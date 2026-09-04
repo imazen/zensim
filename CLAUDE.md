@@ -2120,6 +2120,30 @@ training box.
   `zenjxl-decoder`; the generator used `jxl-oxide`) — so re-decoded pixels
   will NOT byte-match the canonical parquets for those codecs. If exactness
   matters, re-extract ALL corpora through one decoder rather than mixing.
+- **⛔ CORRECTED + QUANTIFIED 2026-09-04 (`docs/DATASET_HISTORY.md` §3.32,
+  `benchmarks/b_reextract_wave_2026-09-04.md` §3): safesyn is NOT
+  re-extractable, and "decode the bitstream first" is not a fix.** Two CSVs
+  exist and are **row-identical except in one column**: the actual 372-col
+  extraction input
+  `/mnt/v/zen/zensim-training/2026-05-16/safesyn_with_iwssim.csv` points
+  `decoded_path` at the **`q<X>.png` decode cache** (measured survival
+  **0/3000 sampled rows, all six codec families**), while
+  `synthetic-v2/training_safe_synthetic.csv` points at the **bitstreams**
+  (present). The bullet above is true only of the first file; conflating
+  them is what makes safesyn look re-extractable. **Measured**: a HEAD
+  extraction off the surviving bitstreams moves the **basic `f0..155`**
+  block — the block the v1 extractor fix provably does NOT touch (§3.27) —
+  on **240/240** probe rows, 69 % of cells over the golden tolerance,
+  worst cell `0.659 → 2875.0` (`image` 0.25 reads an XYB-JPEG as a plain
+  JPEG; `zenjpeg-420-xyb-e2` is 14.4 % of safesyn). That is ~10⁴× the
+  0.03–0.12 masked/IW correction any re-extraction would be trying to
+  apply, so a "fresh safesyn" swaps the fix for a larger uncontrolled
+  change. **Also**: `extract_features_372col` decodes via `image::open()`
+  and returns `None` on failure, so AVIF + JXL rows (30.8 % of safesyn)
+  vanish **silently** — 240 of 360 probe rows scored, no error, no warning.
+  The same blocker owns `multiband_anchor_dial100.parquet`, a 2,000-row
+  safesyn subset (joins **2000/2000** on `(ref_basename, f0)`) that is
+  shipped-Profile-B's **entire dial calibration anchor**.
 - Tower mirror:
   `/mnt/tower/output/zensim-archive-2026-05-20/synthetic-v2-{tables,images}/`.
 - Created from `training_concordant.csv` minus all 49 CID22 validation

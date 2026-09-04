@@ -1199,3 +1199,70 @@ Record: `zenmetrics/benchmarks/avif_autotune_v1_2026-09-04.md`. Contract:
 `zenmetrics/benchmarks/avif_autotune_contract_2026-09-04.md`. Data:
 `/mnt/v/zen/avif-autotune-2026-09-04/` (triple-mirrored;
 `~/work/zen/DATA_PROVENANCE.md`).
+
+---
+
+### §3.32 — shipped B's training legs: the re-extraction is BLOCKED, and the defect is the DIAL (2026-09-04)
+
+**Thought-why.** §3.27 established that the stored 372-col masked/IW block is pre-fix and
+that shipped **B** "was fit AND calibrated on pre-fix masked/IW and is serving post-fix" —
+"a genuine train/serve skew". §4c.3 of `benchmarks/v1_extractor_drift_2026-08-30.md`
+registered the remedy as *re-extract B's ~227k training pairs and retrain*, priced at
+"6–7 min of single-box CPU". The implicit model was: B is contaminated wholesale; a
+re-extraction plus retrain repairs it.
+
+**Actual-why.** Both halves of that model are wrong, measured.
+
+1. **B is only ~13.5 % pre-fix by weight-fitting mass, but 100 % pre-fix in its dial
+   anchor.** B = `0.8·cid + 0.2·kon`. The **cid head — 80 % of B — is fit on `hdr_v3mix`
+   alone** (7,410 rows, extracted 2026-07-03, i.e. after both fixes), so it is already
+   current-era. Only `kon` carries pre-fix legs, and within `canonhdr15` the post-fix
+   `hdr_v3mix` is up-weighted ×15 = 32.7 % of that head's mass. Pre-fix share of the kon
+   head 67.3 %; of B, **13.47 %**. Meanwhile `multiband_anchor_dial100.parquet` — B's
+   *entire* dial calibration — joins into `safesyn` at **2,000/2,000** on
+   `(ref_basename, f0)` and is therefore 100 % pre-fix. That is exactly the symptom shape
+   §3.27 measured: rank barely moves (CID22 +0.0057) while the dial shifts −4.98/−5.86.
+   The weights were never the problem.
+
+2. **The re-extraction cannot be run.** `safesyn` (57.6 % of the kon head's mass, and the
+   source of the anchor) was extracted from the `q<X>.png` decode cache, which is **0 %
+   present** (0 of 3,000 sampled rows, all six codec families). The surviving bitstreams
+   re-decode to *different pixels*: a HEAD extraction moves the **basic `f0..155`** block —
+   which §3.27 proved is invariant under the extractor fix — on **240/240** probe rows,
+   69 % of cells over golden tolerance, worst `0.659 → 2875.0`
+   (`image` 0.25 decodes an XYB-JPEG as a plain JPEG; that family is 14.4 % of safesyn).
+   Alignment gate: 240/240 rows agree on `(ref_basename, human_score)` with the stored row
+   index. The compute estimate in §4c.3 was fine; **the inputs do not exist**, and that was
+   never checked.
+
+3. **A dial re-anchoring corrects the era term at ZERO rank cost.** `kadid`+`tid` exist in
+   both eras with row-order-identical refs and byte-identical `human_score`, giving a
+   matched-era anchor pair (13,005 rows, `target_score = max(ssim2_gpu,0)`; only the
+   feature era differs). `bake_dial_refit shared-anchor` on each, scored on the current-era
+   root: **SROCC identical to 5 dp on all five corpora** (spline is rank-invariant), while
+   the per-pair dial moves **+6.196 (CID22, sd 2.246) / +6.235 (KonJND, sd 1.929)**,
+   100 % of pairs > 0.5 pt. Against the defect's −4.977 (sd 2.301) / −5.857 (sd 2.299):
+   same order, opposite sign, matching spread.
+   **⚠ But anchor CONTENT moves the dial just as much** (−6.44 / −7.78 for a stored-era
+   kadid+tid anchor vs the shipped safesyn one — a comparison itself confounded by
+   procedure, `extend-top`/30 knots vs `shared-anchor`/12). So B's absolute dial is
+   anchor-dependent at the same ±6–8 pt order as the era defect, and swapping anchors is
+   not a drop-in fix.
+
+**Also corrected here.** `zensim/CLAUDE.md` "Safe synthetic dataset" says *"the CSV
+`decoded_path` PNGs no longer exist"*. That is true of
+`2026-05-16/safesyn_with_iwssim.csv` — the actual extraction input — and **false** of
+`synthetic-v2/training_safe_synthetic.csv`, whose `decoded_path` is the bitstream and is
+present. The two files are row-identical and differ only in that column; conflating them is
+what makes safesyn look re-extractable.
+
+**Also found, not fixed.** `extract_features_372col` decodes via `image::open()` and
+returns `None` on failure, so AVIF and JXL rows vanish **silently**: 240 of 360 probe rows
+scored, i.e. 30.8 % of safesyn would be dropped without a word. Third instance of the
+silent-row-drop class (`dataset_metric_baseline`, `zensim-validate --extract-only`,
+now this). The decode helpers already exist at
+`zensim-bench/examples/extract_features_372col_omni.rs:266-293` behind `extract-omni`.
+
+**Nothing was rewritten, retrained, or flipped.** Record:
+`benchmarks/b_reextract_wave_2026-09-04.md`. Instruments + `_MANIFEST.json`:
+`/mnt/v/output/zensim/bfresh-2026-09-04/`.

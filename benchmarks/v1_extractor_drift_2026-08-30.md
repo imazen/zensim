@@ -357,6 +357,22 @@ tolerance was widened.
    ~227k pairs at the measured ~600 pair/s ≈ 6–7 min of single-box CPU for the SDR
    legs — but a retrain + re-calibration + full gauntlet is a wave, not a step, and the
    `hdr_v3mix` leg is HDR-route. **Fleet job; register, do not launch.**
+
+   > **⛔ RAN 2026-09-04 — NOT LAUNCHABLE. The compute estimate is fine; the INPUTS do
+   > not exist, which is the binding constraint and was not checked here.**
+   > `safesyn`'s pixels were the `q<X>.png` decode cache: measured survival **0/3000
+   > sampled rows**. Re-decoding the surviving bitstreams at HEAD moves the **basic
+   > `f0..155`** block — the block §1a proves is invariant under this very fix — on
+   > **240/240** probe rows (69 % of cells over tolerance, worst `0.659 → 2875.0`), and
+   > `extract_features_372col` silently drops AVIF+JXL (30.8 % of safesyn). Two further
+   > corrections to the premise: **`hdr_v3mix` is post-fix** (extracted 2026-07-03), and
+   > it is the *whole* corpus of B's 80 %-weight `cid` head — so B is only **13.47 %**
+   > pre-fix by weight-fitting mass, while `multiband_anchor_dial100.parquet` (a
+   > 2,000-row safesyn subset, joins 2000/2000) is **100 %** of its dial anchor. The
+   > defect is the DIAL, not the weights, and a spline re-anchoring corrects the era term
+   > at **zero rank cost** (+6.196 CID22 / +6.235 KonJND per pair vs the −4.977/−5.857
+   > defect; SROCC identical to 5 dp on all five corpora).
+   > Record: `benchmarks/b_reextract_wave_2026-09-04.md`, `docs/DATASET_HISTORY.md` §3.32.
 4. **BHdr**: quantify the same drift on the PU-linear HDR route. Not measured here.
 5. **aic4 was NOT re-extracted** — its source CSV
    `/mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG_AIC_reconstructed_jnd_scores.csv`
