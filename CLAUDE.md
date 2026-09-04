@@ -1262,6 +1262,68 @@ fit + PWRC (reports/); `bake_verdict --html` is the single-bake Rust report.
 
 > **Historical (May-2026 V0_x / PreviewV0_5 era):** the training goals + three-trail SOTA + shipping/experiment-rigor policies, 2026-05-1x eval mandates, V_20/V39 learnings, canonical-2026-05-18 corpus archaeology, the interactive-site spec (since shipped: `site/compare.html`), V_X experiment workflow, V0_1-era weight status, and V0_7 e1 fill were moved verbatim to [`docs/HISTORY-2026-05-v0x-era.md`](docs/HISTORY-2026-05-v0x-era.md) on 2026-07-19. Current guidance: [`docs/TOP_MODELS_COOKBOOK.md`](docs/TOP_MODELS_COOKBOOK.md).
 
+## G-ADDR — the dial ADDRESSABILITY gate, and what it measured on the SHIPPED dial (2026-09-04)
+
+USER RULE (2026-09-04): **"floor and ceiling dial addressability is crucial … any model that
+limits dial range cannot ship."** `bake_verdict`'s DIAL panel now emits a **G-ADDR** section
+on every run and carries `dial.addressability` (+ `dial.min` / `dial.max`) in `--full-json`.
+Owner: `zensim-validate/src/dial_addressability.rs`; append-only registry
+`benchmarks/dial_addressability_floor_2026-09-04.json`. Full record:
+[`benchmarks/dial_addressability_gate_2026-09-04.md`](benchmarks/dial_addressability_gate_2026-09-04.md).
+
+**Two tiers, never merged.** REGRESSION (`A1`–`A9`) bars against the SHIPPED dial's own value
+on the SAME instrument ("no worse at either end than users have today"); CONTRACT (`C1`–`C6`)
+are absolute product bars. Separate because **the shipped dial fails four contract rows**.
+Absent probe = NOT MEASURED, never a pass; an unregistered dial grid = NOT MEASURABLE. Run it
+with `--negtail-probe` + `--identity-probe` (both pinned under
+`/mnt/v/output/zensim/dialgate-2026-09-04/`) or those axes read `—`.
+
+**Facts that are now measured and must not be re-derived:**
+
+- **The identity feature vector is the ZERO vector, for every image** (38/38 dial-grid refs,
+  byte-identical), so the identity dial is a SCALAR property of a bake, `dial(0⃗)`:
+  **v47-QAT 97.6893, shipped B 96.2412, ADD156 96.1157.** The `[97.5, 100]` identity band is
+  a **v47-era** property; both shipped LINEAR dials miss it.
+- **Shipped B ranks 266 of 4,424 dial-grid cells (6.01 %) ABOVE a perfect copy** in RAW
+  space. Consequence, proved in §10.3: **C2 ⊻ C6** — pin identity at 100 and those cells cap
+  (tied 0.0567 > 0.05); leave it below and they out-score identity. **No monotone output
+  spline can satisfy both. It is a weights defect.**
+- **Shipped B's negative tail does not exist**: on a 2,000-row probe whose every row's ssim2
+  truth is negative (−770 … −0.33) it emits `frac_below_zero = 0.0000`, min **+2.5167**. The
+  cause is the dial anchor's `target_score = max(ssim2, 0)`: 147 of 2,000 rows with genuinely
+  negative ssim2 (to −64.16) are stored as 0 and `fit_spline_knots` collapses that run to one
+  bottom knot. **The lever for the floor is the CLAMP, not the anchor.**
+- **The ssim2 TRUTH on the canonical dial grid** (`/mnt/v/output/zensim/ssim2-bar-2026-08-31/
+  dialcells_ssim2_qv2grid.tsv`): min **−55.35**, p5 **10.26**, p95 **95.46**, max **98.38**,
+  dynamic range **85.20**, 3.48 % of cells negative. Shipped B bottoms out at **+3.13**.
+  Two bars are therefore NOT addressability bars: **A6's 86.08 exceeds the truth's own
+  85.20**, and **A4's `p5 ≤ 13.645` is unattainable by any monotone dial** — an ORACLE arm
+  (the eval grid as its own anchor, truth as target) reads p5 **21.5–22.8** across n_edges
+  12→120. Shipped B clears A4 by mapping the low band BELOW its conditional median.
+- **ssim2 targets are reusable across decoder eras PER CODEC, not in aggregate.** Re-scored
+  today through imazen decoders + `fast-ssim2`: `zenwebp` **0.0000 on 1,000/1,000** rows
+  (bit-exact — which also proves bigcodec's stored `score_ssim2` is the CPU path, no GPU
+  confound), zenjpeg/mozjpeg/zenjxl median ≤ 0.061, but **XYB JPEG (`zenjpeg-420-xyb-e2`)
+  median 0.637 with 58 % past the 0.5-pt dial materiality**, and AVIF carries a 6 % tail
+  (max 8.37). Rank is untouched everywhere (SROCC ≥ 0.9998) — it is the ABSOLUTE value that
+  moves. When the bytes are on disk, re-score (6,000 pairs = 171 s).
+- **`serde_json`'s default float parser is not correctly rounded** and made the reference
+  bake fail its own bar by one ULP (`99.98330778475787` parsed back as `…788`).
+  `zensim-validate` now enables `float_roundtrip`. **Every float bar `freeze_check` reads out
+  of a fulleval JSON had the same hazard.**
+- **imazen-26 is the wrong anchor corpus for the FLOOR** — every imazen-26 arm regresses grid
+  `min` to +11.9 and the negative-tail probe to +11.6. Its deficit is low-band coverage in
+  PREDICTION space; top-densification could never move `p5` (the imazen-26 record found the
+  same and this lane localises it).
+- **Neither dial anchor is contaminated by CID22.** `check_holdout_overlap --threshold 10`
+  over both anchors' references vs the 49 CID22 validation refs: **0 hits at d ≤ 10** for
+  both (imazen-26 1,224 refs, closest d=12, 9 origins in the d ≤ 16 screening tier reported
+  never quarantined; safesyn 1,495 refs, 0 even at d ≤ 16, closest d=17).
+
+**Build a candidate arm with `scripts/dialgate_arms.sh <label> <anchor.parquet> [n_edges]`**
+(shared-anchor → add-winsor → extend-top → gated verdict). Its chain control reproduces the
+imazen-26 lane's `B_safesyn_curera` BYTE-IDENTICALLY (`c414b3f91da83e69…`).
+
 ## TWO-PANEL EVAL MANDATORY — rank + dial, every ship-grade bake (added 2026-05-29)
 
 **`bake_verdict` runs BOTH panels natively (Rust) on every invocation** —
