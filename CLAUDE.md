@@ -1271,12 +1271,53 @@ Owner: `zensim-validate/src/dial_addressability.rs`; append-only registry
 `benchmarks/dial_addressability_floor_2026-09-04.json`. Full record:
 [`benchmarks/dial_addressability_gate_2026-09-04.md`](benchmarks/dial_addressability_gate_2026-09-04.md).
 
-**Two tiers, never merged.** REGRESSION (`A1`–`A9`) bars against the SHIPPED dial's own value
-on the SAME instrument ("no worse at either end than users have today"); CONTRACT (`C1`–`C6`)
-are absolute product bars. Separate because **the shipped dial fails four contract rows**.
-Absent probe = NOT MEASURED, never a pass; an unregistered dial grid = NOT MEASURABLE. Run it
-with `--negtail-probe` + `--identity-probe` (both pinned under
-`/mnt/v/output/zensim/dialgate-2026-09-04/`) or those axes read `—`.
+**Two tiers, never merged.** REGRESSION (`A1`–`A9`) bars against a REFERENCE scorer's own
+value on the SAME instrument; CONTRACT (`C1`–`C6`) are absolute product bars. Separate
+because **the shipped dial fails four contract rows**. Absent probe = NOT MEASURED, never a
+pass; an unregistered dial grid = NOT MEASURABLE. Run it with `--negtail-probe` +
+`--identity-probe` (both pinned under `/mnt/v/output/zensim/dialgate-2026-09-04/`) or those
+axes read `—`.
+
+**⛔ THE REGRESSION BARS ARE `peer_ssim2`, NOT SHIPPED B (re-pinned 2026-09-04).** USER
+DECISION, verbatim: *"I don't think we should pin to B, ssim2 seems a better mentor."* The
+gate's first run measured its own shipped-B pins to be defective — A1/A3/A6 sat ABOVE what
+the reference metric reaches on the same grid, and A4 was met by B only through a −23-point
+low-band bias — so the gate was barring candidates for being CLOSER to the truth than the
+incumbent. Registry rows are now keyed **`(instrument, reference)`**; the shipped-B set is
+retained and printed as **`incumbent`**, never a bar. **Every G-ADDR number published before
+2026-09-04 — including §0–§11 of the gate record and the two bullets further down this
+section that name A1/A3/A4/A6 fails — is graded on the RETIRED pins.** Reproduce that
+grading deliberately with `bake_verdict --gaddr-reference shipped_b`; never quote it as a
+current bar. Re-pin record: gate doc **§14**.
+
+- **The bars** (ssim2's own, canonical grid + both pinned probes, full f64):
+  `max` **98.376644** · `min` **−55.354544** · `p95` **95.45929935** · `p5` **10.26332105** ·
+  `reach` **153.731188** · `DR` **85.1959783** · negtail `min` **−770.619744** /
+  `p1` **−187.13142579** / `frac<0` **1.0000** (definitional — the probe was selected on
+  ssim2 < 0) · identity **100.000000** on all 38 refs · **0** of 4,424 cells above identity.
+- **It is NOT a relaxation — it moved the difficulty to the FLOOR.** Re-grading all 17
+  candidates under both pin sets flips **70 cells PASS→FAIL against 9 FAIL→PASS**; shipped B
+  goes from **0** regression fails (it *was* the bar) to **6**.
+- **ssim2 PASSES the whole CONTRACT tier (6/6)** — mono **0.9924** (more monotone than the
+  shipped dial's 0.9792, same zero tied rate), negtail `frac<0` 1.0000, identity MEASURED at
+  exactly **100.000000** via `zenmetrics batch --metric ssim2` (not assumed from
+  SSIMULACRA2's definition), 0 cells above identity. So the four contract rows B fails are
+  not unreachable in principle.
+- **Still no `B dial-era v2`.** Every era-corrected arm fails, but on DIFFERENT axes than
+  before: **A2 A4 A5 A6 A7 A8 A9 + C2** (floor and spread) instead of A4/A6/C2. The best arm
+  is 45.96 short on A2, 44.34 on A5, 758.94 on A7, and reaches 6.6 % of the negative tail
+  where the mentor reaches 100 %.
+- **Honest limit:** A1/A3 are `≥`, so a dial that OVERSHOOTS the truth passes (B's `max`
+  99.98 clears A1 while sitting 1.6 above the reference metric). G-ADDR is an
+  **addressability** gate, not a calibration gate; the calibration-referenced reading
+  (`|dial end − truth end| ≤ δ`, or MAE vs the reference metric) remains an unimplemented
+  user option.
+- **Flags that make all of this measurable:** `--negtail-peer-scores` /
+  `--identity-peer-scores` (a reference metric has no bake, so its floor axes were previously
+  unmeasurable; peer mode is now **all-or-nothing per axis** and never fills a probe from
+  `--bake`), `--gaddr-json` (the G-ADDR block alone at full f64, stamped with which scorer it
+  describes — peer-safe where `--full-json`/`--fulleval` are refused), `--gaddr-reference`.
+  Re-grade an existing bake with `scripts/dialgate_arms.sh score <label> <bake.bin> [regime]`.
 
 **Facts that are now measured and must not be re-derived:**
 
@@ -1305,10 +1346,22 @@ with `--negtail-probe` + `--identity-probe` (both pinned under
   weights: **Profile D (ADD156) reads p5 9.52.**
 - **Gate readings for the other shipped profiles** (same grid, same probes): **Profile A
   (v47-QAT) is the only bake that passes the ENTIRE CONTRACT tier** — identity 97.6893 in
-  band, 0 above identity, negative tail 55.75 % below zero (min −93.90) — and fails only
-  A1/A3/A4/A6. **Profile D (ADD156)** fails only A1/A3/A6/C5, with `p5` 9.52 and 85.80 % of
-  the negative probe below zero. The shipped SDR dial (B) is the outlier on every contract
-  row.
+  band, 0 above identity, negative tail 55.75 % below zero (min −93.90). **Profile D
+  (ADD156)** fails contract on **C5 only**, with `p5` 9.52 and 85.80 % of the negative probe
+  below zero. The shipped SDR dial (B) is the outlier on every contract row. *(The regression
+  fails once listed here — A's A1/A3/A4/A6 and D's A1/A3/A6 — are RETIRED-PIN grading. Under
+  the ssim2 bars A fails all nine and D fails A1/A2/A3/A5/A7/A8/A9, i.e. D's A6 flips to PASS
+  and both lose the five floor axes B's shallow bars had been granting them.)*
+- **WHICH DIAL SHOULD BE THE DEFAULT is an OPEN USER DECISION** (gate doc §14.6), not a
+  settled fact: **A** is the only contract-passing dial that exists today (6/6 contract, 0/9
+  regression); **D** fails contract on C5 alone (identity 96.1157, 1.384 below the band),
+  passes 2/9 regression axes (the only shipped bake to pass any), and beats A on 4 of 5 rank
+  corpora. **MEASURED and decisive for D:** D's grid `max` (96.049) is strictly BELOW its own
+  identity (96.1157), so every cell already scores under a perfect copy and **the 266-cell
+  C2 ⊻ C6 either/or that blocks the B lineage provably cannot arise for D** — building
+  `D-id100` is REGISTERED, NOT RUN (a real build: ADD156 lasso lineage, its own scaler and
+  anchor, not a re-spline). Shipped B remains the CID22 rank leader (0.88212); the dial and
+  the ranker are not the same decision.
 - **720/944 bakes read `NOT MEASURABLE` by design**: their default dial grid is unregistered
   and the 372-wide probes refuse to score against them (both refusals print loudly).
   Registering a 944 grid needs a SHIPPED 944-class reference dial to measure a floor from,
