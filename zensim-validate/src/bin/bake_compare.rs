@@ -610,7 +610,10 @@ fn render_corpus(
             features_root.display()
         );
     } else if !slot.file.is_empty() && corpus.name == "konjnd" {
-        eprintln!("bake_compare: corpus ruler — {} read on `{}`", corpus.display, slot.file);
+        eprintln!(
+            "bake_compare: corpus ruler — {} read on `{}`",
+            corpus.display, slot.file
+        );
     }
     let path = features_root.join(&slot.file);
     let g = parquet_loader::load_parquet(&path, corpus.display, "human_score", 1.0)

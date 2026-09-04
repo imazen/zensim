@@ -307,7 +307,9 @@ fn parse_args() -> Result<Args, String> {
         return Err("--resample requires --pairwise".to_string());
     }
     if pairwise.is_some() && json {
-        return Err("--json is not supported with --pairwise (the TSV is the contract)".to_string());
+        return Err(
+            "--json is not supported with --pairwise (the TSV is the contract)".to_string(),
+        );
     }
     if batch.is_some() && json {
         return Err("--json is not supported with --batch (the TSV is the contract)".to_string());
@@ -1104,14 +1106,21 @@ fn run_pairwise(path: &Path, resample: Option<&Path>) -> Result<String, String> 
                 .map_err(|e| format!("--pairwise: line {}: {what}: {e}", n + 2))
         };
         let choice = Choice::parse(f[ic]).ok_or_else(|| {
-            format!("--pairwise: line {}: choice must be left|right, got {:?}", n + 2, f[ic])
+            format!(
+                "--pairwise: line {}: choice must be left|right, got {:?}",
+                n + 2,
+                f[ic]
+            )
         })?;
         let weight = match iw {
             Some(i) => parse(f[i], "weight")?,
             None => 1.0,
         };
         if !(weight.is_finite() && weight >= 0.0) {
-            return Err(format!("--pairwise: line {}: weight must be finite >= 0", n + 2));
+            return Err(format!(
+                "--pairwise: line {}: weight must be finite >= 0",
+                n + 2
+            ));
         }
         rows.push(PairwiseRow {
             group: g,
@@ -1145,9 +1154,10 @@ fn run_pairwise(path: &Path, resample: Option<&Path>) -> Result<String, String> 
                 } else {
                     let mut v = Vec::new();
                     for t in spec.split(',') {
-                        let i: usize = t.trim().parse().map_err(|e| {
-                            format!("--resample: line {}: index {t:?}: {e}", n + 1)
-                        })?;
+                        let i: usize = t
+                            .trim()
+                            .parse()
+                            .map_err(|e| format!("--resample: line {}: index {t:?}: {e}", n + 1))?;
                         if i >= n_groups {
                             return Err(format!(
                                 "--resample: line {}: group index {i} >= {n_groups}",
@@ -1158,7 +1168,10 @@ fn run_pairwise(path: &Path, resample: Option<&Path>) -> Result<String, String> 
                     }
                     v
                 };
-                out.push_str(&pairwise_row(label, &agreement_by_group_index(&by_group, &picked)));
+                out.push_str(&pairwise_row(
+                    label,
+                    &agreement_by_group_index(&by_group, &picked),
+                ));
             }
         }
     }
@@ -1283,7 +1296,10 @@ fn main() -> ExitCode {
         // (found by the ssim2-bar lane, A.7; nothing had tripped on it
         // because `zen_stats.panel` never passes `--per-group`). The
         // per-group block is now a key of the panel document.
-        print!("{}", render_json_with_per_group(&reports, has_sigma, per_group.as_ref()));
+        print!(
+            "{}",
+            render_json_with_per_group(&reports, has_sigma, per_group.as_ref())
+        );
     } else {
         print!("{}", render_text(&reports, has_sigma));
         if args.per_group {
@@ -1512,8 +1528,12 @@ mod tests {
         let pred = vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0];
         let targ = vec![1.0, 2.0, 3.0, 3.0, 2.0, 1.0];
         let band = vec![
-            "a".to_string(), "a".to_string(), "a".to_string(),
-            "b".to_string(), "b".to_string(), "b".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "b".to_string(),
+            "b".to_string(),
         ];
         let reports = vec![GroupReport {
             label: "ALL".to_string(),
@@ -1525,11 +1545,18 @@ mod tests {
         let g = per_group_summary(&pred, &targ, &band).expect("two groups");
         let out = render_json_with_per_group(&reports, false, Some(&g));
         // Exactly one top-level object: the text must open once and close once.
-        assert_eq!(out.matches("\n}").count(), 1, "more than one document:\n{out}");
+        assert_eq!(
+            out.matches("\n}").count(),
+            1,
+            "more than one document:\n{out}"
+        );
         assert!(out.contains("\"per_group\""), "{out}");
         assert!(out.contains("\"n_groups\": 2"), "{out}");
         // and the no-per-group form is unchanged
-        assert_eq!(render_json_with_per_group(&reports, false, None), render_json(&reports, false));
+        assert_eq!(
+            render_json_with_per_group(&reports, false, None),
+            render_json(&reports, false)
+        );
     }
 
     #[test]
@@ -1585,7 +1612,10 @@ mod tests {
         let out2 = run_pairwise(&rows, Some(&man)).unwrap();
         let l1: Vec<&str> = out2.lines().nth(1).unwrap().split('\t').collect();
         assert_eq!(l1[0], "POINT");
-        assert_eq!(l1[3], line[3], "'*' must equal the no-resample point estimate");
+        assert_eq!(
+            l1[3], line[3],
+            "'*' must equal the no-resample point estimate"
+        );
         let l2: Vec<&str> = out2.lines().nth(2).unwrap().split('\t').collect();
         assert_eq!(l2[1], "2", "group A drawn twice = two clusters");
         let acc_aa: f64 = l2[3].parse().unwrap();

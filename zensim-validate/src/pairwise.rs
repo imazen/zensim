@@ -260,7 +260,11 @@ fn agreement_impl<I: Iterator<Item = PairwiseRow>>(
             };
         }
     }
-    let acc = if w_sum > 0.0 { agree_sum / w_sum } else { f64::NAN };
+    let acc = if w_sum > 0.0 {
+        agree_sum / w_sum
+    } else {
+        f64::NAN
+    };
     let ceiling = if ceil_den > 0.0 {
         ceil_num / ceil_den
     } else {
@@ -520,7 +524,9 @@ mod tests {
         // Deterministic LCG — no rand dependency, reproducible failure.
         let mut st: u64 = 0x2026_0901_0000_0001;
         let mut next = move || {
-            st = st.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            st = st
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (st >> 33) as u32
         };
         for _case in 0..200 {
@@ -533,7 +539,11 @@ mod tests {
                 }
                 // Force ties sometimes.
                 let l = (next() % 100) as f64;
-                let r = if next() % 5 == 0 { l } else { (next() % 100) as f64 };
+                let r = if next() % 5 == 0 {
+                    l
+                } else {
+                    (next() % 100) as f64
+                };
                 let wl = (next() % 9) as f64;
                 let wr = (next() % 9) as f64;
                 if wl > 0.0 {

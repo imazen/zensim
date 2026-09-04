@@ -77,11 +77,7 @@ pub fn push_bin(mask: &[usize], preds: &[f64], tgt: &[f64], kx: &mut Vec<f64>, k
 ///
 /// `None` = the choice is immaterial for this anchor and either setting emits
 /// the same knots.
-pub fn neg_tail_is_material(
-    preds: &[f64],
-    tgt: &[f64],
-    n_edges: usize,
-) -> Option<(usize, usize)> {
+pub fn neg_tail_is_material(preds: &[f64], tgt: &[f64], n_edges: usize) -> Option<(usize, usize)> {
     let (kx_keep, _) = fit_spline_knots(preds, tgt, n_edges, false);
     let (kx_dedup, _) = fit_spline_knots(preds, tgt, n_edges, true);
     if kx_keep.len() == kx_dedup.len() {

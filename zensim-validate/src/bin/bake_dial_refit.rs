@@ -2671,9 +2671,7 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
                                 .zip(ap.iter())
                                 .map(|(v, (t, ps))| t.apply_with_params(*v as f32, ps)),
                         ),
-                        None => {
-                            xaf.extend(g.feature_rows[ri][..n_feat].iter().map(|v| *v as f32))
-                        }
+                        None => xaf.extend(g.feature_rows[ri][..n_feat].iter().map(|v| *v as f32)),
                     }
                     let mut y = g.human_scores[ri];
                     if let Some(clip) = a.anchor_clip_min
@@ -2938,7 +2936,10 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
                 members.len()
             ));
         }
-        if a.ensemble_weights.iter().any(|w| !w.is_finite() || *w < 0.0) {
+        if a.ensemble_weights
+            .iter()
+            .any(|w| !w.is_finite() || *w < 0.0)
+        {
             return Err("--ensemble-weights must be finite and >= 0".into());
         }
         let sum: f64 = a.ensemble_weights.iter().sum();

@@ -164,8 +164,7 @@ fn usage() -> ! {
 // pass 2026-08-04). Machine-readable flags over fulleval cells so superseded /
 // flattered / absent-not-failed numbers are never read as clean wins. Schema
 // documented in the registry file's `_schema` header. ──────────────────────
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct AnnEntry {
     id: String,
     kind: String, // "invalidated" | "annotated" | "absent-not-failed"
@@ -289,9 +288,7 @@ fn load_annotations_value(v: &serde_json::Value, whence: &str) -> Result<Vec<Ann
     let mut out: Vec<AnnEntry> = Vec::with_capacity(entries.len());
     for (i, e) in entries.iter().enumerate() {
         let at = |what: &str| format!("{whence}: entries[{i}] {what}");
-        let e = e
-            .as_object()
-            .ok_or_else(|| at("is not an object"))?;
+        let e = e.as_object().ok_or_else(|| at("is not an object"))?;
         let id = e
             .get("id")
             .and_then(|x| x.as_str())
@@ -314,9 +311,12 @@ fn load_annotations_value(v: &serde_json::Value, whence: &str) -> Result<Vec<Ann
         }
         let scope = e.get("scope").cloned().unwrap_or(serde_json::Value::Null);
         let scope_obj = scope.as_object().ok_or_else(|| {
-            format!("{whence}: entry `{id}` has no `scope` object — use one of {} for a \
+            format!(
+                "{whence}: entry `{id}` has no `scope` object — use one of {} for a \
                      machine predicate, or {{\"{ANN_SCOPE_MANUAL}\": …}} for a \
-                     documentation-only finding", ANN_SCOPE_PREDICATES.join("/"))
+                     documentation-only finding",
+                ANN_SCOPE_PREDICATES.join("/")
+            )
         })?;
         let manual = scope_obj.len() == 1 && scope_obj.contains_key(ANN_SCOPE_MANUAL);
         if !manual && !scope_is_machine_predicate(&scope) {
@@ -2570,7 +2570,10 @@ mod tests {
                     "n_inputs": 372, "model": {"n_inputs": 372}}),
         );
         let r = select_row(&v);
-        assert_eq!(r.class, "era-bridge", "fixture must be in the class under test");
+        assert_eq!(
+            r.class, "era-bridge",
+            "fixture must be in the class under test"
+        );
 
         // The rule's own selectability predicate, verbatim from `run_select`.
         let selectable = r.m3a != M3aState::Unmeasured && r.n_pass > 0;

@@ -61,7 +61,6 @@ const GOLD_Z_RMSE_PER_SAMPLE: f64 = 0.1726477695;
 
 const TOL: f64 = 1e-9;
 
-
 /// Where is the built `panel` binary? Checks, in order: `ZEN_PANEL_BIN`
 /// (explicit override), `$CARGO_TARGET_DIR/{release,debug}/panel`, then the
 /// in-repo `target/{release,debug}/panel`. Before 2026-09-01 only the last was
