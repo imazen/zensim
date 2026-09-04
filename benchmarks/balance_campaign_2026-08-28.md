@@ -7173,3 +7173,23 @@ aom-rs is PLANNED-BLOCKED on era pins post-#15 for both tracks.
 | **ranked gaps before the training lane** | **1** zenrav1e **4:2:0** arm (the only way to split backend from chroma; needs a small `avif_config_from_knobs` change + ~9,280 cells) · **2** an svt 4:4:4 arm or a recorded "svt is 420-only" decision (blocked upstream in zenavif) · **3** native-size cross-backend coverage · **4** the interaction at s4/s7 (B-6 measured sharpness transfer is speed-specific) · **5** S1c content-class β (in flight) · **6** more plot/screen refs (n=6/5 carry both headline results) · **7** a second scalar quality response (zensim was emitted as a feature vector, so ssim2 is the only scalar) · **8** aom-rs (PLANNED-BLOCKED post-#15) |
 | commits (verified on `master@origin` via `git merge-base --is-ancestor`) | `03a18487` (record + CHANGELOG + the commit-provenance note). ⚠ The record and BOTH scripts physically landed one commit earlier, in **`c041466e`, another lane's commit** — `jj` snapshots the *whole shared working copy* on every command, so the live speed-instrument lane's next `jj` invocation swept these in-progress files into its own change and pushed them under its message. **Nothing lost or altered** (files verified byte-correct on `master@origin`); recorded in §7 of the record rather than rewritten, since the other lane's commit is pushed and is not mine to touch. |
 | **operational lesson (durable)** | an additive path-scoped `.workongoing` prevents two lanes EDITING the same files; it does **nothing** about a shared `jj` working copy, because jj auto-snapshots everything present. Two concurrent lanes in one checkout need a **sibling `jj workspace`**, not a marker convention. This is the second-order cost of the "additive marker" pattern and should be assumed, not rediscovered. |
+
+## ROUND 73 — SESSION WRAP FOR MACHINE REBOOT (2026-09-04 ~04:5xZ)
+All repos clean, all lanes' commits ancestry-verified on their remotes. IN FLIGHT ACROSS THE
+REBOOT (remote hosts, survive): S1c pass 3 on r7900x (speed instrument bonus content-class
+block; harvest command in `~/tmp/speedtrig_RESUME_AFTER_REBOOT.md`); the chroma-split arm's
+endgame + verdict chain (state + ordered resume in `~/tmp/chromasplit_RESUME_AFTER_REBOOT.md`;
+pre-registered verdict rule k11>=9 CHROMA / <=2 BACKEND). DIES LOCALLY (all resumable):
+waiters/monitors/gap-fill loops, agent sessions, /tmp contents (tmpfs; the 100G size override
+persists in /etc). SESSION DELIVERED (rounds 40-72): the ssim2 exam closed (nothing passes;
+A4b stands; W4 re-measured clean); era-2 + Profile D + free set; the AVIF knob-tuning program
+end to end — Stage A, B-6, era-delta (byte-identical stability), the speed instrument
+(feature-conditioned wall-time betas, q-flatness falsified, drift 0.44%), QM x sharpness
+native cancellation (-4.70pp), scm3@p9 -50% on screens, bd10-native win, the HDR-10 RD
+baseline (svt -43%), the chroma-confound discovery + split arm; zenavif-parse 5-bug fix
+(zenavif#46) + the 0.7.1-abort catching the 0.6.2-baseline trap (0.7.0 release decision OPEN);
+zenav1-svt#17/#18 (tile-edge bd10 corruption root-caused + fixed, both rounds); zenav1-aom#15
+standalone encode substantively cleared; imazen-only rule minted + enforced; /tmp 100G;
+restart-loop + scorer-lifecycle launcher fixes. OPEN WITH THE USER: zenavif-parse 0.7.0
+release, GitHub MCP token refresh, squintly's 10 hours, board 12MB cap, README speed-ratio
+doc fixes, Stage-B unspent balance.
