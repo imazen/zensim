@@ -72,6 +72,7 @@ use zenpixels::{PixelBuffer, PixelDescriptor};
 pub fn is_supported(format: ImageFormat) -> bool {
     match format {
         ImageFormat::Jpeg | ImageFormat::Png => true,
+        ImageFormat::Bmp | ImageFormat::Pnm | ImageFormat::Farbfeld => true,
         ImageFormat::WebP => cfg!(feature = "verify-webp"),
         ImageFormat::Avif => cfg!(feature = "verify-avif"),
         ImageFormat::Jxl => cfg!(feature = "verify-jxl"),
@@ -93,15 +94,26 @@ pub struct DecodedRgb8 {
 #[derive(Debug)]
 pub enum DecodeError {
     /// The file could not be read.
-    Io { path: String, source: std::io::Error },
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
     /// `zencodec`'s magic-byte registry did not recognise the leading bytes.
-    Undetectable { path: String, ext: String, head: String },
+    Undetectable {
+        path: String,
+        ext: String,
+        head: String,
+    },
     /// The format was detected, but this build has no imazen decoder wired for
     /// it. Distinct from `Undetectable` so a missing arm is never mistaken for
     /// a corrupt file.
     UnsupportedFormat { path: String, format: &'static str },
     /// The codec rejected the bitstream.
-    Codec { path: String, format: &'static str, message: String },
+    Codec {
+        path: String,
+        format: &'static str,
+        message: String,
+    },
     /// Decode succeeded but the pixel buffer is in a layout this module cannot
     /// flatten to RGB8.
     PixelLayout { path: String, message: String },
@@ -122,7 +134,11 @@ impl fmt::Display for DecodeError {
                  zen_decode in this build — add the arm, never fall back to a \
                  third-party decoder"
             ),
-            DecodeError::Codec { path, format, message } => {
+            DecodeError::Codec {
+                path,
+                format,
+                message,
+            } => {
                 write!(f, "{path}: {format} decode failed: {message}")
             }
             DecodeError::PixelLayout { path, message } => {
@@ -138,7 +154,13 @@ impl std::error::Error for DecodeError {}
 /// side, and printing a megabyte of pixels into a test failure helps nobody.
 impl fmt::Debug for DecodedRgb8 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DecodedRgb8({}x{}, {} bytes)", self.width, self.height, self.pixels.len())
+        write!(
+            f,
+            "DecodedRgb8({}x{}, {} bytes)",
+            self.width,
+            self.height,
+            self.pixels.len()
+        )
     }
 }
 
@@ -182,6 +204,11 @@ pub fn decode_rgb8_bytes(bytes: &[u8], label: &str) -> Result<DecodedRgb8, Decod
         ImageFormat::WebP => decode_webp(bytes, label),
         ImageFormat::Avif => decode_avif(bytes, label),
         ImageFormat::Jxl => decode_jxl(bytes, label),
+        // TID2013 ships .BMP and the PIPAL extraction reads BMP; PNM and
+        // farbfeld ride along on the same imazen codec.
+        ImageFormat::Bmp => decode_bmp(bytes, label),
+        ImageFormat::Pnm => decode_pnm(bytes, label),
+        ImageFormat::Farbfeld => decode_farbfeld(bytes, label),
         other => Err(DecodeError::UnsupportedFormat {
             path: label.to_string(),
             format: format_name(other),
@@ -238,7 +265,11 @@ macro_rules! zc_decode {
             path: $label.to_string(),
             message,
         })?;
-        Ok(DecodedRgb8 { width: w, height: h, pixels })
+        Ok(DecodedRgb8 {
+            width: w,
+            height: h,
+            pixels,
+        })
     }};
 }
 
@@ -248,11 +279,19 @@ fn decode_jpeg(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
 
 #[cfg(feature = "verify-webp")]
 fn decode_webp(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
-    zc_decode!(zenwebp::zencodec::WebpDecoderConfig::new(), bytes, label, "WebP")
+    zc_decode!(
+        zenwebp::zencodec::WebpDecoderConfig::new(),
+        bytes,
+        label,
+        "WebP"
+    )
 }
 #[cfg(not(feature = "verify-webp"))]
 fn decode_webp(_bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
-    Err(DecodeError::UnsupportedFormat { path: label.to_string(), format: "WebP" })
+    Err(DecodeError::UnsupportedFormat {
+        path: label.to_string(),
+        format: "WebP",
+    })
 }
 
 #[cfg(feature = "verify-avif")]
@@ -261,7 +300,10 @@ fn decode_avif(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
 }
 #[cfg(not(feature = "verify-avif"))]
 fn decode_avif(_bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
-    Err(DecodeError::UnsupportedFormat { path: label.to_string(), format: "AVIF" })
+    Err(DecodeError::UnsupportedFormat {
+        path: label.to_string(),
+        format: "AVIF",
+    })
 }
 
 #[cfg(feature = "verify-jxl")]
@@ -270,25 +312,53 @@ fn decode_jxl(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
 }
 #[cfg(not(feature = "verify-jxl"))]
 fn decode_jxl(_bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
-    Err(DecodeError::UnsupportedFormat { path: label.to_string(), format: "JXL" })
+    Err(DecodeError::UnsupportedFormat {
+        path: label.to_string(),
+        format: "JXL",
+    })
+}
+
+fn decode_bmp(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+    zc_decode!(zenbitmaps::BmpDecoderConfig::new(), bytes, label, "BMP")
+}
+
+fn decode_pnm(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+    zc_decode!(zenbitmaps::PnmDecoderConfig::new(), bytes, label, "PNM")
+}
+
+fn decode_farbfeld(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+    zc_decode!(
+        zenbitmaps::FarbfeldDecoderConfig::new(),
+        bytes,
+        label,
+        "farbfeld"
+    )
 }
 
 /// PNG goes through `zenpng`'s native entry point rather than the `zencodec`
 /// trait path: this repo pins `zenpng 0.1.4`, whose `zencodec` adapter landed
 /// in 0.2. Same decoder either way.
 fn decode_png(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
-    let out = zenpng::decode(bytes, &zenpng::PngDecodeConfig::default(), &enough::Unstoppable)
-        .map_err(|e| DecodeError::Codec {
-            path: label.to_string(),
-            format: "PNG",
-            message: format!("decode: {e}"),
-        })?;
+    let out = zenpng::decode(
+        bytes,
+        &zenpng::PngDecodeConfig::default(),
+        &enough::Unstoppable,
+    )
+    .map_err(|e| DecodeError::Codec {
+        path: label.to_string(),
+        format: "PNG",
+        message: format!("decode: {e}"),
+    })?;
     let (w, h) = (out.info.width, out.info.height);
     let pixels = pixelbuffer_to_rgb8(&out.pixels).map_err(|message| DecodeError::PixelLayout {
         path: label.to_string(),
         message,
     })?;
-    Ok(DecodedRgb8 { width: w, height: h, pixels })
+    Ok(DecodedRgb8 {
+        width: w,
+        height: h,
+        pixels,
+    })
 }
 
 /// Flatten a possibly-strided `PixelBuffer` (RGB8 or RGBA8) to tightly packed

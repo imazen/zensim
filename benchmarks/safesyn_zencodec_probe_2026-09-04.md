@@ -209,6 +209,28 @@ python3 .../probe/score_probe.py \
 Artifacts (probe TSV, fresh CSV, both feature matrices, `drift_summary.json`,
 `probe_scores.json`, both scripts): `/mnt/v/output/zensim/im26anchor-2026-09-04/probe/`.
 
+## 5a. The owner gained BMP/PNM/farbfeld the same day, because it had to
+
+`zen_decode` originally covered the five formats the safesyn and imazen-26
+corpora contain. That is not the whole set the extractor is pointed at:
+**TID2013 ships `.BMP`** (`zensim/CLAUDE.md`) and the PIPAL extraction runs
+`extract_features_372col --corpus cid22_train` **on BMP**
+(`scripts/canonical_corpus/v11_extract_pipal.py`). Under the old `image`-crate
+path those decoded; under a five-format owner they would have become loud
+aborts — a capability regression, not a defect the fix was allowed to introduce.
+
+BMP, PNM and farbfeld now go through **zenbitmaps 0.1.5** on the same `zencodec`
+trait path. Gate: `bmp_row_decodes_losslessly` asserts a **byte-exact**
+round-trip (BMP is lossless, so anything less is a bug), and
+`every_corpus_format_is_built` now includes BMP. 14 tests, all green.
+
+**The general lesson.** Replacing a permissive third-party decoder with a strict
+imazen one converts *silent wrong answers* into *loud failures* — which is the
+point — but it also converts *silent right answers* into loud failures wherever
+the old crate happened to cover a format nobody had written down. Enumerate the
+formats every caller actually feeds the tool, not just the ones the corpus in
+front of you contains.
+
 ## 6. What this changed in the owner
 
 The probe could not be run at all until `extract_features_372col` stopped decoding with a

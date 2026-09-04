@@ -14,6 +14,20 @@
 //! emitted vector is 4 scales × 3 channels × 31 features per channel
 //! = 372 columns (basic + peaks + masked + IW).
 //!
+//! ## Build (2026-09-04)
+//!
+//! The codecs are REQUIRED features, so no build exists in which this binary
+//! runs but silently cannot read AVIF / JXL / BMP:
+//!
+//! ```text
+//! cargo build --release -p zensim-bench --example extract_features_372col \
+//!     --features training,zen-decode
+//! ```
+//!
+//! A pair that cannot be decoded, whose dimensions disagree, or that is too
+//! small for the pyramid is a HARD failure that aborts the run. Tolerating any
+//! is the caller's explicit decision: `--allow-failures N` (default 0).
+//!
 //! Usage:
 //!   cargo run --release -p zensim-bench --example extract_features_372col -- \
 //!     --corpus konjnd \
@@ -274,7 +288,6 @@ fn extract_features(kp: &Pair) -> Result<(String, f64, Vec<(String, f64)>, Vec<f
     ))
 }
 
-
 /// KonFiG-IQA (Men/Lin/Jenadeleh/Saupe 2021): 10 sources x 7 distortions x
 /// 12 levels @ 0.25 JND (Part A) + motion blur x 30 levels @ 0.1 JND
 /// (Part B). Levels are calibrated to uniform JND spacing BY DESIGN, so the
@@ -298,7 +311,10 @@ fn load_pairs_tsv(tsv: &Path, max: usize) -> Vec<Pair> {
     };
     let headers = rdr.headers().expect("pairs tsv headers").clone();
     let idx = |n: &str| headers.iter().position(|h| h == n);
-    let (ri, di) = (idx("ref_path").expect("ref_path col"), idx("dist_path").expect("dist_path col"));
+    let (ri, di) = (
+        idx("ref_path").expect("ref_path col"),
+        idx("dist_path").expect("dist_path col"),
+    );
     let hi = idx("human_score");
     let extras: Vec<(usize, String)> = headers
         .iter()
@@ -317,13 +333,23 @@ fn load_pairs_tsv(tsv: &Path, max: usize) -> Vec<Pair> {
             .unwrap_or(0.0);
         let extra_targets: Vec<(String, f64)> = extras
             .iter()
-            .filter_map(|(i, n)| rec.get(*i).and_then(|v| v.parse().ok()).map(|x| (n.clone(), x)))
+            .filter_map(|(i, n)| {
+                rec.get(*i)
+                    .and_then(|v| v.parse().ok())
+                    .map(|x| (n.clone(), x))
+            })
             .collect();
         let ref_basename = reference
             .file_name()
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_default();
-        pairs.push(Pair { reference, distorted, human_score, ref_basename, extra_targets });
+        pairs.push(Pair {
+            reference,
+            distorted,
+            human_score,
+            ref_basename,
+            extra_targets,
+        });
         if pairs.len() >= max {
             break;
         }
@@ -336,7 +362,9 @@ fn load_konfig(base: &Path, max: usize) -> Vec<Pair> {
     let mut pairs = Vec::new();
     for (part, step) in [("PartA", 0.25_f64), ("PartB", 0.1_f64)] {
         let part_dir = images.join(part);
-        let Ok(srcs) = std::fs::read_dir(&part_dir) else { continue };
+        let Ok(srcs) = std::fs::read_dir(&part_dir) else {
+            continue;
+        };
         for src in srcs.flatten() {
             let src_name = src.file_name().to_string_lossy().to_string();
             let reference = images
@@ -346,10 +374,14 @@ fn load_konfig(base: &Path, max: usize) -> Vec<Pair> {
                 eprintln!("konfig: missing reference for {src_name}");
                 continue;
             }
-            let Ok(dists) = std::fs::read_dir(src.path()) else { continue };
+            let Ok(dists) = std::fs::read_dir(src.path()) else {
+                continue;
+            };
             for dist in dists.flatten() {
                 let dist_name = dist.file_name().to_string_lossy().to_string();
-                let Ok(files) = std::fs::read_dir(dist.path()) else { continue };
+                let Ok(files) = std::fs::read_dir(dist.path()) else {
+                    continue;
+                };
                 for f in files.flatten() {
                     let fname = f.file_name().to_string_lossy().to_string();
                     let Some(level) = fname

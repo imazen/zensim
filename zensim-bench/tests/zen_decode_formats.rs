@@ -52,7 +52,6 @@ fn mean_abs_diff(a: &[u8], b: &[u8]) -> f64 {
     sum as f64 / a.len() as f64
 }
 
-
 /// Encode the fixture as JPEG through zenjpeg, optionally in **XYB** mode.
 ///
 /// XYB is the arm that matters: the bitstream carries RGB component IDs and an
@@ -64,7 +63,10 @@ fn encode_jpeg(src: &[u8], xyb: bool) -> Vec<u8> {
     let cfg = if xyb {
         EncoderConfig::xyb(92, XybSubsampling::BQuarter)
     } else {
-        EncoderConfig::ycbcr(92, zenjpeg::encode::encoder_types::ChromaSubsampling::Quarter)
+        EncoderConfig::ycbcr(
+            92,
+            zenjpeg::encode::encoder_types::ChromaSubsampling::Quarter,
+        )
     };
     cfg.encode_bytes(
         src,
@@ -82,7 +84,11 @@ fn decode_and_check(bytes: &[u8], label: &str, tolerance: f64) {
     let src = fixture_rgb8(W, H);
     let out = zen_decode::decode_rgb8_bytes(bytes, label)
         .unwrap_or_else(|e| panic!("{label}: decode FAILED (this is the bug): {e}"));
-    assert_eq!((out.width as usize, out.height as usize), (W, H), "{label}: dimensions");
+    assert_eq!(
+        (out.width as usize, out.height as usize),
+        (W, H),
+        "{label}: dimensions"
+    );
     assert_eq!(out.pixels.len(), W * H * 3, "{label}: packed RGB8 length");
     let mad = mean_abs_diff(&src, &out.pixels);
     assert!(
@@ -97,11 +103,7 @@ fn decode_and_check(bytes: &[u8], label: &str, tolerance: f64) {
 #[test]
 fn png_row_decodes() {
     let src = fixture_rgb8(W, H);
-    let img = imgref::ImgRef::new(
-        bytemuck::cast_slice::<u8, rgb::RGB8>(&src),
-        W,
-        H,
-    );
+    let img = imgref::ImgRef::new(bytemuck::cast_slice::<u8, rgb::RGB8>(&src), W, H);
     let bytes = zenpng::encode_rgb8(
         img,
         None,
@@ -140,9 +142,10 @@ fn xyb_jpeg_decodes_through_the_xyb_transform() {
 fn webp_row_decodes() {
     let src = fixture_rgb8(W, H);
     let cfg = zenwebp::LossyConfig::new();
-    let bytes = zenwebp::EncodeRequest::lossy(&cfg, &src, zenwebp::PixelLayout::Rgb8, W as u32, H as u32)
-        .encode()
-        .expect("zenwebp encode");
+    let bytes =
+        zenwebp::EncodeRequest::lossy(&cfg, &src, zenwebp::PixelLayout::Rgb8, W as u32, H as u32)
+            .encode()
+            .expect("zenwebp encode");
     decode_and_check(&bytes, "fixture.webp", 12.0);
 }
 
@@ -192,8 +195,8 @@ fn jxl_row_decodes() {
 #[test]
 fn undecodable_input_fails_loud() {
     let junk = b"this is not an image, it is a sentence about not being one.".to_vec();
-    let err = zen_decode::decode_rgb8_bytes(&junk, "junk.png")
-        .expect_err("garbage must not decode");
+    let err =
+        zen_decode::decode_rgb8_bytes(&junk, "junk.png").expect_err("garbage must not decode");
     let msg = err.to_string();
     assert!(
         msg.contains("could not detect"),
@@ -236,7 +239,34 @@ fn header_only_bitstream_fails_loud() {
     let err = zen_decode::decode_rgb8_bytes(&stub, "stub.jpg")
         .expect_err("a JPEG with no frame must not decode");
     let msg = err.to_string();
-    assert!(msg.contains("JPEG"), "expected a JPEG-attributed error, got: {msg}");
+    assert!(
+        msg.contains("JPEG"),
+        "expected a JPEG-attributed error, got: {msg}"
+    );
+}
+
+/// FAILING-FIRST for the corpora that are not PNG/JPEG: TID2013 ships `.BMP`
+/// and the PIPAL extraction reads BMP, so a decode owner without it turns two
+/// real corpora into loud aborts. BMP is lossless, so this round-trip must be
+/// byte-exact.
+#[test]
+fn bmp_row_decodes_losslessly() {
+    use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+    use zenpixels::{PixelDescriptor, PixelSlice};
+
+    let src = fixture_rgb8(W, H);
+    let slice = PixelSlice::new(&src, W as u32, H as u32, W * 3, PixelDescriptor::RGB8_SRGB)
+        .expect("bmp slice");
+    let bytes = zenbitmaps::BmpEncoderConfig::new()
+        .job()
+        .encoder()
+        .expect("bmp job")
+        .encode(slice)
+        .expect("bmp encode")
+        .into_vec();
+    let out = zen_decode::decode_rgb8_bytes(&bytes, "fixture.bmp").expect("bmp decode");
+    assert_eq!((out.width as usize, out.height as usize), (W, H));
+    assert_eq!(out.pixels, src, "BMP round-trip must be lossless");
 }
 
 /// A format zencodec recognises but this module has no imazen decoder for is a
@@ -244,7 +274,9 @@ fn header_only_bitstream_fails_loud() {
 /// file (or, worse, quietly routed to a third-party fallback).
 #[test]
 fn detected_but_unsupported_format_fails_loud() {
-    // Minimal GIF87a header — enough for magic-byte detection.
+    // Minimal GIF87a header — enough for magic-byte detection. GIF is a real
+    // format with an imazen codec (zengif); it simply has no arm HERE, and
+    // that must read as "add the arm", never as "the file is corrupt".
     let gif = b"GIF87a\x01\x00\x01\x00\x00\x00\x00".to_vec();
     let err = zen_decode::decode_rgb8_bytes(&gif, "fixture.gif")
         .expect_err("GIF has no arm in zen_decode");
@@ -276,6 +308,7 @@ fn every_corpus_format_is_built() {
         (ImageFormat::WebP, "WebP"),
         (ImageFormat::Avif, "AVIF"),
         (ImageFormat::Jxl, "JXL"),
+        (ImageFormat::Bmp, "BMP"),
     ] {
         assert!(
             zen_decode::is_supported(f),

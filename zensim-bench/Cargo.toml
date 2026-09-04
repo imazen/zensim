@@ -46,7 +46,7 @@ extract-omni = ["training", "dep:parquet", "dep:arrow", "dep:zenavif", "dep:zenj
 # `dep:zenpng` + `dep:enough` are the --decode-list writer (R1b, 2026-08-30):
 # the decoded RGB8 goes back out as PNG through the zen encoder so the zensim
 # feature extractors (PNG/JPEG readers) can consume avif/jxl/webp corpus rows.
-verify-decode = ["dep:zencodec", "dep:zenpixels", "dep:zenjpeg", "zenjpeg/zencodec", "dep:zenpng", "dep:enough", "dep:zenpixels-convert"]
+verify-decode = ["dep:zencodec", "dep:zenpixels", "dep:zenjpeg", "zenjpeg/zencodec", "dep:zenpng", "dep:enough", "dep:zenpixels-convert", "dep:zenbitmaps"]
 # NB: zenavif's zencodec impls are unconditional (no `zencodec` feature there);
 # zenjpeg and zenjxl gate their `*DecoderConfig` types behind their own
 # `zencodec` feature, so enable it explicitly. zenwebp's are unconditional
@@ -159,6 +159,12 @@ zenpng = { version = "0.1.4", optional = true, default-features = false }
 # a bitstream decoded by --decode-list matches what the fleet extractor saw.
 zenpixels-convert = { version = ">=0.2.16, <0.4.0", optional = true }
 enough = { version = "0.4", optional = true }
+# BMP / PNM / farbfeld through the imazen bitmap codec. Load-bearing, not a
+# nicety: TID2013 ships `.BMP` (zensim/CLAUDE.md) and the PIPAL extraction runs
+# `extract_features_372col` on BMP, so a decode owner without it would turn two
+# real corpora into loud aborts. `zencodec` gives the same trait path the other
+# five formats use.
+zenbitmaps = { version = "0.1.5", optional = true, default-features = false, features = ["std", "bmp", "zencodec"] }
 # `m3_fixture_gen` (the M3/M3a coherence-fixture generator): the imazen owners
 # for the size axis (Mitchell downscale) that replaced the ImageMagick shell-out
 # in `scripts/run_full_eval.sh` on 2026-09-02, per the IMAZEN-ONLY rule.
