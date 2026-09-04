@@ -7193,3 +7193,140 @@ standalone encode substantively cleared; imazen-only rule minted + enforced; /tm
 restart-loop + scorer-lifecycle launcher fixes. OPEN WITH THE USER: zenavif-parse 0.7.0
 release, GitHub MCP token refresh, squintly's 10 hours, board 12MB cap, README speed-ratio
 doc fixes, Stage-B unspent balance.
+
+## ROUND 74 — POST-REBOOT RESUME: chroma verdict + S1c content-class β (2026-09-04)
+
+**⚠ PRE-BACKEND-CHANGE ERA (2026-09-04): mid-round, the coordinator relayed a
+user directive that the AV1 backend is under active re-development in a
+concurrent session (est. ~2x faster) and to scope remaining work to
+harvest-of-already-produced-data only — no new encodes, no image rebuilds, no
+zenavif/zenav1-* source edits. Both lanes below comply: the chroma arm's
+encode tail (11 cells) that finished this round was ALREADY DECLARED before
+the reboot, not newly declared; S1c was fully encoded before the reboot too.
+Every published number in this round carries the same annotation and will
+need re-measurement once the backend redevelopment lands.** The zenavif
+`.workongoing` marker (held for the companion-repo check only, zero edits
+made there) was released immediately on receiving the directive.
+
+Resumed both parked lanes from `~/tmp/chromasplit_RESUME_AFTER_REBOOT.md` and
+`~/tmp/speedtrig_RESUME_AFTER_REBOOT.md`, exactly as written, in order.
+
+### Chroma-split lane — VERDICT PUBLISHED: CHROMA, k₁₁ = 11/11 (maximum strength)
+
+Restarted the score gap-fill loop (step 2, as instructed first). Both encode
+arms had 11 cells outstanding at park (br420 4, br444 7) — completed via
+relaunched dev workers; along the way found and fixed **two real operational
+defects**, both worth carrying forward:
+
+1. **Household safety**: tower's 16 pre-existing encode-tail workers (alive
+   since before park, holding stale claims) were saturating the box — load
+   average **33.3 on 32 cores**, zero free, violating the "keep ≥16 cores
+   free" household rule. Retired immediately; load fell to single digits
+   within a minute. They were doing nothing productive anyway (stale claims
+   on an all-but-finished run).
+2. **Scorer restart-policy bug in the parked `chromasplit_repoint.sh`**: its
+   dev section applied `docker update --restart unless-stopped` (needed
+   because a gap-fill-fed scorer's drain-restart cycle IS its manifest-
+   refresh mechanism under `ZEN_LONG_LIVED=0`) but its tower section never
+   did — so the 4 tower scorers drained once (clean exit 0) and, under the
+   2026-09-03 `on-failure:5` fix (which correctly does NOT restart a clean
+   exit), silently stayed stopped. Found via `uptime`/`docker ps -a` cross-
+   check when score coverage stalled at a real number for 5+ minutes despite
+   9 "active" workers; fixed live (`docker update --restart unless-stopped` +
+   `docker start` on all 4) and patched into the script for reuse.
+
+Both arms reached `zenfleet-ctl gap = 0 of 2880`. Ran the harvest
+(`avifdoe_chroma_harvest.sh`, idempotent, re-run at full fill): **5,760/5,760
+cell rows scored (100.00%)**, 5,179 distinct `encode_sha` (581 exact-duplicate
+bitstreams, expected), 0 unscored, 0 missing bytes. Era control 2,880/2,880
+byte-identical; scorer control max|Δssim2|=0.0.
+
+**Verdict, against the PRE-REGISTERED rule (k₁₁≥9 CHROMA / ≤2 BACKEND, fixed
+before the data): CHROMA. k₁₁ = 11 of 11, k = 16 of 16.** Every one of the 16
+pre-registered svt-4:2:0-fails-90 references — all 11 plot+screenshot images
+included — is ALSO a reach-90 failure for zenrav1e at 4:2:0. Independently
+re-verified by hand against the raw `reach_per_image.tsv`, not just the
+analyzer's printed line. Corroborated by a second, ladder-density-immune
+reading: of svt-420's 17 in-wave misses, `br420` also misses all 17/17;
+`br444` misses only 2/17 (both pre-flagged edge cases). Published headline
+re-worded per the pre-registered consequence: "svt cannot reach ssim2 90" →
+"**4:2:0** cannot reach ssim2 90".
+
+**The bytes axes tell a different story than reach — and that difference IS
+the finding.** Backend held, chroma varied: median BD-rate delta **+0.08%**
+(CI [−0.97,+0.93], sign p=0.860 — a coin flip). Chroma held, backend varied:
+**+10.19%** svt-favouring (CI [+0.25,+19.15], sign p=0.071). Chroma is not a
+bytes-efficiency lever where both arms can reach a quality — it is a hard
+reach ceiling that no bitrate opens.
+
+Landed: results §7 in `avif_chroma_split_2026-09-04.md`, unconfounded re-cut
+§8 + §0.6/§0.8/§4/§6 updated in place in `avif_backend_selection_2026-09-03.md`
+(backend-doc §6 rank-1 gap CLOSED), pointer (9 files/645,663 B,
+triple-mirrored + sha256-verified: local/LAN/Tower-over-SSH), DATA_PROVENANCE
+entry. Commits (all verified on `master@origin` via
+`git merge-base --is-ancestor`): zenmetrics `44ff01e6` (results),
+`14b6c181` (backend-doc re-cut).
+
+### Speed-instrument lane — S1c COMPLETE, content-class β landed
+
+S1c finished 2026-09-04T06:15:22Z on r7900x, matching the pre-reboot
+self-prediction's ~06:15Z estimate almost to the minute. All 12 legs, 0
+encode-fails, exact row counts (320/320/320 svt × 10 speeds, 96/96/96
+zenravif × 3 speeds, both native+budget sizes). `COMPLETE` marker present;
+no verify-then-touch procedure was needed (the marker was genuinely written
+by the chain, not the run2-precedent failure mode).
+
+**Found and fixed the documented analyzer trap before use, not after**:
+`avif_speed_analyze.py`'s `pixels_of()` parsed pixel count only from a
+`.crop(N).png` filename tag; S1c's corpus keeps native-looking
+`NNNN.scaleWxH.png` names on BOTH the native corpus and the 1024²-cropped
+budget corpus (budget names wrong on purpose), matching neither. Fixed
+additively at the owner (zenmetrics `cf913382`): an optional `--sources-dir`
+reads true dimensions from each PNG's own IHDR chunk (header-only, no pixel
+decode, no new dependency — same convention as `hdr_corpus_precheck.py`) and
+REFUSES loud on a two-dir pixel-count conflict rather than silently pooling
+native and budget under one basename. 8 hermetic tests
+(`test_avif_speed_analyze.py`). Verified against the real corpora before
+using it for anything: native 32/32 resolved (max 15,996,248 px), budget
+32/32 resolved (max 1,572,864 px, mean 1.157 MP — matches the resume doc's
+independent measurement), conflict path fires correctly on the real
+`1220.scale3000x4000.png` collision. CHANGELOG entry `3351b53d`.
+
+**Content-class β (record §8, `avif_speed_instrument_2026-09-03.md`)**:
+joined per-image ms/MP against the corpus's own 12-fine/5-coarse content
+taxonomy (`avifdoe_stagea_analyze.py`'s `COARSE` map, reused not re-derived).
+**Between-coarse-class median spread tops out at 3.92×** (scan vs ai-gen,
+slowest svt preset) — narrower than S1a's 24.33× per-source headline, which
+is coarser-aggregation smoothing, not a contradiction — and narrows further
+to **1.5–2.2× at production speeds** (svt s7–10). **Within one coarse class
+the spread reaches 52.62×** (`scan` @ budget/svt-rs/s1) — EXCEEDING the
+per-source headline, because the coarse 5-class map folds heterogeneous fine
+classes (1-bit patent scans vs halftone manuscripts) into one bucket. The
+corpus's existing 12-fine-class label, already free in
+`crop_manifest_2026-09-01.tsv`, is a better feature than the 5-coarse one.
+
+Outputs added to the existing `_MANIFEST.json` (additive, 9→23 files):
+12 raw `s1c_*_pass{1,2,3}.tsv` + `s1c_content_class_beta.tsv` +
+`s1c_content_class_beta_per_source.tsv`, at
+`/mnt/v/output/avif-speed-instrument-2026-09-03/`. DATA_PROVENANCE §B.1
+added (`~/work/zen` is not a git repo — filesystem edit, no commit).
+Commit (verified on `master@origin`): zenmetrics `e35bd8e9`.
+
+### Node follow-ups (per the resume doc: NOT chased, only current state noted)
+
+node-2: still Windows (unchanged from park — flag SET + PXE-first + a
+one-time UEFI override all failed to boot Ubuntu; genuinely needs console
+access, recorded as a runbook finding not re-attempted here). node-3: came
+up on its own between park and resume, but into **Windows**, not Ubuntu
+(new information since park, when it was fully down after two WoLs) —
+recorded for the private homefleet runbook, not chased further per the
+resume doc's explicit scope limit. Neutral IDs only per the privacy rule;
+no household names or MACs in this public repo.
+
+### Verification
+
+All markers released this round: zenavif (on receiving the PRE-BACKEND-CHANGE
+directive), zenmetrics (primary), zenmetrics--chromasplit,
+zensim--reboot-resume (this workspace, after this commit). Every commit above
+independently confirmed via `git merge-base --is-ancestor <sha> master@{u}`
+before being reported done, not taken on trust from any intermediate step.
