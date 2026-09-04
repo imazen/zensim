@@ -6875,6 +6875,34 @@ fn train_mlp_per_sample_alpha_head(
     let mut w1 = init_model.w1.clone();
     let mut b1 = init_model.b1.clone();
 
+    // Feature-subset pinning (`--keep-features`): the SAME one-time row
+    // zeroing the plain path applies (see `train_mlp_strategy`'s call) —
+    // this head's layer-1 `w1` is `n_features × n_hidden` in EITHER
+    // architecture (`use_2layer` only adds a second encoder layer `w2_enc`
+    // that reads the HIDDEN layer's output, never the raw features), so
+    // `zero_masked_w1_rows` applies to the identical row layout regardless
+    // of `--n-hidden-layers`. That is what makes a 2-layer student of a
+    // 265-of-944 slice buildable at all.
+    //
+    // Dropped inputs are standardized to exactly 0.0 upstream (the same
+    // CLI-level ablation the plain path relies on), so the gradient into a
+    // zeroed row is exactly 0.0 for the rest of training and the row can
+    // never move again — zero per-step cost, and the shipped bake's
+    // layer-1 truly does not read the dropped columns, as opposed to
+    // merely never having been exercised by training data that happened to
+    // zero them.
+    let masked_rows = zero_masked_w1_rows(&mut w1, n_hidden, input_keep_mask().as_deref());
+    if masked_rows > 0 {
+        log_line(
+            &format!(
+                "[keep-features] pinned {masked_rows} of {n_features} layer-1 input rows to 0 \
+                 (effective width {})",
+                n_features - masked_rows
+            ),
+            log,
+        );
+    }
+
     // 2nd encoder layer (n_hidden → n_hidden_final), initialized if 2-layer.
     let mut w2_enc: Vec<f64> = if use_2layer {
         let scale = (2.0 / n_hidden as f64).sqrt();

@@ -1252,6 +1252,223 @@ fn parse_keep_features(spec: &str, n_features: usize) -> Result<Vec<usize>, Stri
     Ok(idx)
 }
 
+/// Which flag makes `--keep-features` unsupported for this architecture
+/// selection, if any. `None` means the run's layer-1 owner applies the
+/// `INPUT_KEEP_MASK` pinning — today that is the plain
+/// `n_features → n_hidden → 1` strategy path AND `--per-sample-alpha-head`
+/// (both its 1-layer and its `--n-hidden-layers >= 2` architecture: that
+/// head's layer-1 `w1` is `n_features × n_hidden` either way, and
+/// `train_mlp_per_sample_alpha_head` pins it with the same
+/// `zero_masked_w1_rows` call the plain path uses — 2026-09-04,
+/// `benchmarks/fastclass_distill_wave_2026-09-04.md` §7.6/§7.7).
+///
+/// `--pool-head` / `--hybrid-head` keep their own separate layer-1 weights
+/// (`PoolHeadModel` / `HybridHeadModel`) that this knob never touches, and
+/// `--gpu-runtime` is a different code path entirely — both stay refused.
+/// `--n-hidden-layers >= 2` WITHOUT `--per-sample-alpha-head` also stays
+/// refused: the plain path silently ignores `n_hidden_layers` (an
+/// orthogonal, pre-existing gap this fix does not touch), so a
+/// `--keep-features` bake trained that way would misrepresent its own
+/// architecture as 2-layer when it is actually 1-layer.
+fn keep_features_unsupported_flag(
+    pool_head: bool,
+    hybrid_head: bool,
+    per_sample_alpha_head: bool,
+    n_hidden_layers: usize,
+    want_gpu: bool,
+) -> Option<&'static str> {
+    if pool_head {
+        return Some("--pool-head");
+    }
+    if hybrid_head {
+        return Some("--hybrid-head");
+    }
+    if n_hidden_layers >= 2 && !per_sample_alpha_head {
+        return Some("--n-hidden-layers >= 2 without --per-sample-alpha-head");
+    }
+    if want_gpu {
+        return Some("--gpu-runtime");
+    }
+    None
+}
+
+/// Same shape as [`keep_features_unsupported_flag`], for `--group-l1`.
+/// `--group-l1`'s per-step group-lasso prox (`apply_post_adam_penalties`,
+/// in `zensim_validate::mlp_train`) is invoked ONLY inside the plain
+/// path's training loop — `train_mlp_per_sample_alpha_head` never calls
+/// it — so unlike `--keep-features` this stays plain-path-only across
+/// every other flag, unchanged by the 2026-09-04 fix.
+fn group_l1_unsupported_flag(
+    pool_head: bool,
+    hybrid_head: bool,
+    per_sample_alpha_head: bool,
+    n_hidden_layers: usize,
+    want_gpu: bool,
+) -> Option<&'static str> {
+    if pool_head {
+        return Some("--pool-head");
+    }
+    if hybrid_head {
+        return Some("--hybrid-head");
+    }
+    if per_sample_alpha_head {
+        return Some("--per-sample-alpha-head");
+    }
+    if n_hidden_layers >= 2 {
+        return Some("--n-hidden-layers >= 2");
+    }
+    if want_gpu {
+        return Some("--gpu-runtime");
+    }
+    None
+}
+
+#[cfg(test)]
+mod feature_subset_guard_tests {
+    //! Failing-first coverage for the 2026-09-04 fix (owner-fix lane,
+    //! `fastclass_distill_wave_2026-09-04.md` §7.6/§7.7): before it,
+    //! `keep_features_unsupported_flag(_, _, true, 2, _)` returned
+    //! `Some("--per-sample-alpha-head")` unconditionally (the flag was
+    //! blanket-refused whenever `--per-sample-alpha-head` was set, with no
+    //! carve-out for `n_hidden_layers`), so the exact E1-arm invocation the
+    //! wave doc needed — `--per-sample-alpha-head --n-hidden-layers 2
+    //! --keep-features ...` — FATAL-refused. These assert the post-fix
+    //! table; flipping any of the three `per_sample_alpha_head` cases below
+    //! back to `Some(...)` reproduces that pre-fix behavior exactly.
+    use super::{group_l1_unsupported_flag, keep_features_unsupported_flag};
+
+    #[test]
+    fn keep_features_default_case_unchanged() {
+        // No head flags, 1 layer, no GPU: always supported, before and
+        // after this fix. Byte-identity anchor for the untouched case.
+        assert_eq!(
+            keep_features_unsupported_flag(false, false, false, 1, false),
+            None
+        );
+    }
+
+    #[test]
+    fn keep_features_per_sample_alpha_head_1layer_now_supported() {
+        // Pre-fix: Some("--per-sample-alpha-head") (blanket-refused).
+        assert_eq!(
+            keep_features_unsupported_flag(false, false, true, 1, false),
+            None
+        );
+    }
+
+    #[test]
+    fn keep_features_per_sample_alpha_head_2layer_now_supported() {
+        // The exact E1-arm shape from the wave doc: a 2-layer student of a
+        // keep-features slice. Pre-fix: Some("--per-sample-alpha-head").
+        assert_eq!(
+            keep_features_unsupported_flag(false, false, true, 2, false),
+            None
+        );
+    }
+
+    #[test]
+    fn keep_features_n_hidden_layers_2_without_alpha_head_still_refused() {
+        // n_hidden_layers is a no-op on the plain path with no head flag —
+        // orthogonal, pre-existing gap this fix does not touch. Stays
+        // refused so a --keep-features bake can't claim an architecture
+        // that was never actually trained.
+        assert_eq!(
+            keep_features_unsupported_flag(false, false, false, 2, false),
+            Some("--n-hidden-layers >= 2 without --per-sample-alpha-head")
+        );
+    }
+
+    #[test]
+    fn keep_features_pool_head_still_refused() {
+        assert_eq!(
+            keep_features_unsupported_flag(true, false, false, 1, false),
+            Some("--pool-head")
+        );
+    }
+
+    #[test]
+    fn keep_features_hybrid_head_still_refused() {
+        assert_eq!(
+            keep_features_unsupported_flag(false, true, false, 1, false),
+            Some("--hybrid-head")
+        );
+    }
+
+    #[test]
+    fn keep_features_gpu_still_refused() {
+        assert_eq!(
+            keep_features_unsupported_flag(false, false, false, 1, true),
+            Some("--gpu-runtime")
+        );
+    }
+
+    #[test]
+    fn keep_features_pool_head_wins_even_with_alpha_head_and_2_layers() {
+        // pool_head/hybrid_head/per_sample_alpha_head are mutually exclusive
+        // at the CLI level (asserted in train_mlp_strategy), but this
+        // function only encodes the masking-support table itself — pin the
+        // priority order (pool_head checked first) so a future reordering
+        // is a deliberate, reviewed change rather than a silent one.
+        assert_eq!(
+            keep_features_unsupported_flag(true, false, true, 2, false),
+            Some("--pool-head")
+        );
+    }
+
+    // `--group-l1` is untouched by the 2026-09-04 fix: every case that was
+    // refused before stays refused, including per_sample_alpha_head at
+    // n_hidden_layers = 1 (which --keep-features now allows). These are the
+    // "did NOT relax group-l1" regression guards.
+
+    #[test]
+    fn group_l1_plain_path_unchanged() {
+        assert_eq!(
+            group_l1_unsupported_flag(false, false, false, 1, false),
+            None
+        );
+    }
+
+    #[test]
+    fn group_l1_per_sample_alpha_head_1layer_still_refused() {
+        assert_eq!(
+            group_l1_unsupported_flag(false, false, true, 1, false),
+            Some("--per-sample-alpha-head")
+        );
+    }
+
+    #[test]
+    fn group_l1_per_sample_alpha_head_2layer_still_refused() {
+        assert_eq!(
+            group_l1_unsupported_flag(false, false, true, 2, false),
+            Some("--per-sample-alpha-head")
+        );
+    }
+
+    #[test]
+    fn group_l1_n_hidden_layers_2_alone_still_refused() {
+        assert_eq!(
+            group_l1_unsupported_flag(false, false, false, 2, false),
+            Some("--n-hidden-layers >= 2")
+        );
+    }
+
+    #[test]
+    fn group_l1_pool_head_hybrid_head_gpu_still_refused() {
+        assert_eq!(
+            group_l1_unsupported_flag(true, false, false, 1, false),
+            Some("--pool-head")
+        );
+        assert_eq!(
+            group_l1_unsupported_flag(false, true, false, 1, false),
+            Some("--hybrid-head")
+        );
+        assert_eq!(
+            group_l1_unsupported_flag(false, false, false, 1, true),
+            Some("--gpu-runtime")
+        );
+    }
+}
+
 /// Count layer-1 input rows that are **exactly** zero in a baked model, i.e.
 /// inputs the fit dropped (pinned by `--keep-features`, or learned away by
 /// `--group-l1`). Exact zeros are what `bake_dial_refit pack` prunes, so this
@@ -3238,30 +3455,43 @@ fn main() {
         *zensim_validate::mlp_train::GROUP_L1_LAMBDA.lock().unwrap() = args.group_l1;
         println!("[group-l1] group-lasso prox ON: lambda {}", args.group_l1);
     }
-    // Both feature-subset knobs are wired ONLY on the plain
-    // `n_features → n_hidden → 1` strategy path (the one every 944-regime
-    // recipe uses). The head architectures keep their layer-1 weights in a
-    // different owner (`pool_head` / `hybrid_head` / `per_sample_alpha_head`)
-    // and would silently ignore the flag — fail loud instead of shipping a
-    // bake whose spec claims a subset it never trained.
-    if args.keep_features.is_some() || args.group_l1 > 0.0 {
-        let unsupported = [
-            (args.pool_head, "--pool-head"),
-            (args.hybrid_head, "--hybrid-head"),
-            (args.per_sample_alpha_head, "--per-sample-alpha-head"),
-            (args.n_hidden_layers >= 2, "--n-hidden-layers >= 2"),
-            (want_gpu, "--gpu-runtime"),
-        ];
-        for (hit, name) in unsupported {
-            if hit {
-                eprintln!(
-                    "FATAL: --keep-features / --group-l1 are implemented on the plain \
-                     n_features→n_hidden→1 path only; {name} routes layer-1 weights through a \
-                     different owner and would silently ignore them."
-                );
-                std::process::exit(1);
-            }
-        }
+    // See `keep_features_unsupported_flag` / `group_l1_unsupported_flag`
+    // above for the up-to-date support table and rationale (2026-09-04,
+    // `benchmarks/fastclass_distill_wave_2026-09-04.md` §7.6/§7.7) — fail
+    // loud rather than shipping a bake whose spec claims a subset it
+    // never trained.
+    if args.keep_features.is_some()
+        && let Some(name) = keep_features_unsupported_flag(
+            args.pool_head,
+            args.hybrid_head,
+            args.per_sample_alpha_head,
+            args.n_hidden_layers,
+            want_gpu,
+        )
+    {
+        eprintln!(
+            "FATAL: --keep-features is implemented on the plain n_features→n_hidden→1 path \
+             and on --per-sample-alpha-head (1-layer and --n-hidden-layers >= 2) only; {name} \
+             does not train through either of those, so the emitted bake would not actually \
+             honor the kept-feature subset it claims."
+        );
+        std::process::exit(1);
+    }
+    if args.group_l1 > 0.0
+        && let Some(name) = group_l1_unsupported_flag(
+            args.pool_head,
+            args.hybrid_head,
+            args.per_sample_alpha_head,
+            args.n_hidden_layers,
+            want_gpu,
+        )
+    {
+        eprintln!(
+            "FATAL: --group-l1 is implemented on the plain n_features→n_hidden→1 path only; \
+             {name} routes layer-1 weights through a different owner (or a different code \
+             path) and would silently ignore it."
+        );
+        std::process::exit(1);
     }
 
     // Build TrainingGroups. This MOVES the raw feature rows under a mutable

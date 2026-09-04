@@ -2,6 +2,66 @@
 
 ## [Unreleased]
 
+### Fixed — `--keep-features` now works on the multi-layer path (2026-09-04)
+
+- **`zensim_mlp_train --keep-features` + `--per-sample-alpha-head`** (1-layer
+  AND `--n-hidden-layers >= 2`) is now supported instead of FATAL-refused. That
+  head's layer-1 `w1` is `n_features × n_hidden` in either architecture —
+  `use_2layer` only adds a second encoder layer reading the HIDDEN output, never
+  the raw features — so `train_mlp_per_sample_alpha_head` pins it with the same
+  `zero_masked_w1_rows` call the plain path has always used. A 2-layer student of
+  a 265-of-944 slice is buildable for the first time (fastclass §7.6).
+- **What stays refused, and why**: `--pool-head` / `--hybrid-head` keep their
+  layer-1 weights in a different owner; `--gpu-runtime` is another code path; and
+  `--n-hidden-layers >= 2` WITHOUT `--per-sample-alpha-head` still refuses,
+  because the plain path silently ignores `n_hidden_layers`, so such a bake would
+  claim a 2-layer architecture it never trained. `--group-l1` is unchanged on
+  every axis — its per-step prox only runs in the plain path's loop.
+- The support table moved out of an inline array into two named, unit-tested
+  predicates (`keep_features_unsupported_flag` / `group_l1_unsupported_flag`),
+  so a future relaxation is a reviewed edit rather than a silent one.
+- Tests: `zensim-validate/tests/keep_features_multilayer.rs` (3 end-to-end, via
+  `INPUT_KEEP_MASK` + `zenpredict::Model` + `prune::plan`, asserting the SAME raw
+  indices drop on the plain and alpha-head paths and that
+  `caller_input_width()`/`n_inputs()`/`FeatureTransform::Drop` match) + 17 guard
+  predicate tests. **Failing-first proof**: with the new `zero_masked_w1_rows`
+  call removed, both cross-path tests report `left: []` against
+  `right: [1, 3, 4]`. The integration tests live in `tests/` because
+  `INPUT_KEEP_MASK` is a process-global `Mutex` — mutating it inside the unit-test
+  binary raced two unrelated reproducibility tests.
+
+### Added — `freeze_check --select --seed-group`: rank RECIPES, not lucky seeds (2026-09-04)
+
+- **`--seed-group`** (opt-in; `--select` only) groups fulleval cells by RECIPE and
+  ranks GROUPS by the same PRIMARY/TIE-BREAK rule over the k-seed MEAN, printing
+  each group's per-seed spread and every per-seed value. Without it, `--select`
+  ranks individual cells and on a class with real seed spread systematically
+  selects the best-of-k draw (fastclass §7.7 measured 0.133 KonJND spread).
+- **One owner of the grouping rule.** It mirrors `scripts/v_next/gauntlet.py`
+  (`seed_group_key` / `build_seed_groups`) byte-for-byte, id included: key =
+  `sha1(zentrain.repro.argv minus the seed and output-path flags)[:12]`, with
+  duplicate promotions of one training run collapsed by seed identity so
+  **k = distinct seeds, never cells**. Both owners gained `--init-seed` /
+  `--sample-seed` in the drop set and an `(init, sample)` seed identity.
+- **Gate**: `scripts/verify_seed_group_parity.py` runs both owners over the
+  board's fulleval dir and fails on any disagreement in normalized argv, key,
+  seed identity, or the k>=2 partitions. MEASURED: PASS on 432 fullevals / 78
+  k>=2 groups.
+- **The mean is never presented as the group's true score.** A seed drives pair
+  SAMPLING, so members saw objectively different subsets. `k=1` renders
+  UNREPLICATED; an ensemble or a cell with no embedded argv renders UNGROUPABLE —
+  both listed and labelled, never merged or dropped.
+- Default `--select` is byte-identical when the flag is absent (gated by
+  `seed_group_off_leaves_the_plain_rule_untouched`).
+- **Board defect found in passing, reported not hidden**: `peer_cvvdp.fulleval
+  .json` contains a bare `NaN`, which is invalid JSON and which `serde_json`
+  rejects — so `freeze_check --select` over the whole board dir has never worked
+  with that file present. The parity script excludes it loudly and counts it.
+- New direct dependency `sha1 = "0.11.0"` (same RustCrypto generation as the
+  existing `sha2`), fixed by the byte-identical-id requirement: the board's ids
+  are already recorded under a sha256 in `fairness_tiers_2026-09-04.pointer.md`,
+  so moving the board to another digest would invalidate a committed record.
+
 ### Added — class-C free slots: 24 more 944 positions a 156-class walk can emit (2026-09-04)
 
 - **`V1FreeExtras::RawMomentsPlusBoundedErr`** (a strict superset of
