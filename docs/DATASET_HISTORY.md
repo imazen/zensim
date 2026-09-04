@@ -1133,3 +1133,69 @@ still points at the era-2 root. The flip is now supported by the table above;
 the caveat to weigh is that six corpora in the era-3 root are copied prior-era
 rows, so flipping makes the default root era-mixed until those can be
 re-extracted.
+
+
+## §3.29 — the AVIF autotune training view: what we thought we were building vs what the data allowed (2026-09-04)
+
+**Thought-why.** Union every scored AVIF DOE wave into one view, train a picker
+that predicts `{backend, knob tuple, chroma, bit depth, speed}` plus expected
+`{bytes, wall-time}` from source features + a target quality, and validate it on
+held-out ODD origins.
+
+**Actual-why, four ways the data said otherwise — every one MEASURED, not
+inferred:**
+
+1. **There are no odd origins, and there cannot be.** The 32 AVIF DOE references
+   were k-means-selected under `--parity 0` precisely so no val/test-origin
+   content could reach a training artifact. `origin_split.split_of` returns
+   `train` for all 32, so the canonical validate/test buckets are structurally
+   empty and `train_hybrid.py` correctly refuses the corpus with *"0 validation
+   rows … not a train-biased even-only set"*. The fix was NOT to weaken that
+   guard: `train_hybrid` gained a declared `SPLIT_RULE` hook implementing the
+   already-registered even-only sub-split (`DATA_SPLITS.md` L158, the
+   `avifgen-2026-08-06` precedent), which subdivides the TRAIN bucket only and
+   hard-errors on any origin that is not canonical-train. 26 train / 6 `eval8`.
+   **`eval8` is a leg-side holdout; the canonical one does not exist for AVIF.**
+2. **`chroma` is not an axis.** Backend and chroma are perfectly collinear in
+   every row (svt 4:2:0, zenrav1e 4:4:4; 1,114 `av1C` boxes, zero exceptions),
+   because no chroma knob is wired for AVIF at all. It ships as a DERIVED
+   attribute of backend. A picker fitted here learns the pair, and no
+   re-analysis of existing bytes can split them.
+3. **`wall-time` is a model of a model.** No fleet path persists a duration for
+   any DOE cell, so the view's `encode_ms` comes from the speed instrument's
+   `alpha + beta*MP` fits — single-threaded, q45-anchored, per-source fits on 5
+   of 32 sources, pooled fits flagged `linear_model_failed` on 20/20 arms with
+   beta spreading 24.3x. The trained time head fails the trainer's own
+   `TIME_HEAD_R2` gate on both bakes; the shipped answer is the LUT, and even
+   that is labelled modelled.
+4. **The backend head does not work.** 54.0 % agreement with the measured
+   per-image winner against a **67.7 % always-`zenav1-svt` baseline** — worse
+   than the constant, and it never recovers a zenrav1e win (0/25, 3/27). The
+   mechanism is legible in the corpus: the entire zenrav1e arm ran on the 1024²
+   budget corpus, so the model sees that backend at exactly one size.
+
+**What DID work.** The bytes/knob head: held-out mean regret 13.4 % (48-cell
+cross-size-verified bake) / 14.5 % (143-cell full bake) against the per-row
+oracle, and on screen content the core bake is **0.7 % mean, exactly optimal on
+92 % of decisions**. Both bakes carry `safety_report.passed = false` and were
+baked `--allow-unsafe`; those thresholds assume a corpus two orders of magnitude
+larger than 32 references, and the violations are recorded rather than tuned
+away.
+
+**Two corrections made inside this pass, before publishing.** (a) The per-image
+backend reference is a BUDGET-corpus verdict (`pixels` reads 1,048,576 for every
+cropped ref); an earlier pass scored all 293 decisions and read 58.0 %, which
+applied a crop verdict to native pixels — the scoped 161-row read is 54.0 % with
+132 rows counted NOT-COMPARABLE. (b) `build_commit` came back `null` because a
+`jj workspace` has no `.git`; it now falls back to the colocated primary repo.
+
+**Three era-scoped facts were re-derived from the bytes rather than inherited:**
+cross-era byte identity (12,000/12,000 shared cell identities, 0 conflicts), the
+dead-knob census (which settles a contradiction between the Stage-A and
+era-delta records — `scm3`/`tn0` inert at speeds 4 and 6, `scm3` LIVE at speed
+7), and svt speed-dial aliasing (presets 8/9/10 ≡ 7).
+
+Record: `zenmetrics/benchmarks/avif_autotune_v1_2026-09-04.md`. Contract:
+`zenmetrics/benchmarks/avif_autotune_contract_2026-09-04.md`. Data:
+`/mnt/v/zen/avif-autotune-2026-09-04/` (triple-mirrored;
+`~/work/zen/DATA_PROVENANCE.md`).
