@@ -267,20 +267,120 @@ to the user.
 
 ---
 
+## 5a. The top-densified anchor — reach PARTLY recovered, and the real culprit named
+
+Registered as the obvious next experiment in the first pass, then run.
+`imazen26_anchor_topdense_2026-09-04.parquet` (sha `0d5d27a3eb5be4f9`, **3,785 rows**):
+same 4,000-row budget, but 300 per decile up to 90 and then **800 in [90,95) + every one of
+the 285 rows the corpus has above 95** — 1,685 rows above `--band-min 70` and **1,085 above
+90**, against the uniform cut's 400.
+
+| | shipped | oldanchor_full | safesyn_curera | im26 uniform | **im26 top-dense** |
+|---|---:|---:|---:|---:|---:|
+| reach | 96.85 | 96.92 | 94.23 | 85.74 | **88.96** |
+| p95 | 99.72 | 99.72 | 99.57 | 98.44 | **99.12** |
+| p5 | 13.73 | 13.82 | 18.23 | 22.91 | **22.99** |
+| dynamic range | 85.99 | 85.89 | 81.33 | 75.53 | **76.13** |
+| monotonicity | 0.9740 | 0.9738 | 0.9747 | 0.9770 | **0.9768** |
+| CID22 dial Δ vs shipped | — | +0.031 | +3.923 | +3.528 | **+4.173** |
+
+`extend-top`'s saturation goes `k` 1.325 → **1.885** and the top extension's domain shrinks
+from `1.138→8.09` to `1.116→6.00`. **Reach recovers +3.2 of the 11.1 points and p95 recovers
++0.68 — but `p5` does not move at all (22.91 → 22.99).**
+
+**So the diagnosis in §4c was only half right.** The top-end loss is a top-density artifact
+and is fixable there; **the larger remaining term is the LOW end**, where the floor rises
+13.73 → 22.99, and that is set by `shared-anchor`'s in-distribution percentile-edge fit, not
+by `extend-top`. Roughly half of the floor rise is already present in `B_safesyn_curera`
+(18.23), so it is **part era, part content** — the same split §4b found for the dial offset.
+A low-band densification (or a percentile-edge count tuned for it) is the next lever, and it
+is **registered, not run**.
+
+Rank is unchanged (0.88212 / −0.51938 / 0.76501 / 0.77852 / 0.80847) and G-RANGE PASSes.
+
+---
+
+## 5b. ARM 2 — replacing safesyn *inside the kon head*: a clean NEGATIVE
+
+The brief's second arm: re-fit B's kon head with safesyn replaced by an imazen-26 leg. Built
+and measured. **It is a regression on both genuine holdouts and is not a candidate.**
+
+**What replaces safesyn, and at what weight.** `canonhdr15` gives safesyn 196,086 rows ×
+weight 1.0 = 196,086 rows-equivalent (57.6 % of the head's mass). The replacement leg
+`imazen26_konleg_40k_2026-09-04.parquet` (sha `d2bbb218914cd2de`) is **40,000 imazen-26
+TRAIN rows**, same stratification discipline as the anchor (4 codecs × 10 decile bands ×
+1,000, round-robin over origins), **disjoint from the anchor by construction** (0 shared
+`encoded_filename`), extracted by the same imazen-decoder path, and carrying safesyn's own
+target semantics — `human_score = score_ssim2 / 100`, **unclamped**, so its 2,781 negative
+rows survive as they do in safesyn. It enters at weight **196086/40000 = 4.90215**, so the
+mix's weighted mass is unchanged: **the leg's CONTENT changes, its INFLUENCE does not.**
+
+**Two controls, both byte-verified against another lane.** The reconstruction of the
+uncommitted `ens-Pline-cid80` blend is **proven before use**: rebuilt from the *stored*
+heads it reproduces the stored npz to **max\|Δw\| 2.84e-14, \|Δbias\| 2.22e-16, identical
+95-feature support**. And the full-chain control lands on sha **`f08b3c8052e13e37`** —
+byte-identical to `armC` in `b_reextract_wave_2026-09-04.md` §10b, and its tau0 f16 bake on
+`2bf259cf`, the same f16-tie sha that lane reported. Independent, same-byte reproduction of
+another lane's control.
+
+> **Provenance correction.** §10a of that record describes the ensemble step as
+> *"anchor-normalised 0.8\*cid + 0.2\*kon"* and **omits the per-head taus**. Without them the
+> reconstruction misses the stored blend by **max\|Δw\| 1.8e+2** (tau on both heads) or
+> **1.5e+0** (tau on neither). The values are in the owner's `HEAD_POOL`: **cid `tau = 0.0`,
+> kon `tau = 0.005`**. With those it is exact.
+
+**Result — the leg swap alone (same anchor, same chain; floor 3e-5 SROCC / 0.0125 dial):**
+
+| corpus | konctl (= armC) | konim26 | Δ | |
+|---|---:|---:|---:|---|
+| **CID22** | 0.88212 | **0.85100** | **−0.03112** | ⚠ 1,000× floor — **down** |
+| **AIC-3** | 0.76505 | 0.76184 | **−0.00321** | **down** |
+| KonJND (\|SROCC\|) | 0.51934 | 0.52025 | +0.00091 | up, ~30× floor |
+| TID | 0.77852 | 0.79420 | +0.01568 | up — **kon-head training corpus** |
+| KADID | 0.80848 | 0.82634 | +0.01786 | up — **B's train==val cheat corpus** |
+
+Dial monotonicity also degrades, 0.9740 → **0.9566** (still above the 0.93 bar), and reach
+96.85 → 95.04. Per-pair dial moves +1.75 (CID22) / +3.04 (KonJND).
+
+**Coherence and the ranking composite agree with the rank verdict** (fulleval, same run):
+`m3a_coherence` **0.6023 → 0.5683** and `product_composite` **0.8286 → 0.8214**, both down.
+The one number that moves the other way is the LEGACY signal fold `m3` (0.2776 → **0.4400**)
+— which is the instrument the attribution work replaced, and which the campaign record
+already documents as visualization-only. Judged on the deployable map (M3a) and the ranking
+composite, the leg swap loses on every axis that governs a ship decision.
+
+**Both genuine holdouts move DOWN; only the corpora the head is fit on move up.** That is
+the signature of a narrower training leg, and the mechanism is visible in the fit report:
+`canonhdr15im26-bvls-raw` reads `bigval +0.8663` (vs the control's +0.8452) and
+`konjnd_guard 0.2418` (vs 0.1950) while `hdrval` falls +0.8464 → **+0.7915** and
+`hdrmixval` +0.8699 → **+0.8176**.
+
+**The lesson, stated as a rule: mass-matching is not diversity-matching.** safesyn's leg is
+196,086 rows over **1,495 distinct references and six codec families** (including two
+XYB-JPEG variants that exist nowhere else in the corpus set). The imazen-26 leg is 40,000
+rows over **212 origins and four codecs**, up-weighted 4.9× to the same *influence*. Equal
+weighted mass, far less content variety — and CID22 pays 0.031 for it. **A larger imazen-26
+leg is not obviously the fix either**: the corpus has only 212 train origins, so its
+diversity ceiling is a property of the corpus, not of the sample size.
+
+**Consequence for the lane's thesis.** Replacing safesyn is cheap and safe where it is a
+*calibration* input (the dial anchor: rank-invariant, era-correcting) and expensive where it
+is a *fitting* input (the kon head: −0.031 CID22). Those are different questions and this
+lane answers both, differently.
+
+---
+
 ## 6. Registered, NOT executed
 
-1. **A reach-preserving imazen-26 anchor.** The uniform decile cut puts only 1,200 of 4,000
-   rows above `target_score` 70 and 400 above 90, which flattens `extend-top`'s saturation
-   fit (`k` 3.13 → 1.33) and costs 11 points of reach. Densify above 90 (the near-lossless
-   zone is where dial precision is worth the most) and re-measure §4c.
+1. **A LOW-band-densified anchor.** §5a fixed the top end (+3.2 reach) and showed the
+   remaining loss is the floor (`p5` 13.73 → 22.99), which `shared-anchor`'s
+   percentile-edge fit sets and `extend-top` cannot touch. Half of it is era, half content.
 2. **Recompute `target_score` on today's decode** so the anchor is single-era in both
    features and target. Needs an ssim2 pass over the 4,000 pairs through an imazen owner.
-3. **The kon-head re-fit (arm 2 of the brief).** Replacing safesyn's 196,086-row leg in
-   `canonhdr15` with an imazen-26 leg requires fetching + decoding + extracting a
-   comparable slice (≈40k rows at weight 196086/40000 reproduces the mass). Every step is
-   proven at anchor scale in this lane — resolve, byte-range fetch, extract at ~500 pairs/s
-   — so this is a fleet-shaped job, not a research question. **It is NOT done, and no
-   number in this document describes it.**
+3. ~~The kon-head re-fit (arm 2).~~ **DONE — see §5b. It is a measured NEGATIVE**
+   (CID22 −0.03112), so the registered follow-up is the *opposite* of scaling it up:
+   understand whether any imazen-26-only leg can match safesyn's content diversity given
+   the corpus's 212 train origins, before spending a fleet wave on more rows.
 4. **A pools944 companion anchor** for 944-input models. Not needed for B, which is a
    372-input bake whose `f228..371` the 372 extractor emits natively; the 924/944 regimes
    zero that block.

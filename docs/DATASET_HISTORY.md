@@ -1506,11 +1506,42 @@ script's own 100 %-resolution gate. (2) `fetch_bigcodec_bytes.py` hard-required 
 **NOT SHIPPED, and the honest reason.** All gates pass — monotonicity **0.9770** (better
 than shipped's 0.9740), tied 0.0000, G-RANGE PASS — but the dial **compresses**: reach
 96.85 → 85.74, p5 13.73 → 22.91, dynamic range −10.5. About half of that is already in the
-current-era safesyn arm (reach 94.23), so it is part era, part content. Cause is visible in
-the fits: `extend-top`'s saturation goes `k` 3.135 → 2.727 → **1.325** as the count above
-`--band-min 70` goes 600 → 600 → 1,200 under a uniform decile cut. **Registered next
-experiment: densify the anchor above `target_score` 90 instead of holding deciles
-uniform.** A Profile-B swap is a ship-default flip and belongs to the user.
+current-era safesyn arm (reach 94.23), so it is part era, part content. A Profile-B swap is
+a ship-default flip and belongs to the user.
+
+**The registered top-densification was RUN, and it half-worked.**
+`imazen26_anchor_topdense_2026-09-04.parquet` (sha `0d5d27a3eb5be4f9`, 3,785 rows: 300 per
+decile to 90, then 800 in [90,95) plus every one of the 285 rows the corpus has above 95 —
+1,085 above 90 against the uniform cut's 400) moves `extend-top`'s saturation `k`
+1.325 → **1.885** and recovers **reach 85.74 → 88.96** and **p95 98.44 → 99.12**. But
+**`p5` does not move (22.91 → 22.99)**. So the top-end loss was a top-density artifact and
+is fixable there, while the **larger remaining term is the FLOOR**, which `shared-anchor`'s
+percentile-edge fit sets and `extend-top` structurally cannot touch. A low-band
+densification is the next lever — registered, not run.
+
+**ARM 2 — replacing safesyn INSIDE the kon head — is a measured NEGATIVE.** The leg
+`imazen26_konleg_40k_2026-09-04.parquet` (sha `d2bbb218914cd2de`; 40,000 imazen-26 TRAIN
+rows, disjoint from the anchor, `human_score = score_ssim2/100` UNCLAMPED so its 2,781
+negative rows survive as safesyn's do) enters `canonhdr15` at weight **196086/40000 =
+4.90215**, so the mix's weighted mass is unchanged and only the leg's CONTENT differs.
+Result, against a same-day control that is **byte-identical to the b_reextract lane's armC**
+(`f08b3c8052e13e37`): **CID22 0.88212 → 0.85100 (−0.03112, ~1,000× the 3e-5 floor)** and
+**AIC-3 −0.00321** — both genuine holdouts DOWN — while TID (+0.0157) and KADID (+0.0179),
+the corpora the kon head is fit on, go up. Dial monotonicity 0.9740 → 0.9566.
+**Mass-matching is not diversity-matching:** safesyn's leg spans 1,495 references and six
+codec families (including two XYB-JPEG variants that exist nowhere else); the imazen-26 leg
+spans **212 origins and four codecs**, up-weighted 4.9× to equal influence. The corpus's
+212 train origins are a diversity ceiling, so more rows would not obviously fix it.
+**Replacing safesyn is safe where it is a CALIBRATION input (the anchor: rank-invariant)
+and expensive where it is a FITTING input (the kon head: −0.031 CID22).**
+
+**Provenance correction to `b_reextract_wave_2026-09-04.md` §10a:** it describes the
+uncommitted `ens-Pline-cid80` step as *"anchor-normalised 0.8\*cid + 0.2\*kon"* and omits
+the **per-head taus**. Without them the reconstruction misses the stored npz by max |Δw|
+**1.8e+2** (tau on both) or **1.5e+0** (tau on neither). The owner's `HEAD_POOL` has
+cid `tau = 0.0`, kon `tau = 0.005`; with those it reproduces to **2.84e-14** with an
+identical 95-feature support. This lane's arm-2 driver proves the reconstruction against
+the stored artifact before using it.
 
 Record: `benchmarks/imazen26_anchor_2026-09-04.md`. Artifacts:
 `/mnt/v/output/zensim/im26anchor-2026-09-04/{build,arms,probe}/`.
