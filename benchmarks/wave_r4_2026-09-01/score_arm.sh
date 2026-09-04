@@ -31,7 +31,11 @@ echo "== verdict $NAME on the wave-r4 root"
 
 # 3. per-pair dumps for the five pairable corpora (LIVE + AIC-4 are pairable at
 #    944 width -- the old exclusion was root-scoped, max |d| 0.0 on both roots)
-for c in cid22 csiq aic3 live aic4; do
+# konjnd added 2026-09-04 (fastclass lane): its eval table is 504 rows / 504
+# refs, and `paired_perref_boot.py` gained a ref_basename JOIN path for it, so
+# the KonJND axis finally has a paired CI instead of a raw point delta. Adding
+# a dump changes no existing output.
+for c in cid22 csiq aic3 live aic4 konjnd; do
   "$BIN/bake_verdict" --bake "$PACKED" --regime "$REGIME" \
     --features-root "$R4" --corpora "$c" \
     --per-pair-output "$OUT/pp_${NAME}_${c}.tsv" --per-pair-refs \

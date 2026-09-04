@@ -36,6 +36,27 @@
 #            env var name, same default 1.2 = A1/A3b/A4b's own verbatim
 #            value). Ported here unmodified otherwise -- see
 #            benchmarks/a4bkon_2026-09-01.md for the registration.
+#   A3b/A4b fast-class distillation levers (fastclass lane, 2026-09-04):
+#            four NEW env vars, every one of which is a NO-OP when unset, so an
+#            unset invocation reproduces A4b's bake BYTE-IDENTICALLY (gate G1 of
+#            benchmarks/fastclass_distill_wave_2026-09-04.md, verified before
+#            any arm was fit):
+#              WR4_HIGH_Q_BOOST=<f>   -> --high-q-boost <f>  (B3 row-weight
+#                                        boost, target>=90, in RankNet pair
+#                                        sampling; flag omitted when unset,
+#                                        which is the trainer's own 1.0 default)
+#              WR4_KON_WITHINREF=1    -> konjnd_bpg group gains ",withinref"
+#                                        (403 refs x 20 rows = a per-ref ladder)
+#              WR4_HF_WITHINREF=1     -> tbig_hf group gains ",withinref"
+#                                        (1,973 refs x 6.1 rows = the
+#                                        near-lossless ladder the trainer's own
+#                                        --group doc names as the motivating
+#                                        case: uniform pairing leaves it ~1/7th
+#                                        of the gradient)
+#              WR4_N_HIDDEN_LAYERS=<n> -> --n-hidden-layers <n> (default 0,
+#                                        A4b's own value; 2 = 944->128->64)
+#            WR4_KADIS was already here and is used unchanged by that lane's
+#            KADIS-role arm.
 #   A4  MODE=distill  : the tsafesyn leg is re-targeted at the TEACHER's
 #                       output (registration §3.0.2 point 3: HYA_w084 =
 #                       0.84*W10L9PH_s4004 + 0.16*Q7b, era-1-trained, grafted
@@ -71,6 +92,9 @@ TRAIN="${ZL_TRAIN:?ZL_TRAIN must point at the zensim_mlp_train binary}"
 KADIS="${WR4_KADIS:-}"
 WR4_KEEP="${WR4_KEEP:-}"
 KONW="${WR4_KONJND_TRAIN_W:-1.2}"
+KONFLAGS="both"; if [ -n "${WR4_KON_WITHINREF:-}" ]; then KONFLAGS="both,withinref"; fi
+HFFLAGS="both";  if [ -n "${WR4_HF_WITHINREF:-}" ];  then HFFLAGS="both,withinref"; fi
+NHL="${WR4_N_HIDDEN_LAYERS:-0}"
 mkdir -p "$OUTDIR"
 
 TTBIG=""
@@ -97,9 +121,9 @@ TRAIN_GROUPS=(
   --group "tid:$R4/ext_tid.parquet:0.5:1.0:rank"
   --group "bigcodec:$V/tbig_944_200k_pure.parquet:0.5:1.0:both"
   --group "tsafesyn:$TSAFE:0.5:1.0:both"
-  --group "konjnd_bpg:$R4/ext_konjnd_bpg_train.parquet:$KONW:0.0:both"
+  --group "konjnd_bpg:$R4/ext_konjnd_bpg_train.parquet:$KONW:0.0:$KONFLAGS"
   --group "konjnd_bpg_val:$R4/ext_konjnd_bpg_val.parquet:0.0:1.5:both"
-  --group "tbig_hf:$V/tbig_hf_pure.parquet:1.0:0.0:both"
+  --group "tbig_hf:$V/tbig_hf_pure.parquet:1.0:0.0:$HFFLAGS"
 )
 if [ -n "$TTBIG" ]; then TRAIN_GROUPS+=( --group "ttbig:$TTBIG:0.5:1.0:both" ); fi
 if [ -n "$KADIS" ]; then TRAIN_GROUPS+=( --group "kadis:$KADIS:0.15:1.0:both" ); fi
@@ -136,8 +160,11 @@ if [ -n "$WR4_KEEP" ]; then
   WIDTH_ARGS=(--max-features 944 --keep-features "$WR4_KEEP")
 fi
 
-echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) konjnd_train_w=$KONW $(date -u +%H:%M:%SZ)"
-exec "$TRAIN" "${TRAIN_GROUPS[@]}" \
-  --n-hidden-layers 0 --target-column human_score --target-scale 100 \
+EXTRA=()
+if [ -n "${WR4_HIGH_Q_BOOST:-}" ]; then EXTRA+=( --high-q-boost "$WR4_HIGH_Q_BOOST" ); fi
+
+echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) konjnd_train_w=$KONW kon_flags=$KONFLAGS hf_flags=$HFFLAGS n_hidden_layers=$NHL extra=(${EXTRA[*]+"${EXTRA[*]}"}) $(date -u +%H:%M:%SZ)"
+exec "$TRAIN" "${TRAIN_GROUPS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} \
+  --n-hidden-layers "$NHL" --target-column human_score --target-scale 100 \
   --epochs 120 --pairs-per-epoch 50000 "${WIDTH_ARGS[@]}" \
   --coarse-decay 1e-5 "${TFARGS[@]}" --seed "$SEED" --out "$OUT"

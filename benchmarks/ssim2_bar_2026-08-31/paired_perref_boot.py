@@ -34,6 +34,24 @@ is where the appendix-V band defects live:
 
 Default (no band) output is unchanged, byte for byte — the extra lines are
 band-mode only, so `paired_boot_10k.txt` still reproduces.
+
+JOIN MODE (`CORPUS=konjnd`, added by the fast-class distillation lane
+2026-09-04). Closes the registered instrument gap this file's own `CORPORA`
+comment names ("KonJND stays out: its peer table is the DILUTED 1,008-ref
+ruler and the JPEG-504 cut is a `dist_path` filter the peer row applies but
+this script does not, so pairing it needs a join, not an index"). It is a
+join, exactly as that comment says: the peer table is filtered to the JPEG
+half by `dist_path`, keyed by the reference basename, and re-emitted in the
+ORDER of the eval parquet `bake_verdict` itself reads
+(`ext_konjnd_jpeg_val.parquet`). The index-wise target assertion below then
+runs unchanged and is what proves the join is right — MEASURED at build time:
+504/504 refs present, 0 PJND mismatches at 1e-6, and ssim2's pooled |SROCC|
+reproduces the exam's own 0.5272 to four decimals from the joined vectors.
+
+KonJND is POOLED-ONLY: its eval table is one row per reference (504 refs, 504
+rows), so a within-image per-reference SROCC does not exist for it. The
+per-reference block and the within-image bootstrap are SKIPPED with a printed
+reason rather than emitting a degenerate 1-row correlation.
 """
 import csv, os, sys, random, statistics
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "lib"))
@@ -80,13 +98,50 @@ CORPORA = {
     # this script does not, so pairing it needs a join, not an index.
     "live": ("live_ssim2_gpu.tsv", "human_score", "ssim2_gpu", 1.0),
     "aic4": ("aic4_ssim2_gpu.tsv", "human_score", "ssim2_gpu", 1.0),
+    # JOIN MODE — see the module docstring. The peer file holds BOTH KonJND
+    # halves; `row_filter` is the JPEG-504 cut, `order_parquet` supplies the
+    # row order `bake_verdict --corpora konjnd` emits.
+    "konjnd": ("konjnd_ssim2_heldout.tsv", "pjnd", "ssim2_gpu", 1.0),
+}
+# corpus -> join spec. Present ⇒ peer rows are keyed+reordered instead of read
+# positionally. `pooled_only` ⇒ one row per reference, so no within-image axis.
+JOIN = {
+    "konjnd": {
+        "row_filter": lambda x: "/jpeg/" in x["dist_path"],
+        "peer_key": lambda x: os.path.basename(x["ref_path"]).rsplit(".", 1)[0],
+        "order_parquet": os.environ.get(
+            "KONJND_EVAL_PARQUET",
+            "/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01/"
+            "ext_konjnd_jpeg_val.parquet"),
+        "order_column": "ref_basename",
+        "pooled_only": True,
+    },
 }
 CORPUS = os.environ.get("CORPUS", "cid22")
+POOLED_ONLY = JOIN.get(CORPUS, {}).get("pooled_only", False)
 
 def peer_rows():
     f, hc, mc, div = CORPORA[CORPUS]
     r = list(csv.DictReader(open(f"{RM}/{f}"), delimiter="\t"))
-    return [(float(x[mc]), float(x[hc]) / div, os.path.basename(x["ref_path"])) for x in r]
+    j = JOIN.get(CORPUS)
+    if j is None:
+        return [(float(x[mc]), float(x[hc]) / div, os.path.basename(x["ref_path"]))
+                for x in r]
+    import pyarrow.parquet as pq  # only needed on the join path
+    order = pq.read_table(j["order_parquet"],
+                          columns=[j["order_column"]]).column(0).to_pylist()
+    keyed = {}
+    for x in r:
+        if not j["row_filter"](x):
+            continue
+        k = j["peer_key"](x)
+        assert k not in keyed, f"duplicate peer key {k!r} after row_filter"
+        keyed[k] = x
+    missing = [k for k in order if k not in keyed]
+    assert not missing, (
+        f"{CORPUS}: {len(missing)} of {len(order)} eval references absent from the "
+        f"filtered peer table (first: {missing[:3]}) — refusing a partial join")
+    return [(float(keyed[k][mc]), float(keyed[k][hc]) / div, k) for k in order]
 
 arms = {"ssim2": peer_rows()}
 # ARMS is env-overridable so a lane can add a candidate without editing the
@@ -159,8 +214,14 @@ if BANDED:
         print(f"#   {k:10s} srocc_signed={r['srocc_signed']:+.6f}  |srocc|={r['srocc']:.6f}")
 
 # Per-reference SROCC vectors, one panel --batch call per arm.
+# POOLED-ONLY corpora (one row per reference) have no within-image axis; say so
+# rather than emitting a degenerate 1-row correlation.
 perref = {}
-for name, rows in arms.items():
+if POOLED_ONLY:
+    print(f"# within-image axis SKIPPED for {CORPUS}: {n} rows over {len(keys)} "
+          f"references (one row each) — a per-reference SROCC does not exist. "
+          f"Pooled reference-clustered bootstrap only.")
+for name, rows in ({} if POOLED_ONLY else arms).items():
     jobs = [(f"{name}__{j}",
              [rows[i][0] for i in groups[k]],
              [rows[i][1] for i in groups[k]]) for j, k in enumerate(keys)]
@@ -207,6 +268,8 @@ for name in [k for k in pooled_boot if k != "ssim2"]:
     print(f"{name}\t{pooled_jobs[name][0]:.4f}\t{pooled_jobs['ssim2'][0]:.4f}\t"
           f"{statistics.fmean(d):+.4f}\t{lo:+.4f}\t{hi:+.4f}\t{pwin:.3f}")
 
+if POOLED_ONLY:
+    sys.exit(0)
 print("\n# within-image (per-reference) paired bootstrap")
 rng = random.Random(SEED)
 idx_sets = [[rng.randrange(len(keys)) for _ in keys] for _ in range(B_ITERS)]
