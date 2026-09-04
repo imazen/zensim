@@ -181,3 +181,129 @@ into ONE owner used by the training loops **and** the simulator; a bake
 byte-identity gate plus a sample-sequence digest prove the extraction changed
 nothing. Any descriptor stat goes through `zenstats`. Default paths stay
 byte-identical.
+
+---
+
+# RESULTS
+
+**The study falsified its own hypothesis.** Subset coverage does not explain
+seed-to-seed spread in held-out score, and the evidence is not merely "we found
+nothing" — a pre-registered pure-luck control descriptor, which *cannot*
+causally matter, correlates with held-out score **more strongly than any real
+coverage descriptor does**. That is what makes the null a finding rather than an
+absence.
+
+## Phase 1 — the reconstruction, and the proof it is faithful
+
+`mlp_train::sampling` is now THE owner of the pair-draw step: the four training
+loops and the replay all call `sampling::draw_pair`, so the study's subsets are
+the trainer's subsets by construction, not by a re-implementation kept in sync.
+`subset_sim` reads a bake's embedded `zentrain.repro` and replays its sampler
+with **no feature columns read** (`parquet_loader::load_scores_and_refs`) and no
+model built.
+
+Three independent gates, all MEASURED, on three sampling paths (uniform /
+within-ref / high-q-boost):
+
+| gate | result |
+|---|---|
+| per-epoch training trajectory (loss + per-group SROCC/PLCC/PWRC, full printed precision), pre-extraction binary vs post | IDENTICAL, 3/3 |
+| bake bytes, `zentrain.repro` stripped (its timestamp/argv/cwd make whole-file identity impossible by construction) | IDENTICAL, 3/3 |
+| replay digest vs a REAL run's `ZENSIM_SAMPLE_DIGEST=1` | MATCH, 3/3 — `03eb9f61c99f76da` / `fc62d239b67a2e62` / `ff243de6fb5517a4` |
+
+Reproduce: `scripts/subset_study/byte_identity_gate.sh` (binary paths via
+`OLD_TRAIN`/`NEW_TRAIN`, so it cannot fossilise onto a cleaned-up worktree).
+
+Population actually reconstructed: **202 (arm, seed) cells across 66 seed-sibling
+arms**, from 312 board fullevals carrying a usable repro. 17 of the 83 candidate
+arms did not replay (their recorded corpus paths no longer resolve) and are
+simply absent, not silently substituted.
+
+## Phase 2 — H1: whole-run coverage is saturated
+
+At production settings (120 × 50,000 = 6,000,000 draws over ~700,000 training
+rows, ≈17 hits per row) coverage does not vary between seeds in any meaningful
+sense. Between-seed **relative** spread within an arm, over 66 arms:
+
+| descriptor | median relspread | max relspread |
+|---|---:|---:|
+| pooled distinct-row coverage | 1.37e-4 | 4.58e-4 |
+| reference coverage | 1.31e-5 | 8.47e-5 |
+| row-multiplicity entropy | 3.85e-6 | 4.76e-5 |
+| (ref, band) cell coverage | 8.82e-5 | 2.51e-4 |
+| ≥90-endpoint share | 7.74e-4 | 3.85e-3 |
+
+**12 of 29 descriptors never exceed 1 % relative spread on any arm.** Against
+that, the quantity to be explained moves far more: within-arm relative spread is
+**3.9e-3** (median) for within-image CID22, **1.0e-2** for CID22, **1.3e-2** for
+AIC-3, **1.3e-1** for KonJND. Row coverage varies ~28× less than the CID22
+target it would have to drive, and ~940× less than KonJND. **H1 CONFIRMED** —
+whole-run coverage is mechanically incapable of being the driver, independent of
+any correlation one might compute.
+
+## Phase 2 — the falsifier, and why the control is the point
+
+The pre-registered class axis (model input width) turned out **degenerate on this
+board: 65 of 66 sibling arms are 944-input**, so "replicates across ≥2 model
+classes" cannot be evaluated as written. Reported as a limitation. The
+substitute axis actually available is the **group structure** (which corpora at
+which weights an arm trained on — 48 distinct structures), and on it a long list
+of descriptors "replicates" at |ρ| > 0.3.
+
+That list is noise, and the control proves it:
+
+| | max \|ρ\| | median \|ρ\| |
+|---|---:|---:|
+| **pure-luck controls** (`same-row skip rate`, `duplicate-pair rate`) | **0.3707** | 0.0985 |
+| real coverage descriptors | 0.3380 | 0.1002 |
+
+`e_D10_samerow_rate` — how often the RNG happened to draw the same row index
+twice, a property of nothing but RNG luck, carrying no information about the
+training data — is the **single strongest correlate of within-image CID22 on the
+entire board** (ρ = +0.3707, n = 119), and its own permutation null (R = 500)
+calls it "significant" at p = 0.002. `D10_samerow_rate` vs KonJND likewise:
+ρ = −0.3007, p = 0.010. The control also "replicates across ≥2 group structures".
+
+So the machinery manufactures |ρ| ≈ 0.3 with p < 0.01 for a descriptor that
+cannot matter. The mechanism is repeated measures: **seeds recur across arms**
+(seed 4004 appears in 18 of them), a seed-pure descriptor takes the same value
+in every arm it appears in, and permuting *within* arm does not destroy the
+resulting cross-arm dependence — so the null is under-dispersed and every
+p-value in that table is optimistic. **The correct reading is that no descriptor
+clears its own control.** The pre-registered falsifier fires:
+
+> *no descriptor predicts held-out score across ≥2 model classes with |ρ| > 0.3
+> and consistent sign* — and by the stronger, control-based standard, no
+> descriptor predicts it at all.
+
+Per §5, §7(c)'s coverage-targeted steering is therefore **not shipped**. That was
+decided in advance, not after seeing the numbers.
+
+## Phase 2 — H5: the lucky seeds are not better covered
+
+Taking each arm's best seed by within-image CID22 and comparing its descriptors
+against its siblings' mean, in units of the arm's own descriptor SD: the largest
+mean z over 31 arms is **0.467**, and the pure-luck control sits third at 0.428.
+A real coverage advantage would sit near ±1. **H5 CONFIRMED (luck is not
+coverage).**
+
+## Phase 2 — seeds are not transferably good
+
+A separate question the registry makes cheap: is a "good seed" a property of the
+seed? Ranking seeds within each arm and testing whether per-seed mean rank is
+more consistent than chance (2,000 permutations, 31 arms, 8 seeds with ≥4
+appearances):
+
+| target | observed sd of per-seed mean rank | null p95 | emp p |
+|---|---:|---:|---:|
+| CID22 within-image | 0.1570 | 0.1940 | 0.205 |
+| CID22 | 0.2051 | 0.1940 | **0.035** |
+| KonJND | 0.1258 | 0.1940 | 0.446 |
+| AIC-3 | 0.1111 | 0.1940 | 0.587 |
+
+One of four targets is nominally significant, which is what four tests produce by
+chance, and the orderings disagree across targets (seed 4006 is 2nd best on CID22
+and 3rd worst on AIC-3; 4003 is near-worst on CID22 and best on AIC-3). **There
+is no transferable "good seed."** Consequence for the deliverable: a registry of
+good seeds cannot be an oracle, and the registry says so in its own schema
+header.

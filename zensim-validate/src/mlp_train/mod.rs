@@ -2215,6 +2215,19 @@ pub fn train_mlp_strategy(
         .ok()
         .filter(|v| v == "1")
         .map(|_| sampling::SampleSequenceDigest::new());
+    // STRATEGY stratified row-A bands. This used to be built in ONE of the
+    // four training loops, so `--stratified-bands` was a silent no-op on
+    // every other path — including the standard path every board bake
+    // trained through. Empty when the flag is 0, which keeps the default
+    // byte-identical.
+    let strat_bands: Vec<Vec<Vec<usize>>> = if hyperparams.stratified_bands > 0 {
+        train_indices
+            .iter()
+            .map(|&gi| strategy::build_bands(groups[gi].human_scores, hyperparams.stratified_bands))
+            .collect()
+    } else {
+        Vec::new()
+    };
     // Say so out loud: which pairing mode a group trained under changes what
     // the bake learned, and it must never be a silent default.
     for (pos, rb) in ref_buckets.iter().enumerate() {
@@ -2299,7 +2312,7 @@ pub fn train_mlp_strategy(
                     row_counts: &row_counts,
                     per_row_cdfs: &per_row_cdfs,
                     ref_buckets: &ref_buckets,
-                    strat_bands: &[],
+                    strat_bands: &strat_bands,
                 },
                 &mut rng,
             );
@@ -3138,6 +3151,19 @@ fn train_mlp_pool_head_with_tv(
         .ok()
         .filter(|v| v == "1")
         .map(|_| sampling::SampleSequenceDigest::new());
+    // STRATEGY stratified row-A bands. This used to be built in ONE of the
+    // four training loops, so `--stratified-bands` was a silent no-op on
+    // every other path — including the standard path every board bake
+    // trained through. Empty when the flag is 0, which keeps the default
+    // byte-identical.
+    let strat_bands: Vec<Vec<Vec<usize>>> = if hyperparams.stratified_bands > 0 {
+        train_indices
+            .iter()
+            .map(|&gi| strategy::build_bands(groups[gi].human_scores, hyperparams.stratified_bands))
+            .collect()
+    } else {
+        Vec::new()
+    };
     // Say so out loud: which pairing mode a group trained under changes what
     // the bake learned, and it must never be a silent default.
     for (pos, rb) in ref_buckets.iter().enumerate() {
@@ -3212,7 +3238,7 @@ fn train_mlp_pool_head_with_tv(
                     row_counts: &row_counts,
                     per_row_cdfs: &per_row_cdfs,
                     ref_buckets: &ref_buckets,
-                    strat_bands: &[],
+                    strat_bands: &strat_bands,
                 },
                 &mut rng,
             );
@@ -3967,6 +3993,19 @@ fn train_mlp_hybrid_head_with_tv(
         .ok()
         .filter(|v| v == "1")
         .map(|_| sampling::SampleSequenceDigest::new());
+    // STRATEGY stratified row-A bands. This used to be built in ONE of the
+    // four training loops, so `--stratified-bands` was a silent no-op on
+    // every other path — including the standard path every board bake
+    // trained through. Empty when the flag is 0, which keeps the default
+    // byte-identical.
+    let strat_bands: Vec<Vec<Vec<usize>>> = if hyperparams.stratified_bands > 0 {
+        train_indices
+            .iter()
+            .map(|&gi| strategy::build_bands(groups[gi].human_scores, hyperparams.stratified_bands))
+            .collect()
+    } else {
+        Vec::new()
+    };
     // Say so out loud: which pairing mode a group trained under changes what
     // the bake learned, and it must never be a silent default.
     for (pos, rb) in ref_buckets.iter().enumerate() {
@@ -4055,7 +4094,7 @@ fn train_mlp_hybrid_head_with_tv(
                     row_counts: &row_counts,
                     per_row_cdfs: &per_row_cdfs,
                     ref_buckets: &ref_buckets,
-                    strat_bands: &[],
+                    strat_bands: &strat_bands,
                 },
                 &mut rng,
             );
@@ -7006,6 +7045,19 @@ fn train_mlp_per_sample_alpha_head(
         .ok()
         .filter(|v| v == "1")
         .map(|_| sampling::SampleSequenceDigest::new());
+    // STRATEGY stratified row-A bands. This used to be built in ONE of the
+    // four training loops, so `--stratified-bands` was a silent no-op on
+    // every other path — including the standard path every board bake
+    // trained through. Empty when the flag is 0, which keeps the default
+    // byte-identical.
+    let strat_bands: Vec<Vec<Vec<usize>>> = if hyperparams.stratified_bands > 0 {
+        train_indices
+            .iter()
+            .map(|&gi| strategy::build_bands(groups[gi].human_scores, hyperparams.stratified_bands))
+            .collect()
+    } else {
+        Vec::new()
+    };
     // Say so out loud: which pairing mode a group trained under changes what
     // the bake learned, and it must never be a silent default.
     for (pos, rb) in ref_buckets.iter().enumerate() {
@@ -7460,14 +7512,6 @@ fn train_mlp_per_sample_alpha_head(
     // ---------------- STRATEGY-2026-07-02 state ----------------
     let ema_active = hyperparams.ema_decay > 0.0;
     let mut ema = strategy::EmaState::new(hyperparams.ema_decay);
-    let strat_bands: Vec<Vec<Vec<usize>>> = if hyperparams.stratified_bands > 0 {
-        train_indices
-            .iter()
-            .map(|&gi| strategy::build_bands(groups[gi].human_scores, hyperparams.stratified_bands))
-            .collect()
-    } else {
-        Vec::new()
-    };
     let dro_active = hyperparams.dro_eta > 0.0;
     let mut cdf = cdf; // rebindable: DRO rebuilds the group CDF per epoch
     let mut dro_loss_sum: Vec<f64> = vec![0.0; train_indices.len()];
@@ -10853,6 +10897,82 @@ mod tests {
     /// predictions are demonstrably more sensitive in the low-score
     /// region (the boost re-weighted those pairs higher in the rank
     /// loss).
+    /// `--stratified-bands` must actually stratify on the DEFAULT training
+    /// path, not only under `--per-sample-alpha-head`.
+    ///
+    /// It used to build `strat_bands` in exactly ONE of the four training
+    /// loops. Every other loop — including `train_mlp_strategy`'s own
+    /// standard path, which every board bake trained through — passed an
+    /// empty band table, so the flag was a SILENT NO-OP there: setting it
+    /// produced a bit-identical draw sequence and a bit-identical bake.
+    /// MEASURED before the fix, `--stratified-bands 0` vs `8` on the default
+    /// path: sample-sequence digest `127b831bed8a3873` both times.
+    #[test]
+    fn stratified_bands_is_not_a_silent_no_op_on_the_default_path() {
+        let n_features = 8usize;
+        let mut rng = SplitMix64::new(31);
+        let n = 200usize;
+        let mut targets = Vec::with_capacity(n);
+        let mut features_owned: Vec<Vec<f64>> = Vec::with_capacity(n);
+        for i in 0..n {
+            // Deliberately SKEWED scores: most rows crowd the top, so
+            // band-uniform row-A selection has to look different from
+            // row-uniform selection.
+            let s = 100.0 * ((i as f64) / (n as f64 - 1.0)).powf(0.25);
+            targets.push(s);
+            let mut x: Vec<f64> = (0..n_features).map(|_| rng.next_normal()).collect();
+            x[0] = s / 100.0 + rng.next_normal() * 0.1;
+            features_owned.push(x);
+        }
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = || TrainingGroup {
+            name: "strat-test".to_string(),
+            human_scores: &targets,
+            features: FeatureRows::Borrowed(&feats_ref),
+            metric_sigmas: None,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+            ref_ids: None,
+            loss_mode: GroupLossMode::default(),
+        };
+        let base = MlpHyperparams {
+            n_hidden: 6,
+            n_epochs: 20,
+            pairs_per_epoch: 800,
+            initial_lr: 0.01,
+            seed: 7,
+            log_every: 100,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        let strat = MlpHyperparams {
+            stratified_bands: 8,
+            ..base.clone()
+        };
+        let mut l1 = Vec::new();
+        let plain_bytes = train_mlp(&mut [group()], n_features, &base, &mut l1);
+        let mut l2 = Vec::new();
+        let strat_bytes = train_mlp(&mut [group()], n_features, &strat, &mut l2);
+        assert_ne!(
+            plain_bytes, strat_bytes,
+            "--stratified-bands had NO effect on the default training path"
+        );
+
+        // And the negative control: bands=0 must stay bit-identical to a
+        // hyperparams struct that never mentions the flag, so the fix cannot
+        // have moved the default.
+        let explicit_off = MlpHyperparams {
+            stratified_bands: 0,
+            ..base.clone()
+        };
+        let mut l3 = Vec::new();
+        let off_bytes = train_mlp(&mut [group()], n_features, &explicit_off, &mut l3);
+        assert_eq!(
+            plain_bytes, off_bytes,
+            "stratified_bands=0 must be a true no-op"
+        );
+    }
+
     #[test]
     fn train_mlp_low_q_boost_changes_outputs() {
         let n_features = 4;
