@@ -7364,3 +7364,38 @@ splines. ssim2 reuse rule: per codec (zenwebp bit-exact; zenjpeg/mozjpeg/zenjxl 
 — both anchors re-scored single-era. CID22 overlap audit of both anchors: CLEAN. serde_json float-parse ULP hazard
 fixed (affects every float bar freeze_check reads). OPEN (user): redefine A1/A3/A6 as truth-referenced; which
 weights change addresses C2/C6; whether the dial default moves to the contract-passing class (A/D).
+
+## ROUND 77 — 2026-09-04: the FAIR gauntlet — 8 corrections rendered, 42 of 433 rows verifiably fair, 3 defects found in passing
+User: *"generate an updated gauntlet with all of the things we discovered corrected, and the data/models filtered
+to those we can verify we did fairly."* Two boards: `summer_gauntlet_fair.html` (97 rows, **7.2 MB — UNDER the
+12 MB cap**) and the all-rows companion (433 rows, 19.4 MB, over cap and REPORTED — it shrank 2.5 MB from 21.9
+while gaining four panels, because LEGACY rows lose their per-pair cloud; trimming further would drop rank/dial
+DATA). Tiers: **42 VERIFIED-FAIR (14 distinct recipes, every one k≥2) / 55 FAIR-NOTED (43 UNREPLICATED k=1, 12
+ungroupable) / 336 LEGACY**. Failing: `e_no_invalidated` 278, `a_repro` 40, `f_ens_units` 31, `b_era` 2.
+**The dominant source of unfairness is a stale cached scalar: `composite-stale-after-rank-graft` on 276 of 433
+cells (64%) — the scoreboard's DEFAULT SORT KEY.** Seed grouping (argv modulo `--seed`, single-model only,
+collapsed by DISTINCT seed — 42 rows are 33 same-seed re-promotions) VALIDATED by reproducing the fastclass
+§7.1 table without reading it (k=3, KonJND 0.4327/0.3561/0.1329, composite 0.8664/0.8572). Presented per the
+user's correction: mean + spread + k + per-seed on hover, **mean ranks but is never definitive** (a seed drives
+pair SAMPLING, so spread is partly subset coverage); `zentrain.sample_coverage` reads NOT MEASURED on 433/433,
+never zero. **All three of the current top-3 leave the fair view**, for three different reasons; best-of-k
+inflates the composite by median **+0.0066**, max **+0.0222** over 14 recipes whose own k-spread is 0.0164
+median / 0.0445 max — and after filtering, **8 of the top 8 fair rows are k=1**: the leaderboard is mostly
+single draws. Nine registry entries appended (append-only, 0 deletions), closing a **registry gap** — 30 of 61
+entries carried `scope:{"manual"}` and badged nothing, and the hfnl=ssim2 self-target finding was **not in the
+registry at all**. New: Beats-ssim2 panel (six non-circular held-out axes as deltas vs the `peer_ssim2` ROW +
+the transcribed W1–W7) — the product composite is **37% agreement-with-ssim2** (imazen26 0.50 + nonphoto 0.30
+of 2.15), which is the arithmetic by which a peer tops the board; train==val columns dimmed + reason. G-ADDR
+consumed and **re-pinned mid-pass** to the concurrent lane's landed `peer_ssim2` reference (both pin sets
+render; shipped B reads A3 PASS/A4 FAIL/A5 FAIL/A6 PASS — the difficulty moved to the FLOOR; modal cell 3 pass
+/3 fail on 278 of 433). **Three defects found + fixed:** a registry field-scope collision (`composite` names
+both `product_composite` and `balanced_composite`; was wrongly LEGACY-ing 164 rows — corrected via the
+registry's own supersede mechanism, never a silent override); a Python/Rust `ann_matches` mirror drift
+(`name` vs `name`→`bake`); and **a GATE HOLE — the render harness's only `process.exit(1)` sat mid-file, so
+its last third (registry-badge, ECharts SSR, the whole failure-panel test) printed `FAIL:` and exited 0; the
+pre-2026-09-04 board printed three such FAILs on every run while the gate said PASS.** Terminal check added,
+negative-controlled (rc 0→1). `serde_json` ULP verified: `freeze_check` COVERED crate-wide, `gauntlet.py` NOT
+AFFECTED (CPython `strtod` is correctly rounded). Record: `benchmarks/fair_gauntlet_2026-09-04.md`; audit TSV
+`benchmarks/fairness_tiers_2026-09-04.pointer.md`. OPEN: `freeze_check --select --seed-group` must adopt the
+board's grouping rule (it had not landed at this HEAD); `zentrain.sample_coverage` is the missing measurement
+that would split seed spread into model variance vs subset coverage.
