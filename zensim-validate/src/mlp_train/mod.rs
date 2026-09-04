@@ -37,6 +37,7 @@ use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 // / scalar dispatched kernel. Math is bit-identical to the scalar
 // reference (hardware `sqrt`, FMA fusion only where LLVM would already
 // fuse the scalar version).
+pub mod sampling;
 pub mod strategy;
 use crate::adam_simd;
 
@@ -2186,6 +2187,21 @@ pub fn train_mlp_strategy(
         .iter()
         .map(|&gi| groups[gi].ref_ids.and_then(RefBuckets::build))
         .collect();
+    // Row counts by position-in-train_indices, for the owner draw step.
+    // `FeatureRows::len` is cached at construction (it stays correct after
+    // standardization takes the buffer), so hoisting it out of the hot
+    // loop is exact, not an approximation.
+    let row_counts: Vec<usize> = train_indices
+        .iter()
+        .map(|&gi| groups[gi].features.len())
+        .collect();
+    // Opt-in sample-sequence digest: the faithfulness proof that
+    // `sampling::simulate` replays THIS run's draws. Off by default, so a
+    // normal run is byte- and cost-identical.
+    let mut sample_digest = std::env::var("ZENSIM_SAMPLE_DIGEST")
+        .ok()
+        .filter(|v| v == "1")
+        .map(|_| sampling::SampleSequenceDigest::new());
     // Say so out loud: which pairing mode a group trained under changes what
     // the bake learned, and it must never be a silent default.
     for (pos, rb) in ref_buckets.iter().enumerate() {
@@ -2262,33 +2278,26 @@ pub fn train_mlp_strategy(
             // pair (ia, ib) within that group. If per-row CDFs are
             // populated (boost != 1.0), use weighted sampling for the
             // pair; otherwise uniform.
-            let u = rng.next_f64_unit();
-            let train_pos = cdf.partition_point(|&c| c < u).min(cdf.len() - 1);
+            // Draw via THE owner (`sampling::draw_pair`) — see that module
+            // for why the RNG consumption pattern is a wire contract.
+            let drawn = sampling::draw_pair(
+                &sampling::PairDrawCtx {
+                    cdf: &cdf,
+                    row_counts: &row_counts,
+                    per_row_cdfs: &per_row_cdfs,
+                    ref_buckets: &ref_buckets,
+                    strat_bands: &[],
+                },
+                &mut rng,
+            );
+            if let Some(d) = sample_digest.as_mut() {
+                d.push(drawn);
+            }
+            let sampling::Draw::Pair { train_pos, ia, ib } = drawn else {
+                continue;
+            };
             let g_idx = train_indices[train_pos];
             let g = &groups[g_idx];
-            let n = g.features.len();
-            if n < 2 {
-                continue;
-            }
-            let (ia, ib) = if let Some(rb) = &ref_buckets[train_pos] {
-                // Within-ref: pick a ref, then two rows inside it.
-                rb.draw(rng.next_u64(), rng.next_u64(), rng.next_u64())
-            } else {
-                match &per_row_cdfs[train_pos] {
-                    Some(row_cdf) => {
-                        let ua = rng.next_f64_unit();
-                        let ub = rng.next_f64_unit();
-                        (
-                            row_cdf.partition_point(|&c| c < ua).min(n - 1),
-                            row_cdf.partition_point(|&c| c < ub).min(n - 1),
-                        )
-                    }
-                    None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
-                }
-            };
-            if ia == ib {
-                continue;
-            }
 
             // Norm-in-Norm (Li 2020) path: ALWAYS buffer K samples and
             // route through `run_minibatch_with_nin` (sequential within
@@ -2868,6 +2877,10 @@ pub fn train_mlp_strategy(
         &format!("MLP train: best validation mean SROCC = {best_val_score:.4}"),
         log,
     );
+    // Faithfulness hook: `sampling::simulate` must reproduce this hash.
+    if let Some(d) = sample_digest.as_ref() {
+        println!("ZENSIM_SAMPLE_DIGEST {}", d.hex());
+    }
     best_bake.unwrap_or_else(|| {
         bake_two_layer_znpr_v3(
             &scaler_mean,
@@ -3100,6 +3113,21 @@ fn train_mlp_pool_head_with_tv(
         .iter()
         .map(|&gi| groups[gi].ref_ids.and_then(RefBuckets::build))
         .collect();
+    // Row counts by position-in-train_indices, for the owner draw step.
+    // `FeatureRows::len` is cached at construction (it stays correct after
+    // standardization takes the buffer), so hoisting it out of the hot
+    // loop is exact, not an approximation.
+    let row_counts: Vec<usize> = train_indices
+        .iter()
+        .map(|&gi| groups[gi].features.len())
+        .collect();
+    // Opt-in sample-sequence digest: the faithfulness proof that
+    // `sampling::simulate` replays THIS run's draws. Off by default, so a
+    // normal run is byte- and cost-identical.
+    let mut sample_digest = std::env::var("ZENSIM_SAMPLE_DIGEST")
+        .ok()
+        .filter(|v| v == "1")
+        .map(|_| sampling::SampleSequenceDigest::new());
     // Say so out loud: which pairing mode a group trained under changes what
     // the bake learned, and it must never be a silent default.
     for (pos, rb) in ref_buckets.iter().enumerate() {
@@ -3166,33 +3194,26 @@ fn train_mlp_pool_head_with_tv(
         let mut steps_since_adam = 0u64;
 
         for _ in 0..hyperparams.pairs_per_epoch {
-            let u = rng.next_f64_unit();
-            let train_pos = cdf.partition_point(|&c| c < u).min(cdf.len() - 1);
+            // Draw via THE owner (`sampling::draw_pair`) — see that module
+            // for why the RNG consumption pattern is a wire contract.
+            let drawn = sampling::draw_pair(
+                &sampling::PairDrawCtx {
+                    cdf: &cdf,
+                    row_counts: &row_counts,
+                    per_row_cdfs: &per_row_cdfs,
+                    ref_buckets: &ref_buckets,
+                    strat_bands: &[],
+                },
+                &mut rng,
+            );
+            if let Some(d) = sample_digest.as_mut() {
+                d.push(drawn);
+            }
+            let sampling::Draw::Pair { train_pos, ia, ib } = drawn else {
+                continue;
+            };
             let g_idx = train_indices[train_pos];
             let g = &groups[g_idx];
-            let n = g.features.len();
-            if n < 2 {
-                continue;
-            }
-            let (ia, ib) = if let Some(rb) = &ref_buckets[train_pos] {
-                // Within-ref: pick a ref, then two rows inside it.
-                rb.draw(rng.next_u64(), rng.next_u64(), rng.next_u64())
-            } else {
-                match &per_row_cdfs[train_pos] {
-                    Some(row_cdf) => {
-                        let ua = rng.next_f64_unit();
-                        let ub = rng.next_f64_unit();
-                        (
-                            row_cdf.partition_point(|&c| c < ua).min(n - 1),
-                            row_cdf.partition_point(|&c| c < ub).min(n - 1),
-                        )
-                    }
-                    None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
-                }
-            };
-            if ia == ib {
-                continue;
-            }
 
             let g_feats = &std_features[g_idx];
             let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
@@ -3656,6 +3677,10 @@ fn train_mlp_pool_head_with_tv(
         ),
         log,
     );
+    // Faithfulness hook: `sampling::simulate` must reproduce this hash.
+    if let Some(d) = sample_digest.as_ref() {
+        println!("ZENSIM_SAMPLE_DIGEST {}", d.hex());
+    }
     best_bake.unwrap_or_else(|| {
         let model = ph::PoolHeadModel {
             scaler_mean: scaler_mean.clone(),
@@ -3920,6 +3945,21 @@ fn train_mlp_hybrid_head_with_tv(
         .iter()
         .map(|&gi| groups[gi].ref_ids.and_then(RefBuckets::build))
         .collect();
+    // Row counts by position-in-train_indices, for the owner draw step.
+    // `FeatureRows::len` is cached at construction (it stays correct after
+    // standardization takes the buffer), so hoisting it out of the hot
+    // loop is exact, not an approximation.
+    let row_counts: Vec<usize> = train_indices
+        .iter()
+        .map(|&gi| groups[gi].features.len())
+        .collect();
+    // Opt-in sample-sequence digest: the faithfulness proof that
+    // `sampling::simulate` replays THIS run's draws. Off by default, so a
+    // normal run is byte- and cost-identical.
+    let mut sample_digest = std::env::var("ZENSIM_SAMPLE_DIGEST")
+        .ok()
+        .filter(|v| v == "1")
+        .map(|_| sampling::SampleSequenceDigest::new());
     // Say so out loud: which pairing mode a group trained under changes what
     // the bake learned, and it must never be a silent default.
     for (pos, rb) in ref_buckets.iter().enumerate() {
@@ -4000,33 +4040,26 @@ fn train_mlp_hybrid_head_with_tv(
         let mut steps_since_adam = 0u64;
 
         for _ in 0..hyperparams.pairs_per_epoch {
-            let u = rng.next_f64_unit();
-            let train_pos = cdf.partition_point(|&c| c < u).min(cdf.len() - 1);
+            // Draw via THE owner (`sampling::draw_pair`) — see that module
+            // for why the RNG consumption pattern is a wire contract.
+            let drawn = sampling::draw_pair(
+                &sampling::PairDrawCtx {
+                    cdf: &cdf,
+                    row_counts: &row_counts,
+                    per_row_cdfs: &per_row_cdfs,
+                    ref_buckets: &ref_buckets,
+                    strat_bands: &[],
+                },
+                &mut rng,
+            );
+            if let Some(d) = sample_digest.as_mut() {
+                d.push(drawn);
+            }
+            let sampling::Draw::Pair { train_pos, ia, ib } = drawn else {
+                continue;
+            };
             let g_idx = train_indices[train_pos];
             let g = &groups[g_idx];
-            let n = g.features.len();
-            if n < 2 {
-                continue;
-            }
-            let (ia, ib) = if let Some(rb) = &ref_buckets[train_pos] {
-                // Within-ref: pick a ref, then two rows inside it.
-                rb.draw(rng.next_u64(), rng.next_u64(), rng.next_u64())
-            } else {
-                match &per_row_cdfs[train_pos] {
-                    Some(row_cdf) => {
-                        let ua = rng.next_f64_unit();
-                        let ub = rng.next_f64_unit();
-                        (
-                            row_cdf.partition_point(|&c| c < ua).min(n - 1),
-                            row_cdf.partition_point(|&c| c < ub).min(n - 1),
-                        )
-                    }
-                    None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
-                }
-            };
-            if ia == ib {
-                continue;
-            }
 
             let g_feats = &std_features[g_idx];
             let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
@@ -4654,6 +4687,10 @@ fn train_mlp_hybrid_head_with_tv(
         ),
         log,
     );
+    // Faithfulness hook: `sampling::simulate` must reproduce this hash.
+    if let Some(d) = sample_digest.as_ref() {
+        println!("ZENSIM_SAMPLE_DIGEST {}", d.hex());
+    }
     best_bake.unwrap_or_else(|| {
         let model = hh::HybridHeadModel {
             scaler_mean: scaler_mean.clone(),
@@ -6029,16 +6066,16 @@ impl AdamState {
     }
 }
 
-struct SplitMix64 {
+pub(crate) struct SplitMix64 {
     state: u64,
 }
 
 impl SplitMix64 {
-    fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self { state: seed }
     }
 
-    fn next_u64(&mut self) -> u64 {
+    pub(crate) fn next_u64(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.state;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -6046,7 +6083,7 @@ impl SplitMix64 {
         z ^ (z >> 31)
     }
 
-    fn next_f64_unit(&mut self) -> f64 {
+    pub(crate) fn next_f64_unit(&mut self) -> f64 {
         ((self.next_u64() >> 11) as f64 + 0.5) / ((1u64 << 53) as f64)
     }
 
@@ -6950,6 +6987,21 @@ fn train_mlp_per_sample_alpha_head(
         .iter()
         .map(|&gi| groups[gi].ref_ids.and_then(RefBuckets::build))
         .collect();
+    // Row counts by position-in-train_indices, for the owner draw step.
+    // `FeatureRows::len` is cached at construction (it stays correct after
+    // standardization takes the buffer), so hoisting it out of the hot
+    // loop is exact, not an approximation.
+    let row_counts: Vec<usize> = train_indices
+        .iter()
+        .map(|&gi| groups[gi].features.len())
+        .collect();
+    // Opt-in sample-sequence digest: the faithfulness proof that
+    // `sampling::simulate` replays THIS run's draws. Off by default, so a
+    // normal run is byte- and cost-identical.
+    let mut sample_digest = std::env::var("ZENSIM_SAMPLE_DIGEST")
+        .ok()
+        .filter(|v| v == "1")
+        .map(|_| sampling::SampleSequenceDigest::new());
     // Say so out loud: which pairing mode a group trained under changes what
     // the bake learned, and it must never be a silent default.
     for (pos, rb) in ref_buckets.iter().enumerate() {
@@ -7706,39 +7758,32 @@ fn train_mlp_per_sample_alpha_head(
                     continue;
                 }
             }
-            let u = rng.next_f64_unit();
-            let train_pos = cdf.partition_point(|&c| c < u).min(cdf.len() - 1);
+            // Draw via THE owner (`sampling::draw_pair`). This site keeps
+            // `mut ib` because the hard-pair miner below re-draws it.
+            let drawn = sampling::draw_pair(
+                &sampling::PairDrawCtx {
+                    cdf: &cdf,
+                    row_counts: &row_counts,
+                    per_row_cdfs: &per_row_cdfs,
+                    ref_buckets: &ref_buckets,
+                    strat_bands: &strat_bands,
+                },
+                &mut rng,
+            );
+            if let Some(d) = sample_digest.as_mut() {
+                d.push(drawn);
+            }
+            // `SameRow` still reaches the miner below, exactly as the
+            // pre-extraction code did: it dropped through to `if ia == ib`
+            // only AFTER the miner had a chance to re-draw ib.
+            let (train_pos, ia, mut ib) = match drawn {
+                sampling::Draw::GroupTooSmall => continue,
+                sampling::Draw::SameRow { train_pos, row } => (train_pos, row, row),
+                sampling::Draw::Pair { train_pos, ia, ib } => (train_pos, ia, ib),
+            };
             let g_idx = train_indices[train_pos];
             let g = &groups[g_idx];
             let n = g.features.len();
-            if n < 2 {
-                continue;
-            }
-            let (ia, mut ib) = if let Some(rb) = &ref_buckets[train_pos] {
-                rb.draw(rng.next_u64(), rng.next_u64(), rng.next_u64())
-            } else {
-                match &per_row_cdfs[train_pos] {
-                    Some(row_cdf) => {
-                        let ua = rng.next_f64_unit();
-                        let ub = rng.next_f64_unit();
-                        (
-                            row_cdf.partition_point(|&c| c < ua).min(n - 1),
-                            row_cdf.partition_point(|&c| c < ub).min(n - 1),
-                        )
-                    }
-                    None => {
-                        // STRATEGY: stratified row A — band-uniform then row-uniform.
-                        let ia = if !strat_bands.is_empty() {
-                            let bands = &strat_bands[train_pos];
-                            let b = &bands[(rng.next_u64() as usize) % bands.len()];
-                            b[(rng.next_u64() as usize) % b.len()]
-                        } else {
-                            (rng.next_u64() as usize) % n
-                        };
-                        (ia, (rng.next_u64() as usize) % n)
-                    }
-                }
-            };
             // STRATEGY: hard-pair mining — with prob hard_pair_frac, re-draw
             // row B (≤16 tries) until the pair is near-threshold.
             if hyperparams.hard_pair_frac > 0.0 && rng.next_f64_unit() < hyperparams.hard_pair_frac
@@ -9722,6 +9767,10 @@ fn train_mlp_per_sample_alpha_head(
         ),
         log,
     );
+    // Faithfulness hook: `sampling::simulate` must reproduce this hash.
+    if let Some(d) = sample_digest.as_ref() {
+        println!("ZENSIM_SAMPLE_DIGEST {}", d.hex());
+    }
     let bake_bytes = best_bake.unwrap_or_else(|| {
         let model = psah::PerSampleAlphaHeadModel {
             scaler_mean: scaler_mean.clone(),

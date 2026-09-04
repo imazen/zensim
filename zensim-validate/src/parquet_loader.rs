@@ -1693,3 +1693,149 @@ pub fn load_perpair_sample(
         metrics,
     })
 }
+
+/// Target scores + optional reference identity for ONE parquet, with **no
+/// feature columns read**.
+///
+/// [`load_parquet`] always projects `f0..fN`, which on a 944-wide, 190k-row
+/// corpus is ~1.4 GB of I/O plus a transpose. The pair sampler
+/// (`crate::mlp_train::sampling`) needs neither: a drawn subset is a
+/// function of row COUNTS, group weights and the RNG only, and the coverage
+/// descriptors need just the target column and the reference id. This is
+/// that read — same column conventions as [`load_parquet`] (target by name;
+/// `ref_basename` then `image_path` for identity; dense first-seen ref
+/// numbering; `Float32`/`Float64` targets scaled by `target_scale`) so a
+/// light read and a full read agree row-for-row.
+pub struct ScoresAndRefs {
+    /// Row count. Equals [`OwnedLoadedGroup::human_scores`]`.len()`, which
+    /// is the `n` the sampler draws modulo.
+    pub n_rows: usize,
+    /// Target column × `target_scale`.
+    pub human_scores: Vec<f64>,
+    /// Dense reference ids in first-seen order; `None` when the file
+    /// carries neither `ref_basename` nor `image_path`.
+    pub ref_ids: Option<Vec<u32>>,
+}
+
+/// Read only the target + reference columns of a feature parquet.
+pub fn load_scores_and_refs(
+    path: &Path,
+    target_column: &str,
+    target_scale: f64,
+) -> Result<ScoresAndRefs, String> {
+    let file = File::open(path).map_err(|e| format!("{path:?}: open: {e}"))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
+    let arrow_schema = builder.schema().clone();
+    let parquet_schema = builder.parquet_schema().clone();
+    let arrow_fields = arrow_schema.fields();
+
+    let score_arrow_idx = arrow_fields
+        .iter()
+        .position(|f| f.name() == target_column)
+        .ok_or_else(|| format!("{path:?}: missing target column {target_column:?}"))?;
+    let ref_arrow_idx = ["ref_basename", "image_path"]
+        .iter()
+        .find_map(|c| arrow_fields.iter().position(|f| f.name() == c));
+
+    let mut wanted: Vec<usize> = vec![score_arrow_idx];
+    if let Some(r) = ref_arrow_idx {
+        wanted.push(r);
+    }
+    let mask = ProjectionMask::leaves(&parquet_schema, wanted.iter().copied());
+    let reader = builder
+        .with_projection(mask)
+        .with_batch_size(16384)
+        .build()
+        .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
+
+    // The projected reader emits columns in ASCENDING ORIGINAL-INDEX order,
+    // not in the order they were requested — the same rule `load_parquet`
+    // encodes just above. Assuming request order silently reads the wrong
+    // column whenever the reference column precedes the target in the
+    // schema, which it does on every `ext_*` view.
+    let mut sorted_wanted = wanted.clone();
+    sorted_wanted.sort_unstable();
+    let proj_score_idx = sorted_wanted
+        .iter()
+        .position(|&i| i == score_arrow_idx)
+        .expect("score idx must be in projection");
+    let proj_ref_idx = ref_arrow_idx.map(|r| {
+        sorted_wanted
+            .iter()
+            .position(|&p| p == r)
+            .expect("ref idx must be in projection")
+    });
+
+    let mut human_scores: Vec<f64> = Vec::new();
+    let mut ref_ids: Vec<u32> = Vec::new();
+    let mut ref_lookup: HashMap<String, u32> = HashMap::new();
+
+    for batch_res in reader {
+        let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
+        let n_rows = batch.num_rows();
+        if n_rows == 0 {
+            continue;
+        }
+        let score_col = batch.column(proj_score_idx);
+        match score_col.data_type() {
+            DataType::Float64 => {
+                let a = score_col
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .expect("Float64 dispatch");
+                human_scores.extend((0..n_rows).map(|i| a.value(i) * target_scale));
+            }
+            DataType::Float32 => {
+                let a = score_col
+                    .as_any()
+                    .downcast_ref::<Float32Array>()
+                    .expect("Float32 dispatch");
+                human_scores.extend((0..n_rows).map(|i| a.value(i) as f64 * target_scale));
+            }
+            other => {
+                return Err(format!(
+                    "{path:?}: target column {target_column:?} has unsupported dtype {other:?} (need Float32/Float64)",
+                ));
+            }
+        }
+        if let Some(pi) = proj_ref_idx {
+            let col = batch.column(pi);
+            let as_str: Box<dyn Fn(usize) -> String> = match col.data_type() {
+                DataType::Utf8 => {
+                    let a = col.as_any().downcast_ref::<StringArray>().unwrap().clone();
+                    Box::new(move |i| a.value(i).to_string())
+                }
+                DataType::LargeUtf8 => {
+                    let a = col
+                        .as_any()
+                        .downcast_ref::<LargeStringArray>()
+                        .unwrap()
+                        .clone();
+                    Box::new(move |i| a.value(i).to_string())
+                }
+                other => {
+                    return Err(format!(
+                        "{path:?}: ref column has unsupported dtype {other:?} (need Utf8/LargeUtf8)",
+                    ));
+                }
+            };
+            for i in 0..n_rows {
+                let key = as_str(i);
+                let next = ref_lookup.len() as u32;
+                let id = *ref_lookup.entry(key).or_insert(next);
+                ref_ids.push(id);
+            }
+        }
+    }
+
+    Ok(ScoresAndRefs {
+        n_rows: human_scores.len(),
+        human_scores,
+        ref_ids: if ref_ids.is_empty() {
+            None
+        } else {
+            Some(ref_ids)
+        },
+    })
+}
