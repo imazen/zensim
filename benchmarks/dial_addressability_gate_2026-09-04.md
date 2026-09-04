@@ -569,6 +569,11 @@ dumps, overlap TSVs), `anchors/` (every candidate anchor parquet, sha-listed in 
 `arms/` (every bake + `--full-json` verdict), `overlap-review/` (the d ≤ 16 screening page),
 and the two pinned probes at the top level.
 
+**LAN mirror** (the probes are load-bearing — the registry references them by path AND
+sha256, and a missing probe degrades the gate to NOT MEASURED):
+`s3://zentrain/dialgate/2026-09-04/` holds both probes, every candidate anchor and every
+arm bake (73 objects; `source ~/tmp/_lan_env.sh` for `$ZEN_S3_ENDPOINT`).
+
 Key shas: `ne12_ss_unc_id100.bin` `2deeae9ce7da9cc2…`, `ss_unc_id100_lowband.bin`
 `ef4298ef4d938be6…`, anchor `ss_cur_rescored_unclamped_id100.parquet` `6ce2c32971a34791…`,
 anchor `ss_unc_id100_lowband.parquet` `a91a676156d13b08…`, chain control
