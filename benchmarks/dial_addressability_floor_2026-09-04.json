@@ -1,0 +1,99 @@
+{
+  "_schema": {
+    "what": "The G-ADDR (dial ADDRESSABILITY) floor registry. One committed row per dial grid + per probe, holding the SHIPPED product dial's measured end-of-range behaviour on that instrument. A candidate bake clears the REGRESSION tier only when it reaches at least as far at BOTH ends as the row for the instrument it was measured on.",
+    "why": "USER RULE 2026-09-04: 'floor and ceiling dial addressability is crucial ... any model that limits dial range cannot ship'. A dial that compresses at the ends cannot serve a target near the ends, which is where near-lossless product decisions live. SROCC is rank-invariant and structurally cannot see this; G1 (p5<=25, p95>=85) is far too loose to.",
+    "keyed_by": "dial_grid_sha256 for the grid rows; probe_sha256 for the negative-tail and identity rows. An UNREGISTERED grid or probe is NOT-MEASURABLE / NOT-MEASURED, never a pass -- a bar you can dodge by choosing a friendlier instrument is not a bar.",
+    "owner": "zensim-validate/src/dial_addressability.rs (embedded with include_str!, so a stale or missing file cannot silently disarm the gate). Consumed by bake_verdict's DIAL panel; emitted into --full-json at dial.addressability.",
+    "two_tiers": "REGRESSION rows (A*) bar against the shipped dial's own value on the same instrument -- 'no worse at either end than what users have today'. CONTRACT rows (C*) are absolute product requirements. The shipped dial FAILS four contract rows today (C3/C4 negative tail, C5 identity band, C6 nothing-above-identity); those are standing defects recorded here, NOT bars invented for this gate, and the `incumbent` column in every report says so.",
+    "append_only": "Rows are appended, never edited. A floor is a measurement of a specific bake on a specific instrument; changing it retroactively invalidates every verdict that quoted it. To raise a bar (a better dial ships), append a new row and retire the old one by label.",
+    "record": "benchmarks/dial_addressability_gate_2026-09-04.md"
+  },
+
+  "reference_bake": {
+    "name": "b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07",
+    "path": "zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin",
+    "sha256": "b6fe5233ee9c752d29abeb8be8b0814c052dd96f566a82250cdd6ff6a8cb13e0",
+    "role": "ZensimProfile::B -- the SHIPPED SDR product dial as of 2026-09-04. Its end-of-range behaviour IS the regression floor: a replacement dial may not be worse at either end than the dial users have today.",
+    "measured_by": "bake_verdict --bake <B> --dial-grid <grid> --negtail-probe <probe> --identity-probe <probe>, at zensim main 2026-09-04 (this lane's HEAD).",
+    "note": "The gate keys on the GRID/PROBE sha, not on the bake, so a row stays readable if a re-pack changes the reference bake's bytes without changing its dial. The sha is recorded for provenance."
+  },
+
+  "fixed_bars": {
+    "mono_min": 0.93,
+    "tied_max": 0.05,
+    "identity_lo": 97.5,
+    "identity_hi": 100.0,
+    "provenance": "mono/tied are the registered G3 bars (docs/EVAL_PANEL_REQUIREMENT.md), unchanged. The identity band is the shipping convention recorded in benchmarks/standard_bake_packing_2026-05-27.md + the QAT record ('identity ~97.7 exact, 0 above-identity') -- MEASURED to be a v47-era property: v47_strict_qat_native reads 97.6893, but shipped B reads 96.2412 and ADD156 reads 96.1157, so both shipped LINEAR dials fail it. Registered as specified 2026-09-04 and NOT relaxed; the incumbent's failure is a finding, not a reason to move the bar."
+  },
+
+  "grids": [
+    {
+      "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
+      "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL)",
+      "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
+      "n_rows": 4424,
+      "min": 3.12950123756248,
+      "max": 99.98330778475787,
+      "p5": 13.645032446453126,
+      "p95": 99.72170874183841,
+      "reach": 96.85380654719539,
+      "dynamic_range": 86.07667629538528,
+      "mono": 0.9791570171375636,
+      "tied": 0.0,
+      "registered": "2026-09-04",
+      "active": true
+    },
+    {
+      "dial_grid_sha256": "b5d27f212fc6b00cb406e26ff9ba8f74384f56d842280440a7a5dc141f6b0fb7",
+      "label": "dial_grid_372col_2026-05-29_quarantined (NOT canonical -- 9/115 w11 ladders + 33 pre-fix JXL d=0.025 cells; the grid benchmarks/imazen26_anchor_2026-09-04.md measured on)",
+      "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined.parquet",
+      "n_rows": 4457,
+      "min": 3.12950123756248,
+      "max": 99.98376794026095,
+      "p5": 13.726111774203428,
+      "p95": 99.71524151863066,
+      "reach": 96.85426670269847,
+      "dynamic_range": 85.98912974442723,
+      "mono": 0.9740289588600322,
+      "tied": 0.0,
+      "registered": "2026-09-04",
+      "active": true,
+      "note": "Registered ONLY so the 2026-09-04 imazen-26 anchor numbers (reach 96.85 / p5 13.73 / DR 85.99) stay checkable against their own instrument. New work should use the canonical grid; a verdict on this one carries bake_verdict's own NOT-CANONICAL warning."
+    }
+  ],
+
+  "negtail_probes": [
+    {
+      "probe_sha256": "5609d19fa10aef81326d655803a7b51ad3c7339513f959266c272bebfaeeb6d8",
+      "label": "negtail_probe_372_2026-09-04 (kadis_negrich, 20 equal-count ssim2 quantile bins x 100, all rows ssim2 < 0)",
+      "path": "/mnt/v/output/zensim/dialgate-2026-09-04/negtail_probe_372_2026-09-04.parquet",
+      "built_from": "/mnt/v/zen/zensim-training/canonical-2026-07-15/train/kadis_negrich.parquet (266,111 rows; 237,675 with ssim2_gpu < 0). Selection is deterministic: 20 equal-count quantile bins over the negative population, lowest 100 row indices per bin. No RNG.",
+      "truth_span": "ssim2_gpu min -770.6197, p1 -187.1314, median -54.7239, max -0.3312 -- every row's reference metric is negative, so a correct dial must go below zero somewhere on it.",
+      "n_rows": 2000,
+      "min": 2.516685884084839,
+      "p1": 3.981383254902343,
+      "p5": 5.668369289459955,
+      "frac_below_zero": 0.0,
+      "registered": "2026-09-04",
+      "active": true,
+      "incumbent_note": "SHIPPED B never goes below zero on this probe (frac_below_zero 0.0000, min +2.5167) even though every row's truth is negative. That is a standing violation of the product contract ('NEGATIVE zensim values MUST work'), recorded here as the incumbent's own value so a candidate is judged on both the relative and the absolute question."
+    }
+  ],
+
+  "identity_probes": [
+    {
+      "probe_sha256": "e6f9096b8e0ebd97f1c36e40bb7e589e77a599bfdfcb7ff94dde89520018b650",
+      "label": "identity_probe_372_2026-09-04 (all 38 dial-grid reference images, ref == dist)",
+      "path": "/mnt/v/output/zensim/dialgate-2026-09-04/identity_probe_372_2026-09-04.parquet",
+      "built_from": "extract_features_372col --corpus pairs-tsv over the 38 distinct image_ids of the canonical dial grid, each paired with ITSELF, decoded by imazen codecs (zenpng) at this lane's HEAD.",
+      "measured_property": "All 38 rows are the ZERO vector, bit-identical -- which is what a difference metric must do, and it makes the identity dial a SCALAR property of the bake, dial(0-vector). The probe is kept as 38 rows rather than 1 so that property stays gated rather than assumed.",
+      "n_rows": 38,
+      "dial_min": 96.24115978721524,
+      "dial_median": 96.24115978721524,
+      "dial_max": 96.24115978721524,
+      "registered": "2026-09-04",
+      "active": true,
+      "incumbent_note": "SHIPPED B calls a perfect copy 96.2412 while emitting up to 99.9833 on LOSSY dial-grid cells: 266 of 4,424 cells (6.01%) out-score an exact copy, worst `1a20ecb0c1b92466_1022x818` jxl d=0.05 at 99.9833. Standing ceiling defect, recorded as the incumbent's own value."
+    }
+  ]
+}

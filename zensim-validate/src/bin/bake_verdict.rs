@@ -801,6 +801,18 @@ struct Args {
     /// the gate). Scored on the same corruption grid; the dial-alone numbers
     /// stay in the report for honesty. Absent → dial-only, unchanged.
     corruption_head: Option<PathBuf>,
+    /// `--negtail-probe <parquet>`: pinned negative-tail probe (`entry, f0..`)
+    /// for the G-ADDR floor axis — rows whose reference metric is genuinely
+    /// negative, so "does the dial still go below zero, and as deep as the
+    /// shipped dial does" is a MEASUREMENT rather than an assumption. Absent
+    /// → those axes are NOT MEASURED (never a silent pass).
+    negtail_probe: Option<PathBuf>,
+    /// `--identity-probe <parquet>`: pinned identity probe (`entry, f0..`)
+    /// whose rows are `ref == dist` for the dial grid's OWN reference images,
+    /// so "no codec output out-scores a perfect copy of its own reference" is
+    /// checked per reference rather than against a global constant. Absent
+    /// → those axes are NOT MEASURED.
+    identity_probe: Option<PathBuf>,
     /// `--full-json <path>`: the unified "full-eval" JSON consumed by
     /// `scripts/run_full_eval.sh` + the summer-gauntlet dashboard. Richer than
     /// `--json` (which stays a stable per-corpus panel): rank map + dial
@@ -904,6 +916,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             )
         });
     let mut corruption_head: Option<PathBuf> = None;
+    let mut negtail_probe: Option<PathBuf> = None;
+    let mut identity_probe: Option<PathBuf> = None;
     let mut dial_peer_scores: Option<(String, PathBuf)> = None;
     let mut features_root: PathBuf = PathBuf::from(DEFAULT_FEATURES_ROOT_372);
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
@@ -1028,6 +1042,14 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--corruption-head" => {
                 let v = args.next().ok_or("--corruption-head requires <bake.bin>")?;
                 corruption_head = Some(PathBuf::from(v));
+            }
+            "--negtail-probe" => {
+                let v = args.next().ok_or("--negtail-probe requires <parquet>")?;
+                negtail_probe = Some(PathBuf::from(v));
+            }
+            "--identity-probe" => {
+                let v = args.next().ok_or("--identity-probe requires <parquet>")?;
+                identity_probe = Some(PathBuf::from(v));
             }
             "--cross-regime" => {
                 cross_regime = true;
@@ -1195,6 +1217,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         compare,
         corruption_grid,
         corruption_head,
+        negtail_probe,
+        identity_probe,
         dial_peer_scores,
         full_json,
         fulleval,
@@ -1657,6 +1681,16 @@ struct DialMetrics {
     /// (the G4 "cross-codec reach"). `--full-json`'s `dynamic_range` is the
     /// robust p95 − p5; `reach` is the total span (outliers included).
     reach: f64,
+    /// The pooled extremes `reach` is built from. Published separately because
+    /// the G-ADDR gate bars them INDEPENDENTLY: a candidate can hold `reach`
+    /// while trading ceiling for floor, and that trade is exactly what the
+    /// era-corrected anchors do (floor up, ceiling down).
+    min: f64,
+    max: f64,
+    /// G-ADDR — the dial ADDRESSABILITY verdict against the shipped product
+    /// dial's own end-of-range behaviour on this same grid. `None` only when
+    /// the dial panel itself did not run.
+    addr: Option<zensim_validate::dial_addressability::Verdict>,
     /// Per-codec dial stats (codec, n_curves, n_pairs, monotonicity, tied) —
     /// the headline mono/flat pool across codecs, which can mask one broken
     /// family; `--full-json` carries the breakout so the dashboard shows it.
@@ -1781,6 +1815,9 @@ impl DialMetrics {
         p95: f64::NAN,
         flat: f64::NAN,
         reach: f64::NAN,
+        min: f64::NAN,
+        max: f64::NAN,
+        addr: None,
         per_codec: Vec::new(),
         curves: Vec::new(),
         zones: None,
@@ -1866,10 +1903,22 @@ fn load_peer_dial_scores(path: &Path, grid: &parquet_loader::DialGrid) -> Result
     Ok(out)
 }
 
+/// The G-ADDR probe inputs, already scored by the caller (so the probes go
+/// through the SAME `Ensemble` forward every other section uses).
+struct AddrProbes {
+    /// `(measure, probe sha256)` for the negative-tail probe.
+    negtail: Option<(zensim_validate::dial_addressability::NegTailMeasure, String)>,
+    /// `(entry -> identity dial, probe sha256)`. `entry` is the dial grid's
+    /// `image_id`, so the "above identity" check is PER REFERENCE.
+    identity: Option<(Vec<(String, f64)>, String)>,
+}
+
 fn dial_panel(
     ens: &Ensemble,
     grid_path: &Path,
     peer: Option<&(String, PathBuf)>,
+    grid_sha256: &str,
+    probes: &AddrProbes,
 ) -> (String, DialMetrics) {
     if !grid_path.exists() {
         return (
@@ -2571,6 +2620,81 @@ fn dial_panel(
                 .collect(),
         })
         .collect();
+
+    // ── G-ADDR: the dial ADDRESSABILITY gate ──────────────────────────────
+    // Runs on the SAME pooled score vector G1 reads, plus the SAME ladder
+    // accounting G3 reads, so no number here can disagree with the table
+    // above about the same event. See `zensim_validate::dial_addressability`
+    // for why the FLOOR axis is the hard one (the anchor's `max(ssim2, 0)`
+    // clamp is what deletes the in-distribution evidence below zero).
+    use zensim_validate::dial_addressability as gaddr;
+    let (dmin, dmax) = if pooled.is_empty() {
+        (f64::NAN, f64::NAN)
+    } else {
+        (pooled[0], pooled[pooled.len() - 1])
+    };
+    let addr_measure = gaddr::GridMeasure::from_pooled(&scores, mono, flat);
+    // Identity: MEASURED 2026-09-04 — `ref == dist` gives the all-zero feature
+    // vector for every image, so the identity dial is a SCALAR property of the
+    // bake, not a per-image one. Every grid cell is therefore compared against
+    // the probe's `dial_max` (the most permissive identity value), which makes
+    // a nonzero above-identity count unambiguous.
+    let identity_measure = probes.identity.as_ref().map(|(rows, sha)| {
+        let mut dials: Vec<f64> = rows.iter().map(|(_, v)| *v).collect();
+        dials.sort_by(f64::total_cmp);
+        let bars = gaddr::fixed_bars();
+        let n_outside = dials
+            .iter()
+            .filter(|d| **d < bars.identity_lo || **d > bars.identity_hi)
+            .count();
+        let idl = dials.last().copied().unwrap_or(f64::NAN);
+        let mut n_above = 0usize;
+        let mut worst: Option<(String, String, f64, f64, f64)> = None;
+        if idl.is_finite() {
+            for (i, &sc) in scores.iter().enumerate() {
+                if sc - idl > gaddr::ABOVE_IDENTITY_SLACK {
+                    n_above += 1;
+                    if worst.as_ref().is_none_or(|w| sc > w.3) {
+                        worst = Some((
+                            grid.image_id[i].clone(),
+                            grid.codec[i].clone(),
+                            grid.q[i],
+                            sc,
+                            idl,
+                        ));
+                    }
+                }
+            }
+        }
+        let med = if dials.is_empty() {
+            f64::NAN
+        } else {
+            dials[dials.len() / 2]
+        };
+        (
+            gaddr::IdentityMeasure {
+                n: dials.len(),
+                dial_min: dials.first().copied().unwrap_or(f64::NAN),
+                dial_median: med,
+                dial_max: idl,
+                n_outside_band: n_outside,
+                n_above_identity: n_above,
+                n_grid_cells_compared: scores.len(),
+                n_grid_cells_total: scores.len(),
+                worst,
+            },
+            sha.clone(),
+        )
+    });
+    let addr_verdict = gaddr::evaluate(
+        grid_sha256,
+        &grid_path.display().to_string(),
+        &addr_measure,
+        probes.negtail.as_ref().map(|(m, sha)| (m, sha.as_str())),
+        identity_measure.as_ref().map(|(m, sha)| (m, sha.as_str())),
+    );
+    s.push_str(&gaddr::render_markdown(&addr_verdict));
+
     (
         s,
         DialMetrics {
@@ -2579,6 +2703,9 @@ fn dial_panel(
             p95,
             flat,
             reach,
+            min: dmin,
+            max: dmax,
+            addr: Some(addr_verdict),
             per_codec: per_codec_json,
             curves: curve_json,
             zones: Some(dial_zones),
@@ -3738,7 +3865,67 @@ Run the dedicated q-sweep harness for those._\n",
     // ── DIAL panel (codec-target G1/G3) — runs every time, native Rust ──
     // The second mandatory half of the eval (docs/EVAL_PANEL_REQUIREMENT.md):
     // monotonicity + tied + dial range on the densified multi-codec grid.
-    let (dial_md, dial_metrics) = dial_panel(&ens, &args.dial_grid, args.dial_peer_scores.as_ref());
+    // ── G-ADDR probes: score them through the SAME `Ensemble` forward every
+    // other section uses, so the gate can never disagree with the panel about
+    // what this bake emits. A probe whose feature width does not match the
+    // bake is REFUSED loudly rather than silently dropped: a quietly absent
+    // axis is exactly the failure this gate exists to prevent.
+    let probe_scores = |path: &PathBuf, what: &str| -> Option<(Vec<String>, Vec<f64>, String)> {
+        if !path.exists() {
+            eprintln!(
+                "bake_verdict: {what} probe {} is absent — G-ADDR axis NOT MEASURED",
+                path.display()
+            );
+            return None;
+        }
+        match parquet_loader::load_labeled_grid(path) {
+            Ok(g) if g.n_features == n_inputs => {
+                let sha = zensim_validate::train_manifest::sha256_file(path).unwrap_or_default();
+                let dial = ens.score_rows(&g.feature_rows);
+                Some((g.label, dial, sha))
+            }
+            Ok(g) => {
+                eprintln!(
+                    "bake_verdict: {what} probe {} has {} feature columns; bake expects {} — \
+                     G-ADDR axis NOT MEASURED",
+                    path.display(),
+                    g.n_features,
+                    n_inputs
+                );
+                None
+            }
+            Err(e) => {
+                eprintln!(
+                    "bake_verdict: {what} probe {} failed to load: {e} — G-ADDR axis NOT MEASURED",
+                    path.display()
+                );
+                None
+            }
+        }
+    };
+    let addr_probes = AddrProbes {
+        negtail: args.negtail_probe.as_ref().and_then(|p| {
+            probe_scores(p, "negative-tail").map(|(_lbl, dial, sha)| {
+                (
+                    zensim_validate::dial_addressability::NegTailMeasure::from_scores(&dial),
+                    sha,
+                )
+            })
+        }),
+        identity: args.identity_probe.as_ref().and_then(|p| {
+            probe_scores(p, "identity")
+                .map(|(lbl, dial, sha)| (lbl.into_iter().zip(dial).collect::<Vec<_>>(), sha))
+        }),
+    };
+    let dial_grid_sha =
+        zensim_validate::train_manifest::sha256_file(&args.dial_grid).unwrap_or_default();
+    let (dial_md, dial_metrics) = dial_panel(
+        &ens,
+        &args.dial_grid,
+        args.dial_peer_scores.as_ref(),
+        &dial_grid_sha,
+        &addr_probes,
+    );
     buf.push_str(&dial_md);
     pt.mark("DIAL panel (grid load + score + mono/tied)");
 
@@ -4217,27 +4404,11 @@ Run the dedicated q-sweep harness for those._\n",
         // dial: mono/tied/reach/dynamic_range (+ raw p5/p95 for context) +
         // the per-codec breakout and aggregated per-codec curves for plotting.
         let dynamic_range = dial_metrics.p95 - dial_metrics.p5;
-        let dial = json!({
-            "mono_pct": dial_metrics.mono,
-            "tied_pct": dial_metrics.flat,
-            "reach": dial_metrics.reach,
-            "dynamic_range": dynamic_range,
-            "p5": dial_metrics.p5,
-            "p95": dial_metrics.p95,
-            "per_codec": dial_metrics.per_codec.iter().map(|c| json!({
-                "codec": c.codec, "n_curves": c.n_curves, "n_pairs": c.n_pairs,
-                "mono": nan_null(c.mono), "tied": nan_null(c.tied),
-            })).collect::<Vec<_>>(),
-            // curves: {codec: [[q, p25, median, p75], ...]} sorted by q.
-            "curves": dial_metrics.curves.iter().map(|c| (
-                c.codec.clone(),
-                c.pts.iter().map(|&(q, p25, med, p75)| vec![q, p25, med, p75]).collect::<Vec<_>>(),
-            )).collect::<std::collections::BTreeMap<_, _>>(),
-            // zones: ladder inversions split by codec x quality zone and by
-            // reviewed content class x quality zone — the WHERE behind
-            // `mono_pct`. Same events, same MATERIAL threshold, so the
-            // split_kind=="all" rows reconcile with mono_pct exactly.
-            "zones": dial_metrics.zones.as_ref().map(|z| json!({
+        // Hoisted out of the `dial` json! below: serde_json's json_internal
+        // recurses once per key AND once per nesting level, so keeping this
+        // deep sub-tree inline made adding a single key to `dial` blow the
+        // macro recursion limit. Same value, one expansion shallower.
+        let dial_zones_json = dial_metrics.zones.as_ref().map(|z| json!({
                 "scheme": "ladder-inversion-2026-08-31",
                 // The grid this split was cut from. Recorded because the board
                 // carries cells measured on SEVERAL dial grids (the 2026-05-29
@@ -4283,7 +4454,36 @@ Run the dedicated q-sweep harness for those._\n",
                             Some(l.endpoint_backwards as f64 / l.n as f64) } else { None },
                     })
                 }).collect::<Vec<_>>(),
-            })),
+            }));
+        let dial = json!({
+            "mono_pct": dial_metrics.mono,
+            "tied_pct": dial_metrics.flat,
+            "reach": dial_metrics.reach,
+            "dynamic_range": dynamic_range,
+            "p5": dial_metrics.p5,
+            "p95": dial_metrics.p95,
+            "min": nan_null(dial_metrics.min),
+            "max": nan_null(dial_metrics.max),
+            // G-ADDR: floor + ceiling addressability against the SHIPPED
+            // product dial on this same grid. `null` only when the dial panel
+            // did not run; an unregistered grid still emits a block, with
+            // every end-of-range axis `not_measured` (never a pass).
+            "addressability": dial_metrics.addr.as_ref()
+                .map(zensim_validate::dial_addressability::to_json),
+            "per_codec": dial_metrics.per_codec.iter().map(|c| json!({
+                "codec": c.codec, "n_curves": c.n_curves, "n_pairs": c.n_pairs,
+                "mono": nan_null(c.mono), "tied": nan_null(c.tied),
+            })).collect::<Vec<_>>(),
+            // curves: {codec: [[q, p25, median, p75], ...]} sorted by q.
+            "curves": dial_metrics.curves.iter().map(|c| (
+                c.codec.clone(),
+                c.pts.iter().map(|&(q, p25, med, p75)| vec![q, p25, med, p75]).collect::<Vec<_>>(),
+            )).collect::<std::collections::BTreeMap<_, _>>(),
+            // zones: ladder inversions split by codec x quality zone and by
+            // reviewed content class x quality zone — the WHERE behind
+            // `mono_pct`. Same events, same MATERIAL threshold, so the
+            // split_kind=="all" rows reconcile with mono_pct exactly.
+            "zones": dial_zones_json,
         });
 
         // corruption: the real bake_verdict gate (score(corruption) < score(q20)
@@ -4766,6 +4966,25 @@ mod tests {
     /// zensim/weights/manifests/`), which is what makes the whole chain —
     /// number → verdict → bake → recipe → input hashes — close. If this test
     /// fails, that chain is broken; fix the emission, do not weaken the test.
+    #[test]
+    /// The G-ADDR floor registry must hold a row for the grid this binary
+    /// defaults to. Without it every default-flag verdict reads NOT MEASURABLE
+    /// and the addressability gate is decorative — the exact failure mode the
+    /// "absent is never passed" rule exists to make visible rather than to
+    /// make silent.
+    #[test]
+    fn canonical_dial_grid_has_a_g_addr_floor_row() {
+        assert!(
+            zensim_validate::dial_addressability::floor_for_grid(CANONICAL_DIAL_GRID_SHA256)
+                .is_some(),
+            "benchmarks/dial_addressability_floor_2026-09-04.json must register the canonical \
+             dial grid (sha {}). If the canonical grid is rotated, measure the SHIPPED \
+             reference dial on the new one and APPEND a row — never edit an existing row, and \
+             never drop the gate to unblock.",
+            &CANONICAL_DIAL_GRID_SHA256[..16]
+        );
+    }
+
     #[test]
     fn provenance_names_every_input_by_sha256() {
         let dir = std::env::temp_dir().join("zensim_prov_test");

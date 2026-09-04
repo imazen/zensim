@@ -45,7 +45,15 @@ arrow = { version = "59.1.0", default-features = false }
 # --manifest reproduce-this input mode for zensim_mlp_train (train_manifest.rs).
 toml = "1.1.2"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0"
+# `float_roundtrip`: serde_json's DEFAULT float parser is not correctly
+# rounded — it can land one ULP off the value the text names. That silently
+# broke the G-ADDR floor registry (a bar written as the shipped dial's own
+# `99.98330778475787` parsed back as `…788`, so the reference bake failed its
+# own bar by one ULP). Every bar in that registry is an exact measurement of a
+# shipped artifact and must round-trip bit-for-bit, so the accurate parser is
+# mandatory here. It only affects PARSING (serialization already goes through
+# ryu, which is shortest-round-trip), so nothing this crate writes changes.
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
 sha2 = "0.11.0"
 # npz (zip-of-npy) reading for `bake_dial_refit fit-lasso` — DEFLATE inflate
 # only, via our own pure-Rust DEFLATE crate (no external zip/npy deps).
