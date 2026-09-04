@@ -329,6 +329,21 @@ implements its A1-A5/A9 candidates.
 **The canonical index for all ML data lives at `~/work/zen/DATA_PROVENANCE.md`.**
 
 Quick paths:
+- **Dial anchor (imazen-26, 2026-09-04) — a PROPOSAL, not a default:**
+  `/mnt/v/zen/zensim-training/2026-09-04-imazen26-anchor-372/` (LAN
+  `s3://zentrain/anchors/2026-09-04-imazen26-anchor-372/`). 4,000 rows, 4 codecs
+  × 10 decile bands × 100, 192 origins, `target_score = max(score_ssim2,0)`,
+  nothing re-encoded, **decoder era recorded per format** in `_MANIFEST.json`.
+  Ships alongside `safesyn_anchor_curera_2026-09-04.parquet` — the SHIPPED
+  anchor's own 2,000 rows re-read today — which is what makes the era term and
+  the content term separable. MEASURED: era **+3.9/+4.8/+3.9** (CID22/KonJND/
+  AIC-3) vs content **−0.4/−1.0/−0.2**, rank identical to 5 dp on all five
+  corpora, all gates pass, but dial reach falls 96.85 → 85.74. **`zensim/weights/`
+  is UNCHANGED; `ZensimProfile::B` still resolves to the 2026-07-07 bake.**
+  Record: `benchmarks/imazen26_anchor_2026-09-04.md`, ledger §3.35. NOTE
+  `extend-top` alone CANNOT fix an era skew — it keeps in-distribution knots
+  verbatim and only extends above the top knot, which CID22 never reaches; use
+  `shared-anchor` for the whole-spline refit.
 - **Eval features root (`--regime 372`), default since 2026-08-30:**
   `/mnt/v/zen/zensim-training/2026-08-30-full-features-372/` — the CURRENT
   extractor (`build_commit ea16c7ee`). The previous default

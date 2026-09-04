@@ -60,6 +60,10 @@ def main() -> int:
     ap.add_argument("--endpoint", default=None)
     ap.add_argument("--r2", action="store_true")
     ap.add_argument("--jobs", type=int, default=16)
+    ap.add_argument("--score-col", default=None,
+                    help="column to write as the pairs TSV's human_score. "
+                         "Default: first of human_score / target_score / "
+                         "score_ssim2 present in the table.")
     ap.add_argument("--pairs-out-dir", default=None)
     ap.add_argument("--decoded-dir", default=None,
                     help="if given, the emitted pairs TSVs point at "
@@ -177,13 +181,33 @@ def main() -> int:
             slug = name.replace("uris_", "")
             dec = Path(a.decoded_dir) if a.decoded_dir else None
             op = od / (f"pairs_{slug}_png.tsv" if dec else f"pairs_{slug}_local.tsv")
+            # Score column, auto-detected (2026-09-04). This used to hard-require
+            # `human_score` and KeyError'd on any key table that named its target
+            # differently — e.g. a bigcodec cut, whose native column is
+            # `score_ssim2` and whose dial target is `target_score`. The order
+            # below is most-specific-first; `--score-col` overrides it.
+            cand = ([a.score_col] if a.score_col
+                    else ["human_score", "target_score", "score_ssim2"])
+            score_col = next((c for c in cand if c in t.column_names), None)
+            if score_col is None:
+                sys.exit(f"ABORT: {name} has none of {cand} — pass --score-col")
+            # An optional NUMERIC pass-through key. The extractor sorts its output
+            # by ref_basename, which is not unique across a q ladder, so a corpus
+            # cut that needs to rejoin its rows carries an integer key here; the
+            # extractor emits it as an extra target column, ahead of f0.
+            keyc = "row_index" if "row_index" in t.column_names else None
+            keys = t[keyc].to_pylist() if keyc else [None] * t.num_rows
+            hdr = "ref_path\tdist_path\thuman_score" + (f"\t{keyc}" if keyc else "")
             with open(op, "w") as f:
-                f.write("ref_path\tdist_path\thuman_score\n")
-                for r, m, h in zip(t["ref_local"].to_pylist(),
-                                   t["dist_member"].to_pylist(),
-                                   t["human_score"].to_pylist()):
+                f.write(hdr + "\n")
+                for r, m, h, kv in zip(t["ref_local"].to_pylist(),
+                                       t["dist_member"].to_pylist(),
+                                       t[score_col].to_pylist(),
+                                       keys):
                     d = (dec / f"{Path(m).stem}.png") if dec else (cache / m)
-                    f.write(f"{r}\t{d}\t{h}\n")
+                    f.write(f"{r}\t{d}\t{h}" + (f"\t{kv}" if keyc else "") + "\n")
+            print(f"  score column: {score_col}"
+                  + (f"; carrying key column: {keyc}" if keyc else ""))
             h = hashlib.sha256(op.read_bytes()).hexdigest()
             man[slug] = {"pairs_tsv": str(op), "sha256": h, "rows": t.num_rows}
             print(f"  {op} ({t.num_rows} rows)")

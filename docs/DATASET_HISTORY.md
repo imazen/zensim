@@ -1431,3 +1431,86 @@ Record: `benchmarks/safesyn_zencodec_probe_2026-09-04.md`. Gate:
 `zensim-bench/tests/zen_decode_formats.rs` (13 tests; the AVIF, JXL and XYB-JPEG ones are
 failing-first against the old path). Artifacts:
 `/mnt/v/output/zensim/im26anchor-2026-09-04/probe/`.
+
+### §3.35 — the imazen-26 dial anchor, and B's dial split cleanly into ERA and CONTENT (2026-09-04)
+
+**Thought-why.** §3.32 established that 100 % of shipped B's dial calibration comes from a
+2,000-row safesyn subset, and §9d of `benchmarks/b_reextract_wave_2026-09-04.md` concluded
+that swapping it was not a fix: *"B's absolute dial is anchor-dependent at the ±6–8 point
+level, which is the same order as the era defect"*, so any re-anchor "trades one
+uncontrolled ±6-point dial shift for another". The implicit model was that anchor CONTENT
+and anchor ERA are comparably large, leaving no clean move.
+
+**Actual-why.** §9d's estimate was **confounded** — it varied content (safesyn multiband →
+kadid+tid) *and* procedure (30-knot `extend-top` → 12-knot `shared-anchor`) at once. Varied
+cleanly, the two terms are an order of magnitude apart. The instrument is a 2×2 with a
+matched middle arm: the **same 2,000 safesyn anchor rows, same targets, re-decoded and
+re-extracted today**, sitting between the shipped anchor and a new imazen-26 anchor.
+
+| term | held fixed | CID22 | KonJND | AIC-3 |
+|---|---|---:|---:|---:|
+| procedure floor | anchor + era; chain rebuilt | +0.031 | +0.028 | +0.028 |
+| **ERA** | **content exactly fixed** | **+3.892** | **+4.798** | **+3.864** |
+| **CONTENT** | era fixed, both current | **−0.395** | **−0.989** | **−0.233** |
+| total | — | +3.528 | +3.837 | +3.659 |
+
+**Era is 4–10× content on every holdout, and rank is identical to 5 dp across all five
+arms on all five corpora** (CID22 0.88212, KonJND −0.51938, AIC-3 0.76501, TID 0.77852,
+KADID 0.80847). TID and KADID show large positive content terms (+2.0/+2.3) — they are the
+corpora B's kon head was fit on, KADID being its documented train==val corpus, so that is a
+train/serve corpus shift, not a generalization signal.
+
+A `shared-anchor` refit on the same content read today recovers **78 % (CID22) / 82 %
+(KonJND)** of the −4.977 / −5.857 era defect, in the correcting direction, at **126× the
+procedure floor** and zero rank cost.
+
+**A design property worth writing down: `extend-top` alone cannot fix an era skew.** It
+keeps the bottom and in-distribution knots VERBATIM and only extends above the top knot;
+CID22's dial tops out at 90.41, below that domain. Swapping only the `extend-top` anchor
+moved the human corpora by **0.000**. Only `shared-anchor` refits the in-distribution
+spline, which is where the skew lives.
+
+**The new anchor.**
+`/mnt/v/zen/zensim-training/2026-09-04-imazen26-anchor-372/imazen26_multiband_anchor_dial100_2026-09-04.parquet`
+(sha256 `b2e8ead6…`, 4,000 rows × 382 cols; LAN
+`s3://zentrain/anchors/2026-09-04-imazen26-anchor-372/`). Built from **imazen-26 bigcodec
+TRAIN encodes**, 4 lossy codecs × 10 decile bands × 100 rows, 192 distinct origins, 1,224
+distinct refs, `target_score = max(score_ssim2, 0)` — the shipped anchor's own rule.
+**Nothing was re-encoded**: distorted bytes were byte-range-read from the canonical run
+tars, reference bytes are the local `clean-picker-corpus-2026-06-26` renditions (0 of 1,224
+missing). It doubles the shipped anchor's rows and adds a **codec axis the shipped anchor
+does not have at all** (that file has no codec and no q column).
+
+**The 924 tables could not supply it.** Their `f156..f371` are STRUCTURAL ZEROS (0 of 5,000
+sampled rows nonzero); shipped B reads 49 of those 216 slots, so an anchor cut from those
+columns would feed it real zeros — the `--regime 944` mis-scoring hazard in another
+costume. Every feature is freshly extracted at 372.
+
+**DECODER ERA IS NOW A RECORDED PROPERTY.** `_MANIFEST.json` names the decoder crate,
+version and commit **per format** (zenpng 0.2.0 `00d6deb`, zenjpeg 0.9.0 `fad6a0af`,
+zenwebp 0.5.0 `20898b7`, zenavif 0.2.0 `6dfdf6f`, zenjxl 0.3.0 `f0efd6d`), because §3.34
+measured that re-reading a stored-pixel corpus costs ~3.7 dial points. **Known
+mixed-era caveat, stated rather than hidden:** `target_score` is bigcodec's stored ssim2
+from *its* decode era while the features are decoded today. The shipped safesyn anchor has
+the same shape of property, so this is not a regression — but it is not single-era either.
+
+**Two owner corrections this forced.** (1)
+`scripts/canonical_corpus/resolve_bigcodec_pair_uris.py` listed `zenjpeg_lossy` and
+`zenwebp_lossy` as fetch-mode `object`; re-measured, `canonical/2026-06-27/<ds>/encodes/`
+is **empty for all four lossy datasets**, so both are now `tarrange` — as written, every
+zenjpeg/zenwebp `dist_uri` 404s, which fails as a *fetch* error and slips past that
+script's own 100 %-resolution gate. (2) `fetch_bigcodec_bytes.py` hard-required a
+`human_score` column and now auto-detects (`--score-col`), and carries a numeric
+`row_index` through so a corpus cut can rejoin its rows.
+
+**NOT SHIPPED, and the honest reason.** All gates pass — monotonicity **0.9770** (better
+than shipped's 0.9740), tied 0.0000, G-RANGE PASS — but the dial **compresses**: reach
+96.85 → 85.74, p5 13.73 → 22.91, dynamic range −10.5. About half of that is already in the
+current-era safesyn arm (reach 94.23), so it is part era, part content. Cause is visible in
+the fits: `extend-top`'s saturation goes `k` 3.135 → 2.727 → **1.325** as the count above
+`--band-min 70` goes 600 → 600 → 1,200 under a uniform decile cut. **Registered next
+experiment: densify the anchor above `target_score` 90 instead of holding deciles
+uniform.** A Profile-B swap is a ship-default flip and belongs to the user.
+
+Record: `benchmarks/imazen26_anchor_2026-09-04.md`. Artifacts:
+`/mnt/v/output/zensim/im26anchor-2026-09-04/{build,arms,probe}/`.

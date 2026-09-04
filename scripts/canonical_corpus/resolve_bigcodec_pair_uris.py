@@ -45,9 +45,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from join_safety import safe_key_join_arrow  # noqa: E402
 
 # dataset dir  ->  (fetch_mode, tar-index run tag). Measured on the store.
+#
+# ⚠ CORRECTED 2026-09-04 (imazen-26 anchor lane). zenjpeg_lossy and
+# zenwebp_lossy were listed as `object`; they are NOT. Re-measured on the LAN
+# store today, `s3://zentrain/canonical/2026-06-27/<ds>/encodes/` is EMPTY for
+# **all four lossy datasets** — zenjpeg, zenwebp, zenavif and zenjxl-lossy all
+# return zero objects. (Only zenpng_lossless (27,560 objects) and
+# zenwebp_lossless (40,473) were ever regrouped into per-file encodes.) Leaving
+# them as `object` emitted `dist_uri`s that 404 on every row, which surfaces as
+# a fetch failure rather than a resolution failure and so is not caught by this
+# script's own 100 %-resolution gate. Their byte-range indexes exist and are
+# populated — `bf-zjpeg-t*` (8 boxes, variant_index.tsv 30,351,650 B) and
+# `bf-zwebp-t*` (9 boxes, 18,098,936 B) — so `tarrange` is the working route.
 DATASETS = {
-    "zenjpeg_lossy": ("object", "bf-zjpeg"),
-    "zenwebp_lossy": ("object", "bf-zwebp"),
+    "zenjpeg_lossy": ("tarrange", "bf-zjpeg"),
+    "zenwebp_lossy": ("tarrange", "bf-zwebp"),
     "zenpng_lossless": ("object", "bf-zpng"),
     "zenjxl_lossless": ("object", "bf-zjxlm"),
     "zenavif_lossy": ("tarrange", "bf-zavif"),
