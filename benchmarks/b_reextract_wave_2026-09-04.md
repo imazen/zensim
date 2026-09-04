@@ -477,3 +477,94 @@ bake_dial_refit add-winsor  --in armC_anchored.bin --out armC_winsor.bin \
     --fit-corpus /mnt/v/output/zensim-jxl-nearlossless/inclusive_winsor_corpus.parquet --lo-pct 0.1 --hi-pct 99.9
 bake_dial_refit extend-top  --in armC_winsor.bin --out armC_final.bin --anchor .../multiband_anchor_dial100.parquet
 ```
+
+---
+
+## 11. The executable subset, RUN — and it falsifies §5's own prior
+
+§5 predicted the launchable partial (kadid + tid current-era, **1.94 % of the kon head's
+weighted mass, 0.39 % of B's**) was "very unlikely to clear" the 0.071-point floor. **It
+clears it by ~13×, and moves rank on all five corpora.** Registered prior, stated before
+the run, now falsified by the run — recorded rather than quietly dropped.
+
+### 11a. Design — a matched pair, not a comparison against shipped
+
+The comparand is **armC** (§10b), not shipped B: armC is the *same pipeline, same tooling,
+same day*, differing only in that its kadid+tid grams come from the stored root. So
+`armF − armC` isolates the leg swap and nothing else.
+
+`gram` was re-run for kadid+tid only, repointed at
+`/mnt/v/zen/zensim-training/2026-08-30-full-features-372/{kadid,tid}_features_372col_2026-05-15.parquet`
+(`era: current`, `build_commit ea16c7ee`; `human_score` byte-identical to canonical,
+row-order identical refs — §2a). safesyn / cid22_train / hdr_v3mix grams were **copied
+from armC's scratch unchanged**. The **cid head is untouched** — `hdr_v3mix` is already
+current-era, so 80 % of B needs no re-extraction at all. Only `canonhdr15-bvls-raw` is
+refit. The driver overrides two `GROUPS` paths and calls the owner's `cmd_gram`; no stat
+math and no fit logic is re-implemented.
+
+### 11b. The refit head moved much more than its mass share
+
+| | control (stored legs) | fresh (kadid+tid current-era) |
+|---|---|---|
+| `bias` | 0.760180208 | **0.760180208** (unchanged) |
+| support | 85 | **86** |
+| support symmetric difference | — | **{285, 336, 357}** — all in the masked/IW blocks |
+| `max |Δw|` | — | **0.2992 (89.3 % relative)** |
+| ensemble bias | 1.156620801 | 1.155289410 |
+| tau0 bake | 823 B, act 95 | **850 B, act 99** |
+
+**Mechanism.** BVLS is an active-set solve; a 1.94 %-mass perturbation is enough to move
+three features across the active boundary, and the drifted block is exactly where they
+sit. This is why a small mass share does *not* imply a small effect here, and it is the
+same sensitivity §10a identified as the source of the byte-identity break.
+
+### 11c. Result — rank
+
+`armF − armC`, current-era root. Floor from §10b is 3e-5 SROCC.
+
+| corpus | shipped | armC (control) | armF (fresh legs) | armF − armC | vs floor |
+|---|---:|---:|---:|---:|---|
+| CID22 | 0.88212 | 0.88212 | **0.88125** | **−0.00087** | 29× floor — **down** |
+| KonJND (\|SROCC\|) | 0.51938 | 0.51934 | **0.53178** | **+0.01244** | 415× floor — **up** |
+| AIC-3 | 0.76501 | 0.76505 | **0.76610** | +0.00106 | 35× floor — up |
+| TID | 0.77852 | 0.77852 | **0.78008** | +0.00156 | 52× floor — up |
+| KADID | 0.80847 | 0.80848 | **0.81363** | +0.00515 | 172× floor — up ⚠ |
+
+⚠ **KADID is B's train==val corpus** (its `.spec.json`: *"kon head trained on kadid+tid →
+CHEAT for B"*) and kadid+tid are precisely the legs that were swapped, so its +0.00515 is
+partly a memorization score following its own training features. It is **not** evidence of
+generalization. CID22 and AIC-3 are the genuine holdouts here, and they **disagree in
+sign** (−0.00087 vs +0.00106).
+
+### 11d. Result — dial
+
+`armF − armC`, per pair, current-era features. Floor from §10b is 0.0125 points.
+
+| corpus | n | mean | sd | \|Δ\| p50 | p99 | max | frac > floor |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| CID22 | 4,292 | **+0.838** | 0.669 | 0.775 | 3.044 | 6.024 | **0.9946** |
+| KonJND | 504 | **+0.920** | 0.713 | 0.911 | 3.076 | 4.269 | **0.9980** |
+
+**~67× the noise floor, on 99.5 % of pairs, and in the CORRECTING direction** — the defect
+is −4.977 / −5.857, this moves +0.838 / +0.920.
+
+### 11e. What this does and does not license
+
+**Does:** it establishes the partial re-extraction is a *measurable, correcting* change,
+recovers **17 % (CID22) / 16 % (KonJND)** of the dial defect's magnitude from 1.94 % of the
+head's mass, and buys a large KonJND rank gain (+0.0124 \|SROCC\|) for a small CID22 loss
+(−0.00087).
+
+**Does NOT:** license any statement about what the full re-extraction would do. Scaling
+0.84 points by (100/1.94) is exactly the extrapolation this repo bans, and here the
+mechanism makes it actively wrong — the effect runs through a **BVLS active-set boundary**,
+which is non-linear by construction and has no reason to accumulate proportionally. The
+remaining 98 % of the mass is `safesyn` + `cid22_train`, and `safesyn` is **blocked** (§3).
+
+**Nor is armF a ship candidate.** It is a matched-pair instrument. It trades CID22 down for
+KonJND/AIC-3/TID up, its largest apparent gain is on a train==val corpus, and its dial is
+another uncontrolled shift on top of the ±6–8 pt anchor sensitivity §9d measured. A
+Profile-B swap is a ship-default flip and belongs to the user.
+
+Artifacts: `armF_final.bin` `ee9ba288482398f9` (7,352 B), `verdict_armF.json`,
+scratch `lp-fresh/`, driver source inlined in `_MANIFEST.json`.

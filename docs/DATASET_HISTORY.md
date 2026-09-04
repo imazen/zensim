@@ -1283,6 +1283,23 @@ now this). The decode helpers already exist at
    only produces `Pline-cid{30,50,70}` — a missing commit, not a lost recipe; the
    arithmetic reproduces the stored npz to 1.4e-14 with an exact bias.)
 
+5. **The executable subset was RUN, and it falsified this lane's own registered prior.**
+   §5 of the record predicted the launchable partial — kadid + tid swapped to current-era
+   features, **1.94 % of the kon head's weighted mass, 0.39 % of B's** — was "very unlikely
+   to clear" the 0.071-pt floor. Against a **matched control** (same pipeline, same day,
+   stored legs), it clears it by ~13×: the dial moves **+0.838 (CID22) / +0.920 (KonJND)**
+   mean, 99.5 % of pairs above floor, **in the correcting direction**, recovering 17 %/16 %
+   of the defect's magnitude from 1.94 % of the mass; and rank moves on **all five**
+   corpora — CID22 **−0.00087**, KonJND **+0.01244 |SROCC|**, AIC-3 +0.00106, TID +0.00156,
+   KADID +0.00515 (⚠ KADID is B's train==val corpus *and* one of the swapped legs, so its
+   gain is partly memorization, not generalization; the two genuine holdouts, CID22 and
+   AIC-3, **disagree in sign**). Mechanism: BVLS is an **active-set** solve, and a
+   1.94 %-mass perturbation moved three features (285, 336, 357 — all masked/IW) across the
+   active boundary, `max |Δw|` 0.299 (89 % rel), support 85 → 86.
+   **Do NOT extrapolate to the full re-extraction** — the effect runs through a non-linear
+   active-set boundary, and the remaining 98 % is safesyn + cid22_train with safesyn
+   BLOCKED. The arm is an instrument, not a ship candidate.
+
 **Nothing was rewritten, retrained, or flipped.** Record:
 `benchmarks/b_reextract_wave_2026-09-04.md`. Instruments + `_MANIFEST.json`:
 `/mnt/v/output/zensim/bfresh-2026-09-04/`.
