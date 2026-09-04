@@ -162,11 +162,23 @@ implements its A1-A5/A9 candidates.
   0.5006 at w = 0.50 / 0.84 / 1.00), so the shipped teacher is *below* ssim2's
   0.5272 on that axis. **Do not cite a k≥2 `predict --ensemble` output as "the
   ensemble"**, and do not compare a `predict`-built teacher with a
-  `bake_verdict`-scored one. Fix (registered, NOT landed — flipping units
-  would change k=1 output and every stored affine): an additive
-  `--score-units` opt-in plus a test pinning `predict` against `bake_verdict`
-  on a k≥2 blend. Record:
-  `benchmarks/fastclass_distill_wave_2026-09-04.md` §6f (AMENDMENT A2).
+  `bake_verdict`-scored one. **FIX LANDED 2026-09-04 (`58baf010`, ancestor of
+  `main@origin`)**: `bake_dial_refit predict --score-units` (default OFF, so no
+  stored raw-unit recipe moves silently) routes each member through
+  `bake_runtime::score_row{,_minmax}` — the functions `bake_verdict`'s scorer
+  calls — before accumulating. Gate `scripts/verify_predict_score_units.sh`:
+  `max|delta| = 0.0` vs `bake_verdict --ensemble` at w=0.5 AND w=0.84; a
+  same-tree control proves the default path byte-identical on k=1 and both k=2
+  shapes. **What has NOT been rebuilt is the affected DATA**: the
+  `safesyn_distill_hya_r4` teacher table and the 31 board rows distilled from
+  it. New blended-teacher builds must pass the flag. Board consequences are
+  registry-scoped and rendered as of 2026-09-04 —
+  `distill-teacher-raw-units-pre-58baf010-2026-09-04` (the 31 teacher-derived
+  rows fail the fair filter's criterion (f)) and
+  `ens-board-rows-score-units-unaffected-2026-09-04` (the 15 ensemble ROWS are
+  on the CORRECT side: their numbers come from `bake_verdict --ensemble`).
+  Records: `benchmarks/fastclass_distill_wave_2026-09-04.md` §6f (AMENDMENT A2),
+  `benchmarks/fair_gauntlet_2026-09-04.md` §1.2.
 
 - **⚠ `--regime 944` SILENTLY MIS-SCORES a 372-input bake that uses f156-371**
   (found 2026-08-06 the hard way, OPEN). The folded regimes zero f156-371, so a

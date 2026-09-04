@@ -703,6 +703,14 @@ def main():
                          "JXL loop panel (default: the committed jxl-encoder path; section "
                          "omitted when the file is absent)")
     ap.add_argument("--out", default=None)
+    # FAIRNESS PASS (2026-09-04). --fair-only emits the VERIFIED-FAIR board: LEGACY rows
+    # are dropped from the FILE (not merely hidden), which is what lets the fair view fit
+    # the registered 12 MB cap while every legacy row stays on disk, on the companion
+    # all-rows board, and in the fairness TSV. Nothing is deleted.
+    ap.add_argument("--fair-only", action="store_true",
+                    help="gauntlet mode: emit the VERIFIED-FAIR board (LEGACY rows dropped from the file)")
+    ap.add_argument("--fairness-tsv", default=None,
+                    help="gauntlet mode: also write the per-row fairness audit TSV here")
     a = ap.parse_args()
 
     # ---- interactive gauntlet mode (self-contained offline HTML) --------------------------
@@ -710,13 +718,20 @@ def main():
         import os as _os
         import sys as _sys
         _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-        from gauntlet import build_html, load_fulleval, load_hfnl_axis, load_loop_targeting
+        from gauntlet import (build_html, load_fulleval, load_hfnl_axis,
+                              load_loop_targeting, write_fairness_tsv)
         out = a.out or "/mnt/v/output/zensim/reports/summer_gauntlet.html"
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         gbakes = load_fulleval(a.fulleval_dir, a.best_per_day)
+        if a.fairness_tsv:
+            tp, ntsv = write_fairness_tsv(gbakes, a.fairness_tsv)
+            print(f"wrote {tp}  ({ntsv} rows, fairness audit)")
         _p, size = build_html(gbakes, out, loop_targeting=load_loop_targeting(a.loop_targeting),
-                              hfnl_axis=load_hfnl_axis())
-        print(f"wrote {out}  ({size // 1024} KB)  {len(gbakes)} bakes (interactive gauntlet)\n  view: "
+                              hfnl_axis=load_hfnl_axis(), fair_only=a.fair_only)
+        n_shown = sum(1 for b in gbakes
+                      if not a.fair_only or (b.get("fair") or {}).get("tier") != "LEGACY")
+        print(f"wrote {out}  ({size // 1024} KB)  {n_shown} of {len(gbakes)} bakes"
+              + (" [FAIR-ONLY]" if a.fair_only else "") + " (interactive gauntlet)\n  view: "
               + out.replace("/mnt/v/output/", "http://localhost:3300/"))
         return
 

@@ -537,6 +537,15 @@ def _ann_field_present(o, dotpath):
     return cur is not None
 
 
+def _ann_covers(entry_field, target_field):
+    """Segment-boundary prefix match — the exact rule freeze_check's `ann_covers` uses
+    (freeze_check.rs): `rank.hfnlproxy` covers `rank.hfnlproxy.per_ref_mean`;
+    `rank.hfnl` covers neither. The JS side already carries this as `annCovers`."""
+    return (target_field == entry_field
+            or (target_field.startswith(entry_field)
+                and target_field[len(entry_field):len(entry_field) + 1] == "."))
+
+
 def _ann_matches(o, entry):
     """Mirror of freeze_check's scope predicates (missing/present/names/all).
 
@@ -554,8 +563,366 @@ def _ann_matches(o, entry):
     if "present" in scope:
         return _ann_field_present(o, scope["present"])
     if "names" in scope:
-        return o.get("name") in (scope["names"] or [])
+        # MIRROR the Rust owner exactly (freeze_check.rs:596 `bake_name`): `name`, then
+        # `bake`, then "?". Before 2026-09-04 this side read only `name`, so a fulleval
+        # carrying `bake` but no `name` matched in freeze_check and NOT on the board —
+        # a silent divergence between an owner and its documented mirror.
+        nm = o.get("name") or o.get("bake") or "?"
+        return nm in (scope["names"] or [])
     return bool(scope.get("all"))
+
+
+# ============================ FAIRNESS LAYER (2026-09-04) =============================
+# User request: "generate an updated gauntlet with all of the things we discovered
+# corrected, and the data/models filtered to those we can verify we did fairly."
+# Record: benchmarks/fair_gauntlet_2026-09-04.md. Nothing here re-derives a statistic —
+# every number rendered is READ from a fulleval JSON, the annotations registry, the
+# G-ADDR floor registry, or the ssim2-exam scorecard transcription.
+
+# ---- SEED GROUPS -------------------------------------------------------------------
+# A board cell is one TRAINING RUN. Several cells can be draws of the SAME recipe at
+# different seeds, and a headline quoted from the best of them is a best-of-k statistic
+# reported as if it were the recipe's value. MEASURED on this board's own control arm
+# (benchmarks/fastclass_distill_wave_2026-09-04.md §7.1): A4b's published KonJND 0.4327
+# and composite 0.8664 are the best of 3 seeds; the same recipe's mean is 0.3561 /
+# 0.8572 and its KonJND seed spread is 0.133.
+#
+# THE GROUPING RULE (this function is the board's owner of it; `freeze_check --select`
+# is adding a `--seed-group` key concurrently and MUST adopt the identical rule — see
+# the doc's "pending unification" note):
+#   1. Only single-model rows participate. An ensemble is an evaluation FUNCTION over
+#      members, not a training replicate of anything.
+#   2. Key = the embedded `zentrain.repro.argv` with `--seed` and the output-path flags
+#      (and their values) removed. No argv -> UNGROUPABLE (and it also fails criterion
+#      (a), since no argv means no embedded repro).
+#   3. Rows inside a key are collapsed by `repro.seed`: two cells with the SAME recipe
+#      and the SAME seed are one training run promoted twice (MEASURED: 33 such pairs on
+#      this board, e.g. A4b_s4004 / FC_C0_s4004 — identical argv modulo seed, identical
+#      seed 4004, CID22 identical to 16 digits, different bake sha). So k = the number
+#      of DISTINCT seeds, never the number of board rows.
+# VALIDATION: this rule reproduces §7.1's numbers exactly on its own arm — k=3,
+# KonJND best 0.4327 / mean 0.3561 / spread 0.1329, composite best 0.8664 / mean 0.8572.
+#
+# HOW A GROUP IS PRESENTED (USER CORRECTION, 2026-09-04, verbatim): *"data-subsets are
+# not equal though — one might be more representative and diverse, while another sucks,
+# objectively."* A seed drives pair SAMPLING, so a seed's subset can be objectively
+# better- or worse-covered, and part of the spread is subset coverage rather than model
+# variance. Consequences the board must honour, and does:
+#   * the group is shown as MEAN + SPREAD (min-max) + k, with the PER-SEED values
+#     reachable (hover, and every member row stays on the board),
+#   * the mean ranks the default view — it is the honest estimator against best-of-k —
+#     but it is NEVER labelled definitive,
+#   * the badge says so, in `SEED_COVERAGE_NOTE`,
+#   * when a bake carries `zentrain.sample_coverage` (future bakes; the ownerfix lane is
+#     adding it) the board renders it beside the seed. Absent today on 433/433 rows, so
+#     it renders NOT MEASURED, never a zero.
+SEED_COVERAGE_NOTE = ("seed spread partly reflects subset coverage; coverage metrics "
+                      "pending (ownerfix lane adding `zentrain.sample_coverage`)")
+SEED_GROUP_DROP_FLAGS = {"--seed", "--out", "--output", "-o", "--bake-out", "--manifest"}
+
+
+def _norm_argv_for_seed_group(argv):
+    out, i = [], 0
+    argv = [str(x) for x in argv]
+    while i < len(argv):
+        tok = argv[i]
+        if tok in SEED_GROUP_DROP_FLAGS:
+            i += 2 if i + 1 < len(argv) and not argv[i + 1].startswith("--") else 1
+            continue
+        out.append(tok)
+        i += 1
+    return out
+
+
+def seed_group_key(o):
+    """Recipe identity of a fulleval object, seed and output path removed.
+    None when the row cannot be grouped (ensemble, or no embedded repro argv)."""
+    if (o.get("model") or {}).get("kind") == "ensemble":
+        return None
+    argv = (o.get("repro") or {}).get("argv") or []
+    if not argv:
+        return None
+    return hashlib.sha1("\x00".join(_norm_argv_for_seed_group(argv)).encode()).hexdigest()[:12]
+
+
+def build_seed_groups(objs):
+    """[fulleval dicts] -> {group_id: {"k": distinct seeds, "members": [names],
+    "reps": [names, one per distinct seed], "dup_seed": [[names sharing a seed], ...]}}.
+    Only groups with k >= 2 are returned; every other row is UNREPLICATED or UNGROUPABLE."""
+    by_key = {}
+    for o in objs:
+        key = seed_group_key(o)
+        if not key:
+            continue
+        seed = (o.get("repro") or {}).get("seed")
+        if seed is None:
+            continue
+        by_key.setdefault(key, {}).setdefault(seed, []).append(o.get("name"))
+    groups = {}
+    for key, by_seed in by_key.items():
+        if len(by_seed) < 2:
+            continue
+        members = sorted(n for ns in by_seed.values() for n in ns)
+        groups[key] = {
+            "k": len(by_seed),
+            "members": members,
+            # one representative per DISTINCT seed — the unit a k-seed statistic counts
+            "reps": sorted(sorted(ns)[0] for ns in by_seed.values()),
+            "seeds": {str(s): sorted(ns) for s, ns in sorted(by_seed.items(), key=lambda kv: str(kv[0]))},
+            "dup_seed": sorted([sorted(ns) for ns in by_seed.values() if len(ns) > 1]),
+        }
+    return groups
+
+
+def seed_group_stats(group, values):
+    """{name: value} over a group's representatives -> mean / min / max / spread / n /
+    the per-seed list. Returns None when fewer than 2 representatives carry the value.
+
+    The mean is the honest estimator AGAINST best-of-k. It is NOT "the true score": a
+    seed selects a data subset and subsets are not equally representative, so part of
+    the spread is coverage, not model variance (SEED_COVERAGE_NOTE). Nothing here is a
+    statistic in the IQA sense — mean/min/max of already-computed SROCCs, never a
+    re-derived correlation."""
+    per = [(n, values.get(n)) for n in group["reps"]]
+    per = [(n, v) for n, v in per if isinstance(v, (int, float)) and np.isfinite(v)]
+    if len(per) < 2:
+        return None
+    vs = [v for _, v in per]
+    return {"mean": round(float(np.mean(vs)), 5), "min": round(min(vs), 5),
+            "max": round(max(vs), 5), "spread": round(max(vs) - min(vs), 5),
+            "n": len(vs), "per": [[n, round(float(v), 5)] for n, v in per]}
+
+
+# ---- CIRCULARITY (ssim2 exam §2.1) --------------------------------------------------
+# "`nonphoto`, `imazen26` and `hfnlproxy` are ssim2-anchored axes. Their targets are
+# ssim2 scores. A model's number there is *agreement with ssim2*, never a win over it,
+# and `peer_ssim2`'s 1.0 there is a definition, not a measurement."
+# hf_nearlossless joins them by MEASUREMENT (CLAUDE.md, 2026-09-01): its `human_score`
+# IS `ssim2_gpu / 100`, exactly, in float equality, on 1200/1200 rows.
+CIRCULAR_AXES = ["nonphoto", "imazen26", "hfnlproxy", "hf_nearlossless"]
+# train==val by construction; `rank.<c>.train_eq_val` is True on every board cell that
+# carries them (429/429 measured). Integrity guards only, never ranking signal
+# (registry `kadid-tid-train-eq-val`).
+TRAIN_EQ_VAL_AXES = ["kadid", "tid"]
+# The held-out human axes the exam's W1/W2 clauses are evaluated on, after the
+# circularity exclusion and the train==val exclusion.
+HELD_OUT_HUMAN_AXES = ["cid22", "konjnd", "aic3", "aic4", "csiq", "live"]
+
+# ---- registry ids that make a row NOT verifiably fair -------------------------------
+# (b) era: the only registered ERA defect that INVALIDATES a board row's rank/composite.
+# The sibling entries (`board372-row-read-on-ext720-root-2026-08-30`,
+# `eval372-basic-only-bakes-era-independent-2026-08-30`) are MEASURED corrections saying
+# the era flag does NOT apply to those rows, so they are notes, not failures.
+ERA_INVALIDATING_IDS = {"eval372-stored-root-thread-dependent-2026-08-30"}
+# (f) ensemble/teacher units: appended by this pass; see the registry entry.
+ENS_UNITS_IDS = {"distill-teacher-raw-units-pre-58baf010-2026-09-04"}
+# (e) entries whose `fields` declaration has been CORRECTED by a later registry entry.
+# Honoured explicitly, never silently: `balanced-composite-bandtail-abs` declares
+# fields:["composite"], but its reason + evidence are about `freeze_check`'s
+# balanced_composite, while a FULLEVAL's `composite` is product_composite — which
+# carries no band term and cannot be touched by that defect. The correction is itself a
+# committed registry entry (…-field-scope-corrected-2026-09-04); this set is the code
+# that reads it. Without it, 164 rows were marked unfair for a defect that does not
+# reach the number they are ranked on.
+E_FIELD_SCOPE_SUPERSEDED = {
+    "balanced-composite-bandtail-abs": "balanced-composite-bandtail-field-scope-corrected-2026-09-04",
+}
+# Bakes with a committed, byte-verified reproduce script satisfy criterion (a) even
+# when the fulleval predates mandatory embedded repro (scripts/reproduce_*.sh).
+REPRO_SCRIPT_VERIFIED = {
+    "b_sdr_linear_cid80_inclwinsor_dense_dial": "scripts/reproduce_b.sh",
+    "bhdr_linear_shaped_cvvdpmix": "scripts/reproduce_bhdr.sh",
+    "v47_strict_QAT_native": "scripts/reproduce_v47.sh",
+}
+
+FAIR_CRITERIA = [
+    ("a_repro", "embedded zentrain.repro (or a committed byte-verified reproduce script)"),
+    ("b_era", "no registered ERA defect invalidates its ruler"),
+    ("c_no_train_eq_val", "its ranking composite uses no train==val corpus"),
+    ("d_seed", "seed group aggregated (k>=2), or badged UNREPLICATED"),
+    ("e_no_invalidated", "no unresolved `invalidated` registry entry applies"),
+    ("f_ens_units", "if ensemble/teacher-derived, built post `--score-units` (58baf010)"),
+    ("g_split", "its eval read the canonical held-out val group"),
+]
+
+
+def fairness_of(o, ann_entries, seed_groups, name_to_group):
+    """One board row -> {"tier", "fails": [criterion ids], "notes": [...], "k", ...}.
+
+    Tiers:
+      VERIFIED-FAIR  every criterion holds and the row is a replicated seed group
+      FAIR-NOTED     every criterion holds, but k == 1 (UNREPLICATED) or the row is
+                     UNGROUPABLE-but-repro'd; still fair, just noted
+      LEGACY         at least one of (a)(b)(c)(e)(f)(g) fails -> default-hidden, badged
+    Criterion (d) never FAILS by itself: an unreplicated cell is fair as long as it is
+    badged as one. That is the brief's rule and it is what keeps k=1 rows honest rather
+    than invisible."""
+    name = o.get("name") or ""
+    matched = [e for e in ann_entries if "id" in e and _ann_matches(o, e)]
+    matched_ids = {e["id"] for e in matched}
+    invalid_ids = {e["id"] for e in matched if e.get("kind") == "invalidated"}
+    fails, notes = [], []
+
+    # (a) reproducible
+    has_repro = bool((o.get("repro") or {}).get("argv"))
+    script = REPRO_SCRIPT_VERIFIED.get(era_base_name(name))
+    if not has_repro and not script:
+        fails.append("a_repro")
+    elif not has_repro:
+        notes.append("repro via " + script)
+
+    # (b) era
+    if invalid_ids & ERA_INVALIDATING_IDS:
+        fails.append("b_era")
+    if o.get("features_root"):
+        notes.append("ruler recorded (features_root)")
+
+    # (c) train==val: the product composite's own weights (CID22 / imazen26 / nonphoto /
+    # KonJND / AIC-3 / AIC-4) carry no KADID and no TID, so this holds structurally for
+    # every cell whose composite is the Rust product_composite. A cell whose composite
+    # came from gauntlet's legacy fallback is flagged instead of trusted.
+    if o.get("composite") is None and not o.get("peer"):
+        notes.append("composite absent (legacy fallback would be used)")
+    for c in TRAIN_EQ_VAL_AXES:
+        if (o.get("rank", {}).get(c) or {}).get("train_eq_val") is False:
+            fails.append("c_no_train_eq_val")   # a cell claiming KADID/TID are held out
+            break
+
+    # (d) replication
+    gid = name_to_group.get(name)
+    k = seed_groups[gid]["k"] if gid else (1 if (o.get("repro") or {}).get("seed") is not None else None)
+
+    # (e) any unresolved invalidation THAT REACHES THE RANKING VIEW.
+    # Blunt "any invalidated entry matches" is wrong and was measured wrong: two
+    # `invalidated` entries carry {"all": true} over `gates` / `class`
+    # (f8-b9-abs-bar-superseded, add156-audit-d3-unselectable-falsified-2026-08-31),
+    # so every one of the 433 rows failed and the fair set was empty. Those are
+    # caveats on OTHER columns and are already badged there by `annForCol`.
+    # The rule instead uses the registry's OWN coverage semantics: an entry fails the
+    # row iff one of its `fields` covers a field the RANKING view reads — `composite`,
+    # or `rank.<axis>.srocc_signed` for an axis that survives the circularity and
+    # train==val exclusions. So `rank.kadid.*` never fails a row (KADID is an integrity
+    # guard, never ranking signal) and `rank.cid22.bands` never fails one either
+    # (a band is not the ranking scalar), while `composite` and `rank` do.
+    ranked_fields = ["composite"] + [f"rank.{c}.srocc_signed" for c in HELD_OUT_HUMAN_AXES]
+    for e in matched:
+        if e.get("kind") != "invalidated":
+            continue
+        if e["id"] in E_FIELD_SCOPE_SUPERSEDED:
+            notes.append(e["id"] + " -> field scope corrected by "
+                         + E_FIELD_SCOPE_SUPERSEDED[e["id"]])
+            continue
+        for ef in (e.get("fields") or []):
+            if any(_ann_covers(ef, rf) for rf in ranked_fields):
+                fails.append("e_no_invalidated")
+                notes.append("invalidated: " + e["id"])
+                break
+
+    # (f) ensemble / teacher units
+    if matched_ids & ENS_UNITS_IDS:
+        fails.append("f_ens_units")
+
+    # (g) split. `bake_verdict` reads the registered val parquets for every corpus it
+    # reports, so the machine-checkable form here is: the row carries the gold holdout
+    # (CID22) and reports it as held out.
+    cid = o.get("rank", {}).get("cid22") or {}
+    if not cid or cid.get("srocc_signed") is None and cid.get("srocc") is None:
+        fails.append("g_split")
+    elif cid.get("train_eq_val") is True:
+        fails.append("g_split")
+
+    fails = sorted(set(fails))
+    if fails:
+        tier = "LEGACY"
+    elif gid:
+        tier = "VERIFIED-FAIR"
+    else:
+        tier = "FAIR-NOTED"
+    return {"tier": tier, "fails": fails, "notes": notes, "k": k, "group": gid,
+            "ann": sorted(matched_ids)}
+
+
+def load_ssim2_exam(path=None):
+    """The W1-W7 exam scorecard, TRANSCRIBED verbatim from
+    benchmarks/ssim2_replacement_bar_2026-08-31.md §3.0 into a committed JSON so the
+    board can render it without re-deriving anything. Missing file -> no exam panel
+    (the loud-note pattern used by loop-targeting and the HF-NL axis)."""
+    p = Path(path) if path else (Path(__file__).resolve().parents[2] / "benchmarks"
+                                 / "ssim2_exam_scorecard_2026-08-31.json")
+    if not p.exists():
+        print(f"NOTE: ssim2 exam scorecard not found at {p} — exam columns omitted", file=sys.stderr)
+        return None
+    return json.loads(p.read_text())
+
+
+def load_gaddr_registry(path=None):
+    """The G-ADDR dial-addressability floor registry, READ as it stands at regen time
+    (owner: zensim-validate/src/dial_addressability.rs). Renders bars + tiers; a bake's
+    own values come from its fulleval `dial.addressability` when present, and from the
+    `dial` block's already-stored p5/p95/reach/dynamic_range/mono/tied for the six axes
+    those cover. Every other axis is NOT MEASURED, never a zero."""
+    p = Path(path) if path else (Path(__file__).resolve().parents[2] / "benchmarks"
+                                 / "dial_addressability_floor_2026-09-04.json")
+    if not p.exists():
+        print(f"NOTE: G-ADDR registry not found at {p} — addressability columns omitted", file=sys.stderr)
+        return None
+    reg = json.loads(p.read_text())
+    sch = reg.get("_schema") or {}
+    refsets = sch.get("reference_sets") or {}
+    # WHICH PIN SET IS THE BAR. Read from the registry, never assumed. As of 2026-09-04
+    # the ACTIVE reference is `peer_ssim2` — USER DECISION, verbatim in the registry:
+    # "I don't think we should pin to B, ssim2 seems a better mentor." A row carrying
+    # `reference: "peer_ssim2"` is a BAR; a row without the field is a pre-2026-09-04
+    # `shipped_b` row, which the registry says is "printed, never a bar" and labels
+    # BIASED (A1/A3/A6 sit ABOVE the reference metric's own values on the same grid).
+    # Both are rendered — the bar set decides PASS/FAIL, the incumbent set is context —
+    # so a reader can always tell "worse than the mentor" from "worse than what shipped".
+    ACTIVE_REF = "peer_ssim2"
+
+    def _rows(key):
+        act = [x for x in reg.get(key, []) if x.get("active")]
+        bar = next((x for x in act if x.get("reference") == ACTIVE_REF), None)
+        # the canonical instrument for the incumbent set = same sha as the bar row when
+        # there is one (so the two sets describe the SAME instrument), else the first.
+        sha = (bar or {}).get("dial_grid_sha256") or (bar or {}).get("probe_sha256")
+        inc = next((x for x in act
+                    if not x.get("reference")
+                    and (sha is None
+                         or x.get("dial_grid_sha256") == sha or x.get("probe_sha256") == sha)),
+                   None) or next((x for x in act if not x.get("reference")), None)
+        return bar, inc
+
+    gbar, ginc = _rows("grids")
+    nbar, ninc = _rows("negtail_probes")
+    ibar, iinc = _rows("identity_probes")
+    if gbar is None:
+        print("NOTE: G-ADDR registry has no active `reference: peer_ssim2` grid row — "
+              "falling back to the incumbent pins and SAYING SO on the page.", file=sys.stderr)
+    return {"fixed_bars": reg.get("fixed_bars") or {},
+            "reference_bake": reg.get("reference_bake") or {},
+            "activeRef": ACTIVE_REF if gbar else "shipped_b",
+            "refsets": refsets,
+            "grid": gbar or ginc, "gridIncumbent": ginc if gbar else None,
+            "negtail": nbar or ninc, "negtailIncumbent": ninc if nbar else None,
+            "identity": ibar or iinc, "identityIncumbent": iinc if ibar else None}
+
+
+# The six G-ADDR axes computable from what EVERY board cell already stores, and the
+# registry field each bar is read from. The other nine (A1/A2 pooled min+max, A7-A9
+# negative-tail, C3-C6 probes) need instruments that were never run for these cells:
+# they render NOT MEASURED with that reason, never a zero.
+GADDR_AXES = [
+    ("A3", "p95", "p95", "ge", "robust ceiling"),
+    ("A4", "p5", "p5", "le", "robust floor"),
+    ("A5", "reach", "reach", "ge", "reach = max - min"),
+    ("A6", "dynamic_range", "dynamic_range", "ge", "dynamic range = p95 - p5"),
+    ("C1", "mono_pct", "mono", "ge", "monotonicity"),
+    ("C2", "tied_pct", "tied", "le", "flat/clamp dead-zone"),
+]
+GADDR_NOT_MEASURED = ("A1/A2 need the pooled dial min+max, A7-A9 the negative-tail probe "
+                      "and C3-C6 the negative-tail + identity probes; none of those were "
+                      "run for this cell's verdict (the gate landed 2026-09-04, after it).")
+# ======================================================================================
 
 
 # Ladder-inversion zone matrix (bake_verdict `dial.zones`, 2026-08-31). Embedded
@@ -626,6 +993,20 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                             else (1, len(CURATED_BOARD), str(o.get("name", "")).lower())))
 
     ann_entries, _ann_meta = load_annotations_registry()
+    # FAIRNESS LAYER (2026-09-04): seed groups + per-row tier, computed ONCE over the
+    # whole set (a group is a property of the population, not of a row).
+    seed_groups = build_seed_groups(raw)
+    name_to_group = {n: gid for gid, g in seed_groups.items() for n in g["members"]}
+    # group-level stats over the DISTINCT-seed representatives, for the axes the
+    # scoreboard ranks on. Values are READ from each member's own fulleval.
+    _vals = {}
+    for _axis, _get in (("composite", lambda o: o.get("composite")),
+                        ("cid22", lambda o: _signed(o.get("rank", {}), "cid22")),
+                        ("konjnd", lambda o: _signed(o.get("rank", {}), "konjnd"))):
+        _vals[_axis] = {o.get("name"): _get(o) for o in raw}
+    for _gid, _g in seed_groups.items():
+        _g["stats"] = {a: seed_group_stats(_g, _vals[a]) for a in _vals}
+    gaddr = load_gaddr_registry()
     # Why a cell has no ladder-inversion split (measure_dial_zones.py records one
     # reason per board cell). NOT MEASURED must always come with its reason.
     zone_skip = {}
@@ -643,6 +1024,8 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         name = o.get("name", f"bake{ci}")
         curated = name in CURATED
         rank = o.get("rank", {})
+        matched_ann = [e["id"] for e in ann_entries if "id" in e and _ann_matches(o, e)]
+        fair = fairness_of(o, ann_entries, seed_groups, name_to_group)
         # Prefer the Rust-emitted `composite` (product_composite is the single
         # source — stats review Rec-7); the dashboard READS it rather than
         # re-deriving a divergent one. `_composite` stays only as the fallback
@@ -676,7 +1059,13 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         # Registered board-size rule (2026-08-04): scatter embeds for the CURATED set
         # only. Grid-interior cells keep every scalar stat; their per-pair data stays in
         # the source verdict (never deleted) — the charts degrade gracefully without it.
-        pp = o.get("per_pair", {}) if curated else {}
+        # Registered board-size rule (2026-08-04) EXTENDED for the fairness pass
+        # (2026-09-04): per-pair scatter embeds for the curated set MINUS the LEGACY
+        # tier. A legacy row keeps every scalar stat and every badge; only its point
+        # cloud is stripped, and its per-pair data stays in the source verdict (never
+        # deleted) exactly as `--strip-per-pair` already does for grid-interior cells.
+        # This is what buys the fair view its size budget without dropping any DATA.
+        pp = o.get("per_pair", {}) if (curated and fair["tier"] != "LEGACY") else {}
         sc_json = o.get("scatter", {})
         for corp, cols in pp.items():
             pred = cols.get("pred")
@@ -735,7 +1124,35 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             model["feature_transforms"] = ft[:MODEL_TRANSFORMS_EMBED]
         # board-integrity pass (2026-08-04): registry annotations, dominance
         # marks and the static block-usage fingerprint ride into the embed.
-        matched_ann = [e["id"] for e in ann_entries if "id" in e and _ann_matches(o, e)]
+        # (matched_ann / fair are computed above — the scatter policy reads the tier)
+        # `zentrain.sample_coverage` — not on any bake today (the ownerfix lane is
+        # adding it); when it lands it rides here and renders beside the seed. Absent
+        # is NOT MEASURED, never a zero.
+        fair["coverage"] = (o.get("repro") or {}).get("sample_coverage")
+        # G-ADDR: the six axes every cell already stores (dial p5/p95/reach/DR/mono/tied)
+        # against the registry's bars, PLUS the emitted `dial.addressability` block when
+        # a verdict carries one (the gate landed 2026-09-04; no board cell has it yet).
+        addr = (o.get("dial") or {}).get("addressability")
+        gcells, gpass, gfail = [], 0, 0
+        if gaddr and gaddr.get("grid"):
+            _grid = gaddr["grid"]
+            _fx = gaddr["fixed_bars"]
+            for aid, dial_key, bar_key, cmp_, what in GADDR_AXES:
+                mv = (o.get("dial") or {}).get(dial_key)
+                bar = _grid.get(bar_key) if aid.startswith("A") else _fx.get(
+                    {"mono": "mono_min", "tied": "tied_max"}[bar_key])
+                if mv is None or bar is None:
+                    gcells.append([aid, what, None, bar, cmp_, None, None])
+                    continue
+                ok = (mv >= bar) if cmp_ == "ge" else (mv <= bar)
+                gpass += ok
+                gfail += (not ok)
+                inc = None
+                if aid.startswith("A") and gaddr.get("gridIncumbent"):
+                    iv = gaddr["gridIncumbent"].get(bar_key)
+                    inc = None if iv is None else round(float(iv), 5)
+                gcells.append([aid, what, round(float(mv), 5), round(float(bar), 5), cmp_,
+                               bool(ok), inc])
         blocks = None
         bp = o.get("block_profile")
         if isinstance(bp, dict):
@@ -811,11 +1228,64 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "model": model,
             "repro": o.get("repro"),
             "annotations": matched_ann,
+            "fair": fair,
+            "gaddr": {"cells": gcells, "pass": gpass, "fail": gfail,
+                      "emitted": addr} if gcells else None,
             "dominated_by": o.get("dominated_by") or [],
             "blocks": blocks,
             "scatter": scatter_out, "is_stub": bool(o.get("_stub")),
         })
+    # ride the population-level artefacts on the first row so build_html can lift them
+    # without changing load_fulleval's return type (its callers are the dashboard's
+    # --fulleval-dir mode and the fairness TSV emitter).
+    if bakes:
+        bakes[0]["_seed_groups"] = seed_groups
+        bakes[0]["_gaddr"] = gaddr
     return bakes
+
+
+def write_fairness_tsv(bakes, path):
+    """The committed audit surface for the filter: one row per board cell ->
+    tier -> failing criteria -> k -> group stats -> matched registry ids.
+    Written from the SAME `fairness_of` decisions the board renders, so the page and
+    the file can never disagree."""
+    seed_groups = {}
+    for b in bakes:
+        if "_seed_groups" in b:
+            seed_groups = b["_seed_groups"]
+    n2g = {n: g for g, v in seed_groups.items() for n in v["members"]}
+    cols = ["name", "tier", "fails", "k", "seed_group", "composite",
+            "composite_k_mean", "composite_k_spread", "composite_k_min",
+            "composite_k_max", "cid22_signed", "cid22_k_mean", "konjnd_signed",
+            "konjnd_k_mean", "sample_coverage", "curated", "regime", "gaddr_pass",
+            "gaddr_fail", "annotations", "notes"]
+    lines = ["\t".join(cols)]
+    for b in sorted(bakes, key=lambda x: str(x.get("name"))):
+        f = b.get("fair") or {}
+        gid = n2g.get(b.get("name"))
+        st = (seed_groups.get(gid) or {}).get("stats") or {}
+        c, ci, ko = st.get("composite"), st.get("cid22"), st.get("konjnd")
+        g = b.get("gaddr") or {}
+        row = [
+            b.get("name", ""), f.get("tier", "?"), ";".join(f.get("fails") or []) or "-",
+            "" if f.get("k") is None else str(f["k"]), gid or "-",
+            "" if b.get("composite") is None else f"{b['composite']:.6f}",
+            "" if not c else f"{c['mean']:.6f}", "" if not c else f"{c['spread']:.6f}",
+            "" if not c else f"{c['min']:.6f}", "" if not c else f"{c['max']:.6f}",
+            "" if _signed(b.get("rank", {}), "cid22") is None else f"{_signed(b.get('rank', {}), 'cid22'):.6f}",
+            "" if not ci else f"{ci['mean']:.6f}",
+            "" if _signed(b.get("rank", {}), "konjnd") is None else f"{_signed(b.get('rank', {}), 'konjnd'):.6f}",
+            "" if not ko else f"{ko['mean']:.6f}",
+            "NOT MEASURED" if f.get("coverage") is None else json.dumps(f["coverage"]),
+            "1" if b.get("curated") else "0", str(b.get("regime", "")),
+            "" if not g else str(g.get("pass", "")), "" if not g else str(g.get("fail", "")),
+            ";".join(b.get("annotations") or []) or "-",
+            " | ".join(f.get("notes") or []) or "-",
+        ]
+        lines.append("\t".join(x.replace("\t", " ") for x in row))
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text("\n".join(lines) + "\n")
+    return path, len(lines) - 1
 
 
 # ------------------------------------------------------------------ HTML assembly ------------
@@ -886,9 +1356,21 @@ svg{display:block;max-width:100%;height:auto}
 
 
 def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=None,
-               hfnl_axis=None):
+               hfnl_axis=None, fair_only=False):
     ech_js, ech_ver = _load_echarts()
     _, ann_meta = load_annotations_registry()
+    # population-level artefacts lifted off row 0 (see load_fulleval)
+    seed_groups = (bakes[0].pop("_seed_groups", None) if bakes else None) or {}
+    gaddr_reg = (bakes[0].pop("_gaddr", None) if bakes else None)
+    exam = load_ssim2_exam()
+    # FAIR-ONLY board (2026-09-04): the LEGACY tier is dropped from the FILE, not
+    # hidden in it — that is the only way the fair view fits the registered 12 MB cap.
+    # Nothing is deleted: every legacy row keeps its fulleval JSON on disk and appears
+    # in full on the companion all-rows board and in the committed fairness TSV.
+    n_legacy_dropped = 0
+    if fair_only:
+        n_legacy_dropped = sum(1 for b in bakes if (b.get("fair") or {}).get("tier") == "LEGACY")
+        bakes = [b for b in bakes if (b.get("fair") or {}).get("tier") != "LEGACY"]
     # FULL dominance exclusion (user directive 2026-08-28): dominated bakes are
     # EXCLUDED from the board entirely (files + fullevals retained on disk;
     # marks from promote_fulleval --mark-dominated, rule strict-pareto-2026-08-04).
@@ -970,6 +1452,18 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
             "chartThemes": THEME_VARS, "echartsVersion": ech_ver,
             "annRegistry": ann_meta,
             "orientation": EXPECTED_ORIENTATION,
+            # ---- fairness layer (2026-09-04) ----
+            "seedGroups": seed_groups,
+            "seedCoverageNote": SEED_COVERAGE_NOTE,
+            "fairCriteria": FAIR_CRITERIA,
+            "fairOnly": bool(fair_only),
+            "nLegacyDropped": n_legacy_dropped,
+            "circularAxes": CIRCULAR_AXES,
+            "trainEqValAxes": TRAIN_EQ_VAL_AXES,
+            "heldOutHumanAxes": HELD_OUT_HUMAN_AXES,
+            "exam": exam,
+            "gaddrRegistry": gaddr_reg,
+            "gaddrNotMeasured": GADDR_NOT_MEASURED,
             "loopTargeting": loop_targeting,
             "hfnlAxis": hfnl_axis}
     present = {b.get("name") for b in bakes}
@@ -985,6 +1479,26 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
                  "(<code>make_stub_fulleval.py</code>); drop the eval agent's real "
                  "<code>*.fulleval.json</code> in and re-run. " if any_stub else "")
     n_cur = sum(1 for b in bakes if b.get("curated"))
+    _tiers = {}
+    for b in bakes:
+        _tiers[(b.get("fair") or {}).get("tier", "?")] = _tiers.get(
+            (b.get("fair") or {}).get("tier", "?"), 0) + 1
+    fair_note = (
+        "<b>FAIRNESS FILTER (2026-09-04).</b> The default view is <b>VERIFIED-FAIR</b>: "
+        + str(_tiers.get("VERIFIED-FAIR", 0)) + " rows that carry an embedded repro, an "
+        "uninvalidated ruler, no train==val corpus in their ranking composite, a "
+        "replicated seed group, no unresolved <i>invalidated</i> registry entry, no "
+        "pre-<code>--score-units</code> teacher, and a held-out CID22 read. "
+        + str(_tiers.get("FAIR-NOTED", 0)) + " rows are <b>FAIR-NOTED</b> (fair, but "
+        "UNREPLICATED at k=1 or ungroupable) and "
+        + str(_tiers.get("LEGACY", 0)) + " are <b>LEGACY</b> "
+        + ("(dropped from THIS file to fit the 12 MB cap — they are complete on the "
+           "companion all-rows board and in the committed fairness TSV; nothing was "
+           "deleted). " if fair_only else "(default-hidden behind the <i>legacy / "
+           "unverified</i> toggle, with the failing criterion badged on the row). ")
+        + "Per-row tiers + failing criteria: <code>benchmarks/fair_gauntlet_2026-09-04.md</code>. "
+        + ("<b>" + str(n_legacy_dropped) + " LEGACY rows are not in this file.</b> " if n_legacy_dropped else "")
+    )
     coverage = (
         "This board carries <b>every promoted evaluation cell</b> (" + str(len(bakes)) + " bakes, "
         "including the full sota944 campaign grid) — any number cited in a report is findable "
@@ -993,7 +1507,7 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
         "<i>all</i> to reach every grid cell. " if n_cur else "")
     head = (
         "<h1>" + title + "</h1>"
-        "<p class='sub'>" + stub_note + coverage +
+        "<p class='sub'>" + stub_note + fair_note + coverage +
         "Toggle bakes below to compare them across every chart; click any table header to sort. "
         "The scatter matrix shows <b>predicted vs each reference</b> (MOS, JND, SSIMULACRA2, "
         "butteraugli, ColorVideoVDP) per corpus, with an OLS fit and canonical SROCC/PLCC. "
@@ -1084,12 +1598,68 @@ const corpTitle=(node,c)=>{const t=[];
   if(c==="sdr25")t.push("⊂ aic4: "+annReason("sdr25-subset-of-aic4"));
   if(t.length)node.setAttribute("title",t.join(" | "));
   return node;};
+// ---- FAIRNESS LAYER (2026-09-04) ---------------------------------------------------
+// Every value below is READ from the payload (which read it from a fulleval, the
+// annotations registry, the G-ADDR floor registry or the ssim2-exam transcription).
+// Nothing on this page computes a statistic.
+const TIER=b=>((b.fair&&b.fair.tier)||'?');
+const FAIRSET=DATA.bakes.filter(b=>TIER(b)!=='LEGACY').map(b=>b.name);
+const VFAIRSET=DATA.bakes.filter(b=>TIER(b)==='VERIFIED-FAIR').map(b=>b.name);
+const CRIT=Object.fromEntries((DATA.fairCriteria||[]).map(c=>[c[0],c[1]]));
+const tierGlyph=b=>TIER(b)==='VERIFIED-FAIR'?'✔':(TIER(b)==='FAIR-NOTED'?'◐':'⚑');
+const tierTitle=b=>{const f=b.fair||{};const L=['tier: '+TIER(b)];
+  if(f.fails&&f.fails.length)L.push('FAILS: '+f.fails.map(k=>k+' — '+(CRIT[k]||'')).join(' | '));
+  if(f.k===1)L.push('UNREPLICATED (k=1): this recipe has no seed sibling on the board, so its value is one draw and its spread is unknown.');
+  if(f.k==null)L.push('UNGROUPABLE: no embedded repro argv, so no seed group can be formed.');
+  if(f.notes&&f.notes.length)L.push('notes: '+f.notes.join(' | '));
+  return L.join('\n');};
+// Seed groups. Presentation is fixed by the user correction of 2026-09-04: mean +
+// spread + k, per-seed values reachable, mean NEVER labelled definitive.
+const SG=DATA.seedGroups||{};
+const SGOF={};Object.keys(SG).forEach(g=>(SG[g].members||[]).forEach(n=>{SGOF[n]=g;}));
+const sgOf=b=>SG[SGOF[b.name]]||null;
+const sgStat=(b,axis)=>{const g=sgOf(b);return g&&g.stats?g.stats[axis]:null;};
+const SEEDNOTE=DATA.seedCoverageNote||'';
+const sgTitle=(b,axis)=>{const g=sgOf(b),st=sgStat(b,axis);if(!st)return '';
+  return 'SEED GROUP k='+g.k+' on '+axis+'\nmean '+f3(st.mean)+'  spread '+f3(st.spread)
+    +'  [min '+f3(st.min)+' .. max '+f3(st.max)+']'
+    +'\nper seed: '+st.per.map(x=>x[0]+' '+f3(x[1])).join('   ')
+    +'\nThe mean is the honest estimator against best-of-k, NOT "the true score": '+SEEDNOTE
+    +(b.fair&&b.fair.coverage?('\nsample_coverage: '+JSON.stringify(b.fair.coverage)):'\nsample_coverage: NOT MEASURED');};
+// Circularity + train==val, from the exam's own registered lists.
+const CIRC=new Set(DATA.circularAxes||[]);
+const TEV=new Set(DATA.trainEqValAxes||[]);
+const HELDOUT=DATA.heldOutHumanAxes||[];
+const EXAM=DATA.exam||null;
+const examOf=n=>{if(!EXAM)return null;return (EXAM.candidates||[]).find(c=>c.board_name===n)||null;};
+const PEERSSIM2=DATA.bakes.find(b=>b.name==='peer_ssim2')||null;
+// G-ADDR — the registry's bars against what each cell already stores. Absent axes are
+// NOT MEASURED with the reason, never a zero.
+const GADDR=DATA.gaddrRegistry||null;
+const gaddrTitle=b=>{if(!b.gaddr)return 'G-ADDR: NOT MEASURED (no registry / no dial block)';
+  const L=['G-ADDR dial addressability — bars from benchmarks/dial_addressability_floor_2026-09-04.json'];
+  const ar=(GADDR&&GADDR.activeRef)||'?';
+  L.push('REGRESSION bars = the ACTIVE reference "'+ar+'" on the same instrument'
+    +(ar==='peer_ssim2'?' — the reference METRIC, re-pinned by user decision 2026-09-04 ("ssim2 seems a better mentor"). A candidate must address AT LEAST the range ssim2 addresses.':''));
+  if(GADDR&&GADDR.gridIncumbent)L.push('the shipped-B column is CONTEXT, never a bar — the registry labels it BIASED (A1/A3/A6 sit ABOVE the reference metric\u2019s own values on this grid).');
+  (b.gaddr.cells||[]).forEach(c=>L.push('  '+c[0]+' '+c[1]+': '+(c[2]==null?'NOT MEASURED':f3(c[2]))
+      +'  bar('+ar+') '+(c[4]==='ge'?'≥':'≤')+' '+f3(c[3])
+      +(c[6]==null?'':('   [shipped B '+f3(c[6])+']'))
+      +'  '+(c[5]==null?'—':(c[5]?'PASS':'FAIL'))));
+  L.push('NOT MEASURED here: '+(DATA.gaddrNotMeasured||''));
+  if(b.gaddr.emitted)L.push('this cell CARRIES an emitted dial.addressability block — see the Model card');
+  return L.join('\n');};
 const KNOBFAIL=b=>!!(b.knob_end_fail&&b.knob_end_fail.length);
 const CURATED_ALL=DATA.bakes.filter(b=>b.curated&&!DOM(b)).map(b=>b.name);
 // default compare set excludes knob-end failers (dial cannot reach/span the
 // top zone — G-GRAN semantics); they stay toggleable + in 'curated+knobfail'.
 const CURATED=DATA.bakes.filter(b=>b.curated&&!DOM(b)&&!KNOBFAIL(b)).map(b=>b.name);
-const state={shapeNorm:true,visible:new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name)),
+// DEFAULT VIEW = VERIFIED-FAIR (user request 2026-09-04). Curated ∩ fair when that
+// is non-empty, else the whole fair set — never an empty board.
+const _DEFVIS=(()=>{const f=new Set(FAIRSET);
+  const c=CURATED.filter(n=>f.has(n));
+  return c.length?c:(FAIRSET.length?FAIRSET:DATA.bakes.map(b=>b.name));})();
+const state={shapeNorm:true,visible:new Set(_DEFVIS),
   ref:null, sortKey:'composite', sortDir:-1, mcorp:null, chipsOpen:false, gateFilter:new Set()};
 function effTheme(){const dt=document.documentElement.getAttribute('data-theme');
   return dt||((window.matchMedia&&matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light');}
@@ -1229,6 +1799,12 @@ function renderBar(){
   const bar=$('#bar');bar.innerHTML='';
   const mk=(t,fn,title)=>{const x=el('button',{class:'btn',text:t});if(title)x.setAttribute('title',title);x.onclick=fn;return x;};
   bar.append(
+    mk('VERIFIED-FAIR',()=>{state.visible=new Set(VFAIRSET);rerender();renderBar();},
+       'only rows that pass EVERY fairness criterion AND are a replicated seed group (k>=2). '+VFAIRSET.length+' rows.'),
+    mk('fair (incl. unreplicated)',()=>{state.visible=new Set(FAIRSET);rerender();renderBar();},
+       'VERIFIED-FAIR + FAIR-NOTED (fair, but k=1 UNREPLICATED or ungroupable). '+FAIRSET.length+' rows.'),
+    mk('legacy / unverified',()=>{state.visible=new Set(DATA.bakes.filter(b=>TIER(b)==='LEGACY').map(b=>b.name));rerender();renderBar();},
+       'ONLY the rows that fail a fairness criterion — each badged with which one. Nothing is deleted; these rows keep every stat.'),
     mk('curated',()=>{state.visible=new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name));rerender();renderBar();},
     mk('curated+knobfail',()=>{state.visible=new Set(CURATED_ALL);rerender();renderBar();},
       'curated including knob-end failers (dial cannot reach/span the top zone)'),
@@ -1398,6 +1974,13 @@ function makeSortable(tbl){
 // ---- SCOREBOARD TABLE (sortable). columns = derived metrics per bake.
 const COLS=[
   ['name','bake',true,b=>b.name],
+  // FAIRNESS (2026-09-04). `fair` = the tier glyph; `k` = seed-group size; `cmean` =
+  // the group's MEAN composite with its spread — the honest estimator against
+  // best-of-k, never labelled definitive (per-seed values on hover).
+  ['fair','fair',true,b=>tierGlyph(b)],
+  ['k','k',false,b=>{const f=b.fair||{};return f.k==null?null:f.k;}],
+  ['cmean','composite k-mean',false,b=>{const st=sgStat(b,'composite');return st?st.mean:null;}],
+  ['cspread','k-spread',false,b=>{const st=sgStat(b,'composite');return st?st.spread:null;}],
   ['regime','regime',true,b=>b.regime],
   ['trained','trained',true,b=>b.train_date?b.train_date.d+(b.train_date.src==='file'?'*':''):null],
   ['gates','gates',true,b=>gateGlyphs(b)],
@@ -1418,7 +2001,29 @@ const COLS=[
   ['corr','corr-passq20',false,b=>b.corruption&&b.corruption.pass_q20!=null?b.corruption.pass_q20:null],
   ['cid22_ci','CID22 95%CI±',false,b=>{const r=b.rank.cid22;return r&&r.srocc_ci?(r.srocc_ci[1]-r.srocc_ci[0])/2:null;}],
   ['cid22_bwd','CID22 %bwd',false,b=>{const r=b.rank.cid22;return r&&r.frac_negative!=null?r.frac_negative:null;}],
+  // G-ADDR (2026-09-04): pass/fail count over the six axes every cell already stores,
+  // against the committed floor registry. The other nine axes are NOT MEASURED for
+  // these cells (the gate landed after their verdicts) and are never counted as zeros.
+  ['gaddr','G-ADDR p/f',false,b=>b.gaddr?b.gaddr.pass:null],
+  // ssim2 EXAM (transcribed verdicts, benchmarks/ssim2_exam_scorecard_2026-08-31.json)
+  ['w1','W1 no-reg',true,b=>{const e=examOf(b.name);return e?e.W1.v:null;}],
+  ['w2','W2 real-win',true,b=>{const e=examOf(b.name);return e?e.W2.v:null;}],
+  ['w3','W3 ladder',true,b=>{const e=examOf(b.name);return e?e.W3.v:null;}],
+  ['w4','W4 speed',true,b=>{const e=examOf(b.name);return e?e.W4.v:null;}],
+  ['w5','W5 HDR',true,b=>{const e=examOf(b.name);return e?e.W5.v:null;}],
+  ['w6','W6 non-circ',true,b=>{const e=examOf(b.name);return e?e.W6.v:null;}],
+  ['w7','W7 reachable',true,b=>{const e=examOf(b.name);return e?e.W7.v:null;}],
 ];
+// Scoreboard columns that are NOT ranking signal, and why. Rendered dimmed with the
+// reason on hover so they stay visible as integrity guards / sanity rows without ever
+// being read as a win (exam §2.1 + registry kadid-tid-train-eq-val +
+// hfnl-ssim2-self-target-circular-2026-09-01).
+const NONRANK={
+  kadid:'train==val (100% pair overlap) — integrity guard, never ranking signal',
+  tid:'train==val, and retired to train-only by user ruling 2026-08-29 — historical guard',
+  nonphoto:'ssim2-ANCHORED: its target IS an ssim2 score, so this is AGREEMENT with ssim2, never a win over it',
+  imazen26:'ssim2-ANCHORED: agreement with ssim2, not a win over it',
+  hfnl:'hfnlproxy is ssim2-ANCHORED; hf_nearlossless human_score IS ssim2_gpu/100 exactly on 1200/1200 rows'};
 // SIGNED SROCC accessor (2026-08-04; registry-driven 2026-08-05). JND↓ corpora
 // (JND_CORPORA, from the EXPECTED_ORIENTATION registry — aic4/konjnd/sdr25) carry
 // distortion-oriented labels: their signed SROCC is negative BY CONVENTION, so the
@@ -1454,7 +2059,11 @@ if(LT){COLS.push(
   ['loop3','3shot ±2',false,b=>{const c=ltCell(b,'k3_emit_best');return c?c.within2:null;}],
   ['loop3err','3shot med|err|',false,b=>{const c=ltCell(b,'k3_emit_best');return c!=null&&c.med_abs_err!=null?c.med_abs_err:null;}]);}
 function fmtCell(key,v){
-  if(key==='name'||key==='regime')return v;
+  if(key==='name'||key==='regime'||key==='fair')return v;
+  if(key==='k')return v==null?'—':(v===1?'1 ⚠':String(v));
+  if(key==='cspread')return v==null?'—':f3(v);
+  if(key&&key.charAt(0)==='w'&&key.length===2)return v==null?'—':v;
+  if(key==='gaddr')return v==null?'—':v+'/'+6;
   if(key==='trained')return v==null?'—':v;
   if(key==='gates')return v;
   if(key==='cid22_bwd')return v==null?'—':pct(v);
@@ -1553,6 +2162,32 @@ function renderTable(){
       if(c[0]==='name'){td.textContent='';nameInto(td,b,b.is_stub?' ✳':'');}
       if(c[0]==='gates'){td.setAttribute('title',gateTitle(b));td.style.cursor='help';
         td.style.fontFamily='ui-monospace,monospace';td.style.letterSpacing='1px';}
+      // ---- fairness layer cells (2026-09-04) ----
+      if(c[0]==='fair'){td.setAttribute('title',tierTitle(b));td.style.cursor='help';
+        td.style.color=TIER(b)==='VERIFIED-FAIR'?'var(--good)':(TIER(b)==='FAIR-NOTED'?'var(--warn)':'var(--critical)');}
+      if(c[0]==='k'||c[0]==='cmean'||c[0]==='cspread'){
+        const t=sgTitle(b,'composite');
+        td.setAttribute('title',t||((b.fair&&b.fair.k===1)
+          ?'UNREPLICATED (k=1) — one draw, spread unknown. '+SEEDNOTE
+          :'UNGROUPABLE — no embedded repro argv, so no seed group can be formed.'));
+        td.style.cursor='help';}
+      if(c[0]==='gaddr'){td.setAttribute('title',gaddrTitle(b));td.style.cursor='help';
+        if(b.gaddr&&b.gaddr.fail)td.style.color='var(--critical)';}
+      if(c[0].charAt(0)==='w'&&c[0].length===2){
+        const e=examOf(b.name);
+        if(e){const cl=e[c[0].toUpperCase()];
+          td.setAttribute('title','ssim2 EXAM '+c[0].toUpperCase()+' — '+
+            ((EXAM.clauses||[]).find(x=>x.id===c[0].toUpperCase())||{}).question+
+            '\nverdict: '+cl.v+(cl.note?('  ('+cl.note+')'):'')+
+            '\nreference row: peer_ssim2. Source: '+EXAM._schema.source);
+          td.style.cursor='help';
+          td.style.color=cl.v==='PASS'?'var(--good)':(cl.v==='FAIL'?'var(--critical)':'var(--muted)');
+        }else{td.setAttribute('title','this bake is not one of the exam\u2019s six scored candidates — NOT MEASURED, never a fail.');}
+      }
+      // NON-RANKING columns: dimmed, with the reason. Visible as guards, never a win.
+      if(NONRANK[c[0]]){td.style.opacity=.55;td.style.fontStyle='italic';
+        td.setAttribute('title',(td.getAttribute('title')||'')+'\nNOT RANKING SIGNAL — '+NONRANK[c[0]]);
+        td.style.cursor='help';}
       // ⚠ registry badges (benchmarks/eval_annotations.json). GENERIC (2026-08-06):
       // any matched entry whose `fields` cover this column's dot-path badges this cell,
       // so adding a registry entry is sufficient — no per-id JS. Only on a rendered
@@ -1571,7 +2206,8 @@ function renderTable(){
           +annReason('hfnl-absent-not-failed'));
         td.style.cursor='help';
       }
-      if(c[0]!=='name'&&c[0]!=='regime'&&v!=null&&isFinite(v)){
+      if(c[0]!=='name'&&c[0]!=='regime'&&c[0]!=='fair'&&!NONRANK[c[0]]
+         &&!(c[0].charAt(0)==='w'&&c[0].length===2)&&v!=null&&isFinite(v)){
         const[lo,hi]=ranges[c[0]];let t=hi===lo?.5:(v-lo)/(hi-lo);
         // invert shading where lower is better (tied dead-zone, CI width,
         // backwards-ref share, dropped-mass — all "smaller is better")
@@ -2909,12 +3545,120 @@ function renderFailures(){
 // ---- layout + orchestration
 function layout(){
   const p=$('#panels');p.innerHTML='';
-  p.append(el('div',{id:'table'}),el('div',{id:'failures'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'loopcov'}),el('div',{id:'hfnlsec'}),el('div',{id:'gates'}),el('div',{id:'recipes'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
+  p.append(el('div',{id:'table'}),el('div',{id:'fairsec'}),el('div',{id:'beatssec'}),el('div',{id:'failures'}),el('div',{id:'heat'}),el('div',{id:'mpanel'}),el('div',{id:'dialsec'}),el('div',{id:'looptgt'}),el('div',{id:'loopcov'}),el('div',{id:'hfnlsec'}),el('div',{id:'gates'}),el('div',{id:'recipes'}),el('div',{id:'models'}),el('div',{id:'trade'}),el('div',{id:'scatter'}));
 }
+
+// ================= FAIRNESS AUDIT PANEL (2026-09-04) ==================================
+// Row -> tier -> failing criteria, so the filter is auditable on the page and not only
+// in the committed TSV. Computes nothing: it prints what `gauntlet.fairness_of` decided
+// from the fulleval + the annotations registry.
+function renderFair(){
+  const d=$('#fairsec');if(!d)return;d.innerHTML='';
+  const bs=DATA.bakes.slice().sort((a,b)=>{
+    const o={'VERIFIED-FAIR':0,'FAIR-NOTED':1,'LEGACY':2};
+    return (o[TIER(a)]-o[TIER(b)])||String(a.name).localeCompare(String(b.name));});
+  const n={'VERIFIED-FAIR':0,'FAIR-NOTED':0,'LEGACY':0};bs.forEach(b=>{n[TIER(b)]=(n[TIER(b)]||0)+1;});
+  d.append(el('h2',{text:'Fairness audit — which rows we can verify we did fairly'}));
+  d.append(el('div',{class:'cap',html:
+    'A row is <b>VERIFIED-FAIR</b> when every criterion below holds AND it is a replicated seed group '
+    +'(k&ge;2). <b>FAIR-NOTED</b> = every criterion holds but the row is <b>UNREPLICATED</b> (k=1) or '
+    +'ungroupable — still fair, just noted. <b>LEGACY</b> = at least one criterion fails; the row keeps '
+    +'every stat and every badge and nothing is deleted, it is simply not default-visible. '
+    +'Counts: <b>'+n['VERIFIED-FAIR']+'</b> verified-fair · <b>'+n['FAIR-NOTED']+'</b> fair-noted · <b>'
+    +n['LEGACY']+'</b> legacy'+(DATA.fairOnly?(' ('+DATA.nLegacyDropped+' legacy rows are NOT IN THIS FILE — see the companion all-rows board)'):'')+'. '
+    +'Criteria: '+(DATA.fairCriteria||[]).map(c=>'<code>'+c[0]+'</code> '+c[1]).join(' · ')+'.'}));
+  const t=el('table',{class:'tbl'});
+  t.append(el('thead',{html:'<tr><th>bake</th><th>tier</th><th>k</th><th>failing criteria</th><th>notes</th></tr>'}));
+  const tb=el('tbody',{});
+  bs.forEach(b=>{const f=b.fair||{};
+    const tr=el('tr',{});
+    const nd=el('td',{class:'lbl'});nameInto(nd,b,'');tr.append(nd);
+    const td=el('td',{text:TIER(b)});
+    td.style.color=TIER(b)==='VERIFIED-FAIR'?'var(--good)':(TIER(b)==='FAIR-NOTED'?'var(--warn)':'var(--critical)');
+    tr.append(td);
+    const kd=el('td',{text:f.k==null?'— (ungroupable)':(f.k===1?'1 (UNREPLICATED)':String(f.k))});
+    kd.setAttribute('title',sgTitle(b,'composite')||SEEDNOTE);kd.style.cursor='help';tr.append(kd);
+    const fd=el('td',{text:(f.fails&&f.fails.length)?f.fails.join(', '):'—'});
+    if(f.fails&&f.fails.length)fd.setAttribute('title',f.fails.map(k=>k+': '+(CRIT[k]||'')).join('\n'));
+    tr.append(fd);
+    tr.append(el('td',{class:'lbl',text:(f.notes&&f.notes.length)?f.notes.join(' | '):'—'}));
+    tb.append(tr);});
+  t.append(tb);d.append(t);makeSortable(t);
+}
+
+// ============ BEATS-SSIM2 EVIDENCE PANEL (2026-09-04) =================================
+// The product composite carries ssim2-ANCHORED axes at weight 0.50 (imazen26) + 0.30
+// (nonphoto) of 2.15 — 37% of it — which is how a peer row can top a board that is
+// supposed to be ranking models against that peer. This panel answers the "beats ssim2"
+// question on the NON-CIRCULAR held-out human axes only, with peer_ssim2 as the
+// reference ROW. No new composite is invented: the per-axis deltas are differences of
+// numbers each row already carries, and the W1-W7 verdicts are TRANSCRIBED from the
+// exam, never re-derived here.
+function renderBeats(){
+  const d=$('#beatssec');if(!d)return;d.innerHTML='';
+  if(!PEERSSIM2){d.append(el('div',{class:'cap',html:'<b>NOT MEASURED</b> — no <code>peer_ssim2</code> row on this board, so no beats-ssim2 evidence view can be drawn.'}));return;}
+  const dCorp=(EXAM&&EXAM.thresholds)?EXAM.thresholds:{};
+  const dlt=c=>c==='cid22'?(dCorp.delta_cid22_pooled||0.010):(dCorp.delta_corpus||0.010);
+  d.append(el('h2',{text:'Beats-ssim2 evidence — non-circular axes only'}));
+  d.append(el('div',{class:'cap',html:
+    'Reference row = <b>peer_ssim2</b>. Axes shown are the exam’s <b>genuinely held-out human corpora</b>: '
+    +HELDOUT.join(', ')+'. <b>EXCLUDED by construction:</b> '+(DATA.circularAxes||[]).join(', ')
+    +' (ssim2-ANCHORED — their targets ARE ssim2 scores, so a number there is agreement with ssim2, never a win '
+    +'over it; <code>hf_nearlossless</code>’s <code>human_score</code> IS <code>ssim2_gpu/100</code>, exactly, on '
+    +'1200/1200 rows) and '+(DATA.trainEqValAxes||[]).join(', ')+' (train==val integrity guards). '
+    +'A cell is a <b>LOSS</b> when it is worse than peer_ssim2 by more than δ ('+f3(dlt('cid22'))
+    +' pooled CID22, '+f3(dlt('csiq'))+' elsewhere — derived, §2.4). δ is a reference-clustered '
+    +'bootstrap half-width; <b>the board’s own srocc_ci understates it by ~2×</b> (4,292 CID22 pairs are 49 '
+    +'clusters, not 4,292 draws). W1–W7 are TRANSCRIBED verdicts — present only for the exam’s six scored '
+    +'candidates; every other row reads NOT MEASURED, never a fail. '+(EXAM?('<b>'+EXAM.headline+'</b>'):'')}));
+  const t=el('table',{class:'tbl'});
+  const hd=['bake','tier','n LOSS >δ'].concat(HELDOUT).concat(['W1','W2','W3','W4','W5','W6','W7']);
+  t.append(el('thead',{html:'<tr>'+hd.map(h=>'<th>'+h+'</th>').join('')+'</tr>'}));
+  const tb=el('tbody',{});
+  const ref={};HELDOUT.forEach(c=>{ref[c]=rs(PEERSSIM2,c);});
+  const rows=DATA.bakes.filter(b=>state.visible.has(b.name)||b.name==='peer_ssim2');
+  rows.forEach(b=>{
+    const tr=el('tr',{});
+    const nd=el('td',{class:'lbl'});nameInto(nd,b,b.name==='peer_ssim2'?' ◀ reference':'');tr.append(nd);
+    tr.append(el('td',{text:b.name==='peer_ssim2'?'reference':tierGlyph(b)}));
+    let nloss=0,nmeas=0;
+    const cells=HELDOUT.map(c=>{const v=rs(b,c),r=ref[c];
+      if(v==null||r==null)return [c,null,null];
+      nmeas++;const dv=v-r;if(b.name!=='peer_ssim2'&&dv< -dlt(c))nloss++;return [c,v,dv];});
+    const ld=el('td',{text:b.name==='peer_ssim2'?'—':(nmeas?(nloss+'/'+nmeas):'—')});
+    if(nloss)ld.style.color='var(--critical)';
+    ld.setAttribute('title',nmeas?('counted over the '+nmeas+' held-out axes BOTH rows carry. '
+      +'This is W1’s own rule applied per row; it is a COUNT of already-measured differences, not a new statistic.')
+      :'NOT MEASURED — this row shares no held-out axis with peer_ssim2.');
+    ld.style.cursor='help';tr.append(ld);
+    cells.forEach(([c,v,dv])=>{
+      const td=el('td',{text:v==null?'—':f3(v)});
+      if(dv!=null&&b.name!=='peer_ssim2'){
+        td.append(el('span',{style:'opacity:.75;font-size:.85em',text:' ('+(dv>=0?'+':'')+f3(dv)+')'}));
+        if(dv< -dlt(c))td.style.color='var(--critical)';
+        else if(dv>dlt(c))td.style.color='var(--good)';
+        td.setAttribute('title',c+': '+f3(v)+' vs peer_ssim2 '+f3(ref[c])+'  Δ '+(dv>=0?'+':'')+f3(dv)
+          +'\nδ = '+f3(dlt(c))+' — '+(dv< -dlt(c)?'LOSS beyond δ':(dv>dlt(c)?'nominal gain beyond δ (a STRICT win additionally needs the paired CI to exclude zero — W2)':'inside δ: a TIE')));
+        td.style.cursor='help';}
+      tr.append(td);});
+    const e=examOf(b.name);
+    ['W1','W2','W3','W4','W5','W6','W7'].forEach(w=>{
+      const td=el('td',{text:e?e[w].v:'—'});
+      if(e){td.style.color=e[w].v==='PASS'?'var(--good)':(e[w].v==='FAIL'?'var(--critical)':'var(--muted)');
+        td.setAttribute('title',e[w].note||e[w].v);td.style.cursor='help';}
+      else td.setAttribute('title','NOT one of the exam’s six scored candidates — NOT MEASURED, never a fail.');
+      tr.append(td);});
+    tb.append(tr);});
+  t.append(tb);d.append(t);makeSortable(t);
+  if(EXAM&&EXAM.amendments&&EXAM.amendments.length){
+    d.append(el('div',{class:'cap',html:'<b>Amendments carried by the exam record:</b><br>'
+      +EXAM.amendments.map(a=>'• '+a).join('<br>')}));}
+}
+
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
 function rerender(){disposeCharts();state.renderedTheme=effTheme();
-  mountTable();renderFailures();renderHeat();renderMPanel();renderDial();renderLoop();renderCoverage();renderHfnl();renderGates();renderRecipes();renderModels();renderTrade();renderScatter();}
+  mountTable();renderFair();renderBeats();renderFailures();renderHeat();renderMPanel();renderDial();renderLoop();renderCoverage();renderHfnl();renderGates();renderRecipes();renderModels();renderTrade();renderScatter();}
 
 initRef();layout();renderBar();rerender();
 // Theme reactivity: charts (and everything else) rebuild with the other theme's option
@@ -2940,8 +3684,19 @@ if __name__ == "__main__":
     ap.add_argument("--hfnl-axis", default=DEFAULT_HFNL_AXIS,
                     help="appendix-O HF-NL axis study JSON (panel omitted if absent)")
     ap.add_argument("--out", default="/mnt/v/output/zensim/reports/summer_gauntlet.html")
+    ap.add_argument("--fair-only", action="store_true",
+                    help="emit the VERIFIED-FAIR board: LEGACY rows are dropped from the "
+                         "FILE (not merely hidden) so the fair view fits the registered "
+                         "12 MB cap. They stay on disk, on the all-rows board, and in "
+                         "the fairness TSV — nothing is deleted.")
+    ap.add_argument("--fairness-tsv", default=None,
+                    help="also write the per-row fairness audit TSV here")
     a = ap.parse_args()
     bakes = load_fulleval(a.fulleval_dir, a.best_per_day)
+    if a.fairness_tsv:
+        tp, n = write_fairness_tsv(bakes, a.fairness_tsv)
+        print(f"wrote {tp}  ({n} rows, fairness audit)")
     out, size = build_html(bakes, a.out, loop_targeting=load_loop_targeting(a.loop_targeting),
-                           hfnl_axis=load_hfnl_axis(a.hfnl_axis))
-    print(f"wrote {out}  ({size // 1024} KB)  {len(bakes)} bakes")
+                           hfnl_axis=load_hfnl_axis(a.hfnl_axis), fair_only=a.fair_only)
+    print(f"wrote {out}  ({size // 1024} KB)  {len(bakes)} bakes"
+          + ("  [FAIR-ONLY]" if a.fair_only else ""))

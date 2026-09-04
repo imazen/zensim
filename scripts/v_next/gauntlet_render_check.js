@@ -516,10 +516,16 @@ if (DATA) (function failurePanelTest() {
   const tabs = attachedTables(isFail);
   if (tabs.length !== 1) { fail('failure panel: expected 1 attached comparison table, got ' + tabs.length); return; }
   const rows = tabs[0];
-  // the page's own default-visible rule: curated, not dominated, no knob-end failure
+  // The page's own default-visible rule. Kept in lockstep with gauntlet.js's `_DEFVIS`:
+  // curated, not dominated, no knob-end failure — AND, since the 2026-09-04 fairness
+  // pass, not LEGACY (the default view is VERIFIED-FAIR + FAIR-NOTED). A stale copy of
+  // this rule here does not catch a bug, it INVENTS one, which is exactly what happened
+  // when the default changed: the panel drew 6 rows and the harness demanded 16.
+  const anyFair = DATA.bakes.some(b => b.fair && b.fair.tier);
   const vis = DATA.bakes.filter(b => b.curated
     && !(b.dominated_by && b.dominated_by.length)
-    && !(b.knob_end_fail && b.knob_end_fail.length));
+    && !(b.knob_end_fail && b.knob_end_fail.length)
+    && (!anyFair || (b.fair && b.fair.tier !== 'LEGACY')));
   const nVis = vis.length || DATA.bakes.length;
   if (rows.length - 1 !== nVis)
     fail('failure comparison rows ' + (rows.length - 1) + ' != visible bakes ' + nVis);
@@ -597,3 +603,12 @@ if (process.argv.includes('--dump-failures')) {
       .replace(/\s*(evidence:)/g, '\n    $1') + '\n');
   });
 }
+
+// ---------------------------------------------------------------- terminal gate -------
+// GATE HOLE, found + closed 2026-09-04: the only `if (failed) process.exit(1)` sat at
+// roughly the file's midpoint, so every assertion after it — the registry-badge check,
+// the ECharts SSR check and the whole failure-panel test — could print "FAIL: ..." and
+// still exit 0. The pre-2026-09-04 board printed three such FAILs on every run and the
+// gate reported PASS. Nothing below relaxes an assertion; this makes the existing ones
+// actually gate.
+if (failed) process.exit(1);
