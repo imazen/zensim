@@ -1263,6 +1263,26 @@ silent-row-drop class (`dataset_metric_baseline`, `zensim-validate --extract-onl
 now this). The decode helpers already exist at
 `zensim-bench/examples/extract_features_372col_omni.rs:266-293` behind `extract-omni`.
 
+4. **The fit chain is NOT byte-reproducible — and now the cost is priced.** Re-running
+   `legs → gram → fit → ensemble → f16 bake → anchored bake` from the same stored legs
+   breaks byte-identity in two named places: (a) `canonhdr15-bvls-raw` is an **iterative
+   active-set (BVLS) solve**, so its `w` reproduces to **1.19e-5** relative against the
+   closed-form lasso head's 2.25e-12, and 0.2× of that reaches the ensemble where one
+   weight (`f83`) straddles an f16 tie — **371/372 f16 lanes identical**, bake sha
+   differs; (b) the 823 B anchored-bake step's exact invocation is not recovered by
+   `bake_dial_refit shared-anchor` at its defaults (`88a57447` vs the committed
+   `7b326ac5`; the producer `shared_anchor_refit.py` was deleted 2026-07-29). The
+   campaign's *"44/44 refits byte-identical"* determinism claim holds for a re-run **from
+   cached grams**; it does not survive re-accumulating the grams from parquet.
+   **Priced end-to-end**: rank reproduces to **≤ 3e-5 SROCC** (exactly 0.00000 on four of
+   five corpora) and the dial to **≤ 0.071 points**, of which only ≤ 0.013 is the fit
+   re-run itself — i.e. the pipeline's own noise floor is **~70× below** the −4.98-point
+   defect. A fresh-legs comparison is therefore interpretable *functionally*, never on
+   bytes, and any retrain moving the dial < ~0.1 pt has measured nothing.
+   (Also: `ens-Pline-cid80.npz` was never emitted by the committed `cmd_ensemble`, which
+   only produces `Pline-cid{30,50,70}` — a missing commit, not a lost recipe; the
+   arithmetic reproduces the stored npz to 1.4e-14 with an exact bias.)
+
 **Nothing was rewritten, retrained, or flipped.** Record:
 `benchmarks/b_reextract_wave_2026-09-04.md`. Instruments + `_MANIFEST.json`:
 `/mnt/v/output/zensim/bfresh-2026-09-04/`.

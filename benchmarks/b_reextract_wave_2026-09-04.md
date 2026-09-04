@@ -362,3 +362,118 @@ Bakes: `B_reanchor_storedera.bin` `3f832ac3222b580e`, `B_reanchor_curera.bin`
 
 **Neither re-anchored bake is a ship candidate.** They are instruments that isolate the
 era term. No default was flipped and no weight file was modified.
+
+---
+
+## 10. The fit-chain control: **not byte-reproducible**, but functionally reproducible ~70× below the effect
+
+§4 showed the last two steps byte-reproduce. This section runs the **earlier half** —
+`legs → gram → fit → ensemble → f16 bake → anchored bake` — which is the gate a fresh-legs
+retrain has to pass before its delta means anything. It **fails byte-identity, in two
+identified places**, and the functional cost of both was then measured.
+
+Control scratch: `/mnt/v/output/zensim/bfresh-2026-09-04/lp-control/` (fresh `grams/` +
+`fits/`; the historical `/mnt/v/output/zensim-multicodec-probe/linear-probe/` was read-only
+and never written).
+
+### 10a. Link-by-link
+
+| link | reproduces? | measured |
+|---|---|---|
+| legs → grams | to 3.1e-15 rel | raw-space arrays, worst rel: safesyn 3.05e-15, kadid 3.58e-15, cid22_train 1.87e-15, tid 4.79e-16, hdr_v3mix 1.77e-15 (float summation order) |
+| grams → **cid head** `hdrmix-lasso0.002-raw` | to 2.25e-12 rel | `w` max abs 1.03e-13; **support identical (35/35)**; `bias`,`mu` **bit-identical** |
+| grams → **kon head** `canonhdr15-bvls-raw` | to **1.19e-5 rel** | `w` max abs 3.99e-6; **support identical (85/85)**; `bias`,`mu` bit-identical |
+| heads → `ens-Pline-cid80` (0.8/0.2, anchor-normalised) | to 7.8e-17 rel | reproduces the stored npz: `w` max abs 1.42e-14, **`bias` exact** |
+| ens npz → tau0 f16 bake | **NO** — `2bf259cf` vs `1cddfe5e` | **371 of 372 f16 lanes identical**; `f83` lands one ulp apart (−58.88 vs −58.84) because the f64 values −58.859982 / −58.859371 straddle an f16 boundary |
+| tau0 bake → 823 B anchored bake | **NO** — `88a57447` vs `7b326ac5` | `bake_dial_refit shared-anchor` at its defaults, on the *historical* tau0 bake and the canonical multiband anchor, does not reproduce the committed artifact |
+| anchored bake → **shipped B** | **YES, byte-identical** (§4) | `b6fe5233`, `cmp` clean |
+
+**Two distinct breaks, both named.**
+
+1. **`canonhdr15-bvls-raw` is solved by an iterative active-set solver**
+   (`scipy.optimize.lsq_linear`, BVLS), so it converges to a tolerance rather than a closed
+   form. Its `w` reproduces 7 orders looser than the closed-form lasso head (1.19e-5 vs
+   2.25e-12). 0.2 × that reaches the ensemble, where exactly one weight sits within 6e-7 of
+   an f16 tie. The campaign's determinism claim — *"Gram-matrix exact full-data solves — no
+   SGD, no seed"*, *"44/44 refits byte-identical"* — holds for the closed-form families and
+   for a re-run **from cached grams**; it does not survive re-accumulating the grams from
+   parquet, because the gram itself is only summation-order-stable.
+2. **The anchored-bake step's exact invocation is not recovered by the committed tooling's
+   defaults.** The producer was `scripts/v_next/shared_anchor_refit.py`, deleted 2026-07-29
+   in favour of `bake_dial_refit shared-anchor`; the migration was proven byte-identical for
+   the ops it was tested on, but not for this artifact, and the surviving record does not
+   pin the argument (`--n-edges`, the anchor variant) that would close it.
+
+**One more provenance gap, cosmetic but worth stating**: `ens-Pline-cid80.npz` was **not**
+emitted by the committed `cmd_ensemble` — that function only produces
+`Pline-cid{30,50,70}` (line 993, `for a in (0.3, 0.5, 0.7)`), the npz carries a hand-written
+`desc` (*"panel-informed frontier probe"*) unlike the generated ones, and it is absent from
+`ensemble_report.json`. The step is nonetheless fully **recoverable and verified** — the
+arithmetic above reproduces the stored npz to 1.4e-14 with an exact bias — so this is a
+missing-commit, not a lost recipe.
+
+### 10b. What the breaks actually cost — the noise floor
+
+Both arms taken all the way to a shipped-shape bake (`shared-anchor` → `add-winsor` →
+`extend-top`) and verdicted on the current-era root:
+
+| arm | final sha256 (16) | what it isolates |
+|---|---|---|
+| `shipped` | `b6fe5233ee9c752d` | — |
+| `armN` | `62d8274ce257a578` | the **anchored-step procedure gap** (historical fits, rebuilt anchored bake) |
+| `armC` | `f08b3c8052e13e37` | the **full gram+fit re-run** from the same stored legs |
+
+**Rank — SROCC (signed), current-era root:**
+
+| corpus | shipped | armN | armC | armN−shipped | armC−armN |
+|---|---:|---:|---:|---:|---:|
+| cid22 | 0.88212 | 0.88212 | 0.88212 | **+0.00000** | +0.00000 |
+| konjnd | −0.51938 | −0.51938 | −0.51934 | **+0.00000** | +0.00003 |
+| aic3 | 0.76501 | 0.76501 | 0.76505 | **+0.00000** | +0.00003 |
+| tid | 0.77852 | 0.77852 | 0.77852 | **+0.00000** | +0.00000 |
+| kadid | 0.80847 | 0.80847 | 0.80848 | **+0.00000** | +0.00001 |
+
+**Dial — per-pair, current-era features:**
+
+| gap | corpus | mean | \|Δ\| p50 | p99 | max |
+|---|---|---:|---:|---:|---:|
+| armN − shipped (procedure) | CID22 | +0.0314 | 0.0276 | 0.0704 | **0.0705** |
+| armN − shipped (procedure) | KonJND | +0.0280 | 0.0284 | 0.0404 | 0.0700 |
+| armC − armN (**re-run noise floor**) | CID22 | +0.0015 | 0.0013 | 0.0069 | **0.0125** |
+| armC − armN (**re-run noise floor**) | KonJND | +0.0021 | 0.0017 | 0.0069 | 0.0094 |
+
+### 10c. Verdict on the gate
+
+**`REPRODUCIBLE-TO-3e-5-SROCC / 0.07-DIAL-POINTS — not byte-identical.`**
+
+The brief's gate was byte-identity, and byte-identity **fails**. But the failure is
+quantified and it is not disqualifying: rank reproduces to **≤ 3e-5 SROCC** (0.00000 on
+four of five corpora) and the dial to **≤ 0.071 points end-to-end**, of which only
+**≤ 0.013** is the fit re-run itself.
+
+**Against the defect this wave exists to fix — a −4.98 / −5.86 point dial shift — the
+pipeline's own noise floor is ~70× smaller (0.071 vs 4.98).** So a fresh-legs retrain
+comparison *is* interpretable, provided every reported delta is stated against this floor
+and no claim is made on bytes. A retrain moving the dial by less than ~0.1 points has
+measured nothing.
+
+That said, §3 still blocks the retrain that would matter (safesyn + the anchor), and §2c
+bounds the executable subset at 1.94 % of B's weight-fitting mass — which, against a
+0.071-point floor, is very unlikely to clear it. **The gate is passed with a caveat; the
+experiment behind it remains blocked on data, not on reproducibility.**
+
+### 10d. Reproduction
+
+```sh
+S=/mnt/v/output/zensim/bfresh-2026-09-04/lp-control      # fresh scratch; val/ symlinked read-only
+ZLIN_SCRATCH=$S python3 scripts/v_next/linear_projections_2026-07-03.py \
+    gram --only safesyn,cid22_train,kadid,tid,hdr_v3mix   # 8 s
+ZLIN_SCRATCH=$S python3 scripts/v_next/linear_projections_2026-07-03.py fit --only canonhdr15,hdrmix
+# ens-Pline-cid80 = anchor-normalised 0.8*cid + 0.2*kon (see 10a; not emitted by cmd_ensemble)
+ZLIN_SCRATCH=$S python3 scripts/v_next/linear_projections_2026-07-03.py finalize --keys ens-Pline-cid80 --taus 0
+bake_dial_refit shared-anchor --in $S/bakes/lp_ens-Pline-cid80-tau0-f16.bin --out armC_anchored.bin \
+    --anchor .../multiband_anchor_dial100.parquet --target-col target_score
+bake_dial_refit add-winsor  --in armC_anchored.bin --out armC_winsor.bin \
+    --fit-corpus /mnt/v/output/zensim-jxl-nearlossless/inclusive_winsor_corpus.parquet --lo-pct 0.1 --hi-pct 99.9
+bake_dial_refit extend-top  --in armC_winsor.bin --out armC_final.bin --anchor .../multiband_anchor_dial100.parquet
+```
