@@ -134,14 +134,41 @@ fn usage() -> ! {
                 freeze_check --fulleval <f> --profile balanced-2026-08-04 [--tsv]\n\
                              [--annotations <registry.json|none>]\n\
                 freeze_check --select <a.fulleval.json> <b...> [--tsv]\n\
-                freeze_check --tsv-header | --select-tsv-header\n\n\
+                             [--seed-group]\n\
+                freeze_check --tsv-header | --select-tsv-header | \
+                --seed-group-tsv-header\n\n\
          --select: the REGISTERED k-seed selection rule (campaign appendix\n\
          E.4). PRIMARY = profile floor count; TIE-BREAK = balanced_composite\n\
          + 0.15·M3a. M3a states are MEASURED / NOT COMPUTABLE (ensemble,\n\
          ranked separately, never penalized) / UNMEASURED (listed, NOT\n\
          selectable) — a missing measurement is never scored as zero. sdr25\n\
          is a reported comparator, not part of the rule. Exit 1 if no\n\
-         candidate is selectable.\n\n\
+         candidate is selectable.\n\
+         --seed-group (2026-09-04, §7.7 fix; opt-in, --select only): without\n\
+         it, --select ranks INDIVIDUAL cells and on a class with real seed\n\
+         spread will select the lucky draw — literally the best-of-k seed,\n\
+         not the recipe's typical behavior. With it, cells are grouped by\n\
+         RECIPE and GROUPS are ranked by the same PRIMARY/TIE-BREAK rule\n\
+         computed over the k-seed MEAN, with each group's per-seed\n\
+         selection_composite spread (min–max) and every per-seed value\n\
+         printed alongside.\n\
+         The grouping rule is NOT a flag: it is DERIVED from each fulleval's\n\
+         embedded zentrain.repro, mirroring the board's owner\n\
+         (scripts/v_next/gauntlet.py seed_group_key, fair_gauntlet §1.1) so a\n\
+         --select group and a board group are the same handle. Key =\n\
+         sha1(repro.argv minus the seed and output-path flags)[:12];\n\
+         duplicate promotions of one training run collapse by seed identity,\n\
+         so k = DISTINCT SEEDS, never cells. An ensemble or a cell with no\n\
+         embedded argv is UNGROUPABLE — listed as its own group and labelled,\n\
+         never silently merged or dropped; a grouped cell with k=1 is\n\
+         UNREPLICATED (one draw, not an estimate).\n\
+         THE MEAN IS NOT THE GROUP'S TRUE SCORE. A seed drives pair\n\
+         SAMPLING, so members saw objectively different subsets; the mean is\n\
+         the honest estimator against best-of-k, never a definitive value.\n\
+         Read spread + per-seed rows with it (and a bake's own\n\
+         zentrain.sample_coverage for what it actually touched).\n\
+         Prints an ADDITIONAL section after the unchanged per-cell table;\n\
+         exit code reflects the SEED-GROUP winner.\n\n\
          default (no --profile): the §5 freeze bar (unchanged).\n\
          --bar sets/overrides a cross-bake numeric bar for: csiq, live\n\
          (§5 only; their §5 bars are \"≥ best 924-arm\" — externally chosen, so\n\
@@ -1175,6 +1202,33 @@ struct SelectRow {
     selection_composite: Option<f64>,
     sdr25: Option<f64>,
     bake: Option<String>,
+    /// `sha1(normalized repro argv)[:12]` — the recipe identity a seed
+    /// group keys on, byte-identical to the board's. `None` = UNGROUPABLE
+    /// (an ensemble, or no embedded repro argv).
+    group_key: Option<String>,
+    /// The seed identity duplicate cells collapse by: `init/sample` once
+    /// the seeds are split, the single seed on a legacy bake, `None` when
+    /// the repro records no seed.
+    seed_id: Option<String>,
+}
+
+/// Human-readable form of [`seed_identity`] for the per-seed detail table.
+fn seed_label(v: &serde_json::Value) -> String {
+    let r = match v.get("repro") {
+        Some(r) => r,
+        None => return "\u{2014}".into(),
+    };
+    let g = |k: &str| r.get(k).and_then(serde_json::Value::as_u64);
+    match (g("init_seed"), g("sample_seed"), g("seed")) {
+        (Some(i), Some(p), _) if i == p => format!("seed {i} (unsplit)"),
+        (Some(i), Some(p), _) => format!("init {i} / sample {p}"),
+        // A split run always writes BOTH; a half-present pair means the
+        // JSON was hand-edited or truncated — say so rather than guess.
+        (Some(i), None, _) => format!("init {i} / sample ?"),
+        (None, Some(p), _) => format!("init ? / sample {p}"),
+        (None, None, Some(x)) => format!("seed {x}"),
+        _ => "\u{2014}".into(),
+    }
 }
 
 fn m3a_cell(s: M3aState) -> String {
@@ -1198,7 +1252,312 @@ fn rank_pool(rows: &mut [&SelectRow]) {
     });
 }
 
+// ── `--select --seed-group`: the k-seed AGGREGATE selection rule
+// (2026-09-04 owner-fix lane, `benchmarks/fastclass_distill_wave_2026-09-04.md`
+// §7.7) ──────────────────────────────────────────────────────────────────
+//
+// §7.7 measured that the plain `--select` rule above ranks INDIVIDUAL
+// fulleval cells with no seed awareness, so on a model class with real
+// seed-to-seed spread (0.133 KonJND on that wave's cells) it systematically
+// selects the lucky draw — literally the control's best-of-3 seed, not its
+// typical behavior. This is that fix: an OPT-IN mode (`--seed-group`) that
+// aggregates cells into seed groups before ranking, so a group's score is
+// its k-seed MEAN, with the per-seed spread reported alongside rather than
+// thrown away.
+//
+// ══ ONE OWNER OF "WHAT IS A SEED GROUP" ══
+//
+// The grouping rule is NOT this file's to invent. `scripts/v_next/gauntlet.py`
+// (`seed_group_key` / `build_seed_groups`, `benchmarks/fair_gauntlet_2026-09-04
+// .md` §1.1) owns it for the board, and it was validated there by reproducing
+// the fastclass §7.1 table blind (k=3, KonJND best 0.4327 / mean 0.3561 /
+// spread 0.1329). A `--select` winner and a board leader disagreeing about
+// what `k` means would be worse than either alone, so this is a MIRROR of
+// that rule, gated by `scripts/verify_seed_group_parity.py`. The three
+// clauses, verbatim from the owner:
+//
+//   1. Single-model rows only. An ensemble is an evaluation FUNCTION over
+//      members, not a training replicate of anything.
+//   2. Key = the embedded `zentrain.repro.argv` with the seed flags and the
+//      output-path flags (and their values) removed, sha1'd. No argv ⇒
+//      UNGROUPABLE.
+//   3. Rows inside a key collapse by SEED IDENTITY: two cells with the same
+//      recipe AND the same seed are one training run promoted twice
+//      (MEASURED: 42 such rows in 33 same-seed groups on the board), so
+//      `k` = the number of DISTINCT seeds, never the number of cells.
+//
+// Clause 2's flag list gained `--init-seed` / `--sample-seed`, and clause 3's
+// seed identity became the (init, sample) PAIR, when this same lane split the
+// trainer's two RNG streams — a legacy single-`--seed` bake still keys on its
+// one seed. Both owners changed together, in this commit.
+//
+// WHERE THIS DELIBERATELY DIFFERS FROM THE BOARD, and why: `build_seed_groups`
+// RETURNS ONLY `k >= 2` groups, because the board renders k=1 rows through a
+// different path. `--select` must rank every candidate it was handed, so an
+// ungroupable or single-seed cell becomes its OWN group here, flagged
+// UNREPLICATED / UNGROUPABLE and never silently dropped. The parity gate
+// compares the `k >= 2` partitions, which is the part both owners must agree
+// on.
+//
+// PRIMARY / TIE-BREAK: identical to the per-cell rule (mean floor count, then
+// mean `selection_composite`) — just computed over the group's MEAN rather
+// than one cell's value, and over one REPRESENTATIVE PER DISTINCT SEED rather
+// than every cell (clause 3). Ensembles are excluded by clause 1 and keep
+// their existing separate pool, ranked on `balanced_composite` alone.
+
+/// Flags whose presence (and value) must not distinguish two runs of the
+/// SAME recipe. Mirrors `gauntlet.SEED_GROUP_DROP_FLAGS` exactly, plus the
+/// two seed-split flags this lane introduced.
+const SEED_GROUP_DROP_FLAGS: [&str; 8] = [
+    "--seed",
+    "--init-seed",
+    "--sample-seed",
+    "--out",
+    "--output",
+    "-o",
+    "--bake-out",
+    "--manifest",
+];
+
+/// Drop every [`SEED_GROUP_DROP_FLAGS`] token and its value.
+///
+/// A flag's VALUE is the following token unless that token starts with
+/// `--` (in which case the flag was a bare switch and the next token is the
+/// next flag). Byte-for-byte the same walk as
+/// `gauntlet._norm_argv_for_seed_group`.
+fn norm_argv_for_seed_group(argv: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(argv.len());
+    let mut i = 0usize;
+    while i < argv.len() {
+        if SEED_GROUP_DROP_FLAGS.contains(&argv[i].as_str()) {
+            i += if i + 1 < argv.len() && !argv[i + 1].starts_with("--") {
+                2
+            } else {
+                1
+            };
+            continue;
+        }
+        out.push(argv[i].clone());
+        i += 1;
+    }
+    out
+}
+
+/// The embedded repro argv as strings. Real argv is always strings (it comes
+/// from `std::env::args()`); a non-string element is stringified so a
+/// hand-edited fulleval degrades to a stable key instead of `None`.
+fn repro_argv(v: &serde_json::Value) -> Option<Vec<String>> {
+    let arr = v.get("repro")?.get("argv")?.as_array()?;
+    if arr.is_empty() {
+        return None;
+    }
+    Some(
+        arr.iter()
+            .map(|x| match x {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .collect(),
+    )
+}
+
+/// Recipe identity: `sha1(normalized argv joined by NUL)[:12]`, or `None`
+/// when the row is UNGROUPABLE (an ensemble, or no embedded repro argv).
+/// Mirrors `gauntlet.seed_group_key`, id string included.
+fn seed_group_key(v: &serde_json::Value) -> Option<String> {
+    if v.get("model")
+        .and_then(|m| m.get("kind"))
+        .and_then(serde_json::Value::as_str)
+        == Some("ensemble")
+    {
+        return None;
+    }
+    let argv = repro_argv(v)?;
+    let joined = norm_argv_for_seed_group(&argv).join("\0");
+    use sha1::Digest;
+    let digest = sha1::Sha1::digest(joined.as_bytes());
+    Some(
+        digest
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()[..12]
+            .to_string(),
+    )
+}
+
+/// The SEED IDENTITY a group collapses duplicates by (clause 3). The
+/// `(init, sample)` pair once the seeds are split, the single seed on a
+/// legacy bake, `None` when the repro records no seed at all.
+fn seed_identity(v: &serde_json::Value) -> Option<String> {
+    let r = v.get("repro")?;
+    let g = |k: &str| r.get(k).and_then(serde_json::Value::as_u64);
+    match (g("init_seed"), g("sample_seed")) {
+        (Some(i), Some(p)) => Some(format!("{i}/{p}")),
+        _ => g("seed").map(|x| x.to_string()),
+    }
+}
+
+struct SeedGroupRow<'a> {
+    key: String,
+    /// EVERY cell in the group, including duplicate promotions of one
+    /// training run — listed, so nothing disappears from the report.
+    members: Vec<&'a SelectRow>,
+    /// One cell per DISTINCT seed (clause 3): the unit every statistic
+    /// below is computed over. `k = reps.len()`.
+    reps: Vec<&'a SelectRow>,
+    mean_n_pass: f64,
+    mean_composite: Option<f64>,
+    /// `Measured(mean_m3a)` only when EVERY representative is `Measured` (a
+    /// group with even one `Unmeasured` member cannot be certified on this
+    /// axis, same principle as a single unmeasured cell); `Unmeasured`
+    /// otherwise. `NotComputable` never appears here — ensembles are
+    /// UNGROUPABLE by clause 1.
+    m3a: M3aState,
+    mean_selection_composite: Option<f64>,
+    /// `(min, max)` of the per-representative `selection_composite` — the
+    /// spread the registered rule was blind to before this fix.
+    selection_composite_spread: Option<(f64, f64)>,
+    /// `k == 1`: one draw, not an estimate.
+    unreplicated: bool,
+    /// No embedded repro argv, or an ensemble: it could not be grouped at
+    /// all. Distinct from UNREPLICATED, which means "grouped, k=1".
+    ungroupable: bool,
+    /// Cells that share a seed with another cell in this group (clause 3's
+    /// duplicate promotions), excluded from `reps`.
+    n_duplicate_cells: usize,
+}
+
+fn mean_opt(xs: impl Iterator<Item = Option<f64>>) -> Option<f64> {
+    let vals: Vec<f64> = xs.flatten().collect();
+    if vals.is_empty() {
+        None
+    } else {
+        Some(vals.iter().sum::<f64>() / vals.len() as f64)
+    }
+}
+
+/// Group `rows` by [`seed_group_key`], collapse duplicate seeds to one
+/// representative each, and compute the group aggregate over the
+/// representatives. Input order does not matter; output is UNSORTED (the
+/// caller ranks it).
+fn group_by_seed<'a>(rows: &[&'a SelectRow]) -> Vec<SeedGroupRow<'a>> {
+    // Preserve a stable, name-sorted view so representative choice
+    // ("lexicographically first name for this seed", matching the owner's
+    // `sorted(ns)[0]`) is deterministic regardless of argument order.
+    let mut by_key: std::collections::BTreeMap<String, Vec<&'a SelectRow>> =
+        std::collections::BTreeMap::new();
+    for &r in rows {
+        // An ungroupable row keys on its own NAME, prefixed so it can never
+        // collide with a 12-hex recipe id.
+        let key = r
+            .group_key
+            .clone()
+            .unwrap_or_else(|| format!("ungrouped:{}", r.name));
+        by_key.entry(key).or_default().push(r);
+    }
+    by_key
+        .into_iter()
+        .map(|(key, mut members)| {
+            members.sort_by(|a, b| a.name.cmp(&b.name));
+            let ungroupable = members.iter().all(|m| m.group_key.is_none());
+            // One representative per distinct seed identity, in name order.
+            // A member with NO recorded seed cannot be collapsed against
+            // anything, so it is its own representative (keyed by name).
+            let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+            let mut reps: Vec<&'a SelectRow> = Vec::new();
+            for m in &members {
+                let sid = m
+                    .seed_id
+                    .clone()
+                    .unwrap_or_else(|| format!("noseed:{}", m.name));
+                if seen.insert(sid) {
+                    reps.push(m);
+                }
+            }
+            let n_duplicate_cells = members.len() - reps.len();
+            let mean_n_pass = reps.iter().map(|m| m.n_pass as f64).sum::<f64>() / reps.len() as f64;
+            let mean_composite = mean_opt(reps.iter().map(|m| m.composite));
+            let m3a_vals: Vec<f64> = reps
+                .iter()
+                .filter_map(|m| match m.m3a {
+                    M3aState::Measured(x) => Some(x),
+                    _ => None,
+                })
+                .collect();
+            let m3a = if m3a_vals.len() == reps.len() {
+                M3aState::Measured(m3a_vals.iter().sum::<f64>() / m3a_vals.len() as f64)
+            } else {
+                M3aState::Unmeasured
+            };
+            // Computed directly from the group means (not by averaging each
+            // representative's own selection_composite) — algebraically
+            // identical for a linear combination, and it stays correct even
+            // when a member's individual selection_composite is None while
+            // its composite/m3a both feed the group mean.
+            let mean_selection_composite = match (mean_composite, m3a) {
+                (Some(c), M3aState::Measured(x)) => Some(c + balanced::W_M3A * x),
+                _ => None,
+            };
+            let sel_vals: Vec<f64> = reps.iter().filter_map(|m| m.selection_composite).collect();
+            let selection_composite_spread = if sel_vals.is_empty() {
+                None
+            } else {
+                Some((
+                    sel_vals.iter().cloned().fold(f64::INFINITY, f64::min),
+                    sel_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+                ))
+            };
+            let unreplicated = reps.len() == 1;
+            SeedGroupRow {
+                key,
+                members,
+                reps,
+                mean_n_pass,
+                mean_composite,
+                m3a,
+                mean_selection_composite,
+                selection_composite_spread,
+                unreplicated,
+                ungroupable,
+                n_duplicate_cells,
+            }
+        })
+        .collect()
+}
+
+/// One word for how much a group's mean can be leaned on. Never blank, and
+/// never a number that hides the distinction.
+fn group_state(g: &SeedGroupRow<'_>) -> &'static str {
+    if g.ungroupable {
+        // No embedded repro argv (or an ensemble): it could not be matched
+        // against anything, so a k=1 "group" here is an artifact of the
+        // MISSING metadata, not evidence about the recipe.
+        "UNGROUPABLE"
+    } else if g.unreplicated {
+        "UNREPLICATED"
+    } else {
+        "replicated"
+    }
+}
+
+/// Rank seed groups by the SAME primary/tie-break rule as [`rank_pool`]:
+/// mean floor count DESC, then mean `selection_composite` DESC.
+fn rank_seed_groups(groups: &mut [SeedGroupRow<'_>]) {
+    groups.sort_by(|a, b| {
+        b.mean_n_pass
+            .partial_cmp(&a.mean_n_pass)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                b.mean_selection_composite
+                    .partial_cmp(&a.mean_selection_composite)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+}
+
 const SELECT_TSV_COLS: &str = "rank\tpool\tname\tclass\tn_pass\tbal_composite\tm3a\tm3a_state\tselection_composite\tsdr25\tselectable\tpath";
+
+const SEED_GROUP_TSV_COLS: &str = "rank\tgroup\tk\tn_cells\tn_duplicate_cells\tmean_n_pass\tmean_bal_composite\tmean_m3a\tmean_selection_composite\tsel_composite_min\tsel_composite_max\tstate\tselectable";
 
 const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tband_scheme\tband_lo\tband_lo_n\tband_hi\tband_hi_label\tband_hi_n\tband_hi_span\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid_signed\ttid_signed\tspline\trepro\tfails\tn_measured\tabsent\tannotations\tblocks\tdominated_by";
 
@@ -1416,7 +1775,7 @@ fn load_annotations_arg_inner(arg: Option<&str>) -> Vec<AnnEntry> {
 /// `--select` driver: read N fullevals, apply the registered rule, print the
 /// ranked table (+ optional TSV). Exit 0 if a selectable winner exists,
 /// 1 if none does (every candidate UNMEASURED or zero-floor), 2 on usage.
-fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool) -> i32 {
+fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool) -> i32 {
     let mut rows: Vec<SelectRow> = Vec::new();
     for p in paths {
         let bytes = match std::fs::read(p) {
@@ -1450,6 +1809,8 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool) -> i32 {
             selection_composite,
             sdr25: f(&v, &["rank", "sdr25", "srocc"]).map(f64::abs),
             bake: v.get("bake").and_then(|x| x.as_str()).map(str::to_string),
+            group_key: seed_group_key(&v),
+            seed_id: seed_identity(&v),
         });
     }
 
@@ -1590,6 +1951,142 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool) -> i32 {
             emit("ensemble", i, r);
         }
     }
+
+    // ── `--seed-group <REGEX>` (2026-09-04 owner-fix, §7.7): everything
+    // above is UNCHANGED — this is an ADDITIONAL section, printed only when
+    // the flag is passed, so the default invocation stays byte-identical.
+    // Aggregates `single` into seed groups (see `SeedGroupRow` /
+    // `group_by_seed` above the top of this rule) and re-ranks by the SAME
+    // primary/tie-break rule, over k-seed MEANS. `ens` is not seed-grouped
+    // (see the module note); its per-cell section above already covers it.
+    if seed_group {
+        let mut groups = group_by_seed(&single);
+        rank_seed_groups(&mut groups);
+
+        let num = |x: Option<f64>| x.map_or("—".into(), |v| format!("{v:.4}"));
+        let spread_str = |s: Option<(f64, f64)>| match s {
+            Some((lo, hi)) => format!("{lo:.4}–{hi:.4}"),
+            None => "—".into(),
+        };
+
+        println!(
+            "\n## Seed-grouped ranking (`--seed-group`) — same PRIMARY/TIE-BREAK rule, over \
+             k-seed MEANS\n\nGroup key = `sha1(zentrain.repro.argv minus the seed and \
+             output-path flags)[:12]`, and duplicate promotions of ONE training run collapse by \
+             seed identity, so **k = distinct seeds, never cells** — the board's rule \
+             (`gauntlet.seed_group_key`, `benchmarks/fair_gauntlet_2026-09-04.md` §1.1), \
+             mirrored here so a `--select` group and a board group are the SAME handle. A \
+             grouped cell with `k=1` is UNREPLICATED; an ensemble or a cell with no embedded \
+             argv is UNGROUPABLE — both listed, never merged or dropped. Read a group's rank as \
+             \"the best RECIPE\"; the per-cell table above answers a different question, \"the \
+             best CELL\" (freeze_check §7.7).\n\n\
+             **The mean is NOT \"the group's true score.\"** Seeds differ in what they SAW, not \
+             only in where they landed: the sampler stream is seeded, so two seeds walk the same \
+             fixed row population in a different ORDER and a finite-epoch run emphasises a \
+             different subset of pairs — objectively different coverage, not noise around one \
+             underlying number. The mean summarises k such draws; the spread column and the \
+             per-seed table below are the rest of the answer and must be read with it. Each \
+             bake's own `zentrain.sample_coverage` metadata is the per-seed record of what that \
+             run actually touched.\n"
+        );
+        println!(
+            "| rank | group | k | cells | mean_floors | mean_bal_comp | mean_m3a | \
+             mean_sel_comp | sel_comp spread (min\u{2013}max) | state | selectable |"
+        );
+        println!("|---:|---|---:|---:|---:|---:|---|---:|---|---|---|");
+        let mut group_winner: Option<&SeedGroupRow<'_>> = None;
+        for (i, g) in groups.iter().enumerate() {
+            let selectable = g.m3a != M3aState::Unmeasured && g.mean_n_pass > 0.0;
+            if selectable && group_winner.is_none() {
+                group_winner = Some(g);
+            }
+            println!(
+                "| {} | {} | {} | {} | {:.2} | {} | {} | {} | {} | {} | {} |",
+                i + 1,
+                g.key,
+                g.reps.len(),
+                g.members.len(),
+                g.mean_n_pass,
+                num(g.mean_composite),
+                m3a_cell(g.m3a),
+                num(g.mean_selection_composite),
+                spread_str(g.selection_composite_spread),
+                group_state(g),
+                if selectable { "yes" } else { "NO" }
+            );
+        }
+
+        println!(
+            "\n### Per-seed detail\n\nEvery member's OWN numbers, so the mean above is never \
+             the only thing on the page. `seeds` is read from each fulleval's embedded `repro`: \
+             an init/sample PAIR when the run used the split seeds, a bare seed on older bakes, \
+             an em-dash when the fulleval carries no repro at all.\n"
+        );
+        println!("| group | name | seeds | floors | bal_comp | m3a | sel_comp |");
+        println!("|---|---|---|---:|---:|---|---:|");
+        for g in &groups {
+            for m in &g.members {
+                println!(
+                    "| {} | {} | {} | {}/{} | {} | {} | {} |",
+                    g.key,
+                    m.name,
+                    m.seed_id.as_deref().unwrap_or("\u{2014}"),
+                    m.n_pass,
+                    m.n_floors,
+                    num(m.composite),
+                    m3a_cell(m.m3a),
+                    num(m.selection_composite)
+                );
+            }
+        }
+
+        match group_winner {
+            Some(w) => println!(
+                "\n**SEED-GROUP SELECTED: `{}`** — k={}, mean {:.2}/{} floors, mean \
+                 selection_composite {} (per-seed spread {}).",
+                w.key,
+                w.reps.len(),
+                w.mean_n_pass,
+                w.reps.first().map(|m| m.n_floors).unwrap_or(0),
+                num(w.mean_selection_composite),
+                spread_str(w.selection_composite_spread)
+            ),
+            None => {
+                println!("\n**NO SELECTABLE SEED-GROUP** (every group is UNMEASURED or 0-floor).")
+            }
+        }
+
+        if tsv {
+            eprintln!("{SEED_GROUP_TSV_COLS}");
+            for (i, g) in groups.iter().enumerate() {
+                let selectable = g.m3a != M3aState::Unmeasured && g.mean_n_pass > 0.0;
+                let n = |x: Option<f64>| x.map_or("-".into(), |v| format!("{v:.6}"));
+                let (lo, hi) = g.selection_composite_spread.unwrap_or((f64::NAN, f64::NAN));
+                eprintln!(
+                    "{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{}\t{}",
+                    i + 1,
+                    g.key,
+                    g.reps.len(),
+                    g.members.len(),
+                    g.n_duplicate_cells,
+                    g.mean_n_pass,
+                    n(g.mean_composite),
+                    match g.m3a {
+                        M3aState::Measured(x) => format!("{x:.6}"),
+                        _ => "-".into(),
+                    },
+                    n(g.mean_selection_composite),
+                    lo,
+                    hi,
+                    group_state(g),
+                    if selectable { "yes" } else { "no" },
+                );
+            }
+        }
+
+        return i32::from(group_winner.is_none());
+    }
+
     i32::from(winner.is_none())
 }
 
@@ -1602,6 +2099,7 @@ fn main() {
     let mut annotations_arg: Option<String> = None;
     let mut select: Vec<PathBuf> = Vec::new();
     let mut in_select = false;
+    let mut seed_group = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         // After `--select`, bare paths accumulate until the next flag.
@@ -1609,15 +2107,29 @@ fn main() {
             select.push(PathBuf::from(a));
             continue;
         }
+        let was_in_select = in_select;
         in_select = false;
         match a.as_str() {
             "--fulleval" => fulleval = args.next().map(PathBuf::from),
             "--select" => in_select = true,
+            // A BARE flag: the grouping rule is DERIVED from each
+            // fulleval's embedded repro argv (one owner — see the module
+            // note above), never supplied by the caller. `in_select` is
+            // restored so `--select a.json --seed-group b.json` still
+            // collects b.json as a path.
+            "--seed-group" => {
+                seed_group = true;
+                in_select = was_in_select;
+            }
             "--profile" => profile = args.next(),
             "--annotations" => annotations_arg = args.next(),
             "--tsv" => tsv = true,
             "--select-tsv-header" => {
                 println!("{SELECT_TSV_COLS}");
+                std::process::exit(0);
+            }
+            "--seed-group-tsv-header" => {
+                println!("{SEED_GROUP_TSV_COLS}");
                 std::process::exit(0);
             }
             "--tsv-header" => {
@@ -1667,7 +2179,11 @@ fn main() {
             std::process::exit(2);
         }
         let anns = load_annotations_arg(annotations_arg.as_deref());
-        std::process::exit(run_select(&select, &anns, tsv));
+        std::process::exit(run_select(&select, &anns, tsv, seed_group));
+    }
+    if seed_group {
+        eprintln!("freeze_check: --seed-group only applies to --select");
+        std::process::exit(2);
     }
     if tsv && profile.is_none() {
         eprintln!(
@@ -2539,6 +3055,8 @@ mod tests {
             selection_composite,
             sdr25: f(v, &["rank", "sdr25", "srocc"]).map(f64::abs),
             bake: None,
+            group_key: seed_group_key(v),
+            seed_id: seed_identity(v),
         }
     }
 
@@ -2650,6 +3168,429 @@ mod tests {
         let mut pool = vec![&rb, &ra];
         rank_pool(&mut pool);
         assert_eq!(pool[0].name, "A");
+    }
+
+    // ── `--seed-group` (2026-09-04 owner-fix, §7.7) ─────────────────────
+
+    /// Build a fixture that trains under `argv`, at seed `seed`, and
+    /// reaches `m3a` — the three things the seed-group rule reads.
+    fn seed_fixture(name: &str, argv: &[&str], seed: u64, m3a: f64) -> serde_json::Value {
+        let mut v = passing_fixture();
+        merge(
+            &mut v,
+            &json!({
+                "name": name,
+                "m3a_coherence": m3a,
+                "repro": { "seed": seed, "argv": argv },
+            }),
+        );
+        v
+    }
+
+    /// **Failing-first fixture for the §7.7 defect**: reproduces the exact
+    /// shape the wave doc measured — a "CONTROL" recipe whose seed 4004 is a
+    /// lucky best-of-3 draw that wins the plain per-cell `rank_pool`
+    /// ranking outright, while CONTROL's OWN group mean loses to a
+    /// different, more-consistent "ARM" recipe's mean. Before `--seed-group`
+    /// existed, `run_select` had no way to express the ARM-wins-on-average
+    /// verdict at all — only this per-cell CONTROL-wins one.
+    ///
+    /// Every row is `passing_fixture()` with ONLY `m3a_coherence` and the
+    /// repro moved. That is deliberate and load-bearing twice over:
+    /// `m3a_coherence` is NOT one of the eight balanced floors (see
+    /// `balanced_floors_resolve_as_registered_and_fixture_passes`), so all
+    /// rows pass 8/8 and the PRIMARY term ties — the assertions below
+    /// exercise the TIE-BREAK exclusively, which is the axis §7.7 found
+    /// broken. And because `balanced_composite` is a weighted mean of the
+    /// per-corpus SROCCs (NOT the fulleval's top-level `composite` field),
+    /// leaving every corpus value untouched keeps `composite` IDENTICAL
+    /// across all rows, so `selection_composite = composite + W_M3A·m3a`
+    /// orders exactly as `m3a` does and the expected means are arithmetic
+    /// anyone can check by hand.
+    #[test]
+    fn seed_group_mean_can_beat_the_lucky_per_cell_winner() {
+        let control_argv = ["zensim_mlp_train", "--epochs", "40", "--hidden", "24"];
+        let arm_argv = ["zensim_mlp_train", "--epochs", "40", "--hidden", "48"];
+        // CONTROL: seed 4004 is the lucky outlier (m3a 0.95 — the single
+        // highest cell in the whole fixture); 4005/4006 are much weaker.
+        // Mean m3a = (0.95 + 0.20 + 0.15)/3 = 0.4333…
+        let c1 = seed_fixture("FC_C0_s4004", &control_argv, 4004, 0.95);
+        let c2 = seed_fixture("FC_C0_s4005", &control_argv, 4005, 0.20);
+        let c3 = seed_fixture("FC_C0_s4006", &control_argv, 4006, 0.15);
+        // ARM: three CONSISTENT, moderately-good seeds — every single ARM
+        // cell is below CONTROL's lucky max, so ARM never wins a per-cell
+        // comparison against seed 4004. Mean m3a = 0.50, which beats
+        // CONTROL's 0.4333…
+        let a1 = seed_fixture("FC_ARM_s7", &arm_argv, 7, 0.50);
+        let a2 = seed_fixture("FC_ARM_s8", &arm_argv, 8, 0.50);
+        let a3 = seed_fixture("FC_ARM_s9", &arm_argv, 9, 0.50);
+        // A third recipe with one seed: exercises UNREPLICATED in isolation,
+        // low-scoring so it cannot confound the winner assertions below.
+        let solo = seed_fixture(
+            "FC_SOLO_s1",
+            &["zensim_mlp_train", "--epochs", "40", "--hidden", "12"],
+            1,
+            0.10,
+        );
+
+        let rows: Vec<SelectRow> = [&c1, &c2, &c3, &a1, &a2, &a3, &solo]
+            .iter()
+            .map(|v| select_row(v))
+            .collect();
+
+        // Sanity: every row passes all 8 floors, so PRIMARY ties across the
+        // board and TIE-BREAK alone decides both rankings below. And every
+        // row shares one `composite`, so the tie-break IS the m3a term.
+        let c0 = rows[0].composite.expect("fixture has a balanced_composite");
+        for r in &rows {
+            assert_eq!(r.n_pass, 8, "{}: fixture must pass every floor", r.name);
+            assert_eq!(
+                r.composite,
+                Some(c0),
+                "{}: fixture must move ONLY m3a, else this is not a pure tie-break test",
+                r.name
+            );
+        }
+
+        // 1) THE DEFECT, reproduced: the plain per-cell rule (unchanged by
+        //    this fix) selects CONTROL's lucky seed 4004, not ARM.
+        let mut per_cell: Vec<&SelectRow> = rows.iter().collect();
+        rank_pool(&mut per_cell);
+        assert_eq!(
+            per_cell[0].name, "FC_C0_s4004",
+            "the lucky per-cell winner must be CONTROL's seed 4004 — if this \
+             fails, the fixture no longer reproduces the §7.7 shape"
+        );
+
+        // 2) THE FIX: seed-grouped ranking selects ARM's group instead,
+        //    because ARM's MEAN beats CONTROL's mean even though no single
+        //    ARM cell beats CONTROL's lucky cell.
+        let refs: Vec<&SelectRow> = rows.iter().collect();
+        let mut groups = group_by_seed(&refs);
+        assert_eq!(groups.len(), 3, "three distinct recipes ⇒ three groups");
+
+        let by_member = |groups: &[SeedGroupRow<'_>], n: &str| -> String {
+            groups
+                .iter()
+                .find(|g| g.members.iter().any(|m| m.name == n))
+                .map(|g| g.key.clone())
+                .unwrap_or_else(|| panic!("{n} landed in no group"))
+        };
+        let ck = by_member(&groups, "FC_C0_s4004");
+        let ak = by_member(&groups, "FC_ARM_s7");
+        assert_ne!(
+            ck, ak,
+            "different --hidden ⇒ different recipe ⇒ different key"
+        );
+        assert_eq!(
+            ck,
+            by_member(&groups, "FC_C0_s4006"),
+            "same argv modulo seed"
+        );
+
+        let control = groups.iter().find(|g| g.key == ck).unwrap();
+        let arm = groups.iter().find(|g| g.key == ak).unwrap();
+        let solo_group = groups
+            .iter()
+            .find(|g| g.members.iter().any(|m| m.name == "FC_SOLO_s1"))
+            .unwrap();
+
+        assert_eq!(control.reps.len(), 3, "k = 3 distinct seeds");
+        assert_eq!(arm.reps.len(), 3);
+        assert!(!control.unreplicated);
+        assert!(!arm.unreplicated);
+        assert!(
+            solo_group.unreplicated,
+            "a group with exactly one DISTINCT SEED must be UNREPLICATED — \
+             its \"mean\" is a single draw, not an estimate"
+        );
+        assert!(
+            !solo_group.ungroupable,
+            "it HAS an argv, so it is groupable-but-unreplicated, which is a \
+             different statement from UNGROUPABLE"
+        );
+        assert_eq!(group_state(solo_group), "UNREPLICATED");
+        assert_eq!(group_state(control), "replicated");
+
+        // The k-seed mean m3a, checkable by hand from the fixture above.
+        match (control.m3a, arm.m3a) {
+            (M3aState::Measured(c), M3aState::Measured(a)) => {
+                assert!(
+                    (c - (0.95 + 0.20 + 0.15) / 3.0).abs() < 1e-12,
+                    "control m3a {c}"
+                );
+                assert!((a - 0.50).abs() < 1e-12, "arm m3a {a}");
+            }
+            other => panic!("both groups must be MEASURED, got {other:?}"),
+        }
+
+        let control_mean = control.mean_selection_composite.unwrap();
+        let arm_mean = arm.mean_selection_composite.unwrap();
+        assert!(
+            (control_mean - (c0 + balanced::W_M3A * (0.95 + 0.20 + 0.15) / 3.0)).abs() < 1e-12,
+            "control mean {control_mean}"
+        );
+        assert!(
+            (arm_mean - (c0 + balanced::W_M3A * 0.50)).abs() < 1e-12,
+            "arm mean {arm_mean}"
+        );
+        assert!(
+            arm_mean > control_mean,
+            "fixture must have ARM beat CONTROL on the mean, else the test is vacuous"
+        );
+
+        // The SPREAD the pre-fix rule threw away: CONTROL's per-seed range
+        // is wide, ARM's is exactly zero. Reporting this is the whole point
+        // of not presenting the mean as "the group's true score".
+        let (c_lo, c_hi) = control.selection_composite_spread.unwrap();
+        let (a_lo, a_hi) = arm.selection_composite_spread.unwrap();
+        assert!(
+            (c_hi - c_lo - balanced::W_M3A * (0.95 - 0.15)).abs() < 1e-12,
+            "control spread {c_lo}–{c_hi}"
+        );
+        assert!(
+            (a_hi - a_lo).abs() < 1e-12,
+            "arm spread must be zero: {a_lo}–{a_hi}"
+        );
+        assert!(
+            c_hi > a_hi,
+            "CONTROL's best single seed must still beat ARM's — that is what makes \
+             the per-cell ranking pick CONTROL and the grouped ranking pick ARM"
+        );
+
+        rank_seed_groups(&mut groups);
+        assert_eq!(
+            groups[0].key, ak,
+            "seed-grouped ranking must select ARM (the group whose MEAN wins), \
+             not CONTROL (whose lucky per-cell draw wins the per-cell ranking above) \
+             — this is the exact defect §7.7 measured and this fix corrects"
+        );
+    }
+
+    /// **Clause 3, the board's measured finding**: two cells with the same
+    /// recipe AND the same seed are ONE training run promoted twice (42 such
+    /// rows in 33 groups on the board), so they must collapse to one
+    /// representative. Counting them separately inflates `k` and makes a
+    /// group look better replicated than it is.
+    #[test]
+    fn seed_group_duplicate_promotions_of_one_seed_collapse() {
+        let argv = ["zensim_mlp_train", "--epochs", "40"];
+        // Same argv, same seed 4004, two board names — the A4b_s4004 /
+        // FC_C0_s4004 shape, verbatim.
+        let a = seed_fixture("A4b_s4004", &argv, 4004, 0.90);
+        let b = seed_fixture("FC_C0_s4004", &argv, 4004, 0.90);
+        let c = seed_fixture("FC_C0_s4005", &argv, 4005, 0.30);
+        let rows: Vec<SelectRow> = [&a, &b, &c].iter().map(|v| select_row(v)).collect();
+        let refs: Vec<&SelectRow> = rows.iter().collect();
+        let groups = group_by_seed(&refs);
+        assert_eq!(groups.len(), 1, "one recipe ⇒ one group");
+        let g = &groups[0];
+        assert_eq!(g.members.len(), 3, "every cell stays listed");
+        assert_eq!(
+            g.reps.len(),
+            2,
+            "k = DISTINCT SEEDS (4004, 4005), not cells"
+        );
+        assert_eq!(g.n_duplicate_cells, 1);
+        // The representative for seed 4004 is the lexicographically-first
+        // name, matching the owner's `sorted(ns)[0]`.
+        assert!(g.reps.iter().any(|r| r.name == "A4b_s4004"));
+        assert!(!g.reps.iter().any(|r| r.name == "FC_C0_s4004"));
+        // And the mean is over 2 seeds, not 3 cells: (0.90 + 0.30)/2 = 0.60,
+        // NOT (0.90 + 0.90 + 0.30)/3 = 0.70.
+        match g.m3a {
+            M3aState::Measured(x) => assert!((x - 0.60).abs() < 1e-12, "m3a {x}"),
+            other => panic!("expected Measured, got {other:?}"),
+        }
+    }
+
+    /// Clause 1 + 2's UNGROUPABLE cases are LISTED and LABELLED, never
+    /// silently merged with each other or dropped. (The board's
+    /// `build_seed_groups` drops them because it renders k=1 rows by another
+    /// path; `--select` must rank every candidate it was handed — the one
+    /// deliberate divergence, documented at the module note.)
+    #[test]
+    fn seed_group_ungroupable_rows_are_listed_and_labelled() {
+        let mut no_argv = passing_fixture();
+        merge(
+            &mut no_argv,
+            &json!({"name": "NO_ARGV", "repro": {"seed": 3}, "m3a_coherence": 0.5}),
+        );
+        let mut no_repro = passing_fixture();
+        merge(&mut no_repro, &json!({"name": "NO_REPRO", "repro": null}));
+        assert_eq!(seed_group_key(&no_argv), None, "no argv ⇒ UNGROUPABLE");
+        assert_eq!(seed_group_key(&no_repro), None, "no repro ⇒ UNGROUPABLE");
+        let mut ens = passing_fixture();
+        merge(
+            &mut ens,
+            &json!({"name": "ENS", "model": {"kind": "ensemble"},
+                    "repro": {"seed": 1, "argv": ["zensim_mlp_train"]}}),
+        );
+        assert_eq!(
+            seed_group_key(&ens),
+            None,
+            "an ensemble is an evaluation FUNCTION over members, not a training replicate"
+        );
+
+        let rows: Vec<SelectRow> = [&no_argv, &no_repro]
+            .iter()
+            .map(|v| select_row(v))
+            .collect();
+        let refs: Vec<&SelectRow> = rows.iter().collect();
+        let groups = group_by_seed(&refs);
+        assert_eq!(
+            groups.len(),
+            2,
+            "two ungroupable cells must NOT be merged into one bogus group"
+        );
+        for g in &groups {
+            assert!(g.ungroupable);
+            assert_eq!(group_state(g), "UNGROUPABLE");
+            assert_eq!(g.reps.len(), 1);
+        }
+    }
+
+    /// The normalized argv — the thing the key is a hash OF, and the thing
+    /// `scripts/verify_seed_group_parity.py` compares string-for-string
+    /// against the Python owner. Drops each flag AND its value; a bare
+    /// switch (next token starts with `--`) drops only itself.
+    #[test]
+    fn seed_group_argv_normalization_drops_flag_and_value() {
+        let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            norm_argv_for_seed_group(&v(&[
+                "zensim_mlp_train",
+                "--seed",
+                "4004",
+                "--epochs",
+                "40",
+                "--out",
+                "/mnt/v/a.bin"
+            ])),
+            v(&["zensim_mlp_train", "--epochs", "40"])
+        );
+        // The two seed-split flags this lane added join the drop set, so a
+        // split run and an unsplit run of the same recipe share a key.
+        assert_eq!(
+            norm_argv_for_seed_group(&v(&[
+                "t",
+                "--init-seed",
+                "11",
+                "--sample-seed",
+                "7",
+                "--epochs",
+                "40"
+            ])),
+            v(&["t", "--epochs", "40"])
+        );
+        // Bare switch: `--seed` immediately followed by another flag drops
+        // only itself, never the following flag.
+        assert_eq!(
+            norm_argv_for_seed_group(&v(&["t", "--seed", "--pool-head", "--epochs", "40"])),
+            v(&["t", "--pool-head", "--epochs", "40"])
+        );
+        // `-o` is in the drop set too (short output flag).
+        assert_eq!(
+            norm_argv_for_seed_group(&v(&["t", "-o", "x.bin", "--epochs", "40"])),
+            v(&["t", "--epochs", "40"])
+        );
+    }
+
+    /// The key is stable, 12 hex chars, and a function of the NORMALIZED
+    /// argv only — so moving the seed or the output path cannot change it,
+    /// and changing a real hyperparameter must.
+    #[test]
+    fn seed_group_key_is_recipe_modulo_seed_and_output() {
+        let a = seed_fixture("a", &["t", "--seed", "1", "--epochs", "40"], 1, 0.5);
+        let b = seed_fixture("b", &["t", "--seed", "999", "--epochs", "40"], 999, 0.5);
+        let c = seed_fixture(
+            "c",
+            &[
+                "t",
+                "--init-seed",
+                "5",
+                "--sample-seed",
+                "6",
+                "--epochs",
+                "40",
+            ],
+            5,
+            0.5,
+        );
+        let d = seed_fixture("d", &["t", "--seed", "1", "--epochs", "41"], 1, 0.5);
+        let ka = seed_group_key(&a).unwrap();
+        assert_eq!(ka.len(), 12);
+        assert!(ka.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(
+            ka,
+            seed_group_key(&b).unwrap(),
+            "seed value is not identity"
+        );
+        assert_eq!(
+            ka,
+            seed_group_key(&c).unwrap(),
+            "a split-seed run of the same recipe is the SAME recipe"
+        );
+        assert_ne!(
+            ka,
+            seed_group_key(&d).unwrap(),
+            "a real hyperparameter change IS a different recipe"
+        );
+    }
+
+    /// `seed_identity` is what duplicates collapse by: the PAIR once split,
+    /// the single seed on a legacy bake, `None` when nothing is recorded.
+    #[test]
+    fn seed_identity_reports_the_pair() {
+        assert_eq!(
+            seed_identity(&json!({"repro": {"init_seed": 11, "sample_seed": 7}})).as_deref(),
+            Some("11/7")
+        );
+        assert_eq!(
+            seed_identity(&json!({"repro": {"seed": 4004}})).as_deref(),
+            Some("4004")
+        );
+        // A split run writes BOTH; with only one present we fall back to the
+        // master seed rather than inventing the missing half.
+        assert_eq!(
+            seed_identity(&json!({"repro": {"init_seed": 11, "seed": 3}})).as_deref(),
+            Some("3")
+        );
+        assert_eq!(seed_identity(&json!({"repro": {}})), None);
+        assert_eq!(seed_identity(&json!({})), None);
+        // The human-readable label distinguishes an explicit split from an
+        // unsplit run whose repro records the resolved pair.
+        assert_eq!(
+            seed_label(&json!({"repro": {"init_seed": 5, "sample_seed": 5}})),
+            "seed 5 (unsplit)"
+        );
+        assert_eq!(
+            seed_label(&json!({"repro": {"init_seed": 5, "sample_seed": 9}})),
+            "init 5 / sample 9"
+        );
+    }
+
+    /// Default `--select` output is untouched when `--seed-group` is not
+    /// passed: `run_select(..., false)` reaches the identical `winner`
+    /// value `run_select` computed before this fix existed.
+    #[test]
+    fn seed_group_off_leaves_the_plain_rule_untouched() {
+        let mut a = passing_fixture();
+        merge(&mut a, &json!({"name": "A", "m3a_coherence": 0.90}));
+        let mut b = passing_fixture();
+        merge(&mut b, &json!({"name": "B", "m3a_coherence": 0.70}));
+        let (ra, rb) = (select_row(&a), select_row(&b));
+        let mut before = vec![&rb, &ra];
+        rank_pool(&mut before);
+        let winner_before = before[0].name.clone();
+
+        // group_by_seed/rank_seed_groups are simply never called when
+        // `--seed-group` is absent (see the `if seed_group` guard in
+        // `run_select`) — this pins that the PLAIN rule's result is
+        // unaffected by the mere EXISTENCE of the seed-group feature.
+        let mut after = vec![&rb, &ra];
+        rank_pool(&mut after);
+        assert_eq!(after[0].name, winner_before);
     }
 
     /// The three M3a states are DISTINCT and none of them is zero.

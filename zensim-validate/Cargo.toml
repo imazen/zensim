@@ -35,6 +35,16 @@ calamine = "0.34"
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 glob = "0.3"
+# `freeze_check --select --seed-group` (2026-09-04 owner-fix): the seed-group
+# id is sha1(normalized argv)[:12], byte-identical to the board's owner
+# (`scripts/v_next/gauntlet.py::seed_group_key`) so a `--select` group and a
+# board group are THE SAME handle, not two handles that happen to partition
+# the same way. sha1 is fixed by that parity requirement, not chosen: the
+# board's ids are already recorded in `benchmarks/fairness_tiers_2026-09-04
+# .pointer.md` under a sha256, so switching the board to another digest would
+# invalidate a committed record. Same RustCrypto generation as the `sha2`
+# dependency above, so the `Digest` trait versions align.
+sha1 = "0.11.0"
 cmaes = { version = "0.2", default-features = false }
 anyhow = "1"
 memmap2 = "0.9.10"

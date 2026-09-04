@@ -595,13 +595,24 @@ def _ann_matches(o, entry):
 #   2. Key = the embedded `zentrain.repro.argv` with `--seed` and the output-path flags
 #      (and their values) removed. No argv -> UNGROUPABLE (and it also fails criterion
 #      (a), since no argv means no embedded repro).
-#   3. Rows inside a key are collapsed by `repro.seed`: two cells with the SAME recipe
+#   3. Rows inside a key are collapsed by SEED IDENTITY (`seed_identity`): two cells with
+#      the SAME recipe
 #      and the SAME seed are one training run promoted twice (MEASURED: 33 such pairs on
 #      this board, e.g. A4b_s4004 / FC_C0_s4004 — identical argv modulo seed, identical
 #      seed 4004, CID22 identical to 16 digits, different bake sha). So k = the number
 #      of DISTINCT seeds, never the number of board rows.
 # VALIDATION: this rule reproduces §7.1's numbers exactly on its own arm — k=3,
 # KonJND best 0.4327 / mean 0.3561 / spread 0.1329, composite best 0.8664 / mean 0.8572.
+#
+# MIRRORED IN RUST (2026-09-04): `freeze_check --select --seed-group` implements the same
+# three clauses — `norm_argv_for_seed_group` / `seed_group_key` / `seed_identity` in
+# zensim-validate/src/bin/freeze_check.rs, sha1 and all, so a `--select` group id and a
+# board `seed_group` id are the SAME STRING. `scripts/verify_seed_group_parity.py` is the
+# gate: it runs both owners over the board's fulleval dir and fails on any disagreement in
+# normalized argv, key, seed identity, or the resulting k>=2 partitions. ONE deliberate
+# divergence, and only one: `build_seed_groups` returns k>=2 groups because the board
+# renders k=1 rows through another path, while `--select` must rank every candidate it was
+# handed and so keeps ungroupable/single-seed cells as labelled singletons.
 #
 # HOW A GROUP IS PRESENTED (USER CORRECTION, 2026-09-04, verbatim): *"data-subsets are
 # not equal though — one might be more representative and diverse, while another sucks,
@@ -618,7 +629,11 @@ def _ann_matches(o, entry):
 #     it renders NOT MEASURED, never a zero.
 SEED_COVERAGE_NOTE = ("seed spread partly reflects subset coverage; coverage metrics "
                       "pending (ownerfix lane adding `zentrain.sample_coverage`)")
-SEED_GROUP_DROP_FLAGS = {"--seed", "--out", "--output", "-o", "--bake-out", "--manifest"}
+# `--init-seed` / `--sample-seed` joined the set 2026-09-04, when the ownerfix lane split
+# the trainer's two RNG streams: a split run and an unsplit run of the same recipe must
+# still land in one group. Both owners changed in the same commit.
+SEED_GROUP_DROP_FLAGS = {"--seed", "--init-seed", "--sample-seed",
+                         "--out", "--output", "-o", "--bake-out", "--manifest"}
 
 
 def _norm_argv_for_seed_group(argv):
@@ -645,6 +660,21 @@ def seed_group_key(o):
     return hashlib.sha1("\x00".join(_norm_argv_for_seed_group(argv)).encode()).hexdigest()[:12]
 
 
+def seed_identity(o):
+    """The seed a group collapses duplicates by (clause 3).
+
+    The `(init, sample)` PAIR once the trainer's streams are split
+    (`--init-seed` / `--sample-seed`, 2026-09-04), the single `seed` on a legacy
+    bake, None when the repro records no seed at all. Mirrored in Rust as
+    `freeze_check::seed_identity`; gated by scripts/verify_seed_group_parity.py."""
+    r = o.get("repro") or {}
+    i, p = r.get("init_seed"), r.get("sample_seed")
+    if i is not None and p is not None:
+        return f"{i}/{p}"
+    s = r.get("seed")
+    return None if s is None else str(s)
+
+
 def build_seed_groups(objs):
     """[fulleval dicts] -> {group_id: {"k": distinct seeds, "members": [names],
     "reps": [names, one per distinct seed], "dup_seed": [[names sharing a seed], ...]}}.
@@ -654,7 +684,7 @@ def build_seed_groups(objs):
         key = seed_group_key(o)
         if not key:
             continue
-        seed = (o.get("repro") or {}).get("seed")
+        seed = seed_identity(o)
         if seed is None:
             continue
         by_key.setdefault(key, {}).setdefault(seed, []).append(o.get("name"))
