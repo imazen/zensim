@@ -1594,6 +1594,31 @@ pub enum V1FreeExtras {
     /// block on, the append kernel owns `GLOBAL_*` and this writes nothing
     /// there. So a full 944 walk is unaffected whatever this is set to.
     RawMoments,
+    /// [`Self::RawMoments`] PLUS the class-C **bounded-error** tranche —
+    /// a strict superset, so a request for this carries the raw moments too.
+    ///
+    /// Adds `Σ sat((s−d)², C_MSE)` on every channel and, on the Y channel
+    /// only, the dark/bright Bernstein-weighted sums of that same per-pixel
+    /// value. Those finalize:
+    ///
+    /// * the v2-348 `MSE` slot, 12 (scale, channel) cells;
+    /// * the append block's `LUM_DARK_ERR` / `LUM_MID_ERR` /
+    ///   `LUM_BRIGHT_ERR` trio at the Y channel, 4 scales = 12 slots
+    ///   (`LUM_MID_ERR` DERIVED from the partition of unity exactly as
+    ///   [`finish_append`] derives it).
+    ///
+    /// **Y only for the bins, by construction, not by choice.** The weight
+    /// is `sat(ref_Y, C_LUM_T)`, and the Y channel's own `src` plane IS the
+    /// reference luma — so on Y the value rides registers the walk already
+    /// holds. On X/B the same slots would need the ref-Y plane streamed
+    /// into a per-channel kernel: no new *compute*, but a new *load stream*,
+    /// which is outside the class-C ("no new plane, load or pass")
+    /// definition. Those 21 slots stay at their structural zeros; see
+    /// `benchmarks/free_features_classC_2026-09-04.md` §4.
+    ///
+    /// No slot is renumbered or invented: every one of the 24 is an existing
+    /// 944-layout position, filled by a cheaper route.
+    RawMomentsPlusBoundedErr,
 }
 
 /// Indices of the 40 FREE slots ([`V1FreeExtras::RawMoments`]) in the 944
@@ -1632,6 +1657,48 @@ pub(crate) fn free_slot_indices(n_scales: usize) -> Vec<usize> {
             }
         }
         v.push(append2_0 + scale * APPEND2_PER_SCALE + idx_append2::LUMA_MEAN_REF);
+    }
+    v
+}
+
+/// Indices of the 24 CLASS-C slots
+/// ([`V1FreeExtras::RawMomentsPlusBoundedErr`]'s addition over
+/// [`V1FreeExtras::RawMoments`]) in the 944 layout: the v2-348 `MSE` slot
+/// per (scale, channel), plus the append block's three luminance-binned
+/// error slots at the Y channel only.
+///
+/// Same contract as [`free_slot_indices`] — ONE derivation, reused by the
+/// gate tests and by [`crate::fold_engine::wide_bake_v2_read`], never
+/// re-typed as a literal list.
+pub(crate) fn class_c_slot_indices(n_scales: usize) -> Vec<usize> {
+    let v1_total = n_scales * 3 * 31;
+    let append0 = v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
+    let mut v = Vec::new();
+    for scale in 0..n_scales {
+        for ch in 0..3 {
+            v.push(
+                v1_total
+                    + scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                    + ch * FEATURES_PER_CHANNEL_V2_TOTAL
+                    + idx::MSE,
+            );
+        }
+        // Luminance bins: Y channel only (the register-carry constraint —
+        // see `V1FreeExtras::RawMomentsPlusBoundedErr`), and only where the
+        // 944 walk itself computes the append cell.
+        let ch = APPEND2_CHANNEL;
+        if append_cell_active(true, ch, scale) {
+            let base = append0
+                + scale * 3 * FEATURES_PER_CHANNEL_APPEND
+                + ch * FEATURES_PER_CHANNEL_APPEND;
+            for local in [
+                idx_append::LUM_DARK_ERR,
+                idx_append::LUM_MID_ERR,
+                idx_append::LUM_BRIGHT_ERR,
+            ] {
+                v.push(base + local);
+            }
+        }
     }
     v
 }
@@ -1826,7 +1893,35 @@ impl ComputeSet {
     /// owns `GLOBAL_*`; with `append2` on it owns `LUMA_MEAN_REF`). So a full
     /// 944 walk never pays for this however the toggle is set.
     pub(crate) fn raw_moments(&self) -> bool {
-        self.free_extras == V1FreeExtras::RawMoments && !(self.append && self.append2)
+        self.free_extras != V1FreeExtras::Off && !(self.append && self.append2)
+    }
+
+    /// Does the v1 fused kernel need to carry the class-C bounded per-pixel
+    /// error `Σ sat((s−d)², C_MSE)`?
+    ///
+    /// Only when something will READ it: the request asks for the
+    /// bounded-error tranche AND at least one owning block is off — the v2
+    /// dense kernel owns the `MSE` slot, the append kernel owns the
+    /// luminance bins that weight the same per-pixel value. A full 944 walk
+    /// never pays for this however the toggle is set, exactly like
+    /// [`Self::raw_moments`].
+    pub(crate) fn bounded_err(&self) -> bool {
+        self.free_extras == V1FreeExtras::RawMomentsPlusBoundedErr
+            && (!self.v2_blocks || !self.append)
+    }
+
+    /// The per-channel free-extras work order handed to the fused kernel.
+    /// `ch` decides the luminance bins alone: they read `sat(ref_Y, ..)`,
+    /// which is a register carry ONLY on the channel whose `src` IS the
+    /// reference luma ([`APPEND2_CHANNEL`]). Their owning block is the
+    /// append kernel, so they are also skipped whenever it runs.
+    pub(crate) fn free_work(&self, ch: usize) -> crate::fused::FreeExtrasWork {
+        let bounded_err = self.bounded_err();
+        crate::fused::FreeExtrasWork {
+            raw_moments: self.raw_moments(),
+            bounded_err,
+            lum_bins: bounded_err && !self.append && ch == APPEND2_CHANNEL,
+        }
     }
 
     /// Which plane GROUPS the strip scratch must hold, given whether the v1
@@ -1947,7 +2042,7 @@ impl ComputeSet {
         }
         match crate::fold_engine::wide_bake_v2_read(model, v1_total) {
             None => everything,
-            Some(reads_free) => Self {
+            Some(free_extras) => Self {
                 v1_basic: true,
                 v1_pools,
                 v2_blocks: false,
@@ -1959,11 +2054,7 @@ impl ComputeSet {
                 append2: false,
                 append2_dst_activity: false,
                 csfw: false,
-                free_extras: if reads_free {
-                    V1FreeExtras::RawMoments
-                } else {
-                    V1FreeExtras::Off
-                },
+                free_extras,
             },
         }
     }
@@ -4470,6 +4561,34 @@ fn global_stats_from_raw_moments(
     (dmean, g_cgain, g_closs)
 }
 
+/// The three luminance-binned bounded-error values, from the dark/bright
+/// weighted sums plus `Σ mse_i` and `n` — the ONE implementation, shared by
+/// [`finish_append`] (reading the append kernel's accumulators) and the
+/// free-extras finalize (reading the BIT-SAME-DEFINITION sums off the v1
+/// fused kernel). Returns `[dark, mid, bright]`, each already `clamp(0,2)`.
+///
+/// The mid bin is DERIVED, not accumulated: the Bernstein weights
+/// `(1−t)²`, `2t(1−t)`, `t²` are a partition of unity, so
+/// `Σw_mid = n − Σw_dark − Σw_bright` and
+/// `Σw_mid·v = Σv − Σw_dark·v − Σw_bright·v`.
+#[inline]
+fn lum_bins_from_weighted_sums(
+    ws_dark: WeightedSum,
+    ws_bright: WeightedSum,
+    sum_mse: f64,
+    n_f: f64,
+) -> [f64; 3] {
+    let ws_mid = WeightedSum {
+        num: sum_mse - ws_dark.num - ws_bright.num,
+        den: n_f - ws_dark.den - ws_bright.den,
+    };
+    [
+        ws_dark.finish().clamp(0.0, 2.0),
+        ws_mid.finish().clamp(0.0, 2.0),
+        ws_bright.finish().clamp(0.0, 2.0),
+    ]
+}
+
 fn finish_append(
     dense: &DenseAccum,
     app: &AppendAccum,
@@ -4484,10 +4603,6 @@ fn finish_append(
     #[inline]
     fn clamp01(v: f64) -> f64 {
         v.clamp(0.0, 1.0)
-    }
-    #[inline]
-    fn clamp02(v: f64) -> f64 {
-        v.clamp(0.0, 2.0)
     }
     #[inline]
     fn dev_from_moments(sum: f64, sum_sq: f64, n_f: f64) -> f64 {
@@ -4505,16 +4620,12 @@ fn finish_append(
     } else {
         0.0
     };
-    out[idx_append::LUM_DARK_ERR] = clamp02(app.ws_dark.finish());
-    // Mid bin derived from the Bernstein partition of unity (see
-    // `AppendAccum::sum_mse`): Σw_mid = n − Σw_dark − Σw_bright,
-    // Σw_mid·v = Σv − Σw_dark·v − Σw_bright·v.
-    let ws_mid = WeightedSum {
-        num: app.sum_mse - app.ws_dark.num - app.ws_bright.num,
-        den: n_f - app.ws_dark.den - app.ws_bright.den,
-    };
-    out[idx_append::LUM_MID_ERR] = clamp02(ws_mid.finish());
-    out[idx_append::LUM_BRIGHT_ERR] = clamp02(app.ws_bright.finish());
+    // Mid bin derived from the Bernstein partition of unity — see
+    // [`lum_bins_from_weighted_sums`], the shared owner of all three.
+    let lum = lum_bins_from_weighted_sums(app.ws_dark, app.ws_bright, app.sum_mse, n_f);
+    out[idx_append::LUM_DARK_ERR] = lum[0];
+    out[idx_append::LUM_MID_ERR] = lum[1];
+    out[idx_append::LUM_BRIGHT_ERR] = lum[2];
     out[idx_append::MSCN_DIFF_MEAN] = clamp01(app.sum_mscn / n_f);
     out[idx_append::MSCN_DIFF_L2] = clamp01(app.sum_mscn2 / n_f);
     out[idx_append::CONTRAST_GAIN] = clamp01(app.sum_cgain / n_f);
@@ -4601,6 +4712,15 @@ struct V1BasicSums {
     sum_d: f64,
     sum_s2: f64,
     sum_d2: f64,
+    // --- FREE bounded error ([`V1FreeExtras::RawMomentsPlusBoundedErr`]) ---
+    // Σ sat((s−d)², C_MSE) over this (scale, channel), and the Y-only
+    // dark/bright weighted sums of that same per-pixel value. Zero unless
+    // the request asked for them.
+    sum_msat: f64,
+    lum_wd_num: f64,
+    lum_wd_den: f64,
+    lum_wb_num: f64,
+    lum_wb_den: f64,
 }
 
 impl V1BasicSums {
@@ -4644,6 +4764,11 @@ impl V1BasicSums {
         self.sum_d += o.sum_d;
         self.sum_s2 += o.sum_s2;
         self.sum_d2 += o.sum_d2;
+        self.sum_msat += o.sum_msat;
+        self.lum_wd_num += o.lum_wd_num;
+        self.lum_wd_den += o.lum_wd_den;
+        self.lum_wb_num += o.lum_wb_num;
+        self.lum_wb_den += o.lum_wb_den;
     }
 
     fn accumulate(&mut self, s: &crate::fused::StripChannelAccum) {
@@ -4677,6 +4802,13 @@ impl V1BasicSums {
         self.sum_d += s.sum_d;
         self.sum_s2 += s.sum_s2;
         self.sum_d2 += s.sum_d2;
+        // FREE bounded error: plain sums, merged the same unconditional way
+        // as the raw moments above (+0.0 when the kernel did not fill them).
+        self.sum_msat += s.sum_msat;
+        self.lum_wd_num += s.lum_wd_num;
+        self.lum_wd_den += s.lum_wd_den;
+        self.lum_wb_num += s.lum_wb_num;
+        self.lum_wb_den += s.lum_wb_den;
     }
 
     /// Finalize the v1 pool blocks — peaks (6/ch), masked (6/ch), IW
@@ -4722,6 +4854,34 @@ impl V1BasicSums {
         (
             [dmean, cgain.clamp(0.0, 1.0), closs.clamp(0.0, 1.0)],
             saturate(self.sum_s / n_f, C_LUM_T).clamp(0.0, 1.0),
+        )
+    }
+
+    /// Finalize the class-C bounded-error slots
+    /// ([`V1FreeExtras::RawMomentsPlusBoundedErr`]) from the fused kernel's
+    /// `Σ mse_i` + luminance-weighted sums: the v2-348 `MSE` value and the
+    /// dark / mid / bright luminance-binned means.
+    ///
+    /// Both routes go through [`lum_bins_from_weighted_sums`] and the same
+    /// `clamp01(Σ mse_i / n)` the v2 finalize applies, so the parity gate is
+    /// on the ACCUMULATION rather than on two hand-copied formulas — the
+    /// discipline `global_stats_from_raw_moments` already established.
+    fn finalize_free_bounded(&self, n: usize) -> (f64, [f64; 3]) {
+        let n_f = n as f64;
+        (
+            (self.sum_msat / n_f).clamp(0.0, 1.0),
+            lum_bins_from_weighted_sums(
+                WeightedSum {
+                    num: self.lum_wd_num,
+                    den: self.lum_wd_den,
+                },
+                WeightedSum {
+                    num: self.lum_wb_num,
+                    den: self.lum_wb_den,
+                },
+                self.sum_msat,
+                n_f,
+            ),
         )
     }
 
@@ -4907,11 +5067,13 @@ fn fold_v1_one_band(
     raw: [&[f32]; 2],
     sums: &mut V1BasicSums,
     mut pools: Option<(&mut FoldPoolScratch, BandPoolWork)>,
-    // `raw_moments`: also accumulate the FREE raw moments (Σs, Σd, Σs²,
-    // Σd²) in the fused kernel — the four sums that finalize the append
-    // block's GLOBAL_* trio and append2's LUMA_MEAN_REF without any new
-    // plane, load or pass ([`V1FreeExtras`]).
-    raw_moments: bool,
+    // `free`: which FREE extra accumulators the fused kernel should carry —
+    // the raw moments (Σs, Σd, Σs², Σd²) that finalize the append block's
+    // GLOBAL_* trio and append2's LUMA_MEAN_REF, and/or the class-C
+    // bounded-error family (v2 `MSE` + the Y luminance bins). None of them
+    // needs a new plane, load or pass ([`V1FreeExtras`],
+    // [`crate::fused::FreeExtrasWork`]).
+    free: crate::fused::FreeExtrasWork,
 ) -> usize {
     let [src, dst] = raw;
     let rows = 0..rows_end;
@@ -5010,7 +5172,7 @@ fn fold_v1_one_band(
                 &mut [],
                 &mut [],
                 false,
-                raw_moments,
+                free,
             ));
             return b1;
         }
@@ -5110,7 +5272,7 @@ fn fold_v1_one_band(
             &mut ssq_v[..band_n],
             &mut s12_v[..band_n],
             full,
-            raw_moments,
+            free,
         ));
         let inner = inner_start * width..(inner_start + inner_h) * width;
         let inner_src = &src[span.start + inner.start..span.start + inner.end];
@@ -5179,7 +5341,7 @@ fn fold_v1_one_band(
             &mut [],
             &mut [],
             false,
-            raw_moments,
+            free,
         ));
     }
     b1
@@ -5246,10 +5408,10 @@ fn fold_v1_basic_bands(
     sums: &mut V1BasicSums,
     pools: Option<(&mut [FoldPoolScratch], BandPoolWork)>,
     parallel: bool,
-    // `raw_moments`: see [`fold_v1_one_band`] — forwarded verbatim to every
-    // band on both the serial and the band-parallel path, so the two stay
-    // identical by construction.
-    raw_moments: bool,
+    // `free`: see [`fold_v1_one_band`] — forwarded verbatim to every band on
+    // both the serial and the band-parallel path, so the two stay identical
+    // by construction.
+    free: crate::fused::FreeExtrasWork,
 ) {
     assert!(
         !matches!(h_src, FoldHSource::SelfBlur) || pools.is_some(),
@@ -5321,7 +5483,7 @@ fn fold_v1_basic_bands(
                                 raw,
                                 &mut local,
                                 Some((&mut *ps, work)),
-                                raw_moments,
+                                free,
                             );
                             crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
                             out.push(local);
@@ -5352,7 +5514,7 @@ fn fold_v1_basic_bands(
                         raw,
                         &mut local,
                         None,
-                        raw_moments,
+                        free,
                     );
                     crate::fold_timing::stop(__t, crate::fold_timing::Phase::BandBusy, 0);
                     local
@@ -5383,7 +5545,7 @@ fn fold_v1_basic_bands(
             pools
                 .as_mut()
                 .map(|(p, f)| (&mut p[i.min(p.len() - 1)], *f)),
-            raw_moments,
+            free,
         );
         sums.merge(&local);
     }
@@ -6870,6 +7032,11 @@ fn stream_phase_b(
     cross: Option<(&[f32], &[f32])>,
     append2: Option<Append2Params>,
     csfw: Option<CsfwParams>,
+    // `ch`: which channel this strip pass is. Only the free-extras work
+    // order reads it (the class-C luminance bins are a register carry on Y
+    // alone — [`ComputeSet::free_work`]); every other decision here is
+    // already carried by an explicit argument.
+    ch: usize,
     acc: &mut StreamChannelAccums,
 ) {
     let width = info.plane_w;
@@ -6972,12 +7139,12 @@ fn stream_phase_b(
                 V1PoolsMode::Full => Some((&mut acc.pool_scratch[..], BandPoolWork::Full)),
             },
             band_parallel,
-            // FREE EXTRAS: the fused kernel carries the four raw moments only
-            // when a block that is OFF will finalize them (`ComputeSet::
-            // raw_moments`). With the append + append2 blocks on, their own
-            // kernels own those slots and this is false, so the full 944 walk
-            // is untouched.
-            ComputeSet::from_toggles(toggles).raw_moments(),
+            // FREE EXTRAS: the fused kernel carries an extra accumulator only
+            // when a block that is OFF will finalize it (`ComputeSet::
+            // free_work`). With the owning blocks on, their own kernels own
+            // those slots and every flag is false, so the full 944 walk is
+            // untouched.
+            ComputeSet::from_toggles(toggles).free_work(ch),
         );
     }
 
@@ -8147,6 +8314,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                         None,
                         append2,
                         csfw,
+                        ch,
                         acc,
                     );
                     crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
@@ -8230,6 +8398,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     cross,
                     append2,
                     csfw,
+                    ch,
                     acc,
                 );
                 crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
@@ -8291,6 +8460,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     None,
                     append2,
                     csfw,
+                    ch,
                     &mut accums[ch],
                 );
             }
@@ -8332,6 +8502,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     cross,
                     append2,
                     csfw,
+                    1,
                     &mut accums[1],
                 );
             }
@@ -8436,7 +8607,12 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 // this can never race the append/append2 finalize below.
                 // Index-stable: every other slot of those blocks keeps its
                 // structural 0.0.
-                if toggles.free_extras == V1FreeExtras::RawMoments {
+                // `!= Off`, not `== RawMoments`: every variant is a
+                // SUPERSET of the raw moments, so an exact-equality test
+                // here silently zeroes these 40 slots the moment a wider
+                // variant is requested (caught by
+                // `class_c_extras_are_pure_addition_to_the_free_walk`).
+                if toggles.free_extras != V1FreeExtras::Off {
                     let (globals, luma_mean) = acc.v1[scale].finalize_free(n);
                     // `GLOBAL_*` live in the append block. The 944 walk skips
                     // the (B, scale 0) append cell entirely
@@ -8452,6 +8628,32 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                     if layout_append2 && !append2_on && ch == APPEND2_CHANNEL {
                         features_app2[scale * APPEND2_PER_SCALE + idx_append2::LUMA_MEAN_REF] =
                             luma_mean;
+                    }
+                }
+                // CLASS-C FREE EXTRAS: the bounded-error slots, written under
+                // the same "only where the owning block is off" rule. The v2
+                // finalize above already ran and left `MSE` at its structural
+                // `clamp01(0/n) = 0.0` when `v2_blocks` is off, so this
+                // overwrite is the value's first and only real write.
+                if toggles.free_extras == V1FreeExtras::RawMomentsPlusBoundedErr {
+                    let (mse, lum) = acc.v1[scale].finalize_free_bounded(n);
+                    if !v2_blocks {
+                        features_v12[v1_total
+                            + scale_base
+                            + ch * FEATURES_PER_CHANNEL_V2_TOTAL
+                            + idx::MSE] = mse;
+                    }
+                    // The luminance bins are append's, and Y-only for the
+                    // same register-carry reason the kernel is.
+                    if layout_append
+                        && !append_on
+                        && ch == APPEND2_CHANNEL
+                        && append_cell_active(true, ch, scale)
+                    {
+                        let apb = app_scale_base + ch * FEATURES_PER_CHANNEL_APPEND;
+                        features_app[apb + idx_append::LUM_DARK_ERR] = lum[0];
+                        features_app[apb + idx_append::LUM_MID_ERR] = lum[1];
+                        features_app[apb + idx_append::LUM_BRIGHT_ERR] = lum[2];
                     }
                 }
                 if toggles.v1_pools != V1PoolsMode::Off {
@@ -13940,9 +14142,13 @@ pub(crate) mod tests {
                         &mut sums,
                         Some((&mut pool[..], BandPoolWork::Full)),
                         parallel,
-                        // Free moments ON: the self-blur-vs-precomputed
+                        // Every FREE extra ON: the self-blur-vs-precomputed
                         // identity has to cover them too.
-                        true,
+                        crate::fused::FreeExtrasWork {
+                            raw_moments: true,
+                            bounded_err: true,
+                            lum_bins: true,
+                        },
                     );
                     sums
                 };
@@ -14523,6 +14729,452 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    // =====================================================================
+    // CLASS-C free slots (`V1FreeExtras::RawMomentsPlusBoundedErr`) —
+    // `benchmarks/free_features_classC_2026-09-04.md`
+    // =====================================================================
+
+    /// The kernel's f32 copies of the two saturation constants must equal
+    /// the f64 definitions the 944 walk uses. `fused.rs` is unconditional
+    /// while this module is behind `feature-regime-v2`, so the constants
+    /// cannot be imported; this is the gate that keeps the duplication
+    /// honest (the same contract `fused::C_MSE_F32`'s doc states).
+    #[test]
+    fn class_c_kernel_constants_match() {
+        // Stated in f32, which is the comparison that means something: the
+        // 944 walk's own SIMD path splats `C_MSE as f32` / `C_LUM_T as f32`
+        // (`append_block_kernel_generic`), so THAT is the value the class-C
+        // kernel has to reproduce. Neither constant is representable in
+        // f32, so an `as f64` round-trip equality would be false for a
+        // correct implementation — it was, and this is the corrected claim.
+        assert_eq!(crate::fused::C_MSE_F32, C_MSE as f32);
+        assert_eq!(crate::fused::C_LUM_T_F32, C_LUM_T as f32);
+    }
+
+    /// **CLASS-C GATE 0 — the INTEGRAND, against an f64 scalar oracle.**
+    ///
+    /// The per-slot end-to-end oracle is gate 2 below (an independent
+    /// kernel's value for the same slot). This one gates the arithmetic
+    /// underneath it: the kernel's f32 per-pixel integrands
+    /// (`sat((s−d)², C_MSE)` and the Bernstein weights of
+    /// `t = sat(ref_Y, C_LUM_T)`) against the SAME f64 `saturate` the
+    /// append kernel's own scalar tail calls, over a value range that
+    /// spans the XYB planes' actual span including negatives (where the
+    /// `max(0)` clamp is load-bearing) and the near-zero regime the
+    /// saturation amplifies ~1/C.
+    ///
+    /// The bar is RELATIVE (1e-5) with a 1e-7 absolute floor: f32 carries
+    /// ~1.2e-7 relative, and `sat` is contractive in relative error
+    /// (`dsat/sat = (1−sat)·dx/x`), so a correct f32 evaluation lands two
+    /// orders inside it. An algebra error does not.
+    #[test]
+    fn class_c_integrands_match_the_f64_scalar_oracle() {
+        let vals: Vec<f32> = vec![
+            -3.0, -1.0, -0.35, -1e-4, 0.0, 1e-7, 1e-4, 0.001, 0.01, 0.05, 0.1, 0.35, 0.5, 1.0, 2.0,
+            7.5,
+        ];
+        let mut worst_m = 0.0f64;
+        let mut worst_w = 0.0f64;
+        for &s in &vals {
+            for &d in &vals {
+                let mut acc_m = 0.0f32;
+                let m = crate::fused::test_only_bounded_err_scalar(&mut acc_m, s - d);
+                assert_eq!(
+                    acc_m, m,
+                    "the accumulator must hold exactly what it returned"
+                );
+                let want_m = saturate(((s - d) as f64) * ((s - d) as f64), C_MSE);
+                let dm = (m as f64 - want_m).abs();
+                worst_m = worst_m.max(dm / want_m.max(1e-7));
+                assert!(
+                    dm <= 1e-5 * want_m.abs().max(1e-2) + 1e-7,
+                    "mse_i({s},{d}) = {m:e}, f64 oracle {want_m:e}"
+                );
+
+                let (mut wdn, mut wdd, mut wbn, mut wbd) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+                crate::fused::test_only_lum_bins_scalar(
+                    &mut wdn, &mut wdd, &mut wbn, &mut wbd, s, m,
+                );
+                let t_ref = saturate(s as f64, C_LUM_T);
+                let (wd_ref, wb_ref) = ((1.0 - t_ref) * (1.0 - t_ref), t_ref * t_ref);
+                for (got, want, name) in [
+                    (wdd as f64, wd_ref, "w_dark"),
+                    (wbd as f64, wb_ref, "w_bright"),
+                    (wdn as f64, wd_ref * want_m, "w_dark*mse"),
+                    (wbn as f64, wb_ref * want_m, "w_bright*mse"),
+                ] {
+                    let dw = (got - want).abs();
+                    worst_w = worst_w.max(dw / want.abs().max(1e-7));
+                    assert!(
+                        dw <= 1e-5 * want.abs().max(1e-2) + 1e-7,
+                        "{name}({s},{d}) = {got:e}, f64 oracle {want:e}"
+                    );
+                }
+                // The partition of unity the mid bin is DERIVED from must
+                // hold at every point, or `lum_bins_from_weighted_sums`'s
+                // subtraction is not a mid-bin weight.
+                let w_mid = 1.0 - wd_ref - wb_ref;
+                assert!(
+                    (w_mid - 2.0 * t_ref * (1.0 - t_ref)).abs() <= 1e-12,
+                    "Bernstein partition of unity broken at s={s}"
+                );
+                assert!(w_mid >= -1e-12, "derived mid weight negative at s={s}");
+            }
+        }
+        eprintln!(
+            "class-C integrand vs f64 oracle: worst rel |Δ| mse {worst_m:e}, weights {worst_w:e}"
+        );
+    }
+
+    /// **CLASS-C GATE 1 — the class-C set is pure ADDITION.**
+    ///
+    /// Same claim, same shape, as `free_extras_are_pure_addition_to_the_
+    /// v1_only_walk`: turning the variant on must leave every slot the
+    /// `RawMoments` walk already emitted BIT-IDENTICAL (that includes the
+    /// 156 basic slots, the 72 peaks AND the 40 raw-moment slots) and fill
+    /// only the 24 class-C positions, which are `+0.0` without it. This is
+    /// the "no existing slot moves" era gate: if it fails, the change is an
+    /// era break, not an addition.
+    #[cfg(feature = "training")]
+    #[test]
+    fn class_c_extras_are_pure_addition_to_the_free_walk() {
+        const CELLS: &[(usize, usize)] = &[
+            (96, 64),
+            (208, 144),
+            (592, 80),
+            (127, 93),
+            (200, 151),
+            (576, 96),
+            (255, 96),
+        ];
+        for &parallel in &[false, true] {
+            let z =
+                crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(parallel);
+            let mut scratch = V2Scratch::new();
+            for &(w, h) in CELLS {
+                let src = textured_image(w, h, 7);
+                let dst = quantize_distort(&src, w, h);
+                let sref = RgbSlice::new(&src, w, h);
+                let dref = RgbSlice::new(&dst, w, h);
+                let base = V2NewFeatureToggles {
+                    v1_only: true,
+                    v1_pools: V1PoolsMode::Peaks,
+                    append_block: true,
+                    append2_block: true,
+                    free_extras: V1FreeExtras::RawMoments,
+                    ..V2NewFeatureToggles::default()
+                };
+                let off = z
+                    .compute_folded720_append_features_streaming(&sref, &dref, base, &mut scratch)
+                    .unwrap();
+                let on = z
+                    .compute_folded720_append_features_streaming(
+                        &sref,
+                        &dref,
+                        V2NewFeatureToggles {
+                            free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
+                            ..base
+                        },
+                        &mut scratch,
+                    )
+                    .unwrap();
+                let (fo, fn_) = (off.features(), on.features());
+                assert_eq!(fo.len(), 944, "{w}x{h}: expected the 944 layout");
+                assert_eq!(fo.len(), fn_.len(), "{w}x{h}: width moved");
+                let cc: std::collections::HashSet<usize> =
+                    class_c_slot_indices(off.n_scales()).into_iter().collect();
+                assert_eq!(cc.len(), 24, "the class-C set is 24 slots at 4 scales");
+                for i in 0..fo.len() {
+                    if cc.contains(&i) {
+                        assert_eq!(
+                            fo[i].to_bits(),
+                            0.0f64.to_bits(),
+                            "{w}x{h} par={parallel}: class-C slot {i} is {:e} with the mode OFF",
+                            fo[i]
+                        );
+                    } else {
+                        assert_eq!(
+                            fo[i].to_bits(),
+                            fn_[i].to_bits(),
+                            "{w}x{h} par={parallel}: slot {i} moved ({:e} -> {:e}) — an ERA BREAK, \
+                             not an addition",
+                            fo[i],
+                            fn_[i]
+                        );
+                    }
+                }
+                // Every class-C slot must carry a value and be finite —
+                // an all-zero fill would pass the identity above trivially.
+                for &i in &cc {
+                    assert!(
+                        fn_[i].is_finite(),
+                        "{w}x{h} par={parallel}: class-C slot {i} is {:e}",
+                        fn_[i]
+                    );
+                }
+                assert!(
+                    cc.iter().filter(|&&i| fn_[i] != 0.0).count() >= cc.len() / 2,
+                    "{w}x{h} par={parallel}: the class-C block came out mostly zero"
+                );
+            }
+        }
+    }
+
+    /// **CLASS-C GATE 2 — the class-C slots ARE the 944 slots (the per-slot
+    /// oracle).**
+    ///
+    /// Each of the 24 values is compared against the SAME slot produced by
+    /// an entirely different kernel on a full 944 walk: `MSE` by the dense
+    /// v2 kernel, the luminance bins by the append kernel. Bitwise equality
+    /// is not available for the same reason gate 2 of the raw-moments set
+    /// documents (different accumulation grouping AND different f32/f64
+    /// staging), so the bar is the same `free_tol()`.
+    #[cfg(feature = "training")]
+    #[test]
+    fn class_c_extras_match_the_944_walk() {
+        const CELLS: &[(usize, usize)] = &[
+            (96, 64),
+            (208, 144),
+            (592, 80),
+            (127, 93),
+            (200, 151),
+            (576, 96),
+            (255, 96),
+            (1152, 72),
+            (2304, 64),
+        ];
+        let mut worst = 0.0f64;
+        let mut worst_at = (0usize, 0usize, 0usize);
+        for &parallel in &[false, true] {
+            let z =
+                crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(parallel);
+            let mut scratch = V2Scratch::new();
+            for &(w, h) in CELLS {
+                let src = textured_image(w, h, 7);
+                let dst = quantize_distort(&src, w, h);
+                let sref = RgbSlice::new(&src, w, h);
+                let dref = RgbSlice::new(&dst, w, h);
+                let full = z
+                    .compute_folded720_append_features_streaming(
+                        &sref,
+                        &dref,
+                        V2NewFeatureToggles {
+                            append_block: true,
+                            append2_block: true,
+                            ..V2NewFeatureToggles::default()
+                        },
+                        &mut scratch,
+                    )
+                    .unwrap();
+                let free = z
+                    .compute_folded720_append_features_streaming(
+                        &sref,
+                        &dref,
+                        V2NewFeatureToggles {
+                            v1_only: true,
+                            v1_pools: V1PoolsMode::Peaks,
+                            append_block: true,
+                            append2_block: true,
+                            free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
+                            ..V2NewFeatureToggles::default()
+                        },
+                        &mut scratch,
+                    )
+                    .unwrap();
+                let (a, b) = (full.features(), free.features());
+                for i in class_c_slot_indices(full.n_scales()) {
+                    let d = (a[i] - b[i]).abs();
+                    if d > worst {
+                        worst = d;
+                        worst_at = (w, h, i);
+                    }
+                    assert!(
+                        d <= free_tol(),
+                        "{w}x{h} par={parallel}: class-C slot {i} = {:e}, 944 walk says {:e} \
+                         (Δ {d:e})",
+                        b[i],
+                        a[i]
+                    );
+                }
+                // The 944 side must actually be non-trivial on these slots,
+                // or the comparison above is vacuous.
+                assert!(
+                    class_c_slot_indices(full.n_scales())
+                        .iter()
+                        .filter(|&&i| a[i] != 0.0)
+                        .count()
+                        >= 12,
+                    "{w}x{h}: the 944 walk's own class-C slots are mostly zero"
+                );
+            }
+        }
+        eprintln!("class-C vs 944 walk: worst |Δ| = {worst:e} at {worst_at:?}");
+    }
+
+    /// **CLASS-C GATE 3 — a live 944 walk is untouched.**
+    #[cfg(feature = "training")]
+    #[test]
+    fn class_c_extras_never_touch_a_live_944_walk() {
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+        let mut scratch = V2Scratch::new();
+        for &(w, h) in &[(208usize, 144usize), (127, 93), (576, 96)] {
+            let src = textured_image(w, h, 7);
+            let dst = quantize_distort(&src, w, h);
+            let sref = RgbSlice::new(&src, w, h);
+            let dref = RgbSlice::new(&dst, w, h);
+            let base = V2NewFeatureToggles {
+                append_block: true,
+                append2_block: true,
+                ..V2NewFeatureToggles::default()
+            };
+            let off = z
+                .compute_folded720_append_features_streaming(&sref, &dref, base, &mut scratch)
+                .unwrap();
+            let on = z
+                .compute_folded720_append_features_streaming(
+                    &sref,
+                    &dref,
+                    V2NewFeatureToggles {
+                        free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
+                        ..base
+                    },
+                    &mut scratch,
+                )
+                .unwrap();
+            for (i, (x, y)) in off.features().iter().zip(on.features()).enumerate() {
+                assert_eq!(
+                    x.to_bits(),
+                    y.to_bits(),
+                    "{w}x{h}: 944 slot {i} moved under the class-C variant ({x:e} -> {y:e})"
+                );
+            }
+        }
+    }
+
+    /// **CLASS-C GATE 4 — finite and BIT-IDENTICAL across rayon pool sizes
+    /// and against the serial walk.**
+    ///
+    /// The band merge is sequential in band order on both the serial and
+    /// the band-parallel path, so the f64 addition sequence is the same
+    /// whatever the pool size — the property `v1_masked_and_iw_blocks_are_
+    /// thread_invariant` gates for the v1 blocks, restated for the new
+    /// accumulators (which are plain sums merged the same way). Sizes span
+    /// several 32-row bands so a layout disagreement has somewhere to show.
+    #[cfg(all(feature = "training", feature = "threads"))]
+    #[test]
+    fn class_c_extras_are_thread_invariant_and_finite() {
+        let toggles = V2NewFeatureToggles {
+            v1_only: true,
+            v1_pools: V1PoolsMode::Peaks,
+            append_block: true,
+            append2_block: true,
+            free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
+            ..V2NewFeatureToggles::default()
+        };
+        for &(w, h) in &[(256usize, 256usize), (96, 320), (320, 96), (127, 288)] {
+            let src = textured_image(w, h, 11);
+            let dst = quantize_distort(&src, w, h);
+            let mut reference: Option<Vec<f64>> = None;
+            // `false` = the serial walk; the rest are pool sizes for the
+            // band-parallel one.
+            for &parallel in &[false, true] {
+                for threads in [1usize, 2, 8, 16] {
+                    if !parallel && threads != 1 {
+                        continue;
+                    }
+                    let pool = rayon::ThreadPoolBuilder::new()
+                        .num_threads(threads)
+                        .build()
+                        .expect("build rayon pool");
+                    let got = pool.install(|| {
+                        let z = crate::Zensim::new(crate::ZensimProfile::codec_target())
+                            .with_parallel(parallel);
+                        let mut scratch = V2Scratch::new();
+                        let sref = RgbSlice::new(&src, w, h);
+                        let dref = RgbSlice::new(&dst, w, h);
+                        z.compute_folded720_append_features_streaming(
+                            &sref,
+                            &dref,
+                            toggles,
+                            &mut scratch,
+                        )
+                        .unwrap()
+                        .features()
+                        .to_vec()
+                    });
+                    for (i, &v) in got.iter().enumerate() {
+                        assert!(
+                            v.is_finite(),
+                            "{w}x{h} par={parallel} t={threads}: slot {i} is {v:e}"
+                        );
+                    }
+                    match &reference {
+                        None => reference = Some(got),
+                        Some(first) => {
+                            for (i, (x, y)) in first.iter().zip(&got).enumerate() {
+                                assert_eq!(
+                                    x.to_bits(),
+                                    y.to_bits(),
+                                    "{w}x{h}: slot {i} moved at par={parallel} t={threads} \
+                                     ({x:e} -> {y:e})"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// **CLASS-C GATE 5 — append-only bookkeeping.**
+    ///
+    /// The class-C tranche adds NO new slot numbers: every one of its 24
+    /// positions is an existing 944-layout slot, it is disjoint from the
+    /// raw-moments free set, and the layout width is unchanged. A future
+    /// lane that wants genuinely new features must EXTEND the layout past
+    /// 944, never renumber — this test is what fails if someone forgets.
+    #[test]
+    fn class_c_slot_set_is_append_only_and_disjoint() {
+        for n_scales in 1..=4 {
+            let cc = class_c_slot_indices(n_scales);
+            let rm = free_slot_indices(n_scales);
+            let width = n_scales * 3 * (31 + FEATURES_PER_CHANNEL_V2_TOTAL)
+                + n_scales * 3 * FEATURES_PER_CHANNEL_APPEND
+                + n_scales * APPEND2_PER_SCALE;
+            let set: std::collections::HashSet<usize> = cc.iter().copied().collect();
+            assert_eq!(set.len(), cc.len(), "class-C slot list has duplicates");
+            for &i in &cc {
+                assert!(
+                    i < width,
+                    "class-C slot {i} is outside the {width}-wide layout"
+                );
+                assert!(
+                    !rm.contains(&i),
+                    "class-C slot {i} overlaps the raw-moments free set"
+                );
+            }
+            // 3 MSE cells per scale (one per channel) + the Y luminance
+            // trio per scale where the 944 walk computes that append cell.
+            let want = n_scales * 3
+                + (0..n_scales)
+                    .filter(|&s| append_cell_active(true, APPEND2_CHANNEL, s))
+                    .count()
+                    * 3;
+            assert_eq!(cc.len(), want, "class-C slot count at {n_scales} scales");
+        }
+        // The 4-scale set, spelled out, so a renumbering shows up as a diff
+        // in review rather than as a silently different table.
+        assert_eq!(
+            class_c_slot_indices(4),
+            vec![
+                377, 406, 435, 739, 740, 741, // scale 0
+                464, 493, 522, 790, 791, 792, // scale 1
+                551, 580, 609, 841, 842, 843, // scale 2
+                638, 667, 696, 892, 893, 894, // scale 3
+            ]
+        );
     }
 
     /// POOL PARITY GATE (2026-08-30, the carrier lane): with

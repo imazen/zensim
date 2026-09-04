@@ -860,7 +860,7 @@ fn process_channel_banded(
             false,
             // The attribution walk emits no append/append2 slots, so it never
             // needs the free raw moments.
-            false,
+            crate::fused::FreeExtrasWork::default(),
         );
         merge_acc(&mut acc, &band);
         y = inner_end;
@@ -2296,6 +2296,36 @@ mod tests {
                 app2(3, idx_append2::HL_BIN2),
                 false,
                 "944: HL_BIN2 is HDR-gated — structural zero on the SDR route",
+            ),
+            // CLASS-C free slots (2026-09-04): the bounded-error tranche
+            // adds NO new slot numbers, so there is no new block for this
+            // test to reach — but the 24 positions it now FILLS from the
+            // cheap walk have to be decomposable, or a steering loop that
+            // reads them gets a silently-empty map. Probed explicitly here
+            // rather than assumed from "they were always in the layout".
+            (
+                720,
+                BLOCK_END_V1_POOLS + 29 + crate::feature_v2::idx::MSE,
+                true,
+                "720: v2 MSE (class-C free slot) must be spatialized",
+            ),
+            (
+                944,
+                BLOCK_END_V2 + 17 + crate::feature_v2::idx_append::LUM_DARK_ERR,
+                true,
+                "944: append LUM_DARK_ERR (class-C free slot) must be spatialized",
+            ),
+            (
+                944,
+                BLOCK_END_V2 + 17 + crate::feature_v2::idx_append::LUM_MID_ERR,
+                true,
+                "944: append LUM_MID_ERR (class-C free slot) must be spatialized",
+            ),
+            (
+                944,
+                BLOCK_END_V2 + 17 + crate::feature_v2::idx_append::LUM_BRIGHT_ERR,
+                true,
+                "944: append LUM_BRIGHT_ERR (class-C free slot) must be spatialized",
             ),
         ];
         for &(width, k, want_nonzero, why) in cases {

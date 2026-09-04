@@ -1699,7 +1699,7 @@ fn process_strip_channel(
                 false,
                 // v1's 372 layout has no append/append2 block, so the free
                 // raw moments have nowhere to land on this path.
-                false,
+                crate::fused::FreeExtrasWork::default(),
             );
 
             // Accumulate weighted features into diffmap before extended features

@@ -338,18 +338,21 @@ pub(crate) fn bake_pool_need_from_model(model: &crate::mlp::Model) -> V1PoolNeed
 /// `v1_total` that a cheap v1-only(+free-extras) walk cannot serve?
 ///
 /// Checks every caller line from `v1_total` up to the bake's declared width
-/// against [`crate::feature_v2::free_slot_indices`] (the 40
-/// `V1FreeExtras::RawMoments` positions a v1-only walk can finalize for
-/// free — three `GLOBAL_*` append slots per live (scale, channel) plus
-/// append2's per-scale `LUMA_MEAN_REF`, none of which need the expensive
-/// v2-348/append/append2/csfw compute passes). `None` when the bake can't
-/// be tiled (unanalyzable — same safe-fallback contract as
+/// against the two free sets a v1-only walk can finalize without the
+/// expensive v2-348/append/append2/csfw compute passes:
+/// [`crate::feature_v2::free_slot_indices`] (the 40 `RawMoments` positions —
+/// three `GLOBAL_*` append slots per live (scale, channel) plus append2's
+/// per-scale `LUMA_MEAN_REF`) and
+/// [`crate::feature_v2::class_c_slot_indices`] (the 24 class-C
+/// bounded-error positions — the v2-348 `MSE` cell per (scale, channel)
+/// plus the Y-channel luminance-bin trio per scale). `None` when the bake
+/// can't be tiled (unanalyzable — same safe-fallback contract as
 /// [`bake_pool_need_from_model`]'s `V1PoolNeed::ALL`) OR when it reads ANY
-/// live column beyond `v1_total` that is NOT in the free set — either way
-/// the caller must fall back to computing everything. `Some(reads_free)`
-/// when every live column beyond `v1_total` sits inside the free set (or
-/// there are none): cheap-set-eligible, and `reads_free` says whether
-/// [`crate::feature_v2::V1FreeExtras::RawMoments`] should be requested.
+/// live column beyond `v1_total` that is in NEITHER set — either way the
+/// caller must fall back to computing everything. `Some(mode)` when every
+/// live column beyond `v1_total` sits inside the free sets (or there are
+/// none): cheap-set-eligible, with `mode` the CHEAPEST
+/// [`crate::feature_v2::V1FreeExtras`] that still covers what it reads.
 ///
 /// This is what closes the gap `benchmarks/free_features_2026-09-01.md`-
 /// class bakes (944-wide, `--keep-features` trained, live columns entirely
@@ -358,14 +361,17 @@ pub(crate) fn bake_pool_need_from_model(model: &crate::mlp::Model) -> V1PoolNeed
 /// width() > 372` and unconditionally fell back to "compute everything" —
 /// correct, but silently paying the full 944 walk for a bake that never
 /// reads 904 of its 944 declared inputs.
-pub(crate) fn wide_bake_v2_read(model: &crate::mlp::Model, v1_total: usize) -> Option<bool> {
+pub(crate) fn wide_bake_v2_read(
+    model: &crate::mlp::Model,
+    v1_total: usize,
+) -> Option<crate::feature_v2::V1FreeExtras> {
     let layer = model.layer(0);
     let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
     let spans = caller_col_spans(model, in_dim)?;
     if spans.len() <= v1_total {
         // Nothing beyond v1_total to read at all — trivially cheap-eligible,
         // free_extras unread.
-        return Some(false);
+        return Some(crate::feature_v2::V1FreeExtras::Off);
     }
     let col_live = |i: usize| -> bool {
         match &layer.weights {
@@ -386,17 +392,28 @@ pub(crate) fn wide_bake_v2_read(model: &crate::mlp::Model, v1_total: usize) -> O
         crate::feature_v2::free_slot_indices(crate::NUM_SCALES)
             .into_iter()
             .collect();
-    let mut reads_free = false;
+    let class_c: std::collections::HashSet<usize> =
+        crate::feature_v2::class_c_slot_indices(crate::NUM_SCALES)
+            .into_iter()
+            .collect();
+    // Cheapest-covering mode, monotone: once a class-C read is seen the
+    // request cannot drop back to the raw-moments-only set (its strict
+    // subset).
+    let mut mode = crate::feature_v2::V1FreeExtras::Off;
     for (pos, &(a, b)) in spans.iter().enumerate().skip(v1_total) {
         if (a..b).any(&col_live) {
-            if free.contains(&pos) {
-                reads_free = true;
+            if class_c.contains(&pos) {
+                mode = crate::feature_v2::V1FreeExtras::RawMomentsPlusBoundedErr;
+            } else if free.contains(&pos) {
+                if mode == crate::feature_v2::V1FreeExtras::Off {
+                    mode = crate::feature_v2::V1FreeExtras::RawMoments;
+                }
             } else {
                 return None;
             }
         }
     }
-    Some(reads_free)
+    Some(mode)
 }
 
 /// Layer-0 structural read-set of one bake's BYTES, or [`V1PoolNeed::ALL`]
