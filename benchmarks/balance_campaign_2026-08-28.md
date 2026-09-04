@@ -7351,3 +7351,16 @@ CONTENT −0.4/−1.0/−0.2 on the dial, rank identical to 5dp; proposal `B_saf
 NOT free), already present in pools944, free-40's GLOBAL_CGAIN/CLOSS precision skew found + bounded. OPEN WITH
 THE USER: B_safesyn_curera era break; zenanalyze-api 0.1.1; zenavif-parse 0.7.0; squintly's 10 hours; GitHub
 MCP token; AVIF hold lift.
+
+## ROUND 76 — 2026-09-04: dial addressability is a HARD GATE (user), and the spline cannot deliver it on B
+G-ADDR landed in the owner (two tiers: REGRESSION vs shipped-B's own values; CONTRACT absolute — shipped B fails
+four contract rows today: identity 96.24, 266 above-identity cells, negative tail min +2.52). Every era-corrected
+spline candidate retains the +3.9/+4.5 correction at identical rank but FAILS the gate, and the impossibility is
+measured: p5 ≤13.65 is unreachable on B's ordering (oracle spline p5 21.5–22.8; shipped B clears it via a −23 pt
+low-band bias, MAE 5.45 vs candidates 4.3); A1/A3/A6 bars exceed the reference metric's own grid values (truth max
+98.38/p95 95.46/DR 85.20); C2⊻C6 is a WEIGHTS defect (6.01% of cells out-rank a perfect copy in raw space). Profile
+D reads p5 9.52; Profile A (v47-QAT) passes the whole contract tier → floor/ceiling are reachable by WEIGHTS, not
+splines. ssim2 reuse rule: per codec (zenwebp bit-exact; zenjpeg/mozjpeg/zenjxl ≤0.061; XYB-JPEG and AVIF-tail NOT)
+— both anchors re-scored single-era. CID22 overlap audit of both anchors: CLEAN. serde_json float-parse ULP hazard
+fixed (affects every float bar freeze_check reads). OPEN (user): redefine A1/A3/A6 as truth-referenced; which
+weights change addresses C2/C6; whether the dial default moves to the contract-passing class (A/D).
