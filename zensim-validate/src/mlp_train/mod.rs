@@ -63,7 +63,21 @@ pub struct MlpHyperparams {
     pub pairs_per_epoch: usize,
     pub initial_lr: f64,
     pub leaky_alpha: f64,
+    /// The single seed. Drives BOTH the init stream and the sample stream
+    /// unless one is overridden below — which is how every bake trained
+    /// before 2026-09-04 was produced, and why those bakes cannot separate
+    /// an init effect from a sampling effect.
     pub seed: u64,
+    /// Override the weight-init stream's seed. `None` = use `seed`.
+    ///
+    /// The two streams were ALREADY independent internally (the separation
+    /// predates this field: it exists so a 228-vs-372 A/B sees the same pair
+    /// draws even though init consumes a different number of normals). These
+    /// fields only expose that split to the CLI, so a run can hold the drawn
+    /// subset fixed while varying the init, or vice versa.
+    pub init_seed: Option<u64>,
+    /// Override the pair-sampling stream's seed. `None` = use `seed`.
+    pub sample_seed: Option<u64>,
     pub log_every: usize,
     /// H-TRAJ (balance campaign 2026-08-28): dump a spline-less bake of the
     /// CURRENT projected net every N epochs (0 = off). Fires at validation
@@ -872,6 +886,8 @@ impl Default for MlpHyperparams {
             initial_lr: 0.001,
             leaky_alpha: 0.01,
             seed: 42,
+            init_seed: None,
+            sample_seed: None,
             log_every: 10,
             l2_lambda: 1e-5,
             early_stop_patience: 50,
@@ -2059,13 +2075,10 @@ pub fn train_mlp_strategy(
     // more normals when n_features is larger), making the A/B
     // unfair. Both seeds derive deterministically from
     // `hyperparams.seed` so reproducibility is preserved.
-    let mut init_rng = SplitMix64::new(hyperparams.seed);
-    let mut rng = SplitMix64::new(
-        hyperparams
-            .seed
-            .wrapping_mul(0x9E3779B97F4A7C15)
-            .wrapping_add(0xDEADBEEFCAFEBABE),
-    );
+    let mut init_rng = SplitMix64::new(hyperparams.init_seed.unwrap_or(hyperparams.seed));
+    let mut rng = SplitMix64::new(sampling::sample_stream_seed(
+        hyperparams.sample_seed.unwrap_or(hyperparams.seed),
+    ));
     let std1 = (2.0 / (n_features + n_hidden) as f64).sqrt();
     let std2 = (2.0 / (n_hidden + n_outputs) as f64).sqrt();
     let mut w1 = (0..n_features * n_hidden)
@@ -3030,13 +3043,10 @@ fn train_mlp_pool_head_with_tv(
     // Init layer-1 weights via Xavier-Glorot (same RNG split scheme as
     // the standard head). The pool-head reducer is initialized via
     // `PoolHeadModel::new` and then we copy out its reducer init.
-    let mut init_rng = SplitMix64::new(hyperparams.seed);
-    let mut rng = SplitMix64::new(
-        hyperparams
-            .seed
-            .wrapping_mul(0x9E3779B97F4A7C15)
-            .wrapping_add(0xDEADBEEFCAFEBABE),
-    );
+    let mut init_rng = SplitMix64::new(hyperparams.init_seed.unwrap_or(hyperparams.seed));
+    let mut rng = SplitMix64::new(sampling::sample_stream_seed(
+        hyperparams.sample_seed.unwrap_or(hyperparams.seed),
+    ));
     let std1 = (2.0 / (n_features + n_hidden) as f64).sqrt();
     let mut w1 = (0..n_features * n_hidden)
         .map(|_| init_rng.next_normal() * std1)
@@ -3871,12 +3881,9 @@ fn train_mlp_hybrid_head_with_tv(
     let mut reducer_b = init_model.reducer_b;
     let mut alpha_logit = init_model.alpha_logit;
 
-    let mut rng = SplitMix64::new(
-        hyperparams
-            .seed
-            .wrapping_mul(0x9E3779B97F4A7C15)
-            .wrapping_add(0xDEADBEEFCAFEBABE),
-    );
+    let mut rng = SplitMix64::new(sampling::sample_stream_seed(
+        hyperparams.sample_seed.unwrap_or(hyperparams.seed),
+    ));
 
     // Adam slot sizes: w2 = n_hidden (rank_w) + 4 (reducer_w) + 1 (α_logit).
     // b2 = 2 (rank_b, reducer_b).
@@ -6907,12 +6914,9 @@ fn train_mlp_per_sample_alpha_head(
     };
     let mut b_alpha = init_model.b_alpha;
 
-    let mut rng = SplitMix64::new(
-        hyperparams
-            .seed
-            .wrapping_mul(0x9E3779B97F4A7C15)
-            .wrapping_add(0x0123456789ABCDEF),
-    );
+    let mut rng = SplitMix64::new(sampling::sample_stream_seed_per_sample_alpha(
+        hyperparams.sample_seed.unwrap_or(hyperparams.seed),
+    ));
 
     // Adam slot sizes:
     //   w1 slot: n_features × n_hidden (+ optional n_hidden × n_hidden_final for 2-layer

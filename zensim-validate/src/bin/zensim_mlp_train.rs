@@ -180,8 +180,32 @@ struct Args {
     val_aggregate: String,
 
     /// Random seed. Default 1 matches V0_16 ship.
+    ///
+    /// Sets BOTH the weight-init stream and the pair-sampling stream unless
+    /// one is overridden by `--init-seed` / `--sample-seed`. Every bake
+    /// trained before 2026-09-04 used this form, which is why none of them
+    /// can separate an init effect from a sampling effect.
     #[arg(long, default_value_t = 1)]
     seed: u64,
+
+    /// Seed the weight INIT stream independently of `--seed`.
+    ///
+    /// The two streams have always been independent internally (the split
+    /// predates the flag: it exists so a 228-vs-372 A/B sees the same pair
+    /// draws even though init consumes a different number of normals). These
+    /// flags expose it, so a study can hold the drawn training subset fixed
+    /// while varying the init, or the reverse — which is the only way to
+    /// attribute seed-to-seed score spread to one or the other.
+    ///
+    /// Omitting both flags is BYTE-IDENTICAL to the pre-2026-09-04 trainer.
+    #[arg(long)]
+    init_seed: Option<u64>,
+
+    /// Seed the pair-SAMPLING stream independently of `--seed`. Two runs
+    /// sharing a `--sample-seed` draw exactly the same training pairs in
+    /// exactly the same order, whatever their `--init-seed`.
+    #[arg(long)]
+    sample_seed: Option<u64>,
 
     /// Log every N epochs.
     #[arg(long, default_value_t = 10)]
@@ -2665,6 +2689,8 @@ fn main() {
         initial_lr: args.lr,
         leaky_alpha: args.leaky_alpha,
         seed: args.seed,
+        init_seed: args.init_seed,
+        sample_seed: args.sample_seed,
         log_every: args.log_every,
         dump_checkpoints_every: args.dump_checkpoints_every,
         dump_checkpoints_dir: args.dump_checkpoints_dir.clone(),
