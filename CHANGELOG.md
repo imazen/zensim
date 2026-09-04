@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+### Added — `zentrain.sample_coverage`: what a run's sampler actually touched (2026-09-04)
+
+- **Every bake now embeds a `zentrain.sample_coverage` block**, and
+  `bake_verdict --full-json` surfaces it at `repro.sample_coverage` — exactly
+  where `scripts/v_next/gauntlet.py` already reads it, so the board's coverage
+  column stops reading NOT MEASURED on 433/433 rows without a board change.
+- **Why a bake needs it.** A seed does not only move where a run LANDS, it moves
+  what the run SEES: the sample stream is seeded, so two sample seeds walk the
+  same fixed row population in a different ORDER and a finite-epoch run
+  emphasises a different subset. USER CORRECTION, 2026-09-04: *"data-subsets are
+  not equal though — one might be more representative and diverse, while another
+  sucks, objectively."* A k-seed mean therefore summarises draws that saw
+  different data; until now nothing on a bake said by how much. MEASURED on two
+  seeds of one recipe: pooled row coverage 0.998756 vs 1.000000.
+- **Computed by REPLAY through the sampler's own owner** (`mlp_train::sampling`,
+  the module the subset-study lane extracted), not by a counter bolted into four
+  training loops. The drawn multiset is a pure function of the sampling
+  parameters, so the replay is EXACT; it costs the training loops nothing; and
+  the `digest` it carries is the same rolling hash `subset_sim --expect-digest`
+  checks, so the stored block is falsifiable rather than asserted. **MEASURED:
+  the embedded digest equals a real run's `ZENSIM_SAMPLE_DIGEST=1` output**
+  (`c1aba4c4a149e6ff`), replay cost <0.05 s for 3 x 2000 draws.
+- Per group: pairs drawn, distinct rows touched and the fraction of the group's
+  rows ever paired, distinct refs, distinct `(ref, band)` cells, the four-band
+  pair histogram, row-multiplicity entropy/CV, near-threshold and within-image
+  shares — plus whole-run group-share L1/chi-square and duplicate-pair rate, over
+  both a full and an early window.
+- `sampling::coverage_json` / `run_coverage_json` are THE encoder: `subset_sim`'s
+  replay output and a bake's embedded block are the same shape by construction,
+  so a stored block is directly comparable to a later replay.
+- **Absent is ABSENT.** `--no-sample-coverage` skips the replay and embeds no
+  block; every bake trained before this carries none. The field is then not
+  inserted at all and renders NOT MEASURED — never a zero, which would read as
+  "this run covered nothing". A failure to embed is a loud WARNING, not fatal,
+  unlike the mandatory `zentrain.repro` embed beside it.
+- Gate: `scripts/subset_study/coverage_embed_gate.sh` (6/6 PASS) — digest equals
+  the real run's; same `--sample-seed` + different `--init-seed` gives
+  byte-identical coverage AND digest; different `--sample-seed` gives different
+  coverage; `--no-sample-coverage` embeds nothing. Plus two unit tests in
+  `mlp_train::sampling`.
+
 ### Fixed — `--keep-features` now works on the multi-layer path (2026-09-04)
 
 - **`zensim_mlp_train --keep-features` + `--per-sample-alpha-head`** (1-layer

@@ -662,6 +662,112 @@ pub fn simulate(groups: &[SimGroup], params: &SimParams) -> SimResult {
     }
 }
 
+/// JSON for one coverage window. THE encoder — `subset_sim`'s replay output
+/// and the `zentrain.sample_coverage` block a bake embeds are the SAME shape
+/// because they come through here, which is what makes a stored bake's
+/// coverage directly comparable to a later replay of the same seed.
+pub fn coverage_json(c: &SampleCoverage) -> serde_json::Value {
+    serde_json::json!({
+        "window_draws": c.window_draws,
+        "n_pairs": c.n_pairs,
+        "same_row_skips": c.same_row_skips,
+        "group_too_small_skips": c.group_too_small_skips,
+        "pooled_row_coverage": c.pooled_row_coverage,
+        "group_share_l1": c.group_share_l1,
+        "group_share_chisq": c.group_share_chisq,
+        "near_threshold_share": c.near_threshold_share,
+        "within_image_share": c.within_image_share,
+        "duplicate_pair_rate": c.duplicate_pair_rate,
+        "per_group": c.per_group.iter().map(|g| serde_json::json!({
+            "name": g.name,
+            "n_rows": g.n_rows,
+            "train_weight": g.train_weight,
+            "n_pairs": g.n_pairs,
+            "rows_touched": g.rows_touched,
+            "row_coverage": g.row_coverage,
+            "refs_touched": g.refs_touched,
+            "n_refs": g.n_refs,
+            "ref_coverage": g.ref_coverage,
+            "cells_touched": g.cells_touched,
+            "n_cells": g.n_cells,
+            "cell_coverage": g.cell_coverage,
+            "row_entropy_norm": g.row_entropy_norm,
+            "row_multiplicity_cv": g.row_multiplicity_cv,
+            "near_threshold_share": g.near_threshold_share,
+            "within_image_share": g.within_image_share,
+            "band_pair_counts": g.band_pair_counts,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// The full `zentrain.sample_coverage` payload for a run: both windows, the
+/// digest that proves a replay reproduced it, and every input the replay
+/// needs.
+///
+/// # What this is, and what it is not
+///
+/// It is the record of **what a run's pair sampler actually touched**. A
+/// seed does not only move where a run LANDS — it moves what the run SEES:
+/// the sample stream is seeded, so two sample seeds walk the same fixed row
+/// population in a different ORDER, and a finite-epoch run emphasises a
+/// different subset. Two seed siblings therefore differ in coverage, and
+/// before this block existed nothing on a bake said by how much.
+///
+/// It is NOT a claim that more coverage is better — that is the question the
+/// subset-quality study asks, and this is the measurement that makes it
+/// answerable. It is also NOT a record of which rows were ELIGIBLE: group
+/// membership and the train/val split are fixed by the declared `--group`
+/// corpora and the data-prep-time origin-hash rule, which no seed moves.
+///
+/// `digest` is the same rolling hash `subset_sim --expect-digest` checks, so
+/// a stored block can be re-derived and verified without the bake's weights.
+pub fn run_coverage_json(
+    r: &SimResult,
+    groups: &[SimGroup],
+    params: &SimParams,
+    init_seed: u64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema": 1,
+        "what": "what this run's PAIR SAMPLER actually touched. A seed moves what a run \
+                 SEES, not only where it lands: the sample stream is seeded, so two sample \
+                 seeds walk the same fixed row population in a different order and a \
+                 finite-epoch run emphasises a different subset. This is that difference, \
+                 measured.",
+        "not": "NOT a claim that more coverage is better, and NOT a record of which rows \
+                were ELIGIBLE — group membership and the train/val split are fixed by the \
+                declared --group corpora and the data-prep-time origin-hash rule, which no \
+                seed moves.",
+        "init_seed": init_seed,
+        "sample_seed": params.seed,
+        "sample_stream_seed": if params.per_sample_alpha_head {
+            sample_stream_seed_per_sample_alpha(params.seed)
+        } else {
+            sample_stream_seed(params.seed)
+        },
+        "epochs": params.epochs,
+        "pairs_per_epoch": params.pairs_per_epoch,
+        "low_q_boost": params.low_q_boost,
+        "mid_q_boost": params.mid_q_boost,
+        "high_q_boost": params.high_q_boost,
+        "stratified_bands": params.stratified_bands,
+        "per_sample_alpha_head": params.per_sample_alpha_head,
+        "band_edges": "B0 <50, B1 [50,65), B2 [65,90), B3 >=90 (human_score 0-100), the \
+                       trainer's own q-boost bands",
+        "digest": r.digest.hex(),
+        "early_digest": r.early_digest.hex(),
+        "groups_declared": groups.iter().map(|g| serde_json::json!({
+            "name": g.name,
+            "train_weight": g.train_weight,
+            "n_rows": g.n_rows,
+            "within_ref": g.within_ref,
+            "has_ref_ids": g.ref_ids.is_some(),
+        })).collect::<Vec<_>>(),
+        "full": coverage_json(&r.full),
+        "early": coverage_json(&r.early),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -916,5 +1022,135 @@ mod tests {
         p.early_window = 100;
         let short = simulate(&gs, &p);
         assert_eq!(short.digest.finish(), r.early_digest.finish());
+    }
+
+    /// `run_coverage_json` carries the digest `simulate` produced and every
+    /// field the board reads. A block whose digest disagreed with its own
+    /// simulation would be unfalsifiable — `subset_sim --expect-digest`
+    /// could never catch a stale or mis-parameterised embed.
+    #[test]
+    fn run_coverage_json_carries_the_digest_and_the_board_read_fields() {
+        let gs = vec![
+            SimGroup {
+                name: "a".into(),
+                train_weight: 1.0,
+                n_rows: 40,
+                human_scores: (0..40).map(|i| i as f64 * 2.5).collect(),
+                ref_ids: Some((0..40).map(|i| (i / 4) as u32).collect()),
+                within_ref: true,
+            },
+            SimGroup {
+                name: "b".into(),
+                train_weight: 0.5,
+                n_rows: 25,
+                human_scores: (0..25).map(|i| 50.0 + i as f64).collect(),
+                ref_ids: None,
+                within_ref: false,
+            },
+        ];
+        let p = SimParams {
+            seed: 100,
+            epochs: 2,
+            pairs_per_epoch: 300,
+            low_q_boost: 1.0,
+            mid_q_boost: 1.0,
+            high_q_boost: 1.0,
+            stratified_bands: 0,
+            early_window: 0,
+            per_sample_alpha_head: false,
+        };
+        let r = simulate(&gs, &p);
+        let v = run_coverage_json(&r, &gs, &p, 777);
+
+        assert_eq!(v["digest"], serde_json::json!(r.digest.hex()));
+        assert_eq!(v["early_digest"], serde_json::json!(r.early_digest.hex()));
+        // The two seeds are reported SEPARATELY: coverage is a property of
+        // the sample stream, and saying so is what lets a reader tell an
+        // init re-roll from a sample re-roll.
+        assert_eq!(v["init_seed"], serde_json::json!(777u64));
+        assert_eq!(v["sample_seed"], serde_json::json!(100u64));
+        assert_eq!(
+            v["sample_stream_seed"],
+            serde_json::json!(sample_stream_seed(100))
+        );
+        for k in [
+            "schema",
+            "epochs",
+            "pairs_per_epoch",
+            "stratified_bands",
+            "groups_declared",
+            "full",
+            "early",
+        ] {
+            assert!(!v[k].is_null(), "missing board-read field {k}");
+        }
+        for k in [
+            "pooled_row_coverage",
+            "n_pairs",
+            "per_group",
+            "group_share_l1",
+        ] {
+            assert!(!v["full"][k].is_null(), "missing full.{k}");
+        }
+        // Per-group rows carry the four things the brief names: distinct
+        // refs, distinct (ref, band) cells, the fraction of rows ever
+        // paired, and the pair count — plus the band histogram.
+        let g0 = &v["full"]["per_group"][0];
+        for k in [
+            "refs_touched",
+            "cells_touched",
+            "row_coverage",
+            "n_pairs",
+            "band_pair_counts",
+        ] {
+            assert!(!g0[k].is_null(), "missing per_group.{k}");
+        }
+        assert_eq!(g0["name"], serde_json::json!("a"));
+        // `groups_declared` is the DECLARED table, so a reader can tell a
+        // group that was never drawn from a group that was never declared.
+        assert_eq!(v["groups_declared"].as_array().unwrap().len(), 2);
+    }
+
+    /// Coverage depends on the SAMPLE seed and on nothing else in the pair:
+    /// the same `SimParams` gives a byte-identical block, a different seed
+    /// does not. This is the in-process form of `coverage_embed_gate.sh`
+    /// checks 2 and 3.
+    #[test]
+    fn coverage_json_is_a_function_of_the_sample_seed() {
+        let gs = vec![SimGroup {
+            name: "a".into(),
+            train_weight: 1.0,
+            n_rows: 30,
+            human_scores: (0..30).map(|i| i as f64 * 3.0).collect(),
+            ref_ids: None,
+            within_ref: false,
+        }];
+        let mk = |seed: u64| SimParams {
+            seed,
+            epochs: 2,
+            pairs_per_epoch: 200,
+            low_q_boost: 1.0,
+            mid_q_boost: 1.0,
+            high_q_boost: 1.0,
+            stratified_bands: 0,
+            early_window: 0,
+            per_sample_alpha_head: false,
+        };
+        let (p1, p2) = (mk(100), mk(999));
+        let j = |p: &SimParams, init: u64| {
+            run_coverage_json(&simulate(&gs, p), &gs, p, init).to_string()
+        };
+        // Different INIT seed, same sample seed: identical, including digest.
+        assert_eq!(
+            j(&p1, 1).replace("\"init_seed\":1,", "I"),
+            j(&p1, 42).replace("\"init_seed\":42,", "I"),
+            "coverage must not depend on the init seed"
+        );
+        // Different SAMPLE seed: it must actually move.
+        assert_ne!(
+            simulate(&gs, &p1).digest.hex(),
+            simulate(&gs, &p2).digest.hex(),
+            "coverage must depend on the sample seed"
+        );
     }
 }

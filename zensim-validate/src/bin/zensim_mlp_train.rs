@@ -207,6 +207,17 @@ struct Args {
     #[arg(long)]
     sample_seed: Option<u64>,
 
+    /// Skip the `zentrain.sample_coverage` embed (2026-09-04).
+    ///
+    /// Coverage is computed by REPLAYING the pair sampler through
+    /// `mlp_train::sampling` after training — an exact reconstruction, since
+    /// the drawn multiset is a pure function of the sampling parameters, but
+    /// it does cost one RNG walk of `epochs × pairs_per_epoch` draws. Pass
+    /// this for a run that cannot afford even that; the bake then carries no
+    /// coverage block, which the board renders NOT MEASURED (never a zero).
+    #[arg(long, default_value_t = false)]
+    no_sample_coverage: bool,
+
     /// Log every N epochs.
     #[arg(long, default_value_t = 10)]
     log_every: usize,
@@ -3858,6 +3869,97 @@ fn main() {
         .to_string()
     };
 
+    // `zentrain.sample_coverage` — WHAT THIS RUN'S SAMPLER ACTUALLY TOUCHED
+    // (2026-09-04 owner-fix lane; the board has been rendering this axis as
+    // NOT MEASURED on 433/433 rows waiting for it —
+    // `scripts/v_next/gauntlet.py` SEED_COVERAGE_NOTE).
+    //
+    // WHY A BAKE NEEDS IT. A seed does not only move where a run LANDS, it
+    // moves what the run SEES: the sample stream is seeded, so two sample
+    // seeds walk the same fixed row population in a different ORDER and a
+    // finite-epoch run emphasises a different subset. USER CORRECTION,
+    // 2026-09-04, verbatim: *"data-subsets are not equal though — one might
+    // be more representative and diverse, while another sucks,
+    // objectively."* So a k-seed MEAN is a summary of draws that saw
+    // different data, not noise around one underlying number — and until
+    // this block existed, no artifact said by how much.
+    //
+    // HOW IT IS COMPUTED — by REPLAY, through the sampler's own owner
+    // (`mlp_train::sampling`), not by a counter bolted into four training
+    // loops. That is deliberate on three counts: the drawn multiset is a
+    // pure function of `(sample seed, [train_weight], [row_count], epochs,
+    // pairs_per_epoch, boosts, within_ref, stratified_bands)` and of
+    // nothing else, so a replay is EXACT, not an estimate; it costs the
+    // training loops nothing; and the `digest` it carries is the same
+    // rolling hash `subset_sim --expect-digest` checks against a real run's
+    // `ZENSIM_SAMPLE_DIGEST=1` output, so the stored block is falsifiable
+    // rather than merely asserted.
+    //
+    // Cost is one RNG walk of `epochs × pairs_per_epoch` draws with no
+    // forward/backward pass. `--no-sample-coverage` skips it for a run that
+    // cannot afford even that; the bake then carries no block at all, which
+    // the board renders NOT MEASURED — never a zero.
+    let sample_coverage_json: Option<String> = if args.no_sample_coverage {
+        println!("[coverage] zentrain.sample_coverage SKIPPED (--no-sample-coverage)");
+        None
+    } else {
+        let sim_groups: Vec<mlp_train::sampling::SimGroup> = loaded
+            .iter()
+            // Exactly the groups the sampler can draw from: `train_indices`
+            // is `train_weight > 0.0`, so a validation-only group must not
+            // enter the CDF here either.
+            .filter(|g| g.train_w > 0.0)
+            .map(|g| mlp_train::sampling::SimGroup {
+                name: g.name.clone(),
+                train_weight: g.train_w,
+                n_rows: g.human_scores.len(),
+                human_scores: g.human_scores.clone(),
+                // `ref_ids` only steers the draw when the group opted in —
+                // same condition the trainer applies when it builds
+                // `TrainingGroup`.
+                ref_ids: if g.within_ref {
+                    g.ref_ids.clone()
+                } else {
+                    None
+                },
+                within_ref: g.within_ref,
+            })
+            .collect();
+        if sim_groups.is_empty() {
+            println!("[coverage] no training groups — nothing to describe");
+            None
+        } else {
+            let params = mlp_train::sampling::SimParams {
+                seed: args.sample_seed.unwrap_or(args.seed),
+                epochs: hyperparams.n_epochs,
+                pairs_per_epoch: hyperparams.pairs_per_epoch,
+                low_q_boost: hyperparams.low_q_boost,
+                mid_q_boost: hyperparams.mid_q_boost,
+                high_q_boost: hyperparams.high_q_boost,
+                stratified_bands: hyperparams.stratified_bands,
+                early_window: 0,
+                per_sample_alpha_head: args.per_sample_alpha_head,
+            };
+            let t0 = std::time::Instant::now();
+            let sim = mlp_train::sampling::simulate(&sim_groups, &params);
+            let v = mlp_train::sampling::run_coverage_json(
+                &sim,
+                &sim_groups,
+                &params,
+                args.init_seed.unwrap_or(args.seed),
+            );
+            println!(
+                "[coverage] pooled row coverage {:.4} over {} pairs, group-share L1 {:.4},                  digest {} ({:.1}s)",
+                sim.full.pooled_row_coverage,
+                sim.full.n_pairs,
+                sim.full.group_share_l1,
+                sim.digest.hex(),
+                t0.elapsed().as_secs_f64()
+            );
+            Some(v.to_string())
+        }
+    };
+
     // MANDATORY: embed reproduction provenance into the bake bytes themselves.
     // append_metadata_utf8 is zenpredict-bake's section-level splice with
     // score/byte identity guarantees (weights untouched — no requantization).
@@ -3869,6 +3971,25 @@ fn main() {
                 eprintln!("FATAL: could not embed zentrain.repro into the bake: {e:?}");
                 std::process::exit(4);
             });
+    // Coverage is a MEASUREMENT, not provenance: a run whose sampler could
+    // not be described is still reproducible, so a failure here is loud but
+    // NOT fatal — unlike the repro embed above. The bake then carries no
+    // block, which the board renders NOT MEASURED rather than a zero.
+    let bake_bytes = match &sample_coverage_json {
+        None => bake_bytes,
+        Some(j) => {
+            match zenpredict_bake::append_metadata_utf8(&bake_bytes, "zentrain.sample_coverage", j)
+            {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!(
+                        "WARNING: could not embed zentrain.sample_coverage into the bake: {e:?}                      — the bake is still valid and still carries zentrain.repro; its                      coverage will read NOT MEASURED."
+                    );
+                    bake_bytes
+                }
+            }
+        }
+    };
     std::fs::write(&out_path, &bake_bytes).unwrap_or_else(|e| {
         eprintln!("write {out_path:?}: {e}");
         std::process::exit(1);

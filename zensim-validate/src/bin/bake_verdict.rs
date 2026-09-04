@@ -4869,6 +4869,43 @@ Run the dedicated q-sweep harness for those._\n",
                 }
             }
         };
+        // `zentrain.sample_coverage` — WHAT THE RUN'S SAMPLER TOUCHED
+        // (2026-09-04). A separate bake metadata key, because it is a
+        // MEASUREMENT rather than provenance: a bake without it is still
+        // reproducible. It is surfaced as `repro.sample_coverage` because
+        // that is where the board already reads it from
+        // (`gauntlet.py`: `(o.get("repro") or {}).get("sample_coverage")`),
+        // so a bake trained with it renders without a board change.
+        //
+        // ABSENT IS ABSENT. Every bake trained before this landed carries
+        // no block; the field is simply not inserted, and the board renders
+        // NOT MEASURED — never a zero, which would read as "this run
+        // covered nothing".
+        let repro_value: Value = match model.metadata().get_utf8("zentrain.sample_coverage") {
+            Ok(s) => match (serde_json::from_str::<Value>(s), repro_value) {
+                (Ok(cov), Value::Object(mut o)) => {
+                    o.insert("sample_coverage".into(), cov);
+                    Value::Object(o)
+                }
+                // No repro object to attach to (a bake with coverage but no
+                // provenance is not a shape the trainer can emit, but do not
+                // silently drop a measurement if one ever appears).
+                (Ok(cov), other) => {
+                    if other.is_null() {
+                        json!({ "source": "sample_coverage_only", "sample_coverage": cov })
+                    } else {
+                        other
+                    }
+                }
+                (Err(e), other) => {
+                    eprintln!(
+                        "bake_verdict: zentrain.sample_coverage is present but unparseable ({e}) — reporting NOT MEASURED rather than a partial value"
+                    );
+                    other
+                }
+            },
+            Err(_) => repro_value,
+        };
         let full = json!({
             "bake": args.bake.display().to_string(),
             "bake_sha256": bake_sha,

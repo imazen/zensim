@@ -624,11 +624,14 @@ def _ann_matches(o, entry):
 #   * the mean ranks the default view — it is the honest estimator against best-of-k —
 #     but it is NEVER labelled definitive,
 #   * the badge says so, in `SEED_COVERAGE_NOTE`,
-#   * when a bake carries `zentrain.sample_coverage` (future bakes; the ownerfix lane is
-#     adding it) the board renders it beside the seed. Absent today on 433/433 rows, so
-#     it renders NOT MEASURED, never a zero.
-SEED_COVERAGE_NOTE = ("seed spread partly reflects subset coverage; coverage metrics "
-                      "pending (ownerfix lane adding `zentrain.sample_coverage`)")
+#   * when a bake carries `zentrain.sample_coverage` the board renders it beside the
+#     seed. It LANDED 2026-09-04 (the trainer embeds it; `bake_verdict` surfaces it at
+#     `repro.sample_coverage`, which is exactly where this file reads it), so bakes
+#     trained from that commit on carry it and every earlier board row does not —
+#     absent renders NOT MEASURED, never a zero.
+SEED_COVERAGE_NOTE = ("seed spread partly reflects subset coverage; coverage is measured "
+                      "per bake in `zentrain.sample_coverage` (bakes trained from "
+                      "2026-09-04 on) and NOT MEASURED on earlier rows")
 # `--init-seed` / `--sample-seed` joined the set 2026-09-04, when the ownerfix lane split
 # the trainer's two RNG streams: a split run and an unsplit run of the same recipe must
 # still land in one group. Both owners changed in the same commit.
@@ -1155,9 +1158,10 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         # board-integrity pass (2026-08-04): registry annotations, dominance
         # marks and the static block-usage fingerprint ride into the embed.
         # (matched_ann / fair are computed above — the scatter policy reads the tier)
-        # `zentrain.sample_coverage` — not on any bake today (the ownerfix lane is
-        # adding it); when it lands it rides here and renders beside the seed. Absent
-        # is NOT MEASURED, never a zero.
+        # `zentrain.sample_coverage` — landed 2026-09-04. The trainer embeds it and
+        # `bake_verdict` surfaces it here, so a bake trained from that commit on
+        # renders coverage beside the seed and every earlier row reads NOT MEASURED.
+        # Absent is NOT MEASURED, never a zero.
         fair["coverage"] = (o.get("repro") or {}).get("sample_coverage")
         # G-ADDR: the six axes every cell already stores (dial p5/p95/reach/DR/mono/tied)
         # against the registry's bars, PLUS the emitted `dial.addressability` block when

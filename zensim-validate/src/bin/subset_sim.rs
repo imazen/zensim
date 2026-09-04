@@ -309,39 +309,10 @@ fn main() {
                 digest_ok = false;
             }
         }
-        let enc = |c: &sampling::SampleCoverage| -> Value {
-            json!({
-                "window_draws": c.window_draws,
-                "n_pairs": c.n_pairs,
-                "same_row_skips": c.same_row_skips,
-                "group_too_small_skips": c.group_too_small_skips,
-                "pooled_row_coverage": c.pooled_row_coverage,
-                "group_share_l1": c.group_share_l1,
-                "group_share_chisq": c.group_share_chisq,
-                "near_threshold_share": c.near_threshold_share,
-                "within_image_share": c.within_image_share,
-                "duplicate_pair_rate": c.duplicate_pair_rate,
-                "per_group": c.per_group.iter().map(|g| json!({
-                    "name": g.name,
-                    "n_rows": g.n_rows,
-                    "train_weight": g.train_weight,
-                    "n_pairs": g.n_pairs,
-                    "rows_touched": g.rows_touched,
-                    "row_coverage": g.row_coverage,
-                    "refs_touched": g.refs_touched,
-                    "n_refs": g.n_refs,
-                    "ref_coverage": g.ref_coverage,
-                    "cells_touched": g.cells_touched,
-                    "n_cells": g.n_cells,
-                    "cell_coverage": g.cell_coverage,
-                    "row_entropy_norm": g.row_entropy_norm,
-                    "row_multiplicity_cv": g.row_multiplicity_cv,
-                    "near_threshold_share": g.near_threshold_share,
-                    "within_image_share": g.within_image_share,
-                    "band_pair_counts": g.band_pair_counts,
-                })).collect::<Vec<_>>(),
-            })
-        };
+        // THE encoder lives in `sampling` so this replay and the
+        // `zentrain.sample_coverage` block a bake embeds are the same shape
+        // (one owner — zensim CLAUDE.md "no duplicate implementations").
+        let enc = sampling::coverage_json;
         rows.push(json!({
             "source": source,
             "seed": seed,
