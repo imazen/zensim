@@ -423,6 +423,103 @@ made), or declare the compute set statically in a new profile variant. Neither
 is attempted here — it is a product/ship decision, out of this wave's scope,
 and it is not a reason to call W7 passed.
 
+## 6f. AMENDMENT A2 — `bake_dial_refit predict --ensemble` and `bake_verdict --ensemble` DISAGREE, and A4b's teacher was built by the one that is wrong
+
+Found while checking this wave's own premise, declared before any arm result
+existed. **This is a defect in a load-bearing owner, and the wave's own teacher
+table is inside its blast radius.**
+
+### What the two owners do
+
+MEASURED on the same 504 KonJND JPEG rows at the teacher's own twin-era root
+(`r1b-pools944-2026-08-30`), forwarding the two `HYA` members:
+
+| | member output range | blend at w=0.5 | blend at w=0.84 |
+|---|---|--:|--:|
+| `bake_verdict --ensemble` | W10L9PH **[48.7, 75.9]**, Q7b **[44.4, 74.1]** — **score units, each member's own output spline applied** | **0.5390** | **0.5218** |
+| `bake_dial_refit predict --ensemble` | W10L9PH **[−2.02, 5.16]**, Q7b **[−0.30, 0.11]** — **RAW model output, no spline** | **0.5073** | **0.5019** |
+
+Both were reproduced by hand from the per-member vectors (max \|manual −
+tool\| = **0** in every cell), so this is not a rounding artifact: the two
+tools blend in **different units**. The weights themselves are applied
+correctly by both.
+
+### Why it went unnoticed
+
+Both agree exactly at **k = 1** (W10L9PH alone: 0.5006 from both), because a
+monotone output spline is rank-invariant — every single-bake SROCC is
+identical either way. The divergence only exists once a blend is actually
+formed, and it is large precisely when the members' raw scales differ: here
+W10L9PH spans 7.18 raw units and Q7b spans 0.41, so in RAW units at w = 0.84
+Q7b contributes `0.16·0.41 / (0.84·7.18)` ≈ **1.1 %** of the signal. In score
+units both span ~30 points and Q7b actually participates.
+
+### The code
+
+`bake_dial_refit predict` forwards through `zenpredict::Predictor::predict{,_transformed}`
+(`bake_dial_refit.rs:~2940`) and accumulates `w · p[0]` directly. That call
+returns the **raw** model output; the bake's `zentrain.output_calibration_spline`
+is never applied. Its own doc says the opposite, verbatim: *"This mirrors
+`bake_verdict`'s `Ensemble::score_rows` contract exactly — same averaging order
+(**after each member's own output spline, i.e. in each member's score
+units**)… the teacher a distillation trains against must come from the same
+forward the evaluation used."* **The doc is false as implemented, and it is
+false about exactly the property it was written to guarantee.**
+
+### Blast radius — this wave's teacher, and the campaign's premise
+
+`safesyn_distill_hya_r4.parquet`, the teacher target A4b / K2 / K3 and **every
+arm in this wave** distil against, was produced by `bake_dial_refit predict
+--ensemble … --ensemble-weights 0.84,0.16` (wave_r4 §24.2 step 1; the hybrid
+lane's `teach/_MANIFEST.json` names `predict_owner: bake_dial_refit predict`,
+and its stored affine `lo = −13.996, hi = 12.711` is in RAW units, which
+confirms the raw path). So:
+
+**A4b was distilled against the RAW-unit blend, which at w = 0.84 is
+numerically ~W10L9PH alone — not against `HYA_w084` as the campaign records
+it.**
+
+Two premise corrections follow, both of which weaken the story this wave was
+launched on and are stated because they are true:
+
+1. **The super-additive KonJND peak is at w = 0.5–0.6, not at w = 0.84.**
+   `hybrid_candidate_2026-09-01.md` §6.3's own table reads 0.5390 at w = 0.5/0.6
+   and 0.5265 → 0.5134 across w = 0.8 → 0.9. This lane reproduces the
+   score-unit curve exactly (w = 0.5 → **0.5390**, w = 0.84 → **0.5218**,
+   w = 1.0 → **0.5006**). **The teacher A4b actually distils from does not
+   carry the peak**, and at 0.5218 it is *below* ssim2's 0.5272 in score units
+   — and at **0.5019** in the raw units its labels were really built with.
+2. **So "the KonJND is in the teacher and the student loses it in
+   distillation" is only half right.** The student reads 0.4327 against a real
+   teacher of **0.5019** — a 0.069 distillation gap, not the 0.106 the framing
+   implies — and *perfect* distillation of that teacher still would not reach
+   ssim2.
+
+### What this does NOT change, and what it opens
+
+It changes **no arm and no result in this wave**: every arm shares the same
+teacher table, so every Δ-vs-control is still a clean read of its own lever.
+It changes the *interpretation*: this wave is measuring what can be recovered
+around a teacher that is itself sub-ssim2 on the axis in question.
+
+It opens the wave's **top follow-up, now with numbers attached**: rebuild the
+teacher table from the **score-unit** blend at **w = 0.5** (KonJND **0.5390**,
+above ssim2's 0.5272 — the only teacher in this family that clears the
+opponent on this axis) and re-distil. That is a new teacher table, i.e. new
+data, so it is a new wave and not an arm added to a frozen set.
+
+### The fix, scoped rather than driven by
+
+The correct fix is for `predict` to apply each member's output spline before
+accumulating, matching its documented contract. It is **not** landed here, and
+the reason is stated rather than hidden: flipping `predict`'s units changes
+k = 1 output too (raw → score), which would change the affine bounds every
+existing teacher-build recipe stores, while three lanes are live in this repo.
+The safe shape is an **additive** `--score-units` opt-in plus a test pinning
+`predict` against `bake_verdict` on a k ≥ 2 blend — byte-neutral for every
+existing caller. Registered as owner work with the measurement above as its
+acceptance data.
+
 ## 7. RESULTS
 
 *(appended below as arms land; nothing above this line is edited)*

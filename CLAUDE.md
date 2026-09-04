@@ -133,6 +133,41 @@ implements its A1-A5/A9 candidates.
   Record: campaign appendices U + V, `benchmarks/band_minimum_n_2026-08-06.md`,
   `benchmarks/appendixV/`.
 
+- **⛔ `bake_dial_refit predict --ensemble` BLENDS IN RAW UNITS; `bake_verdict
+  --ensemble` BLENDS IN SCORE UNITS — the two disagree on every k≥2 blend, and
+  the teacher tables were built with the wrong one (found + measured
+  2026-09-04, OPEN).** `predict` forwards through
+  `zenpredict::Predictor::predict{,_transformed}` and accumulates `w·p[0]`
+  directly, so the bake's `zentrain.output_calibration_spline` is **never
+  applied**; `bake_verdict`'s `Ensemble::score_rows` applies each member's
+  spline first. `predict`'s own doc claims the opposite verbatim ("same
+  averaging order — after each member's own output spline, i.e. in each
+  member's score units… the teacher a distillation trains against must come
+  from the same forward the evaluation used"). MEASURED on 504 KonJND JPEG
+  rows at `r1b-pools944-2026-08-30`, the `HYA` pair (W10L9PH + Q7b): member
+  ranges **[48.7, 75.9] / [44.4, 74.1]** through `bake_verdict` vs
+  **[−2.02, 5.16] / [−0.30, 0.11]** through `predict`; blend |SROCC| **0.5390
+  vs 0.5073** at w=0.5 and **0.5218 vs 0.5019** at w=0.84 (both hand-reproduced
+  from the per-member vectors, max |manual−tool| = 0). **It hides at k=1** —
+  a monotone spline is rank-invariant, so every single-bake SROCC agrees — and
+  it bites hardest when members' raw scales differ (here Q7b's 0.41 raw span
+  against W10L9PH's 7.18 means Q7b contributes ~1.1 % of a w=0.84 raw blend
+  and ~16 % of the score-unit one). **Blast radius: every distillation teacher
+  table built by `predict --ensemble`**, including
+  `safesyn_distill_hya_r4.parquet` — so `A4b`/`K2`/`K3` and the
+  2026-09-04 fastclass wave were distilled against ~W10L9PH alone, not against
+  `HYA_w084`. Consequence for numbers you read: the campaign's
+  **super-additive KonJND peak (0.5390) is at w = 0.5–0.6, NOT at the w = 0.84
+  the teacher is named for** (score-unit curve, reproduced: 0.5390 / 0.5218 /
+  0.5006 at w = 0.50 / 0.84 / 1.00), so the shipped teacher is *below* ssim2's
+  0.5272 on that axis. **Do not cite a k≥2 `predict --ensemble` output as "the
+  ensemble"**, and do not compare a `predict`-built teacher with a
+  `bake_verdict`-scored one. Fix (registered, NOT landed — flipping units
+  would change k=1 output and every stored affine): an additive
+  `--score-units` opt-in plus a test pinning `predict` against `bake_verdict`
+  on a k≥2 blend. Record:
+  `benchmarks/fastclass_distill_wave_2026-09-04.md` §6f (AMENDMENT A2).
+
 - **⚠ `--regime 944` SILENTLY MIS-SCORES a 372-input bake that uses f156-371**
   (found 2026-08-06 the hard way, OPEN). The folded regimes zero f156-371, so a
   root-A model with weight there gets structural zeros for exactly the block it
