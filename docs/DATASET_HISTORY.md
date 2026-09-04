@@ -1224,16 +1224,20 @@ re-extraction plus retrain repairs it.
    §3.27 measured: rank barely moves (CID22 +0.0057) while the dial shifts −4.98/−5.86.
    The weights were never the problem.
 
-2. **The re-extraction cannot be run.** `safesyn` (57.6 % of the kon head's mass, and the
-   source of the anchor) was extracted from the `q<X>.png` decode cache, which is **0 %
-   present** (0 of 3,000 sampled rows, all six codec families). The surviving bitstreams
-   re-decode to *different pixels*: a HEAD extraction moves the **basic `f0..155`** block —
-   which §3.27 proved is invariant under the extractor fix — on **240/240** probe rows,
-   69 % of cells over golden tolerance, worst `0.659 → 2875.0`
-   (`image` 0.25 decodes an XYB-JPEG as a plain JPEG; that family is 14.4 % of safesyn).
-   Alignment gate: 240/240 rows agree on `(ref_basename, human_score)` with the stored row
-   index. The compute estimate in §4c.3 was fine; **the inputs do not exist**, and that was
-   never checked.
+2. **The re-extraction cannot be run** — ⚠ **numbers CORRECTED 2026-09-04, see §3.34.**
+   `safesyn` (57.6 % of the kon head's mass, and the source of the anchor) was extracted
+   from the `q<X>.png` decode cache, which is **0 % present** (0 of 3,000 sampled rows, all
+   six codec families) — that part stands. The surviving bitstreams do re-decode to
+   *different pixels*, but the magnitude first recorded here was measured through the
+   third-party `image` crate, which reads an **XYB JPEG as an ordinary JPEG** and cannot
+   decode AVIF or JXL at all. ~~worst `0.659 → 2875.0`, 69 % of cells over tolerance,
+   roughly 10^4× the correction~~ — **RETRACTED.** Re-run with imazen decoders on all six
+   families (360 rows, alignment gate 360/360): basic worst cell **5.481e+1**, the XYB
+   family's own worst **30.31**, `|Δ| > 1.0` on **14 cells = 0.025 %**. The conclusion
+   survives on a different number: re-decoding shifts shipped B's dial by **mean −3.658
+   points, 73 % of the −4.98 era defect**, so a fresh safesyn still confounds the fix with
+   a decoder-era term of comparable size. The compute estimate in §4c.3 was fine; **the
+   inputs do not exist**, and that was never checked.
 
 3. **A dial re-anchoring corrects the era term at ZERO rank cost.** `kadid`+`tid` exist in
    both eras with row-order-identical refs and byte-identical `human_score`, giving a
@@ -1363,3 +1367,67 @@ brief expected "~zero marginal"; the measurement is what is published.
 
 Record: `benchmarks/free_features_classC_2026-09-04.md`. Artifacts:
 `/mnt/v/output/zensim/classc-2026-09-04/{native,capv3,routeparity}/`. Code: `a8b24c8e`.
+
+### §3.34 — the safesyn re-decode probe, run with OUR decoders: a 52× retraction, and decoder era is a −3.66-point term on every corpus (2026-09-04)
+
+**Thought-why.** §3.32 point 2 concluded that safesyn is not re-extractable because
+re-decoding its surviving bitstreams moves the basic `f0..155` block by *"roughly 10^4×"*
+the correction the wave existed to apply — worst cell `0.659 → 2875.0`, 69 % of cells over
+golden tolerance. The implicit model was: the stored pixels are unrecoverable by a wide
+margin, so the whole question is closed.
+
+**Actual-why.** That probe decoded with the third-party **`image` crate**, in a
+measurement whose purpose was tuning an imazen model — an IMAZEN-ONLY rule violation
+(`~/work/zen/CLAUDE.md`), and the violation *is* the result. `image` reads an **XYB JPEG
+as an ordinary YCbCr JPEG** and never applies the inverse XYB→sRGB transform, so the
+`zenjpeg-420-xyb-e2` family (14.4 % of safesyn) was compared in the wrong colour space;
+and it has **no AVIF and no JXL decoder at all**, so `zenavif-s5-e6` (34,001 rows) +
+`zenjxl-e7` (26,362 rows) = **30.8 % of safesyn** was silently dropped and never measured.
+
+Re-run through `zencodec` magic-byte detection + zenjpeg / zenpng / zenwebp / zenavif /
+zenjxl — **360 rows, 60 per family, all six families, q5..q100 across 16 q values,
+alignment gate 360/360 on `(ref_basename, cpu_ssimulacra2)`**, extraction
+`360/360 scored, 0 failed`:
+
+| quantity | retracted (`image`) | **corrected (imazen)** | ratio |
+|---|---:|---:|---:|
+| basic `f0..155` max abs | 2.874e+3 | **5.481e+1** | **52×** |
+| XYB family worst cell | 0.659 → 2875.0 | **29.84 → 60.16** | **95×** |
+| peaks / masked / IW max abs | 1.613 / 1.034 / 1.246 | **0.166 / 0.0411 / 0.132** | 9.7× / 25× / 9.4× |
+| basic cells with \|Δ\| > 1.0 | not reported | **14 of 56,160 (0.025 %), 6 of 360 rows** | — |
+| families measurable | 4 of 6 | **6 of 6** | — |
+
+The corrected numbers land **inside the drift bounds `zensim/CLAUDE.md` had already
+recorded on 2026-06-22** from an independent measurement (plain JPEG `max_abs ≤ 5` —
+measured ≤ 0.48; XYB `≤ 42` — measured 30.31; JXL differs by decoder lineage — measured
+the worst family at 54.81). The retracted 2,875 was outside all three, which is the tell.
+
+**The conclusion survives, on a number that is now the interesting one.** Forwarding both
+matrices through **shipped B** on the canonical runtime: re-decoding shifts the dial by
+**mean −3.658 points (median −3.181, sd 2.589, 94.4 % of rows > 0.5, max 16.0)** against
+an era defect of **−4.977 / −5.857**. **Decoder era is 73 % of the extractor era, same
+sign.** So a fresh safesyn still cannot isolate the extractor fix — but as a confound of
+*comparable* size, not of four orders. Median basic cell moves 1.29e-5; the retracted
+doc's own median (1.09e-5) was the part that was never wrong. **What was wrong was the
+tail, and the tail was the argument.**
+
+**What this changes for every corpus, not just safesyn.** Any corpus whose pixels were
+decoded once and stored is pinned to that decoder's era, and re-reading it today costs
+~3.7 dial points *before* any model change. imazen-26 is not exempt. The remedy is not to
+hunt for a corpus that escaped decoder drift; it is to choose a **deliberate** era,
+re-extract through it, and record the decoder per format in the manifest — which is what
+the imazen-26 anchor build (§3.35) does.
+
+**Owner fix that made the probe possible at all.** `extract_features_372col` decoded with
+`image::open(..).ok()?`: a third-party decoder behind a `?` that turned failure into a
+dropped row. It now goes through `zensim-bench/examples/shared/zen_decode.rs` (one owner,
+shared with `verify_bitstream_decode`) and returns `Result`; a row that cannot be decoded
+aborts the run unless the caller passes `--allow-failures N` (default 0). First contact
+found a further gap the pre-existing `extract-omni` helper shared: **every probed
+`zenavif-s5-e6` row decodes to `Rgb16`**, which both helpers rejected — now flattened by
+the canonical `zenpixels_convert::RowConverter`, not a hand-rolled `v >> 8`.
+
+Record: `benchmarks/safesyn_zencodec_probe_2026-09-04.md`. Gate:
+`zensim-bench/tests/zen_decode_formats.rs` (13 tests; the AVIF, JXL and XYB-JPEG ones are
+failing-first against the old path). Artifacts:
+`/mnt/v/output/zensim/im26anchor-2026-09-04/probe/`.

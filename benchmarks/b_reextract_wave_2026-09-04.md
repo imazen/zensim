@@ -4,15 +4,33 @@
 **Registered by:** `benchmarks/v1_extractor_drift_2026-08-30.md` §4c.3 — *"Re-extract B's
 TRAINING inputs and consider a retrain … Fleet job; register, do not launch."*
 
+> ## ⛔ RETRACTED IN PART — §3b's probe decoded with a THIRD-PARTY crate (2026-09-04)
+>
+> §3b below (and every number §3c and `docs/DATASET_HISTORY.md` §3.32 point 2 quote from
+> it) was measured with `image::open`, which reads an **XYB JPEG as an ordinary JPEG** and
+> has **no AVIF or JXL decoder at all**. That is an IMAZEN-ONLY rule violation, and it
+> manufactured the result: re-run with our own codecs the basic block's worst cell is
+> **`2.874e+3 → 5.481e+1` (52× smaller)** and the XYB family's own worst cell falls
+> **`2875.0 → 30.31` (95×)**. **Do not cite the 2,875 figure, the 69 %-of-cells figure, or
+> "roughly 10^4× the correction".**
+>
+> The §3 CONCLUSION survives on new evidence: re-decoding still shifts shipped **B**'s dial
+> by **mean −3.658 points** — **73 % of the −4.98 era defect** — so a fresh safesyn still
+> cannot isolate the fix. It is a confound of comparable size, not of four orders.
+> Corrected measurement, all six codec families, 360 rows:
+> **`benchmarks/safesyn_zencodec_probe_2026-09-04.md`**.
+> §1, §2, §4, §9, §10 and §11 are unaffected — none of them decodes an image.
+
 **One-line answer.** The census was run and the wave is **NOT launchable as specified**:
 **safesyn — 57.6 % of the affected head's weighted mass, and the source of B's entire dial
 anchor — is not re-extractable.** Its pixels were the `q<X>.png` decode cache, which is
 **0 % present** (0 of 3,000 sampled rows), and re-decoding the surviving bitstreams with
 today's decoders moves the **basic `f0..155`** block — the block the extractor fix provably
 does *not* touch — on **240 of 240** probe rows, worst cell `0.659 → 2875.0`. That is a
-pixel change roughly **10^4×** the size of the 0.03–0.12 masked/IW correction the wave
-exists to apply. A "fresh safesyn" would not isolate the fix; it would substitute a larger,
-uncontrolled one.
+pixel change ~~roughly **10^4×** the size of~~ **[RETRACTED — see the banner above; measured
+with imazen decoders it is −3.658 dial points, 73 % of the −4.98 era defect]** the
+0.03–0.12 masked/IW correction the wave exists to apply. A "fresh safesyn" would not
+isolate the fix; it would apply a decoder-era term of *comparable* size at the same time.
 
 What *is* launchable, and what the census changed about the defect statement, is below.
 
@@ -122,7 +140,19 @@ Both are 196,086 rows and **row-order identical to each other and to `safesyn.pa
 (`zensim/CLAUDE.md`); measured survival on 3,000 sampled rows: **0/3000 (0.00 %)**, and 0
 in every one of the six codec families.
 
-### 3b. Re-decoding the bitstreams changes the pixels — measured
+### 3b. Re-decoding the bitstreams changes the pixels — ⛔ **THIS SUBSECTION IS RETRACTED**
+
+**Everything in §3b was measured through `image::open`.** The corrected run — imazen
+decoders, all six families, 360 rows — is
+`benchmarks/safesyn_zencodec_probe_2026-09-04.md`. Headline corrections: basic max abs
+**2.874e+3 → 5.481e+1**; the XYB worst cell **2875.0 → 30.31**; the `|Δ| > 1.0` population
+is **14 cells (0.025 %) across 6 of 360 rows**, all in `zenjpeg-420-xyb-e2` /
+`zenjxl-e7`. The corrected numbers land inside the drift bounds `zensim/CLAUDE.md` already
+recorded on 2026-06-22 (plain JPEG ≤ 5, XYB ≤ 42, JXL differs by decoder lineage) — the
+retracted 2,875 was outside all of them, which is the tell that should have been chased.
+The text below is kept verbatim for provenance; **do not cite any number in it.**
+
+#### (retracted text follows)
 
 Stratified probe, 60 rows per codec family. `extract_features_372col --corpus safesyn` at
 HEAD against the surviving bitstreams, compared to the stored `safesyn.parquet` rows by
@@ -169,6 +199,14 @@ would vanish without a word. The decode helpers already exist —
 `zenjxl::decode` → `pixelbuffer_to_rgb8`) behind the `extract-omni` feature — so this part
 is a small "extend the owner" change, **but it does not solve §3b**: those decoders are
 today's, and the pixels they produce are not the pixels safesyn was extracted from.
+
+> **§3c's finding is CORRECT and is now FIXED** (2026-09-04). `extract_features_372col`
+> decodes through `zensim-bench/examples/shared/zen_decode.rs` — magic-byte detection via
+> `zencodec` plus zenjpeg/zenpng/zenwebp/zenavif/zenjxl — and returns `Result`, so a row
+> that cannot be decoded aborts the run unless the caller passes `--allow-failures N`.
+> Gate: `zensim-bench/tests/zen_decode_formats.rs` (13 tests). §3c also *under*-stated the
+> problem: it named only the two missing decoders, not that the XYB family was being
+> decoded WRONGLY by the four "working" ones — which is what produced §3b's number.
 
 ---
 
@@ -245,11 +283,14 @@ None of these is a lane decision. A Profile-B swap is a ship-default flip.
 
 ## 7. Registered, NOT executed
 
-1. Extend `extract_features_372col` with the `extract-omni` `decode_to_rgb8` helper so
-   AVIF/JXL rows stop silently vanishing, **and make an undecodable row a loud error
-   rather than a `None`.** The silent-drop class is already documented for
-   `dataset_metric_baseline` and `zensim-validate --extract-only` (drift doc §4c.7); this
-   is a third instance.
+1. ~~Extend `extract_features_372col` … so AVIF/JXL rows stop silently vanishing, and make
+   an undecodable row a loud error rather than a `None`.~~ **DONE 2026-09-04** — and done
+   through `zencodec` + the five imazen codecs rather than the `extract-omni` helper, which
+   still used `image` for JPEG/PNG/WebP and so still mis-decoded XYB. Owner:
+   `zensim-bench/examples/shared/zen_decode.rs`; gate:
+   `zensim-bench/tests/zen_decode_formats.rs`. First contact found a further gap the helper
+   also had: every probed `zenavif-s5-e6` row decodes to `Rgb16`, now flattened by the
+   canonical `zenpixels_convert::RowConverter`.
 2. The partial-legs kon-head refit (§5).
 3. A current-era multiband anchor (§6 route 1), as a *proposal* with a measured A/B.
 4. `BHdr`: the same census has not been run on the PU-linear route. `hdr_v3` (its whole

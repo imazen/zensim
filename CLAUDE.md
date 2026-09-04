@@ -2165,17 +2165,36 @@ training box.
   **0/3000 sampled rows, all six codec families**), while
   `synthetic-v2/training_safe_synthetic.csv` points at the **bitstreams**
   (present). The bullet above is true only of the first file; conflating
-  them is what makes safesyn look re-extractable. **Measured**: a HEAD
-  extraction off the surviving bitstreams moves the **basic `f0..155`**
-  block — the block the v1 extractor fix provably does NOT touch (§3.27) —
-  on **240/240** probe rows, 69 % of cells over the golden tolerance,
-  worst cell `0.659 → 2875.0` (`image` 0.25 reads an XYB-JPEG as a plain
-  JPEG; `zenjpeg-420-xyb-e2` is 14.4 % of safesyn). That is ~10⁴× the
-  0.03–0.12 masked/IW correction any re-extraction would be trying to
-  apply, so a "fresh safesyn" swaps the fix for a larger uncontrolled
-  change. **Also**: `extract_features_372col` decodes via `image::open()`
-  and returns `None` on failure, so AVIF + JXL rows (30.8 % of safesyn)
-  vanish **silently** — 240 of 360 probe rows scored, no error, no warning.
+  them is what makes safesyn look re-extractable.
+  **⚠ THE MAGNITUDE HERE WAS RETRACTED 2026-09-04 — §3.34,
+  `benchmarks/safesyn_zencodec_probe_2026-09-04.md`.** ~~a HEAD extraction
+  moves the basic block on 240/240 rows, 69 % of cells over tolerance,
+  worst `0.659 → 2875.0`, ~10⁴× the correction~~ — that probe decoded with
+  the third-party `image` crate, which reads an XYB JPEG as an ordinary
+  JPEG and has no AVIF/JXL decoder, so it *manufactured* its own headline.
+  **Re-measured with OUR codecs** (zencodec detect + zenjpeg/zenpng/zenwebp/
+  zenavif/zenjxl; 360 rows, 60 per family, all six families, alignment gate
+  360/360): basic worst cell **5.481e+1 (52× smaller)**, the XYB family's
+  own worst **29.84 → 60.16 (95× smaller)**, and `|Δ| > 1.0` on **14 cells
+  = 0.025 %, 6 of 360 rows**, all in `zenjpeg-420-xyb-e2` / `zenjxl-e7`.
+  Those land INSIDE the 2026-06-22 drift bounds in the bullet above (plain
+  JPEG ≤ 5, XYB ≤ 42, JXL differs by lineage); the retracted 2,875 was
+  outside all of them.
+  **safesyn is still NOT re-extractable, for a measured reason instead:**
+  re-decoding shifts shipped B's dial by **mean −3.658 points (median
+  −3.181, sd 2.589, 94.4 % of rows > 0.5)** against an era defect of
+  −4.98/−5.86 — **decoder era is 73 % of extractor era**, i.e. a confound of
+  comparable size, not of four orders. **This is true of EVERY stored-pixel
+  corpus, imazen-26 included**: pick a deliberate decoder era and record it
+  per format, do not hunt for a corpus that escaped drift.
+  **FIXED same day**: `extract_features_372col` no longer decodes via
+  `image::open()` + `None`. It uses the one owner
+  `zensim-bench/examples/shared/zen_decode.rs` (magic-byte detection via
+  `zencodec`, five imazen codecs, `Rgb16` through
+  `zenpixels_convert::RowConverter`) and returns `Result`; a row that cannot
+  be decoded ABORTS unless the caller passes `--allow-failures N` (default
+  0). Build it with `--features training,zen-decode`. Gate:
+  `zensim-bench/tests/zen_decode_formats.rs`, 13 tests.
   The same blocker owns `multiband_anchor_dial100.parquet`, a 2,000-row
   safesyn subset (joins **2000/2000** on `(ref_basename, f0)`) that is
   shipped-Profile-B's **entire dial calibration anchor**.
