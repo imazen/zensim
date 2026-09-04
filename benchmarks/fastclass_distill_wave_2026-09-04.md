@@ -719,6 +719,42 @@ control's downside*.
 the wave is `D2_s4005` at **0.4484**, against ssim2's **0.5272** — still
 −0.079. The registered W1 clause fails for every arm, every seed.
 
+### 7.4b THE OWNER BOOTSTRAP — every arm, every seed, every axis (B = 10,000, reference-clustered)
+
+`paired_perref_boot.py` (the exam's own instrument, extended this lane to cover
+KonJND), seed 20260901, 21 arm-cells × 7 axes. Per-arm summary: mean Δ over the
+arm's 3 seeds, the worst/best seed CI bound, and how many seeds have a CI that
+excludes zero.
+
+| axis | C0 | D1 | **D2** | **D3** | D4 | F1 | G1 | reading |
+|---|--:|--:|--:|--:|--:|--:|--:|---|
+| **KonJND** Δ | −0.1711 | −0.1199 | **−0.0959** | **−0.0950** | −0.1809 | −0.1205 | −0.1472 | **3/3 seeds FAIL for every arm** |
+| ↳ seeds w/ CI excl. 0 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | P(win) = **0.000** in all 21 |
+| **CSIQ** Δ | +0.0513 | +0.0509 | +0.0497 | +0.0512 | +0.0438 | +0.0401 | +0.0510 | **3/3 WIN for every arm** |
+| **CID22** Δ | −0.0032 | −0.0074 | **+0.0011** | −0.0031 | −0.0050 | −0.0116 | −0.0035 | tie; D1/D2/D3/G1 **0/3** fails |
+| **LIVE** Δ | −0.0066 | −0.0037 | −0.0161 | −0.0156 | −0.0033 | +0.0005 | −0.0075 | D2/D3 fail **1/3** seeds |
+| **AIC-3** Δ | −0.0005 | +0.0062 | +0.0022 | +0.0046 | +0.0065 | −0.0046 | −0.0018 | tie, 0/3 everywhere |
+| **AIC-4** Δ | +0.0004 | −0.0013 | −0.0031 | +0.0049 | +0.0059 | +0.0007 | −0.0011 | tie |
+| **hfnl band** (pooled) | −0.0081 | −0.0067 | −0.0153 | −0.0133 | −0.0045 | −0.0280 | +0.0016 | **0 wins anywhere** |
+| **hfnl band** (within-img) | −0.0034 | −0.0014 | +0.0040 | −0.0080 | −0.0102 | −0.0174 | +0.0074 | D2: 1/3 seeds win |
+
+**The KonJND row is the wave's answer and it is unambiguous: 21 of 21 cells
+have a 95 % CI that excludes zero, and P(candidate > ssim2) = 0.000 in every
+one.** The tightest miss anywhere is `D2_s4005` at **−0.0790 [−0.1088,
+−0.0491]**. There is no seed, in no arm, that is even arguably level with
+ssim2 on this axis.
+
+**W2 fails for every arm on the same shape as the whole class:** exactly ONE
+confirmed win (CSIQ, 3/3 seeds, +0.040 to +0.051), and the named axes — CID22
+and the near-lossless band — are ties, never wins. D2's single within-image
+band win on one seed is the closest anything gets, and one seed of three is not
+a win by this exam's standard.
+
+**One honest cost to note:** D2 and D3 each fail LIVE on 1 of 3 seeds (worst CI
+bounds −0.0729 and −0.0616), where the control fails it on 1/3 too — so the
+within-ref arms do not create a LIVE problem, but they do not fix the one that
+is there.
+
 ### 7.5 What DID move, significantly: the VARIANCE, and W3
 
 Two effects clear their tests where the means do not.
@@ -853,10 +889,18 @@ produce it.
 | G1 | **FAIL** (KonJND −0.147) | FAIL (1 win) | FAIL (mono 0.9888) | PASS* (1.216× worst-case, §6g) | n/a | PASS (0.950/0.951) | FAIL |
 | E1 | — | — | — | — | — | — | **NOT MEASURED (§7.6)** |
 
-CSIQ is a real strict win for every arm (+0.040 to +0.051, CI excludes zero),
-but W2 needs **two** with one on CID22 or the near-lossless band, and no arm
-has a second. W7 fails for all: none is wired into a `ZensimProfile`, and §6e
-names the one change that would fix it.
+**Every W1 cell above is CONFIRMED, not a raw delta** — §7.4b's paired
+bootstrap puts a 95 % CI excluding zero on the KonJND miss for **21 of 21
+arm-cells**, with P(candidate > ssim2) = 0.000 in every one. That is a
+first for this axis: until this lane added the KonJND JOIN to the exam's own
+instrument (§2.1), every KonJND verdict in the campaign was an unconfirmed
+point estimate.
+
+CSIQ is a real strict win for every arm (+0.040 to +0.051, 3/3 seeds, CI
+excludes zero), but W2 needs **two** with one on CID22 or the near-lossless
+band — and both named axes are ties for every arm (§7.4b), so no arm has a
+second. W7 fails for all: none is wired into a `ZensimProfile`, and §6e names
+the one change that would fix it.
 
 ### 7.10 **BOTTOM LINE — NOTHING MOVES KonJND, and the wave says where the next dollar goes**
 
