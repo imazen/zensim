@@ -2,6 +2,63 @@
 
 ## [Unreleased]
 
+### Added — `--pair-sampling stratified`: make coverage a property of the recipe, not the seed (2026-09-04)
+
+- **`zensim_mlp_train --pair-sampling <uniform|stratified>`.** `uniform` is the
+  default and is byte-identical to the draw every model before 2026-09-04
+  trained under (gated by `pair_sampling_uniform_is_the_untouched_draw`, which
+  compares full `simulate` digests so a change in skip behaviour cannot pass).
+- **What `stratified` does**: visits every (group, reference, quality-band)
+  stratum on a FIXED round-robin keyed on the draw index, and walks each
+  stratum's rows through a sample-seeded affine bijection. So the schedule is a
+  function of POSITION and the walk is a function of the SEED — which means two
+  `--sample-seed` values touch the same rows, refs and cells and differ only in
+  pair ORDER. It consumes ZERO RNG per draw; the seed enters once, when the plan
+  is built.
+- **Why**: it is the arm that separates "this seed saw a better subset" from
+  "this seed landed in a better basin". Hold coverage fixed, vary the seed, and
+  any remaining spread is not subset quality. `zentrain.sample_coverage` is the
+  instrument that makes the difference visible; this is the knob that removes it.
+- It is **NOT** `--stratified-bands`, which picks a band uniformly then a row
+  uniformly inside it — that equalises band representation in expectation while
+  leaving WHICH rows are seen seed-dependent.
+- **Singleton strata are excluded and COUNTED**: a (ref, band) cell holding one
+  row cannot yield an in-stratum pair, so it is dropped from the schedule rather
+  than left to emit collisions that would read as RNG bad luck in the coverage
+  record. The trainer prints the stratum count, and WARNS loudly when
+  `pairs_per_epoch < n_strata` — the schedule still cycles, so coverage stays
+  seed-invariant across the run, but the per-epoch guarantee the mode is named
+  for does not hold at that setting.
+- One owner for the partition (`sampling::strata_of`), used by both the trainer's
+  plan builder and `simulate`, so a replay cuts the cells the run trained on.
+  `subset_sim` reads the mode from `repro.pair_sampling` (or argv) and replays it.
+- Gates: 5 unit tests (seed-invariance WITH a uniform control that must differ;
+  round-robin visit counts within 1; the walk is a bijection for every seed at
+  every length 2..40; singleton exclusion; uniform byte-identity) and 4 new
+  end-to-end checks in `scripts/subset_study/coverage_embed_gate.sh` — **10/10
+  PASS on real training runs**.
+
+### Fixed — a board fulleval was invalid JSON, and nothing could tell (2026-09-04)
+
+- `scripts/v_next/build_peer_fullevals.py` dumped with `json.dump`'s default
+  `allow_nan=True`, which writes a **bare `NaN`** — accepted by CPython's own
+  loader and rejected by every strict reader. MEASURED: `peer_cvvdp
+  .fulleval.json` carried **73** of them, so `freeze_check --select` over the
+  whole fulleval dir had **never worked**, silently, for as long as that row
+  existed. Python read it happily, which is exactly why nobody noticed.
+- Fixed at the producer, not by hand-editing: per-pair entries the metric could
+  not score are DROPPED index-aligned across `pred`/`mos` (recorded as
+  `n_unscoreable_dropped`) rather than written as `null` — the board's scatter
+  filters with `np.isfinite`, which raises on `None`, so a null would have traded
+  an unreadable file for a crashing one. Anything else non-finite becomes `null`,
+  and the dump now runs `allow_nan=False` so invalid JSON raises instead of
+  shipping. Regenerated: **0 bare NaN, all 12 `rank` corpora byte-equal to
+  before** — no statistic moved.
+- New **gate 3** in `scripts/v_next/gauntlet_gates.sh`: strict-parses every
+  `*.fulleval.json` the board is built from (`node --check` for data), with a
+  missing dir treated as a SETUP FAILURE rather than a pass. Verified both ways —
+  436 files PASS, a planted bare `NaN` FAILS with an actionable message.
+
 ### Fixed — `fit_spline_knots`'s neg-tail dedup deleted genuinely-negative knots (2026-09-04)
 
 - `zensim_validate::dial_spline::fit_spline_knots` selected its neg-tail dedup run

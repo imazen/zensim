@@ -207,6 +207,32 @@ struct Args {
     #[arg(long)]
     sample_seed: Option<u64>,
 
+    /// How RankNet pairs are drawn: `uniform` (default) or `stratified`.
+    ///
+    /// `uniform` is the draw every model before 2026-09-04 trained under and
+    /// is byte-identical to it — gated by
+    /// `pair_sampling_uniform_is_the_untouched_draw`.
+    ///
+    /// `stratified` visits every (group, reference, quality-band) stratum on
+    /// a FIXED round-robin and walks each stratum's rows through a
+    /// sample-seeded bijection. The effect is that COVERAGE STOPS BEING A
+    /// PROPERTY OF THE SEED: two `--sample-seed` values touch the same rows,
+    /// refs and cells and differ only in pair ORDER. That is the arm which
+    /// separates "this seed saw a better subset" from "this seed landed in a
+    /// better basin" — hold coverage fixed, vary the seed, and any remaining
+    /// spread is not subset quality.
+    ///
+    /// It is NOT `--stratified-bands`, which picks a band uniformly and then
+    /// a row uniformly inside it: that equalises band representation in
+    /// expectation while leaving WHICH rows are seen seed-dependent.
+    ///
+    /// Needs `--pairs-per-epoch >= n_strata` for the per-epoch guarantee; the
+    /// trainer prints the stratum count and WARNS loudly when it is not met
+    /// (the schedule still cycles, so coverage stays seed-invariant across
+    /// the run).
+    #[arg(long, default_value = "uniform", value_parser = ["uniform", "stratified"])]
+    pair_sampling: String,
+
     /// Skip the `zentrain.sample_coverage` embed (2026-09-04).
     ///
     /// Coverage is computed by REPLAYING the pair sampler through
@@ -2917,6 +2943,11 @@ fn main() {
         initial_lr: args.lr,
         leaky_alpha: args.leaky_alpha,
         seed: args.seed,
+        pair_sampling: if args.pair_sampling == "stratified" {
+            mlp_train::PairSampling::Stratified
+        } else {
+            mlp_train::PairSampling::Uniform
+        },
         init_seed: args.init_seed,
         sample_seed: args.sample_seed,
         log_every: args.log_every,
@@ -3849,6 +3880,7 @@ fn main() {
             "epochs": args.epochs,
             "pairs_per_epoch": args.pairs_per_epoch,
             "n_hidden_layers": args.n_hidden_layers,
+            "pair_sampling": args.pair_sampling,
             "target_column": args.target_column,
             "target_scale": args.target_scale,
             "max_features": args.max_features,
@@ -3939,6 +3971,7 @@ fn main() {
                 stratified_bands: hyperparams.stratified_bands,
                 early_window: 0,
                 per_sample_alpha_head: args.per_sample_alpha_head,
+                stratified_pairs: hyperparams.pair_sampling == mlp_train::PairSampling::Stratified,
             };
             let t0 = std::time::Instant::now();
             let sim = mlp_train::sampling::simulate(&sim_groups, &params);

@@ -79,6 +79,13 @@ struct Args {
     #[arg(long, default_value_t = false)]
     per_sample_alpha_head: bool,
 
+    /// Replay a `--pair-sampling stratified` run. Read from the fulleval's
+    /// `repro.pair_sampling` when one is supplied; this flag is for the
+    /// explicit-`--group` form, and for a legacy bake whose repro predates
+    /// the knob (those were all uniform).
+    #[arg(long, default_value_t = false)]
+    stratified_pairs: bool,
+
     /// Verify the replayed sequence hash against a real run's
     /// `ZENSIM_SAMPLE_DIGEST=1` output. Exits 3 on mismatch.
     #[arg(long)]
@@ -135,6 +142,7 @@ fn main() {
     let (mut lo, mut mid, mut hi) = (args.low_q_boost, args.mid_q_boost, args.high_q_boost);
     let mut strat = args.stratified_bands;
     let mut psa = args.per_sample_alpha_head;
+    let mut strat_pairs = args.stratified_pairs;
     let mut source = String::from("cli");
 
     if let Some(fe) = &args.fulleval {
@@ -208,6 +216,13 @@ fn main() {
                 || argv
                     .iter()
                     .any(|v| v.as_str() == Some("--per-sample-alpha-head"));
+            // `--pair-sampling` landed 2026-09-04; a repro without it is a
+            // run from before the knob existed, which was uniform. Read the
+            // structured field first, then argv, so a hand-built repro that
+            // records only one of the two still replays correctly.
+            strat_pairs = strat_pairs
+                || repro.get("pair_sampling").and_then(|v| v.as_str()) == Some("stratified")
+                || argv_val(argv, "--pair-sampling").as_deref() == Some("stratified");
         }
         // Row-count cross-check against the recorded repro.
         if let Some(arr) = repro.get("inputs").and_then(|v| v.as_array()) {
@@ -298,6 +313,7 @@ fn main() {
             stratified_bands: strat,
             early_window: args.early_window,
             per_sample_alpha_head: psa,
+            stratified_pairs: strat_pairs,
         };
         let r = sampling::simulate(&sim_groups, &p);
         if let Some(want) = &args.expect_digest {

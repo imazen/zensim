@@ -71,6 +71,188 @@ pub(crate) struct PairDrawCtx<'a> {
     pub ref_buckets: &'a [Option<RefBuckets>],
     /// STRATEGY stratified row-A bands; empty slice = off.
     pub strat_bands: &'a [Vec<Vec<usize>>],
+    /// `--pair-sampling stratified` SCHEDULE, or `None` for the uniform
+    /// draw every model before 2026-09-04 trained under. See
+    /// [`StratifiedPlan`]. **`None` is the default and leaves `draw_pair`
+    /// byte-for-byte the function it was** — the stratified branch is a
+    /// leading `if` that a `None` plan never enters.
+    pub plan: Option<&'a StratifiedPlan>,
+    /// Index of THIS draw within the run (`epoch * pairs_per_epoch + i`,
+    /// or `simulate`'s flat step). Read ONLY by the stratified branch,
+    /// which is a schedule and therefore a function of position; the
+    /// uniform branch ignores it entirely.
+    pub draw_index: u64,
+}
+
+// ── `--pair-sampling stratified` ─────────────────────────────────────────
+//
+// The uniform draw visits a (ref, quality-band) cell as often as chance
+// takes it there, so which cells a finite-epoch run covers — and how
+// evenly — is a property of the sample seed. `zentrain.sample_coverage`
+// measures that; this is the mode that REMOVES it, so a study can hold
+// coverage fixed and vary only the seed.
+//
+// THE SCHEDULE, and what each half is a function of:
+//
+//   * WHICH stratum a draw visits is a pure function of `draw_index`:
+//     stratum `draw_index % n_strata`, a fixed round-robin. Every stratum
+//     is therefore visited every `n_strata` draws — "every ref x band each
+//     epoch" whenever `pairs_per_epoch >= n_strata`, which the plan checks
+//     and reports rather than assumes.
+//   * WHICH ROWS inside it is a function of the SAMPLE SEED: each stratum
+//     walks its own rows through a seeded affine bijection
+//     `j -> (a*j + b) mod len` with `a` coprime to `len`, pairing visit `j`
+//     with visit `j+1`. A bijection walks every row of the stratum exactly
+//     once per `len` visits, so the SET of rows a run touches is the whole
+//     stratum for any seed — the coverage is seed-invariant while the pair
+//     ORDER and the pairings are not.
+//
+// That split is the whole design: the seed permutes order WITHIN strata,
+// and nothing else. It is also why the stratified branch consumes ZERO RNG
+// values — the seed enters once, when the plan is built, not per draw. A
+// stratified run's `--sample-seed` therefore changes the pair sequence
+// (and the digest) while leaving row/ref/cell coverage identical, which is
+// exactly the property `coverage_embed_gate.sh` checks in the other
+// direction for uniform.
+//
+// NOT an era break for anything already trained: a `None` plan is the
+// default and skips this entirely.
+
+/// One (group, ref, band) stratum: the row indices in it, plus the seeded
+/// affine walk over them.
+#[derive(Clone, Debug)]
+pub struct Stratum {
+    /// Position within `train_indices` (NOT the group index).
+    pub train_pos: usize,
+    /// The stratum's rows, in ascending row order. The seed permutes the
+    /// WALK, never this list, so two seeds' strata are the same sets.
+    pub rows: Vec<usize>,
+    /// Multiplier of the affine walk; coprime to `rows.len()`.
+    step: usize,
+    /// Offset of the affine walk.
+    offset: usize,
+}
+
+impl Stratum {
+    /// Row at visit `j` of this stratum.
+    #[inline]
+    fn row_at(&self, j: u64) -> usize {
+        let len = self.rows.len();
+        self.rows[((j as usize)
+            .wrapping_mul(self.step)
+            .wrapping_add(self.offset))
+            % len]
+    }
+}
+
+/// The stratified visiting schedule for a whole run.
+#[derive(Clone, Debug)]
+pub struct StratifiedPlan {
+    pub strata: Vec<Stratum>,
+    /// Draws per epoch, so the plan can say whether every stratum is
+    /// actually reached within one.
+    pub pairs_per_epoch: usize,
+    /// Strata with a single row: they can never yield an in-stratum pair
+    /// and are EXCLUDED from `strata` rather than silently emitting
+    /// collisions. Counted so the exclusion is visible, not invisible.
+    pub singleton_strata: usize,
+}
+
+/// Largest `a < len` coprime to `len`, at or below a seeded start. Any
+/// coprime multiplier makes `j -> a*j + b (mod len)` a bijection; picking
+/// it from the seed is what makes the WALK seed-dependent while the row
+/// SET stays fixed.
+fn coprime_step(len: usize, seed: u64) -> usize {
+    if len <= 2 {
+        return 1;
+    }
+    let gcd = |mut a: usize, mut b: usize| {
+        while b != 0 {
+            let t = a % b;
+            a = b;
+            b = t;
+        }
+        a
+    };
+    let start = 1 + (seed % (len as u64 - 1)) as usize;
+    for d in 0..len {
+        let c = 1 + ((start - 1 + d) % (len - 1));
+        if gcd(c, len) == 1 {
+            return c;
+        }
+    }
+    1
+}
+
+/// THE (ref, quality-band) partition a stratified run visits, for ONE
+/// group: cells keyed on `(ref_id, native_band)` when the group carries
+/// `ref_ids`, and on band alone when it does not — the finest partition
+/// the group's own metadata supports, never a fabricated one.
+///
+/// One owner, called by both the trainer's plan builder and [`simulate`],
+/// so a replay partitions exactly as the run did.
+pub fn strata_of(human_scores: &[f64], ref_ids: Option<&[u32]>) -> Vec<Vec<usize>> {
+    let mut cells: std::collections::BTreeMap<(u32, usize), Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (i, &s) in human_scores.iter().enumerate() {
+        // `u32::MAX` is the "no reference identity" key, so a group without
+        // ref_ids partitions on band alone rather than being dropped.
+        let r = ref_ids.and_then(|r| r.get(i).copied()).unwrap_or(u32::MAX);
+        cells.entry((r, native_band(s))).or_default().push(i);
+    }
+    cells.into_values().collect()
+}
+
+impl StratifiedPlan {
+    /// Build the schedule. `strata_of` yields, per train group, the row
+    /// index lists of its (ref, band) cells; a group with no ref identity
+    /// contributes its band cells alone.
+    pub fn build(
+        per_group_strata: &[Vec<Vec<usize>>],
+        pairs_per_epoch: usize,
+        sample_seed: u64,
+    ) -> Self {
+        let mut strata = Vec::new();
+        let mut singleton_strata = 0usize;
+        for (train_pos, cells) in per_group_strata.iter().enumerate() {
+            for rows in cells {
+                if rows.len() < 2 {
+                    if !rows.is_empty() {
+                        singleton_strata += 1;
+                    }
+                    continue;
+                }
+                // Seed each stratum's walk distinctly, so two strata of the
+                // same size do not march in lockstep.
+                let k = SplitMix64::new(
+                    sample_seed
+                        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        .wrapping_add(strata.len() as u64),
+                )
+                .next_u64();
+                let len = rows.len();
+                strata.push(Stratum {
+                    train_pos,
+                    rows: rows.clone(),
+                    step: coprime_step(len, k),
+                    offset: (k >> 32) as usize % len,
+                });
+            }
+        }
+        Self {
+            strata,
+            pairs_per_epoch,
+            singleton_strata,
+        }
+    }
+
+    /// True when one epoch reaches every stratum at least once. False is
+    /// not an error — it is a fact the caller must be told, because the
+    /// mode's headline promise ("every ref x band each epoch") does not
+    /// hold below it.
+    pub fn covers_every_stratum_per_epoch(&self) -> bool {
+        !self.strata.is_empty() && self.pairs_per_epoch >= self.strata.len()
+    }
 }
 
 /// One draw's outcome.
@@ -99,6 +281,34 @@ pub(crate) enum Draw {
 /// when the group is unusable. Any change re-rolls every subsequent draw
 /// of every model ever trained, so it must be treated as an era break.
 pub(crate) fn draw_pair(ctx: &PairDrawCtx<'_>, rng: &mut SplitMix64) -> Draw {
+    // `--pair-sampling stratified`: a SCHEDULE, so it reads `draw_index`
+    // and consumes NO rng. See the StratifiedPlan note above for why the
+    // seed enters at plan-build time instead. `None` (the default) falls
+    // straight through to the unchanged uniform draw below.
+    if let Some(plan) = ctx.plan {
+        if plan.strata.is_empty() {
+            return Draw::GroupTooSmall;
+        }
+        let n_strata = plan.strata.len() as u64;
+        let s = &plan.strata[(ctx.draw_index % n_strata) as usize];
+        let visit = ctx.draw_index / n_strata;
+        let ia = s.row_at(visit);
+        let ib = s.row_at(visit + 1);
+        if ia == ib {
+            // Only reachable for a 2-row stratum walked with step 1 at an
+            // odd offset; report it the way the uniform path reports a
+            // collision so every caller's skip logic is unchanged.
+            return Draw::SameRow {
+                train_pos: s.train_pos,
+                row: ia,
+            };
+        }
+        return Draw::Pair {
+            train_pos: s.train_pos,
+            ia,
+            ib,
+        };
+    }
     let u = rng.next_f64_unit();
     let train_pos = ctx.cdf.partition_point(|&c| c < u).min(ctx.cdf.len() - 1);
     let n = ctx.row_counts[train_pos];
@@ -220,6 +430,9 @@ pub struct SimParams {
     pub early_window: usize,
     /// Use the `train_mlp_per_sample_alpha_head` stream constant.
     pub per_sample_alpha_head: bool,
+    /// Replay a `--pair-sampling stratified` run. `false` (default for a
+    /// legacy bake, which had no such flag) replays the uniform draw.
+    pub stratified_pairs: bool,
 }
 
 /// Per-group coverage descriptors over one window.
@@ -617,12 +830,27 @@ pub fn simulate(groups: &[SimGroup], params: &SimParams) -> SimResult {
         Vec::new()
     };
 
-    let ctx = PairDrawCtx {
+    let plan: Option<StratifiedPlan> = if params.stratified_pairs {
+        let per_group: Vec<Vec<Vec<usize>>> = groups
+            .iter()
+            .map(|g| strata_of(&g.human_scores, g.ref_ids.as_deref()))
+            .collect();
+        Some(StratifiedPlan::build(
+            &per_group,
+            params.pairs_per_epoch,
+            params.seed,
+        ))
+    } else {
+        None
+    };
+    let mut ctx = PairDrawCtx {
         cdf: &cdf,
         row_counts: &row_counts,
         per_row_cdfs: &per_row_cdfs,
         ref_buckets: &ref_buckets,
         strat_bands: &strat_bands,
+        plan: plan.as_ref(),
+        draw_index: 0,
     };
 
     let stream = if params.per_sample_alpha_head {
@@ -645,6 +873,7 @@ pub fn simulate(groups: &[SimGroup], params: &SimParams) -> SimResult {
     let mut early_digest = SampleSequenceDigest::new();
 
     for step in 0..total {
+        ctx.draw_index = step as u64;
         let d = draw_pair(&ctx, &mut rng);
         digest.push(d);
         full.record(groups, d);
@@ -751,6 +980,7 @@ pub fn run_coverage_json(
         "mid_q_boost": params.mid_q_boost,
         "high_q_boost": params.high_q_boost,
         "stratified_bands": params.stratified_bands,
+        "pair_sampling": if params.stratified_pairs { "stratified" } else { "uniform" },
         "per_sample_alpha_head": params.per_sample_alpha_head,
         "band_edges": "B0 <50, B1 [50,65), B2 [65,90), B3 >=90 (human_score 0-100), the \
                        trainer's own q-boost bands",
@@ -794,6 +1024,7 @@ mod tests {
             stratified_bands: 0,
             early_window: 100,
             per_sample_alpha_head: false,
+            stratified_pairs: false,
         }
     }
 
@@ -919,6 +1150,8 @@ mod tests {
             per_row_cdfs: &prc,
             ref_buckets: &rb,
             strat_bands: &[],
+            plan: None,
+            draw_index: 0,
         };
         let _ = gs;
         let mut r1 = SplitMix64::new(7);
@@ -1058,6 +1291,7 @@ mod tests {
             stratified_bands: 0,
             early_window: 0,
             per_sample_alpha_head: false,
+            stratified_pairs: false,
         };
         let r = simulate(&gs, &p);
         let v = run_coverage_json(&r, &gs, &p, 777);
@@ -1135,6 +1369,7 @@ mod tests {
             stratified_bands: 0,
             early_window: 0,
             per_sample_alpha_head: false,
+            stratified_pairs: false,
         };
         let (p1, p2) = (mk(100), mk(999));
         let j = |p: &SimParams, init: u64| {
@@ -1152,5 +1387,195 @@ mod tests {
             simulate(&gs, &p2).digest.hex(),
             "coverage must depend on the sample seed"
         );
+    }
+
+    // ── `--pair-sampling stratified` ────────────────────────────────────
+
+    fn strat_groups() -> Vec<SimGroup> {
+        // 60 rows over 6 refs x a score ramp that lands rows in several
+        // native bands, so the (ref, band) partition is non-trivial.
+        vec![SimGroup {
+            name: "a".into(),
+            train_weight: 1.0,
+            n_rows: 60,
+            human_scores: (0..60).map(|i| (i as f64) * 1.7).collect(),
+            ref_ids: Some((0..60).map(|i| (i % 6) as u32).collect()),
+            within_ref: false,
+        }]
+    }
+
+    fn strat_params(seed: u64) -> SimParams {
+        SimParams {
+            seed,
+            epochs: 4,
+            pairs_per_epoch: 400,
+            low_q_boost: 1.0,
+            mid_q_boost: 1.0,
+            high_q_boost: 1.0,
+            stratified_bands: 0,
+            early_window: 0,
+            per_sample_alpha_head: false,
+            stratified_pairs: true,
+        }
+    }
+
+    /// **The property the mode exists for**, and the failing-first shape:
+    /// under `stratified`, two SAMPLE SEEDS touch the same rows, refs and
+    /// cells — coverage stops being a property of the seed — while under
+    /// `uniform` they do not. Both halves are asserted, because only the
+    /// contrast is evidence: a stratified-only assertion would also pass
+    /// on a mode that ignored the seed entirely.
+    #[test]
+    fn stratified_coverage_is_seed_invariant_and_uniform_is_not() {
+        let gs = strat_groups();
+        let cov = |p: &SimParams| {
+            let c = &simulate(&gs, p).full.per_group[0];
+            (
+                c.rows_touched,
+                c.refs_touched,
+                c.cells_touched,
+                c.n_pairs,
+                c.band_pair_counts,
+            )
+        };
+        let (s1, s2) = (strat_params(100), strat_params(999));
+        assert_eq!(
+            cov(&s1),
+            cov(&s2),
+            "stratified: two sample seeds must touch the SAME rows/refs/cells"
+        );
+        // ...and it is not vacuous: the schedule reaches EVERY row that a
+        // stratum can pair, which is the guarantee — not "every row in the
+        // group". A (ref, band) cell holding one row cannot yield an
+        // in-stratum pair and is excluded by construction, so the reachable
+        // set is computed from the plan rather than assumed to be all 60.
+        // (This fixture HAS such cells: 9 rows land in band 1 and 7 in band
+        // 3, spread over 6 refs, so several cells hold exactly one row —
+        // the first version of this test asserted 60 and correctly failed.)
+        let per_group: Vec<Vec<Vec<usize>>> = gs
+            .iter()
+            .map(|g| strata_of(&g.human_scores, g.ref_ids.as_deref()))
+            .collect();
+        let plan = StratifiedPlan::build(&per_group, s1.pairs_per_epoch, s1.seed);
+        let reachable: usize = plan.strata.iter().map(|st| st.rows.len()).sum();
+        assert!(
+            plan.singleton_strata > 0,
+            "fixture must contain excluded singleton cells, else this assertion is              indistinguishable from the naive one"
+        );
+        assert!(reachable < 60 && reachable >= 40, "reachable {reachable}");
+        assert_eq!(cov(&s1).0, reachable, "every pairable row must be reached");
+        let reachable_refs: std::collections::BTreeSet<u32> = plan
+            .strata
+            .iter()
+            .flat_map(|st| st.rows.iter().map(|&r| gs[0].ref_ids.as_ref().unwrap()[r]))
+            .collect();
+        assert_eq!(
+            cov(&s1).1,
+            reachable_refs.len(),
+            "every pairable ref is reached"
+        );
+        assert_eq!(reachable_refs.len(), 6, "all 6 refs survive somewhere");
+
+        // The seed still does something: the pair ORDER (hence the digest)
+        // differs, which is exactly "permutes order WITHIN strata only".
+        assert_ne!(
+            simulate(&gs, &s1).digest.hex(),
+            simulate(&gs, &s2).digest.hex(),
+            "the sample seed must still permute the within-stratum walk"
+        );
+
+        // UNIFORM, same two seeds, same everything else: coverage MOVES.
+        let mut u1 = strat_params(100);
+        u1.stratified_pairs = false;
+        let mut u2 = strat_params(999);
+        u2.stratified_pairs = false;
+        assert_ne!(
+            cov(&u1),
+            cov(&u2),
+            "uniform: coverage must vary with the sample seed — if this fails the \
+             contrast the stratified assertion rests on is not real"
+        );
+    }
+
+    /// Every stratum is visited on a fixed round-robin, so within one epoch
+    /// each is reached `pairs_per_epoch / n_strata` times and the visit
+    /// counts differ by at most one. This is the "every ref x band each
+    /// epoch" claim, asserted rather than asserted-in-a-doc-comment.
+    #[test]
+    fn stratified_visits_every_stratum_each_epoch() {
+        let gs = strat_groups();
+        let per_group: Vec<Vec<Vec<usize>>> = gs
+            .iter()
+            .map(|g| strata_of(&g.human_scores, g.ref_ids.as_deref()))
+            .collect();
+        let plan = StratifiedPlan::build(&per_group, 400, 100);
+        assert!(plan.strata.len() >= 6, "several (ref, band) cells");
+        assert!(plan.covers_every_stratum_per_epoch());
+
+        let mut visits = vec![0usize; plan.strata.len()];
+        for k in 0..400u64 {
+            visits[(k % plan.strata.len() as u64) as usize] += 1;
+        }
+        let (lo, hi) = (*visits.iter().min().unwrap(), *visits.iter().max().unwrap());
+        assert!(
+            hi - lo <= 1,
+            "round-robin visit counts differ by >1: {lo}..{hi}"
+        );
+
+        // A too-small budget is REPORTED, not silently mis-promised.
+        let tight = StratifiedPlan::build(&per_group, 2, 100);
+        assert!(!tight.covers_every_stratum_per_epoch());
+    }
+
+    /// The within-stratum walk is a BIJECTION: `len` consecutive visits
+    /// enumerate the stratum exactly once each, for every seed. That is
+    /// what makes the row SET seed-invariant while the order is not.
+    #[test]
+    fn stratum_walk_is_a_bijection_for_every_seed() {
+        for len in 2..40usize {
+            for seed in [0u64, 1, 7, 100, 999, u64::MAX] {
+                let rows: Vec<usize> = (0..len).collect();
+                let plan = StratifiedPlan::build(&[vec![rows.clone()]], 1000, seed);
+                let s = &plan.strata[0];
+                let seen: std::collections::BTreeSet<usize> =
+                    (0..len as u64).map(|j| s.row_at(j)).collect();
+                assert_eq!(
+                    seen.len(),
+                    len,
+                    "len {len} seed {seed}: walk is not a bijection"
+                );
+            }
+        }
+    }
+
+    /// Singleton strata cannot yield an in-stratum pair. They are EXCLUDED
+    /// and counted, rather than silently emitting collisions that would
+    /// look like RNG bad luck in the coverage record.
+    #[test]
+    fn singleton_strata_are_excluded_and_counted() {
+        let plan = StratifiedPlan::build(&[vec![vec![0], vec![1, 2, 3], vec![4]]], 100, 7);
+        assert_eq!(plan.strata.len(), 1);
+        assert_eq!(plan.singleton_strata, 2);
+        assert_eq!(plan.strata[0].rows, vec![1, 2, 3]);
+    }
+
+    /// **Default byte-identity**: a `None` plan leaves `draw_pair` the
+    /// function it was, draw for draw, including RNG consumption. Asserted
+    /// against a full simulate digest so a change in skip behaviour (which
+    /// shifts every later draw) cannot pass.
+    #[test]
+    fn pair_sampling_uniform_is_the_untouched_draw() {
+        let gs = strat_groups();
+        let mut p = strat_params(100);
+        p.stratified_pairs = false;
+        let a = simulate(&gs, &p);
+        let b = simulate(&gs, &p);
+        assert_eq!(a.digest.finish(), b.digest.finish());
+        // The uniform path must still consume RNG (the stratified one does
+        // not) — a plan-free run whose draws did not depend on the stream
+        // would mean the `None` branch had been bypassed.
+        let mut q = strat_params(4242);
+        q.stratified_pairs = false;
+        assert_ne!(a.digest.hex(), simulate(&gs, &q).digest.hex());
     }
 }

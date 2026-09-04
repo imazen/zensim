@@ -195,7 +195,58 @@ def main():
                 elif k not in doc:
                     doc[k] = v
                     carried.append(k)
-        json.dump(doc, open(out, "w"), indent=1)
+        # NON-FINITE GUARD (2026-09-04). `json.dump` defaults to
+        # `allow_nan=True`, which writes a BARE `NaN` — accepted by CPython's
+        # own loader and rejected by every strict reader, `serde_json`
+        # included. MEASURED: `peer_cvvdp.fulleval.json` carried 73 of them
+        # in `per_pair.imazen26.pred`, which made the file unreadable by
+        # `freeze_check --select` (so `--select` over the whole fulleval dir
+        # had never worked) while nothing on the Python side ever noticed.
+        #
+        # A per-pair entry the metric could not score is not a data point, so
+        # it is DROPPED — index-aligned across `pred`/`mos`, which keeps the
+        # two arrays paired and keeps every value finite. That is deliberately
+        # not "write null": the board's scatter path filters with
+        # `np.isfinite`, which raises on `None`, so a null would trade an
+        # unreadable file for a crashing one.
+        #
+        # Anything non-finite ANYWHERE ELSE becomes `null` (absent, never a
+        # zero), and the dump then runs with `allow_nan=False` so this file
+        # can never again be emitted as invalid JSON — a future non-finite
+        # raises here instead of shipping.
+        def _finite(v):
+            return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v \
+                and v not in (float("inf"), float("-inf"))
+
+        dropped = 0
+        for c, blk in (doc.get("per_pair") or {}).items():
+            pr, mo = blk.get("pred"), blk.get("mos")
+            if not isinstance(pr, list) or not isinstance(mo, list) or len(pr) != len(mo):
+                continue
+            keep = [i for i in range(len(pr)) if _finite(pr[i]) and _finite(mo[i])]
+            if len(keep) != len(pr):
+                dropped += len(pr) - len(keep)
+                blk["pred"] = [pr[i] for i in keep]
+                blk["mos"] = [mo[i] for i in keep]
+                blk["n_unscoreable_dropped"] = len(pr) - len(keep)
+
+        def _nulled(o):
+            if isinstance(o, float) and not _finite(o):
+                return None
+            if isinstance(o, dict):
+                return {k: _nulled(v) for k, v in o.items()}
+            if isinstance(o, list):
+                return [_nulled(v) for v in o]
+            return o
+
+        doc = _nulled(doc)
+        if dropped:
+            print(f"peer_{peer}: dropped {dropped} unscoreable per-pair entries "
+                  f"(non-finite prediction or label) — recorded per corpus as "
+                  f"n_unscoreable_dropped")
+        # allow_nan=False: a bare NaN/Infinity is now a hard error, not a
+        # silently-invalid file.
+        json.dump(doc, open(out, "w"), indent=1, allow_nan=False)
         print(f"peer_{peer}: {len(rank)} corpora computed -> {out}")
         for c, b in sorted(rank.items()):
             print(f"   {c}: srocc {b['srocc']:.4f} (n={b['n']})")

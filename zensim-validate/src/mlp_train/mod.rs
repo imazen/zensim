@@ -481,6 +481,9 @@ pub struct MlpHyperparams {
     /// within band (kills band starvation under pooled sampling).
     /// Ignored for groups with per-row CDFs. `0` = off.
     pub stratified_bands: usize,
+    /// `--pair-sampling`. [`PairSampling::Uniform`] is the default and the
+    /// behaviour of every model trained before 2026-09-04.
+    pub pair_sampling: PairSampling,
 
     /// STRATEGY-2026-07-02: GroupDRO-style worst-group emphasis.
     /// Per-epoch, group sampling weights become
@@ -920,6 +923,7 @@ impl Default for MlpHyperparams {
             hard_pair_frac: 0.0,
             hard_pair_max_delta: 0.05,
             stratified_bands: 0,
+            pair_sampling: PairSampling::Uniform,
             dro_eta: 0.0,
             listwise_weight: 0.0,
             listwise_size: 8,
@@ -1426,6 +1430,74 @@ impl GroupLossMode {
     pub(crate) fn has_mse(self) -> bool {
         matches!(self, Self::Mse | Self::Both)
     }
+}
+
+/// How RankNet pairs are drawn (`--pair-sampling`).
+///
+/// The choice changes WHAT a run sees, not just where it lands, so it is a
+/// recorded knob rather than an internal detail: `zentrain.sample_coverage`
+/// reports which mode produced the coverage it describes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PairSampling {
+    /// Group by weighted CDF, then rows uniformly (or by the q-boost CDF /
+    /// within-ref buckets). **The default, and byte-identical to every
+    /// model trained before 2026-09-04.**
+    #[default]
+    Uniform,
+    /// Visit every (group, ref, quality-band) stratum on a fixed
+    /// round-robin, walking each stratum's rows through a seeded
+    /// bijection. Coverage becomes a property of the RECIPE rather than of
+    /// the sample seed: two sample seeds touch the same rows, refs and
+    /// cells, and differ only in pair order. See
+    /// [`sampling::StratifiedPlan`].
+    Stratified,
+}
+
+/// Build the `--pair-sampling stratified` schedule for a run, or `None`
+/// under the default uniform mode.
+///
+/// The strata are (ref, quality-band) cells when the group carries
+/// `ref_ids`, and band cells alone when it does not — the finest partition
+/// the group's own metadata supports, never a fabricated one.
+fn build_pair_plan(
+    groups: &[TrainingGroup<'_>],
+    train_indices: &[usize],
+    hyperparams: &MlpHyperparams,
+) -> Option<sampling::StratifiedPlan> {
+    if hyperparams.pair_sampling != PairSampling::Stratified {
+        return None;
+    }
+    // The partition has ONE owner (`sampling::strata_of`), so a replay in
+    // `sampling::simulate` cuts the same cells this run trained on.
+    let per_group: Vec<Vec<Vec<usize>>> = train_indices
+        .iter()
+        .map(|&gi| sampling::strata_of(groups[gi].human_scores, groups[gi].ref_ids))
+        .collect();
+    let plan = sampling::StratifiedPlan::build(
+        &per_group,
+        hyperparams.pairs_per_epoch,
+        hyperparams.sample_seed.unwrap_or(hyperparams.seed),
+    );
+    println!(
+        "  pair-sampling: STRATIFIED — {} strata over {} train groups ({} singleton strata \
+         excluded: a 1-row cell cannot yield an in-stratum pair){}",
+        plan.strata.len(),
+        train_indices.len(),
+        plan.singleton_strata,
+        if plan.covers_every_stratum_per_epoch() {
+            String::new()
+        } else {
+            format!(
+                "\n  WARNING: pairs_per_epoch {} < {} strata, so ONE EPOCH DOES NOT REACH \
+                 EVERY STRATUM. The schedule still cycles, so coverage stays seed-invariant \
+                 across the run, but the per-epoch guarantee this mode is named for does not \
+                 hold at this setting.",
+                hyperparams.pairs_per_epoch,
+                plan.strata.len()
+            )
+        }
+    );
+    Some(plan)
 }
 
 /// Row indices bucketed by reference image, for within-ref pair draws.
@@ -2258,6 +2330,11 @@ pub fn train_mlp_strategy(
     // every other path — including the standard path every board bake
     // trained through. Empty when the flag is 0, which keeps the default
     // byte-identical.
+    // `--pair-sampling stratified` schedule (None = the uniform draw every
+    // model before 2026-09-04 trained under). Built once per run, from the
+    // SAMPLE seed — see `sampling::StratifiedPlan`.
+    let pair_plan: Option<sampling::StratifiedPlan> =
+        build_pair_plan(groups, &train_indices, hyperparams);
     let strat_bands: Vec<Vec<Vec<usize>>> = if hyperparams.stratified_bands > 0 {
         train_indices
             .iter()
@@ -2327,6 +2404,10 @@ pub fn train_mlp_strategy(
     }
 
     for epoch in 0..hyperparams.n_epochs {
+        // Global draw index, the coordinate `--pair-sampling stratified`'s
+        // schedule is a function of. Unused (and unread) by the uniform
+        // draw, which is why adding it changes nothing for a default run.
+        let draw_index_base = (epoch as u64).wrapping_mul(hyperparams.pairs_per_epoch as u64);
         let lr = hyperparams.initial_lr
             * 0.5
             * (1.0 + (std::f64::consts::PI * (epoch % 50) as f64 / 50.0).cos());
@@ -2337,7 +2418,7 @@ pub fn train_mlp_strategy(
         // controls the final-flush at epoch end when not aligned with K.
         let mut steps_since_adam = 0u64;
 
-        for _ in 0..hyperparams.pairs_per_epoch {
+        for pair_i in 0..hyperparams.pairs_per_epoch {
             // Pick a training group via inverse-CDF sampling, then a
             // pair (ia, ib) within that group. If per-row CDFs are
             // populated (boost != 1.0), use weighted sampling for the
@@ -2351,6 +2432,8 @@ pub fn train_mlp_strategy(
                     per_row_cdfs: &per_row_cdfs,
                     ref_buckets: &ref_buckets,
                     strat_bands: &strat_bands,
+                    plan: pair_plan.as_ref(),
+                    draw_index: draw_index_base + pair_i as u64,
                 },
                 &mut rng,
             );
@@ -3194,6 +3277,11 @@ fn train_mlp_pool_head_with_tv(
     // every other path — including the standard path every board bake
     // trained through. Empty when the flag is 0, which keeps the default
     // byte-identical.
+    // `--pair-sampling stratified` schedule (None = the uniform draw every
+    // model before 2026-09-04 trained under). Built once per run, from the
+    // SAMPLE seed — see `sampling::StratifiedPlan`.
+    let pair_plan: Option<sampling::StratifiedPlan> =
+        build_pair_plan(groups, &train_indices, hyperparams);
     let strat_bands: Vec<Vec<Vec<usize>>> = if hyperparams.stratified_bands > 0 {
         train_indices
             .iter()
@@ -3259,6 +3347,10 @@ fn train_mlp_pool_head_with_tv(
     };
 
     for epoch in 0..hyperparams.n_epochs {
+        // Global draw index, the coordinate `--pair-sampling stratified`'s
+        // schedule is a function of. Unused (and unread) by the uniform
+        // draw, which is why adding it changes nothing for a default run.
+        let draw_index_base = (epoch as u64).wrapping_mul(hyperparams.pairs_per_epoch as u64);
         let lr = hyperparams.initial_lr
             * 0.5
             * (1.0 + (std::f64::consts::PI * (epoch % 50) as f64 / 50.0).cos());
@@ -3267,7 +3359,7 @@ fn train_mlp_pool_head_with_tv(
         let mut n_steps = 0u64;
         let mut steps_since_adam = 0u64;
 
-        for _ in 0..hyperparams.pairs_per_epoch {
+        for pair_i in 0..hyperparams.pairs_per_epoch {
             // Draw via THE owner (`sampling::draw_pair`) — see that module
             // for why the RNG consumption pattern is a wire contract.
             let drawn = sampling::draw_pair(
@@ -3277,6 +3369,8 @@ fn train_mlp_pool_head_with_tv(
                     per_row_cdfs: &per_row_cdfs,
                     ref_buckets: &ref_buckets,
                     strat_bands: &strat_bands,
+                    plan: pair_plan.as_ref(),
+                    draw_index: draw_index_base + pair_i as u64,
                 },
                 &mut rng,
             );
@@ -4036,6 +4130,11 @@ fn train_mlp_hybrid_head_with_tv(
     // every other path — including the standard path every board bake
     // trained through. Empty when the flag is 0, which keeps the default
     // byte-identical.
+    // `--pair-sampling stratified` schedule (None = the uniform draw every
+    // model before 2026-09-04 trained under). Built once per run, from the
+    // SAMPLE seed — see `sampling::StratifiedPlan`.
+    let pair_plan: Option<sampling::StratifiedPlan> =
+        build_pair_plan(groups, &train_indices, hyperparams);
     let strat_bands: Vec<Vec<Vec<usize>>> = if hyperparams.stratified_bands > 0 {
         train_indices
             .iter()
@@ -4115,6 +4214,10 @@ fn train_mlp_hybrid_head_with_tv(
     };
 
     for epoch in 0..hyperparams.n_epochs {
+        // Global draw index, the coordinate `--pair-sampling stratified`'s
+        // schedule is a function of. Unused (and unread) by the uniform
+        // draw, which is why adding it changes nothing for a default run.
+        let draw_index_base = (epoch as u64).wrapping_mul(hyperparams.pairs_per_epoch as u64);
         let lr = hyperparams.initial_lr
             * 0.5
             * (1.0 + (std::f64::consts::PI * (epoch % 50) as f64 / 50.0).cos());
@@ -4123,7 +4226,7 @@ fn train_mlp_hybrid_head_with_tv(
         let mut n_steps = 0u64;
         let mut steps_since_adam = 0u64;
 
-        for _ in 0..hyperparams.pairs_per_epoch {
+        for pair_i in 0..hyperparams.pairs_per_epoch {
             // Draw via THE owner (`sampling::draw_pair`) — see that module
             // for why the RNG consumption pattern is a wire contract.
             let drawn = sampling::draw_pair(
@@ -4133,6 +4236,8 @@ fn train_mlp_hybrid_head_with_tv(
                     per_row_cdfs: &per_row_cdfs,
                     ref_buckets: &ref_buckets,
                     strat_bands: &strat_bands,
+                    plan: pair_plan.as_ref(),
+                    draw_index: draw_index_base + pair_i as u64,
                 },
                 &mut rng,
             );
@@ -7116,6 +7221,11 @@ fn train_mlp_per_sample_alpha_head(
     // every other path — including the standard path every board bake
     // trained through. Empty when the flag is 0, which keeps the default
     // byte-identical.
+    // `--pair-sampling stratified` schedule (None = the uniform draw every
+    // model before 2026-09-04 trained under). Built once per run, from the
+    // SAMPLE seed — see `sampling::StratifiedPlan`.
+    let pair_plan: Option<sampling::StratifiedPlan> =
+        build_pair_plan(groups, &train_indices, hyperparams);
     let strat_bands: Vec<Vec<Vec<usize>>> = if hyperparams.stratified_bands > 0 {
         train_indices
             .iter()
@@ -7664,6 +7774,10 @@ fn train_mlp_per_sample_alpha_head(
     }
 
     for epoch in 0..hyperparams.n_epochs {
+        // Global draw index, the coordinate `--pair-sampling stratified`'s
+        // schedule is a function of. Unused (and unread) by the uniform
+        // draw, which is why adding it changes nothing for a default run.
+        let draw_index_base = (epoch as u64).wrapping_mul(hyperparams.pairs_per_epoch as u64);
         let lr = hyperparams.initial_lr
             * 0.5
             * (1.0 + (std::f64::consts::PI * (epoch % 50) as f64 / 50.0).cos());
@@ -7690,7 +7804,7 @@ fn train_mlp_per_sample_alpha_head(
         let mut n_steps = 0u64;
         let mut steps_since_adam = 0u64;
 
-        for _ in 0..hyperparams.pairs_per_epoch {
+        for pair_i in 0..hyperparams.pairs_per_epoch {
             // STRATEGY: listwise / triplet steps steal a fraction of the
             // pair budget (Adam cadence identical: one logical step each).
             if listwise_active || triplet_active {
@@ -7881,6 +7995,8 @@ fn train_mlp_per_sample_alpha_head(
                     per_row_cdfs: &per_row_cdfs,
                     ref_buckets: &ref_buckets,
                     strat_bands: &strat_bands,
+                    plan: pair_plan.as_ref(),
+                    draw_index: draw_index_base + pair_i as u64,
                 },
                 &mut rng,
             );

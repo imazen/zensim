@@ -1210,6 +1210,11 @@ struct SelectRow {
     /// the seeds are split, the single seed on a legacy bake, `None` when
     /// the repro records no seed.
     seed_id: Option<String>,
+    /// [`seed_label`] of the same repro — what the per-seed table PRINTS.
+    /// Separate from `seed_id` on purpose: the identity is a grouping key
+    /// and must stay terse and stable, the label is for a reader and says
+    /// which half of a split pair is which.
+    seed_text: String,
 }
 
 /// Human-readable form of [`seed_identity`] for the per-seed detail table.
@@ -1811,6 +1816,7 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
             bake: v.get("bake").and_then(|x| x.as_str()).map(str::to_string),
             group_key: seed_group_key(&v),
             seed_id: seed_identity(&v),
+            seed_text: seed_label(&v),
         });
     }
 
@@ -2030,7 +2036,7 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
                     "| {} | {} | {} | {}/{} | {} | {} | {} |",
                     g.key,
                     m.name,
-                    m.seed_id.as_deref().unwrap_or("\u{2014}"),
+                    m.seed_text,
                     m.n_pass,
                     m.n_floors,
                     num(m.composite),
@@ -3057,6 +3063,7 @@ mod tests {
             bake: None,
             group_key: seed_group_key(v),
             seed_id: seed_identity(v),
+            seed_text: seed_label(v),
         }
     }
 
