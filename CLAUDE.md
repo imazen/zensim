@@ -1296,10 +1296,23 @@ with `--negtail-probe` + `--identity-probe` (both pinned under
 - **The ssim2 TRUTH on the canonical dial grid** (`/mnt/v/output/zensim/ssim2-bar-2026-08-31/
   dialcells_ssim2_qv2grid.tsv`): min **−55.35**, p5 **10.26**, p95 **95.46**, max **98.38**,
   dynamic range **85.20**, 3.48 % of cells negative. Shipped B bottoms out at **+3.13**.
-  Two bars are therefore NOT addressability bars: **A6's 86.08 exceeds the truth's own
-  85.20**, and **A4's `p5 ≤ 13.645` is unattainable by any monotone dial** — an ORACLE arm
-  (the eval grid as its own anchor, truth as target) reads p5 **21.5–22.8** across n_edges
-  12→120. Shipped B clears A4 by mapping the low band BELOW its conditional median.
+  **A1 / A3 / A6's bars all sit ABOVE the truth** (99.98 / 99.72 / 86.08 vs 98.38 / 95.46 /
+  85.20) — a dial calibrated exactly to the truth fails all three, and **both other shipped
+  profiles do**. And **A4's `p5 ≤ 13.645` is unattainable by any monotone dial ON B's
+  ORDERING** — an ORACLE arm (the eval grid as its own anchor, truth as target) reads p5
+  **21.5–22.8** across n_edges 12→120, worse than every real candidate; shipped B clears A4
+  by mapping the low band BELOW its conditional median. The bar IS reachable by other
+  weights: **Profile D (ADD156) reads p5 9.52.**
+- **Gate readings for the other shipped profiles** (same grid, same probes): **Profile A
+  (v47-QAT) is the only bake that passes the ENTIRE CONTRACT tier** — identity 97.6893 in
+  band, 0 above identity, negative tail 55.75 % below zero (min −93.90) — and fails only
+  A1/A3/A4/A6. **Profile D (ADD156)** fails only A1/A3/A6/C5, with `p5` 9.52 and 85.80 % of
+  the negative probe below zero. The shipped SDR dial (B) is the outlier on every contract
+  row.
+- **720/944 bakes read `NOT MEASURABLE` by design**: their default dial grid is unregistered
+  and the 372-wide probes refuse to score against them (both refusals print loudly).
+  Registering a 944 grid needs a SHIPPED 944-class reference dial to measure a floor from,
+  and none exists.
 - **ssim2 targets are reusable across decoder eras PER CODEC, not in aggregate.** Re-scored
   today through imazen decoders + `fast-ssim2`: `zenwebp` **0.0000 on 1,000/1,000** rows
   (bit-exact — which also proves bigcodec's stored `score_ssim2` is the CPU path, no GPU

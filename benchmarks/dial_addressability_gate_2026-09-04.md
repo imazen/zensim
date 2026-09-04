@@ -22,13 +22,18 @@ wired into `bake_verdict`'s DIAL panel and emitted at `dial.addressability` in
 **No candidate passes. `B dial-era v2` is NOT proposed.** Three bars block the leading arms,
 and all three are now measured rather than argued:
 
-- **A4 / A6** (`p5` and `dynamic_range`) are **not attainable by any output spline**. An
+- **A4** (`p5 ≤ 13.645`) is **not attainable by any output spline on B's ordering**. An
   ORACLE arm — the eval grid itself as the anchor with the ssim2 truth as target — reads
-  `p5` **21.5–22.8** across a 10× knot sweep, *further* from the 13.645 bar than every real
-  candidate (17.7–18.6). Shipped B clears the bar at 13.65 by mapping the low band **below**
-  its conditional median: on the 221 lowest-truth cells it is +23.27 off the truth, and the
-  best candidate is +22.80 — better. Separately, **the truth's own dynamic range on this
-  grid is 85.20, below A6's 86.08 bar** — a perfectly calibrated dial fails A6.
+  `p5` **21.5–22.8** across a 10× knot sweep, *further* from the bar than every real
+  candidate (17.7–18.6). Shipped B clears it by mapping the low band **below** its
+  conditional median: on the 221 lowest-truth cells it is +23.27 off the truth, the best
+  candidate +22.80, the oracle +27.09. **Profile D reads `p5 = 9.52`** on the same
+  instrument, so the bar IS reachable — by different weights, not by a different spline.
+- **A1 / A3 / A6** (`max`, `p95`, `dynamic_range`) sit **ABOVE the reference metric's own
+  values on the same grid** — truth `max` 98.38 / `p95` 95.46 / DR 85.20 against bars
+  99.98 / 99.72 / 86.08. A dial calibrated exactly to the truth fails all three, and both
+  other shipped profiles (A and D) do. Those bars encode the incumbent's *stretch* at the
+  ceiling, not its reach.
 - **C2 ⊻ C6 is a MODEL defect with a proof.** 266 of 4,424 dial-grid cells (6.01 %) have a
   raw prediction ABOVE the identity vector's — B ranks 6 % of lossy output better than a
   perfect copy. Pin identity at 100 and they cap (C2 fails, measured: 267 cells at exactly
@@ -290,6 +295,38 @@ Three things follow immediately, and they reframe two of the pre-registered bars
    not "more addressable" at p5 either; it is closer to the truth there than the candidates,
    but for a reason §10 shows is miscalibration rather than reach.
 
+**And the same is true at the ceiling.** The truth's `max` is 98.38 and its `p95` 95.46;
+shipped B reads 99.98 and 99.72 — **+1.6 and +4.3 above the reference metric**. So bars A1,
+A3 and A6 all sit ABOVE the truth's own values on this grid. They encode the incumbent's
+*stretch*, not its reach, and **a dial calibrated exactly to the truth would fail all three**.
+A2 / A5 / A7-A9 (the floor and tail axes) are the ones where the incumbent is genuinely
+short of the truth, by an enormous margin, and those are the axes the candidates fix.
+
+### 8a. Running the gate on the OTHER shipped profiles — the cross-check that settles it
+
+Same grid, same probes, zero extra work (the gate runs on every `bake_verdict` invocation):
+
+| profile | reach | min | max | p5 | p95 | DR | tied | negtail min | frac<0 | identity | above-id | fails |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| **B** (SHIPPED SDR) | 96.85 | 3.13 | 99.98 | 13.65 | 99.72 | 86.08 | .0000 | +2.52 | .0000 | 96.24 | 266 | C3 C4 C5 C6 |
+| **A** `v47_strict_qat_native` | 113.90 | −17.11 | 96.78 | 16.67 | 94.51 | 77.85 | .0000 | **−93.90** | **.5575** | **97.69** | **0** | A1 A3 A4 A6 |
+| **D** `d_sdr_add156_dense_dial` | 108.25 | −12.20 | 96.05 | **9.52** | 95.28 | 85.77 | .0000 | **−100.00** | **.8580** | 96.12 | **0** | A1 A3 A6 C5 |
+| ssim2 TRUTH | 153.73 | −55.35 | 98.38 | 10.26 | 95.46 | 85.20 | — | — | — | — | — | — |
+
+Three things this settles:
+
+- **Profile A is the only bake measured here that passes the ENTIRE CONTRACT tier** —
+  identity 97.6893 in band, 0 cells above identity, and a negative tail that actually works
+  (55.75 % of the all-negative-truth probe scores below zero, min −93.90). The QAT-era dial
+  was right about all four things the shipped SDR dial gets wrong.
+- **A4 is reachable — by a DIFFERENT MODEL.** Profile D reads `p5 = 9.52`, comfortably under
+  the 13.645 bar and within 0.7 of the truth's 10.26. §10.1's impossibility is therefore
+  precisely scoped: it is unattainable *for B's raw ordering*, and the residual is a weights
+  limitation, now demonstrated rather than inferred.
+- **A1 / A3 / A6 are the mirror image**: both A and D fail all three, and both sit BELOW the
+  truth at the top while B sits above it. Only the incumbent clears bars that the reference
+  metric itself does not.
+
 ## 9. The candidates — all rank-identical, and four of the incumbent's contract defects fixed
 
 Every arm shares **identical weights, scaler and winsor guards**; only the output spline
@@ -353,7 +390,7 @@ against the −4.977 / −5.857 era defect — i.e. the leading candidates still
 Three bars remain unmet by the best arms: **A4** (`p5 ≤ 13.6450`), **A6** (`dynamic_range ≥
 86.0767`) and **C2** (`tied ≤ 0.05`). Each is now measured, not argued.
 
-### 10.1 A4 — unattainable by ANY output spline, and the incumbent passes it by miscalibration
+### 10.1 A4 — unattainable by any output spline ON B'S ORDERING (a different model reaches it)
 
 An **ORACLE** arm was built to bound the question: the dial grid *itself* as the anchor, with
 the **ssim2 truth** as the target — i.e. train-on-test, the best a monotone re-map of B's own
@@ -390,7 +427,10 @@ shipped B on whole-grid MAE (4.29–4.37 vs **5.45**).
 
 So shipped B's `p5 = 13.65` is not addressability — it is the low band mapped *below* its
 conditional median. **A4 as pre-registered rewards that.** It is unattainable by a dial
-change and the residual is a **model (weights) limitation**, not a calibration one.
+change *on B's ordering*, and the residual is a **model (weights) limitation** — which §8a
+demonstrates directly: **Profile D (`d_sdr_add156_dense_dial`) reads `p5 = 9.52`**, under the
+bar and within 0.7 of the truth's 10.26, on the same grid with the same gate. A4 is a
+reachable bar; B cannot reach it by re-splining.
 
 ### 10.2 A6 — the bar exceeds the truth's own dynamic range
 
@@ -427,15 +467,20 @@ the gate did its job on its first use.
 
 What the lane established, in the order it matters:
 
-1. **The two bars that block the leading candidates are themselves not addressability bars.**
-   A4 is unattainable by any monotone dial and the incumbent passes it by mapping the low
-   band below its conditional median; A6's bar (86.08) exceeds the reference metric's own
-   dynamic range (85.20) on the same grid. **This is a finding about the pre-registration,
-   not a request to relax it** — the bars stay exactly as written, and no candidate was
-   graded against anything softer. The user's decision is whether to REPLACE A4/A6 with
-   bars a correctly-calibrated dial can meet — the obvious candidates being truth-referenced
-   (`p5 ≤ truth p5 + δ`) or calibration-referenced (low-band MAE vs the reference metric),
-   both of which every candidate already beats the incumbent on.
+1. **The bars that block the leading candidates are, in part, not addressability bars.**
+   A4 is unattainable by any monotone dial *on B's ordering* (though Profile D reaches it —
+   §8a — so it is a weights problem, not an unreachable bar); and **A1, A3 and A6 all sit
+   ABOVE the reference metric's own values on the same grid** (truth `max` 98.38 / `p95`
+   95.46 / DR 85.20 vs bars 99.98 / 99.72 / 86.08). A dial calibrated exactly to the truth
+   fails all three, and both other shipped profiles do. **This is a finding about the
+   pre-registration, not a request to relax it** — the bars stay exactly as written, no
+   candidate was graded against anything softer, and the arms are reported as failing. The
+   user's decision is whether to REPLACE the four *ceiling/spread* bars with ones a
+   correctly-calibrated dial can meet: truth-referenced (`|dial end − truth end| ≤ δ`) or
+   calibration-referenced (low-band and whole-grid MAE against the reference metric), both of
+   which **every candidate already beats the incumbent on** (whole-grid MAE 4.29-4.37 vs
+   5.45). The FLOOR bars (A2, A5, A7-A9) need no revision — they are the axes where the
+   incumbent is genuinely short of the truth, and the candidates fix them.
 2. **`ne12_ss_unc_id100`** (sha `2deeae9c…`) and **`ss_unc_id100_lowband`** (sha `ef4298ef…`)
    are the leading arms: rank-identical to shipped B, era correction retained (+3.9 / +4.5 /
    +3.9 and +3.7 / +4.7 / +3.7), whole-grid calibration better than shipped (MAE 4.29 / 4.37
@@ -450,6 +495,13 @@ What the lane established, in the order it matters:
    to +11.9 and negtail `min` to +11.6. Its deficit is low-band coverage in prediction space,
    which is fixable by adding a low band — not by top-densification, which the imazen-26
    record had already found could not move `p5`.
+
+**A note on other regimes.** A 720/944-input bake reads `regression NOT MEASURABLE` and
+`contract INCOMPLETE`: its default dial grid is not in the registry and the 372-wide probes
+refuse to score against it (both refusals print loudly on stderr). That is correct and
+deliberate — registering a 944 grid needs a **shipped 944-class reference dial** to measure
+the floor from, and none exists. Verified on `c_sdr_purity944_2026-08-29`: 2 pass, 0 fail,
+13 not measured, no silent pass anywhere.
 
 **Registered, not run:** (i) a non-kadis low band — `ss_unc_id100_lowband`'s low rows come
 from `kadis_negrich`, disjoint from the negtail probe by construction but same-distribution,
