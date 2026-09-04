@@ -17,6 +17,15 @@ wired into `bake_verdict`'s DIAL panel and emitted at `dial.addressability` in
 
 ---
 
+> **⚠ SUPERSEDED BARS BELOW — READ [§14 "Re-pin 2026-09-04"](#14-re-pin-2026-09-04--the-bars-are-the-reference-metric-now) FIRST.**
+> USER DECISION 2026-09-04: *"I don't think we should pin to B, ssim2 seems a better
+> mentor."* Every REGRESSION bar quoted in §0-§11 is the **retired shipped-B** pin set. It
+> is still readable (the registry keeps it; `bake_verdict --gaddr-reference shipped_b`
+> reproduces this grading exactly) but it is **no longer a bar**. The active bars are
+> `peer_ssim2`'s own measured values, and the re-graded candidate table is §14.4.
+
+---
+
 ## 0. Headline
 
 **No candidate passes. `B dial-era v2` is NOT proposed.** Three bars block the leading arms,
@@ -578,3 +587,344 @@ Key shas: `ne12_ss_unc_id100.bin` `2deeae9ce7da9cc2…`, `ss_unc_id100_lowband.b
 `ef4298ef4d938be6…`, anchor `ss_cur_rescored_unclamped_id100.parquet` `6ce2c32971a34791…`,
 anchor `ss_unc_id100_lowband.parquet` `a91a676156d13b08…`, chain control
 `ctl_curera.bin` `c414b3f91da83e69…` (= the imazen-26 lane's `B_safesyn_curera`, byte-identical).
+
+---
+
+# 14. Re-pin 2026-09-04 — the bars are the REFERENCE METRIC now
+
+**USER DECISION, verbatim:** *"I don't think we should pin to B, ssim2 seems a better
+mentor."*
+
+**Landed:** owner `zensim-validate/src/dial_addressability.rs`, registry
+`benchmarks/dial_addressability_floor_2026-09-04.json` (append-only), driver
+`scripts/dialgate_arms.sh score`.
+
+## 14.1 Why the incumbent was the wrong mentor
+
+The gate's own first run measured its pins to be defective — not merely strict, but
+pointing the wrong way. Both findings are in §8 and §10 and neither was known when the
+bars were pre-registered:
+
+1. **A1 / A3 / A6 sat ABOVE what the reference metric itself reaches on the same grid.**
+   Truth `max` 98.3766 / `p95` 95.4593 / DR 85.1960 against bars 99.9833 / 99.7217 /
+   86.0767. A dial calibrated *exactly to the truth* failed all three, and so did both
+   other shipped profiles. Those bars encoded the incumbent's **stretch**, not its reach.
+2. **A4 was met by B only through a −23-point low-band bias.** On the 221 lowest-truth
+   cells B reads +11.97 where the truth is −11.30, and the train-on-test ORACLE — the
+   ceiling for any monotone re-map of B's ordering — reads `p5` 21.5–22.8. B's low `p5`
+   is the low band mapped *below* its conditional median; the old A4 rewarded exactly that.
+
+A gate pinned to the incumbent therefore **barred candidates for being closer to the truth
+than the incumbent is**. That is the failure the re-pin fixes.
+
+## 14.2 What changed, precisely
+
+Registry rows are now keyed **`(instrument, reference)`**, both halves load-bearing. The
+`peer_ssim2` pin set was appended; the `shipped_b` set is **retained, printed as
+`incumbent`, and never a bar** — labelled biased, with the two measured reasons above.
+Pre-2026-09-04 rows carry no `reference` field and a serde default supplies one, so those
+rows are **byte-untouched**, which is what append-only requires.
+
+Direction semantics are unchanged in form and sharper in meaning: **a candidate must
+address at least the range ssim2 addresses** (`max`/`p95`/`reach`/`DR`/`frac<0` ≥ ssim2's;
+`min`/`p5`/negtail `min`/negtail `p1` ≤ ssim2's). Every report prints both columns —
+**`bar (vs ssim2)`** and **`incumbent (shipped B)`** — so "worse than the mentor" and
+"worse than what shipped" can never be confused.
+
+**The mentor's own values** (full f64, straight out of `dial_addressability::to_json`; no
+percentile math was re-implemented beside the owner):
+
+| axis | ssim2 (THE BAR) | shipped B (retired bar, now `incumbent`) |
+|---|--:|--:|
+| A1 `max` ≥ | **98.376644** | 99.98330778475787 |
+| A2 `min` ≤ | **−55.354544** | 3.12950123756248 |
+| A3 `p95` ≥ | **95.45929934999998** | 99.72170874183841 |
+| A4 `p5` ≤ | **10.26332105** | 13.645032446453126 |
+| A5 `reach` ≥ | **153.731188** | 96.85380654719539 |
+| A6 `dynamic_range` ≥ | **85.19597829999998** | 86.07667629538528 |
+| A7 negtail `min` ≤ | **−770.619744** | 2.516685884084839 |
+| A8 negtail `p1` ≤ | **−187.13142578999998** | 3.981383254902343 |
+| A9 negtail `frac_below_zero` ≥ | **1.0** | 0.0 |
+| — mono | 0.99235757295044 | 0.9791570171375636 |
+| — tied | 0.0 | 0.0 |
+| — identity dial | **100.0** (all 38 refs) | 96.24115978721524 |
+| — cells above identity | **0** of 4,424 | 266 of 4,424 |
+
+**A9's `1.0` is DEFINITIONAL, not a discovery** — the probe's population was selected by
+"ssim2 < 0", so the reference metric is below zero on all 2,000 rows by construction. A9
+therefore asks for perfect sign agreement with ssim2 on an all-negative population. That
+is the strictest honest reading of "address at least the range ssim2 addresses", and it is
+stated here so nobody mistakes it for an empirical bar.
+
+## 14.3 The re-pin is NOT a relaxation — measured, 70 against 9
+
+Re-grading all 17 candidates under **both** pin sets, same measurements, different bars
+(`--gaddr-reference shipped_b` reproduces the retired grading through the same owner, so
+this is a measurement rather than a hand-derived table):
+
+| candidate | fails under RETIRED shipped-B pins | fails under ACTIVE ssim2 pins | flipped FAIL→PASS | flipped PASS→FAIL |
+|---|---|---|---|---|
+| SHIPPED B | C3 C4 C5 C6 | A2 A4 A5 A7 A8 A9 C3 C4 C5 C6 | — | A2 A4 A5 A7 A8 A9 |
+| Profile A `v47_strict_qat_native` | A1 A3 A4 A6 | A1 A2 A3 A4 A5 A6 A7 A8 A9 | — | A2 A5 A7 A8 A9 |
+| Profile D `d_sdr_add156_dense_dial` (=ADD156) | A1 A3 A6 C5 | A1 A2 A3 A5 A7 A8 A9 C5 | A6 | A2 A5 A7 A8 A9 |
+| `ctl_curera` | A1 A2 A3 A4 A5 A6 A7 A8 C3 C4 C5 C6 | A2 A4 A5 A6 A7 A8 A9 C3 C4 C5 C6 | A1 A3 | A9 |
+| `ss_cur_rescored_clamped` | A1 A2 A3 A4 A5 A6 A7 A8 C3 C4 C5 C6 | A2 A4 A5 A6 A7 A8 A9 C3 C4 C5 C6 | A1 A3 | A9 |
+| (a) `ss_cur_rescored_unclamped` | A1 A3 A4 A6 C3 C4 C5 C6 | A2 A4 A5 A6 A7 A8 A9 C3 C4 C5 C6 | A1 A3 | A2 A5 A7 A8 A9 |
+| (b) `ss_..._unclamped_id100` | A4 A6 C2 C3 C4 | A2 A4 A5 A6 A7 A8 A9 C2 C3 C4 | — | A2 A5 A7 A8 A9 |
+| (b′) `ne12_ss_unc_id100` | A4 A6 C2 | A2 A4 A5 A6 A7 A8 A9 C2 | — | A2 A5 A7 A8 A9 |
+| `ne30_ss_unc_id100` | A4 A6 C2 | A2 A4 A5 A6 A7 A8 A9 C2 | — | A2 A5 A7 A8 A9 |
+| `ne60_ss_unc_id100` | A4 A6 C2 | A2 A4 A5 A6 A7 A8 A9 C2 | — | A2 A5 A7 A8 A9 |
+| `ne120_ss_unc_id100` | A4 A6 C2 | A2 A4 A5 A6 A7 A8 A9 C2 | — | A2 A5 A7 A8 A9 |
+| (b″) `ss_unc_id100_lowband` | A4 A6 C2 | A2 A4 A5 A6 A7 A8 A9 C2 | — | A2 A5 A7 A8 A9 |
+| (c) `im26_..._unclamped_id100` | A2 A4 A5 A6 A7 A8 C2 C3 C4 | A2 A4 A5 A6 A7 A8 A9 C2 C3 C4 | — | A9 |
+| `mix_unc_id100` | A2 A4 A5 A6 A7 A8 C2 C3 C4 | A2 A4 A5 A6 A7 A8 A9 C2 C3 C4 | — | A9 |
+| `mix_unc_id100_lowband` | A4 A6 C2 | A2 A4 A5 A6 A7 A8 A9 C2 | — | A2 A5 A7 A8 A9 |
+| ORACLE | A1 A3 A4 A6 C5 C6 | A1 A2 A4 A5 A6 A7 A8 A9 C5 C6 | A3 | A2 A5 A7 A8 A9 |
+| ORACLE id100 | A1 A3 A4 A6 C5 C6 | A1 A2 A4 A5 A6 A7 A8 A9 C5 C6 | A3 | A2 A5 A7 A8 A9 |
+
+**70 cells flipped PASS → FAIL; 9 flipped FAIL → PASS.** The re-pin moved the difficulty
+from the ceiling to the **floor**, which is correct: ssim2 reaches −55.35 on this grid
+where shipped B stops at +3.13, and its negative-tail probe is 100 % below zero against
+B's 0 %. Shipped B itself goes from **0** regression fails (it *was* the bar) to **6**.
+
+**Round-trip control:** grading `peer_ssim2` against its own freshly-registered pins reads
+**SHIPPABLE — regression PASS + contract PASS, 15 / 15**, with every bar tied bit-exactly.
+That is the check that the pins were derived through the owner and not re-typed.
+
+**One honest limit of the reach reading.** A1/A3 are `≥`, so a dial that *overshoots* the
+truth passes — shipped B's `max` 99.98 clears A1 while sitting 1.6 above the reference
+metric. G-ADDR is an **addressability** gate (how much range is reachable), not a
+calibration gate, and over-reach is not an addressability failure. The alternative
+**calibration-referenced** reading (`|dial end − truth end| ≤ δ`, or low-band / whole-grid
+MAE against the reference metric) that §11 registered is still a separate, unimplemented
+user option; this re-pin implements the reach reading only.
+
+## 14.4 Every candidate, re-graded against the mentor
+
+Measured values (identical to §9 — only the bars moved):
+
+| candidate | reach | min | max | p5 | p95 | DR | mono | tied | ntl min | ntl p1 | frac<0 | identity | above-id | REGRESSION | CONTRACT |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|---|
+| **ssim2 (THE BAR)** | 153.731 | −55.355 | 98.377 | 10.263 | 95.459 | 85.196 | .9924 | .0000 | −770.620 | −187.131 | 1.0000 | 100.0000 | 0 | *(is the bar)* | **PASS 6/6** |
+| SHIPPED B | 96.854 | 3.130 | 99.983 | 13.645 | 99.722 | 86.077 | 0.9792 | 0.0000 | 2.517 | 3.981 | 0.0000 | 96.2412 | 266 | FAIL | FAIL |
+| Profile A `v47_strict_qat_native` | 113.897 | -17.112 | 96.784 | 16.666 | 94.511 | 77.845 | 0.9782 | 0.0000 | -93.897 | -59.171 | 0.5575 | 97.6893 | 0 | FAIL | PASS |
+| Profile D `d_sdr_add156_dense_dial` (= ADD156) | 108.252 | -12.204 | 96.049 | 9.517 | 95.284 | 85.767 | 0.9847 | 0.0000 | -100.000 | -87.306 | 0.8580 | 96.1157 | 0 | FAIL | FAIL |
+| 944 flagship `c_sdr_purity944` | 88.365 | 11.635 | 100.000 | 33.189 | 100.000 | 66.811 | 0.9932 | 0.0376 | — | — | — | — | — | NOT MEASURABLE | INCOMPLETE |
+| ADD156 raw lasso `add156_n156` | 1.225 | -0.165 | 1.061 | 0.502 | 0.973 | 0.471 | 1.0000 | 0.0000 | — | — | — | — | — | FAIL | INCOMPLETE |
+| `ctl_curera` (era only) | 94.232 | 5.731 | 99.963 | 18.103 | 99.573 | 81.470 | 0.9799 | 0.0000 | 5.023 | 6.680 | 0.0000 | 95.8517 | 266 | FAIL | FAIL |
+| `ss_cur_rescored_clamped` | 94.228 | 5.745 | 99.972 | 18.047 | 99.658 | 81.611 | 0.9794 | 0.0000 | 5.037 | 6.693 | 0.0000 | 96.4843 | 266 | FAIL | FAIL |
+| (a) `ss_cur_rescored_unclamped` | 98.012 | 1.960 | 99.972 | 18.047 | 99.658 | 81.611 | 0.9794 | 0.0000 | 0.347 | 3.954 | 0.0000 | 96.4843 | 266 | FAIL | FAIL |
+| (b) `ss_..._unclamped_id100` | 98.118 | 1.882 | 100.000 | 17.919 | 100.000 | 82.081 | 0.9808 | 0.0567 | 0.276 | 3.865 | 0.0000 | 100.0000 | 0 | FAIL | FAIL |
+| (b′) `ne12_ss_unc_id100` | 102.695 | -2.695 | 100.000 | 18.633 | 100.000 | 81.367 | 0.9794 | 0.0567 | -4.374 | -0.519 | 0.0135 | 100.0000 | 0 | FAIL | FAIL |
+| `ne30_ss_unc_id100` | 100.967 | -0.967 | 100.000 | 17.725 | 100.000 | 82.275 | 0.9801 | 0.0567 | -3.596 | 2.135 | 0.0030 | 100.0000 | 0 | FAIL | FAIL |
+| `ne60_ss_unc_id100` | 102.123 | -2.123 | 100.000 | 18.168 | 100.000 | 81.832 | 0.9801 | 0.0567 | -2.650 | -1.304 | 0.0215 | 100.0000 | 0 | FAIL | FAIL |
+| `ne120_ss_unc_id100` | 106.999 | -6.999 | 100.000 | 18.170 | 100.000 | 81.830 | 0.9810 | 0.0567 | -10.060 | -3.045 | 0.0210 | 100.0000 | 0 | FAIL | FAIL |
+| (b″) `ss_unc_id100_lowband` | 109.390 | -9.390 | 100.000 | 18.640 | 100.000 | 81.360 | 0.9771 | 0.0567 | -11.676 | -6.451 | 0.0660 | 100.0000 | 0 | FAIL | FAIL |
+| (c) `im26_..._unclamped_id100` | 88.088 | 11.912 | 100.000 | 22.106 | 100.000 | 77.894 | 0.9789 | 0.0567 | 11.642 | 12.418 | 0.0000 | 100.0000 | 0 | FAIL | FAIL |
+| `mix_unc_id100` | 92.716 | 7.284 | 100.000 | 20.547 | 100.000 | 79.453 | 0.9787 | 0.0567 | 6.371 | 8.425 | 0.0000 | 100.0000 | 0 | FAIL | FAIL |
+| `mix_unc_id100_lowband` | 101.300 | -1.300 | 100.000 | 21.465 | 100.000 | 78.535 | 0.9775 | 0.0567 | -3.154 | 1.088 | 0.0045 | 100.0000 | 0 | FAIL | FAIL |
+| ORACLE (train-on-test) | 98.617 | -0.853 | 97.765 | 21.747 | 97.127 | 75.380 | 0.9801 | 0.0000 | -2.446 | 1.225 | 0.0040 | 95.2510 | 266 | FAIL | FAIL |
+| ORACLE id100 | 98.864 | -0.866 | 97.998 | 21.517 | 97.261 | 75.743 | 0.9794 | 0.0000 | -2.454 | 1.205 | 0.0040 | 95.3393 | 266 | FAIL | FAIL |
+
+Per-row verdict, **both tiers**:
+
+| candidate | A1 | A2 | A3 | A4 | A5 | A6 | A7 | A8 | A9 | C1 | C2 | C3 | C4 | C5 | C6 | pass/fail/NM |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| **ssim2 (THE BAR)** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 15/0/0 |
+| SHIPPED B | ✓ | **✗** | ✓ | **✗** | **✗** | ✓ | **✗** | **✗** | **✗** | ✓ | ✓ | **✗** | **✗** | **✗** | **✗** | 5/10/0 |
+| Profile A `v47_strict_qat_native` | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 6/9/0 |
+| Profile D `d_sdr_add156_dense_dial` (= ADD156) | **✗** | **✗** | **✗** | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | ✓ | ✓ | ✓ | ✓ | **✗** | ✓ | 7/8/0 |
+| 944 flagship `c_sdr_purity944` | — | — | — | — | — | — | — | — | — | ✓ | ✓ | — | — | — | — | 2/0/13 |
+| ADD156 raw lasso `add156_n156` | **✗** | **✗** | **✗** | ✓ | **✗** | **✗** | — | — | — | ✓ | ✓ | — | — | — | — | 3/5/7 |
+| `ctl_curera` (era only) | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | ✓ | **✗** | **✗** | **✗** | **✗** | 4/11/0 |
+| `ss_cur_rescored_clamped` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | ✓ | **✗** | **✗** | **✗** | **✗** | 4/11/0 |
+| (a) `ss_cur_rescored_unclamped` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | ✓ | **✗** | **✗** | **✗** | **✗** | 4/11/0 |
+| (b) `ss_..._unclamped_id100` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | **✗** | **✗** | **✗** | ✓ | ✓ | 5/10/0 |
+| (b′) `ne12_ss_unc_id100` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | **✗** | ✓ | ✓ | ✓ | ✓ | 7/8/0 |
+| `ne30_ss_unc_id100` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | **✗** | ✓ | ✓ | ✓ | ✓ | 7/8/0 |
+| `ne60_ss_unc_id100` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | **✗** | ✓ | ✓ | ✓ | ✓ | 7/8/0 |
+| `ne120_ss_unc_id100` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | **✗** | ✓ | ✓ | ✓ | ✓ | 7/8/0 |
+| (b″) `ss_unc_id100_lowband` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | **✗** | ✓ | ✓ | ✓ | ✓ | 7/8/0 |
+| (c) `im26_..._unclamped_id100` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | **✗** | **✗** | **✗** | ✓ | ✓ | 5/10/0 |
+| `mix_unc_id100` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | **✗** | **✗** | **✗** | ✓ | ✓ | 5/10/0 |
+| `mix_unc_id100_lowband` | ✓ | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | **✗** | ✓ | ✓ | ✓ | ✓ | 7/8/0 |
+| ORACLE (train-on-test) | **✗** | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | ✓ | ✓ | ✓ | **✗** | **✗** | 5/10/0 |
+| ORACLE id100 | **✗** | **✗** | ✓ | **✗** | **✗** | **✗** | **✗** | **✗** | **✗** | ✓ | ✓ | ✓ | ✓ | **✗** | **✗** | 5/10/0 |
+
+Distance to the mentor on each regression axis (negative = short of the bar):
+
+| axis | dir | ssim2 bar | (b″) lowband | gap | Profile D | gap | Profile A | gap | shipped B | gap |
+|---|:--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| A1 | ≥ | 98.377 | 100.000 | OK | 96.049 | -2.328 | 96.784 | -1.592 | 99.983 | OK |
+| A2 | ≤ | -55.355 | -9.390 | -45.964 | -12.204 | -43.151 | -17.112 | -38.242 | 3.130 | -58.484 |
+| A3 | ≥ | 95.459 | 100.000 | OK | 95.284 | -0.175 | 94.511 | -0.948 | 99.722 | OK |
+| A4 | ≤ | 10.263 | 18.640 | -8.377 | 9.517 | OK | 16.666 | -6.403 | 13.645 | -3.382 |
+| A5 | ≥ | 153.731 | 109.390 | -44.341 | 108.252 | -45.479 | 113.897 | -39.835 | 96.854 | -56.877 |
+| A6 | ≥ | 85.196 | 81.360 | -3.836 | 85.767 | OK | 77.845 | -7.351 | 86.077 | OK |
+| A7 | ≤ | -770.620 | -11.676 | -758.944 | -100.000 | -670.620 | -93.897 | -676.723 | 2.517 | -773.136 |
+| A8 | ≤ | -187.131 | -6.451 | -180.680 | -87.306 | -99.825 | -59.171 | -127.961 | 3.981 | -191.113 |
+| A9 | ≥ | 1.000 | 0.066 | -0.934 | 0.858 | -0.142 | 0.557 | -0.443 | 0.000 | -1.000 |
+
+## 14.5 Is there a `B dial-era v2`? — **NO**, and for better reasons than before
+
+**No candidate passes the re-pinned gate, so none is proposed for the board and no
+discussion set is published.** But the *blocking axes changed completely*, and the new ones
+are all real:
+
+- Under the retired pins the leading arms failed **A4 / A6 / C2** — two of which §8 had
+  already shown were bars the reference metric itself could not meet.
+- Under the mentor's pins they fail **A2, A4, A5, A6, A7, A8, A9 and C2** — the **floor and
+  spread** axes, every one of them a genuine shortfall against a scorer that demonstrably
+  reaches further.
+
+The magnitude is not marginal. The best arm, `ss_unc_id100_lowband`, is **45.96 short on
+A2**, **44.34 short on A5**, **758.94 short on A7**, **180.68 short on A8** and reaches
+**6.6 %** of the negative tail where the mentor reaches **100 %**. Re-splining B cannot
+close that: the whole B-lineage spread on A9 across every arm built in this lane is
+0.0000 → 0.0660.
+
+**C2 ⊻ C6 still blocks B, and it is still a WEIGHTS defect.** §10.3's proof is untouched by
+the re-pin: 266 of 4,424 dial-grid cells (6.01 %) carry a raw prediction above the identity
+vector's, so a monotone spline must either cap them (C2 fails, `tied` 0.0567 — measured on
+every `id100` arm) or let them out-score a perfect copy (C5/C6 fail). No output spline
+satisfies both. The fix is in the weights.
+
+## 14.6 Then which dial should be the default? — a proposal for the user
+
+Measured on the same instrument, same probes, same gate:
+
+| | contract | regression | rank (CID22 / \|KonJND\| / AIC-3 / TID / KADID) |
+|---|---|---|---|
+| **Profile A** `v47_strict_qat_native` | **PASS 6/6** | 0/9 | 0.86606 / 0.44313 / 0.77039 / 0.79264 / 0.79378 |
+| **Profile D** `d_sdr_add156_dense_dial` (= ADD156) | 5/6 — **only C5** | **2/9** (A4, A6) | 0.86338 / **0.53319** / **0.77734** / **0.82348** / **0.80822** |
+| shipped B | 2/6 | 3/9 | **0.88212** / 0.51938 / 0.76501 / 0.77852 / 0.80847 |
+
+**Profile A is the only bake measured anywhere in this lane that passes the entire CONTRACT
+tier** — identity 97.6893 in band, 0 cells above identity, and a negative tail that works
+(55.75 % of the all-negative probe below zero, min −93.90). If a contract-passing dial
+default has to be named **today**, it is A.
+
+**But D is the better candidate, and its single contract failure is one dial edit away —
+provably without B's either/or.** D fails only **C5**: its identity dial is 96.1157, which
+is **1.384 below** the `[97.5, 100]` band. Two measured facts make that fixable in a way
+B's is not:
+
+1. **D's grid `max` is 96.049 — strictly BELOW its own identity of 96.1157.** Every one of
+   the 4,424 cells already scores below a perfect copy (`above-identity = 0`). So the 266
+   raw inversions that force B's C2 ⊻ C6 either/or **do not exist for D**, and anchoring
+   D's identity at 100 cannot pile cells at the cap the way it does for every `id100` arm
+   in §14.4 (`tied` 0.0567).
+2. **D is already the closest thing to the mentor's floor that exists.** A9 `0.858` against
+   the bar's `1.000` — a gap of 0.142, against 0.934 for the best B-lineage arm and 1.000
+   for shipped B. On A8 it is 99.8 short where the best arm is 180.7 short.
+
+D also beats A on **four of five** rank corpora (and is 0.0027 behind on CID22), and passes
+**A4 and A6**, the only two regression axes any shipped bake passes.
+
+**Proposal, for the user to decide:**
+
+- **(i)** Name **Profile A** the contract-passing dial default *only if* one must be named
+  before any new build. It is contract-clean today and nothing else is.
+- **(ii)** Otherwise, build **`D-id100`** first — Profile D re-anchored with identity at
+  100 — and re-gate it. Fact 1 above says the C2 cost that blocks the B lineage cannot
+  arise. **REGISTERED, NOT RUN:** the build is a different lineage from this lane's arms
+  (ADD156 lasso, its own scaler and anchor), so it is a real build, not a re-spline, and
+  nothing here claims its A-row outcome.
+- **(iii)** shipped **B stays the rank leader on CID22** (0.88212) and is not displaced by
+  either on that axis. The dial and the ranker are not the same decision.
+
+## 14.7 What was added to the owners
+
+`bake_verdict` gained three flags, all of which existed to make this measurable rather than
+to make it pass:
+
+- **`--negtail-peer-scores` / `--identity-peer-scores`** (`entry⇥pred`) — a reference
+  metric has no bake, so before this its floor axes could not be measured at all, and a
+  peer run silently reported *the peer's* grid reach beside *the bake's* tail depth under
+  one headline, counting "cells above identity" across two different scorers. Peer mode is
+  now **all-or-nothing per axis**: an unsupplied probe is NOT MEASURED, never filled in
+  from `--bake`. Refused loudly.
+- **`--gaddr-json <path>`** — the G-ADDR block alone at full f64, stamped with which scorer
+  it describes. Peer-safe (unlike `--full-json`/`--fulleval`, which stay refused in peer
+  mode). This is how a pin set is derived without duplicating percentile/tail math outside
+  its owner, and it also closes §11's registered "the JSON is emitted; nothing reads it".
+- **`--gaddr-reference <name>`** — grade against a named pin set. Default is
+  `ACTIVE_REFERENCE` = `peer_ssim2`; `shipped_b` reproduces the retired grading through the
+  same comparators, which is what makes §14.3 a measurement.
+
+`scripts/dialgate_arms.sh` gained a **`score`** mode so re-grading an existing bake and
+building a new arm end in the same `grade` function — a re-grade after a bar change cannot
+accidentally be a different measurement from the build-time one.
+
+**Tests** (`cargo test -p zensim-validate --lib dial_addressability`, 17 pass): both
+directions of disagreement are covered by fixtures built from real measured values —
+ssim2's own values fail the retired B bars on A1/A3/A6, B's own values fail the ssim2 bars
+on A2/A5; A4 specifically is pinned to stop rewarding the low-band bias while still
+accepting Profile D's real 9.52; the mentor's contract PASS is pinned; and the retired
+shipped-B rows are asserted to survive. **Negative control:** deleting the `peer_ssim2`
+rows from the registry fails **12 of the 17**.
+
+## 14.8 Does the mentor itself pass the CONTRACT tier? — **YES, all six**
+
+The question "what does *as good as the mentor* mean at the ends" has a measured answer.
+`peer_ssim2`, graded by the same instrument on the same grid and probes:
+
+| id | axis | bar | ssim2 measured | shipped B | verdict |
+|---|---|--:|--:|--:|:--:|
+| C1 | monotonicity | ≥ 0.93 | **0.99235757295044** | 0.9791570171375636 | ✓ |
+| C2 | flat/clamp dead-zone | ≤ 0.05 | **0.0** | 0.0 | ✓ |
+| C3 | negative values WORK (`frac<0` on an all-negative probe) | > 0 | **1.0** | 0.0 | ✓ |
+| C4 | deepest probe dial < 0 | < 0 | **−770.619744** | +2.516685884084839 | ✓ |
+| C5 | `dial(ref==dist)` ∈ [97.5, 100] | 0 rows outside | **100.000000** (min = med = max, n=38) | 96.24115978721524 | ✓ |
+| C6 | cells out-scoring a perfect copy | 0 | **0** of 4,424 | 266 of 4,424 | ✓ |
+
+Three notes on how those were obtained, because the identity row is the one that could
+have been assumed instead of measured:
+
+- **C5 was MEASURED**, not taken from SSIMULACRA2's definition:
+  `zenmetrics batch --metric ssim2` (the imazen CPU implementation) over the 38 dial-grid
+  references paired **with themselves** reads exactly `100.000000` on all 38 — one distinct
+  value, min = median = max. The grid truth is `ssim2_gpu`; identity is 100 by
+  SSIMULACRA2's construction, which is why the cross-implementation question does not arise
+  at this point.
+- **C6 follows from two registry rows** with no extra measurement: the mentor's grid `max`
+  (98.3766) is below its identity (100.0), so nothing can out-score a perfect copy. Pinned
+  as a test.
+- **C1 is the quiet one.** ssim2 is *more* monotone on this grid than the shipped dial
+  (0.9924 vs 0.9792) with the same zero tied rate — so C1/C2 are not rows the mentor needed
+  help with, and a candidate that beats ssim2 on monotonicity has to clear 0.9924, not the
+  0.93 floor.
+
+So the mentor is clean at both ends, and the four contract rows shipped B fails are
+**not** rows that are unreachable in principle — the reference metric meets all of them,
+and so does Profile A.
+
+## 14.9 Reproduction
+
+```sh
+cargo build --release -p zensim-validate --bin bake_verdict
+D=/mnt/v/output/zensim/dialgate-2026-09-04
+G=/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet
+
+# the mentor's pins (this is how they were derived; --gaddr-json carries full f64)
+./target/release/bake_verdict --bake <any 372 bake> --corpora cid22 --dial-grid $G \
+    --negtail-probe  $D/negtail_probe_372_2026-09-04.parquet \
+    --identity-probe $D/identity_probe_372_2026-09-04.parquet \
+    --dial-peer-scores     peer_ssim2=/mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_qv2grid.tsv \
+    --negtail-peer-scores  peer_ssim2=$D/repin/negtail_peer_ssim2.tsv \
+    --identity-peer-scores peer_ssim2=$D/repin/identity_peer_ssim2.tsv \
+    --gaddr-json $D/repin/peer_ssim2_gaddr.json --output $D/repin/peer_ssim2_gaddr.md
+
+# ssim2's identity, measured with the imazen CPU implementation
+~/work/zen/zenmetrics/target/release/zenmetrics batch --metric ssim2 \
+    --pairs $D/build/identity_pairs.tsv --output $D/repin/identity_ssim2_cpu.tsv
+
+# re-grade any candidate (score mode = no rebuild); add --gaddr-reference shipped_b
+# to reproduce the retired grading
+scripts/dialgate_arms.sh score <label> <bake.bin> [372|720|944]
+```
+
+**As-run artifacts** (block storage, not git): `$D/repin/` (peer cell tables, the mentor's
+G-ADDR json + markdown, the ssim2 identity measurement), `$D/arms/gaddr_R_*.json` (every
+candidate under the active pins), `$D/arms/bpins/gaddr_R_*.json` (every candidate under the
+retired pins), `$D/arms/verdict_R_*.json` (full verdicts with the rank panel).

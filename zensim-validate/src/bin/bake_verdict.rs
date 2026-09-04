@@ -824,6 +824,17 @@ struct Args {
     /// owner would be exactly the duplication the no-duplicate-implementations
     /// rule forbids, and the numbers would drift the first time either moved.
     gaddr_json: Option<PathBuf>,
+    /// `--gaddr-reference <name>`: grade the G-ADDR REGRESSION tier against a
+    /// named pin set instead of the active one. Default (and the only value a
+    /// ship decision may use) is
+    /// `dial_addressability::ACTIVE_REFERENCE` = `peer_ssim2`.
+    ///
+    /// `shipped_b` reproduces the retired pre-2026-09-04 grading. It exists so
+    /// "how would this candidate have graded under the old bars?" is a
+    /// MEASUREMENT — same comparators, same rows, same owner — rather than a
+    /// table someone re-derived by hand beside the gate. Every report says
+    /// which pin set it used, in the caption and in the JSON.
+    gaddr_reference: Option<String>,
     /// `--corruption-head <bake.bin>`: companion corruption-head bake — the
     /// shipping design's corruption owner (at 924 the dial's own ordering is
     /// broken by design, distributional; the head trained on negrich carries
@@ -951,6 +962,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut negtail_peer_scores: Option<(String, PathBuf)> = None;
     let mut identity_peer_scores: Option<(String, PathBuf)> = None;
     let mut gaddr_json: Option<PathBuf> = None;
+    let mut gaddr_reference: Option<String> = None;
     let mut features_root: PathBuf = PathBuf::from(DEFAULT_FEATURES_ROOT_372);
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
         .map(PathBuf::from)
@@ -1019,6 +1031,10 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                     return Err("--dial-peer-scores label must be non-empty".into());
                 }
                 dial_peer_scores = Some((label.to_string(), PathBuf::from(path)));
+            }
+            "--gaddr-reference" => {
+                let v = args.next().ok_or("--gaddr-reference requires <name>")?;
+                gaddr_reference = Some(v);
             }
             "--gaddr-json" => {
                 let v = args.next().ok_or("--gaddr-json requires <path>")?;
@@ -1301,6 +1317,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         negtail_peer_scores,
         identity_peer_scores,
         gaddr_json,
+        gaddr_reference,
         full_json,
         fulleval,
         name,
@@ -2060,6 +2077,7 @@ fn dial_panel(
     peer: Option<&(String, PathBuf)>,
     grid_sha256: &str,
     probes: &AddrProbes,
+    gaddr_reference: &str,
 ) -> (String, DialMetrics) {
     if !grid_path.exists() {
         return (
@@ -2827,7 +2845,8 @@ fn dial_panel(
             sha.clone(),
         )
     });
-    let addr_verdict = gaddr::evaluate(
+    let addr_verdict = gaddr::evaluate_with_reference(
+        gaddr_reference,
         grid_sha256,
         &grid_path.display().to_string(),
         &addr_measure,
@@ -4115,6 +4134,9 @@ Run the dedicated q-sweep harness for those._\n",
         args.dial_peer_scores.as_ref(),
         &dial_grid_sha,
         &addr_probes,
+        args.gaddr_reference
+            .as_deref()
+            .unwrap_or(zensim_validate::dial_addressability::ACTIVE_REFERENCE),
     );
     buf.push_str(&dial_md);
     pt.mark("DIAL panel (grid load + score + mono/tied)");
