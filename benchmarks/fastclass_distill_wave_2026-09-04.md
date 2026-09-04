@@ -246,6 +246,96 @@ Stated now so none can be claimed post hoc.
    if the inversions are large in raw units, rather than shipping a
    compressed dial.
 
+## 6b. AMENDMENT A1 — the KonJND training leg is SATURATED (measured 2026-09-04, AFTER registration, BEFORE any arm result)
+
+Declared here, before a single arm's verdict existed, because it changes how
+D1's result must be read and because it retro-explains a falsification the
+campaign had recorded without a mechanism. **No arm is added, dropped or
+changed.** Measured from stored bytes: `bake_dial_refit predict` (the owner)
+forwards the shipped `A4b_156_s4004_packed.bin` over each training leg, and
+`panel --per-group` (= `zenstats::per_group_srocc`, the owner) reports pooled
+and within-reference SROCC against that leg's OWN target.
+
+| training leg | n | refs | rows/ref | pooled | **within-ref mean** | median | refs ranked PERFECTLY |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `konjnd_bpg` (train) | 8,060 | 403 | 20.0 | 0.9964 | **0.9997** | 1.0000 | **81.6 %** |
+| `tbig_hf` (near-lossless) | 11,941 | 1,973 | 6.1 | 0.8447 | **0.8406** | 0.9000 | 32.8 % |
+| `safesyn` | 111,068 | 3,218 | 34.5 | 0.9839 | 0.9876 | 0.9920 | 0.3 % |
+
+Three consequences, all of which were NOT known when §3 was frozen:
+
+1. **D1's mechanism is prospectively falsified.** Within-reference pairing
+   exists to recover a ladder that uniform pairing drowns out. There is no
+   ladder left to recover here: A4b already ranks the konjnd_bpg ladder at
+   **0.9997 within-reference**, perfectly on 4 of every 5 references. D1 is
+   still RUN — it is registered, and a pre-registered null whose mechanism
+   was predicted in advance is worth more than a quietly dropped arm — but
+   its expected result is now **no movement**, and that expectation is on
+   the record before the number.
+2. **K1's falsification finally has a mechanism.** wave_r4 §24 measured that
+   raising `konjnd_bpg`'s train weight 1.2 → 1.8/2.4 makes KonJND **worse**
+   (−0.086 / −0.080) and could not say why. This is why: the weight is being
+   added to a leg with no gradient left, so the only thing it can do is take
+   sampling away from the legs that still have some. The certified 944-class
+   lever did not "invert on this architecture"; it was **spent** on this
+   architecture, which had already solved the leg the lever feeds.
+3. **The KonJND val group cannot select a checkpoint.** With `--val-policy
+   min`, selection is the WORST group; across training `konjnd_bpg_val` sits
+   at 0.9955–0.9961 (best or near-best) while `tbig_hf` sits at 0.69→0.84
+   (worst throughout). Checkpoint choice in this recipe is driven end-to-end
+   by the near-lossless leg. KonJND never touches it.
+
+Combined with §1.3 — the training legs carry a **metric-mix** target while
+the exam ruler carries a **PJND threshold**, on disjoint references — the
+honest statement of the wave's own prior becomes: **the KonJND axis this exam
+grades is not represented in this recipe's training signal at all.** A model
+saturated at 0.9997 on the proxy reads 0.4327 on the ruler. Arms that
+redistribute effort among existing legs (D1, D4, F1, and the already-run K1)
+are therefore unlikely to move it; the arm with a live mechanism on this
+evidence is **D2** (`tbig_hf` withinref), the only leg with measured headroom
+(0.8406 within-ref, 32.8 % perfect) — and its route to KonJND is indirect,
+through shared near-threshold discrimination, not through KonJND data.
+
+Provenance: `/mnt/v/output/zensim/fastclass-2026-09-04/leg_saturation.json`.
+
+## 6c. MEASURED CORRECTION — gate G1 as registered could not pass, and the reason is a trap
+
+§4 registered G1 as *"reproduces `A4b_156_s4004.bin` **byte-for-byte**
+(sha256)"*. **Run as written, it FAILED — and the gate was wrong, not the
+extension.**
+
+Every bake carries a MANDATORY embedded `zentrain.repro` section (argv, seed,
+timestamp, input sha256s — the discipline the E-M campaign added and the
+trainer exits 4 rather than skip). Two runs that differ only in `--out`
+therefore embed different argv and different timestamps, and can **never** be
+byte-identical. Measured:
+
+| | A4b (wave-r4 path) | C0 (this wave's path) |
+|---|--:|--:|
+| raw file size | 509,024 B | 509,021 B |
+| `best_val` | 0.9501206775416382 | **0.9501206775416382** |
+| spec `argv` delta | — | the `--out` path only |
+| spec `timestamp_epoch` | 1788290423 | 1788504029 |
+
+The 3-byte delta is exactly the output-path length difference
+(`wave-r4-2026-09-01/…/A4b_156_s4004.bin` → `fastclass-2026-09-04/…/C0_s4004.bin`).
+
+**Corrected gate G1′ compares the MODEL, two independent ways — both PASS:**
+
+* **(a)** sha256 with `zentrain.repro` stripped by the owner
+  (`bake_dial_refit strip --key zentrain.repro`):
+  `a29b610fa16e251d309e15103ae7a4aa08ffa1fb400e382940e0484a7fa9a85f`
+  on **both** files.
+* **(b)** predictions through the production forward
+  (`bake_dial_refit predict` over `ext_cid22val`): **bit-identical on all
+  4,292 rows.**
+
+So the four new env levers ARE the no-ops they claim to be, and every Δ in §7
+is a property of the arm, not of the script edit. `gate_g1_byte_identity.sh`
+now implements G1′ and carries this whole finding in its header, because the
+next lane to write a "bake byte-identity" gate will otherwise hit it too:
+**a bake's bytes are not a function of its model alone.**
+
 ## 7. RESULTS
 
 *(appended below as arms land; nothing above this line is edited)*
