@@ -1691,3 +1691,66 @@ readings are 1.050× (`v4x`) and 1.077× (`v3`).
 Method + all 54 raw invocations: `benchmarks/profile_d_notax_2026-09-01.md`
 §4.3–§4.4; raw JSONL `~/tmp/dnotax/w4_measure_raw.jsonl` (rows marked
 `"rerun": true`).
+
+---
+
+## APPENDIX C ADDENDUM 2 — A4b's headline numbers are its BEST of three seeds, and the a4bkon ranking was a single-seed-control artifact (2026-09-04, fastclass lane)
+
+**Nothing in APPENDIX C or its first addendum is edited.** They stand as the
+record of what those lanes measured under their protocol. This addendum
+records what the same recipe reads at **k = 3** instead of k = 1, because two
+of APPENDIX C's headline claims do not survive it.
+
+`benchmarks/fastclass_distill_wave_2026-09-04.md` §7.1 retrained A4b's recipe
+**verbatim** at seeds 4004 / 4005 / 4006 through the same script, build and
+root. Seed 4004's bake is model-identical to the published
+`A4b_156_s4004` (gate G1′: sha256 with `zentrain.repro` stripped
+`a29b610f…` on both; predictions bit-identical on all 4,292 CID22 rows), and
+its verdict reproduces the board row on every axis. So this is A4b, three
+times:
+
+| | CID22 | **KonJND** | composite |
+|---|--:|--:|--:|
+| seed 4004 — **the published A4b** | 0.8903 | **0.4327** | **0.8664** |
+| seed 4005 | 0.8798 | 0.3357 | 0.8521 |
+| seed 4006 | 0.8886 | 0.2998 | 0.8530 |
+| **mean [min..max]** | 0.8862 | **0.3561 [0.2998..0.4327]** | **0.8572** |
+
+**The published A4b is the maximum of three draws on both headline numbers.**
+
+1. **KonJND.** The control's own seed spread is **0.133** — 1.4× the entire
+   deficit to ssim2 (0.0945) and larger than every arm effect APPENDIX C
+   tabulates. A4b's mean is 0.3561.
+2. **Composite.** APPENDIX C's *"posts the wave's highest product composite of
+   any arm scored, 0.8664, higher than the 944-class teacher itself
+   (0.8601)"* is a single high seed: **mean 0.8572 < 0.8601.** A4b does not
+   beat its teacher on composite at k = 3.
+3. **The lever table inverts.** Re-reading the SAME stored K1/K2/K3 verdicts
+   against a control with k > 1 (matched seed set 4004+4005, so the
+   comparison is exact):
+
+| arm (k=2) | mean KonJND | Δ **as published** (vs the 1-seed K4) | Δ vs control, matched seeds | Δ vs control, k=3 |
+|---|--:|--:|--:|--:|
+| K1 w=1.8 | 0.3472 | **−0.0855** | −0.0370 | −0.0089 |
+| K1 w=2.4 | 0.3524 | **−0.0804** | −0.0319 | −0.0037 |
+| **K2** | 0.4317 | −0.0010 *("wash")* | **+0.0475** | **+0.0756** |
+| K3 | 0.3553 | **−0.0774** | −0.0289 | −0.0007 |
+
+So *"the certified kon-data-mass lever inverts on this architecture class"*
+shrinks to −0.009 against a k = 3 control, inside that control's own spread,
+and **K2 — recorded as a statistical wash — is the largest positive KonJND
+effect in the family.** No number was re-run to show this; what was missing
+was a control with more than one seed, and §17's own measured "0.06–0.07
+KonJND seed-spread on this model class" was already on the record when the
+single-seed comparison was made.
+
+**What this does and does not change.** APPENDIX C's *clause* verdicts stand:
+the 156+free class still fails W1 (KonJND), still fails W2 and W3, and its
+KonJND is *worse* at k = 3 than the single seed suggested, so "nothing passes
+W1–W7" is if anything more firmly true. What changes is every *comparative*
+claim that rested on A4b's single seed — its composite lead over the teacher,
+and the ranking of the four levers that were measured against it.
+
+**Rule this implies, and it is cheap:** on this architecture class a k = 1
+control cannot support a KonJND conclusion. Report the mean over k ≥ 3 with
+its range, or do not report a KonJND delta.

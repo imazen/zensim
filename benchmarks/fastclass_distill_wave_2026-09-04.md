@@ -522,4 +522,66 @@ acceptance data.
 
 ## 7. RESULTS
 
-*(appended below as arms land; nothing above this line is edited)*
+### 7.1 THE CONTROL — A4b's headline numbers are its BEST seed, and the seed spread swallows every published arm effect
+
+The first result of the wave needed no arm: **C0, A4b's recipe verbatim, at
+k = 3.** `C0_s4004` is model-identical to the published `A4b_156_s4004`
+(gate G1′), and its verdict reproduces the board row on every axis to the last
+digit — so this is A4b, measured three times.
+
+| seed | CID22 | **KonJND** | CSIQ | LIVE | AIC-3 | AIC-4 | composite | mono |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| 4004 (**the published A4b**) | 0.8903 | **0.4327** | 0.9588 | 0.9594 | 0.7963 | 0.9085 | **0.8664** | 0.9879 |
+| 4005 | 0.8798 | **0.3357** | 0.9531 | 0.9594 | 0.7976 | 0.9175 | 0.8521 | 0.9868 |
+| 4006 | 0.8886 | **0.2998** | 0.9558 | 0.9406 | 0.7965 | 0.9139 | 0.8530 | 0.9906 |
+| **mean [min..max]** | 0.8862 | **0.3561 [0.2998..0.4327]** | 0.9559 | 0.9531 | 0.7968 | 0.9133 | **0.8572** | 0.9884 |
+
+**The published A4b is the MAXIMUM of three draws on both of its headline
+numbers.** Two consequences, and both invert a published claim:
+
+1. **KonJND: the control's own seed spread is 0.133.** That is **1.4× the
+   entire deficit to ssim2** (0.0945) and larger than *every* arm effect the
+   a4bkon lane reported. A4b's mean is **0.3561**, not 0.4327.
+2. **Composite: A4b does NOT beat its teacher at k = 3.** The exam's APPENDIX
+   C headline — *"posts the wave's highest product composite of any arm
+   scored, 0.8664, higher than the 944-class teacher itself (0.8601)"* — is a
+   single high seed. Mean over three: **0.8572 < 0.8601.**
+
+### 7.2 MEASURED CORRECTION — the a4bkon lane's KonJND ranking was a single-seed-control artifact
+
+wave_r4 §24 compared all eight K1/K2/K3 cells against **K4 = one seed**
+(`A4b_s4004`, 0.4327) and concluded the certified kon-data-mass lever
+"inverts on this architecture class" and that K2 was "a tie, not a win".
+Re-reading the *same stored verdicts* against a control that has more than one
+seed — matched seed set (4004, 4005), so the comparison is exact — the
+ranking changes:
+
+| arm (k=2) | mean KonJND | Δ **as published** (vs 1-seed K4) | Δ vs control, **matched seeds** | Δ vs control, k=3 |
+|---|--:|--:|--:|--:|
+| K1 w=1.8 | 0.3472 | **−0.0855** | −0.0370 | −0.0089 |
+| K1 w=2.4 | 0.3524 | **−0.0804** | −0.0319 | −0.0037 |
+| **K2** (ttbig mixed teacher) | 0.4317 | −0.0010 *(“wash”)* | **+0.0475** | **+0.0756** |
+| K3 | 0.3553 | **−0.0774** | −0.0289 | −0.0007 |
+
+**K1's "the certified lever inverts" shrinks to less than half its published
+magnitude on matched seeds and to −0.009 against the k = 3 control — inside
+the control's own spread. K3 goes to −0.001. And K2, published as a wash, is
+the largest positive KonJND effect anywhere in the family (+0.047 matched,
++0.076 at k=3).** The direction of K1 survives; the *conclusion* drawn from
+its magnitude does not, and K2's does not survive at all.
+
+This is not a re-run: every number above is read from verdicts that already
+existed. What was missing was a control with k > 1 — and §17's own measured
+"0.06–0.07 KonJND seed-spread on this model class" was on the record when the
+single-seed comparison was made. **The methodological lesson is the durable
+part: on this architecture class, a k = 1 control cannot support a KonJND
+conclusion, and this wave's registered risk 3 said so before the data
+arrived.**
+
+Corrections are being carried into the affected docs as labelled addenda; the
+original text stands as the record of what those lanes measured under their
+protocol.
+
+### 7.3 The arms
+
+*(appended as arms land)*
