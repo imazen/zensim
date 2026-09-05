@@ -101,7 +101,12 @@ fn main() {
                         let rsv = RgbSlice::new(src_static, w, h);
                         let dsv = RgbSlice::new(dst_static, w, h);
                         let v2 = z
-                            .compute_folded720_features_streaming(&rsv, &dsv, carriers, &mut scratch)
+                            .compute_folded720_features_streaming(
+                                &rsv,
+                                &dsv,
+                                carriers,
+                                &mut scratch,
+                            )
                             .unwrap();
                         zenbench::black_box((v2.features()[178], v2.features()[943]));
                     })

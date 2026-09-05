@@ -313,19 +313,22 @@ pub(crate) fn bake_pool_need_from_model(model: &crate::mlp::Model) -> V1PoolNeed
         if lo >= hi {
             return false;
         }
-        spans[lo..hi].iter().flat_map(|&(a, b)| a..b).any(|i| match &layer.weights {
-            crate::mlp::WeightStorage::F32(w) => {
-                w[i * out_dim..(i + 1) * out_dim].iter().any(|&v| v != 0.0)
-            }
-            crate::mlp::WeightStorage::F16(w) => w[i * out_dim..(i + 1) * out_dim]
-                .iter()
-                .any(|&h| crate::mlp::f16_bits_to_f32(h) != 0.0),
-            crate::mlp::WeightStorage::I8 { weights, scales } => weights
-                [i * out_dim..(i + 1) * out_dim]
-                .iter()
-                .zip(scales.iter())
-                .any(|(&q, &s)| q != 0 && s != 0.0),
-        })
+        spans[lo..hi]
+            .iter()
+            .flat_map(|&(a, b)| a..b)
+            .any(|i| match &layer.weights {
+                crate::mlp::WeightStorage::F32(w) => {
+                    w[i * out_dim..(i + 1) * out_dim].iter().any(|&v| v != 0.0)
+                }
+                crate::mlp::WeightStorage::F16(w) => w[i * out_dim..(i + 1) * out_dim]
+                    .iter()
+                    .any(|&h| crate::mlp::f16_bits_to_f32(h) != 0.0),
+                crate::mlp::WeightStorage::I8 { weights, scales } => weights
+                    [i * out_dim..(i + 1) * out_dim]
+                    .iter()
+                    .zip(scales.iter())
+                    .any(|(&q, &s)| q != 0 && s != 0.0),
+            })
     };
     V1PoolNeed {
         peaks: reads(V1_PEAKS.0, V1_PEAKS.1),
@@ -583,7 +586,9 @@ mod skip_policy_tests {
         let z = crate::Zensim::new(ZensimProfile::B);
         assert_eq!(z.score_pool_mode(), V1PoolsMode::Full);
         assert_eq!(
-            z.clone().with_unread_feature_skipping(true).score_pool_mode(),
+            z.clone()
+                .with_unread_feature_skipping(true)
+                .score_pool_mode(),
             V1PoolsMode::Full,
             "B reads the block, so even opted-in it must compute it"
         );

@@ -1429,12 +1429,20 @@ fn fold_backed_fixtures_match_golden() {
     let (w, h) = (64, 64);
     let r = common::generators::gen_value_noise(w, h, 0xC0FFEE);
     let d = common::generators::distort_block_artifacts(&r, w, h);
-    assert_golden_close("GOLDEN_SYNTHETIC/fold", &feats(&r, &d, w, h), &GOLDEN_SYNTHETIC);
+    assert_golden_close(
+        "GOLDEN_SYNTHETIC/fold",
+        &feats(&r, &d, w, h),
+        &GOLDEN_SYNTHETIC,
+    );
 
     let (w, h) = (200, 150);
     let r = common::generators::gen_value_noise(w, h, 0xC0FFEE);
     let d = common::generators::distort_block_artifacts(&r, w, h);
-    assert_golden_close("GOLDEN_NONTIGHT/fold", &feats(&r, &d, w, h), &GOLDEN_NONTIGHT);
+    assert_golden_close(
+        "GOLDEN_NONTIGHT/fold",
+        &feats(&r, &d, w, h),
+        &GOLDEN_NONTIGHT,
+    );
 
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let (r, rw, rh) = load_png_rgb8(&manifest.join("tests/fixtures/v1_golden_real_ref.png"));

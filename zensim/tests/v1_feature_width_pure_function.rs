@@ -129,7 +129,10 @@ fn v1_with_ref_entry_emits_372_at_every_r1b_size_class() {
             bad.push(format!("{w}x{h}: {n}"));
         }
     }
-    assert!(bad.is_empty(), "with-ref entry emitted short vectors: {bad:?}");
+    assert!(
+        bad.is_empty(),
+        "with-ref entry emitted short vectors: {bad:?}"
+    );
 }
 
 /// The product path was never affected — kept as the differential that
@@ -247,13 +250,20 @@ fn every_public_v1_entry_handles_sub64_sides() {
         // Buffered family.
         assert!(z.compute(&rs, &ds).is_ok(), "compute at {w}x{h}");
         let ext = z.compute_extended_features(&rs, &ds).unwrap();
-        assert_eq!(ext.features().len(), 372, "compute_extended_features {w}x{h}");
+        assert_eq!(
+            ext.features().len(),
+            372,
+            "compute_extended_features {w}x{h}"
+        );
         let all = z.compute_all_features(&rs, &ds).unwrap();
         assert_eq!(all.features().len(), 372, "compute_all_features {w}x{h}");
 
         // Precomputed-reference family.
         let pre = z.precompute_reference(&rs).unwrap();
-        assert!(z.compute_with_ref(&pre, &ds).is_ok(), "compute_with_ref {w}x{h}");
+        assert!(
+            z.compute_with_ref(&pre, &ds).is_ok(),
+            "compute_with_ref {w}x{h}"
+        );
         let mut scratch = zensim::ZensimScratch::default();
         assert!(
             z.compute_with_ref_into(&pre, &ds, &mut scratch).is_ok(),
@@ -266,7 +276,8 @@ fn every_public_v1_entry_handles_sub64_sides() {
             "compute_streaming_strips_default {w}x{h}"
         );
         assert!(
-            z.compute_with_ref_streaming_strips_default(&pre, &ds).is_ok(),
+            z.compute_with_ref_streaming_strips_default(&pre, &ds)
+                .is_ok(),
             "compute_with_ref_streaming_strips_default {w}x{h}"
         );
 

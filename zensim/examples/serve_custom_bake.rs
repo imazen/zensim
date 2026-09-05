@@ -35,12 +35,18 @@ fn load_rgb(path: &str) -> (Vec<[u8; 3]>, u32, u32) {
         .to_rgb8();
     let (w, h) = (img.width(), img.height());
     let raw = img.into_raw();
-    (raw.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(), w, h)
+    (
+        raw.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
+        w,
+        h,
+    )
 }
 
 fn main() {
     let mut a = std::env::args().skip(1);
-    let bake_path = a.next().expect("usage: serve_custom_bake <bake.bin> <ref> <dist>");
+    let bake_path = a
+        .next()
+        .expect("usage: serve_custom_bake <bake.bin> <ref> <dist>");
     let ref_path = a.next().expect("ref image required");
     let dist_path = a.next().expect("dist image required");
 
@@ -81,7 +87,8 @@ fn main() {
     match z.compute(&rs, &ds) {
         Ok(res) => println!(
             "SERVED  score={:.6}  raw_distance={:.6}",
-            res.score(), res.raw_distance()
+            res.score(),
+            res.raw_distance()
         ),
         Err(e) => println!("REFUSED by Zensim::compute: {e:?}"),
     }

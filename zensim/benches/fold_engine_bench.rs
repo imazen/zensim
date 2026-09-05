@@ -124,8 +124,10 @@ fn rss_mode(arm: &str) {
         "poolctl_full" | "poolctl_off" => fold,
         other => panic!("unknown ZEN_FE_RSS arm: {other}"),
     };
-    let pre = (arm.starts_with("ref_") || arm.starts_with("refinto_"))
-        .then(|| z.precompute_reference(&RgbSlice::new(&src, size, size)).unwrap());
+    let pre = (arm.starts_with("ref_") || arm.starts_with("refinto_")).then(|| {
+        z.precompute_reference(&RgbSlice::new(&src, size, size))
+            .unwrap()
+    });
     let mut sc = zensim::ZensimScratch::new();
     let mut sink = 0.0f64;
     for _ in 0..iters {

@@ -2357,8 +2357,8 @@ mod profile_c_tests {
     /// internal layer-0 width are equal.
     #[test]
     fn d_bake_loads_caller_width_372_dense() {
-        let model = crate::mlp::Model::from_bytes(mlp_bake_d_add156())
-            .expect("shipped D bake must parse");
+        let model =
+            crate::mlp::Model::from_bytes(mlp_bake_d_add156()).expect("shipped D bake must parse");
         assert_eq!(model.caller_input_width(), 372, "caller-facing width");
         assert_eq!(model.n_inputs(), 372, "D is unpruned: no Drop columns");
         assert_eq!(model.n_outputs(), 1);
@@ -2430,7 +2430,10 @@ mod profile_c_tests {
                 .unwrap_or_else(|e| panic!("step {step}: {e}"))
                 .score();
             assert!(score.is_finite(), "step {step}: got {score}");
-            assert!(score <= 100.0 + 1e-9, "step {step}: runtime caps at 100, got {score}");
+            assert!(
+                score <= 100.0 + 1e-9,
+                "step {step}: runtime caps at 100, got {score}"
+            );
             assert!(
                 score <= prev + 1e-9,
                 "step {step}: ladder must be monotone non-increasing, got {score} after {prev}"

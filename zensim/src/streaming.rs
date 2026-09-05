@@ -4851,20 +4851,15 @@ mod tests {
                 let (a, rest) = out.split_at_mut(1);
                 let (b, c) = rest.split_at_mut(1);
                 convert_source_to_xyb_into_slices_chunked(
-                    &src,
-                    &mut a[0],
-                    &mut b[0],
-                    &mut c[0],
-                    padded_w,
-                    parallel,
-                    0,
-                    chunk,
+                    &src, &mut a[0], &mut b[0], &mut c[0], padded_w, parallel, 0, chunk,
                 );
                 out
             };
             let want = convert(DEFAULT_CONVERT_CHUNK_ROWS, false);
             let bits = |v: &[Vec<f32>; 3]| -> Vec<u32> {
-                v.iter().flat_map(|p| p.iter().map(|x| x.to_bits())).collect()
+                v.iter()
+                    .flat_map(|p| p.iter().map(|x| x.to_bits()))
+                    .collect()
             };
             let want_bits = bits(&want);
             for &parallel in &[false, true] {

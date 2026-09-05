@@ -222,7 +222,11 @@ fn extended_features_are_bit_identical_across_engines() {
                     z.compute_extended_features(&RgbSlice::new(&r, w, h), &RgbSlice::new(&d, w, h))
                         .expect("compute_extended_features")
                 });
-                assert_eq!(b.features().len(), want, "{profile:?} {w}x{h}: buffered width");
+                assert_eq!(
+                    b.features().len(),
+                    want,
+                    "{profile:?} {w}x{h}: buffered width"
+                );
                 assert_result_bit_identical(
                     &format!("extended {profile:?} {w}x{h} par={parallel}"),
                     &b,
@@ -570,7 +574,11 @@ fn attribution_density_is_engine_independent() {
         let zf = Zensim::new(ZensimProfile::codec_target()).with_engine(ScoringEngine::Fold);
 
         let cmp = |name: &str, a: &zensim::AttributionResult, b: &zensim::AttributionResult| {
-            assert_eq!((a.width(), a.height()), (b.width(), b.height()), "{name} dims");
+            assert_eq!(
+                (a.width(), a.height()),
+                (b.width(), b.height()),
+                "{name} dims"
+            );
             for (i, (&x, &y)) in a.density().iter().zip(b.density().iter()).enumerate() {
                 assert_eq!(
                     x.to_bits(),
@@ -600,8 +608,10 @@ fn attribution_density_is_engine_independent() {
         );
         cmp(
             "density_full",
-            &zb.compute_attribution_density_full(&rs, &ds, &s_full).unwrap(),
-            &zf.compute_attribution_density_full(&rs, &ds, &s_full).unwrap(),
+            &zb.compute_attribution_density_full(&rs, &ds, &s_full)
+                .unwrap(),
+            &zf.compute_attribution_density_full(&rs, &ds, &s_full)
+                .unwrap(),
         );
     }
 }

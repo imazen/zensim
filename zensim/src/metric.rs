@@ -728,13 +728,7 @@ pub fn compute_zensim_with_ref_and_config(
     // mismatch. Same rule as `Zensim::compute_with_ref`.
     let result = if needs_pyramid_pad(width, height, config.num_scales) {
         let d = reflect_pad_for_scales(&dst_img, config.num_scales);
-        crate::streaming::compute_zensim_streaming_with_ref(
-            precomputed,
-            &d,
-            &config,
-            WEIGHTS,
-            None,
-        )
+        crate::streaming::compute_zensim_streaming_with_ref(precomputed, &d, &config, WEIGHTS, None)
     } else {
         crate::streaming::compute_zensim_streaming_with_ref(
             precomputed,
@@ -2182,10 +2176,7 @@ impl Zensim {
         #[cfg(feature = "feature-regime-v2")]
         let mut scratch = scratch;
         #[cfg(feature = "feature-regime-v2")]
-        if self.fold_engine
-            && self.stop.is_none()
-            && crate::fold_engine::is_fold_backable(config)
-        {
+        if self.fold_engine && self.stop.is_none() && crate::fold_engine::is_fold_backable(config) {
             let mut owned;
             let v2 = match scratch.as_mut() {
                 Some(s) => &mut s.v2,
@@ -3472,7 +3463,12 @@ fn compute_with_config_core(
         // caller already made; a surprise falls back rather than erroring out
         // of a path whose signature is infallible.
         if let Ok(r) = crate::fold_engine::compute_fold_backed(
-            source, distorted, config, weights, &mut scratch, pool_mode,
+            source,
+            distorted,
+            config,
+            weights,
+            &mut scratch,
+            pool_mode,
         ) {
             return r;
         }
@@ -4466,7 +4462,12 @@ fn apply_hybrid_head_runtime(h: &[f32], meta: &HybridHeadMeta) -> f64 {
 /// configuration complaint.
 fn bake_carries_output_spline(bytes: &[u8]) -> bool {
     crate::mlp::Model::from_bytes(bytes)
-        .map(|model| model.metadata().get(OUTPUT_CALIBRATION_SPLINE_KEY).is_some())
+        .map(|model| {
+            model
+                .metadata()
+                .get(OUTPUT_CALIBRATION_SPLINE_KEY)
+                .is_some()
+        })
         .unwrap_or(false)
 }
 
@@ -5429,7 +5430,10 @@ pub(crate) fn combine_scores(
 
     let (score, raw_distance) =
         score_v1_layout_features(&mut features, weights, config, scale_stats.len());
-    debug_assert_eq!(basic_total + peak_total, n_scales * 3 * FEATURES_PER_CHANNEL_WITH_PEAKS);
+    debug_assert_eq!(
+        basic_total + peak_total,
+        n_scales * 3 * FEATURES_PER_CHANNEL_WITH_PEAKS
+    );
 
     // Placeholder profile tag — every `Zensim::compute*` caller overrides
     // it via `with_profile(self.profile)` before returning to the user.
@@ -5552,13 +5556,8 @@ mod tests {
         );
 
         // (2) The guard: scoring under that configuration must FAIL LOUD.
-        let mut result = ZensimResult::new(
-            0.0,
-            0.0,
-            feats,
-            ZensimProfile::B,
-            control.mean_offset(),
-        );
+        let mut result =
+            ZensimResult::new(0.0, 0.0, feats, ZensimProfile::B, control.mean_offset());
         let outcome = apply_mlp_scoring(&mut result, &broken, W as u32, H as u32);
         let err = match outcome {
             Err(e) => e,

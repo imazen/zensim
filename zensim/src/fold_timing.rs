@@ -279,11 +279,7 @@ fn dump(walks: u64) {
         }
         (n, c)
     };
-    eprintln!(
-        "  v2:TOTAL(busy)  {:>10.3} {:>8.1}",
-        ms(v2sum),
-        pct(v2sum)
-    );
+    eprintln!("  v2:TOTAL(busy)  {:>10.3} {:>8.1}", ms(v2sum), pct(v2sum));
     let (p, _) = sum(Phase::Producer);
     let (a, _) = sum(Phase::AWall);
     let (bt, _) = sum(Phase::Between);

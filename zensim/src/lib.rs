@@ -259,6 +259,23 @@ pub mod xyb_lms_features;
 // the board) needs them on a `--no-default-features` build too.
 pub mod feature_set_id;
 
+// The feature DEFINITION registry — what each slot IS (name, family, scale,
+// channel, statistic, cost class, difference-form, direction, owning kernel,
+// revision history) and the one owner of the layout arithmetic that expands
+// signals into slot ids. NOT feature-gated, for the same reason
+// `feature_set_id` is not: it is pure data, and the plan derivation and every
+// consumer need it on a `--no-default-features` build too.
+// docs/FEATURE_SYSTEM_DESIGN_2026-09-05.md
+//
+// `allow(dead_code)` outside `cfg(test)` while increment 1a stands alone: the
+// registry is a DATA surface whose consumer is the plan derivation (increment
+// 1b), and the cross-check gates that prove it correct are tests. Same
+// treatment `ComputeSet::from_block_profile` carries for the same reason.
+// REMOVE the attribute when the plan consumes it — a permanent blanket allow
+// here would hide genuinely-unreachable definitions later.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod feature_defs;
+
 // V2 "bounded" feature extraction — opt-in, strictly additive. See
 // feature_v2.rs's module doc and docs/FEATURE_V2_SPEC_2026-07-18.md.
 #[cfg(feature = "feature-regime-v2")]
