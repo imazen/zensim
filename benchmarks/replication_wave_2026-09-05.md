@@ -286,6 +286,41 @@ build id is recorded per fit and every bake embeds `zentrain.repro` +
 
 ---
 
+## 4b. CONTROLS — both gates PASS (measured 2026-09-05, fits 1–2 of 17)
+
+The two controls are the wave's preconditions, and both are closed before any arm fit
+was interpreted.
+
+**CTL-A reproduces the stored model EXACTLY.** `LSTAR_s4021` replayed verbatim from its
+embedded argv on the pinned binary, scored with `bake_verdict --regime 944 --full-json`
+against the stored raw bake:
+
+| | |
+|---|---|
+| corpora compared | 12 (aic3, aic4, cid22, csiq, hfnlproxy, imazen26, kadid, konjnd, live, nonphoto, sdr25, tid) |
+| `srocc_signed` mismatches | **0 of 12**, equal to all 12 printed decimals |
+| `product_composite` | `0.8648336661364353` on both, to all 16 digits |
+
+So the trainer's behaviour is unchanged by everything that landed between 2026-08-28 and
+`34b4899f` (this lane's repro-block addition included), and new arm draws are the same
+population as the existing diagonal cells. Bake bytes are NOT identical — the coverage
+sidecar and a different `--out` in the embedded argv both changed since — which is why
+the gate is on the MODEL, not the file.
+
+**CTL-B confirms the seed-flag equivalence.** `--init-seed 4021 --sample-seed 4021` vs
+legacy `--seed 4021`: **0 of 12 mismatches, identical composite to 16 digits.** So
+`--seed X` ≡ `--init-seed X --sample-seed X` on a real 944 recipe, and the legacy
+diagonal draw is a legitimate member of both arm S and arm I.
+
+**The writer fix is confirmed on a real bake, not just a probe.** CTL-B's embedded repro
+reads `"init_seed":4021, "sample_seed":4021, "seed":1` — and that `seed:1` is exactly the
+collapse §1b describes: without the two new keys this bake, and every arm member, would
+have reported seed identity `"1"`.
+
+Wall clock: 505 s and 477 s. The 17-fit wave is ~2.4 h, serial, on this box.
+
+---
+
 ## 5. What this wave does NOT do
 
 * It does not enable `--stratified-bands`, or change any recipe.
