@@ -567,3 +567,41 @@ land.** The registered ship rule needs A7r PASS. On this evidence:
   the table above is a linear fit except `v47`, which is 372-**full**, not
   228), and whether **`--monotonicity-reg`** — the only ordering-aware
   regularizer in the trainer, alpha-head-only, arm `MR` — moves it.
+
+## 9. FIRST ARM RESULT — the SERVABLE set beats the control on the campaign's own axis
+
+Two Phase-A cells are complete at k = 3 (seeds 4004/4005/4006), both at
+H128 on the plain path, both read from their own fullevals:
+
+| arm | k | composite | CID22 | **KonJND** | AIC-3 | CSIQ | LIVE | imazen26 | nonphoto | hfnlproxy | mono | **A7r** | bytes |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| **`S228`** (156+peaks — **SERVABLE**) | 3 | **0.8652** | 0.8852 | **0.4536** | 0.7985 | 0.9556 | 0.9282 | 0.9487 | 0.9465 | 0.4173 | 0.9901 | 5 | 29,298 |
+| `S265` (156+free — the control) | 3 | 0.8645 | **0.8863** | 0.4322 | 0.8018 | 0.9559 | 0.9442 | 0.9504 | 0.9487 | 0.4271 | 0.9901 | 5 | 30,669 |
+
+Per-seed spreads: CID22 0.0041 / 0.0018, KonJND **0.0375 / 0.0146**.
+
+**Three readings, and the first one is the campaign's headline so far.**
+
+1. **Dropping the 37 raw-moment slots — which is what makes the set servable —
+   COSTS NOTHING and buys KonJND.** Composite +0.0007, KonJND **+0.0214**,
+   CID22 −0.0011 (a quarter of the CID22 spread, and well inside the 0.0069
+   per-model CI half-width). That is the same direction the D+free lane
+   measured in the *linear* class (peaks carry 97 % of the free set's CID22
+   gain, and beat the full free set on 8 of 12 corpora) — **now reproduced in
+   the MLP class, where it had never been tested.**
+2. **Against the era-closed bar** (composite ≥ 0.8626, CID22 ≥ 0.8877, KonJND ≥
+   0.4782): `S228` **passes composite outright** — above both 944 leaders —
+   ties CID22 within the CI, and closes the KonJND gap from the incumbent's
+   −0.046 to **−0.025**.
+3. **A7r is unmoved at 5**, for both. The floor blocker does not care which of
+   these two sets it is looking at, which is consistent with §8's isolation:
+   the step that costs codecs is 156 → 228, and both of these are past it.
+
+**Instrument note for the endgame.** `freeze_check --select --seed-group
+--min-k 2 --floor-basis all` runs and correctly reports **NO SELECTABLE
+RECIPE** — both groups are `replicated` at k = 3 with 7-8/8 floors, but M3a is
+UNMEASURED, and the owner's registered rule lists an UNMEASURED cell without
+making it selectable. M3a therefore has to be measured before selection, via
+its owner (`scripts/harvest_bakes.sh`, 27 cells, ~66 s/bake). At ~60 bakes that
+is ~66 min of exclusive CPU, so it runs on the curated candidate set after the
+fit queue drains — never concurrently, which would corrupt both.
