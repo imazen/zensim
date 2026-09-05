@@ -52,6 +52,9 @@ use rayon::prelude::*;
 use zenpredict::{Model, Predictor};
 
 use zensim_validate::bands;
+/// The G-ADDR owner — also the home of the 2026-09-05 two-reference inversion
+/// rule (`encoder_inversion`), which the DIAL census and the contract share.
+use zensim_validate::dial_addressability as gaddr;
 use zensim_validate::eval_report;
 use zensim_validate::eval_roots::{
     DEFAULT_FEATURES_ROOT_372, KONJND_JPEG504_372_SLOTS, era_of, resolve_slot,
@@ -795,6 +798,34 @@ struct Args {
     /// label, and `--full-json` / `--fulleval` are REFUSED in this mode so a
     /// peer dial can never be written into a bake's board row.
     dial_peer_scores: Option<(String, PathBuf)>,
+    /// `--inversion-truth single|agree`: which reference set decides whether a
+    /// material backwards rung counts against the DIAL.
+    ///
+    /// USER RULING 2026-09-05 — *"for inversions, we should choose say ssim2
+    /// and butter and only flag true inversions where they agree"*. Under
+    /// `agree` (the default), a backwards rung on a pair where BOTH reference
+    /// metrics independently call the higher setting worse is charged to the
+    /// ENCODER and leaves `mono` / the zone census. `single` reproduces the
+    /// pre-ruling reading and is retained so a published number stays
+    /// reproducible. The rule itself lives in
+    /// [`zensim_validate::dial_addressability::encoder_inversion`] — one
+    /// function, so the G-ADDR contract and this census cannot drift.
+    inversion_truth: gaddr::InversionTruth,
+    /// `--reference-truth <tsv>[:variant]`: the per-cell reference table
+    /// `agree` needs (`image_id/codec/q/ssim2/butteraugli`, butteraugli in
+    /// DISTANCE units). Absent, `agree` is NOT MEASURABLE and the run falls
+    /// back to `single` LOUDLY — never silently, because a missing table would
+    /// otherwise look like a clean dial.
+    reference_truth: Option<(PathBuf, gaddr::ButteraugliVariant)>,
+    /// `--encoder-inversion-census <tsv>`: write EVERY encoder inversion the
+    /// instrument holds, independent of any bake.
+    ///
+    /// The per-run table in the DIAL panel lists only the pairs THIS scorer
+    /// also inverted on; a codec tracking issue wants the whole set, because a
+    /// pair the encoder ran backwards on is the codec's defect whether or not
+    /// one particular dial happened to notice. Same rule, same margins, same
+    /// `gaddr::encoder_inversion` — only the filter differs.
+    encoder_inversion_census: Option<PathBuf>,
     /// `--negtail-peer-scores <label>=<tsv>`: the NEGATIVE-TAIL probe's scores
     /// for a peer, as `entry\tpred`. Companion to `--dial-peer-scores` — it is
     /// what makes G-ADDR's floor axes measurable for a reference metric, which
@@ -1047,6 +1078,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut negtail_probe: Option<PathBuf> = None;
     let mut identity_probe: Option<PathBuf> = None;
     let mut dial_peer_scores: Option<(String, PathBuf)> = None;
+    let mut inversion_truth = gaddr::InversionTruth::Agree;
+    let mut reference_truth: Option<(PathBuf, gaddr::ButteraugliVariant)> = None;
+    let mut encoder_inversion_census: Option<PathBuf> = None;
     let mut negtail_peer_scores: Option<(String, PathBuf)> = None;
     let mut identity_peer_scores: Option<(String, PathBuf)> = None;
     let mut gaddr_json: Option<PathBuf> = None;
@@ -1126,6 +1160,32 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                     return Err("--dial-peer-scores label must be non-empty".into());
                 }
                 dial_peer_scores = Some((label.to_string(), PathBuf::from(path)));
+            }
+            "--encoder-inversion-census" => {
+                let v = args
+                    .next()
+                    .ok_or("--encoder-inversion-census requires <path>")?;
+                encoder_inversion_census = Some(PathBuf::from(v));
+            }
+            "--inversion-truth" => {
+                let v = args
+                    .next()
+                    .ok_or("--inversion-truth requires single|agree")?;
+                inversion_truth = gaddr::InversionTruth::parse(&v)?;
+            }
+            "--reference-truth" => {
+                let v = args
+                    .next()
+                    .ok_or("--reference-truth requires <tsv>[:variant]")?;
+                // `path:variant` — split on the LAST colon so an absolute path
+                // with a drive/colon in it still parses.
+                let (path, variant) = match v.rsplit_once(':') {
+                    Some((p, tag)) if gaddr::ButteraugliVariant::parse(tag).is_ok() => {
+                        (p.to_string(), gaddr::ButteraugliVariant::parse(tag)?)
+                    }
+                    _ => (v.clone(), gaddr::ButteraugliVariant::PNorm3),
+                };
+                reference_truth = Some((PathBuf::from(path), variant));
             }
             "--gaddr-reference" => {
                 let v = args.next().ok_or("--gaddr-reference requires <name>")?;
@@ -1490,6 +1550,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         negtail_probe,
         identity_probe,
         dial_peer_scores,
+        inversion_truth,
+        reference_truth,
+        encoder_inversion_census,
         negtail_peer_scores,
         identity_peer_scores,
         gaddr_json,
@@ -1951,7 +2014,13 @@ fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, 
 #[derive(Clone)]
 struct DialMetrics {
     /// G3: monotonicity = 1 − material-inversion rate (gate ≥ 0.93).
+    /// Under the 2026-09-05 two-reference ruling this counts only the
+    /// DIAL-attributed inversions; see [`InversionTruthReport`].
     mono: f64,
+    /// Which inversion reading produced `mono`, and the encoder-attributed
+    /// half. Always present so a reader can never mistake "the rule did not
+    /// run" for "no encoder inversions".
+    inversion_truth: InversionTruthReport,
     /// G1 dial dynamic range percentiles (gate p5 ≤ 25 ∧ p95 ≥ 85).
     p5: f64,
     p95: f64,
@@ -2041,7 +2110,17 @@ const ZONE_LABELS: [&str; 3] = ["q<50", "q50-85", "q>=85"];
 struct ZoneCell {
     n_pairs: usize,
     forward: usize,
+    /// Material backwards rungs charged to the DIAL (the operative count).
     inv_material: usize,
+    /// Material backwards rungs charged to the ENCODER — both reference
+    /// metrics independently call the higher setting worse. Reported, never
+    /// gated against the dial. Always 0 under `--inversion-truth single`.
+    inv_encoder: usize,
+    /// Material backwards rungs whose attribution is NOT MEASURABLE (the
+    /// reference table has no row for one endpoint). These stay in
+    /// `inv_material` — unknown is never an exemption — and are counted here
+    /// so a thin truth table cannot look like a clean dial.
+    inv_unknown: usize,
     inv_strict: usize,
     flat: usize,
     codec_sat: usize,
@@ -2062,6 +2141,55 @@ struct ZoneLadders {
     /// worst-quality rung. This is the "ranks the ladder backwards" statement
     /// — a codec loop handed such a ladder walks the wrong way.
     endpoint_backwards: usize,
+}
+
+/// The 2026-09-05 two-reference inversion ruling, as it applied to ONE run.
+///
+/// `mono` in [`DialMetrics`] is the DIAL-attributed number; `mono_single` is
+/// the pre-ruling one. Both travel together so a published figure always says
+/// which reading it is, and a reader can see the size of the exemption rather
+/// than inferring it.
+#[derive(Clone, Default)]
+struct InversionTruthReport {
+    /// `single` or `agree` — the reading that produced `DialMetrics::mono`.
+    /// This is the EFFECTIVE reading: a requested `agree` with no usable
+    /// reference table degrades to `single` and reports `single` here.
+    effective: String,
+    /// What the caller asked for, before any fallback.
+    requested: String,
+    /// The reference table actually read, and its butteraugli variant.
+    source: Option<String>,
+    variant: Option<String>,
+    n_reference_cells: usize,
+    /// Material backwards rungs charged to the ENCODER (both refs agree).
+    n_encoder: usize,
+    /// Material backwards rungs whose attribution is NOT MEASURABLE; these
+    /// stay charged to the dial.
+    n_unknown: usize,
+    /// `1 − (dial + encoder) / pairs` — the pre-ruling monotonicity.
+    mono_single: f64,
+    /// The human sentence the markdown prints, including the loud fallback.
+    note: String,
+    /// Every encoder-attributed pair: `(image, codec, q_lo, q_hi, dial drop,
+    /// Δssim2, Δbutteraugli)` — the codec bug-report evidence.
+    encoder_pairs: Vec<(String, String, f64, f64, f64, f64, f64)>,
+}
+
+impl InversionTruthReport {
+    /// The "no dial panel ran at all" value — distinct from a run that read a
+    /// truth table and found nothing, which carries a real `effective` tag.
+    const EMPTY: Self = Self {
+        effective: String::new(),
+        requested: String::new(),
+        source: None,
+        variant: None,
+        n_reference_cells: 0,
+        n_encoder: 0,
+        n_unknown: 0,
+        mono_single: f64::NAN,
+        note: String::new(),
+        encoder_pairs: Vec::new(),
+    };
 }
 
 /// Ladder-inversion breakdown: the pooled dial monotonicity split by the two
@@ -2089,8 +2217,10 @@ struct DialZones {
 }
 
 impl DialMetrics {
+    #[allow(clippy::declare_interior_mutable_const)]
     const NAN: Self = Self {
         mono: f64::NAN,
+        inversion_truth: InversionTruthReport::EMPTY,
         p5: f64::NAN,
         p95: f64::NAN,
         flat: f64::NAN,
@@ -2264,6 +2394,12 @@ fn dial_panel(
     gaddr_grid_truth: Option<&PathBuf>,
     floor_rule: zensim_validate::dial_addressability::FloorRule,
     value_pins: zensim_validate::dial_addressability::ValuePins,
+    inversion_truth: zensim_validate::dial_addressability::InversionTruth,
+    reference_truth: Option<&(
+        PathBuf,
+        zensim_validate::dial_addressability::ButteraugliVariant,
+    )>,
+    encoder_inversion_census: Option<&PathBuf>,
 ) -> (String, DialMetrics) {
     if !grid_path.exists() {
         return (
@@ -2439,7 +2575,12 @@ fn dial_panel(
     let mut tot_pairs = 0usize;
     let mut tot_fwd = 0usize; // Δ > MATERIAL_INV — clear quality increase
     let mut tot_inv = 0usize; // strict (any backwards > 1e-9) — diagnostic
-    let mut tot_inv_material = 0usize; // backwards by > MATERIAL_INV — gate
+    let mut tot_inv_material = 0usize; // backwards by > MATERIAL_INV, DIAL-attributed — gate
+    // Two-reference inversion truth (2026-09-05 ruling). `truth` is None when
+    // the operative reading is not measurable on this instrument; the run then
+    // falls back to `single` and SAYS SO in the panel.
+    let mut tot_inv_encoder = 0usize; // charged to the ENCODER, not gated
+    let mut tot_inv_unknown = 0usize; // attribution NOT MEASURABLE — stays dial
     let mut tot_flat = 0usize; // distinct features, |Δ| ≤ 1e-9 — metric dead-zone — gate
     let mut tot_codec_sat = 0usize; // identical features — codec quality ceiling — not gated
     let mut tot_subres = 0usize; // 1e-9 < |Δ| ≤ MATERIAL_INV — expected oversampling
@@ -2448,6 +2589,65 @@ fn dial_panel(
     // Ladder-inversion split (2026-08-31): the same five outcomes, bucketed by
     // (codec, zone) and (content class, zone). Nothing above changes — these
     // accumulate alongside so the split ALWAYS reconciles with the pooled gate.
+    // The reference-truth table for the 2026-09-05 two-reference ruling. Loaded
+    // ONCE, here, so a parse failure is reported before any counting starts.
+    // `truth_note` carries the exact sentence the panel prints — including the
+    // loud NOT-MEASURABLE fallback, which must never be silent.
+    let (truth, truth_note): (Option<gaddr::ReferenceTruth>, String) = match (
+        inversion_truth,
+        reference_truth,
+    ) {
+        (gaddr::InversionTruth::Single, _) => (
+            None,
+            "inversion truth: `single` — EVERY material backwards rung is charged to the dial \
+             (the pre-2026-09-05 reading)."
+                .to_string(),
+        ),
+        (gaddr::InversionTruth::Agree, Some((path, variant))) => {
+            match gaddr::ReferenceTruth::from_tsv(path, *variant) {
+                Ok(t) => {
+                    let n = t.len();
+                    (
+                        Some(t),
+                        format!(
+                            "inversion truth: `agree` — a material backwards rung is charged to \
+                             the ENCODER only where ssim2 (≤ −{:.1} pt) AND butteraugli-{} \
+                             (≥ +{:.2} distance) BOTH call the higher setting worse. Reference \
+                             table `{}` ({n} cells).",
+                            gaddr::ENCODER_SSIM2_MARGIN_PT,
+                            variant.tag(),
+                            variant.margin(),
+                            path.display()
+                        ),
+                    )
+                }
+                Err(e) => (
+                    None,
+                    format!(
+                        "inversion truth: **NOT MEASURABLE** — `agree` was requested but the \
+                         reference table could not be read ({e}). FALLING BACK to `single`; \
+                         every material backwards rung below is charged to the dial."
+                    ),
+                ),
+            }
+        }
+        (gaddr::InversionTruth::Agree, None) => (
+            None,
+            "inversion truth: **NOT MEASURABLE** — `agree` is the operative reading but no \
+             `--reference-truth` table was supplied for this instrument, so no pair's \
+             attribution can be decided. FALLING BACK to `single`: every material backwards \
+             rung below is charged to the dial."
+                .to_string(),
+        ),
+    };
+    /// One ENCODER-attributed pair: `(image, codec, q_lo, q_hi, dial drop,
+    /// (Δssim2, Δbutteraugli))`. This is the codec bug-report evidence.
+    type EncoderPair = (String, String, f64, f64, f64, (f64, f64));
+    let mut encoder_pairs: Vec<EncoderPair> = Vec::new();
+    // The BAKE-INDEPENDENT census: every pair the instrument's own two
+    // references agree the encoder ran backwards on, whether or not this
+    // scorer noticed. Same rule, same margins — only the filter differs.
+    let mut census_rows: Vec<(String, String, f64, f64, f64, f64)> = Vec::new();
     let mut zcells: BTreeMap<(String, String, String), ZoneCell> = BTreeMap::new();
     let mut zladders: BTreeMap<(String, String, String), ZoneLadders> = BTreeMap::new();
     let mut class_images: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
@@ -2499,10 +2699,50 @@ fn dial_panel(
                 tot_inv += 1; // strict backwards (diagnostic, all magnitudes)
                 inv_mags.push(-delta);
             }
+            if encoder_inversion_census.is_some() {
+                if let Some(t) = truth.as_ref() {
+                    if t.pair_is_encoder_inversion(img, codec, q0, q1) == Some(true) {
+                        let (ds, db) = t
+                            .pair_deltas(img, codec, q0, q1)
+                            .unwrap_or((f64::NAN, f64::NAN));
+                        census_rows.push((img.clone(), codec.clone(), q0, q1, ds, db));
+                    }
+                }
+            }
+            // 2026-09-05 ruling: a material backwards rung on a pair where BOTH
+            // reference metrics call the higher setting worse is the ENCODER's,
+            // not the dial's. `None` (no reference row) is NOT an exemption.
+            let attrib: Option<bool> = if bucket == 1 {
+                truth
+                    .as_ref()
+                    .map(|t| t.pair_is_encoder_inversion(img, codec, q0, q1))
+                    .unwrap_or(Some(false))
+            } else {
+                None
+            };
+            let encoder_pair = attrib == Some(true);
+            let unknown_pair = bucket == 1 && attrib.is_none();
             match bucket {
                 0 => tot_fwd += 1, // clear quality increase
+                1 if encoder_pair => {
+                    tot_inv_encoder += 1; // the CODEC ran backwards — reported, not gated
+                    encoder_pairs.push((
+                        img.clone(),
+                        codec.clone(),
+                        q0,
+                        q1,
+                        -delta,
+                        truth
+                            .as_ref()
+                            .and_then(|t| t.pair_deltas(img, codec, q0, q1))
+                            .unwrap_or((f64::NAN, f64::NAN)),
+                    ));
+                }
                 1 => {
-                    tot_inv_material += 1; // material backwards (gate)
+                    tot_inv_material += 1; // material backwards, DIAL-attributed (gate)
+                    if unknown_pair {
+                        tot_inv_unknown += 1;
+                    }
                     entry[1] += 1;
                     zone_has_inv.insert(zone, true);
                 }
@@ -2523,8 +2763,12 @@ fn dial_panel(
                 }
                 match bucket {
                     0 => c.forward += 1,
+                    1 if encoder_pair => c.inv_encoder += 1,
                     1 => {
                         c.inv_material += 1;
+                        if unknown_pair {
+                            c.inv_unknown += 1;
+                        }
                         c.inv_mags.push(-delta);
                     }
                     2 => c.codec_sat += 1,
@@ -2635,6 +2879,18 @@ fn dial_panel(
     // inversions but are reported on their own line). The gate uses the
     // MATERIAL inversion count (backwards by > MATERIAL_INV score units);
     // sub-MATERIAL backwards wiggles fold into the tied/dead-zone bucket.
+    //
+    // 2026-09-05 RULING: `tot_inv_material` now holds only the DIAL-attributed
+    // material inversions — encoder-attributed pairs were counted into
+    // `tot_inv_encoder` above and never entered it. So `mono` is the dial's own
+    // monotonicity under `agree`, and byte-identical to the pre-ruling number
+    // under `single` (where `tot_inv_encoder` is 0 by construction).
+    let inv_rate_all_material = if tot_pairs > 0 {
+        (tot_inv_material + tot_inv_encoder) as f64 / tot_pairs as f64
+    } else {
+        f64::NAN
+    };
+    let mono_single = 1.0 - inv_rate_all_material;
     let inv_rate = if tot_pairs > 0 {
         tot_inv_material as f64 / tot_pairs as f64
     } else {
@@ -2754,6 +3010,24 @@ fn dial_panel(
         "| monotonicity (1 − inversions) | {mono:.4} | G3 ≥ 0.93 | {} |\n",
         if mono >= 0.93 { "✓" } else { "✗" }
     ));
+    // 2026-09-05 ruling: show the encoder-attributed half beside the dial's own
+    // number, ALWAYS — including when it is zero, so a reader can tell "no
+    // encoder inversions" from "the rule did not run".
+    if tot_inv_encoder > 0 || truth.is_some() {
+        s.push_str(&format!(
+            "| ↳ charged to the ENCODER (both refs agree) | {} | — (codec, not dial) | |\n",
+            tot_inv_encoder
+        ));
+        s.push_str(&format!(
+            "| ↳ monotonicity under `single` (pre-ruling) | {mono_single:.4} | (reported) | |\n"
+        ));
+    }
+    if tot_inv_unknown > 0 {
+        s.push_str(&format!(
+            "| ↳ attribution NOT MEASURABLE (kept on the dial) | {} | — | |\n",
+            tot_inv_unknown
+        ));
+    }
     s.push_str(&format!(
         "| dial p5 / p95 | {p5:.1} / {p95:.1} | G1 p5≤25 ∧ p95≥85 | {} |\n",
         if p5 <= 25.0 && p95 >= 85.0 {
@@ -2826,6 +3100,79 @@ fn dial_panel(
          zone + jxl-in-butteraugli-distance (0→0.3 step .025, 0.3→1 step .05, 1→3 step .2, \
          13→25 step 2; q-equiv = 100 − 4·distance)._\n",
     );
+    // The bake-independent census, if asked for. Written even when EMPTY: a
+    // zero-row file with a header is the honest record that the rule ran and
+    // found nothing, which an absent file cannot say.
+    if let Some(path) = encoder_inversion_census {
+        let variant = truth
+            .as_ref()
+            .map(|t| t.variant().tag())
+            .unwrap_or("<not measurable>");
+        let mut out = String::new();
+        out.push_str(&format!(
+            "# encoder-inversion census, rule `two-reference-agree-2026-09-05`\n\
+             # grid = {}\n# reference table = {}\n\
+             # ssim2 margin = {:.1} pt; butteraugli-{} margin = {:.2} distance\n\
+             # BAKE-INDEPENDENT: every adjacent DISTINCT-setting pair both references\n\
+             # agree the higher setting is worse on. This is the CODEC's behaviour,\n\
+             # not any dial's.\n",
+            grid_path.display(),
+            truth.as_ref().map(|t| t.source()).unwrap_or("<none>"),
+            gaddr::ENCODER_SSIM2_MARGIN_PT,
+            variant,
+            truth
+                .as_ref()
+                .map(|t| t.variant().margin())
+                .unwrap_or(f64::NAN),
+        ));
+        out.push_str("image_id\tcodec\tq_lo\tq_hi\td_ssim2\td_butteraugli\n");
+        let mut rows = census_rows.clone();
+        rows.sort_by(|a, b| {
+            (a.1.as_str(), a.0.as_str(), a.2)
+                .partial_cmp(&(b.1.as_str(), b.0.as_str(), b.2))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for (img, codec, q0, q1, ds, db) in rows.iter() {
+            out.push_str(&format!("{img}\t{codec}\t{q0}\t{q1}\t{ds:.6}\t{db:.6}\n"));
+        }
+        match std::fs::write(path, &out) {
+            Ok(()) => eprintln!(
+                "encoder-inversion census: {} pairs -> {}",
+                census_rows.len(),
+                path.display()
+            ),
+            Err(e) => eprintln!("encoder-inversion census: FAILED to write {path:?}: {e}"),
+        }
+    }
+    // The 2026-09-05 two-reference ruling: which reading this run used, and —
+    // when the operative reading ran — the pairs it charged to the ENCODER,
+    // named, so a codec tracking issue can be written from this table alone.
+    s.push_str(&format!("\n_{truth_note}_\n"));
+    if !encoder_pairs.is_empty() {
+        s.push_str(&format!(
+            "\n**ENCODER-attributed inversions ({} pairs)** — both reference metrics \
+             independently call the higher setting worse, so these are the CODEC running \
+             backwards, not the dial. File or update the codec's tracking issue.\n\n",
+            encoder_pairs.len()
+        ));
+        s.push_str(
+            "| image | codec | step | dial drop | Δssim2 | Δbutteraugli |\n|---|---|---|--:|--:|--:|\n",
+        );
+        let mut rows = encoder_pairs.clone();
+        rows.sort_by(|a, b| b.4.partial_cmp(&a.4).unwrap_or(std::cmp::Ordering::Equal));
+        for (img, codec, q0, q1, drop, (ds, db)) in rows.iter().take(25) {
+            s.push_str(&format!(
+                "| `{img}` | {codec} | q{q0}→q{q1} | −{drop:.2} | {ds:+.3} | {db:+.4} |\n"
+            ));
+        }
+        if rows.len() > 25 {
+            s.push_str(&format!(
+                "\n_{} further pairs omitted; the full set is in `--full-json` \
+                 `dial.inversion_truth.encoder_pairs`._\n",
+                rows.len() - 25
+            ));
+        }
+    }
     // Ladder inversions WHERE they happen: codec x quality zone, then content
     // class x quality zone. The pooled `inversions` row above is one number for
     // a codec loop; this is the number for the loop the reader is actually
@@ -2972,7 +3319,6 @@ fn dial_panel(
     // above about the same event. See `zensim_validate::dial_addressability`
     // for why the FLOOR axis is the hard one (the anchor's `max(ssim2, 0)`
     // clamp is what deletes the in-distribution evidence below zero).
-    use zensim_validate::dial_addressability as gaddr;
     let (dmin, dmax) = if pooled.is_empty() {
         (f64::NAN, f64::NAN)
     } else {
@@ -3108,6 +3454,25 @@ fn dial_panel(
         s,
         DialMetrics {
             mono,
+            inversion_truth: InversionTruthReport {
+                effective: if truth.is_some() {
+                    gaddr::InversionTruth::Agree.tag().to_string()
+                } else {
+                    gaddr::InversionTruth::Single.tag().to_string()
+                },
+                requested: inversion_truth.tag().to_string(),
+                source: truth.as_ref().map(|t| t.source().to_string()),
+                variant: truth.as_ref().map(|t| t.variant().tag().to_string()),
+                n_reference_cells: truth.as_ref().map(|t| t.len()).unwrap_or(0),
+                n_encoder: tot_inv_encoder,
+                n_unknown: tot_inv_unknown,
+                mono_single,
+                note: truth_note.clone(),
+                encoder_pairs: encoder_pairs
+                    .iter()
+                    .map(|(i, c, a, b, d, (ds, db))| (i.clone(), c.clone(), *a, *b, *d, *ds, *db))
+                    .collect(),
+            },
             p5,
             p95,
             flat,
@@ -4601,6 +4966,9 @@ Run the dedicated q-sweep harness for those._\n",
                     .expect("validated at argument-parse time")
             })
             .unwrap_or_default(),
+        args.inversion_truth,
+        args.reference_truth.as_ref(),
+        args.encoder_inversion_census.as_ref(),
     );
     buf.push_str(&dial_md);
     pt.mark("DIAL panel (grid load + score + mono/tied)");
@@ -5173,6 +5541,7 @@ Run the dedicated q-sweep harness for those._\n",
         // recurses once per key AND once per nesting level, so keeping this
         // deep sub-tree inline made adding a single key to `dial` blow the
         // macro recursion limit. Same value, one expansion shallower.
+        let itr = &dial_metrics.inversion_truth;
         let dial_zones_json = dial_metrics.zones.as_ref().map(|z| json!({
                 "scheme": "ladder-inversion-2026-08-31",
                 // The grid this split was cut from. Recorded because the board
@@ -5199,6 +5568,11 @@ Run the dedicated q-sweep harness for those._\n",
                         "n_pairs": c.n_pairs,
                         "forward": c.forward,
                         "inv_material": c.inv_material,
+                        // 2026-09-05 ruling: material backwards rungs the two
+                        // reference metrics AGREE are the encoder's, split out.
+                        // `inv_material` above is DIAL-attributed only.
+                        "inv_encoder": c.inv_encoder,
+                        "inv_unknown": c.inv_unknown,
                         "inv_strict": c.inv_strict,
                         "flat": c.flat,
                         "codec_sat": c.codec_sat,
@@ -5249,6 +5623,32 @@ Run the dedicated q-sweep harness for those._\n",
             // `mono_pct`. Same events, same MATERIAL threshold, so the
             // split_kind=="all" rows reconcile with mono_pct exactly.
             "zones": dial_zones_json,
+            // inversion_truth: the 2026-09-05 two-reference ruling as it
+            // applied to THIS run. `mono` above is the DIAL-attributed number
+            // under `effective == "agree"`; `mono_single` is the pre-ruling
+            // one. Always emitted, so a reader can never mistake "the rule did
+            // not run" for "no encoder inversions".
+            "inversion_truth": {
+                "scheme": "two-reference-agree-2026-09-05",
+                "effective": itr.effective,
+                "requested": itr.requested,
+                "reference_table": itr.source,
+                "butteraugli_variant": itr.variant,
+                "n_reference_cells": itr.n_reference_cells,
+                "ssim2_margin_pt": gaddr::ENCODER_SSIM2_MARGIN_PT,
+                "butteraugli_margin": itr.variant.as_deref().and_then(
+                    |v| gaddr::ButteraugliVariant::parse(v).ok()).map(|v| v.margin()),
+                "n_encoder_attributed": itr.n_encoder,
+                "n_attribution_unknown": itr.n_unknown,
+                "mono_dial": nan_null(dial_metrics.mono),
+                "mono_single": nan_null(itr.mono_single),
+                "note": itr.note,
+                "encoder_pairs": itr.encoder_pairs.iter().map(
+                    |(img, cd, q0, q1, drop, ds, db)| json!({
+                        "image_id": img, "codec": cd, "q_lo": q0, "q_hi": q1,
+                        "dial_drop": drop, "d_ssim2": ds, "d_butteraugli": db,
+                    })).collect::<Vec<_>>(),
+            },
         });
 
         // corruption: the real bake_verdict gate (score(corruption) < score(q20)

@@ -1,5 +1,18 @@
 # Failure profiles — what each model gets wrong, and where that bites
 
+> **⛔ ERA NOTE (added 2026-09-05): every inversion count, `mono_pct` and ladder-zone
+> figure below is the `single` reading — every material backwards rung charged to the
+> DIAL, including the rungs where the CODEC itself ran backwards.** Since the
+> 2026-09-05 user ruling the operative reading is `agree`: a rung is charged to the
+> ENCODER where ssim2 (≤ −0.5 pt) AND butteraugli-pnorm3 (≥ +0.05 distance) both call
+> the higher setting worse. The two are different quantities — do not compare or
+> average them. Reproduce these numbers exactly with
+> `bake_verdict --inversion-truth single` (proven byte-identical to the pre-ruling
+> binary). Rule + margins + the per-codec encoder table:
+> [`inversion_truth_2026-09-05.md`](inversion_truth_2026-09-05.md); registry scope
+> `inversion-counts-single-reference-pre-2026-09-05`.
+
+
 **The complaint this answers (user, 2026-08-31):** the gauntlet board shows
 *minimal information about a model's flaws and where those flaws will hurt*. It
 is a leaderboard — SROCC columns, gates, badges — and a reader cannot see what a

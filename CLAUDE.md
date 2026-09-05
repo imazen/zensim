@@ -1605,6 +1605,59 @@ pass; an unregistered dial grid = NOT MEASURABLE. Run it with `--negtail-probe` 
 `--identity-probe` (both pinned under `/mnt/v/output/zensim/dialgate-2026-09-04/`) or those
 axes read `—`.
 
+**⛔ SINCE 2026-09-05 `C1` COUNTS ONLY *DIAL*-ATTRIBUTED INVERSIONS — a
+backwards rung BOTH reference metrics confirm is the ENCODER's.** USER
+DIRECTIVE, verbatim: *"for inversions, we should choose say ssim2 and butter and
+only flag true inversions where they agree, and we can then file or update
+tracking issues on codecs for when they are nonmonotonic."* A dial ladder walks a
+codec's own settings, so a backwards rung has two causes and the pre-ruling
+instrument could not tell them apart. THE rule has one owner —
+`dial_addressability::encoder_inversion` — shared by C1's `mono` input and
+`bake_verdict`'s zone census: **`Δssim2 ≤ −0.5` pt AND `Δbutteraugli-pnorm3 ≥
++0.05` distance**, both required. `--inversion-truth single|agree` selects the
+reading (`agree` is the DEFAULT); `--reference-truth <tsv>[:variant]` supplies
+the per-cell table; `--encoder-inversion-census <tsv>` writes the
+BAKE-INDEPENDENT set (the codec bug-report evidence).
+**Facts you must not re-derive:**
+(a) **The butteraugli margin is NOT a noise margin — there is no noise.** A
+from-scratch re-run of the instrument's jpeg leg reproduces 2,574/2,574 cells at
+`max |Δ| = 0` on BOTH butteraugli variants. The margin is the **p85 of |Δ| on
+FORWARD pairs whose Δssim2 ∈ [0.45,0.55], rounded UP to the next 0.05** — pnorm3
+0.0481 → **0.05**, max 0.2189 → **0.25**. Rounding UP is conservative: a larger
+margin excuses FEWER rungs.
+(b) **pnorm3 is PRIMARY on measurement, not taste** — 94.30 % direction agreement
+with ssim2 over 9,411 pairs vs `max`'s 75.27 %; and `peer_butteraugli_max` fails
+C1 (0.9286) under both readings.
+(c) **BOTH, not EITHER, is load-bearing**: of 105 ssim2-alone material
+inversions, butteraugli moves the worse direction on only 47. On D's ten worst,
+**ssim2 alone confirmed 9/10; both references confirm 5/10** — and on two of
+those, ssim2 reads a 7-10 pt loss while butteraugli says the higher setting is
+BETTER.
+(d) **UNKNOWN IS NEVER AN EXEMPTION** — a pair with no reference row stays
+charged to the DIAL and is counted in `dial.inversion_truth.n_attribution_unknown`;
+a requested `agree` with no usable table degrades to `single` LOUDLY.
+(e) **The board cannot move and did not**: `mono_agree ≥ mono_single` always,
+`mono` gates exactly ONE row (C1, a `≥` bar), and all 130 board G-ADDR cells
+already read C1 PASS ⇒ badge count unchanged at **47**. The two-reference reading
+is **NOT MEASURABLE** on the canonical-372 / 944-POOLS grids: their only
+butteraugli is the `max` variant (identified at median rel err 0.0029 over 4,105
+cells) and re-scoring pnorm3 would be a decoder-era confound.
+(f) **`--inversion-truth single` is byte-identical to the pre-ruling binary**
+(0 JSON differences on shipped D) — every published pre-2026-09-05 inversion
+number stays reproducible, and is scoped in `eval_annotations.json` as
+`inversion-counts-single-reference-pre-2026-09-05`. Never compare a `single`
+count with an `agree` one.
+Measured C1 inputs (ladder instrument, single → agree): **D 0.99310 →
+0.99470** (15 rungs), D-prev 0.99420 → 0.99540 (12), A 0.98030 → 0.98120 (8),
+B 0.97760 → 0.97870 (11), **`peer_ssim2` 0.98880 → 0.99160** (26) — so D's
+dial-attributed inversion rate is **0.53 % against the mentor's 0.84 %**.
+Codec issues filed from the census: **`imazen/zenjpeg#201`** (5 pairs, all
+costing bytes), **`imazen/zenrav1e#42`** (20 pairs / 14 refs, 13 costing bytes),
+**`imazen/zenav1-svt#19`** (1 pair + the 36.4 % setting-saturation observation);
+**jxl and webp are CLEAN — zero confirmed.** Record:
+[`benchmarks/inversion_truth_2026-09-05.md`](benchmarks/inversion_truth_2026-09-05.md),
+gate doc **§18**.
+
 **⛔ SINCE 2026-09-05 THE OPERATIVE FLOOR WINDOW IS `resolvable`, AND `A1`-`A6`
 ARE REPORT-ONLY.** USER RULING (the "ok" opening *"ok, is there poor resolution
 compared to ssim2? … what should be the new SDR and HDR [defaults]"*, read as

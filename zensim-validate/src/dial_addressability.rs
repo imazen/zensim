@@ -1265,6 +1265,290 @@ pub const IDENTITY_IS_THE_ZERO_VECTOR: &str =
 /// agree on what "above identity" means.
 pub const ABOVE_IDENTITY_SLACK: f64 = 0.01;
 
+// ────────────────── two-reference inversion truth (2026-09-05) ──────────────────
+//
+// USER DIRECTIVE 2026-09-05, verbatim:
+//
+//   "for inversions, we should choose say ssim2 and butter and only flag true
+//    inversions where they agree, and we can then file or update tracking
+//    issues on codecs for when they are nonmonotonic."
+//
+// WHAT IT CHANGES. A dial ladder walks a codec's own quality settings. When the
+// dial reads a higher setting as WORSE, that has two possible causes and the
+// instrument could not tell them apart: the dial mis-ranked two images, or the
+// ENCODER actually emitted a worse image at the higher setting. Charging the
+// second to the dial makes every scorer look defective in proportion to how
+// non-monotone its codecs are — and it is the codec that needs the bug report.
+//
+// THE RULE. For one adjacent DISTINCT-setting pair, `encoder_inversion` is true
+// iff BOTH reference metrics independently say the higher setting is worse by a
+// material margin. A scorer's material inversion on such a pair is charged to
+// the ENCODER and leaves the dial's count. Everything else stays the dial's.
+//
+// WHY "BOTH", NOT "EITHER". MEASURED on the 2026-09-05 ladder instrument
+// (9,411 adjacent distinct pairs): of the 105 pairs where ssim2 alone calls a
+// material inversion, butteraugli-pnorm3 moves the worse direction AT ALL on
+// only 47. A single-reference rule would excuse more than twice as many pairs
+// as two agreeing references do, and half of what it excused would be one
+// metric's opinion. Requiring agreement is what makes an exemption evidence.
+//
+// THE MARGINS, AND HOW THEY WERE DERIVED. ssim2's is not re-derived — it is
+// the gate's own materiality, `MATERIAL_INV_PT` = 0.5 dial points, so the
+// reference is held to exactly the bar the dial is held to.
+//
+// butteraugli's could not come from measurement noise, because there is none:
+// re-running the instrument's jpeg leg from scratch reproduces **2,574 / 2,574**
+// cells with `max |Δ| = 0` on BOTH butteraugli variants (as well as on ssim2,
+// dssim and encoded bytes). That extends the instrument's §8.0 reproducibility
+// gate, which checked only bytes and ssim2. A reproducibility-derived margin
+// would therefore be 0.0, which is not a materiality bar at all.
+//
+// So the margin is derived by EQUIVALENCE to ssim2's own materiality, on the
+// population where the two metrics demonstrably track each other:
+//
+//   margin(variant) = p85 of |Δ variant| over FORWARD adjacent pairs whose
+//                     Δssim2 lies in [0.45, 0.55] — the moves ssim2 itself
+//                     calls exactly material — rounded UP to the next 0.05.
+//
+// MEASURED (n = 410 forward pairs in band; the estimate is stable to ±0.0007
+// across the wider bands [0.4,0.6] and [0.25,0.75], so it is not band-choice):
+//
+//   | variant  | p25    | median | p75    | p85    | -> margin |
+//   | pnorm3   | 0.0238 | 0.0315 | 0.0403 | 0.0481 |    0.05   |
+//   | max      | 0.0037 | 0.0677 | 0.1361 | 0.2189 |    0.25   |
+//
+// Rounding UP is the conservative direction and is deliberate: a LARGER
+// butteraugli margin makes agreement RARER, so fewer inversions are excused and
+// MORE stay charged to the dial. The ruling cannot launder a dial defect by
+// being generous with this number.
+//
+// WHY pnorm3 IS PRIMARY. MEASURED over all 9,411 pairs, the share on which the
+// variant moves the direction ssim2 moves: **pnorm3 94.30 %, max 75.27 %**.
+// `max` is a maximum over pixels, so one localised artifact swings it; in the
+// population where ssim2 barely moves (|Δ| < 0.05) its own p95 excursion is
+// 1.27 against pnorm3's 0.14. `max` is reported beside pnorm3, never instead of
+// it.
+//
+// UNKNOWN IS NOT AN EXEMPTION. A pair whose reference values are not both on
+// disk yields `None`, and an unknown pair stays charged to the DIAL. The count
+// of unknown pairs is reported so a thin truth table can never look like a
+// clean dial.
+
+/// Which butteraugli pooling the truth table carries. The margin is
+/// variant-specific — see the module note — so a table must name its variant
+/// and a caller may never assume one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButteraugliVariant {
+    /// 3-norm pooling. PRIMARY: 94.30 % direction agreement with ssim2.
+    PNorm3,
+    /// Maximum over pixels. Reported BESIDE pnorm3: 75.27 % direction
+    /// agreement, and a p95 excursion 9x pnorm3's where ssim2 says nothing.
+    Max,
+}
+
+impl ButteraugliVariant {
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::PNorm3 => "pnorm3",
+            Self::Max => "max",
+        }
+    }
+
+    /// The derived materiality margin, in butteraugli DISTANCE units.
+    pub fn margin(self) -> f64 {
+        match self {
+            Self::PNorm3 => ENCODER_BUTTERAUGLI_PNORM3_MARGIN,
+            Self::Max => ENCODER_BUTTERAUGLI_MAX_MARGIN,
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim() {
+            "pnorm3" | "p3" | "pnorm-3" => Ok(Self::PNorm3),
+            "max" => Ok(Self::Max),
+            other => Err(format!(
+                "unknown butteraugli variant {other:?} (expected `pnorm3` or `max`)"
+            )),
+        }
+    }
+}
+
+/// ssim2's half of the agreement test — the dial gate's OWN materiality, so the
+/// reference is held to exactly the bar the dial is held to. Not re-derived.
+pub const ENCODER_SSIM2_MARGIN_PT: f64 = 0.5;
+
+/// butteraugli-pnorm3's half, in distance units. Derived by ssim2-equivalence
+/// (module note): p85 = 0.0481 -> rounded UP to the next 0.05.
+pub const ENCODER_BUTTERAUGLI_PNORM3_MARGIN: f64 = 0.05;
+
+/// butteraugli-max's half, in distance units. Same derivation: p85 = 0.2189 ->
+/// rounded UP to the next 0.05. Report-only; `max` is the noisier variant.
+pub const ENCODER_BUTTERAUGLI_MAX_MARGIN: f64 = 0.25;
+
+/// Which reference set decides whether a backwards rung counts against the dial.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InversionTruth {
+    /// The pre-ruling reading: EVERY material backwards rung counts against the
+    /// dial, whatever the encoder did. Retained so a pre-2026-09-05 number can
+    /// be reproduced deliberately, and reported beside the operative reading.
+    Single,
+    /// The operative reading after the 2026-09-05 ruling: a backwards rung on a
+    /// pair where BOTH references agree the higher setting is worse is charged
+    /// to the ENCODER and leaves the dial's count.
+    Agree,
+}
+
+impl InversionTruth {
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Agree => "agree",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim() {
+            "single" => Ok(Self::Single),
+            "agree" => Ok(Self::Agree),
+            other => Err(format!(
+                "unknown --inversion-truth {other:?} (expected `single` or `agree`)"
+            )),
+        }
+    }
+}
+
+/// **THE shared rule.** One adjacent pair, as quality RISES.
+///
+/// * `d_ssim2` — ssim2 at the higher setting minus ssim2 at the lower, in ssim2
+///   points. ssim2 is quality-oriented, so worse means NEGATIVE.
+/// * `d_butteraugli` — butteraugli DISTANCE at the higher setting minus the
+///   lower. butteraugli is a distance, so worse means POSITIVE.
+///
+/// Both callers — the G-ADDR contract's `mono` input and the ladder-inversion
+/// census — go through this function, so the gate and the census can never
+/// drift apart on what an encoder inversion is.
+pub fn encoder_inversion(d_ssim2: f64, d_butteraugli: f64, variant: ButteraugliVariant) -> bool {
+    d_ssim2 <= -ENCODER_SSIM2_MARGIN_PT && d_butteraugli >= variant.margin()
+}
+
+/// Per-cell reference-metric values for one instrument, keyed the same way
+/// `--dial-peer-scores` keys its tables: `(image_id, codec, round(q, 4))`.
+///
+/// TSV shape `image_id \t codec \t q \t ssim2 \t butteraugli`, with the
+/// butteraugli column in DISTANCE units of the named variant.
+#[derive(Debug, Clone)]
+pub struct ReferenceTruth {
+    variant: ButteraugliVariant,
+    source: String,
+    cells: std::collections::HashMap<(String, String, i64), (f64, f64)>,
+}
+
+impl ReferenceTruth {
+    fn key(img: &str, codec: &str, q: f64) -> (String, String, i64) {
+        (
+            img.to_string(),
+            codec.to_string(),
+            (q * 10_000.0).round() as i64,
+        )
+    }
+
+    /// Parse a reference-truth TSV. Fails LOUD on a missing column or an
+    /// unparseable value — a truth table that silently drops rows would turn
+    /// coverage gaps into dial exemptions.
+    pub fn from_tsv(path: &std::path::Path, variant: ButteraugliVariant) -> Result<Self, String> {
+        let txt = std::fs::read_to_string(path).map_err(|e| format!("open {path:?}: {e}"))?;
+        Self::from_tsv_str(&txt, variant, &path.display().to_string())
+    }
+
+    pub fn from_tsv_str(
+        txt: &str,
+        variant: ButteraugliVariant,
+        source: &str,
+    ) -> Result<Self, String> {
+        let mut lines = txt.lines().filter(|l| !l.trim_start().starts_with('#'));
+        let header = lines.next().ok_or_else(|| format!("{source}: empty"))?;
+        let cols: Vec<&str> = header.split('\t').collect();
+        let ci = |n: &str| cols.iter().position(|c| c.trim() == n);
+        let (i_img, i_codec, i_q, i_s2, i_b) = (
+            ci("image_id").ok_or_else(|| format!("{source}: missing image_id column"))?,
+            ci("codec").ok_or_else(|| format!("{source}: missing codec column"))?,
+            ci("q").ok_or_else(|| format!("{source}: missing q column"))?,
+            ci("ssim2").ok_or_else(|| format!("{source}: missing ssim2 column"))?,
+            ci("butteraugli").ok_or_else(|| format!("{source}: missing butteraugli column"))?,
+        );
+        let need = i_img.max(i_codec).max(i_q).max(i_s2).max(i_b);
+        let mut cells = std::collections::HashMap::new();
+        for line in lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let f: Vec<&str> = line.split('\t').collect();
+            if f.len() <= need {
+                return Err(format!("{source}: short row {line:?}"));
+            }
+            let p = |i: usize, what: &str| -> Result<f64, String> {
+                f[i].trim()
+                    .parse::<f64>()
+                    .map_err(|_| format!("{source}: bad {what} {:?}", f[i]))
+            };
+            let (q, s2, b) = (p(i_q, "q")?, p(i_s2, "ssim2")?, p(i_b, "butteraugli")?);
+            cells.insert(Self::key(f[i_img].trim(), f[i_codec].trim(), q), (s2, b));
+        }
+        if cells.is_empty() {
+            return Err(format!("{source}: no rows"));
+        }
+        Ok(Self {
+            variant,
+            source: source.to_string(),
+            cells,
+        })
+    }
+
+    pub fn variant(&self) -> ButteraugliVariant {
+        self.variant
+    }
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+    pub fn len(&self) -> usize {
+        self.cells.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+
+    /// Is this adjacent pair an ENCODER inversion?
+    ///
+    /// `None` when either endpoint is absent from the table — the pair's truth
+    /// is NOT MEASURABLE, and an unknown pair is never an exemption. Callers
+    /// must count `None`s and report them.
+    pub fn pair_is_encoder_inversion(
+        &self,
+        image_id: &str,
+        codec: &str,
+        q_lo: f64,
+        q_hi: f64,
+    ) -> Option<bool> {
+        let a = self.cells.get(&Self::key(image_id, codec, q_lo))?;
+        let b = self.cells.get(&Self::key(image_id, codec, q_hi))?;
+        Some(encoder_inversion(b.0 - a.0, b.1 - a.1, self.variant))
+    }
+
+    /// The raw reference deltas for a pair, for reporting a confirmed inversion
+    /// (`(Δssim2, Δbutteraugli)`), or `None` when either endpoint is absent.
+    pub fn pair_deltas(
+        &self,
+        image_id: &str,
+        codec: &str,
+        q_lo: f64,
+        q_hi: f64,
+    ) -> Option<(f64, f64)> {
+        let a = self.cells.get(&Self::key(image_id, codec, q_lo))?;
+        let b = self.cells.get(&Self::key(image_id, codec, q_hi))?;
+        Some((b.0 - a.0, b.1 - a.1))
+    }
+}
+
 // ─────────────────────────────── verdict ───────────────────────────────
 
 /// Which kind of bar a row carries. Kept separate because they answer
@@ -2694,6 +2978,208 @@ pub fn to_json(v: &Verdict) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ───────────── two-reference inversion truth (2026-09-05 ruling) ─────────────
+    //
+    // Three synthetic ladders, one per attribution outcome. Each is written so
+    // it FAILS against the pre-ruling behaviour (which charged every material
+    // backwards rung to the dial) and passes only once `encoder_inversion` is
+    // the arbiter.
+
+    /// A three-rung reference table: q 10 / 20 / 30 on one image+codec, with
+    /// the 20 -> 30 step engineered per the test's needs.
+    fn truth_tsv(d_ssim2: f64, d_butter: f64) -> String {
+        // rung at q=20 is the anchor; q=30 moves by the given deltas.
+        let (s0, b0) = (60.0_f64, 1.0_f64);
+        format!(
+            "image_id\tcodec\tq\tssim2\tbutteraugli\n\
+             img\tjpeg\t10\t{:.6}\t{:.6}\n\
+             img\tjpeg\t20\t{:.6}\t{:.6}\n\
+             img\tjpeg\t30\t{:.6}\t{:.6}\n",
+            s0 - 5.0,
+            b0 + 0.5,
+            s0,
+            b0,
+            s0 + d_ssim2,
+            b0 + d_butter,
+        )
+    }
+
+    fn truth(d_ssim2: f64, d_butter: f64) -> ReferenceTruth {
+        ReferenceTruth::from_tsv_str(
+            &truth_tsv(d_ssim2, d_butter),
+            ButteraugliVariant::PNorm3,
+            "<test>",
+        )
+        .expect("truth table parses")
+    }
+
+    /// BOTH references say the higher setting is worse -> the pair is the
+    /// ENCODER's, and a scorer's inversion there must NOT count against C1.
+    #[test]
+    fn both_references_inverting_charges_the_encoder() {
+        // ssim2 drops 3 points (>> 0.5); butteraugli distance rises 0.20 (>> 0.05).
+        let t = truth(-3.0, 0.20);
+        assert_eq!(
+            t.pair_is_encoder_inversion("img", "jpeg", 20.0, 30.0),
+            Some(true),
+            "both references materially backwards -> encoder-attributed"
+        );
+        // and the raw rule agrees when called directly
+        assert!(encoder_inversion(-3.0, 0.20, ButteraugliVariant::PNorm3));
+    }
+
+    /// Only ONE reference inverts -> the pair stays the DIAL's. Both single-ref
+    /// directions are covered, because the AND is what makes this a rule rather
+    /// than a preference.
+    #[test]
+    fn one_reference_inverting_charges_the_dial() {
+        // ssim2 inverts materially, butteraugli says the higher setting is BETTER.
+        let s2_only = truth(-3.0, -0.20);
+        assert_eq!(
+            s2_only.pair_is_encoder_inversion("img", "jpeg", 20.0, 30.0),
+            Some(false),
+            "ssim2 alone is not evidence — the pair stays dial-attributed"
+        );
+        // butteraugli inverts materially, ssim2 says the higher setting is BETTER.
+        let b_only = truth(3.0, 0.20);
+        assert_eq!(
+            b_only.pair_is_encoder_inversion("img", "jpeg", 20.0, 30.0),
+            Some(false),
+            "butteraugli alone is not evidence — the pair stays dial-attributed"
+        );
+        // ssim2 inverts materially but butteraugli moves the worse direction by
+        // LESS than its derived margin: still the dial's.
+        let sub = truth(-3.0, ENCODER_BUTTERAUGLI_PNORM3_MARGIN * 0.5);
+        assert_eq!(
+            sub.pair_is_encoder_inversion("img", "jpeg", 20.0, 30.0),
+            Some(false),
+            "sub-margin butteraugli agreement is not agreement"
+        );
+    }
+
+    /// NEITHER reference inverts -> the pair is the DIAL's, which is the case
+    /// that must keep C1 able to fail at all.
+    #[test]
+    fn no_reference_inverting_charges_the_dial() {
+        let t = truth(2.0, -0.10);
+        assert_eq!(
+            t.pair_is_encoder_inversion("img", "jpeg", 20.0, 30.0),
+            Some(false)
+        );
+        // a flat pair is likewise not an encoder inversion
+        let flat = truth(0.0, 0.0);
+        assert_eq!(
+            flat.pair_is_encoder_inversion("img", "jpeg", 20.0, 30.0),
+            Some(false)
+        );
+    }
+
+    /// An UNKNOWN pair is never an exemption.
+    #[test]
+    fn unknown_pair_is_not_an_exemption() {
+        let t = truth(-3.0, 0.20);
+        assert_eq!(t.pair_is_encoder_inversion("img", "jpeg", 20.0, 99.0), None);
+        assert_eq!(
+            t.pair_is_encoder_inversion("other", "jpeg", 20.0, 30.0),
+            None
+        );
+        assert_eq!(t.pair_is_encoder_inversion("img", "webp", 20.0, 30.0), None);
+    }
+
+    /// The ssim2 half is exactly the dial gate's own materiality, and the
+    /// butteraugli margins are the derived, ROUNDED-UP values. Pinned so a
+    /// later edit to either cannot silently re-scope every published census.
+    #[test]
+    fn inversion_truth_margins_are_pinned() {
+        assert_eq!(ENCODER_SSIM2_MARGIN_PT, 0.5);
+        assert_eq!(ENCODER_BUTTERAUGLI_PNORM3_MARGIN, 0.05);
+        assert_eq!(ENCODER_BUTTERAUGLI_MAX_MARGIN, 0.25);
+        assert_eq!(ButteraugliVariant::PNorm3.margin(), 0.05);
+        assert_eq!(ButteraugliVariant::Max.margin(), 0.25);
+        // exactly at the margin counts (>=), just under does not
+        assert!(encoder_inversion(-0.5, 0.05, ButteraugliVariant::PNorm3));
+        assert!(!encoder_inversion(
+            -0.5,
+            0.049_999,
+            ButteraugliVariant::PNorm3
+        ));
+        assert!(!encoder_inversion(
+            -0.499_999,
+            0.05,
+            ButteraugliVariant::PNorm3
+        ));
+        // the max variant is held to its OWN, larger margin
+        assert!(!encoder_inversion(-3.0, 0.10, ButteraugliVariant::Max));
+        assert!(encoder_inversion(-3.0, 0.25, ButteraugliVariant::Max));
+    }
+
+    /// The whole point of the ruling, exercised through the REAL C1 row: a
+    /// ladder whose backwards rung both references confirm leaves the dial's
+    /// count, so C1 can only move UP. A synthetic 1,000-pair grid with 20
+    /// dial-attributed and 15 encoder-attributed inversions, graded twice.
+    ///
+    /// This is the "C1 unaffected" half of the three-outcome test spec: an
+    /// encoder-attributed pair must never be able to turn a C1 PASS into a
+    /// FAIL, and — because C1 is a `≥` bar on `mono` — must never be able to
+    /// make the contract verdict worse.
+    #[test]
+    fn encoder_attribution_moves_c1_up_and_never_down() {
+        let f = canonical();
+        let (nt_f, _) = probes();
+        let pairs = 1_000.0;
+        // Grade the SAME ladder under both readings: `single` charges all 35,
+        // `agree` charges only the 20 the references do not corroborate.
+        let mut c1 = |dial: f64, encoder: f64| -> (State, f64) {
+            let mut m = tie(&f);
+            m.mono = 1.0 - (dial + encoder) / pairs;
+            let v = evaluate(&f.dial_grid_sha256, &f.label, &m, None, None);
+            let _ = &nt_f;
+            (row_by_id(&v, "C1").state, m.mono)
+        };
+        let (st_single, mono_single) = c1(20.0, 15.0);
+        let (st_agree, mono_agree) = c1(20.0, 0.0);
+        assert!(
+            mono_agree > mono_single,
+            "the exemption must raise mono: {mono_agree} vs {mono_single}"
+        );
+        assert_eq!(st_single, State::Pass);
+        assert_eq!(st_agree, State::Pass, "C1 cannot get worse under `agree`");
+
+        // And at a mono low enough that `single` FAILS C1, `agree` is the one
+        // that can rescue it — never the reverse. 80 dial + 60 encoder puts
+        // `single` at 0.860 (below the 0.93 bar) and `agree` at 0.920, still
+        // below: the exemption is not a free pass, it is exactly its own size.
+        let (st_lo_single, mono_lo_single) = c1(80.0, 60.0);
+        let (st_lo_agree, mono_lo_agree) = c1(80.0, 0.0);
+        assert_eq!(st_lo_single, State::Fail);
+        assert_eq!(
+            st_lo_agree,
+            State::Fail,
+            "a dial with 8% of its own inversions still fails C1: {mono_lo_agree}"
+        );
+        assert!(mono_lo_agree > mono_lo_single);
+        // The direction property, stated as the invariant it is: for ANY
+        // non-negative encoder count, `agree` >= `single`, so C1's `≥` bar can
+        // only ever be reached, never lost.
+        for enc in [0.0, 1.0, 7.0, 93.0, 500.0] {
+            let a = 1.0 - 20.0 / pairs;
+            let sgl = 1.0 - (20.0 + enc) / pairs;
+            assert!(a >= sgl, "encoder count {enc} inverted the direction");
+        }
+    }
+
+    #[test]
+    fn inversion_truth_tags_round_trip() {
+        for t in [InversionTruth::Single, InversionTruth::Agree] {
+            assert_eq!(InversionTruth::parse(t.tag()), Ok(t));
+        }
+        for v in [ButteraugliVariant::PNorm3, ButteraugliVariant::Max] {
+            assert_eq!(ButteraugliVariant::parse(v.tag()), Ok(v));
+        }
+        assert!(InversionTruth::parse("either").is_err());
+        assert!(ButteraugliVariant::parse("pnorm2").is_err());
+    }
 
     const CANONICAL_GRID_SHA: &str =
         "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd";

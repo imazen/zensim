@@ -1,778 +1,825 @@
 {
- "_schema": {
-  "what": "The G-ADDR (dial ADDRESSABILITY) floor registry. One committed row per (instrument, REFERENCE), holding that reference scorer's measured end-of-range behaviour on that instrument. A candidate bake clears the REGRESSION tier only when it reaches at least as far at BOTH ends as the ACTIVE reference's row for the instrument it was measured on.",
-  "why": "USER RULE 2026-09-04: 'floor and ceiling dial addressability is crucial ... any model that limits dial range cannot ship'. A dial that compresses at the ends cannot serve a target near the ends, which is where near-lossless product decisions live. SROCC is rank-invariant and structurally cannot see this; G1 (p5<=25, p95>=85) is far too loose to.",
-  "keyed_by": "(dial_grid_sha256, reference) for the grid rows; (probe_sha256, reference) for the negative-tail and identity rows. BOTH halves are load-bearing: a row is a measurement OF ONE SCORER on one instrument, so reading a peer_ssim2 bar off a shipped_b row would compare a candidate against the wrong mentor. An UNREGISTERED grid or probe is NOT-MEASURABLE / NOT-MEASURED, never a pass -- a bar you can dodge by choosing a friendlier instrument is not a bar.",
-  "reference_sets": {
-   "ACTIVE (bars)": "peer_ssim2 -- the REFERENCE METRIC. USER DECISION 2026-09-04, verbatim: 'I don't think we should pin to B, ssim2 seems a better mentor.' Direction semantics: a candidate must address AT LEAST the range ssim2 addresses (reach/max/p95/DR/frac<0 >= ssim2's; min/p5/negtail-min/negtail-p1 <= ssim2's).",
-   "incumbent (printed, never a bar)": "shipped_b -- the shipped product dial. Retained so a reader can always see whether a fail is 'worse than the mentor' or 'worse than what shipped', and so the pre-2026-09-04 verdicts stay readable against the pins they were graded on. Labelled BIASED: measured on 2026-09-04 to put A1/A3/A6 ABOVE the reference metric's own values on the same grid (bars 99.98/99.72/86.08 vs truth 98.38/95.46/85.20 -- a dial calibrated exactly to the truth failed all three, and so did both other shipped profiles), and to meet A4 (p5 <= 13.65) only through a -23-point low-band bias (B reads +11.97 on the 221 lowest-truth cells where the truth is -11.30; the train-on-test ORACLE, the ceiling for any monotone re-map of B's ordering, reads p5 21.5-22.8).",
-   "not a relaxation": "Re-pinning MOVED the difficulty from the ceiling to the FLOOR. ssim2's grid min is -55.35 against B's +3.13 and its negative-tail probe is 100% below zero against B's 0%, so A2/A5/A7-A9 all got much harder. That is correct: the floor is where the incumbent is genuinely broken.",
-   "rows without a `reference` field": "pre-2026-09-04 rows, all shipped_b. A serde default supplies the label so those rows stay BYTE-UNTOUCHED, which is what append-only requires.",
-   "derivation": "Every peer_ssim2 value came out of the owner instrument at full f64 precision -- `bake_verdict --dial-peer-scores peer_ssim2=<cells> --negtail-peer-scores ... --identity-peer-scores ... --gaddr-json` -- never from percentile math re-implemented beside it."
+  "_schema": {
+    "what": "The G-ADDR (dial ADDRESSABILITY) floor registry. One committed row per (instrument, REFERENCE), holding that reference scorer's measured end-of-range behaviour on that instrument. A candidate bake clears the REGRESSION tier only when it reaches at least as far at BOTH ends as the ACTIVE reference's row for the instrument it was measured on.",
+    "why": "USER RULE 2026-09-04: 'floor and ceiling dial addressability is crucial ... any model that limits dial range cannot ship'. A dial that compresses at the ends cannot serve a target near the ends, which is where near-lossless product decisions live. SROCC is rank-invariant and structurally cannot see this; G1 (p5<=25, p95>=85) is far too loose to.",
+    "keyed_by": "(dial_grid_sha256, reference) for the grid rows; (probe_sha256, reference) for the negative-tail and identity rows. BOTH halves are load-bearing: a row is a measurement OF ONE SCORER on one instrument, so reading a peer_ssim2 bar off a shipped_b row would compare a candidate against the wrong mentor. An UNREGISTERED grid or probe is NOT-MEASURABLE / NOT-MEASURED, never a pass -- a bar you can dodge by choosing a friendlier instrument is not a bar.",
+    "reference_sets": {
+      "ACTIVE (bars)": "peer_ssim2 -- the REFERENCE METRIC. USER DECISION 2026-09-04, verbatim: 'I don't think we should pin to B, ssim2 seems a better mentor.' Direction semantics: a candidate must address AT LEAST the range ssim2 addresses (reach/max/p95/DR/frac<0 >= ssim2's; min/p5/negtail-min/negtail-p1 <= ssim2's).",
+      "incumbent (printed, never a bar)": "shipped_b -- the shipped product dial. Retained so a reader can always see whether a fail is 'worse than the mentor' or 'worse than what shipped', and so the pre-2026-09-04 verdicts stay readable against the pins they were graded on. Labelled BIASED: measured on 2026-09-04 to put A1/A3/A6 ABOVE the reference metric's own values on the same grid (bars 99.98/99.72/86.08 vs truth 98.38/95.46/85.20 -- a dial calibrated exactly to the truth failed all three, and so did both other shipped profiles), and to meet A4 (p5 <= 13.65) only through a -23-point low-band bias (B reads +11.97 on the 221 lowest-truth cells where the truth is -11.30; the train-on-test ORACLE, the ceiling for any monotone re-map of B's ordering, reads p5 21.5-22.8).",
+      "not a relaxation": "Re-pinning MOVED the difficulty from the ceiling to the FLOOR. ssim2's grid min is -55.35 against B's +3.13 and its negative-tail probe is 100% below zero against B's 0%, so A2/A5/A7-A9 all got much harder. That is correct: the floor is where the incumbent is genuinely broken.",
+      "rows without a `reference` field": "pre-2026-09-04 rows, all shipped_b. A serde default supplies the label so those rows stay BYTE-UNTOUCHED, which is what append-only requires.",
+      "derivation": "Every peer_ssim2 value came out of the owner instrument at full f64 precision -- `bake_verdict --dial-peer-scores peer_ssim2=<cells> --negtail-peer-scores ... --identity-peer-scores ... --gaddr-json` -- never from percentile math re-implemented beside it."
+    },
+    "owner": "zensim-validate/src/dial_addressability.rs (embedded with include_str!, so a stale or missing file cannot silently disarm the gate). Consumed by bake_verdict's DIAL panel; emitted into --full-json at dial.addressability.",
+    "two_tiers": "REGRESSION rows (A*) bar against the ACTIVE reference's value on the same instrument -- since 2026-09-04, 'addresses at least the range ssim2 addresses'. CONTRACT rows (C*) are absolute product requirements. The shipped dial FAILS four contract rows today (C3/C4 negative tail, C5 identity band, C6 nothing-above-identity); those are standing defects recorded here, NOT bars invented for this gate, and the `incumbent` column in every report says so. MEASURED 2026-09-04: peer_ssim2 PASSES all six contract rows -- mono 0.9924, tied 0.0000, negtail frac<0 1.0000 / min -770.62, identity exactly 100.0000 on all 38 refs, 0 of 4,424 cells above identity. That is what 'as good as the mentor at the ends' means, and it is a measurement, not a target.",
+    "append_only": "Rows are appended, never edited. A floor is a measurement of a specific bake on a specific instrument; changing it retroactively invalidates every verdict that quoted it. To raise a bar (a better dial ships), append a new row and retire the old one by label.",
+    "record": "benchmarks/dial_addressability_gate_2026-09-04.md (section 'Re-pin 2026-09-04' carries the user decision, the derivation and the re-graded candidate table)"
   },
-  "owner": "zensim-validate/src/dial_addressability.rs (embedded with include_str!, so a stale or missing file cannot silently disarm the gate). Consumed by bake_verdict's DIAL panel; emitted into --full-json at dial.addressability.",
-  "two_tiers": "REGRESSION rows (A*) bar against the ACTIVE reference's value on the same instrument -- since 2026-09-04, 'addresses at least the range ssim2 addresses'. CONTRACT rows (C*) are absolute product requirements. The shipped dial FAILS four contract rows today (C3/C4 negative tail, C5 identity band, C6 nothing-above-identity); those are standing defects recorded here, NOT bars invented for this gate, and the `incumbent` column in every report says so. MEASURED 2026-09-04: peer_ssim2 PASSES all six contract rows -- mono 0.9924, tied 0.0000, negtail frac<0 1.0000 / min -770.62, identity exactly 100.0000 on all 38 refs, 0 of 4,424 cells above identity. That is what 'as good as the mentor at the ends' means, and it is a measurement, not a target.",
-  "append_only": "Rows are appended, never edited. A floor is a measurement of a specific bake on a specific instrument; changing it retroactively invalidates every verdict that quoted it. To raise a bar (a better dial ships), append a new row and retire the old one by label.",
-  "record": "benchmarks/dial_addressability_gate_2026-09-04.md (section 'Re-pin 2026-09-04' carries the user decision, the derivation and the re-graded candidate table)"
- },
- "reference_bake": {
-  "name": "b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07",
-  "path": "zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin",
-  "sha256": "b6fe5233ee9c752d29abeb8be8b0814c052dd96f566a82250cdd6ff6a8cb13e0",
-  "role": "ZensimProfile::B -- the SHIPPED SDR product dial as of 2026-09-04. Its end-of-range behaviour IS the regression floor: a replacement dial may not be worse at either end than the dial users have today.",
-  "measured_by": "bake_verdict --bake <B> --dial-grid <grid> --negtail-probe <probe> --identity-probe <probe>, at zensim main 2026-09-04 (this lane's HEAD).",
-  "note": "The gate keys on the GRID/PROBE sha, not on the bake, so a row stays readable if a re-pack changes the reference bake's bytes without changing its dial. The sha is recorded for provenance."
- },
- "fixed_bars": {
-  "mono_min": 0.93,
-  "tied_max": 0.05,
-  "identity_lo": 97.5,
-  "identity_hi": 100.0,
-  "provenance": "mono/tied are the registered G3 bars (docs/EVAL_PANEL_REQUIREMENT.md), unchanged. The identity band is the shipping convention recorded in benchmarks/standard_bake_packing_2026-05-27.md + the QAT record ('identity ~97.7 exact, 0 above-identity') -- MEASURED to be a v47-era property: v47_strict_qat_native reads 97.6893, but shipped B reads 96.2412 and ADD156 reads 96.1157, so both shipped LINEAR dials fail it. Registered as specified 2026-09-04 and NOT relaxed; the incumbent's failure is a finding, not a reason to move the bar."
- },
- "negative_tail_bars": {
-  "_what": "The NEGATIVE-TAIL / FLOOR rows of G-ADDR. Two pin sets, both kept: `mentor-2026-09-04` (RETIRED) barred rows A7/A8/A9 against `peer_ssim2`'s own measured DEPTH on one probe; `floor-representability-2026-09-05` (ACTIVE, OPERATIVE) asks instead whether each codec's LOWEST CONFIGURABLE SETTINGS still resolve, and contains NO dial-value bar of any kind. Selected at run time by `bake_verdict --gaddr-tail-pins {product|retired}`; the default is the active set. A1-A6 are untouched by this and remain mentor-pinned.",
-  "user_ruling_2026-09-05_first": "the negative tail bar is entirely arbitrary. below -5-50",
-  "user_ruling_2026-09-05_correction": "i said -50 not -5, codecs are all different, some go lower than others",
-  "user_ruling_2026-09-05_final_OPERATIVE": "i care that the lowest configurable settings per codec are representable, not that negative fifty is in that specifically",
-  "_which_is_in_force": "The THIRD form is OPERATIVE. The first two are recorded because they are the sequence the rule was arrived at and because the intermediate reading briefly landed in this file, but NEITHER -5 NOR -50 IS A BAR ANYWHERE in the active pin set. The only numbers the active rule carries are `bottom_k` (how many of a codec's lowest settings must resolve) and `clamp_eps` (float tolerance for 'sitting on the clamp'); the per-codec BAR is the reference metric's own measured fraction on the same cells.",
-  "_ruling_reading": "A dial serves a codec's low end when the codec's lowest configurable settings are still DISTINGUISHABLE on it. Depth is not the question - a dial could reach -700 and still be useless at the bottom if its three lowest steps tie or invert, and a dial that stops at -12 is fine if every step still resolves. So: for each `(image_id, codec)` ladder on the canonical dial grid (REAL CODEC OUTPUT), take the `bottom_k` lowest configurable settings - the lowest q steps; for JXL the largest distances, which the grid stores as its lowest `q`, so 'lowest q' is correct on every codec - and require (i) the dial strictly increases across those steps AND into the next step up (no ties, no inversions), and (ii) no bottom step sits within `clamp_eps` of the dial's instrument-wide minimum, UNLESS that ladder is the SINGLE ladder attaining the minimum. Somebody has to be lowest; two or more ladders sharing the bottom value is a floor that has collapsed onto a clamp, and neither ladder is addressable there.",
-  "_scope": "The ruling is about the REGRESSION tail. NO contract row was added, removed or moved, so the CONTRACT tier -- and therefore the board's NOT SHIPPABLE badge, which is contract-driven -- is unaffected. C3 ('some row of an all-negative-truth probe scores < 0') and C4 ('the deepest probe dial is below 0') keep their absolute 0.0 bars, which are SIGN requirements, not depth bars.",
-  "active": "floor-representability-resolvable-2026-09-05",
-  "pin_sets": [
-   {
-    "id": "mentor-2026-09-04",
-    "status": "retired",
-    "registered": "2026-09-04",
-    "retired_on": "2026-09-05",
-    "retired_by": "USER RULING 2026-09-05, final form, verbatim: \"i care that the lowest configurable settings per codec are representable, not that negative fifty is in that specifically\"",
-    "axes": [
-     "A7",
-     "A8",
-     "A9"
+  "reference_bake": {
+    "name": "b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07",
+    "path": "zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin",
+    "sha256": "b6fe5233ee9c752d29abeb8be8b0814c052dd96f566a82250cdd6ff6a8cb13e0",
+    "role": "ZensimProfile::B -- the SHIPPED SDR product dial as of 2026-09-04. Its end-of-range behaviour IS the regression floor: a replacement dial may not be worse at either end than the dial users have today.",
+    "measured_by": "bake_verdict --bake <B> --dial-grid <grid> --negtail-probe <probe> --identity-probe <probe>, at zensim main 2026-09-04 (this lane's HEAD).",
+    "note": "The gate keys on the GRID/PROBE sha, not on the bake, so a row stays readable if a re-pack changes the reference bake's bytes without changing its dial. The sha is recorded for provenance."
+  },
+  "fixed_bars": {
+    "mono_min": 0.93,
+    "tied_max": 0.05,
+    "identity_lo": 97.5,
+    "identity_hi": 100.0,
+    "provenance": "mono/tied are the registered G3 bars (docs/EVAL_PANEL_REQUIREMENT.md), unchanged. The identity band is the shipping convention recorded in benchmarks/standard_bake_packing_2026-05-27.md + the QAT record ('identity ~97.7 exact, 0 above-identity') -- MEASURED to be a v47-era property: v47_strict_qat_native reads 97.6893, but shipped B reads 96.2412 and ADD156 reads 96.1157, so both shipped LINEAR dials fail it. Registered as specified 2026-09-04 and NOT relaxed; the incumbent's failure is a finding, not a reason to move the bar."
+  },
+  "negative_tail_bars": {
+    "_what": "The NEGATIVE-TAIL / FLOOR rows of G-ADDR. Two pin sets, both kept: `mentor-2026-09-04` (RETIRED) barred rows A7/A8/A9 against `peer_ssim2`'s own measured DEPTH on one probe; `floor-representability-2026-09-05` (ACTIVE, OPERATIVE) asks instead whether each codec's LOWEST CONFIGURABLE SETTINGS still resolve, and contains NO dial-value bar of any kind. Selected at run time by `bake_verdict --gaddr-tail-pins {product|retired}`; the default is the active set. A1-A6 are untouched by this and remain mentor-pinned.",
+    "user_ruling_2026-09-05_first": "the negative tail bar is entirely arbitrary. below -5-50",
+    "user_ruling_2026-09-05_correction": "i said -50 not -5, codecs are all different, some go lower than others",
+    "user_ruling_2026-09-05_final_OPERATIVE": "i care that the lowest configurable settings per codec are representable, not that negative fifty is in that specifically",
+    "_which_is_in_force": "The THIRD form is OPERATIVE. The first two are recorded because they are the sequence the rule was arrived at and because the intermediate reading briefly landed in this file, but NEITHER -5 NOR -50 IS A BAR ANYWHERE in the active pin set. The only numbers the active rule carries are `bottom_k` (how many of a codec's lowest settings must resolve) and `clamp_eps` (float tolerance for 'sitting on the clamp'); the per-codec BAR is the reference metric's own measured fraction on the same cells.",
+    "_ruling_reading": "A dial serves a codec's low end when the codec's lowest configurable settings are still DISTINGUISHABLE on it. Depth is not the question - a dial could reach -700 and still be useless at the bottom if its three lowest steps tie or invert, and a dial that stops at -12 is fine if every step still resolves. So: for each `(image_id, codec)` ladder on the canonical dial grid (REAL CODEC OUTPUT), take the `bottom_k` lowest configurable settings - the lowest q steps; for JXL the largest distances, which the grid stores as its lowest `q`, so 'lowest q' is correct on every codec - and require (i) the dial strictly increases across those steps AND into the next step up (no ties, no inversions), and (ii) no bottom step sits within `clamp_eps` of the dial's instrument-wide minimum, UNLESS that ladder is the SINGLE ladder attaining the minimum. Somebody has to be lowest; two or more ladders sharing the bottom value is a floor that has collapsed onto a clamp, and neither ladder is addressable there.",
+    "_scope": "The ruling is about the REGRESSION tail. NO contract row was added, removed or moved, so the CONTRACT tier -- and therefore the board's NOT SHIPPABLE badge, which is contract-driven -- is unaffected. C3 ('some row of an all-negative-truth probe scores < 0') and C4 ('the deepest probe dial is below 0') keep their absolute 0.0 bars, which are SIGN requirements, not depth bars.",
+    "active": "floor-representability-resolvable-2026-09-05",
+    "pin_sets": [
+      {
+        "id": "mentor-2026-09-04",
+        "status": "retired",
+        "registered": "2026-09-04",
+        "retired_on": "2026-09-05",
+        "retired_by": "USER RULING 2026-09-05, final form, verbatim: \"i care that the lowest configurable settings per codec are representable, not that negative fifty is in that specifically\"",
+        "axes": [
+          "A7",
+          "A8",
+          "A9"
+        ],
+        "bars": "the ACTIVE reference's own row in `negtail_probes` for the same probe sha -- A7 `min` <= reference min, A8 `p1` <= reference p1, A9 `frac_below_zero` >= reference frac_below_zero",
+        "reproduce": "bake_verdict --gaddr-tail-pins retired (grading is bit-reproducible; nothing was rewritten)",
+        "note": "RETAINED, not deleted: every G-ADDR number published before 2026-09-05 -- the gate record's sections 0-15, the 2026-09-04 board grading, and both re-graded candidate tables -- is graded on THESE bars. A count quoted from that era is only readable against them."
+      },
+      {
+        "id": "floor-representability-2026-09-05",
+        "status": "retired",
+        "registered": "2026-09-05",
+        "retired_on": "2026-09-05",
+        "retired_by": "USER RULING 2026-09-05. Asked \"ok, is there poor resolution compared to ssim2?\", the lane reported that this set's `distinct` window grades each ladder's three literal lowest positions -- including steps the MENTOR itself cannot resolve -- and recommended grading only the steps ssim2 separates by >= 0.5 points. The user answered \"ok\", read as accepting that recommendation. Superseded by `floor-representability-resolvable-2026-09-05`.",
+        "retained_because": "Every A7r number published between 2026-09-05 and this flip -- gate record section 16, the 11-arm lambda sweep table, the 2026-09-05 board grading -- is graded on THIS set's `distinct` window. Reachable with `--floor-rule distinct`, or by pointing `negative_tail_bars.active` back here (no code change).",
+        "axes": [
+          "A7r",
+          "A8r"
+        ],
+        "bottom_k": 3,
+        "clamp_eps": 1e-09,
+        "report_floor_threshold": -50.0,
+        "axis_definitions": {
+          "A7r": "FLOOR REPRESENTABILITY, per codec, on the canonical dial grid (real codec output). Fraction of that codec's `(image_id, codec)` ladders whose `bottom_k` lowest configurable settings are REPRESENTED: (i) the dial strictly increases across those steps and into the next one up, and (ii) none of them sits within `clamp_eps` of the dial's instrument-wide minimum, unless that ladder is the sole holder of the minimum. BAR = the REFERENCE metric's own fraction on the same cells, pinned per codec in `grid_floor_representability`; the incumbent's fraction is printed beside it. The row's `measured` value is the COUNT of codecs below their mentor bar, barred at <= 0. A codec on which the mentor itself represents nothing gets a bar of 0.0 -- the natural analogue of an exemption, needing no special case.",
+          "A8r": "The negative-tail probe, REPORT-ONLY on tier `report-only` (excluded from both tier verdicts by construction). Pooled `min` and `p1` are printed with the probe's own reference-truth extremes; NOTHING is barred. Reason: the probe carries no codec identity at all -- its rows are KADIS distortion types, not codec output -- so it cannot answer the ruling's question. Its per-DISTORTION-family reading is measured in benchmarks/d_peaks_lambda_sweep_2026-09-05.md sections 4-6, where grading it at a fixed depth was shown to fail every bake ever built on one n=8 family."
+        },
+        "dropped_axes": {
+          "A9r": "DROPPED as a bar. Its per-codec quantity -- of a codec's cells whose reference truth is at or below `report_floor_threshold`, the fraction the dial also places at or below it -- is FOLDED INTO the per-codec report block as the `ref<=floor also dial<=floor` column. `report_floor_threshold` is a REPORTING threshold for that one column and is barred against NOTHING; it is the only place -50 survives in this file, and it survives as information."
+        },
+        "provenance": {
+          "bottom_k": "user-ruling, verbatim: \"the lowest K=3 configurable settings present in the grid for that codec\"",
+          "clamp_eps": "user-ruling, verbatim: \"a value equal (within 1e-9) to the dial's instrument-wide minimum counts as clamped\"",
+          "sole_holder_exception": "user-ruling, verbatim: \"unless that ladder is the single ladder attaining the minimum (two or more ladders sharing the bottom value = a collapsed floor)\"",
+          "per_codec_bars": "MEASURED, not chosen: each codec's bar is `peer_ssim2`'s own representability fraction on the same cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) and appended to `grid_floor_representability`. Re-implementing the ladder walk outside the owner to produce these would be exactly the duplication the no-duplicate-implementations rule forbids."
+        },
+        "quality_orientation": "`q` is QUALITY-ORIENTED on every codec in the dial grid, including JXL: its `param_kind` is `distance` and its q=0 cells carry `codec_param` 25.0 (the largest distance = the worst quality), rising to q=99.8 at distance 0.05. So 'the lowest configurable settings' is always the smallest `q`, and no per-codec direction switch is needed. VERIFIED 2026-09-05 on the canonical grid: avif/jpeg/webp q in [0,100] with codec_param == q, jxl q in [0,99.8] with codec_param 25.0 -> 0.05 monotonically decreasing."
+      },
+      {
+        "id": "floor-representability-resolvable-2026-09-05",
+        "status": "active",
+        "registered": "2026-09-05",
+        "supersedes": "floor-representability-2026-09-05",
+        "axes": [
+          "A7r",
+          "A8r"
+        ],
+        "bottom_k": 3,
+        "clamp_eps": 1e-09,
+        "report_floor_threshold": -50.0,
+        "floor_rule": "resolvable",
+        "floor_margin": 0.5,
+        "user_messages_verbatim_2026-09-05": [
+          "ok, is there poor resolution compared to ssim2? update and share thw gauntlet for what should be the. ew sdr and bdr",
+          "hdr"
+        ],
+        "_ruling_reading": "The two messages are one instruction: the second supplies the word the first mistyped, so the ask is \"update and share the gauntlet for what should be the new SDR and HDR [defaults]\". The leading \"ok\" answers the two recommendations the previous report put to the user, and IS READ AS ACCEPTING BOTH: (1) grade floor representability under the RESOLVABLE window (margin 0.5) instead of the literal bottom-3 window, and (2) demote the six dial-VALUE rows A1-A6 from hard regression bars to the Report tier. This reading is recorded explicitly because \"ok\" is terse: it is an INFERENCE from the conversation, not a verbatim instruction, and both halves are reversible without a code change -- point `active` back at `floor-representability-2026-09-05` for the window, pass `--gaddr-value-pins hard` for the tier.",
+        "axis_definitions": {
+          "A7r": "FLOOR REPRESENTABILITY, per codec, under the RESOLVABLE window. Identical to the superseded set's rule -- a ladder is REPRESENTED when the dial strictly increases across the selected steps and into the next one up, and no bottom step sits within `clamp_eps` of the instrument-wide minimum unless that ladder is its sole holder -- EXCEPT in which steps it selects. `distinct` took each ladder's literal three lowest settings; `resolvable` walks up from the lowest setting, SKIPPING any step whose |delta mentor| from the last SELECTED step is below `floor_margin`, until bottom_k+1 mentor-resolvable steps are collected. BAR = the reference metric's own fraction on the same cells under the SAME rule, pinned per codec in `grid_floor_representability` rows carrying `\"floor_rule\": \"resolvable\"`; where no such row is registered the bar is computed LIVE through the identical owner call. A `distinct` fraction is NEVER substituted for a `resolvable` one.",
+          "A8r": "Unchanged from the superseded set: the negative-tail probe, REPORT-ONLY, no bar."
+        },
+        "why_resolvable": "MEASURED, `benchmarks/ladder_floor_resolution_2026-09-05.md` sections 2-4 and 8.3. The `distinct` window grades steps the MENTOR itself cannot separate, so it charges a candidate for disagreeing with noise. The extreme case is jpeg on the pre-ladder grids, where q=0/5/10 are BYTE-IDENTICAL encoder output and the bar was a vacuous 0.0000; the ladder instrument fixed the instrument, and this rule fixes the WINDOW. On the ladder instrument the mentor's own bottom-triplet failures are 78% (jpeg) / 67% (avif-rav1e) genuine inversions rather than ties, so the flat zone is real and skipping it is not hiding a defect -- it is declining to grade where the reference cannot.",
+        "value_pins": {
+          "_what": "Which tier the six dial-VALUE rows A1-A6 are emitted on. `report` is the default from 2026-09-05: they are still MEASURED and still PRINTED with their bars, but sit on tier `report-only` and gate nothing, so the REGRESSION headline is carried by A7r alone. `--gaddr-value-pins hard` restores them to the regression tier and reproduces the pre-ruling grading row-for-row.",
+          "default": "report",
+          "why": "A1-A6 bar a candidate against `peer_ssim2`'s own max / p95 / min / p5 / reach / dynamic_range on one instrument. Those are incidental properties of where the mentor's distribution happens to land, not product requirements -- and the gate record's own section 14.6 measured the resulting absurdity under the RETIRED shipped-B pins, where A1/A3/A6 sat ABOVE what the reference metric itself reaches, so a dial calibrated exactly to the truth failed three rows. The product requirements live in the CONTRACT tier (C1-C6) and the per-codec floor (A7r).",
+          "scope": "TIER ONLY. No contract row was added, removed, moved or re-barred, so the board's NOT SHIPPABLE badge -- which is contract-driven -- cannot move with this setting. Asserted by a unit test, not assumed."
+        },
+        "reversibility": "Two independent levers, neither requiring a code change: point `negative_tail_bars.active` back at `floor-representability-2026-09-05` to restore the `distinct` window everywhere, or pass `--floor-rule distinct` / `--gaddr-value-pins hard` per invocation.",
+        "not_measurable_note": "`resolvable` chooses each ladder's window from the MENTOR's own per-cell values, so it REQUIRES `--gaddr-grid-truth`. Where none is supplied A7r reads NOT MEASURED with that reason -- it is never silently re-graded under `distinct`'s window, which asks a different question, and never defaulted to a pass."
+      }
+    ]
+  },
+  "grid_floor_representability": [
+    {
+      "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL) -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif",
+          "n_ladders": 35,
+          "represented_frac": 1.0
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 22,
+          "represented_frac": 0.0
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 33,
+          "represented_frac": 0.9696969696969697
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 16,
+          "represented_frac": 1.0
+        }
+      ],
+      "note": "THE BAR. `peer_ssim2`'s own floor representability on these cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) at full f64 -- never re-implemented beside it. NOTE `jpeg` reads 0.000000: MEASURED 2026-09-05, that codec's three lowest settings are BYTE-IDENTICAL encoder output on 22 of 22 ladders (max |delta| over the 372 features is exactly 0.0, and ssim2 itself returns the identical value at q=0/5/10), so NO scorer can resolve them -- the encoder does not. A bar of 0.0 there is the honest outcome and it is what makes the 'exemption' a measurement rather than an exception."
+    },
+    {
+      "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
+      "reference": "shipped_b",
+      "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL) -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif",
+          "n_ladders": 35,
+          "represented_frac": 0.7714285714285715
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 22,
+          "represented_frac": 0.0
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 33,
+          "represented_frac": 0.7575757575757576
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 16,
+          "represented_frac": 1.0
+        }
+      ],
+      "note": "The INCUMBENT column -- shipped Profile B's own floor representability on these cells. Printed beside the bar so a reader can always tell 'worse than the mentor' from 'worse than what shipped'. Never used as a bar."
+    },
+    {
+      "dial_grid_sha256": "506bdadfce7d2c4ea2ad37a6a2e7635f5eda6f945126033e4cf4365d3c695643",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_372col_postC_2026-09-05 (the RUNTIME era) -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_postC_2026-09-05.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif",
+          "n_ladders": 35,
+          "represented_frac": 1.0
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 22,
+          "represented_frac": 0.0
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 33,
+          "represented_frac": 0.9696969696969697
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 16,
+          "represented_frac": 1.0
+        }
+      ],
+      "note": "THE BAR. `peer_ssim2`'s own floor representability on these cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) at full f64 -- never re-implemented beside it. NOTE `jpeg` reads 0.000000: MEASURED 2026-09-05, that codec's three lowest settings are BYTE-IDENTICAL encoder output on 22 of 22 ladders (max |delta| over the 372 features is exactly 0.0, and ssim2 itself returns the identical value at q=0/5/10), so NO scorer can resolve them -- the encoder does not. A bar of 0.0 there is the honest outcome and it is what makes the 'exemption' a measurement rather than an exception."
+    },
+    {
+      "dial_grid_sha256": "506bdadfce7d2c4ea2ad37a6a2e7635f5eda6f945126033e4cf4365d3c695643",
+      "reference": "shipped_b",
+      "label": "dial_grid_372col_postC_2026-09-05 (the RUNTIME era) -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_postC_2026-09-05.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif",
+          "n_ladders": 35,
+          "represented_frac": 0.6
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 22,
+          "represented_frac": 0.0
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 33,
+          "represented_frac": 0.7878787878787878
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 16,
+          "represented_frac": 1.0
+        }
+      ],
+      "note": "The INCUMBENT column -- shipped Profile B's own floor representability on these cells. Printed beside the bar so a reader can always tell 'worse than the mentor' from 'worse than what shipped'. Never used as a bar."
+    },
+    {
+      "dial_grid_sha256": "3caee8602c037fb05ba158c9300a8d5ddb3f489ef7d5314067695b75d4d66774",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_372col_preC_2026-09-05 (the era pair of the row above) -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_preC_2026-09-05.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif",
+          "n_ladders": 35,
+          "represented_frac": 1.0
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 22,
+          "represented_frac": 0.0
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 33,
+          "represented_frac": 0.9696969696969697
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 16,
+          "represented_frac": 1.0
+        }
+      ],
+      "note": "THE BAR. `peer_ssim2`'s own floor representability on these cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) at full f64 -- never re-implemented beside it. NOTE `jpeg` reads 0.000000: MEASURED 2026-09-05, that codec's three lowest settings are BYTE-IDENTICAL encoder output on 22 of 22 ladders (max |delta| over the 372 features is exactly 0.0, and ssim2 itself returns the identical value at q=0/5/10), so NO scorer can resolve them -- the encoder does not. A bar of 0.0 there is the honest outcome and it is what makes the 'exemption' a measurement rather than an exception."
+    },
+    {
+      "dial_grid_sha256": "3caee8602c037fb05ba158c9300a8d5ddb3f489ef7d5314067695b75d4d66774",
+      "reference": "shipped_b",
+      "label": "dial_grid_372col_preC_2026-09-05 (the era pair of the row above) -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_preC_2026-09-05.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif",
+          "n_ladders": 35,
+          "represented_frac": 0.6
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 22,
+          "represented_frac": 0.0
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 33,
+          "represented_frac": 0.8181818181818182
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 16,
+          "represented_frac": 1.0
+        }
+      ],
+      "note": "The INCUMBENT column -- shipped Profile B's own floor representability on these cells. Printed beside the bar so a reader can always tell 'worse than the mentor' from 'worse than what shipped'. Never used as a bar."
+    },
+    {
+      "dial_grid_sha256": "694e16c4520a5d41b986cebe5ab9c8390c1eabdfef15b44386fe71abcd3c5593",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_944col_POOLS_2026-08-30 -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/mnt/v/output/zensim/wlin7b-2026-08-30/dial_grid_944col_POOLS_2026-08-30.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif",
+          "n_ladders": 35,
+          "represented_frac": 1.0
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 23,
+          "represented_frac": 0.0
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 33,
+          "represented_frac": 0.9696969696969697
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 24,
+          "represented_frac": 1.0
+        }
+      ],
+      "note": "THE BAR for the 944 POOLS grid, derived through the owner from dialcells_ssim2_944grid.tsv. There is deliberately NO `shipped_b` companion row here: shipped B is a 372-width bake and cannot score this grid, so the `incumbent` column reads em-dash rather than borrowing a number from a different instrument. The fractions match the 372 grids on avif/jxl/webp exactly (same cells, same ssim2) and jpeg is 0.000000 for the same measured reason -- its three lowest settings are byte-identical encoder output."
+    },
+    {
+      "dial_grid_sha256": "4c3874a78c469e15c664a63e10216760317bd9501b9fe9365b6b93845cb5f980",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_372col_ladder_2026-09-05 (FLOOR-DENSE: per-codec lowest DISTINCT settings, 2 AVIF backends) -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif-rav1e",
+          "n_ladders": 39,
+          "represented_frac": 0.5384615384615384
+        },
+        {
+          "codec": "avif-svt",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 39,
+          "represented_frac": 0.5384615384615384
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 26,
+          "represented_frac": 0.9230769230769231
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        }
+      ],
+      "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
+      "note": "THE BAR for this instrument. `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) are removed from the instrument, so jpeg's bottom three are three SETTINGS rather than three samples of one. `avif-svt` and `avif-rav1e` are separate ladders — different encoders, different quantizer mappings."
+    },
+    {
+      "dial_grid_sha256": "0e8e5fb789bd21b263edc3531b243b4086b5ba9c6757de37188ac912bd392f2a",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_944col_ladder_2026-09-05 (FLOOR-DENSE, foldapp2pools; same cells as the 372 ladder grid) -- per-CODEC FLOOR REPRESENTABILITY",
+      "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet",
+      "bottom_k": 3,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif-rav1e",
+          "n_ladders": 39,
+          "represented_frac": 0.5384615384615384
+        },
+        {
+          "codec": "avif-svt",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 39,
+          "represented_frac": 0.5384615384615384
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 26,
+          "represented_frac": 0.9230769230769231
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        }
+      ],
+      "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
+      "note": "THE BAR for this instrument. `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) are removed from the instrument, so jpeg's bottom three are three SETTINGS rather than three samples of one. `avif-svt` and `avif-rav1e` are separate ladders — different encoders, different quantizer mappings."
+    },
+    {
+      "dial_grid_sha256": "4c3874a78c469e15c664a63e10216760317bd9501b9fe9365b6b93845cb5f980",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_372col_ladder_2026-09-05 (FLOOR-DENSE) -- per-CODEC FLOOR REPRESENTABILITY, RESOLVABLE window",
+      "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
+      "bottom_k": 3,
+      "floor_rule": "resolvable",
+      "floor_margin": 0.5,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif-rav1e",
+          "n_ladders": 39,
+          "represented_frac": 0.6410256410256411
+        },
+        {
+          "codec": "avif-svt",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 39,
+          "represented_frac": 0.6666666666666666
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 26,
+          "represented_frac": 0.9615384615384616
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        }
+      ],
+      "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
+      "note": "THE BAR for this instrument UNDER THE RESOLVABLE WINDOW (the operative rule since the USER RULING 2026-09-05). `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-grid-truth <cells> --floor-rule resolvable --gaddr-json`), copied verbatim at full f64. This row does NOT replace the `distinct` row for the same grid -- both stay active and answer different questions, and the lookup key includes `floor_rule` so neither can be served for the other. Reproduces benchmarks/ladder_floor_resolution_2026-09-05.md section 8.3's mentor row exactly (0.6410 / 1.0000 / 0.6667 / 0.9615 / 1.0000). MEASURED on BOTH ladder widths and BIT-IDENTICAL between them, as it must be: the mentor's per-cell scores are a property of the pixels, not of the feature width."
+    },
+    {
+      "dial_grid_sha256": "0e8e5fb789bd21b263edc3531b243b4086b5ba9c6757de37188ac912bd392f2a",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_944col_ladder_2026-09-05 (FLOOR-DENSE, foldapp2pools) -- per-CODEC FLOOR REPRESENTABILITY, RESOLVABLE window",
+      "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet",
+      "bottom_k": 3,
+      "floor_rule": "resolvable",
+      "floor_margin": 0.5,
+      "registered": "2026-09-05",
+      "active": true,
+      "codecs": [
+        {
+          "codec": "avif-rav1e",
+          "n_ladders": 39,
+          "represented_frac": 0.6410256410256411
+        },
+        {
+          "codec": "avif-svt",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        },
+        {
+          "codec": "jpeg",
+          "n_ladders": 39,
+          "represented_frac": 0.6666666666666666
+        },
+        {
+          "codec": "jxl",
+          "n_ladders": 26,
+          "represented_frac": 0.9615384615384616
+        },
+        {
+          "codec": "webp",
+          "n_ladders": 39,
+          "represented_frac": 1.0
+        }
+      ],
+      "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
+      "note": "THE BAR for this instrument UNDER THE RESOLVABLE WINDOW (the operative rule since the USER RULING 2026-09-05). `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-grid-truth <cells> --floor-rule resolvable --gaddr-json`), copied verbatim at full f64. This row does NOT replace the `distinct` row for the same grid -- both stay active and answer different questions, and the lookup key includes `floor_rule` so neither can be served for the other. Reproduces benchmarks/ladder_floor_resolution_2026-09-05.md section 8.3's mentor row exactly (0.6410 / 1.0000 / 0.6667 / 0.9615 / 1.0000). MEASURED on BOTH ladder widths and BIT-IDENTICAL between them, as it must be: the mentor's per-cell scores are a property of the pixels, not of the feature width."
+    }
+  ],
+  "grids": [
+    {
+      "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
+      "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL)",
+      "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
+      "n_rows": 4424,
+      "min": 3.12950123756248,
+      "max": 99.98330778475787,
+      "p5": 13.645032446453126,
+      "p95": 99.72170874183841,
+      "reach": 96.85380654719539,
+      "dynamic_range": 86.07667629538528,
+      "mono": 0.9791570171375636,
+      "tied": 0.0,
+      "registered": "2026-09-04",
+      "active": true
+    },
+    {
+      "dial_grid_sha256": "b5d27f212fc6b00cb406e26ff9ba8f74384f56d842280440a7a5dc141f6b0fb7",
+      "label": "dial_grid_372col_2026-05-29_quarantined (NOT canonical -- 9/115 w11 ladders + 33 pre-fix JXL d=0.025 cells; the grid benchmarks/imazen26_anchor_2026-09-04.md measured on)",
+      "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined.parquet",
+      "n_rows": 4457,
+      "min": 3.12950123756248,
+      "max": 99.98376794026095,
+      "p5": 13.726111774203428,
+      "p95": 99.71524151863066,
+      "reach": 96.85426670269847,
+      "dynamic_range": 85.98912974442723,
+      "mono": 0.9740289588600322,
+      "tied": 0.0,
+      "registered": "2026-09-04",
+      "active": true,
+      "note": "Registered ONLY so the 2026-09-04 imazen-26 anchor numbers (reach 96.85 / p5 13.73 / DR 85.99) stay checkable against their own instrument. New work should use the canonical grid; a verdict on this one carries bake_verdict's own NOT-CANONICAL warning."
+    },
+    {
+      "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL)",
+      "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
+      "n_rows": 4424,
+      "min": -55.354544,
+      "max": 98.376644,
+      "p5": 10.26332105,
+      "p95": 95.45929934999998,
+      "reach": 153.731188,
+      "dynamic_range": 85.19597829999998,
+      "mono": 0.99235757295044,
+      "tied": 0.0,
+      "registered": "2026-09-04",
+      "active": true,
+      "note": "THE ACTIVE REGRESSION PIN SET. ssim2's own dial on the canonical grid, measured by the owner instrument (bake_verdict --dial-peer-scores peer_ssim2=<dialcells_ssim2_qv2grid.tsv> --gaddr-json), full f64 precision straight out of dial_addressability::to_json -- no re-implemented percentile math. Note it is MORE monotone than the shipped dial (0.9924 vs 0.9792) and has zero ties, so C1/C2 are not bars ssim2 needs help with. The un-quarantined companion grid deliberately has NO peer_ssim2 row: no ssim2 cell table covers its 33 extra pre-fix JXL cells, and measuring a bar on known-corrupt ladders would be worse than reading NOT MEASURABLE there."
+    },
+    {
+      "dial_grid_sha256": "694e16c4520a5d41b986cebe5ab9c8390c1eabdfef15b44386fe71abcd3c5593",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_944col_POOLS_2026-08-30 -- ssim2's OWN values on the 944 folded720append2pools grid",
+      "path": "/mnt/v/output/zensim/wlin7b-2026-08-30/dial_grid_944col_POOLS_2026-08-30.parquet",
+      "n_rows": 4817,
+      "min": -55.354544,
+      "max": 99.993468,
+      "p5": 12.015869200000006,
+      "p95": 95.4858354,
+      "reach": 155.34801199999998,
+      "dynamic_range": 83.46996619999999,
+      "mono": 0.9929817099106764,
+      "tied": 0.0,
+      "registered": "2026-09-05",
+      "active": true,
+      "note": "Derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<tsv> --gaddr-json`), never re-implemented. Peer cells: /mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_944grid.tsv restricted to this grid's key set -- 4817 of 4817 matched, 0 unmatched. CONTROL: the same TSV restricted to the canonical 372 grid's 4,424 keys reproduces the registered 372 peer_ssim2 row EXACTLY on all six scalars (gaddrinst census, 2026-09-04). This grid is REQUIRED for a bake that reads f156..371: the two other 944 grids (2026-08-01, era2r4-foldapp2) carry that block STRUCTURALLY ZERO, so a peaks-using bake graded on them is served zeros for the block it reads."
+    },
+    {
+      "dial_grid_sha256": "506bdadfce7d2c4ea2ad37a6a2e7635f5eda6f945126033e4cf4365d3c695643",
+      "label": "dial_grid_372col_postC_2026-09-05 -- ssim2's OWN values on the RUNTIME-era (post-option-C) re-extraction of the canonical key set",
+      "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_postC_2026-09-05.parquet",
+      "reference": "peer_ssim2",
+      "feature_set_id": "basic+peaks+masked+iw@w372/v1postc#d16a1091",
+      "built_from": "dial-grid-pixels-2026-07-27 + reports/refmetrics/dialgrid_pairs.tsv, via scripts/canonical_corpus/build_dial372_instruments.py --tag postC; extractor built at 4fbd8ff8",
+      "n_rows": 4424,
+      "min": -55.354544,
+      "max": 98.376644,
+      "p5": 10.26332105,
+      "p95": 95.45929934999998,
+      "reach": 153.731188,
+      "dynamic_range": 85.19597829999998,
+      "mono": 0.99235757295044,
+      "tied": 0.0,
+      "registered": "2026-09-05",
+      "active": true,
+      "provenance_note": "The canonical 2026-05-29 grid's OWN pixels are GONE: its build list eval_panels_2026-05-29/qsweep_372_grid.tsv points every distorted cell at the /mnt/v/input/zensim/images/<ref>/<codec>/q<N>.png decode cache DELETED 2026-06-22, and 0 of 2,560 of those paths exist. This grid is the SAME 4,424 (image_id, codec, codec_param) key set re-extracted from the surviving dial-grid-pixels-2026-07-27 encode (zenjpeg where the 2026-05-29 jpeg leg was mozjpeg-rs-420-e4), so it is a NEW instrument, never a re-read. MEASURED: a PRE-option-C binary (27cfde15) does NOT reproduce the canonical grid from these pixels either (basic max |d| 0.703 on 2,168 of 2,340 control cells, against 0.055 for the whole preC->HEAD era step), which is the evidence the pixels differ rather than the era.",
+      "bars_note": "peer_ssim2's values here are BIT-IDENTICAL to its canonical-grid row on all six grid scalars -- the ssim2 truth is a property of the PIXELS and these are the pixels it was measured on (dialcells_ssim2_qv2grid.tsv IS dialcells_ssim2_944grid.tsv restricted to these 4,424 keys, 4,424 of 4,424 exactly equal). So the mentor's bars transfer unchanged; only the FEATURE era differs.",
+      "control_note": "CONTROL: on this grid peer_ssim2 reproduces its CANONICAL-grid row EXACTLY on all eight recorded scalars -- min/max/p5/p95/reach/dynamic_range AND mono 0.99235757295044 / tied 0.0000. Same cells, same ssim2 values, so the mentor's bars are transferable and only the FEATURE era differs. That equality is also the check that caught this row's first build: `extract_features_372col` ends with `rows.sort_by(ref_basename)`, so attaching (image_id, codec, q) POSITIONALLY scrambled features across the 38 references -- every scorer's mono collapsed (shipped D 0.9847 -> 0.5611) and tied read 0.0672. The pairs TSV now carries a `row_id` the extractor hands back and the permutation is checked, not assumed."
+    },
+    {
+      "dial_grid_sha256": "3caee8602c037fb05ba158c9300a8d5ddb3f489ef7d5314067695b75d4d66774",
+      "label": "dial_grid_372col_preC_2026-09-05 -- ssim2's OWN values on the SAME pixels extracted at the PRE-option-C commit 27cfde15 (the era pair of the row above)",
+      "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_preC_2026-09-05.parquet",
+      "reference": "peer_ssim2",
+      "feature_set_id": "basic+peaks+masked+iw@w372/v1cur#d16a1091 (era-equivalent: 27cfde15 is the commit immediately before option C, and the v1cur root was built two hours earlier at ea16c7ee)",
+      "built_from": "same pixels + same pairs TSV as the postC row; extractor built at 27cfde15",
+      "n_rows": 4424,
+      "min": -55.354544,
+      "max": 98.376644,
+      "p5": 10.26332105,
+      "p95": 95.45929934999998,
+      "reach": 153.731188,
+      "dynamic_range": 85.19597829999998,
+      "mono": 0.99235757295044,
+      "tied": 0.0,
+      "registered": "2026-09-05",
+      "active": true,
+      "provenance_note": "EXISTS ONLY to make the extractor era separable from the pixels: it and the postC row differ in exactly one thing, the extractor commit. peer_ssim2's values are identical on the two (same cells, same ssim2), which is the control.",
+      "bars_note": "peer_ssim2's values here are BIT-IDENTICAL to its canonical-grid row on all six grid scalars -- the ssim2 truth is a property of the PIXELS and these are the pixels it was measured on (dialcells_ssim2_qv2grid.tsv IS dialcells_ssim2_944grid.tsv restricted to these 4,424 keys, 4,424 of 4,424 exactly equal). So the mentor's bars transfer unchanged; only the FEATURE era differs.",
+      "control_note": "CONTROL: on this grid peer_ssim2 reproduces its CANONICAL-grid row EXACTLY on all eight recorded scalars -- min/max/p5/p95/reach/dynamic_range AND mono 0.99235757295044 / tied 0.0000. Same cells, same ssim2 values, so the mentor's bars are transferable and only the FEATURE era differs. That equality is also the check that caught this row's first build: `extract_features_372col` ends with `rows.sort_by(ref_basename)`, so attaching (image_id, codec, q) POSITIONALLY scrambled features across the 38 references -- every scorer's mono collapsed (shipped D 0.9847 -> 0.5611) and tied read 0.0672. The pairs TSV now carries a `row_id` the extractor hands back and the permutation is checked, not assumed."
+    },
+    {
+      "dial_grid_sha256": "4c3874a78c469e15c664a63e10216760317bd9501b9fe9365b6b93845cb5f980",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_372col_ladder_2026-09-05 (FLOOR-DENSE: per-codec lowest DISTINCT settings, 2 AVIF backends)",
+      "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
+      "n_rows": 9593,
+      "min": -64.326595,
+      "max": 100.0,
+      "p5": -16.252150599999997,
+      "p95": 93.9743354,
+      "reach": 164.326595,
+      "dynamic_range": 110.226486,
+      "mono": 0.9888428434810328,
+      "tied": 0.0,
+      "registered": "2026-09-05",
+      "active": true
+    },
+    {
+      "dial_grid_sha256": "0e8e5fb789bd21b263edc3531b243b4086b5ba9c6757de37188ac912bd392f2a",
+      "reference": "peer_ssim2",
+      "label": "dial_grid_944col_ladder_2026-09-05 (FLOOR-DENSE, foldapp2pools; same cells as the 372 ladder grid)",
+      "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet",
+      "n_rows": 9593,
+      "min": -64.326595,
+      "max": 100.0,
+      "p5": -16.252150599999997,
+      "p95": 93.9743354,
+      "reach": 164.326595,
+      "dynamic_range": 110.226486,
+      "mono": 0.9888428434810328,
+      "tied": 0.0,
+      "registered": "2026-09-05",
+      "active": true
+    }
+  ],
+  "negtail_probes": [
+    {
+      "probe_sha256": "5609d19fa10aef81326d655803a7b51ad3c7339513f959266c272bebfaeeb6d8",
+      "label": "negtail_probe_372_2026-09-04 (kadis_negrich, 20 equal-count ssim2 quantile bins x 100, all rows ssim2 < 0)",
+      "path": "/mnt/v/output/zensim/dialgate-2026-09-04/negtail_probe_372_2026-09-04.parquet",
+      "mirror": "s3://zentrain/dialgate/2026-09-04/negtail_probe_372_2026-09-04.parquet (LAN store, $ZEN_S3_ENDPOINT)",
+      "built_from": "/mnt/v/zen/zensim-training/canonical-2026-07-15/train/kadis_negrich.parquet (266,111 rows; 237,675 with ssim2_gpu < 0). Selection is deterministic: 20 equal-count quantile bins over the negative population, lowest 100 row indices per bin. No RNG.",
+      "truth_span": "ssim2_gpu min -770.6197, p1 -187.1314, median -54.7239, max -0.3312 -- every row's reference metric is negative, so a correct dial must go below zero somewhere on it.",
+      "n_rows": 2000,
+      "min": 2.516685884084839,
+      "p1": 3.981383254902343,
+      "p5": 5.668369289459955,
+      "frac_below_zero": 0.0,
+      "registered": "2026-09-04",
+      "active": true,
+      "incumbent_note": "SHIPPED B never goes below zero on this probe (frac_below_zero 0.0000, min +2.5167) even though every row's truth is negative. That is a standing violation of the product contract ('NEGATIVE zensim values MUST work'), recorded here as the incumbent's own value so a candidate is judged on both the relative and the absolute question."
+    },
+    {
+      "probe_sha256": "5609d19fa10aef81326d655803a7b51ad3c7339513f959266c272bebfaeeb6d8",
+      "reference": "peer_ssim2",
+      "label": "negtail_probe_372_2026-09-04 -- ssim2's OWN values (the probe parquet's `ssim2_gpu` column, the same measurement the probe's population was selected on)",
+      "n_rows": 2000,
+      "min": -770.619744,
+      "p1": -187.13142578999998,
+      "p5": -71.55064789999999,
+      "frac_below_zero": 1.0,
+      "registered": "2026-09-04",
+      "active": true,
+      "note": "frac_below_zero = 1.0000 is DEFINITIONAL, not a coincidence: the probe was built by selecting rows whose ssim2 is negative, so the reference metric is below zero on all 2,000 by construction. A9 therefore asks a candidate for perfect sign agreement with ssim2 on an all-negative population. That is the strictest reading of 'address at least the range ssim2 addresses' and it is stated here so nobody mistakes it for an empirically-discovered bar. The incumbent reads 0.0000."
+    },
+    {
+      "probe_sha256": "bafc89943befd195b0372e76afa91dab76a5c1f6c569bd53f33f942c3b8d67d8",
+      "reference": "peer_ssim2",
+      "label": "negtail_probe_944pools_2026-09-05 -- ssim2's OWN values (the probe's `ssim2_gpu` column, = the pools safesyn leg's `human_score` x 100)",
+      "path": "/mnt/v/output/zensim/dfree-2026-09-05/probes/negtail_probe_944pools_2026-09-05.parquet",
+      "n_rows": 2000,
+      "min": -739.0430024442184,
+      "p1": -64.22909908963912,
+      "p5": -62.061534979862806,
+      "frac_below_zero": 1.0,
+      "built_from": "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_safesyn_full.parquet (111,068 rows; 6,098 with human_score*100 < 0), cut by the SAME registered rule as the 372 probe -- 20 equal-count quantile bins over the negative population, lowest 100 row indices per bin, no RNG. A 944-POOLS-era probe had to be built because both stored 944 negtail probes (2026-08-01era, era2r4_foldapp2) carry f156..371 structurally zero.",
+      "truth_span": "ssim2 (= human_score x 100) min -739.0430, p1 -64.2291, max -0.0072 -- every row's reference metric is negative. VERIFIED that this column IS ssim2: on canonical-2026-05-21/train/safesyn.parquet, human_score*100 == ssim2_gpu EXACTLY on all 196,086 rows (max|delta| 0.0).",
+      "registered": "2026-09-05",
+      "active": true,
+      "note": "frac_below_zero = 1.0 is DEFINITIONAL here for the same reason as the 372 row: the population was selected on ssim2 < 0. This probe is SHALLOWER in its p1 than the 372 kadis probe (-64.23 vs -187.13) because safesyn's negative population is less deep, so A8 is a materially easier bar on this instrument than on the 372 one -- a number from the two probes must NEVER be compared."
+    },
+    {
+      "probe_sha256": "8a545f901c282d5b6f7c4cc6c26262d70b9fd7fec608aae878e30eaffaddcef7",
+      "label": "negtail_probe_372_postC_2026-09-05 -- ssim2's OWN values on the RUNTIME-era re-extraction of the 2026-09-04 probe's own 2,000 rows",
+      "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/negtail_probe_372_postC_2026-09-05.parquet",
+      "reference": "peer_ssim2",
+      "feature_set_id": "basic+peaks+masked+iw@w372/v1postc#d16a1091",
+      "built_from": "the stored probe's 2,000 rows joined UNIQUELY (2,000 of 2,000, 0 ambiguous) to kadis700k_canonical_gpu_2026-07-01 on (feat_0,feat_1,feat_2,score_ssim2_gpu), giving distorted_url (R2-persisted PNG) + source_filename (local, 2,000 of 2,000 present); re-extracted by scripts/canonical_corpus/build_dial372_instruments.py --tag postC",
+      "n_rows": 2000,
+      "min": -770.619744,
+      "p1": -187.13142578999998,
+      "p5": -71.55064789999999,
+      "frac_below_zero": 1.0,
+      "registered": "2026-09-05",
+      "active": true,
+      "provenance_note": "SAME ROWS as negtail_probe_372_2026-09-04, same entry ids, same ssim2_gpu -- so peer_ssim2's three axes are bit-identical to the 2026-09-04 row. The CONTROL that the pixels are the probe's own: extracting them at PRE-option-C 27cfde15 reproduces the stored probe to <=7.66 absolute on a slot whose values are ~1.2e5 (6.2e-5 relative; peaks/masked/iw <=0.0036), a producer-level residue, while the preC->HEAD era step on the same rows is 18,953 absolute on that slot.",
+      "bars_note": "ssim2 truth is the probe's own ssim2_gpu column, unchanged by the feature era."
+    },
+    {
+      "probe_sha256": "5038b9c6f3601feabff8e8f05f137d7b2b19061d26929fcd901e9234f8c95449",
+      "label": "negtail_probe_372_preC_2026-09-05 -- the PRE-option-C (27cfde15) extraction of the same 2,000 rows; the era pair of the row above",
+      "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/negtail_probe_372_preC_2026-09-05.parquet",
+      "reference": "peer_ssim2",
+      "feature_set_id": "basic+peaks+masked+iw@w372/v1cur#d16a1091 (era-equivalent, see the preC grid row)",
+      "built_from": "same pixels + same pairs TSV as the postC probe; extractor built at 27cfde15",
+      "n_rows": 2000,
+      "min": -770.619744,
+      "p1": -187.13142578999998,
+      "p5": -71.55064789999999,
+      "frac_below_zero": 1.0,
+      "registered": "2026-09-05",
+      "active": true,
+      "provenance_note": "EXISTS ONLY to make the extractor era separable from the pixels.",
+      "bars_note": "peer_ssim2 identical to the postC row by construction (same rows, same ssim2_gpu)."
+    }
+  ],
+  "identity_probes": [
+    {
+      "probe_sha256": "e6f9096b8e0ebd97f1c36e40bb7e589e77a599bfdfcb7ff94dde89520018b650",
+      "label": "identity_probe_372_2026-09-04 (all 38 dial-grid reference images, ref == dist)",
+      "path": "/mnt/v/output/zensim/dialgate-2026-09-04/identity_probe_372_2026-09-04.parquet",
+      "mirror": "s3://zentrain/dialgate/2026-09-04/identity_probe_372_2026-09-04.parquet (LAN store, $ZEN_S3_ENDPOINT)",
+      "built_from": "extract_features_372col --corpus pairs-tsv over the 38 distinct image_ids of the canonical dial grid, each paired with ITSELF, decoded by imazen codecs (zenpng) at this lane's HEAD.",
+      "measured_property": "All 38 rows are the ZERO vector, bit-identical -- which is what a difference metric must do, and it makes the identity dial a SCALAR property of the bake, dial(0-vector). The probe is kept as 38 rows rather than 1 so that property stays gated rather than assumed.",
+      "n_rows": 38,
+      "dial_min": 96.24115978721524,
+      "dial_median": 96.24115978721524,
+      "dial_max": 96.24115978721524,
+      "registered": "2026-09-04",
+      "active": true,
+      "incumbent_note": "SHIPPED B calls a perfect copy 96.2412 while emitting up to 99.9833 on LOSSY dial-grid cells: 266 of 4,424 cells (6.01%) out-score an exact copy, worst `1a20ecb0c1b92466_1022x818` jxl d=0.05 at 99.9833. Standing ceiling defect, recorded as the incumbent's own value."
+    },
+    {
+      "probe_sha256": "e6f9096b8e0ebd97f1c36e40bb7e589e77a599bfdfcb7ff94dde89520018b650",
+      "reference": "peer_ssim2",
+      "label": "identity_probe_372_2026-09-04 -- ssim2's OWN values on the 38 ref==dist pairs",
+      "n_rows": 38,
+      "dial_min": 100.0,
+      "dial_median": 100.0,
+      "dial_max": 100.0,
+      "registered": "2026-09-04",
+      "active": true,
+      "note": "MEASURED, not assumed: zenmetrics batch --metric ssim2 (CPU SSIMULACRA2) over the 38 dial-grid references paired with themselves reads EXACTLY 100.000000 on all 38, min == median == max, one distinct value. So the mentor is inside the registered [97.5, 100] identity band at its ceiling, and since its grid max is 98.3766 < 100 it has ZERO cells out-scoring a perfect copy -- ssim2 passes C5 and C6, the two contract rows the shipped dial fails. The grid truth is ssim2_gpu and this is the CPU implementation; identity is 100 by SSIMULACRA2's construction, which is why the cross-implementation question does not arise at this point."
+    },
+    {
+      "probe_sha256": "31fc440381a38d188ca8f91f9b5799daa2a19b9565f5a355cb6dcad86ebc1655",
+      "reference": "peer_ssim2",
+      "label": "identity_probe_944pools_2026-09-05 -- ssim2's OWN values on the 39 ref==dist pairs",
+      "path": "/mnt/v/output/zensim/dfree-2026-09-05/probes/identity_probe_944pools_2026-09-05.parquet",
+      "n_rows": 39,
+      "dial_min": 100.0,
+      "dial_median": 100.0,
+      "dial_max": 100.0,
+      "built_from": "the 39 distinct reference images of the 944 dial grids (/mnt/v/output/zensim/dial-grid-pixels-2026-07-27/sources), each paired with ITSELF, extracted by the PINNED pools-era extractor /mnt/v/output/zensim/wlin7b-2026-08-30/v2_ab_extract_PREFIX_PINNED at ZENSIM_AB_MODE=foldapp2pools. That binary was verified BIT-EXACT against BOTH the r1b-pools944-2026-08-30 root (12 imazen26 rows x 944, max|delta| 0.0) and this grid (7 matched cells x 944, max|delta| 0.0) before the probe was cut.",
+      "measured_property": "*** NOT the zero vector. *** 286 of 944 slots are non-zero on at least one of the 39 rows, and they VARY BY IMAGE -- so at 944 width the identity dial is a PER-IMAGE quantity, not the scalar dial(0-vector) the 372 probe's own registry row records. The 39 rows are what makes that gated instead of assumed.",
+      "registered": "2026-09-05",
+      "active": true,
+      "note": "MEASURED, not assumed: 38 of the 39 values are the zenmetrics CPU SSIMULACRA2 readings already recorded for the 372 probe (100.000000 each); the 39th reference (9059ec43b26aa167_769x513, present on the 944 grids but not the 372 one) was measured here by the same tool and also reads 100.000000. min == median == max == 100.0."
+    }
+  ],
+  "inversion_truth": {
+    "_what": "The two-reference INVERSION-ATTRIBUTION rule. A material backwards rung on a dial ladder is charged to the ENCODER, and leaves the dial's `mono` (hence C1) and the zone census, only where BOTH reference metrics independently say the higher setting is worse by a material margin. Everything else stays the dial's, INCLUDING every pair whose attribution cannot be decided.",
+    "_user_ruling_2026_09_05_verbatim": "for inversions, we should choose say ssim2 and butter and only flag true inversions where they agree, and we can then file or update tracking issues on codecs for when they are nonmonotonic.",
+    "scheme": "two-reference-agree-2026-09-05",
+    "owner": "zensim_validate::dial_addressability::encoder_inversion — ONE function, shared by the G-ADDR contract's `mono` input and bake_verdict's ladder-inversion census, so the gate and the census cannot drift apart on what an encoder inversion is.",
+    "default": "agree",
+    "legacy_reading": "single — every material backwards rung charged to the dial. Retained and selectable (`bake_verdict --inversion-truth single`) so every number published before 2026-09-05 stays reproducible. MEASURED: a `single` run is byte-identical to the pre-ruling binary (0 JSON differences on shipped Profile D over the 9,593-row ladder instrument).",
+    "margins": {
+      "ssim2_pt": 0.5,
+      "ssim2_derivation": "NOT re-derived — this is bake_verdict's own MATERIAL_INV_PT, so the reference is held to exactly the bar the dial is held to.",
+      "butteraugli_pnorm3": 0.05,
+      "butteraugli_max": 0.25,
+      "butteraugli_derivation": "p85 of |delta variant| over FORWARD adjacent pairs whose delta-ssim2 lies in [0.45, 0.55] — the moves ssim2 itself calls exactly material — rounded UP to the next 0.05. MEASURED on the 2026-09-05 ladder instrument (n=410 in band): pnorm3 p25/med/p75/p85 = 0.0238/0.0315/0.0403/0.0481 -> 0.05; max = 0.0037/0.0677/0.1361/0.2189 -> 0.25. Stable to +/-0.0007 across the wider bands [0.4,0.6] and [0.25,0.75], so it is not band-choice.",
+      "why_not_a_noise_margin": "There is no measurement noise to derive one from. MEASURED: re-running the instrument's jpeg leg from scratch reproduces 2,574/2,574 cells with max|delta| = 0 on BOTH butteraugli variants (as well as ssim2, dssim and encoded bytes) — extending the instrument's own reproducibility gate, which checked only bytes and ssim2. A reproducibility-derived margin would be 0.0, which is not a materiality bar.",
+      "rounding_direction": "UP, deliberately. A LARGER butteraugli margin makes agreement RARER, so fewer inversions are excused and MORE stay charged to the dial. The ruling cannot launder a dial defect by being generous with this number."
+    },
+    "primary_variant": "pnorm3",
+    "variant_evidence": "MEASURED over all 9,411 adjacent distinct pairs of the ladder instrument, the share on which the variant moves the direction ssim2 moves: pnorm3 94.30 %, max 75.27 %. In the population where ssim2 barely moves (|delta| < 0.05), max's own p95 excursion is 1.27 against pnorm3's 0.14. `max` is reported BESIDE pnorm3, never instead of it.",
+    "unknown_is_not_an_exemption": "A pair whose reference values are not both on disk is NOT MEASURABLE and stays charged to the DIAL. bake_verdict counts and reports those pairs (`dial.inversion_truth.n_attribution_unknown`), and a requested `agree` with no usable reference table degrades to `single` LOUDLY, never silently.",
+    "c1_direction_property": "mono_agree = 1 - dial/pairs and mono_single = 1 - (dial+encoder)/pairs, so mono_agree >= mono_single for every non-negative encoder count. C1 is a `>=` bar on mono and is mono's ONLY gate consumer, so the ruling can move C1 up and never down. Gate: dial_addressability::tests::encoder_attribution_moves_c1_up_and_never_down.",
+    "reference_tables": [
+      {
+        "grid_sha16": "4c3874a78c469e15",
+        "grid": "dial_grid_372col_ladder.parquet (2026-09-05 ladder instrument, 9,593 distinct settings)",
+        "table": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/reference_truth_ladder_pnorm3.tsv",
+        "variant": "pnorm3",
+        "n_cells": 9593,
+        "built_by": "scripts/build_reference_truth.py --full ladder_grid_ladder_full.parquet --variant pnorm3"
+      },
+      {
+        "grid_sha16": "4c3874a78c469e15",
+        "grid": "dial_grid_372col_ladder.parquet",
+        "table": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/reference_truth_ladder_max.tsv",
+        "variant": "max",
+        "n_cells": 9593,
+        "note": "the SECONDARY variant, reported beside pnorm3"
+      },
+      {
+        "grid_sha16": "0e8e5fb789bd21b2",
+        "grid": "dial_grid_944col_ladder.parquet — the SAME 9,593 cells at 944 width, so the same reference tables serve it",
+        "table": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/reference_truth_ladder_pnorm3.tsv",
+        "variant": "pnorm3",
+        "n_cells": 9593
+      }
     ],
-    "bars": "the ACTIVE reference's own row in `negtail_probes` for the same probe sha -- A7 `min` <= reference min, A8 `p1` <= reference p1, A9 `frac_below_zero` >= reference frac_below_zero",
-    "reproduce": "bake_verdict --gaddr-tail-pins retired (grading is bit-reproducible; nothing was rewritten)",
-    "note": "RETAINED, not deleted: every G-ADDR number published before 2026-09-05 -- the gate record's sections 0-15, the 2026-09-04 board grading, and both re-graded candidate tables -- is graded on THESE bars. A count quoted from that era is only readable against them."
-   },
-   {
-    "id": "floor-representability-2026-09-05",
-    "status": "retired",
-    "registered": "2026-09-05",
-    "retired_on": "2026-09-05",
-    "retired_by": "USER RULING 2026-09-05. Asked \"ok, is there poor resolution compared to ssim2?\", the lane reported that this set's `distinct` window grades each ladder's three literal lowest positions -- including steps the MENTOR itself cannot resolve -- and recommended grading only the steps ssim2 separates by >= 0.5 points. The user answered \"ok\", read as accepting that recommendation. Superseded by `floor-representability-resolvable-2026-09-05`.",
-    "retained_because": "Every A7r number published between 2026-09-05 and this flip -- gate record section 16, the 11-arm lambda sweep table, the 2026-09-05 board grading -- is graded on THIS set's `distinct` window. Reachable with `--floor-rule distinct`, or by pointing `negative_tail_bars.active` back here (no code change).",
-    "axes": [
-     "A7r",
-     "A8r"
-    ],
-    "bottom_k": 3,
-    "clamp_eps": 1e-09,
-    "report_floor_threshold": -50.0,
-    "axis_definitions": {
-     "A7r": "FLOOR REPRESENTABILITY, per codec, on the canonical dial grid (real codec output). Fraction of that codec's `(image_id, codec)` ladders whose `bottom_k` lowest configurable settings are REPRESENTED: (i) the dial strictly increases across those steps and into the next one up, and (ii) none of them sits within `clamp_eps` of the dial's instrument-wide minimum, unless that ladder is the sole holder of the minimum. BAR = the REFERENCE metric's own fraction on the same cells, pinned per codec in `grid_floor_representability`; the incumbent's fraction is printed beside it. The row's `measured` value is the COUNT of codecs below their mentor bar, barred at <= 0. A codec on which the mentor itself represents nothing gets a bar of 0.0 -- the natural analogue of an exemption, needing no special case.",
-     "A8r": "The negative-tail probe, REPORT-ONLY on tier `report-only` (excluded from both tier verdicts by construction). Pooled `min` and `p1` are printed with the probe's own reference-truth extremes; NOTHING is barred. Reason: the probe carries no codec identity at all -- its rows are KADIS distortion types, not codec output -- so it cannot answer the ruling's question. Its per-DISTORTION-family reading is measured in benchmarks/d_peaks_lambda_sweep_2026-09-05.md sections 4-6, where grading it at a fixed depth was shown to fail every bake ever built on one n=8 family."
-    },
-    "dropped_axes": {
-     "A9r": "DROPPED as a bar. Its per-codec quantity -- of a codec's cells whose reference truth is at or below `report_floor_threshold`, the fraction the dial also places at or below it -- is FOLDED INTO the per-codec report block as the `ref<=floor also dial<=floor` column. `report_floor_threshold` is a REPORTING threshold for that one column and is barred against NOTHING; it is the only place -50 survives in this file, and it survives as information."
-    },
-    "provenance": {
-     "bottom_k": "user-ruling, verbatim: \"the lowest K=3 configurable settings present in the grid for that codec\"",
-     "clamp_eps": "user-ruling, verbatim: \"a value equal (within 1e-9) to the dial's instrument-wide minimum counts as clamped\"",
-     "sole_holder_exception": "user-ruling, verbatim: \"unless that ladder is the single ladder attaining the minimum (two or more ladders sharing the bottom value = a collapsed floor)\"",
-     "per_codec_bars": "MEASURED, not chosen: each codec's bar is `peer_ssim2`'s own representability fraction on the same cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) and appended to `grid_floor_representability`. Re-implementing the ladder walk outside the owner to produce these would be exactly the duplication the no-duplicate-implementations rule forbids."
-    },
-    "quality_orientation": "`q` is QUALITY-ORIENTED on every codec in the dial grid, including JXL: its `param_kind` is `distance` and its q=0 cells carry `codec_param` 25.0 (the largest distance = the worst quality), rising to q=99.8 at distance 0.05. So 'the lowest configurable settings' is always the smallest `q`, and no per-codec direction switch is needed. VERIFIED 2026-09-05 on the canonical grid: avif/jpeg/webp q in [0,100] with codec_param == q, jxl q in [0,99.8] with codec_param 25.0 -> 0.05 monotonically decreasing."
-   },
-   {
-    "id": "floor-representability-resolvable-2026-09-05",
-    "status": "active",
-    "registered": "2026-09-05",
-    "supersedes": "floor-representability-2026-09-05",
-    "axes": [
-     "A7r",
-     "A8r"
-    ],
-    "bottom_k": 3,
-    "clamp_eps": 1e-09,
-    "report_floor_threshold": -50.0,
-    "floor_rule": "resolvable",
-    "floor_margin": 0.5,
-    "user_messages_verbatim_2026-09-05": [
-     "ok, is there poor resolution compared to ssim2? update and share thw gauntlet for what should be the. ew sdr and bdr",
-     "hdr"
-    ],
-    "_ruling_reading": "The two messages are one instruction: the second supplies the word the first mistyped, so the ask is \"update and share the gauntlet for what should be the new SDR and HDR [defaults]\". The leading \"ok\" answers the two recommendations the previous report put to the user, and IS READ AS ACCEPTING BOTH: (1) grade floor representability under the RESOLVABLE window (margin 0.5) instead of the literal bottom-3 window, and (2) demote the six dial-VALUE rows A1-A6 from hard regression bars to the Report tier. This reading is recorded explicitly because \"ok\" is terse: it is an INFERENCE from the conversation, not a verbatim instruction, and both halves are reversible without a code change -- point `active` back at `floor-representability-2026-09-05` for the window, pass `--gaddr-value-pins hard` for the tier.",
-    "axis_definitions": {
-     "A7r": "FLOOR REPRESENTABILITY, per codec, under the RESOLVABLE window. Identical to the superseded set's rule -- a ladder is REPRESENTED when the dial strictly increases across the selected steps and into the next one up, and no bottom step sits within `clamp_eps` of the instrument-wide minimum unless that ladder is its sole holder -- EXCEPT in which steps it selects. `distinct` took each ladder's literal three lowest settings; `resolvable` walks up from the lowest setting, SKIPPING any step whose |delta mentor| from the last SELECTED step is below `floor_margin`, until bottom_k+1 mentor-resolvable steps are collected. BAR = the reference metric's own fraction on the same cells under the SAME rule, pinned per codec in `grid_floor_representability` rows carrying `\"floor_rule\": \"resolvable\"`; where no such row is registered the bar is computed LIVE through the identical owner call. A `distinct` fraction is NEVER substituted for a `resolvable` one.",
-     "A8r": "Unchanged from the superseded set: the negative-tail probe, REPORT-ONLY, no bar."
-    },
-    "why_resolvable": "MEASURED, `benchmarks/ladder_floor_resolution_2026-09-05.md` sections 2-4 and 8.3. The `distinct` window grades steps the MENTOR itself cannot separate, so it charges a candidate for disagreeing with noise. The extreme case is jpeg on the pre-ladder grids, where q=0/5/10 are BYTE-IDENTICAL encoder output and the bar was a vacuous 0.0000; the ladder instrument fixed the instrument, and this rule fixes the WINDOW. On the ladder instrument the mentor's own bottom-triplet failures are 78% (jpeg) / 67% (avif-rav1e) genuine inversions rather than ties, so the flat zone is real and skipping it is not hiding a defect -- it is declining to grade where the reference cannot.",
-    "value_pins": {
-     "_what": "Which tier the six dial-VALUE rows A1-A6 are emitted on. `report` is the default from 2026-09-05: they are still MEASURED and still PRINTED with their bars, but sit on tier `report-only` and gate nothing, so the REGRESSION headline is carried by A7r alone. `--gaddr-value-pins hard` restores them to the regression tier and reproduces the pre-ruling grading row-for-row.",
-     "default": "report",
-     "why": "A1-A6 bar a candidate against `peer_ssim2`'s own max / p95 / min / p5 / reach / dynamic_range on one instrument. Those are incidental properties of where the mentor's distribution happens to land, not product requirements -- and the gate record's own section 14.6 measured the resulting absurdity under the RETIRED shipped-B pins, where A1/A3/A6 sat ABOVE what the reference metric itself reaches, so a dial calibrated exactly to the truth failed three rows. The product requirements live in the CONTRACT tier (C1-C6) and the per-codec floor (A7r).",
-     "scope": "TIER ONLY. No contract row was added, removed, moved or re-barred, so the board's NOT SHIPPABLE badge -- which is contract-driven -- cannot move with this setting. Asserted by a unit test, not assumed."
-    },
-    "reversibility": "Two independent levers, neither requiring a code change: point `negative_tail_bars.active` back at `floor-representability-2026-09-05` to restore the `distinct` window everywhere, or pass `--floor-rule distinct` / `--gaddr-value-pins hard` per invocation.",
-    "not_measurable_note": "`resolvable` chooses each ladder's window from the MENTOR's own per-cell values, so it REQUIRES `--gaddr-grid-truth`. Where none is supplied A7r reads NOT MEASURED with that reason -- it is never silently re-graded under `distinct`'s window, which asks a different question, and never defaulted to a pass."
-   }
-  ]
- },
- "grid_floor_representability": [
-  {
-   "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL) -- per-CODEC FLOOR REPRESENTABILITY",
-   "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
-   "bottom_k": 3,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif",
-     "n_ladders": 35,
-     "represented_frac": 1.0
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 22,
-     "represented_frac": 0.0
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 33,
-     "represented_frac": 0.9696969696969697
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 16,
-     "represented_frac": 1.0
-    }
-   ],
-   "note": "THE BAR. `peer_ssim2`'s own floor representability on these cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) at full f64 -- never re-implemented beside it. NOTE `jpeg` reads 0.000000: MEASURED 2026-09-05, that codec's three lowest settings are BYTE-IDENTICAL encoder output on 22 of 22 ladders (max |delta| over the 372 features is exactly 0.0, and ssim2 itself returns the identical value at q=0/5/10), so NO scorer can resolve them -- the encoder does not. A bar of 0.0 there is the honest outcome and it is what makes the 'exemption' a measurement rather than an exception."
-  },
-  {
-   "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
-   "reference": "shipped_b",
-   "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL) -- per-CODEC FLOOR REPRESENTABILITY",
-   "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
-   "bottom_k": 3,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif",
-     "n_ladders": 35,
-     "represented_frac": 0.7714285714285715
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 22,
-     "represented_frac": 0.0
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 33,
-     "represented_frac": 0.7575757575757576
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 16,
-     "represented_frac": 1.0
-    }
-   ],
-   "note": "The INCUMBENT column -- shipped Profile B's own floor representability on these cells. Printed beside the bar so a reader can always tell 'worse than the mentor' from 'worse than what shipped'. Never used as a bar."
-  },
-  {
-   "dial_grid_sha256": "506bdadfce7d2c4ea2ad37a6a2e7635f5eda6f945126033e4cf4365d3c695643",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_372col_postC_2026-09-05 (the RUNTIME era) -- per-CODEC FLOOR REPRESENTABILITY",
-   "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_postC_2026-09-05.parquet",
-   "bottom_k": 3,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif",
-     "n_ladders": 35,
-     "represented_frac": 1.0
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 22,
-     "represented_frac": 0.0
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 33,
-     "represented_frac": 0.9696969696969697
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 16,
-     "represented_frac": 1.0
-    }
-   ],
-   "note": "THE BAR. `peer_ssim2`'s own floor representability on these cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) at full f64 -- never re-implemented beside it. NOTE `jpeg` reads 0.000000: MEASURED 2026-09-05, that codec's three lowest settings are BYTE-IDENTICAL encoder output on 22 of 22 ladders (max |delta| over the 372 features is exactly 0.0, and ssim2 itself returns the identical value at q=0/5/10), so NO scorer can resolve them -- the encoder does not. A bar of 0.0 there is the honest outcome and it is what makes the 'exemption' a measurement rather than an exception."
-  },
-  {
-   "dial_grid_sha256": "506bdadfce7d2c4ea2ad37a6a2e7635f5eda6f945126033e4cf4365d3c695643",
-   "reference": "shipped_b",
-   "label": "dial_grid_372col_postC_2026-09-05 (the RUNTIME era) -- per-CODEC FLOOR REPRESENTABILITY",
-   "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_postC_2026-09-05.parquet",
-   "bottom_k": 3,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif",
-     "n_ladders": 35,
-     "represented_frac": 0.6
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 22,
-     "represented_frac": 0.0
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 33,
-     "represented_frac": 0.7878787878787878
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 16,
-     "represented_frac": 1.0
-    }
-   ],
-   "note": "The INCUMBENT column -- shipped Profile B's own floor representability on these cells. Printed beside the bar so a reader can always tell 'worse than the mentor' from 'worse than what shipped'. Never used as a bar."
-  },
-  {
-   "dial_grid_sha256": "3caee8602c037fb05ba158c9300a8d5ddb3f489ef7d5314067695b75d4d66774",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_372col_preC_2026-09-05 (the era pair of the row above) -- per-CODEC FLOOR REPRESENTABILITY",
-   "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_preC_2026-09-05.parquet",
-   "bottom_k": 3,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif",
-     "n_ladders": 35,
-     "represented_frac": 1.0
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 22,
-     "represented_frac": 0.0
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 33,
-     "represented_frac": 0.9696969696969697
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 16,
-     "represented_frac": 1.0
-    }
-   ],
-   "note": "THE BAR. `peer_ssim2`'s own floor representability on these cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) at full f64 -- never re-implemented beside it. NOTE `jpeg` reads 0.000000: MEASURED 2026-09-05, that codec's three lowest settings are BYTE-IDENTICAL encoder output on 22 of 22 ladders (max |delta| over the 372 features is exactly 0.0, and ssim2 itself returns the identical value at q=0/5/10), so NO scorer can resolve them -- the encoder does not. A bar of 0.0 there is the honest outcome and it is what makes the 'exemption' a measurement rather than an exception."
-  },
-  {
-   "dial_grid_sha256": "3caee8602c037fb05ba158c9300a8d5ddb3f489ef7d5314067695b75d4d66774",
-   "reference": "shipped_b",
-   "label": "dial_grid_372col_preC_2026-09-05 (the era pair of the row above) -- per-CODEC FLOOR REPRESENTABILITY",
-   "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_preC_2026-09-05.parquet",
-   "bottom_k": 3,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif",
-     "n_ladders": 35,
-     "represented_frac": 0.6
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 22,
-     "represented_frac": 0.0
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 33,
-     "represented_frac": 0.8181818181818182
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 16,
-     "represented_frac": 1.0
-    }
-   ],
-   "note": "The INCUMBENT column -- shipped Profile B's own floor representability on these cells. Printed beside the bar so a reader can always tell 'worse than the mentor' from 'worse than what shipped'. Never used as a bar."
-  },
-  {
-   "dial_grid_sha256": "694e16c4520a5d41b986cebe5ab9c8390c1eabdfef15b44386fe71abcd3c5593",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_944col_POOLS_2026-08-30 -- per-CODEC FLOOR REPRESENTABILITY",
-   "path": "/mnt/v/output/zensim/wlin7b-2026-08-30/dial_grid_944col_POOLS_2026-08-30.parquet",
-   "bottom_k": 3,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif",
-     "n_ladders": 35,
-     "represented_frac": 1.0
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 23,
-     "represented_frac": 0.0
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 33,
-     "represented_frac": 0.9696969696969697
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 24,
-     "represented_frac": 1.0
-    }
-   ],
-   "note": "THE BAR for the 944 POOLS grid, derived through the owner from dialcells_ssim2_944grid.tsv. There is deliberately NO `shipped_b` companion row here: shipped B is a 372-width bake and cannot score this grid, so the `incumbent` column reads em-dash rather than borrowing a number from a different instrument. The fractions match the 372 grids on avif/jxl/webp exactly (same cells, same ssim2) and jpeg is 0.000000 for the same measured reason -- its three lowest settings are byte-identical encoder output."
-  },
-  {
-   "dial_grid_sha256": "4c3874a78c469e15c664a63e10216760317bd9501b9fe9365b6b93845cb5f980",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_372col_ladder_2026-09-05 (FLOOR-DENSE: per-codec lowest DISTINCT settings, 2 AVIF backends) -- per-CODEC FLOOR REPRESENTABILITY",
-   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
-   "bottom_k": 3,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif-rav1e",
-     "n_ladders": 39,
-     "represented_frac": 0.5384615384615384
-    },
-    {
-     "codec": "avif-svt",
-     "n_ladders": 39,
-     "represented_frac": 1.0
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 39,
-     "represented_frac": 0.5384615384615384
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 26,
-     "represented_frac": 0.9230769230769231
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 39,
-     "represented_frac": 1.0
-    }
-   ],
-   "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
-   "note": "THE BAR for this instrument. `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) are removed from the instrument, so jpeg's bottom three are three SETTINGS rather than three samples of one. `avif-svt` and `avif-rav1e` are separate ladders \u2014 different encoders, different quantizer mappings."
-  },
-  {
-   "dial_grid_sha256": "0e8e5fb789bd21b263edc3531b243b4086b5ba9c6757de37188ac912bd392f2a",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_944col_ladder_2026-09-05 (FLOOR-DENSE, foldapp2pools; same cells as the 372 ladder grid) -- per-CODEC FLOOR REPRESENTABILITY",
-   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet",
-   "bottom_k": 3,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif-rav1e",
-     "n_ladders": 39,
-     "represented_frac": 0.5384615384615384
-    },
-    {
-     "codec": "avif-svt",
-     "n_ladders": 39,
-     "represented_frac": 1.0
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 39,
-     "represented_frac": 0.5384615384615384
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 26,
-     "represented_frac": 0.9230769230769231
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 39,
-     "represented_frac": 1.0
-    }
-   ],
-   "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
-   "note": "THE BAR for this instrument. `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) are removed from the instrument, so jpeg's bottom three are three SETTINGS rather than three samples of one. `avif-svt` and `avif-rav1e` are separate ladders \u2014 different encoders, different quantizer mappings."
-  },
-  {
-   "dial_grid_sha256": "4c3874a78c469e15c664a63e10216760317bd9501b9fe9365b6b93845cb5f980",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_372col_ladder_2026-09-05 (FLOOR-DENSE) -- per-CODEC FLOOR REPRESENTABILITY, RESOLVABLE window",
-   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
-   "bottom_k": 3,
-   "floor_rule": "resolvable",
-   "floor_margin": 0.5,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif-rav1e",
-     "n_ladders": 39,
-     "represented_frac": 0.6410256410256411
-    },
-    {
-     "codec": "avif-svt",
-     "n_ladders": 39,
-     "represented_frac": 1.0
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 39,
-     "represented_frac": 0.6666666666666666
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 26,
-     "represented_frac": 0.9615384615384616
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 39,
-     "represented_frac": 1.0
-    }
-   ],
-   "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
-   "note": "THE BAR for this instrument UNDER THE RESOLVABLE WINDOW (the operative rule since the USER RULING 2026-09-05). `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-grid-truth <cells> --floor-rule resolvable --gaddr-json`), copied verbatim at full f64. This row does NOT replace the `distinct` row for the same grid -- both stay active and answer different questions, and the lookup key includes `floor_rule` so neither can be served for the other. Reproduces benchmarks/ladder_floor_resolution_2026-09-05.md section 8.3's mentor row exactly (0.6410 / 1.0000 / 0.6667 / 0.9615 / 1.0000). MEASURED on BOTH ladder widths and BIT-IDENTICAL between them, as it must be: the mentor's per-cell scores are a property of the pixels, not of the feature width."
-  },
-  {
-   "dial_grid_sha256": "0e8e5fb789bd21b263edc3531b243b4086b5ba9c6757de37188ac912bd392f2a",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_944col_ladder_2026-09-05 (FLOOR-DENSE, foldapp2pools) -- per-CODEC FLOOR REPRESENTABILITY, RESOLVABLE window",
-   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet",
-   "bottom_k": 3,
-   "floor_rule": "resolvable",
-   "floor_margin": 0.5,
-   "registered": "2026-09-05",
-   "active": true,
-   "codecs": [
-    {
-     "codec": "avif-rav1e",
-     "n_ladders": 39,
-     "represented_frac": 0.6410256410256411
-    },
-    {
-     "codec": "avif-svt",
-     "n_ladders": 39,
-     "represented_frac": 1.0
-    },
-    {
-     "codec": "jpeg",
-     "n_ladders": 39,
-     "represented_frac": 0.6666666666666666
-    },
-    {
-     "codec": "jxl",
-     "n_ladders": 26,
-     "represented_frac": 0.9615384615384616
-    },
-    {
-     "codec": "webp",
-     "n_ladders": 39,
-     "represented_frac": 1.0
-    }
-   ],
-   "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
-   "note": "THE BAR for this instrument UNDER THE RESOLVABLE WINDOW (the operative rule since the USER RULING 2026-09-05). `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-grid-truth <cells> --floor-rule resolvable --gaddr-json`), copied verbatim at full f64. This row does NOT replace the `distinct` row for the same grid -- both stay active and answer different questions, and the lookup key includes `floor_rule` so neither can be served for the other. Reproduces benchmarks/ladder_floor_resolution_2026-09-05.md section 8.3's mentor row exactly (0.6410 / 1.0000 / 0.6667 / 0.9615 / 1.0000). MEASURED on BOTH ladder widths and BIT-IDENTICAL between them, as it must be: the mentor's per-cell scores are a property of the pixels, not of the feature width."
+    "not_measurable_on": "Every dial grid built before the 2026-09-05 ladder instrument. MEASURED: the canonical 372 grid and the 944 POOLS grid carry ssim2 per-cell tables but the ONLY butteraugli on disk for them is `dialcells_butteraugli_944grid.tsv`, whose variant the artifact does not name. Identified empirically as `max` (median relative error 0.0029 against score_butteraugli_max over 4,105 independently-encoded cells, against 0.58 for pnorm3) — so the PRIMARY variant does not exist for those cells, and re-scoring it is not honestly possible because the pixels that produced them are a different decoder/encoder generation. Those grids therefore read `single` with the loud NOT MEASURABLE note."
   }
- ],
- "grids": [
-  {
-   "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
-   "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL)",
-   "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
-   "n_rows": 4424,
-   "min": 3.12950123756248,
-   "max": 99.98330778475787,
-   "p5": 13.645032446453126,
-   "p95": 99.72170874183841,
-   "reach": 96.85380654719539,
-   "dynamic_range": 86.07667629538528,
-   "mono": 0.9791570171375636,
-   "tied": 0.0,
-   "registered": "2026-09-04",
-   "active": true
-  },
-  {
-   "dial_grid_sha256": "b5d27f212fc6b00cb406e26ff9ba8f74384f56d842280440a7a5dc141f6b0fb7",
-   "label": "dial_grid_372col_2026-05-29_quarantined (NOT canonical -- 9/115 w11 ladders + 33 pre-fix JXL d=0.025 cells; the grid benchmarks/imazen26_anchor_2026-09-04.md measured on)",
-   "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined.parquet",
-   "n_rows": 4457,
-   "min": 3.12950123756248,
-   "max": 99.98376794026095,
-   "p5": 13.726111774203428,
-   "p95": 99.71524151863066,
-   "reach": 96.85426670269847,
-   "dynamic_range": 85.98912974442723,
-   "mono": 0.9740289588600322,
-   "tied": 0.0,
-   "registered": "2026-09-04",
-   "active": true,
-   "note": "Registered ONLY so the 2026-09-04 imazen-26 anchor numbers (reach 96.85 / p5 13.73 / DR 85.99) stay checkable against their own instrument. New work should use the canonical grid; a verdict on this one carries bake_verdict's own NOT-CANONICAL warning."
-  },
-  {
-   "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL)",
-   "path": "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29_quarantined_v2.parquet",
-   "n_rows": 4424,
-   "min": -55.354544,
-   "max": 98.376644,
-   "p5": 10.26332105,
-   "p95": 95.45929934999998,
-   "reach": 153.731188,
-   "dynamic_range": 85.19597829999998,
-   "mono": 0.99235757295044,
-   "tied": 0.0,
-   "registered": "2026-09-04",
-   "active": true,
-   "note": "THE ACTIVE REGRESSION PIN SET. ssim2's own dial on the canonical grid, measured by the owner instrument (bake_verdict --dial-peer-scores peer_ssim2=<dialcells_ssim2_qv2grid.tsv> --gaddr-json), full f64 precision straight out of dial_addressability::to_json -- no re-implemented percentile math. Note it is MORE monotone than the shipped dial (0.9924 vs 0.9792) and has zero ties, so C1/C2 are not bars ssim2 needs help with. The un-quarantined companion grid deliberately has NO peer_ssim2 row: no ssim2 cell table covers its 33 extra pre-fix JXL cells, and measuring a bar on known-corrupt ladders would be worse than reading NOT MEASURABLE there."
-  },
-  {
-   "dial_grid_sha256": "694e16c4520a5d41b986cebe5ab9c8390c1eabdfef15b44386fe71abcd3c5593",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_944col_POOLS_2026-08-30 -- ssim2's OWN values on the 944 folded720append2pools grid",
-   "path": "/mnt/v/output/zensim/wlin7b-2026-08-30/dial_grid_944col_POOLS_2026-08-30.parquet",
-   "n_rows": 4817,
-   "min": -55.354544,
-   "max": 99.993468,
-   "p5": 12.015869200000006,
-   "p95": 95.4858354,
-   "reach": 155.34801199999998,
-   "dynamic_range": 83.46996619999999,
-   "mono": 0.9929817099106764,
-   "tied": 0.0,
-   "registered": "2026-09-05",
-   "active": true,
-   "note": "Derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<tsv> --gaddr-json`), never re-implemented. Peer cells: /mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_944grid.tsv restricted to this grid's key set -- 4817 of 4817 matched, 0 unmatched. CONTROL: the same TSV restricted to the canonical 372 grid's 4,424 keys reproduces the registered 372 peer_ssim2 row EXACTLY on all six scalars (gaddrinst census, 2026-09-04). This grid is REQUIRED for a bake that reads f156..371: the two other 944 grids (2026-08-01, era2r4-foldapp2) carry that block STRUCTURALLY ZERO, so a peaks-using bake graded on them is served zeros for the block it reads."
-  },
-  {
-   "dial_grid_sha256": "506bdadfce7d2c4ea2ad37a6a2e7635f5eda6f945126033e4cf4365d3c695643",
-   "label": "dial_grid_372col_postC_2026-09-05 -- ssim2's OWN values on the RUNTIME-era (post-option-C) re-extraction of the canonical key set",
-   "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_postC_2026-09-05.parquet",
-   "reference": "peer_ssim2",
-   "feature_set_id": "basic+peaks+masked+iw@w372/v1postc#d16a1091",
-   "built_from": "dial-grid-pixels-2026-07-27 + reports/refmetrics/dialgrid_pairs.tsv, via scripts/canonical_corpus/build_dial372_instruments.py --tag postC; extractor built at 4fbd8ff8",
-   "n_rows": 4424,
-   "min": -55.354544,
-   "max": 98.376644,
-   "p5": 10.26332105,
-   "p95": 95.45929934999998,
-   "reach": 153.731188,
-   "dynamic_range": 85.19597829999998,
-   "mono": 0.99235757295044,
-   "tied": 0.0,
-   "registered": "2026-09-05",
-   "active": true,
-   "provenance_note": "The canonical 2026-05-29 grid's OWN pixels are GONE: its build list eval_panels_2026-05-29/qsweep_372_grid.tsv points every distorted cell at the /mnt/v/input/zensim/images/<ref>/<codec>/q<N>.png decode cache DELETED 2026-06-22, and 0 of 2,560 of those paths exist. This grid is the SAME 4,424 (image_id, codec, codec_param) key set re-extracted from the surviving dial-grid-pixels-2026-07-27 encode (zenjpeg where the 2026-05-29 jpeg leg was mozjpeg-rs-420-e4), so it is a NEW instrument, never a re-read. MEASURED: a PRE-option-C binary (27cfde15) does NOT reproduce the canonical grid from these pixels either (basic max |d| 0.703 on 2,168 of 2,340 control cells, against 0.055 for the whole preC->HEAD era step), which is the evidence the pixels differ rather than the era.",
-   "bars_note": "peer_ssim2's values here are BIT-IDENTICAL to its canonical-grid row on all six grid scalars -- the ssim2 truth is a property of the PIXELS and these are the pixels it was measured on (dialcells_ssim2_qv2grid.tsv IS dialcells_ssim2_944grid.tsv restricted to these 4,424 keys, 4,424 of 4,424 exactly equal). So the mentor's bars transfer unchanged; only the FEATURE era differs.",
-   "control_note": "CONTROL: on this grid peer_ssim2 reproduces its CANONICAL-grid row EXACTLY on all eight recorded scalars -- min/max/p5/p95/reach/dynamic_range AND mono 0.99235757295044 / tied 0.0000. Same cells, same ssim2 values, so the mentor's bars are transferable and only the FEATURE era differs. That equality is also the check that caught this row's first build: `extract_features_372col` ends with `rows.sort_by(ref_basename)`, so attaching (image_id, codec, q) POSITIONALLY scrambled features across the 38 references -- every scorer's mono collapsed (shipped D 0.9847 -> 0.5611) and tied read 0.0672. The pairs TSV now carries a `row_id` the extractor hands back and the permutation is checked, not assumed."
-  },
-  {
-   "dial_grid_sha256": "3caee8602c037fb05ba158c9300a8d5ddb3f489ef7d5314067695b75d4d66774",
-   "label": "dial_grid_372col_preC_2026-09-05 -- ssim2's OWN values on the SAME pixels extracted at the PRE-option-C commit 27cfde15 (the era pair of the row above)",
-   "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/dial_grid_372col_preC_2026-09-05.parquet",
-   "reference": "peer_ssim2",
-   "feature_set_id": "basic+peaks+masked+iw@w372/v1cur#d16a1091 (era-equivalent: 27cfde15 is the commit immediately before option C, and the v1cur root was built two hours earlier at ea16c7ee)",
-   "built_from": "same pixels + same pairs TSV as the postC row; extractor built at 27cfde15",
-   "n_rows": 4424,
-   "min": -55.354544,
-   "max": 98.376644,
-   "p5": 10.26332105,
-   "p95": 95.45929934999998,
-   "reach": 153.731188,
-   "dynamic_range": 85.19597829999998,
-   "mono": 0.99235757295044,
-   "tied": 0.0,
-   "registered": "2026-09-05",
-   "active": true,
-   "provenance_note": "EXISTS ONLY to make the extractor era separable from the pixels: it and the postC row differ in exactly one thing, the extractor commit. peer_ssim2's values are identical on the two (same cells, same ssim2), which is the control.",
-   "bars_note": "peer_ssim2's values here are BIT-IDENTICAL to its canonical-grid row on all six grid scalars -- the ssim2 truth is a property of the PIXELS and these are the pixels it was measured on (dialcells_ssim2_qv2grid.tsv IS dialcells_ssim2_944grid.tsv restricted to these 4,424 keys, 4,424 of 4,424 exactly equal). So the mentor's bars transfer unchanged; only the FEATURE era differs.",
-   "control_note": "CONTROL: on this grid peer_ssim2 reproduces its CANONICAL-grid row EXACTLY on all eight recorded scalars -- min/max/p5/p95/reach/dynamic_range AND mono 0.99235757295044 / tied 0.0000. Same cells, same ssim2 values, so the mentor's bars are transferable and only the FEATURE era differs. That equality is also the check that caught this row's first build: `extract_features_372col` ends with `rows.sort_by(ref_basename)`, so attaching (image_id, codec, q) POSITIONALLY scrambled features across the 38 references -- every scorer's mono collapsed (shipped D 0.9847 -> 0.5611) and tied read 0.0672. The pairs TSV now carries a `row_id` the extractor hands back and the permutation is checked, not assumed."
-  },
-  {
-   "dial_grid_sha256": "4c3874a78c469e15c664a63e10216760317bd9501b9fe9365b6b93845cb5f980",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_372col_ladder_2026-09-05 (FLOOR-DENSE: per-codec lowest DISTINCT settings, 2 AVIF backends)",
-   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
-   "n_rows": 9593,
-   "min": -64.326595,
-   "max": 100.0,
-   "p5": -16.252150599999997,
-   "p95": 93.9743354,
-   "reach": 164.326595,
-   "dynamic_range": 110.226486,
-   "mono": 0.9888428434810328,
-   "tied": 0.0,
-   "registered": "2026-09-05",
-   "active": true
-  },
-  {
-   "dial_grid_sha256": "0e8e5fb789bd21b263edc3531b243b4086b5ba9c6757de37188ac912bd392f2a",
-   "reference": "peer_ssim2",
-   "label": "dial_grid_944col_ladder_2026-09-05 (FLOOR-DENSE, foldapp2pools; same cells as the 372 ladder grid)",
-   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet",
-   "n_rows": 9593,
-   "min": -64.326595,
-   "max": 100.0,
-   "p5": -16.252150599999997,
-   "p95": 93.9743354,
-   "reach": 164.326595,
-   "dynamic_range": 110.226486,
-   "mono": 0.9888428434810328,
-   "tied": 0.0,
-   "registered": "2026-09-05",
-   "active": true
-  }
- ],
- "negtail_probes": [
-  {
-   "probe_sha256": "5609d19fa10aef81326d655803a7b51ad3c7339513f959266c272bebfaeeb6d8",
-   "label": "negtail_probe_372_2026-09-04 (kadis_negrich, 20 equal-count ssim2 quantile bins x 100, all rows ssim2 < 0)",
-   "path": "/mnt/v/output/zensim/dialgate-2026-09-04/negtail_probe_372_2026-09-04.parquet",
-   "mirror": "s3://zentrain/dialgate/2026-09-04/negtail_probe_372_2026-09-04.parquet (LAN store, $ZEN_S3_ENDPOINT)",
-   "built_from": "/mnt/v/zen/zensim-training/canonical-2026-07-15/train/kadis_negrich.parquet (266,111 rows; 237,675 with ssim2_gpu < 0). Selection is deterministic: 20 equal-count quantile bins over the negative population, lowest 100 row indices per bin. No RNG.",
-   "truth_span": "ssim2_gpu min -770.6197, p1 -187.1314, median -54.7239, max -0.3312 -- every row's reference metric is negative, so a correct dial must go below zero somewhere on it.",
-   "n_rows": 2000,
-   "min": 2.516685884084839,
-   "p1": 3.981383254902343,
-   "p5": 5.668369289459955,
-   "frac_below_zero": 0.0,
-   "registered": "2026-09-04",
-   "active": true,
-   "incumbent_note": "SHIPPED B never goes below zero on this probe (frac_below_zero 0.0000, min +2.5167) even though every row's truth is negative. That is a standing violation of the product contract ('NEGATIVE zensim values MUST work'), recorded here as the incumbent's own value so a candidate is judged on both the relative and the absolute question."
-  },
-  {
-   "probe_sha256": "5609d19fa10aef81326d655803a7b51ad3c7339513f959266c272bebfaeeb6d8",
-   "reference": "peer_ssim2",
-   "label": "negtail_probe_372_2026-09-04 -- ssim2's OWN values (the probe parquet's `ssim2_gpu` column, the same measurement the probe's population was selected on)",
-   "n_rows": 2000,
-   "min": -770.619744,
-   "p1": -187.13142578999998,
-   "p5": -71.55064789999999,
-   "frac_below_zero": 1.0,
-   "registered": "2026-09-04",
-   "active": true,
-   "note": "frac_below_zero = 1.0000 is DEFINITIONAL, not a coincidence: the probe was built by selecting rows whose ssim2 is negative, so the reference metric is below zero on all 2,000 by construction. A9 therefore asks a candidate for perfect sign agreement with ssim2 on an all-negative population. That is the strictest reading of 'address at least the range ssim2 addresses' and it is stated here so nobody mistakes it for an empirically-discovered bar. The incumbent reads 0.0000."
-  },
-  {
-   "probe_sha256": "bafc89943befd195b0372e76afa91dab76a5c1f6c569bd53f33f942c3b8d67d8",
-   "reference": "peer_ssim2",
-   "label": "negtail_probe_944pools_2026-09-05 -- ssim2's OWN values (the probe's `ssim2_gpu` column, = the pools safesyn leg's `human_score` x 100)",
-   "path": "/mnt/v/output/zensim/dfree-2026-09-05/probes/negtail_probe_944pools_2026-09-05.parquet",
-   "n_rows": 2000,
-   "min": -739.0430024442184,
-   "p1": -64.22909908963912,
-   "p5": -62.061534979862806,
-   "frac_below_zero": 1.0,
-   "built_from": "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/ext_safesyn_full.parquet (111,068 rows; 6,098 with human_score*100 < 0), cut by the SAME registered rule as the 372 probe -- 20 equal-count quantile bins over the negative population, lowest 100 row indices per bin, no RNG. A 944-POOLS-era probe had to be built because both stored 944 negtail probes (2026-08-01era, era2r4_foldapp2) carry f156..371 structurally zero.",
-   "truth_span": "ssim2 (= human_score x 100) min -739.0430, p1 -64.2291, max -0.0072 -- every row's reference metric is negative. VERIFIED that this column IS ssim2: on canonical-2026-05-21/train/safesyn.parquet, human_score*100 == ssim2_gpu EXACTLY on all 196,086 rows (max|delta| 0.0).",
-   "registered": "2026-09-05",
-   "active": true,
-   "note": "frac_below_zero = 1.0 is DEFINITIONAL here for the same reason as the 372 row: the population was selected on ssim2 < 0. This probe is SHALLOWER in its p1 than the 372 kadis probe (-64.23 vs -187.13) because safesyn's negative population is less deep, so A8 is a materially easier bar on this instrument than on the 372 one -- a number from the two probes must NEVER be compared."
-  },
-  {
-   "probe_sha256": "8a545f901c282d5b6f7c4cc6c26262d70b9fd7fec608aae878e30eaffaddcef7",
-   "label": "negtail_probe_372_postC_2026-09-05 -- ssim2's OWN values on the RUNTIME-era re-extraction of the 2026-09-04 probe's own 2,000 rows",
-   "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/negtail_probe_372_postC_2026-09-05.parquet",
-   "reference": "peer_ssim2",
-   "feature_set_id": "basic+peaks+masked+iw@w372/v1postc#d16a1091",
-   "built_from": "the stored probe's 2,000 rows joined UNIQUELY (2,000 of 2,000, 0 ambiguous) to kadis700k_canonical_gpu_2026-07-01 on (feat_0,feat_1,feat_2,score_ssim2_gpu), giving distorted_url (R2-persisted PNG) + source_filename (local, 2,000 of 2,000 present); re-extracted by scripts/canonical_corpus/build_dial372_instruments.py --tag postC",
-   "n_rows": 2000,
-   "min": -770.619744,
-   "p1": -187.13142578999998,
-   "p5": -71.55064789999999,
-   "frac_below_zero": 1.0,
-   "registered": "2026-09-05",
-   "active": true,
-   "provenance_note": "SAME ROWS as negtail_probe_372_2026-09-04, same entry ids, same ssim2_gpu -- so peer_ssim2's three axes are bit-identical to the 2026-09-04 row. The CONTROL that the pixels are the probe's own: extracting them at PRE-option-C 27cfde15 reproduces the stored probe to <=7.66 absolute on a slot whose values are ~1.2e5 (6.2e-5 relative; peaks/masked/iw <=0.0036), a producer-level residue, while the preC->HEAD era step on the same rows is 18,953 absolute on that slot.",
-   "bars_note": "ssim2 truth is the probe's own ssim2_gpu column, unchanged by the feature era."
-  },
-  {
-   "probe_sha256": "5038b9c6f3601feabff8e8f05f137d7b2b19061d26929fcd901e9234f8c95449",
-   "label": "negtail_probe_372_preC_2026-09-05 -- the PRE-option-C (27cfde15) extraction of the same 2,000 rows; the era pair of the row above",
-   "path": "/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/negtail_probe_372_preC_2026-09-05.parquet",
-   "reference": "peer_ssim2",
-   "feature_set_id": "basic+peaks+masked+iw@w372/v1cur#d16a1091 (era-equivalent, see the preC grid row)",
-   "built_from": "same pixels + same pairs TSV as the postC probe; extractor built at 27cfde15",
-   "n_rows": 2000,
-   "min": -770.619744,
-   "p1": -187.13142578999998,
-   "p5": -71.55064789999999,
-   "frac_below_zero": 1.0,
-   "registered": "2026-09-05",
-   "active": true,
-   "provenance_note": "EXISTS ONLY to make the extractor era separable from the pixels.",
-   "bars_note": "peer_ssim2 identical to the postC row by construction (same rows, same ssim2_gpu)."
-  }
- ],
- "identity_probes": [
-  {
-   "probe_sha256": "e6f9096b8e0ebd97f1c36e40bb7e589e77a599bfdfcb7ff94dde89520018b650",
-   "label": "identity_probe_372_2026-09-04 (all 38 dial-grid reference images, ref == dist)",
-   "path": "/mnt/v/output/zensim/dialgate-2026-09-04/identity_probe_372_2026-09-04.parquet",
-   "mirror": "s3://zentrain/dialgate/2026-09-04/identity_probe_372_2026-09-04.parquet (LAN store, $ZEN_S3_ENDPOINT)",
-   "built_from": "extract_features_372col --corpus pairs-tsv over the 38 distinct image_ids of the canonical dial grid, each paired with ITSELF, decoded by imazen codecs (zenpng) at this lane's HEAD.",
-   "measured_property": "All 38 rows are the ZERO vector, bit-identical -- which is what a difference metric must do, and it makes the identity dial a SCALAR property of the bake, dial(0-vector). The probe is kept as 38 rows rather than 1 so that property stays gated rather than assumed.",
-   "n_rows": 38,
-   "dial_min": 96.24115978721524,
-   "dial_median": 96.24115978721524,
-   "dial_max": 96.24115978721524,
-   "registered": "2026-09-04",
-   "active": true,
-   "incumbent_note": "SHIPPED B calls a perfect copy 96.2412 while emitting up to 99.9833 on LOSSY dial-grid cells: 266 of 4,424 cells (6.01%) out-score an exact copy, worst `1a20ecb0c1b92466_1022x818` jxl d=0.05 at 99.9833. Standing ceiling defect, recorded as the incumbent's own value."
-  },
-  {
-   "probe_sha256": "e6f9096b8e0ebd97f1c36e40bb7e589e77a599bfdfcb7ff94dde89520018b650",
-   "reference": "peer_ssim2",
-   "label": "identity_probe_372_2026-09-04 -- ssim2's OWN values on the 38 ref==dist pairs",
-   "n_rows": 38,
-   "dial_min": 100.0,
-   "dial_median": 100.0,
-   "dial_max": 100.0,
-   "registered": "2026-09-04",
-   "active": true,
-   "note": "MEASURED, not assumed: zenmetrics batch --metric ssim2 (CPU SSIMULACRA2) over the 38 dial-grid references paired with themselves reads EXACTLY 100.000000 on all 38, min == median == max, one distinct value. So the mentor is inside the registered [97.5, 100] identity band at its ceiling, and since its grid max is 98.3766 < 100 it has ZERO cells out-scoring a perfect copy -- ssim2 passes C5 and C6, the two contract rows the shipped dial fails. The grid truth is ssim2_gpu and this is the CPU implementation; identity is 100 by SSIMULACRA2's construction, which is why the cross-implementation question does not arise at this point."
-  },
-  {
-   "probe_sha256": "31fc440381a38d188ca8f91f9b5799daa2a19b9565f5a355cb6dcad86ebc1655",
-   "reference": "peer_ssim2",
-   "label": "identity_probe_944pools_2026-09-05 -- ssim2's OWN values on the 39 ref==dist pairs",
-   "path": "/mnt/v/output/zensim/dfree-2026-09-05/probes/identity_probe_944pools_2026-09-05.parquet",
-   "n_rows": 39,
-   "dial_min": 100.0,
-   "dial_median": 100.0,
-   "dial_max": 100.0,
-   "built_from": "the 39 distinct reference images of the 944 dial grids (/mnt/v/output/zensim/dial-grid-pixels-2026-07-27/sources), each paired with ITSELF, extracted by the PINNED pools-era extractor /mnt/v/output/zensim/wlin7b-2026-08-30/v2_ab_extract_PREFIX_PINNED at ZENSIM_AB_MODE=foldapp2pools. That binary was verified BIT-EXACT against BOTH the r1b-pools944-2026-08-30 root (12 imazen26 rows x 944, max|delta| 0.0) and this grid (7 matched cells x 944, max|delta| 0.0) before the probe was cut.",
-   "measured_property": "*** NOT the zero vector. *** 286 of 944 slots are non-zero on at least one of the 39 rows, and they VARY BY IMAGE -- so at 944 width the identity dial is a PER-IMAGE quantity, not the scalar dial(0-vector) the 372 probe's own registry row records. The 39 rows are what makes that gated instead of assumed.",
-   "registered": "2026-09-05",
-   "active": true,
-   "note": "MEASURED, not assumed: 38 of the 39 values are the zenmetrics CPU SSIMULACRA2 readings already recorded for the 372 probe (100.000000 each); the 39th reference (9059ec43b26aa167_769x513, present on the 944 grids but not the 372 one) was measured here by the same tool and also reads 100.000000. min == median == max == 100.0."
-  }
- ]
 }

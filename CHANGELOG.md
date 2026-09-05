@@ -2,6 +2,62 @@
 
 ## [Unreleased]
 
+### Added — inversion attribution: a backwards rung BOTH references confirm is the ENCODER's, not the dial's (2026-09-05, user directive)
+
+- **USER DIRECTIVE, verbatim:** *"for inversions, we should choose say ssim2 and
+  butter and only flag true inversions where they agree, and we can then file or
+  update tracking issues on codecs for when they are nonmonotonic."*
+- **ONE owner for the rule** — `zensim_validate::dial_addressability::encoder_inversion`,
+  called by both the G-ADDR contract's `mono`/C1 input and `bake_verdict`'s
+  ladder-inversion census, so the gate and the census cannot drift apart. A
+  material backwards rung leaves the dial's count only where `Δssim2 ≤ −0.5` pt
+  **and** `Δbutteraugli-pnorm3 ≥ +0.05` distance.
+- **New flags:** `bake_verdict --inversion-truth single|agree` (default `agree`),
+  `--reference-truth <tsv>[:variant]`, `--encoder-inversion-census <tsv>` (the
+  bake-independent set — the codec bug-report evidence). `--full-json` gains
+  `dial.inversion_truth`; each zone cell gains `inv_encoder` / `inv_unknown`.
+  New sidecar emitter `scripts/build_reference_truth.py`.
+- **The butteraugli margin is not a noise margin — there is no noise.** A
+  from-scratch re-run of the ladder instrument's jpeg leg reproduces 2,574/2,574
+  cells at `max |Δ| = 0` on BOTH butteraugli variants (extending §8.0's gate,
+  which checked only bytes + ssim2). Derived instead by equivalence to ssim2's
+  own materiality: the p85 of |Δ| on FORWARD pairs whose Δssim2 ∈ [0.45, 0.55],
+  rounded UP to the next 0.05 — pnorm3 0.0481 → **0.05**, max 0.2189 → **0.25**.
+  Rounding up is conservative: a larger margin excuses FEWER rungs.
+- **pnorm3 is primary on measurement**: 94.30 % direction agreement with ssim2
+  over 9,411 pairs vs `max`'s 75.27 %; `peer_butteraugli_max` fails C1 (0.9286)
+  under both readings.
+- **"BOTH, not EITHER" is load-bearing**: of 105 ssim2-alone material inversions
+  butteraugli corroborates only 47; on D's ten worst, ssim2 alone confirmed 9/10
+  while both references confirm **5/10**.
+- **Per-codec encoder-confirmed non-monotonicity** (ladder instrument,
+  bake-independent): `avif-rav1e` 20/2,457 (14 refs, 13 also costing bytes),
+  `jpeg` 5/1,950 (3 refs, all costing bytes), `avif-svt` 1/1,599, **`jxl` 0 and
+  `webp` 0**. Issues filed: `imazen/zenjpeg#201`, `imazen/zenrav1e#42`,
+  `imazen/zenav1-svt#19`.
+- **Dial-attributed re-grade** (single → agree): shipped D 0.99310 → **0.99470**
+  (15 rungs), D-previous 0.99420 → 0.99540, A 0.98030 → 0.98120, B 0.97760 →
+  0.97870, `peer_ssim2` 0.98880 → **0.99160** (26). D's dial-attributed inversion
+  rate is 0.53 % against the mentor's 0.84 %.
+- **The board provably cannot move, and did not** — NOT-SHIPPABLE count identical,
+  all gates PASS. `mono_agree ≥ mono_single` always, `mono` gates exactly one row
+  (C1, a `≥` bar), and all 130 board G-ADDR cells already read C1 PASS. The
+  two-reference reading is additionally NOT MEASURABLE on the canonical-372 /
+  944-POOLS grids: their only butteraugli is the `max` variant (identified at
+  median relative error 0.0029 over 4,105 cells) and recovering pnorm3 would be a
+  decoder-era confound.
+- **`--inversion-truth single` is byte-identical to the pre-ruling binary**
+  (0 JSON differences on shipped D over the 9,593-row ladder instrument), so every
+  published pre-2026-09-05 inversion number stays reproducible; scoped in
+  `benchmarks/eval_annotations.json` as
+  `inversion-counts-single-reference-pre-2026-09-05`.
+- 7 new owner tests (three-outcome attribution incl. both single-reference
+  directions and a sub-margin case, unknown-is-not-an-exemption, pinned margins
+  with boundary cases, tag round-trip, and the C1 direction property through the
+  real gate). Record: `benchmarks/inversion_truth_2026-09-05.md`; gate doc §18.
+
+>>>>>>> conflict 1 of 1 ends
+
 ### Fixed — fast-class extraction kernel: two defects, both bit-exact (2026-09-05, kernel lane)
 
 - **`ComputeSet::self_blur_eligible` and the strip loop disagreed on

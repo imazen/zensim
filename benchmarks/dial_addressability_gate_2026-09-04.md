@@ -1564,3 +1564,58 @@ scripts/gaddr_board_regrade.py grade ... --ladder --floor-rule resolvable --floo
 # reproduce the PRE-ruling grading, row-for-row
 target/release/bake_verdict ... --floor-rule distinct --gaddr-value-pins hard
 ```
+
+---
+
+## 18. USER RULING 2026-09-05 (third) — C1 counts DIAL inversions only; a rung both references confirm is the ENCODER's
+
+**Verbatim:** *"for inversions, we should choose say ssim2 and butter and only flag true
+inversions where they agree, and we can then file or update tracking issues on codecs for when
+they are nonmonotonic."*
+
+Full record + derivations: [`benchmarks/inversion_truth_2026-09-05.md`](inversion_truth_2026-09-05.md).
+Rule owner: `zensim_validate::dial_addressability::encoder_inversion`. Registry: the
+`inversion_truth` section of `benchmarks/dial_addressability_floor_2026-09-04.json`.
+
+**What C1 now measures.** `mono` is still `1 − material-inversion rate`, but a material
+backwards rung is charged to the ENCODER — and leaves that rate — where BOTH reference metrics
+independently call the higher setting worse: **ssim2 ≤ −0.5 points AND butteraugli-pnorm3 ≥
++0.05 distance**. `bake_verdict --inversion-truth single` reproduces the pre-ruling reading and
+is **byte-identical to a pristine `main@origin` binary** (0 JSON differences on shipped D over
+the 9,593-row ladder instrument).
+
+**C1 can only move UP, and it moved nothing.** `mono_agree = 1 − dial/pairs` and
+`mono_single = 1 − (dial+encoder)/pairs`, so `mono_agree ≥ mono_single` always; `mono` gates
+exactly one row (C1, `dial_addressability.rs:2199`, a `≥` bar); and **all 130 board fullevals
+carrying a G-ADDR block already read C1 PASS**. So no C1 row can flip in either direction and
+the **NOT-SHIPPABLE badge count is unchanged at 47**. Gate:
+`dial_addressability::tests::encoder_attribution_moves_c1_up_and_never_down`.
+
+**Measured C1 inputs on the ladder instrument** (`4c3874a78c469e15…`, 9,593 rows):
+
+| arm | `single` | `agree` | rungs re-attributed |
+|---|--:|--:|--:|
+| **Profile D — SHIPPED** | 0.99310 | **0.99470** | 15 |
+| Profile D — previous (08-31) | 0.99420 | 0.99540 | 12 |
+| Profile A | 0.98030 | 0.98120 | 8 |
+| Profile B | 0.97760 | 0.97870 | 11 |
+| **`peer_ssim2`** | 0.98880 | **0.99160** | 26 |
+| `peer_butteraugli_pnorm3` | 0.99970 | 0.99980 | 1 |
+| `peer_butteraugli_max` | **0.92650 ✗** | **0.92860 ✗** | 20 |
+
+Shipped D's DIAL-attributed inversion rate is **0.53 %** against the mentor's **0.84 %** — D is
+the more monotone of the two on this instrument. `peer_butteraugli_max` fails C1 under both
+readings, which is a second argument for pnorm3 as the primary variant (94.30 % direction
+agreement with ssim2 over 9,411 pairs, against `max`'s 75.27 %).
+
+**NOT MEASURABLE where the references are not both on disk, and that is enforced.** The
+canonical 372 and 944 POOLS grids carry ssim2 but their only butteraugli is the `max` variant
+(identified empirically at median relative error 0.0029 over 4,105 cells against
+`score_butteraugli_max`, vs 0.58 for pnorm3). A requested `agree` with no usable reference table
+degrades to `single` **loudly**, and a pair with no reference row stays charged to the DIAL and
+is counted in `dial.inversion_truth.n_attribution_unknown` — unknown is never an exemption.
+
+**Codec tracking issues filed from the bake-independent census** (`bake_verdict
+--encoder-inversion-census`): `imazen/zenjpeg#201` (5 pairs, all costing bytes),
+`imazen/zenrav1e#42` (20 pairs / 14 refs, 13 costing bytes), `imazen/zenav1-svt#19` (1 pair,
+plus the 36.4 % setting-saturation observation). jxl and webp are clean — zero confirmed.

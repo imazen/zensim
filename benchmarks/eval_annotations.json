@@ -2290,6 +2290,23 @@
       "evidence": "benchmarks/dial_addressability_gate_2026-09-04.md section 17; benchmarks/default_proposals_2026-09-05.md; benchmarks/ladder_floor_resolution_2026-09-05.md sections 2-4 and 8.3 (the measurement that minted the window: jpeg/avif-rav1e per-step ssim2 motion is 0.43/1.03 median, and 78%/67% of the mentor's own bottom-triplet failures are genuine inversions). Reversibility PROVEN against a pristine main@origin (65267020) binary: `--floor-rule distinct --gaddr-value-pins hard` reproduces its grading row-for-row on 4 board cells spanning all four instrument classes (all 14 checks rows, both tier verdicts, every measured value; 0 differences).",
       "fix_path": "Nothing to fix - the superseded numbers are correct FOR THEIR ERA and stay reachable. Reproduce them with `--floor-rule distinct --gaddr-value-pins hard`, or by pointing negative_tail_bars.active back at `floor-representability-2026-09-05`. Do not negate, rescale or compare across the flip.",
       "date": "2026-09-05"
+    },
+    {
+      "id": "inversion-counts-single-reference-pre-2026-09-05",
+      "kind": "annotated",
+      "fields": [
+        "dial.mono_pct",
+        "dial.zones",
+        "dial.per_codec",
+        "dial.addressability"
+      ],
+      "scope": {
+        "manual": "EVERY published dial monotonicity number, per-codec inversion count, ladder-zone census and `ladders_with_inv` / `ladders_ends_backwards` statement made BEFORE 2026-09-05 - the whole board, benchmarks/failure_profiles_2026-08-31.md section 4, benchmarks/d_inversions_2026-09-05.md, benchmarks/ladder_instrument_2026-09-05.md and the G-ADDR gate doc's C1 rows. Those are the `single` reading: every material backwards rung was charged to the DIAL, including the rungs where the CODEC itself ran backwards. Since 2026-09-05 the operative reading is `agree`, which charges a rung to the ENCODER where ssim2 AND butteraugli-pnorm3 independently call the higher setting worse. The two are not the same quantity and must not be compared or averaged."
+      },
+      "reason": "USER DIRECTIVE 2026-09-05, verbatim: \"for inversions, we should choose say ssim2 and butter and only flag true inversions where they agree, and we can then file or update tracking issues on codecs for when they are nonmonotonic.\" A dial ladder walks a codec's own settings, so a backwards rung has two possible causes and the pre-ruling instrument could not tell them apart. MEASURED size of the difference on the 2026-09-05 ladder instrument: shipped Profile D reads mono 0.99310 under `single` and 0.99470 under `agree` (15 rungs re-attributed); peer_ssim2 0.98880 -> 0.99160 (26); Profile A 0.98030 -> 0.98120 (8); Profile B 0.97760 -> 0.97870 (11).",
+      "evidence": "benchmarks/inversion_truth_2026-09-05.md; rule + margins + derivation in zensim-validate/src/dial_addressability.rs (`encoder_inversion`, `ReferenceTruth`) and in the `inversion_truth` section of benchmarks/dial_addressability_floor_2026-09-04.json. NEGATIVE CONTROL: `bake_verdict --inversion-truth single` is byte-identical to the pre-ruling binary built from main@origin - 0 JSON differences on shipped D over the 9,593-row ladder instrument, so every pre-ruling number stays exactly reproducible.",
+      "fix_path": "Nothing to fix - the `single` numbers are correct FOR THEIR READING. Reproduce them with `bake_verdict --inversion-truth single`. The board's own cells are NOT re-graded because the two-reference reading is NOT MEASURABLE on their grids: the only butteraugli on disk for the canonical 372 and 944 POOLS grids is the `max` variant (identified empirically at median relative error 0.0029 over 4,105 cells), the PRIMARY pnorm3 variant does not exist for those cells, and re-scoring it is not honest because the pixels that produced them are a different decoder/encoder generation. Those cells therefore keep the `single` reading with the loud NOT MEASURABLE note. The board's NOT SHIPPABLE badge is UNAFFECTED and provably so: C1 is mono's only gate consumer and is a `>=` bar, the ruling can only RAISE mono, and all 130 board cells carrying a G-ADDR block already read C1 PASS.",
+      "date": "2026-09-05"
     }
   ]
 }

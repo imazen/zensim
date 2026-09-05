@@ -1,5 +1,18 @@
 # D-vs-ssim2 ladder inversions — census on both instruments, and the ten worst (2026-09-05)
 
+> **⛔ ERA NOTE (added 2026-09-05): every inversion count, `mono_pct` and ladder-zone
+> figure below is the `single` reading — every material backwards rung charged to the
+> DIAL, including the rungs where the CODEC itself ran backwards.** Since the
+> 2026-09-05 user ruling the operative reading is `agree`: a rung is charged to the
+> ENCODER where ssim2 (≤ −0.5 pt) AND butteraugli-pnorm3 (≥ +0.05 distance) both call
+> the higher setting worse. The two are different quantities — do not compare or
+> average them. Reproduce these numbers exactly with
+> `bake_verdict --inversion-truth single` (proven byte-identical to the pre-ruling
+> binary). Rule + margins + the per-codec encoder table:
+> [`inversion_truth_2026-09-05.md`](inversion_truth_2026-09-05.md); registry scope
+> `inversion-counts-single-reference-pre-2026-09-05`.
+
+
 **Report-only lane.** No rule, registry, default, weight, or spline changed. `zensim/src/profile.rs`
 and `zensim/weights/` were not opened for writing. This answers the user's read of the fair
 gauntlet's `d_id100_negrich@did100lane` cell ("it says inversions and corruptions are a problem")
