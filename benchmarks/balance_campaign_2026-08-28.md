@@ -7624,3 +7624,59 @@ at the owner; best-of-k inflation survives.** (`34b4899f`)
   from a tree lacking `d3a948ca` (dropped from `origin/main` by a sideways push), so they
   currently carry **0 NOT-SHIPPABLE badges**. Derived artifacts, fully regenerable; both
   gates PASS on the files as they stand. Must be regenerated after the `d3a948ca` recovery.
+
+# ROUND row — replication lane phase 2 (`claude-replicate`), 2026-09-05
+
+Paste into `benchmarks/balance_campaign_2026-08-28.md`. Phase 1 is ROUND 82 (`fa720cf3`).
+
+---
+
+**ROUND 83 — replicating the leaders moved them DOWN, and ORDER beats INIT on CID22.**
+17/17 fits, 0 nonzero rc, 2 h 11 m serial. Record:
+`benchmarks/replication_wave_2026-09-05.md`. Discussion set `2026-09-05-replication` (23 bakes).
+
+- **Controls closed first.** CTL-A (replay of `LSTAR_s4021` from its embedded argv) reproduces
+  the stored model **exactly** — 0 of 12 corpora differ in `srocc_signed`, composite
+  `0.8648336661364353` to 16 digits. CTL-B proves `--seed X` ≡ `--init-seed X --sample-seed X`
+  (same 0/12), which is what licenses pooling the legacy diagonal into both arms.
+- **What moved at the top.** With the arms joined, `LSTAR` goes k=3 → **k=7** and k-mean
+  0.8615 → **0.8564** (rank **1 → 8**); `LSTAR3` k-mean 0.8604 → **0.8568** (rank 2 → 6);
+  `W11J` 0.8577 → **0.8593** (rank 7 → **3**). New top three — `A5_r4` (k=2, 0.85945),
+  `W10L9PH` (k=6, 0.85935), `W11J` (k=7, 0.85929) — span **0.0002**, still indistinguishable.
+  Best-of-k inflation **rose** with honest draws: median +0.0061 → **+0.0070**, max +0.0223;
+  median k-spread 0.0141 → **0.0160**. That is what selection-on-noise looks like.
+- **ORDER vs INIT.** **CID22: ORDER > INIT on 3 of 3 recipes** (0.0193/0.0111, 0.0135/0.0019,
+  0.0143/0.0020) and it is the ONLY axis clearing the noise floor — the order spread is 2–7×
+  the per-model bootstrap CI half-width (~0.0067) while the init spread sits *inside* it on two
+  of three. Confirms the subset study's n=3 pilot on real leaders at k=3/arm.
+  **The pilot's KonJND/AIC-3 flip does NOT survive**: 5 of 6 cells are UNRESOLVED (CI half-width
+  0.073–0.075 KonJND, 0.034 AIC-3, both larger than either spread) and the sixth separates the
+  arms by 0.0004. Honest statement: not resolved at k=3.
+- **`--select --seed-group` picks `W10L9_s4003_packed`, k=1, UNREPLICATED** (8.00/8 floors).
+  The rule's PRIMARY key is floor count, so a single draw can still top it; `--seed-group` makes
+  k visible and ranks by the mean, it does not prevent this. Worth a look.
+- **Four owner defects, all found by actually replaying a recipe, all fixed + gated** (commits
+  `34b4899f`, `31102338`, `3615e1fd`): (1) `--dump-checkpoints-dir` in the recipe key,
+  (2) the repro never recorded the split seeds (would have reported k=1 for the whole wave),
+  (3) `argv[0]`'s build path in the recipe key — 32 distinct values on the board, so a replay
+  from a sibling workspace could never group with its own diagonal, (4) a seedless cell counted
+  as a draw, and `init == sample` counted as a second draw. Same shape every time: something
+  that is not the recipe was part of its identity, or a non-draw was counted as a draw.
+  Cross-owner parity gate PASS (450 fullevals); 10/10 `seed_*` tests, each with a negative control.
+- **A3b** (the one genuinely-k=1 fair-board recipe) trains and scores fine at its **native**
+  era-2×r4 root (CID22 mean 0.8855, order spread 0.0100 clearing its 0.0069 CI) but is **not on
+  the board**: `run_full_eval.sh` hard-codes `--features-root` per regime, so a non-default-root
+  bake has no board cell. Named gap — a missing row, not a wrong number.
+- **Coverage stays reported, never explanatory** (subset study `92caf565` falsified it); the live
+  axis is ORDER. `--stratified-bands` enabled nowhere.
+- Boards regenerated on the re-landed G-ADDR code and gated: fair **9,258,026 B** (113/450),
+  all-rows **22,091,701 B** (450/450), both `gauntlet_gates.sh` PASS incl. strict-JSON 450/450.
+
+## ROUND 84 — 2026-09-05: RAM-backed /tmp banned everywhere (user); feature-set NAMING mandated (user); selection rule tightening
+tmp.mount masked on the dev box (disk-backed at next boot) and r7900x; tower zen* containers get TMPDIR=/scratch on
+the array; fleet-entrypoint refuses tmpfs/unset TMPDIR (exit 3, tested). User: "we need a better way to identify
+feature-sets than by count" → registered id = compute set + layout + era + slot-hash on zenanalyze-api's name@hash8
+substrate, aliases for every legacy count, bake_verdict warns/refuses on mismatch (lane live). Replication wave
+showed `--select --seed-group` still picks a k=1 cell (floor-count PRIMARY) → replication floor (k≥2) amendment +
+native-root board rows for era-2×radius-4 bakes (lane live). D+free arms building (the free set was never in a
+shipped profile — extraction was free, consumption never wired).
