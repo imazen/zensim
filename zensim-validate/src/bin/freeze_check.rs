@@ -1426,6 +1426,14 @@ fn seed_identity(v: &serde_json::Value) -> Option<String> {
     let r = v.get("repro")?;
     let g = |k: &str| r.get(k).and_then(serde_json::Value::as_u64);
     match (g("init_seed"), g("sample_seed")) {
+        // i == p is the SAME DRAW as the legacy `--seed i`, not a second one:
+        // the trainer maps `--seed X` to init = sample = X
+        // (`zensim_mlp_train.rs` seed plumbing), and CTL-A vs CTL-B measured it
+        // — 0 of 12 corpora differ and the composite matches to 16 digits.
+        // Without this, a control pair inflates its group's k by one, which is
+        // the very quantity a seed group exists to report.
+        // (2026-09-05, `benchmarks/replication_wave_2026-09-05.md`)
+        (Some(i), Some(p)) if i == p => Some(i.to_string()),
         (Some(i), Some(p)) => Some(format!("{i}/{p}")),
         _ => g("seed").map(|x| x.to_string()),
     }
@@ -3745,6 +3753,17 @@ mod tests {
         assert_eq!(
             seed_identity(&json!({"repro": {"init_seed": 11, "seed": 3}})).as_deref(),
             Some("3")
+        );
+        // init == sample is the SAME draw as the legacy `--seed`, measured:
+        // CTL-A vs CTL-B differ on 0 of 12 corpora.
+        assert_eq!(
+            seed_identity(&json!({"repro": {"init_seed": 4021, "sample_seed": 4021}})).as_deref(),
+            Some("4021")
+        );
+        assert_eq!(
+            seed_identity(&json!({"repro": {"init_seed": 4021, "sample_seed": 4021}})),
+            seed_identity(&json!({"repro": {"seed": 4021}})),
+            "a split run at one value must collapse against its legacy twin"
         );
         assert_eq!(seed_identity(&json!({"repro": {}})), None);
         assert_eq!(seed_identity(&json!({})), None);

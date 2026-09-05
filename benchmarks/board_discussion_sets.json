@@ -9,7 +9,7 @@
   {
    "id": "2026-09-04-b-imazen26-anchor",
    "date": "2026-09-04",
-   "label": "2026-09-04 · B dial re-anchor: imazen-26 vs safesyn, ERA vs CONTENT (proposal, no default flipped)",
+   "label": "2026-09-04 \u00b7 B dial re-anchor: imazen-26 vs safesyn, ERA vs CONTENT (proposal, no default flipped)",
    "bakes": [
     "B_oldanchor_full@im26lane",
     "B_safesyn_curera@im26lane",
@@ -20,12 +20,12 @@
     "B_konim26@im26lane",
     "B_konim26_anchim26@im26lane"
    ],
-   "note": "Four dial arms over IDENTICAL weights/scaler/winsor — only the output spline differs, so SROCC is identical to 5 dp on all five corpora by construction; read the DIAL columns, not the rank ones. oldanchor_full = the procedure floor (+0.031 CID22 vs shipped, and sha 62d8274c reproduces the b_reextract lane's armN independently). safesyn_curera = the SAME 2,000 shipped-anchor rows re-decoded + re-extracted 2026-09-04 with targets unchanged, so (curera - oldanchor_full) is the ERA term with content EXACTLY fixed: +3.892 CID22 / +4.798 KonJND / +3.864 AIC-3. im26anchor swaps content on top, adding only -0.395 / -0.989 / -0.233 — era is 4-10x content, which overturns b_reextract §9d's confounded +-6-8pt content estimate. im26top is the extend-top-anchor-swap-only arm and moves the human corpora by 0.000 BY DESIGN (extend-top keeps in-distribution knots verbatim; CID22 tops out at 90.41, below the extension domain). NOT A SHIP CANDIDATE: im26anchor's dial reach falls 96.85 -> 85.74. im26_topdense is the reach-preserving anchor variant (reach 85.74 -> 88.96, p95 98.44 -> 99.12, but p5 unmoved -- the floor is shared-anchor's, not extend-top's). The FOUR arms above all share identical WEIGHTS, so their rank rows are identical by construction. The last three do NOT: konctl/konim26/konim26_anchim26 re-fit B's kon head with safesyn replaced by a mass-matched imazen-26 leg, and that is a MEASURED NEGATIVE -- CID22 0.88212 -> 0.85100 and AIC-3 -0.00321 (both genuine holdouts DOWN) while TID +0.0157 and KADID +0.0179 (both kon-head training corpora) go up; M3a 0.6023 -> 0.5683 and product_composite 0.8286 -> 0.8214. konctl is byte-identical to the b_reextract lane's armC (f08b3c80). Mass-matching is not diversity-matching: safesyn spans 1,495 refs and six codec families, the imazen-26 leg 212 origins and four. Record: benchmarks/imazen26_anchor_2026-09-04.md."
+   "note": "Four dial arms over IDENTICAL weights/scaler/winsor \u2014 only the output spline differs, so SROCC is identical to 5 dp on all five corpora by construction; read the DIAL columns, not the rank ones. oldanchor_full = the procedure floor (+0.031 CID22 vs shipped, and sha 62d8274c reproduces the b_reextract lane's armN independently). safesyn_curera = the SAME 2,000 shipped-anchor rows re-decoded + re-extracted 2026-09-04 with targets unchanged, so (curera - oldanchor_full) is the ERA term with content EXACTLY fixed: +3.892 CID22 / +4.798 KonJND / +3.864 AIC-3. im26anchor swaps content on top, adding only -0.395 / -0.989 / -0.233 \u2014 era is 4-10x content, which overturns b_reextract \u00a79d's confounded +-6-8pt content estimate. im26top is the extend-top-anchor-swap-only arm and moves the human corpora by 0.000 BY DESIGN (extend-top keeps in-distribution knots verbatim; CID22 tops out at 90.41, below the extension domain). NOT A SHIP CANDIDATE: im26anchor's dial reach falls 96.85 -> 85.74. im26_topdense is the reach-preserving anchor variant (reach 85.74 -> 88.96, p95 98.44 -> 99.12, but p5 unmoved -- the floor is shared-anchor's, not extend-top's). The FOUR arms above all share identical WEIGHTS, so their rank rows are identical by construction. The last three do NOT: konctl/konim26/konim26_anchim26 re-fit B's kon head with safesyn replaced by a mass-matched imazen-26 leg, and that is a MEASURED NEGATIVE -- CID22 0.88212 -> 0.85100 and AIC-3 -0.00321 (both genuine holdouts DOWN) while TID +0.0157 and KADID +0.0179 (both kon-head training corpora) go up; M3a 0.6023 -> 0.5683 and product_composite 0.8286 -> 0.8214. konctl is byte-identical to the b_reextract lane's armC (f08b3c80). Mass-matching is not diversity-matching: safesyn spans 1,495 refs and six codec families, the imazen-26 leg 212 origins and four. Record: benchmarks/imazen26_anchor_2026-09-04.md."
   },
   {
    "id": "2026-08-29-w12u3-jwfold",
    "date": "2026-08-29",
-   "label": "2026-08-29 · W12-U3 jwfold (structure falsified) + avif matrix era",
+   "label": "2026-08-29 \u00b7 W12-U3 jwfold (structure falsified) + avif matrix era",
    "bakes": [
     "LSTAR3_s4041_packed",
     "LSTAR3_s4042_packed",
@@ -38,7 +38,7 @@
   {
    "id": "2026-08-29-w12u2-jw05",
    "date": "2026-08-29",
-   "label": "2026-08-29 · W12-U2 jw05 verdict (weight lever falsified)",
+   "label": "2026-08-29 \u00b7 W12-U2 jw05 verdict (weight lever falsified)",
    "bakes": [
     "LSTAR2_s4033_packed",
     "lstar2_4033_e080",
@@ -52,7 +52,7 @@
   {
    "id": "unified-track",
    "date": "2026-08-29",
-   "label": "unified track · lodestar generations (accumulating)",
+   "label": "unified track \u00b7 lodestar generations (accumulating)",
    "bakes": [
     "LSTAR_s4021_packed",
     "lstar4021_e080",
@@ -66,7 +66,7 @@
   {
    "id": "2026-08-29-lodestar-verdict",
    "date": "2026-08-29",
-   "label": "2026-08-29 · lodestar W12-U verdict (jw lever + kadid:S wall)",
+   "label": "2026-08-29 \u00b7 lodestar W12-U verdict (jw lever + kadid:S wall)",
    "bakes": [
     "LSTAR_s4021_packed",
     "lstar4021_e080",
@@ -81,7 +81,7 @@
   {
    "id": "2026-08-28-pair-freezes-w11",
    "date": "2026-08-28",
-   "label": "2026-08-28 · freezes + steering pair + W11 + gate audit",
+   "label": "2026-08-28 \u00b7 freezes + steering pair + W11 + gate audit",
    "bakes": [
     "W10L9PH_s4004_packed",
     "PH_s4004_e060",
@@ -124,7 +124,7 @@
   {
    "id": "2026-08-31-era2-fast-profile",
    "date": "2026-08-31",
-   "label": "2026-08-31 · era-2 flip (tiling + fixed-lane accumulation default-on) + fast-profile subset + ADD156 ship audit",
+   "label": "2026-08-31 \u00b7 era-2 flip (tiling + fixed-lane accumulation default-on) + fast-profile subset + ADD156 ship audit",
    "bakes": [
     "ADD156_safesyn_only_raw_lasso",
     "ADD156_safesyn_only_raw_lasso@cur372",
@@ -136,7 +136,7 @@
   {
    "id": "2026-09-01-a4bkon-konjnd-closure",
    "date": "2026-09-01",
-   "label": "2026-09-01 · a4bkon KonJND-closure attempt (falsified) + exam APPENDIX C verdict",
+   "label": "2026-09-01 \u00b7 a4bkon KonJND-closure attempt (falsified) + exam APPENDIX C verdict",
    "bakes": [
     "A4b_s4004",
     "a4bkon_K1_w1.8_s4004",
@@ -148,12 +148,12 @@
     "a4bkon_K3_s4004",
     "a4bkon_K3_s4005"
    ],
-   "note": "K1 (kon-mass sweep, w1.8/2.4), K2 (ttbig mixed-teacher leg) and K3 (combined) all fail to close A4b's KonJND-only W1 gap (wave_r4_2026-09-01.md §24): K1/K3 make KonJND WORSE (-0.077 to -0.086 vs A4b), K2 is a statistical wash (-0.001) but costs composite + a within-image CID22 axis A4b itself passes. A4b/K4 (=A4b_s4004 here) remains the best 156+free profile produced, composite 0.8664. W4 (AMENDMENT B2, <=1.25x add156_156basic) directly measured: clean PASS at 1T every size; 8T PASSES 576/2304 but FAILS 1152 (1.4375-1.4583x, repeatable). Closing verdict: ssim2_replacement_bar_2026-08-31.md APPENDIX C."
+   "note": "K1 (kon-mass sweep, w1.8/2.4), K2 (ttbig mixed-teacher leg) and K3 (combined) all fail to close A4b's KonJND-only W1 gap (wave_r4_2026-09-01.md \u00a724): K1/K3 make KonJND WORSE (-0.077 to -0.086 vs A4b), K2 is a statistical wash (-0.001) but costs composite + a within-image CID22 axis A4b itself passes. A4b/K4 (=A4b_s4004 here) remains the best 156+free profile produced, composite 0.8664. W4 (AMENDMENT B2, <=1.25x add156_156basic) directly measured: clean PASS at 1T every size; 8T PASSES 576/2304 but FAILS 1152 (1.4375-1.4583x, repeatable). Closing verdict: ssim2_replacement_bar_2026-08-31.md APPENDIX C."
   },
   {
    "id": "2026-09-01-wave-r4",
    "date": "2026-09-01",
-   "label": "2026-09-01 · wave-r4 era-2×radius-4 retrain — nothing passes W1–W7 (14 arms promoted)",
+   "label": "2026-09-01 \u00b7 wave-r4 era-2\u00d7radius-4 retrain \u2014 nothing passes W1\u2013W7 (14 arms promoted)",
    "bakes": [
     "A1foldapp2_r4_s4004",
     "A1foldapp2_r4_s4005",
@@ -174,18 +174,49 @@
     "ADD156_safesyn_only_raw_lasso",
     "peer_ssim2"
    ],
-   "note": "wave_r4_2026-09-01.md §19 closing exam: NOTHING in this wave passes W1–W7 against peer_ssim2, matching the exam's own pre-registered expectation. 16 fullevals existed on disk; 14 promoted here (A4b_s4004 already on the board, sha256-identical, promoted earlier this session as K4 in the a4bkon lane -- not re-promoted; A1_r4_s4004 SKIPPED -- it is the pre-fix wrong-regime diagnostic run §7.3/§7.6 explicitly says is 'not cited' (best_val 0.3058, dial-mono 0.9271 below the 0.93 gate, silently fell back to the era-1 features root) and is kept on disk only as regime-mismatch evidence, not a candidate arm; the doc's real A1 flagship citation is A1foldapp2_r4_s4004/s4005, both promoted). Two honest rankings: A5 s4005 (944, kon w=2.4) is the cleanest W1 profile in the whole wave (its only miss is the same raw-delta KonJND edge every 944-class arm shows, Δ−0.0195, CID22 flat); A4b (156+free, distill target, teacher HYA_w084) is the cleanest in the 156-class-ish family, matching A1foldapp2's own single-axis KonJND-only failure shape at roughly a fifth of the 944-class extraction cost, and posts the highest product composite of any arm scored this wave (0.8664, beating the 944 teacher's own 0.8601). A6 (196k safesyn leg, §21) is the wave's biggest single lever: +0.0617 CID22 over its 111k control (A2) at λ=0.002 and +0.023 at λ=0.3, cross-checking the hybrid lane's independent +0.057 citation within 0.005. The free-set (156+free) family wins on every axis over its 156-only control at zero extra training-data cost: A2b vs A2ctrl at matched λ=0.3, CID22 +0.031, KonJND +0.071, CSIQ +0.025, hfnl_cid22band +0.05 pooled (§14.2) -- though both still fail W6's 0.85 nonphoto floor, the one axis where architecture class (additive vs MLP) decides regardless of slice width. W4: every 944-class arm (A1foldapp2, A5) fails structurally at both 1T and 8T (worse threaded, 2.1–4.1x over the 1.25x bar); every 156-class arm (A2/A2ctrl/A3/A4/A6) passes by architecture-class construction; the two free-set MLPs (A3b/A4b) pass evidence-backed (~5–7% over the add156_156basic walk, not a direct bench-measured arm) rather than automatically. W7 (default-build reachability) fails for every arm in this wave -- none is wired into a ZensimProfile variant; that remains a follow-up product decision, out of scope here. Two data-integrity bugs this wave found and fixed in-flight, both flagged in §7: the wave root's regime didn't match the flagship recipe's training regime (foldapp2pools vs foldapp2, §7.3), and kadid_pairs_ab.tsv still carries the pre-2026-08-05 INVERTED KADID target so any fresh extraction re-introduces the bug until the TSV itself is fixed at its owner (§7.4)."
+   "note": "wave_r4_2026-09-01.md \u00a719 closing exam: NOTHING in this wave passes W1\u2013W7 against peer_ssim2, matching the exam's own pre-registered expectation. 16 fullevals existed on disk; 14 promoted here (A4b_s4004 already on the board, sha256-identical, promoted earlier this session as K4 in the a4bkon lane -- not re-promoted; A1_r4_s4004 SKIPPED -- it is the pre-fix wrong-regime diagnostic run \u00a77.3/\u00a77.6 explicitly says is 'not cited' (best_val 0.3058, dial-mono 0.9271 below the 0.93 gate, silently fell back to the era-1 features root) and is kept on disk only as regime-mismatch evidence, not a candidate arm; the doc's real A1 flagship citation is A1foldapp2_r4_s4004/s4005, both promoted). Two honest rankings: A5 s4005 (944, kon w=2.4) is the cleanest W1 profile in the whole wave (its only miss is the same raw-delta KonJND edge every 944-class arm shows, \u0394\u22120.0195, CID22 flat); A4b (156+free, distill target, teacher HYA_w084) is the cleanest in the 156-class-ish family, matching A1foldapp2's own single-axis KonJND-only failure shape at roughly a fifth of the 944-class extraction cost, and posts the highest product composite of any arm scored this wave (0.8664, beating the 944 teacher's own 0.8601). A6 (196k safesyn leg, \u00a721) is the wave's biggest single lever: +0.0617 CID22 over its 111k control (A2) at \u03bb=0.002 and +0.023 at \u03bb=0.3, cross-checking the hybrid lane's independent +0.057 citation within 0.005. The free-set (156+free) family wins on every axis over its 156-only control at zero extra training-data cost: A2b vs A2ctrl at matched \u03bb=0.3, CID22 +0.031, KonJND +0.071, CSIQ +0.025, hfnl_cid22band +0.05 pooled (\u00a714.2) -- though both still fail W6's 0.85 nonphoto floor, the one axis where architecture class (additive vs MLP) decides regardless of slice width. W4: every 944-class arm (A1foldapp2, A5) fails structurally at both 1T and 8T (worse threaded, 2.1\u20134.1x over the 1.25x bar); every 156-class arm (A2/A2ctrl/A3/A4/A6) passes by architecture-class construction; the two free-set MLPs (A3b/A4b) pass evidence-backed (~5\u20137% over the add156_156basic walk, not a direct bench-measured arm) rather than automatically. W7 (default-build reachability) fails for every arm in this wave -- none is wired into a ZensimProfile variant; that remains a follow-up product decision, out of scope here. Two data-integrity bugs this wave found and fixed in-flight, both flagged in \u00a77: the wave root's regime didn't match the flagship recipe's training regime (foldapp2pools vs foldapp2, \u00a77.3), and kadid_pairs_ab.tsv still carries the pre-2026-08-05 INVERTED KADID target so any fresh extraction re-introduces the bug until the TSV itself is fixed at its owner (\u00a77.4)."
   },
   {
    "id": "2026-09-04-d-id100",
    "date": "2026-09-04",
-   "label": "2026-09-04 · D-id100: Profile D with the identity pinned at 100 (proposal, no default flipped)",
+   "label": "2026-09-04 \u00b7 D-id100: Profile D with the identity pinned at 100 (proposal, no default flipped)",
    "bakes": [
     "d_id100@did100lane",
     "d_id100_negrich@did100lane",
     "D_shipped_ctl@did100lane"
    ],
-   "note": "Three cells over BYTE-IDENTICAL weights — stripping the spline and the repro block from all three yields sha256 330d8c09…, the shipped Profile D fit. Only the output-calibration spline differs, so every rank column is the same number by construction (paired bootstrap ΔSROCC 95% CI = [0,0] on cid22/konjnd/aic3/csiq/nonphoto/imazen26; ≤8e-6 on tid/live/kadid, and ZERO pair-order flips on all 14 corpora — the residue is tie structure). READ THE DIAL COLUMNS. D_shipped_ctl is the byte-exact reproduction of the shipped d_sdr_add156_dense_dial bake (sha 4481c2d4…), included as the era-matched reference read in the same run. d_id100 adds 21 identity rows (feature 0⃗ ↦ 100) to the spline anchor; d_id100_negrich additionally reads the anchor's OWN unclamped ssim2_gpu column instead of target_score = max(ssim2,0). G-ADDR (peer_ssim2 bars): shipped D CONTRACT 5/6 + REGRESSION 2/9 → d_id100 6/6 + 4/9 → d_id100_negrich 6/6 + 7/9. Record: benchmarks/d_id100_2026-09-04.md."
+   "note": "Three cells over BYTE-IDENTICAL weights \u2014 stripping the spline and the repro block from all three yields sha256 330d8c09\u2026, the shipped Profile D fit. Only the output-calibration spline differs, so every rank column is the same number by construction (paired bootstrap \u0394SROCC 95% CI = [0,0] on cid22/konjnd/aic3/csiq/nonphoto/imazen26; \u22648e-6 on tid/live/kadid, and ZERO pair-order flips on all 14 corpora \u2014 the residue is tie structure). READ THE DIAL COLUMNS. D_shipped_ctl is the byte-exact reproduction of the shipped d_sdr_add156_dense_dial bake (sha 4481c2d4\u2026), included as the era-matched reference read in the same run. d_id100 adds 21 identity rows (feature 0\u20d7 \u21a6 100) to the spline anchor; d_id100_negrich additionally reads the anchor's OWN unclamped ssim2_gpu column instead of target_score = max(ssim2,0). G-ADDR (peer_ssim2 bars): shipped D CONTRACT 5/6 + REGRESSION 2/9 \u2192 d_id100 6/6 + 4/9 \u2192 d_id100_negrich 6/6 + 7/9. Record: benchmarks/d_id100_2026-09-04.md."
+  },
+  {
+   "id": "2026-09-05-replication",
+   "date": "2026-09-05",
+   "label": "2026-09-05 \u00b7 replication wave: ORDER-vs-INIT arms on the corrected top recipes (LSTAR / LSTAR3 / W11J) + their diagonals",
+   "bakes": [
+    "CTL_A_LSTAR_s4021_legacy_packed",
+    "CTL_B_LSTAR_s4021_split_packed",
+    "LSTAR3__I__i5011_p4041_packed",
+    "LSTAR3__I__i5012_p4041_packed",
+    "LSTAR3__S__i4041_p5001_packed",
+    "LSTAR3__S__i4041_p5002_packed",
+    "LSTAR3_s4041_packed",
+    "LSTAR3_s4042_packed",
+    "LSTAR3_s4043_packed",
+    "LSTAR__I__i5011_p4021_packed",
+    "LSTAR__I__i5012_p4021_packed",
+    "LSTAR__S__i4021_p5001_packed",
+    "LSTAR__S__i4021_p5002_packed",
+    "LSTAR_s4021_packed",
+    "LSTAR_s4022_packed",
+    "LSTAR_s4023_packed",
+    "W11J__I__i5011_p4013_packed",
+    "W11J__I__i5012_p4013_packed",
+    "W11J__S__i4013_p5001_packed",
+    "W11J__S__i4013_p5002_packed",
+    "W11J_s4012_packed",
+    "W11J_s4013_packed",
+    "W11J_s4014_packed"
+   ],
+   "note": "Arm S = sample/ORDER varies at fixed init; arm I = init varies at fixed order; the legacy --seed draws on the board are the confounded DIAGONAL and belong to both arms. CTL_A/CTL_B are the equivalence controls (legacy --seed 4021 vs --init-seed 4021 --sample-seed 4021): 0 of 12 corpora differ and the composite matches to 16 digits, which is why the diagonal may be pooled. READ A GROUP DOWN \u2014 k-mean and spread, never best-of-k; best-of-k inflates the composite by a median +0.0061 on this board. These three recipes only became visible AS recipes after the 2026-09-05 grouping fixes (--dump-checkpoints-dir and argv[0] were part of the recipe key, so every seed looked like its own k=1 recipe). A3b \u2014 the one genuinely-k=1 fair-board recipe \u2014 is NOT here: it is era-2 x radius-4 and must be scored at its native root, which run_full_eval.sh cannot yet express; its arm is in benchmarks/replication_wave_2026-09-05.md."
   }
  ]
 }

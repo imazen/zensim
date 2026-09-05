@@ -698,7 +698,11 @@ def seed_identity(o):
     r = o.get("repro") or {}
     i, p = r.get("init_seed"), r.get("sample_seed")
     if i is not None and p is not None:
-        return f"{i}/{p}"
+        # i == p is the SAME DRAW as legacy `--seed i` (the trainer maps
+        # `--seed X` to init = sample = X), measured by this wave's CTL-A vs
+        # CTL-B: 0 of 12 corpora differ, composite equal to 16 digits. Counting
+        # it separately inflates k by one.  (2026-09-05)
+        return str(i) if i == p else f"{i}/{p}"
     s = r.get("seed")
     return None if s is None else str(s)
 

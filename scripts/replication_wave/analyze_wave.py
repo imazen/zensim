@@ -44,8 +44,22 @@ for f in fits:
     rec, arm = tag.split('__')[0], f['arm']
     o = load(f'{FE_WAVE}/{tag}_packed.fulleval.json')
     if o is None:
+        # A3b is an era-2 x radius-4 recipe: bake_verdict REFUSES to score it on
+        # the canonical folded root (it structurally uses 72 caller lines in
+        # f156-371 that the folded root feeds as zeros), so its arm is scored at
+        # its NATIVE root and lands here instead. Reported separately, never pooled.
+        o = load(f'{W}/verdicts_a3b/{tag}_packed.fulleval.json')
+    if o is None:
         print(f'  MISSING harvest: {tag}', file=sys.stderr); continue
-    members.setdefault(rec, {}).setdefault(arm, []).append((f"i{f['init']}/p{f['sample']}", o))
+    lab = f"i{f['init']}/p{f['sample']}"
+    if arm == 'D':
+        # A re-run diagonal (init == sample == S0) is a member of BOTH arms, the
+        # same way a legacy --seed draw is — CTL-B measured that equivalence.
+        lab += ' (diagonal, re-run)'
+        for a2 in ('S', 'I'):
+            members.setdefault(rec, {}).setdefault(a2, []).append((lab, o))
+    else:
+        members.setdefault(rec, {}).setdefault(arm, []).append((lab, o))
 
 # the legacy diagonal belongs to BOTH arms (CTL-B proved --seed X == split X/X)
 for rec, (s0, cell) in DIAG.items():
