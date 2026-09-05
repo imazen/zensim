@@ -333,6 +333,32 @@ fit that constrains adjacent-step ordering at the floor — the same lever
 evidence behind it and an instrument that can actually score it.
 
 
+### 9.3 The calibration gap at each codec's floor — and a correction
+
+Shipped D's dial minus the mentor's own value, over the bottom three DISTINCT
+settings of every ladder (n = cells, not ladders):
+
+| codec | n | mean | median | min | max |
+|---|--:|--:|--:|--:|--:|
+| `jxl` | 78 | **−8.55** | −8.79 | **−25.02** | +9.40 |
+| `avif-svt` | 117 | −6.16 | −5.86 | −30.64 | +7.13 |
+| `webp` | 117 | −4.54 | −3.46 | −22.64 | +7.12 |
+| `avif-rav1e` | 117 | −3.14 | −2.20 | −21.00 | +6.87 |
+| `jpeg` | 117 | **+2.96** | +3.65 | −16.47 | +24.34 |
+
+Whole instrument, all 9,593 cells: mean **−1.78**, median −0.83, p5 −11.92,
+p95 +5.12.
+
+**CORRECTION to the framing this program started from.** The brief described the
+defect as *"the D dial sits 20–30 points below ssim2 at the JXL floor"*. On this
+instrument that is an **overstatement**: the mean gap at the jxl floor is **−8.55**
+and the median −8.79, with only the worst individual cell reaching −25.02. The
+direction is right and the gap is real — jxl is the worst-calibrated floor of the
+five — but the magnitude is roughly a third of the stated one. Note also that
+**jpeg's floor gap has the opposite sign** (+2.96): D reads *above* the mentor
+there, which is a different failure from the one the framing assumed and is
+consistent with §9's finding that D's jpeg problem is ORDER, not level.
+
 ---
 
 ## 11. Registered, NOT run — with the measured reason in each case
@@ -345,18 +371,34 @@ published fullevals: **409 are 944-class, 34 are 372, 8 are 720, 7 are 156, 4 ar
 than returning a wrong number), so re-grading the board here would move **41 of 467
 cells** and leave the 944 majority untouched. The board's NOT-SHIPPABLE badge is
 CONTRACT-driven and this instrument changes no contract rule, so no published badge
-is stale. **The prerequisite is a 944 ladder grid**, which this lane built the
-features for (§11b) but did not derive bars on.
+is stale. **The prerequisite — a 944 ladder grid — now EXISTS** (§11b), so the board re-grade
+is a compute question rather than a missing-instrument one.
 
-**(b) The 944 ladder instrument's BARS.** The 944 feature extraction over the same
-9,593 distinct cells is done (`ZENSIM_AB_MODE=foldapp2pools`, the runtime regime of
-`dial_grid_944col_POOLS_2026-08-30`). Deriving `peer_ssim2`'s bars on it and
-registering them is a separate append.
-**A trap that does NOT apply here, verified rather than assumed:**
+**(b) ~~The 944 ladder instrument's BARS~~ — DONE, not deferred.**
+`dial_grid_944col_ladder.parquet` (9,593 rows x 944, sha `0e8e5fb789bd21b2`,
+`ZENSIM_AB_MODE=foldapp2pools` — the runtime regime of
+`dial_grid_944col_POOLS_2026-08-30`) is built and its `peer_ssim2` bars are
+registered. **They are IDENTICAL to the 372 grid's** (avif-rav1e 0.5385 /
+avif-svt 1.0000 / jpeg 0.5385 / jxl 0.9231 / webp 1.0000) — as they must be, since
+the mentor's truth is a property of the CELLS and the width only decides which
+bakes can be scored. A useful consistency check that the two packings describe the
+same instrument.
+
+**A trap that does NOT apply, verified rather than assumed:**
 `extract_features_372col` sorts its output by `ref_basename` and silently scrambles
 positional key attachment; **`v2_ab_extract` does NOT** — tested on a deliberately
-non-alphabetical 6-row input, output order matched input exactly. The 944 path
-needs no `row_id` inversion.
+non-alphabetical 6-row input, output order matched input exactly. The 944 packer
+still GATES the decision (ref-basename equality on every row, identity `row_id`,
+key-parquet agreement) rather than trusting it.
+
+**Demonstrated end-to-end**, which is how a silent-fallback bug in the grading owner
+was found: `dialgate_arms.sh` passed `--dial-grid` only when the regime was 372, so
+`score <bake> 944` **ignored `ZL_GRID` and used `bake_verdict`'s built-in 944 grid
+while looking like it had honoured it**. The tell was codec names from the other
+instrument (`avif` rather than `avif-svt`/`avif-rav1e`) and an "unregistered dial
+grid" note on a grid that IS registered. Fixed; `Profile C` (`c_sdr_purity944`) then
+grades on the real instrument at avif-rav1e 0.4103 / avif-svt 0.8974 / jpeg 0.3590 /
+jxl 0.8846 / webp 1.0000 — four of five codecs failing.
 
 **(c) `zenavif backend=aom-rs` as a third AVIF ladder.** Deferred, with the reason
 recorded rather than the arm silently skipped: the `avif-aom` build byte-verifies

@@ -345,6 +345,44 @@
    ],
    "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
    "note": "THE BAR for this instrument. `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) are removed from the instrument, so jpeg's bottom three are three SETTINGS rather than three samples of one. `avif-svt` and `avif-rav1e` are separate ladders \u2014 different encoders, different quantizer mappings."
+  },
+  {
+   "dial_grid_sha256": "0e8e5fb789bd21b263edc3531b243b4086b5ba9c6757de37188ac912bd392f2a",
+   "reference": "peer_ssim2",
+   "label": "dial_grid_944col_ladder_2026-09-05 (FLOOR-DENSE, foldapp2pools; same cells as the 372 ladder grid) -- per-CODEC FLOOR REPRESENTABILITY",
+   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet",
+   "bottom_k": 3,
+   "registered": "2026-09-05",
+   "active": true,
+   "codecs": [
+    {
+     "codec": "avif-rav1e",
+     "n_ladders": 39,
+     "represented_frac": 0.5384615384615384
+    },
+    {
+     "codec": "avif-svt",
+     "n_ladders": 39,
+     "represented_frac": 1.0
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 39,
+     "represented_frac": 0.5384615384615384
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 26,
+     "represented_frac": 0.9230769230769231
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 39,
+     "represented_frac": 1.0
+    }
+   ],
+   "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
+   "note": "THE BAR for this instrument. `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) are removed from the instrument, so jpeg's bottom three are three SETTINGS rather than three samples of one. `avif-svt` and `avif-rav1e` are separate ladders \u2014 different encoders, different quantizer mappings."
   }
  ],
  "grids": [
@@ -466,6 +504,23 @@
    "reference": "peer_ssim2",
    "label": "dial_grid_372col_ladder_2026-09-05 (FLOOR-DENSE: per-codec lowest DISTINCT settings, 2 AVIF backends)",
    "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
+   "n_rows": 9593,
+   "min": -64.326595,
+   "max": 100.0,
+   "p5": -16.252150599999997,
+   "p95": 93.9743354,
+   "reach": 164.326595,
+   "dynamic_range": 110.226486,
+   "mono": 0.9888428434810328,
+   "tied": 0.0,
+   "registered": "2026-09-05",
+   "active": true
+  },
+  {
+   "dial_grid_sha256": "0e8e5fb789bd21b263edc3531b243b4086b5ba9c6757de37188ac912bd392f2a",
+   "reference": "peer_ssim2",
+   "label": "dial_grid_944col_ladder_2026-09-05 (FLOOR-DENSE, foldapp2pools; same cells as the 372 ladder grid)",
+   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet",
    "n_rows": 9593,
    "min": -64.326595,
    "max": 100.0,

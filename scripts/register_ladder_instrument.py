@@ -33,9 +33,13 @@ def sha256(p: str) -> str:
     return h.hexdigest()
 
 
-def derive(bv: str, bake: str, grid: str, truth: str, out: str) -> dict:
+def derive(bv: str, bake: str, grid: str, truth: str, out: str,
+           regime: str = "372") -> dict:
     """peer mode: the scorer described is the REFERENCE metric, not `--bake`."""
-    cmd = [bv, "--bake", bake, "--corpora", "cid22", "--dial-grid", grid,
+    cmd = [bv, "--bake", bake, "--corpora", "cid22", "--dial-grid", grid]
+    if regime != "372":
+        cmd += ["--regime", regime]
+    cmd += [
            "--gaddr-grid-truth", truth,
            "--dial-peer-scores", f"peer_ssim2={truth}",
            "--gaddr-json", out]
@@ -63,6 +67,7 @@ def main() -> None:
     ap.add_argument("--bake", default=os.path.join(
         REPO, "zensim/weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin"))
     ap.add_argument("--bv", default=os.path.join(REPO, "target/release/bake_verdict"))
+    ap.add_argument("--regime", default="372", help="372 / 720 / 944 — the grid's width")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -78,7 +83,7 @@ def main() -> None:
                              f"— refusing")
 
     work = tempfile.mkdtemp(prefix="ladderreg_")
-    d = derive(a.bv, a.bake, a.grid, a.truth, os.path.join(work, "peer.json"))
+    d = derive(a.bv, a.bake, a.grid, a.truth, os.path.join(work, "peer.json"), a.regime)
     meas = d["measured"]
     dial = meas["grid"]
     import pyarrow.parquet as pq

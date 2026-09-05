@@ -68,6 +68,9 @@ case "${ZL_ERA:-canonical}" in
     # but a denser q axis, saturated steps removed by encode hash, and TWO avif
     # ladders (`avif-svt` / `avif-rav1e`) where the older grids have one `avif`.
     # Its own peer_ssim2 bars are registered separately, keyed by grid sha256.
+    # 372 by default; ZL_GRID=$L/dial_grid_944col_ladder.parquet + regime 944 for
+    # the 944-class lineage. Both carry the SAME cells and therefore the same
+    # peer_ssim2 bars (verified: identical per-codec fractions on both widths).
     GRID_DEF=$L/dial_grid_372col_ladder.parquet
     NEGTAIL_DEF=$I/negtail_probe_372_postC_2026-09-05.parquet
     IDENTITY_DEF=$I/identity_probe_372_postC_2026-09-05.parquet
@@ -100,8 +103,17 @@ grade() {  # <label> <bake.bin> [regime]
     # --gaddr-json carries the G-ADDR block at FULL f64 precision; the markdown
     # rounds to 4dp, which is not enough to append a registry pin from.
     [ -n "$GRIDTRUTH" ] && [ -f "$GRIDTRUTH" ] && EXTRA+=(--gaddr-grid-truth "$GRIDTRUTH")
-    "$V" --bake "$BAKE" "${EXTRA[@]}" \
-         $([ "$REGIME" = "372" ] && echo --dial-grid "$GRID") \
+    # --dial-grid is passed for 372 (whose GRID_DEF is a 372 grid) and, for any
+    # other regime, ONLY when the caller set ZL_GRID explicitly. Without the second
+    # case a `score <bake> 944` silently fell back to bake_verdict's built-in 944
+    # grid while LOOKING like it honoured ZL_GRID — the tell is codec names from the
+    # other instrument (`avif` rather than `avif-svt`/`avif-rav1e`) and an
+    # "unregistered dial grid" note on a grid that IS registered.
+    local GRID_ARG=()
+    if [ "$REGIME" = "372" ] || [ -n "${ZL_GRID:-}" ]; then
+        GRID_ARG=(--dial-grid "$GRID")
+    fi
+    "$V" --bake "$BAKE" "${EXTRA[@]}" "${GRID_ARG[@]}" \
          --negtail-probe "$NEGTAIL" \
          --identity-probe "$IDENTITY" \
          --corpora "$CORPORA" \
