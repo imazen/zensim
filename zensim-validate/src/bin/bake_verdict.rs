@@ -835,6 +835,22 @@ struct Args {
     /// table someone re-derived by hand beside the gate. Every report says
     /// which pin set it used, in the caption and in the JSON.
     gaddr_reference: Option<String>,
+    /// `--gaddr-tail-pins <product|retired>`: which NEGATIVE-TAIL pin set
+    /// grades the G-ADDR tail rows. Default `product` — the absolute product
+    /// range from the **USER RULING 2026-09-05** (*"the negative tail bar is
+    /// entirely arbitrary. below -5-50"*), emitted as `A7r`/`A8r`/`A9r`.
+    /// `retired` reproduces the pre-2026-09-05 grading exactly (`A7`/`A8`/`A9`
+    /// barred against `peer_ssim2`'s own depth on the same probe), which is
+    /// what every G-ADDR number published before that date was graded on.
+    /// A1-A6 are unaffected by either value.
+    gaddr_tail_pins: Option<String>,
+    /// `--gaddr-grid-truth <tsv>`: the REFERENCE metric's own per-cell scores
+    /// on the dial grid (`image_id\tcodec\tq\tpred` — the same table
+    /// `--dial-peer-scores` reads). Used ONLY to fill the per-codec-family
+    /// `A9r` columns, which need per-ROW reference truth; `A7r`'s exemptions
+    /// come from the registry and need no flag. Absent ⇒ the `A9r` columns
+    /// read `—`.
+    gaddr_grid_truth: Option<PathBuf>,
     /// `--corruption-head <bake.bin>`: companion corruption-head bake — the
     /// shipping design's corruption owner (at 924 the dial's own ordering is
     /// broken by design, distributional; the head trained on negrich carries
@@ -989,6 +1005,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut identity_peer_scores: Option<(String, PathBuf)> = None;
     let mut gaddr_json: Option<PathBuf> = None;
     let mut gaddr_reference: Option<String> = None;
+    let mut gaddr_tail_pins: Option<String> = None;
+    let mut gaddr_grid_truth: Option<PathBuf> = None;
     let mut features_root: PathBuf = PathBuf::from(DEFAULT_FEATURES_ROOT_372);
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
         .map(PathBuf::from)
@@ -1063,6 +1081,20 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--gaddr-reference" => {
                 let v = args.next().ok_or("--gaddr-reference requires <name>")?;
                 gaddr_reference = Some(v);
+            }
+            "--gaddr-tail-pins" => {
+                let v = args
+                    .next()
+                    .ok_or("--gaddr-tail-pins requires <product|retired>")?;
+                // Validate at PARSE time: an unknown value must never fall
+                // through to the default, which would grade an arm against
+                // bars nobody selected.
+                zensim_validate::dial_addressability::TailPins::parse(&v)?;
+                gaddr_tail_pins = Some(v);
+            }
+            "--gaddr-grid-truth" => {
+                let v = args.next().ok_or("--gaddr-grid-truth requires <tsv>")?;
+                gaddr_grid_truth = Some(PathBuf::from(v));
             }
             "--gaddr-json" => {
                 let v = args.next().ok_or("--gaddr-json requires <path>")?;
@@ -1353,6 +1385,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         identity_peer_scores,
         gaddr_json,
         gaddr_reference,
+        gaddr_tail_pins,
+        gaddr_grid_truth,
         full_json,
         fulleval,
         name,
@@ -2114,6 +2148,8 @@ fn dial_panel(
     grid_sha256: &str,
     probes: &AddrProbes,
     gaddr_reference: &str,
+    gaddr_tail_pins: zensim_validate::dial_addressability::TailPins,
+    gaddr_grid_truth: Option<&PathBuf>,
 ) -> (String, DialMetrics) {
     if !grid_path.exists() {
         return (
@@ -2881,13 +2917,44 @@ fn dial_panel(
             sha.clone(),
         )
     });
-    let addr_verdict = gaddr::evaluate_with_reference(
+    // ── PER-CODEC-FAMILY tail (A7r / A9r) ──
+    // USER CORRECTION 2026-09-05: "codecs are all different, some go lower than
+    // others." The dial grid is the only instrument on hand that carries codec
+    // identity — the negative-tail probes do not — so the per-family rows are
+    // built here, from the SAME pooled score vector G1 and A1-A6 read.
+    // Per-ROW reference truth (A9r's denominator) is optional and comes from
+    // `--gaddr-grid-truth`; A7r's exemptions come from the registry.
+    let grid_truth: Option<Vec<f64>> =
+        gaddr_grid_truth.and_then(|p| match load_peer_dial_scores(p, &grid) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!(
+                    "bake_verdict: --gaddr-grid-truth {} failed to load: {e} — the per-family \
+                     A9r columns will read NOT MEASURED",
+                    p.display()
+                );
+                None
+            }
+        });
+    let family_measure = gaddr::FamilyMeasure::from_rows(
+        &grid_path
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| grid_path.display().to_string()),
+        &grid.codec,
+        &scores,
+        grid_truth.as_deref(),
+        gaddr::product_tail_bars().product_bar,
+    );
+    let addr_verdict = gaddr::evaluate_full(
         gaddr_reference,
+        gaddr_tail_pins,
         grid_sha256,
         &grid_path.display().to_string(),
         &addr_measure,
         probes.negtail.as_ref().map(|(m, sha)| (m, sha.as_str())),
         identity_measure.as_ref().map(|(m, sha)| (m, sha.as_str())),
+        Some(&family_measure),
     );
     s.push_str(&gaddr::render_markdown(&addr_verdict));
 
@@ -4246,7 +4313,7 @@ Run the dedicated q-sweep harness for those._\n",
     let probe_scores = |path: &PathBuf,
                         what: &str,
                         peer: Option<&(String, PathBuf)>|
-     -> Option<(Vec<String>, Vec<f64>, String)> {
+     -> Option<(Vec<String>, Vec<f64>, String, Option<Vec<f64>>)> {
         if !path.exists() {
             eprintln!(
                 "bake_verdict: {what} probe {} is absent — G-ADDR axis NOT MEASURED",
@@ -4275,7 +4342,7 @@ Run the dedicated q-sweep harness for those._\n",
                         "bake_verdict: {what} probe scored from PEER `{label}` ({})",
                         ppath.display()
                     );
-                    Some((g.label, v, sha))
+                    Some((g.label, v, sha, g.truth_ssim2))
                 }
                 Err(e) => {
                     eprintln!(
@@ -4300,7 +4367,8 @@ Run the dedicated q-sweep harness for those._\n",
                 None
             }
             (None, None) if g.n_features == n_inputs => {
-                Some((g.label, ens.score_rows(&g.feature_rows), sha))
+                let scores = ens.score_rows(&g.feature_rows);
+                Some((g.label, scores, sha, g.truth_ssim2))
             }
             (None, None) => {
                 eprintln!(
@@ -4317,9 +4385,25 @@ Run the dedicated q-sweep harness for those._\n",
     let addr_probes = AddrProbes {
         negtail: args.negtail_probe.as_ref().and_then(|p| {
             probe_scores(p, "negative-tail", args.negtail_peer_scores.as_ref()).map(
-                |(_lbl, dial, sha)| {
+                |(_lbl, dial, sha, truth)| {
+                    // The probe's OWN reference truth drives A8r's
+                    // reachability guard. It comes from the probe PARQUET even
+                    // in peer mode — the instrument's truth is a property of
+                    // the instrument, not of whichever scorer is being graded
+                    // — and `load_labeled_grid` reorders nothing, so the two
+                    // vectors stay row-aligned.
+                    if truth.is_none() {
+                        eprintln!(
+                            "bake_verdict: negative-tail probe {} carries no `ssim2_gpu` truth \
+                             column — G-ADDR A8r NOT MEASURED (no unit-safe fallback)",
+                            p.display()
+                        );
+                    }
                     (
-                        zensim_validate::dial_addressability::NegTailMeasure::from_scores(&dial),
+                        zensim_validate::dial_addressability::NegTailMeasure::from_scores_and_truth(
+                            &dial,
+                            truth.as_deref(),
+                        ),
                         sha,
                     )
                 },
@@ -4327,7 +4411,7 @@ Run the dedicated q-sweep harness for those._\n",
         }),
         identity: args.identity_probe.as_ref().and_then(|p| {
             probe_scores(p, "identity", args.identity_peer_scores.as_ref())
-                .map(|(lbl, dial, sha)| (lbl.into_iter().zip(dial).collect::<Vec<_>>(), sha))
+                .map(|(lbl, dial, sha, _)| (lbl.into_iter().zip(dial).collect::<Vec<_>>(), sha))
         }),
     };
     let dial_grid_sha =
@@ -4341,6 +4425,14 @@ Run the dedicated q-sweep harness for those._\n",
         args.gaddr_reference
             .as_deref()
             .unwrap_or(zensim_validate::dial_addressability::ACTIVE_REFERENCE),
+        args.gaddr_tail_pins
+            .as_deref()
+            .map(|v| {
+                zensim_validate::dial_addressability::TailPins::parse(v)
+                    .expect("validated at argument-parse time")
+            })
+            .unwrap_or_default(),
+        args.gaddr_grid_truth.as_ref(),
     );
     buf.push_str(&dial_md);
     pt.mark("DIAL panel (grid load + score + mono/tied)");

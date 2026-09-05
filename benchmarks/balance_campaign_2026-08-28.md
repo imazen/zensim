@@ -7877,3 +7877,41 @@ single most defensible candidate (zero grid regressions vs D, fewest negtail reg
 choice must be made, not as a passing verdict. Everything else from ROUND 90 (rank deltas, the spline-only lever
 control, hfnl_cid22band) is unchanged. Still never installed. Full correction:
 [`d_peaks_lambda_sweep_2026-09-05.md`](d_peaks_lambda_sweep_2026-09-05.md) §4-§5.
+
+## ROUND 91 — 2026-09-05: the negative tail is re-pinned to −50, PER CODEC, and the codecs are not the same
+USER RULING: *"the negative tail bar is entirely arbitrary. below -5-50"*, corrected the same day: *"i said -50 not
+-5, codecs are all different, some go lower than others"*, refined once more after the λ-sweep lane measured what the
+probe holds. G-ADDR's `A7`/`A8`/`A9` — `peer_ssim2`'s own depth on one probe (`min` ≤ −770.62, `p1` ≤ −187.13) plus a
+`frac<0` ≥ **1.0000** bar that was **definitional**, not measured (the probe's population was *selected* on ssim2 < 0)
+— are RETIRED and replaced by `A7r`/`A8r`/`A9r` at an absolute **−50**. What minted it: `Dpeaks372_id100negrich`, CID22
+**+0.00798** with a strictly positive CI and CONTRACT **6/6**, refused on **A8 alone** for being 19 points less deep at
+one percentile. **The floor rows are PER CODEC and the exemption is a MEASUREMENT** — joining the ssim2 cell table to
+the canonical grid (4,424/4,424 matched): `avif` **−55.3545** and `webp` **−51.8466** reach the bar and are graded;
+`jpeg` **−8.0450** and `jxl` **−39.6858** never do and are **EXEMPT**, because asking a dial to go deeper than the truth
+bars it for being correct. Registered as `grid_family_floors` on all four grids; a test asserts
+`exempt == (reference_min > bar)` so the flag can never be hand-set. `A8r` is the ONE pooled row, and that is a
+measurement too: the negtail probes carry **no codec column at all** (their rows are KADIS distortion types), and the
+λ-sweep lane showed grading that instrument per *distortion* family at −50 fails **every bake ever built**, mentor arms
+included, on a single n=8 family. `A9r` is **REPORT-ONLY on a new `Tier::Report`** excluded from both tier verdicts —
+the proposed 0.90 is registered `user-provisional` and the code never reads it as a bar. **MEASURED, 6 scorers × 2
+eras × 2 pin sets:** D-peaks' blocker is gone (`A8r` PASS, −167.72 clears −50 by 117.7) but it now fails `A7r` on
+**webp** by **4.28** and shipped D by **1.88** (−48.12 vs ssim2's −51.85) — a named codec with a measured gap instead
+of an arbitrary depth. Shipped B fails both tail rows on every codec (its probe min is **+2.47**). `A9r`'s denominators
+are avif **n=4**, webp **n=1**, which is itself why it ships as a report. **Board: all 97 fair cells re-graded under
+BOTH pin sets and re-grafted; the CONTRACT-driven NOT SHIPPABLE badge is UNCHANGED at 47 measured / 46 on board, with
+0 contract rows changed — asserted by the grafter (it refuses to write if the count moves) and by a unit test on four
+fixtures, not assumed.** 76 of 97 cells fail the pooled `A8r` the retired pins read as NOT MEASURED — coverage
+expansion, since an absolute bar needs no reference row, kept honest by a reachability guard (a probe whose own truth
+never reaches −50 yields NOT MEASURED, never a fail). `--gaddr-tail-pins retired` reproduces the pre-ruling grading and
+does so row-for-row on 88 of 97 cells; the other 9 moved because the 944-POOLS `peer_ssim2` grid row was registered by
+another lane on 2026-09-05 — reported so it is not misread as a side-effect. Two grafts refused, both pre-existing
+same-grid mismatches (`ebothg_m504`, `A3b_s4004` — neither ever had a `dial_gaddr_source`). Also landed: the board
+re-grade is **committed this time** (`scripts/gaddr_board_regrade.{sh,py}`, which reconstructs each cell's invocation —
+bake, ensemble members *and weights*, features root, corpora, grid, probe sha, `--cross-regime`, and `--regime`
+recovered from the corpus filename the log names — from the 2026-09-04 as-run logs, so a re-grade is provably the same
+invocation with one flag changed); `LabeledGrid.truth_ssim2` reads `ssim2_gpu` **only**, so a probe storing its truth as
+`human_score_norm` (a ÷100 quantity) reads NOT MEASURED rather than being silently rescaled 100× off. Boards regenerated
++ gated (both rc=0): fair **10,067,382 B** / 128 rows, all-rows **22,911,315 B** / 465 rows. Record:
+[`dial_addressability_gate_2026-09-04.md`](dial_addressability_gate_2026-09-04.md) §16; registry entry
+`gaddr-negtail-bars-retired-2026-09-05`. Lesson: **a bar copied from a reference's incidental behaviour is not a
+product requirement** — and when a rule says "codecs differ", the instrument it is graded on had better contain codecs.

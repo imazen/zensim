@@ -30,6 +30,117 @@
   "identity_hi": 100.0,
   "provenance": "mono/tied are the registered G3 bars (docs/EVAL_PANEL_REQUIREMENT.md), unchanged. The identity band is the shipping convention recorded in benchmarks/standard_bake_packing_2026-05-27.md + the QAT record ('identity ~97.7 exact, 0 above-identity') -- MEASURED to be a v47-era property: v47_strict_qat_native reads 97.6893, but shipped B reads 96.2412 and ADD156 reads 96.1157, so both shipped LINEAR dials fail it. Registered as specified 2026-09-04 and NOT relaxed; the incumbent's failure is a finding, not a reason to move the bar."
  },
+ "negative_tail_bars": {
+  "_what": "The NEGATIVE-TAIL bars for G-ADDR. Two pin sets, both kept: `mentor-2026-09-04` (RETIRED) barred the tail against `peer_ssim2`'s own measured depth on the same probe, as rows A7/A8/A9; `product-range-2026-09-05` (ACTIVE) is an ABSOLUTE product bar at -50, graded PER CODEC FAMILY, as rows A7r/A8r/A9r. Selected at run time by `bake_verdict --gaddr-tail-pins {product|retired}`; the default is the active set. A1-A6 are untouched by this and remain mentor-pinned.",
+  "user_ruling_2026-09-05": "the negative tail bar is entirely arbitrary. below -5-50",
+  "user_correction_2026-09-05": "i said -50 not -5, codecs are all different, some go lower than others",
+  "user_refinement_2026-09-05": "A7r is the per-CODEC rule and it belongs on the CANONICAL DIAL GRID (real codec output: jpeg/webp/avif/jxl), not on the negative-tail probe. MEASURED by the lambda-sweep lane (benchmarks/d_peaks_lambda_sweep_2026-09-05.md sections 4-6, commit da0be13b): the probe carries no codec information at all -- its rows are KADIS distortion types (mean_shift, noneccentricity, ...) -- and graded per DISTORTION family at -50 it fails EVERY bake including shipped D and the mentor-fitted arms, on one n=8 family (mean_shift, ssim2 -63.5). So the probe is read POOLED (A8r) and the per-family rule lives on the grid. A9r is REPORT-ONLY with no bar.",
+  "_ruling_reading": "The ssim2-pinned tail depths (A7 min <= -770.619744, A8 p1 <= -187.13142579) are arbitrary as PRODUCT requirements -- they are the mentor's incidental depth on one probe, not a range anything needs to address. The product-meaningful bar is -50, and it is a PER-CODEC question: codecs differ in how far below zero their worst output goes, so a family whose REFERENCE never reaches -50 must not be asked to, and the tail must never be pooled across families. MEASURED on the canonical dial grid: avif reaches -55.3545 and webp -51.8466, while jpeg bottoms out at -8.0450 and jxl at -39.6858 -- so half the families are EXEMPT by measurement. The ruling was minted after a D-peaks candidate (CID22 +0.00798 over shipped D, CONTRACT 6/6) was refused ONLY on A8 -- p1 -167.715 against a bar of -187.131 -- i.e. barred for being 19 points less deep at the 1st percentile of a probe than a scorer whose depth nobody had argued was required. Record: benchmarks/d_peaks_372_postC_2026-09-05.md section 5.",
+  "_scope": "The ruling is about the REGRESSION tail. NO contract row was added, removed or moved, so the CONTRACT tier -- and therefore the board's NOT SHIPPABLE badge, which is contract-driven -- is unaffected by this change. C3 ('some row of an all-negative-truth probe scores < 0') and C4 ('the deepest probe dial is below 0') keep their absolute 0.0 bars.",
+  "active": "product-range-2026-09-05",
+  "pin_sets": [
+   {
+    "id": "mentor-2026-09-04",
+    "status": "retired",
+    "registered": "2026-09-04",
+    "retired_on": "2026-09-05",
+    "retired_by": "USER RULING 2026-09-05, verbatim: \"the negative tail bar is entirely arbitrary. below -5-50\", corrected the same day, verbatim: \"i said -50 not -5, codecs are all different, some go lower than others\"",
+    "axes": ["A7", "A8", "A9"],
+    "bars": "the ACTIVE reference's own row in `negtail_probes` for the same probe sha -- A7 `min` <= reference min, A8 `p1` <= reference p1, A9 `frac_below_zero` >= reference frac_below_zero",
+    "reproduce": "bake_verdict --gaddr-tail-pins retired (grading is bit-reproducible; nothing was rewritten)",
+    "note": "RETAINED, not deleted: every G-ADDR number published before 2026-09-05 -- the gate record's sections 0-15, the 2026-09-04 board grading, and both re-graded candidate tables -- is graded on THESE bars. A count quoted from that era is only readable against them."
+   },
+   {
+    "id": "product-range-2026-09-05",
+    "status": "active",
+    "registered": "2026-09-05",
+    "axes": ["A7r", "A8r", "A9r"],
+    "product_bar": -50.0,
+    "min_family_n": 36,
+    "product_family_frac_min": 0.9,
+    "product_family_frac_min_status": "user-provisional",
+    "axis_definitions": {
+     "A7r": "negative tail, PER CODEC FAMILY: on each family's rows of an instrument that carries codec identity, if the REFERENCE (ssim2) min on those rows is <= -50 then the DIAL's min on those same rows must also be <= -50. A family whose reference never reaches -50 is EXEMPT and is printed as such -- this is the 'some go lower than others' clause. The tail is NEVER pooled across codecs. The row's `measured` value is the COUNT of non-exempt families the dial fails, barred at <= 0, and the per-family table is printed beside it.",
+     "A8r": "negative tail -- POOLED negative-tail probe: ONE axis, TWO numbers. The pooled `min` AND the pooled `p1` must both be <= -50. No per-family bar here: MEASURED, the probe carries no codec column -- its rows are KADIS distortion types, not codec output -- and grading it per DISTORTION family at -50 fails every bake ever built on a single n=8 family. A pooled percentile is the honest reading of this instrument. (`min` <= `p1` always holds, so `p1` is the binding number; both are checked explicitly and both are printed.)",
+     "A9r": "negative tail, PER CODEC, **REPORT-ONLY -- NO BAR, gates nothing**: of a codec's grid cells whose REFERENCE truth is <= -50, the fraction the DIAL also places <= -50. Reported per codec with its `n`, alongside the mentor's, the incumbent's, shipped D's, Profile A's and D-peaks' values, so the user can set a bar later with the evidence in front of them. Carried on tier `report-only`, which is excluded from BOTH tier verdicts by construction, so it can never block a ship. The companion per-DISTORTION-family reading on the probe is measured in benchmarks/d_peaks_lambda_sweep_2026-09-05.md sections 4-6. Replaces A9 (`frac_below_zero` >= the mentor's), whose bar of 1.0000 was DEFINITIONAL -- the probe's population was selected on ssim2 < 0, so the mentor is below zero on 100 % of it by construction."
+    },
+    "provenance": {
+     "product_bar": "user-ruling, verbatim: \"i said -50 not -5\"",
+     "per_family": "user-ruling, verbatim: \"codecs are all different, some go lower than others\"",
+     "product_family_frac_min": "USER-PROVISIONAL AND DELIBERATELY NOT APPLIED. 0.90 is this lane's proposal; A9r is report-only, so this number is printed as a proposal and barred against NOTHING. Printed per codec beside the mentor's, the incumbent's, shipped D's, Profile A's and D-peaks' measured values in benchmarks/dial_addressability_gate_2026-09-04.md section 16 so the user can set it with the evidence in front of them.",
+     "min_family_n": "DERIVED, not chosen, and currently ADVISORY: a fraction at a 0.90 bar has binomial standard error sqrt(0.9*0.1/n), and n = 36 is the smallest n whose SE (0.050) is at or under half the 0.10 gap between the bar and a perfect 1.00. Retained so that whoever turns A9r into a real bar has the denominator threshold already derived. MEASURED 2026-09-05: no codec on any registered grid reaches it (avif 4, webp 1)."
+    },
+    "reachability_guard": "MEASURED, and load-bearing: an absolute bar is still instrument-dependent, because an instrument whose own reference truth never reaches -50 cannot discriminate a dial that does not either. A7r handles this per family via the registered `exempt` flag. A8r PASSES on the measurement alone but may only FAIL when the PROBE'S OWN reference truth p1 reaches -50; otherwise the axis is NOT MEASURED with the reason printed. Probe truth is read from the parquet's `ssim2_gpu` column ONLY; a probe carrying its truth under another name or in another unit (negtail_probe_944_era2r4_foldapp2.parquet stores `human_score_norm`, a /100 quantity) reads NOT MEASURED rather than being silently rescaled.",
+    "measurability_today": "MEASURED 2026-09-05, and it must not be papered over. A7r is gradeable on every grid with a `grid_family_floors` row -- 2 non-exempt codecs (avif, webp) and 2 EXEMPT (jpeg, jxl). A8r is gradeable on every negative-tail probe carrying `ssim2_gpu`. A9r is REPORT-ONLY by design and additionally thin: only 4 avif cells and 1 webp cell on the dial grids have a reference truth at or below -50, so even if a bar were set it could not yet be supported. That is exactly why it ships as a report."
+   }
+  ]
+ },
+ "grid_family_floors": [
+  {
+   "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
+   "reference": "peer_ssim2",
+   "label": "dial_grid_372col_2026-05-29_quarantined_v2 (CANONICAL) -- per-CODEC-FAMILY reference floors",
+   "measured_from": "/mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_qv2grid.tsv joined on (image_id, codec, q); 4424 of 4424 cells matched, 0 unmatched",
+   "bar": -50.0,
+   "registered": "2026-09-05",
+   "active": true,
+   "families": [
+    {"codec": "avif", "n": 1400, "reference_min": -55.354544, "n_at_or_below_bar": 4, "exempt": false},
+    {"codec": "jpeg", "n": 880, "reference_min": -8.045033, "n_at_or_below_bar": 0, "exempt": true},
+    {"codec": "jxl", "n": 1504, "reference_min": -39.685842, "n_at_or_below_bar": 0, "exempt": true},
+    {"codec": "webp", "n": 640, "reference_min": -51.846587, "n_at_or_below_bar": 1, "exempt": false}
+   ],
+   "note": "THE 'codecs are all different, some go lower than others' MEASUREMENT. jpeg and jxl never reach -50 anywhere on this grid, so asking a dial to reach -50 on their rows would bar it for tracking the truth. They are EXEMPT by measurement, not by exception."
+  },
+  {
+   "dial_grid_sha256": "506bdadfce7d2c4ea2ad37a6a2e7635f5eda6f945126033e4cf4365d3c695643",
+   "reference": "peer_ssim2",
+   "label": "dial_grid_372col_postC_2026-09-05 -- per-CODEC-FAMILY reference floors",
+   "measured_from": "/mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_qv2grid.tsv joined on (image_id, codec, q); 4424 of 4424 cells matched, 0 unmatched",
+   "bar": -50.0,
+   "registered": "2026-09-05",
+   "active": true,
+   "families": [
+    {"codec": "avif", "n": 1400, "reference_min": -55.354544, "n_at_or_below_bar": 4, "exempt": false},
+    {"codec": "jpeg", "n": 880, "reference_min": -8.045033, "n_at_or_below_bar": 0, "exempt": true},
+    {"codec": "jxl", "n": 1504, "reference_min": -39.685842, "n_at_or_below_bar": 0, "exempt": true},
+    {"codec": "webp", "n": 640, "reference_min": -51.846587, "n_at_or_below_bar": 1, "exempt": false}
+   ],
+   "note": "the postC re-extraction of the canonical key set; same cells, same ssim2, so the per-family floors are IDENTICAL to the canonical grid row -- which is the control that the era changes the FEATURES, never the truth."
+  },
+  {
+   "dial_grid_sha256": "3caee8602c037fb05ba158c9300a8d5ddb3f489ef7d5314067695b75d4d66774",
+   "reference": "peer_ssim2",
+   "label": "dial_grid_372col_preC_2026-09-05 -- per-CODEC-FAMILY reference floors",
+   "measured_from": "/mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_qv2grid.tsv joined on (image_id, codec, q); 4424 of 4424 cells matched, 0 unmatched",
+   "bar": -50.0,
+   "registered": "2026-09-05",
+   "active": true,
+   "families": [
+    {"codec": "avif", "n": 1400, "reference_min": -55.354544, "n_at_or_below_bar": 4, "exempt": false},
+    {"codec": "jpeg", "n": 880, "reference_min": -8.045033, "n_at_or_below_bar": 0, "exempt": true},
+    {"codec": "jxl", "n": 1504, "reference_min": -39.685842, "n_at_or_below_bar": 0, "exempt": true},
+    {"codec": "webp", "n": 640, "reference_min": -51.846587, "n_at_or_below_bar": 1, "exempt": false}
+   ],
+   "note": "the era pair of the row above; identical per-family floors by construction."
+  },
+  {
+   "dial_grid_sha256": "694e16c4520a5d41b986cebe5ab9c8390c1eabdfef15b44386fe71abcd3c5593",
+   "reference": "peer_ssim2",
+   "label": "dial_grid_944col_POOLS_2026-08-30 -- per-CODEC-FAMILY reference floors",
+   "measured_from": "/mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_944grid.tsv joined on (image_id, codec, q); 4817 of 4817 cells matched, 0 unmatched",
+   "bar": -50.0,
+   "registered": "2026-09-05",
+   "active": true,
+   "families": [
+    {"codec": "avif", "n": 1400, "reference_min": -55.354544, "n_at_or_below_bar": 4, "exempt": false},
+    {"codec": "jpeg", "n": 920, "reference_min": -8.045033, "n_at_or_below_bar": 0, "exempt": true},
+    {"codec": "jxl", "n": 1537, "reference_min": -39.685842, "n_at_or_below_bar": 0, "exempt": true},
+    {"codec": "webp", "n": 960, "reference_min": -51.846587, "n_at_or_below_bar": 1, "exempt": false}
+   ],
+   "note": "the 944 POOLS grid, from dialcells_ssim2_944grid.tsv. Its per-family minima match the 372 grids exactly (the extra cells are all above -50), so a 944 candidate on this grid is graded against the SAME two non-exempt families."
+  }
+ ],
  "grids": [
   {
    "dial_grid_sha256": "6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",

@@ -1090,6 +1090,15 @@ pub struct LabeledGrid {
     pub label: Vec<String>,
     pub feature_rows: Vec<Vec<f64>>,
     pub n_features: usize,
+    /// The probe's own REFERENCE TRUTH, read from `ssim2_gpu` **only**, row
+    /// aligned with `label`. `None` when the column is absent.
+    ///
+    /// Deliberately single-named: `negtail_probe_944_era2r4_foldapp2.parquet`
+    /// stores its truth as `human_score_norm`, a ÷100 quantity, and silently
+    /// accepting that would put G-ADDR's −50 product bar 100× off. A probe
+    /// whose truth is under another name or in another unit reads `None`, and
+    /// the axes that need it read NOT MEASURED.
+    pub truth_ssim2: Option<Vec<f64>>,
 }
 
 /// Load a labeled feature grid (`<label_col>`, `f0..`/`feat_0..`). The
@@ -1114,6 +1123,7 @@ pub fn load_labeled_grid(path: &PathBuf) -> Result<LabeledGrid, String> {
         .ok_or_else(|| {
             format!("{path:?}: missing label column (entry/image_path/image_id/ref_basename)")
         })?;
+    let truth_i = idx("ssim2_gpu");
     let feat_prefix = if idx("feat_0").is_some() {
         "feat_"
     } else {
@@ -1147,6 +1157,7 @@ pub fn load_labeled_grid(path: &PathBuf) -> Result<LabeledGrid, String> {
     };
     let mut label = Vec::new();
     let mut feature_rows: Vec<Vec<f64>> = Vec::new();
+    let mut truth: Vec<f64> = Vec::new();
     for batch_res in reader {
         let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
         let n_rows = batch.num_rows();
@@ -1165,16 +1176,32 @@ pub fn load_labeled_grid(path: &PathBuf) -> Result<LabeledGrid, String> {
             .map_err(|e| format!("{path:?}: feature column {e}"))?;
         // `r` indexes both `lbl_arr` and every `per_col[c]` — a range loop
         // is the natural shape (same idiom as `load_dial_grid`).
+        let truth_col = match truth_i {
+            Some(ti) => Some(
+                col_f64(batch.column(ti).as_ref(), n_rows)
+                    .map_err(|e| format!("{path:?}: ssim2_gpu column {e}"))?,
+            ),
+            None => None,
+        };
         #[allow(clippy::needless_range_loop)]
         for r in 0..n_rows {
             label.push(lbl_arr.value(r).to_string());
             feature_rows.push((0..n_features).map(|c| per_col[c][r]).collect());
+            if let Some(t) = truth_col.as_ref() {
+                truth.push(t[r]);
+            }
         }
     }
+    let truth_ssim2 = if truth_i.is_some() && truth.len() == label.len() {
+        Some(truth)
+    } else {
+        None
+    };
     Ok(LabeledGrid {
         label,
         feature_rows,
         n_features,
+        truth_ssim2,
     })
 }
 

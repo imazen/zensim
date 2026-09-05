@@ -56,6 +56,14 @@ case "${ZL_ERA:-canonical}" in
     OUT_DEF=/mnt/v/output/zensim/dpeaks372-2026-09-05/arms/preC ;;
   *) echo "unknown ZL_ERA=${ZL_ERA} (canonical|postC|preC)" >&2; exit 2 ;;
 esac
+# The REFERENCE metric's own per-cell scores on the dial grid. Only A9r (the
+# report-only per-codec agreement row) needs it; A7r's per-codec exemptions come
+# from the registry. Same table --dial-peer-scores reads, and the ssim2 truth is
+# a property of the PIXELS, so one file serves all three 372 eras.
+GRIDTRUTH="${ZL_GRIDTRUTH:-/mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_qv2grid.tsv}"
+# Which NEGATIVE-TAIL pin set grades A7*/A8*/A9*: `product` (the 2026-09-05
+# -50 per-codec bars, the default) or `retired` (the pre-ruling mentor pins).
+TAILPINS="${ZL_TAILPINS:-product}"
 GRID="${ZL_GRID:-$GRID_DEF}"
 NEGTAIL="${ZL_NEGTAIL:-$NEGTAIL_DEF}"
 IDENTITY="${ZL_IDENTITY:-$IDENTITY_DEF}"
@@ -70,11 +78,13 @@ grade() {  # <label> <bake.bin> [regime]
     mkdir -p "$ARMS"
     # --gaddr-json carries the G-ADDR block at FULL f64 precision; the markdown
     # rounds to 4dp, which is not enough to append a registry pin from.
+    [ -n "$GRIDTRUTH" ] && [ -f "$GRIDTRUTH" ] && EXTRA+=(--gaddr-grid-truth "$GRIDTRUTH")
     "$V" --bake "$BAKE" "${EXTRA[@]}" \
          $([ "$REGIME" = "372" ] && echo --dial-grid "$GRID") \
          --negtail-probe "$NEGTAIL" \
          --identity-probe "$IDENTITY" \
          --corpora "$CORPORA" \
+         --gaddr-tail-pins "$TAILPINS" \
          --gaddr-json "$ARMS/gaddr_${LABEL}.json" \
          --full-json "$ARMS/verdict_${LABEL}.json" \
          > "$ARMS/verdict_${LABEL}.log" 2>&1
@@ -90,7 +100,13 @@ if m.get('negtail') and m.get('identity'):
     print('   negtail min %.3f p1 %.3f frac<0 %.4f | identity %.4f | above-identity %d'%(
         m['negtail']['min'],m['negtail']['p1'],m['negtail']['frac_below_zero'],
         m['identity']['dial_max'],m['identity']['n_above_identity']))
-print('   bar set:', a.get('reference'), '| incumbent:', a.get('incumbent_reference'))
+print('   bar set:', a.get('reference'), '| tail pins:', a.get('tail_pins'))
+for fam in (m.get('families') or []):
+    print('   %-6s ref_min %9.4f  dial_min %s  exempt=%-5s A7r=%-13s n_ref<=bar=%s frac=%s'%(
+        fam['codec'], fam['reference_min'],
+        ('%9.4f'%fam['dial_min']) if fam.get('dial_min') is not None else '        -',
+        fam['exempt'], fam['a7r'],
+        fam.get('n_ref_at_or_below_bar'), fam.get('frac_at_or_below_bar')))
 print('   fails:', [c['id'] for c in a['checks'] if c['state']=='fail'],
       '| not measured:', [c['id'] for c in a['checks'] if c['state']=='not_measured'])
 try:

@@ -1572,9 +1572,40 @@ current bar. Re-pin record: gate doc **§14**.
 
 - **The bars** (ssim2's own, canonical grid + both pinned probes, full f64):
   `max` **98.376644** · `min` **−55.354544** · `p95` **95.45929935** · `p5` **10.26332105** ·
-  `reach` **153.731188** · `DR` **85.1959783** · negtail `min` **−770.619744** /
-  `p1` **−187.13142579** / `frac<0` **1.0000** (definitional — the probe was selected on
-  ssim2 < 0) · identity **100.000000** on all 38 refs · **0** of 4,424 cells above identity.
+  `reach` **153.731188** · `DR` **85.1959783** · identity **100.000000** on all 38 refs ·
+  **0** of 4,424 cells above identity. *(The negative-tail bars `min` −770.619744 /
+  `p1` −187.13142579 / `frac<0` 1.0000 are **RETIRED 2026-09-05** — see the tail re-pin
+  below. They remain the grading of every G-ADDR number published before that date.)*
+
+**⛔ THE NEGATIVE-TAIL BARS ARE RE-PINNED — A7/A8/A9 are RETIRED, A7r/A8r/A9r are the
+gate (USER RULING 2026-09-05).** Verbatim: *"the negative tail bar is entirely arbitrary.
+below -5-50"*, corrected the same day: *"i said -50 not -5, codecs are all different, some
+go lower than others"*. The mentor-pinned depths were `peer_ssim2`'s incidental reach on
+one probe (and A9's 1.0000 bar was **definitional** — the probe's population was selected
+on `ssim2 < 0`). The bar is now an absolute **−50**, and the floor rows are **PER CODEC**:
+
+  | row | tier | axis | bar |
+  |---|---|---|---|
+  | `A7r` | regression | **per codec** on the dial grid: where ssim2's min on a codec's cells is ≤ −50, the dial's min on those cells | ≤ **−50** (value = count of non-exempt codecs that miss) |
+  | `A8r` | regression | **pooled** negtail probe — one axis, two numbers: `min` AND `p1` | both ≤ **−50** |
+  | `A9r` | **report-only** | per codec: of cells with ssim2 ≤ −50, the fraction the dial also puts ≤ −50 | **NO BAR** (0.90 registered `user-provisional`, deliberately not applied) |
+
+  **Exemption is a MEASUREMENT.** On every registered grid: `avif` −55.3545 and `webp`
+  −51.8466 reach the bar and are graded; `jpeg` −8.0450 and `jxl` −39.6858 never do and are
+  **EXEMPT** — asking a dial to go deeper than the truth would bar it for being correct.
+  Registered as `grid_family_floors`; a test asserts `exempt == (reference_min > bar)`.
+  `A8r` is pooled only because the probes carry **no codec column at all** (their rows are
+  KADIS distortion types) — and grading that instrument per *distortion* family at −50
+  fails every bake ever built on one n=8 family (`benchmarks/d_peaks_lambda_sweep_2026-09-05.md`
+  §4-§6). **Reproduce any pre-ruling grading with `--gaddr-tail-pins retired`**; the retired
+  set stays in the registry and re-running all 97 board cells under it reproduces the
+  2026-09-04 states row-for-row on 88 of 97 (the other 9 moved for an unrelated registry
+  append). **MEASURED consequences:** D-peaks' sole blocker A8 → `A8r` **PASS**, but it now
+  fails `A7r` on **webp** by 4.28 (dial −45.72 vs ssim2 −51.85) and shipped D by **1.88**
+  (−48.12); shipped B fails both tail rows on every codec; **76 of 97 board cells never
+  reach −50 on the pooled probe**. The board's NOT SHIPPABLE badge is contract-driven and
+  is **unchanged (47 measured / 46 on board), asserted not assumed** — the graft refuses to
+  write if the count moves. Record: gate doc **§16**.
 - **It is NOT a relaxation — it moved the difficulty to the FLOOR.** Re-grading all 17
   candidates under both pin sets flips **70 cells PASS→FAIL against 9 FAIL→PASS**; shipped B
   goes from **0** regression fails (it *was* the bar) to **6**.
@@ -1591,7 +1622,9 @@ current bar. Re-pin record: gate doc **§14**.
   99.98 clears A1 while sitting 1.6 above the reference metric). G-ADDR is an
   **addressability** gate, not a calibration gate; the calibration-referenced reading
   (`|dial end − truth end| ≤ δ`, or MAE vs the reference metric) remains an unimplemented
-  user option.
+  user option. The 2026-09-05 tail re-pin narrows this for the FLOOR only: `A7r` is
+  referenced to each codec's own ssim2 min, so a codec the reference never takes to −50
+  cannot be failed there.
 - **Flags that make all of this measurable:** `--negtail-peer-scores` /
   `--identity-peer-scores` (a reference metric has no bake, so its floor axes were previously
   unmeasurable; peer mode is now **all-or-nothing per axis** and never fills a probe from
@@ -1607,7 +1640,10 @@ current bar. Re-pin record: gate doc **§14**.
   cut in-era by `scripts/cut_gaddr_negtail_probe.py` (the committed owner of that cut; its
   control reproduces the stored 372 probe EXACTLY) and are deliberately **NOT registered** —
   no reference has been measured on them, so A7–A9 stay NOT MEASURED there while the
-  absolute-bar C3/C4 read normally. Graft with `promote_fulleval.py --graft-gaddr`.
+  absolute-bar C3/C4 read normally. Graft with `promote_fulleval.py --graft-gaddr`, or
+  re-grade the whole board with `scripts/gaddr_board_regrade.sh {grade|graft}` (committed
+  2026-09-05; it reconstructs every cell's invocation from the 2026-09-04 as-run logs and
+  refuses to graft if the contract-fail count moves).
 
 **Facts that are now measured and must not be re-derived:**
 
