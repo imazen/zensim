@@ -193,7 +193,23 @@ widths **H32**, **H128** (`--hidden` default = the control) → 5 × 2 × 3 = **
 **H256** × {the two best Phase-A sets by k-mean composite} × 3 seeds.
 *(Decision rule frozen here; the SETS it picks are read from Phase A.)*
 
-### Phase C — HEAD / DEPTH at the Phase-A/B winner (set\*, H\*) (9 fits)
+### Phase C — HEAD / DEPTH at the CONTROL cell `S265/H128` (9 fits)
+
+**AMENDMENT, registered 2026-09-05 20:30 UTC**, with Phase A at 2 of 30 cells
+scored and only the CONTROL read. Phase C was registered "at the Phase-A/B
+winner"; it now runs at the **control cell** `S265/H128`. Two reasons, and the
+arms are unchanged:
+
+1. **It makes C a clean single-variable experiment.** `P1α − control` at the
+   same set and width isolates the HEAD, which is the comparison C exists to
+   support; run at a winner it would confound head with set/width.
+2. **It removes a dependency on this lane's own reading of Phase A**, so the
+   whole queue A → C → ORACLE runs unattended instead of waiting on a
+   judgement call in the middle of the night. Nothing about which arms run,
+   or their seeds, changes.
+
+If Phase A's winner turns out to differ materially from the control, a
+winner-cell repeat of the best C arm is an ADDITION, reported as such.
 
 | arm | env delta | what it isolates |
 |---|---|---|
