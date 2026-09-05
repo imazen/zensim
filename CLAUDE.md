@@ -1144,6 +1144,22 @@ Two corollaries, both measured the hard way:
   `blur(|src − blur(src)|)`), i.e. **20 rows out of a 32-row band = 62 %
   redundancy**; the column closure is `±BLUR_RADIUS`, so a 1536-wide tile
   re-blurs **0.6 %**. Band-local phase A measured +15.6 % / +5.5 % (§22).
+- **The tile's LAST slab can be `radius + 1` columns wide, and that was a
+  latent debug-build panic (found + fixed 2026-09-04).** The last tile stages
+  `width % tile` interior columns plus a `radius` left halo, so
+  `tw = (width % tile) + radius`; at `width % H_TILE_WIDTH == 1` that is exactly
+  `radius + 1` and the H kernels' one-step right-edge mirror
+  `2*(tw - 1) - (x + radius + 1)` underflowed `usize` — **12 tests**, including
+  `Zensim::compute` through `fold_engine_parity`'s `(2049, 40)` cell.
+  **Release bytes were never wrong** (that index feeds only the final `x`'s
+  running-sum update, which nothing reads; pre/post-fix release `to_bits` dumps
+  identical at 1025/2049/3073 and at every control). The rule now has ONE owner,
+  `blur::h_mirror_add_idx`, matching the V kernels' long-standing
+  `saturating_sub`; gate:
+  `blur::tests::h_entries_are_bit_exact_at_a_degenerate_last_column_tile`.
+  **When you change `H_TILE_WIDTH` or add an H entry, `width % tile == 1` is the
+  cell to test** — a width-sweep that steps by anything but 1 will miss it.
+
 - **Carry an identical-code-path control.** The tile does nothing when
   `width <= tile`, so 576²/1152² cells run the *same code* in both arms and
   must read 1.000×. What they actually read is the measurement's noise floor:

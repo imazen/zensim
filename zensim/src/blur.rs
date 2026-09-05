@@ -24,6 +24,42 @@ use magetypes::simd::generic::f32x16;
 /// correctness one.
 const H_RING_CAP: usize = 33;
 
+/// Right-edge mirror for the horizontal sliding window: the source column the
+/// add-side gather reads when the window's leading edge `add_raw = x + r + 1`
+/// has walked past the last column.
+///
+/// **The `saturating_sub` is load-bearing.** The one-step reflection
+/// `2*(width - 1) - add_raw` is only non-negative for `width >= radius + 2`,
+/// and the era-2 column tile (see [`H_TILE_WIDTH`]) makes narrower slabs
+/// reachable from a perfectly ordinary image: the last tile stages
+/// `width % tile` interior columns plus a `radius`-wide left halo, so at
+/// `width % tile == 1` the slab is exactly `radius + 1` columns and the
+/// reflection underflows. Before 2026-09-04 this was a bare `usize`
+/// subtraction — a debug build panicked with `attempt to subtract with
+/// overflow` (12 tests, incl. `Zensim::compute` through
+/// `tests/fold_engine_parity.rs`'s `(2049, 40)` cell) and a release build
+/// wrapped to `usize::MAX - k`, saved from an out-of-bounds gather only by
+/// the `.min(width - 1)` here.
+///
+/// The value in that slot is **not observable**: `add_raw > 2*(width - 1)`
+/// requires `x > 2*width - radius - 3`, which for `width == radius + 1` is
+/// satisfied only by `x == width - 1`, and every kernel writes its outputs
+/// BEFORE the running-sum update, so the last update is dead.
+/// `blur::tests::h_entries_are_bit_exact_at_a_degenerate_last_column_tile`
+/// MEASURES that (its reference feeds a *different* index into the same slot
+/// and every plane still matches to the bit), which is why this returns 0 —
+/// matching the identical `saturating_sub` the vertical kernels have carried
+/// since they hit the same shape at small pyramid scales — rather than
+/// paying for a full multi-period reflection in the hot loop.
+#[inline(always)]
+fn h_mirror_add_idx(add_raw: usize, width: usize) -> usize {
+    if add_raw < width {
+        add_raw
+    } else {
+        (2 * (width - 1)).saturating_sub(add_raw)
+    }
+}
+
 /// 1-pass blur: rectangular kernel.
 /// Use with larger radius to approximate same effective width.
 pub fn box_blur_1pass_into(
@@ -664,12 +700,7 @@ fn box_blur_h_inner_v4(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -740,12 +771,7 @@ fn box_blur_h_inner_v4(
                 output[(row_base + ro) * width + x] = result[ro];
             }
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -803,12 +829,7 @@ fn box_blur_h_inner_v4(
         for x in 0..width {
             out[x] = sum * inv;
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -862,12 +883,7 @@ fn box_blur_h_inner_v4x(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -938,12 +954,7 @@ fn box_blur_h_inner_v4x(
                 output[(row_base + ro) * width + x] = result[ro];
             }
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1001,12 +1012,7 @@ fn box_blur_h_inner_v4x(
         for x in 0..width {
             out[x] = sum * inv;
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1064,12 +1070,7 @@ fn box_blur_h_inner_v3(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1130,12 +1131,7 @@ fn box_blur_h_inner_v3(
         for x in 0..width {
             out[x] = sum * inv;
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1192,12 +1188,7 @@ fn box_blur_h_inner(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1258,12 +1249,7 @@ fn box_blur_h_inner(
         for x in 0..width {
             out[x] = sum * inv;
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1293,9 +1279,15 @@ pub(crate) fn box_blur_h_into_abs_diff(
 ) {
     let tile = h_blur_tile_width();
     if tile > 0 && width > tile {
-        h_tile_1in1out(src, out_activity, width, height, radius, tile, |i, o, w, h| {
-            box_blur_h_into_abs_diff_untiled(i, o, w, h, radius)
-        });
+        h_tile_1in1out(
+            src,
+            out_activity,
+            width,
+            height,
+            radius,
+            tile,
+            |i, o, w, h| box_blur_h_into_abs_diff_untiled(i, o, w, h, radius),
+        );
         return;
     }
     box_blur_h_into_abs_diff_untiled(src, out_activity, width, height, radius)
@@ -1367,12 +1359,7 @@ fn box_blur_h_into_abs_diff_inner_v4(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1447,12 +1434,7 @@ fn box_blur_h_into_abs_diff_inner_v4(
                 output[(row_base + ro) * width + x] = result[ro];
             }
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1508,12 +1490,7 @@ fn box_blur_h_into_abs_diff_inner_v4(
         for x in 0..width {
             out[x] = (inp[x] - sum * inv).abs();
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1577,12 +1554,7 @@ fn box_blur_h_into_abs_diff_inner_v4x(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1657,12 +1629,7 @@ fn box_blur_h_into_abs_diff_inner_v4x(
                 output[(row_base + ro) * width + x] = result[ro];
             }
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1718,12 +1685,7 @@ fn box_blur_h_into_abs_diff_inner_v4x(
         for x in 0..width {
             out[x] = (inp[x] - sum * inv).abs();
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1782,12 +1744,7 @@ fn box_blur_h_into_abs_diff_inner_v3(
                 output[(row_base + ro) * width + x] = result[ro];
             }
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1843,12 +1800,7 @@ fn box_blur_h_into_abs_diff_inner_v3(
         for x in 0..width {
             out[x] = (inp[x] - sum * inv).abs();
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1907,12 +1859,7 @@ fn box_blur_h_into_abs_diff_inner(
                 output[(row_base + ro) * width + x] = result[ro];
             }
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1967,12 +1914,7 @@ fn box_blur_h_into_abs_diff_inner(
         for x in 0..width {
             out[x] = (inp[x] - sum * inv).abs();
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -2085,12 +2027,7 @@ fn fused_blur_h_mu_inner_v4(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -2179,12 +2116,7 @@ fn fused_blur_h_mu_inner_v4(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -2255,12 +2187,7 @@ fn fused_blur_h_mu_inner_v4(
             out_mu2[row_off + x] = sum_d * inv;
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -2327,12 +2254,7 @@ fn fused_blur_h_mu_inner_v4x(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -2421,12 +2343,7 @@ fn fused_blur_h_mu_inner_v4x(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -2497,12 +2414,7 @@ fn fused_blur_h_mu_inner_v4x(
             out_mu2[row_off + x] = sum_d * inv;
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -2570,12 +2482,7 @@ fn fused_blur_h_mu_inner_v3(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -2646,12 +2553,7 @@ fn fused_blur_h_mu_inner_v3(
             out_mu2[row_off + x] = sum_d * inv;
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -2726,12 +2628,7 @@ fn fused_blur_h_mu_inner(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -3041,12 +2938,29 @@ pub fn fused_blur_h_ssim(
     let tile = h_blur_tile_width();
     if tile > 0 && width > tile {
         fused_blur_h_ssim_column_tiled(
-            src, dst, out_mu1, out_mu2, out_sigma_sq, out_sigma12, width, height, radius, tile,
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            width,
+            height,
+            radius,
+            tile,
         );
         return;
     }
     fused_blur_h_ssim_untiled(
-        src, dst, out_mu1, out_mu2, out_sigma_sq, out_sigma12, width, height, radius,
+        src,
+        dst,
+        out_mu1,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        radius,
     )
 }
 
@@ -3252,12 +3166,7 @@ fn fused_blur_h_ssim_inner_v4(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -3365,12 +3274,7 @@ fn fused_blur_h_ssim_inner_v4(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -3458,12 +3362,7 @@ fn fused_blur_h_ssim_inner_v4(
             out_sigma12[row_off + x] = sum_prod * inv;
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -3633,12 +3532,7 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -3755,12 +3649,7 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -3854,12 +3743,7 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             out_sigma12[row_off + x] = sum_prod * inv;
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -3951,12 +3835,7 @@ fn fused_blur_h_ssim_inner_v3(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -4044,12 +3923,7 @@ fn fused_blur_h_ssim_inner_v3(
             out_sigma12[row_off + x] = sum_prod * inv;
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -4152,12 +4026,7 @@ fn fused_blur_h_ssim_inner(
             }
 
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -5658,12 +5527,7 @@ mod tests {
                 for x in 0..width {
                     o[x] = sum * inv;
                     let add_raw = x + r + 1;
-                    let add_idx = if add_raw < width {
-                        add_raw
-                    } else {
-                        2 * (width - 1) - add_raw
-                    };
-                    let add_idx = add_idx.min(width - 1);
+                    let add_idx = super::h_mirror_add_idx(add_raw, width).min(width - 1);
                     let rem_i = x as isize - r as isize;
                     let rem_idx = if rem_i < 0 {
                         rem_i.unsigned_abs()
@@ -5761,12 +5625,7 @@ mod tests {
         }
         for x in 0..width {
             let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -5909,6 +5768,225 @@ mod tests {
                     c(t2[i], wm2[i], "ssim3.mu2");
                     c(tq[i], wq[i], "ssim3.sigma_sq");
                     c(tp[i], wp[i], "ssim3.sigma12");
+                }
+            }
+        }
+    }
+
+    /// True reflect-101, period `2*(w - 1)`, total over the integers — the
+    /// index the H kernels' single-step mirror approximates. It agrees with
+    /// the kernels everywhere the mirror stays in range and DISAGREES in
+    /// exactly the out-of-range slot, which is what makes it the right
+    /// reference for [`h_entries_are_bit_exact_at_a_degenerate_last_column_tile`].
+    fn reflect101(i: isize, w: usize) -> usize {
+        if w <= 1 {
+            return 0;
+        }
+        let period = 2 * (w as isize - 1);
+        let mut m = i % period;
+        if m < 0 {
+            m += period;
+        }
+        if m >= w as isize {
+            (period - m) as usize
+        } else {
+            m as usize
+        }
+    }
+
+    /// [`ring_walk`] with the TRUE reflect-101 index in the slide. Prime is
+    /// copied verbatim from the kernels so the only difference between this
+    /// reference and the production recurrence is the one expression under
+    /// test.
+    fn tile_walk(tw: usize, radius: usize, mut step: impl FnMut(usize, usize, usize)) {
+        let r = radius;
+        for i in 0..2 * radius + 1 {
+            let idx = if i <= r {
+                (r - i).min(tw - 1)
+            } else {
+                (i - r).min(tw - 1)
+            };
+            step(usize::MAX, idx, usize::MAX);
+        }
+        for x in 0..tw {
+            step(
+                x,
+                reflect101((x + r + 1) as isize, tw),
+                reflect101(x as isize - r as isize, tw),
+            );
+        }
+    }
+
+    /// The column-tile decomposition every H entry applies when
+    /// `tile > 0 && width > tile`, as `(x0, xl, tw, keep, kn)` — the same
+    /// arithmetic as `h_tile_1in1out` / `h_tile_2in2out` /
+    /// `fused_blur_h_ssim_column_tiled`, which is what makes the reference a
+    /// reference and not a second implementation of the blur.
+    fn tile_spans(
+        width: usize,
+        radius: usize,
+        tile: usize,
+    ) -> Vec<(usize, usize, usize, usize, usize)> {
+        if tile == 0 || width <= tile {
+            return vec![(0, 0, width, 0, width)];
+        }
+        let mut v = Vec::new();
+        let mut x0 = 0usize;
+        while x0 < width {
+            let x1 = (x0 + tile).min(width);
+            let xl = x0.saturating_sub(radius);
+            let xr = (x1 + radius).min(width);
+            v.push((x0, xl, xr - xl, x0 - xl, x1 - x0));
+            x0 = x1;
+        }
+        v
+    }
+
+    /// **The era-2 column tile can emit a last tile only `radius + 1` columns
+    /// wide, and that is the one shape where the H kernels' right-edge mirror
+    /// leaves its own domain.**
+    ///
+    /// The tile stages `width % tile` interior columns plus a `radius`-wide
+    /// left halo, so the final slab is `tw = (width % tile) + radius`. At
+    /// `width % tile == 1` that is `tw == radius + 1`, and the mirror
+    /// `2*(tw - 1) - (x + radius + 1)` — which needs `tw >= radius + 2` to
+    /// stay non-negative — goes out of range at `x == tw - 1`. Before
+    /// 2026-09-04 that expression was a plain `usize` subtraction: a debug
+    /// build panicked (`attempt to subtract with overflow`, the 12 failures
+    /// this test was written against) and a release build wrapped to
+    /// `usize::MAX - k` and was rescued only by the following `.min(tw - 1)`.
+    ///
+    /// The reference walks the SAME tile decomposition with the TRUE
+    /// reflect-101 index, i.e. a DIFFERENT value from the kernels' saturating
+    /// one in exactly that slot (for `tw == 6, radius == 5`: reference 1,
+    /// kernel 0, pre-fix release 5). Bit-identical output over every plane is
+    /// therefore a MEASUREMENT that the out-of-range index cannot reach an
+    /// output — it is consumed only by the running-sum update of the final
+    /// `x`, which no later iteration reads — and not an argument that it
+    /// happens to agree.
+    ///
+    /// Widths are derived from the LIVE `h_blur_tile_width()` so the test
+    /// means the same thing under a `ZENSIM_H_TILE` override as it does at
+    /// the era-2 default; `base + 2` and `2 * base` are the in-range controls
+    /// (first safe remainder, and no remainder tile at all).
+    #[test]
+    fn h_entries_are_bit_exact_at_a_degenerate_last_column_tile() {
+        let tile = super::h_blur_tile_width();
+        let base = if tile == 0 { super::H_TILE_WIDTH } else { tile };
+        for &w in &[base + 1, 2 * base + 1, base + 2, base + 129, 2 * base] {
+            // Heights that are a multiple of 8 keep every row inside a vector
+            // group. `fused_blur_h_mu`'s SCALAR TAIL carries a KNOWN, era-locked
+            // 1-2 ulp divergence from its own vector body (`sum += add - rem`
+            // there vs `(sum + add) - rem` in the group loops; deliberately not
+            // fixed because converting it would move v1's shipped bytes), so the
+            // two ragged heights are checked on the four entries that do not
+            // carry it. `fused_blur_h_ssim`'s scalar tail is already consistent.
+            for &(h, check_mu) in &[
+                (8usize, true),
+                (24, true),
+                (40, true),
+                (33, false),
+                (3, false),
+            ] {
+                let src = ring_plane(w, h, 11);
+                let dst = ring_plane(w, h, 7919);
+                let n = w * h;
+                for &radius in &[1usize, 2, 5, 8] {
+                    let inv = 1.0 / (2 * radius + 1) as f32;
+
+                    // Reference: per-tile, per-row scalar recurrences.
+                    let mut r_blur = vec![0.0f32; n];
+                    let mut r_act = vec![0.0f32; n];
+                    let mut r_mu1 = vec![0.0f32; n];
+                    let mut r_mu2 = vec![0.0f32; n];
+                    let mut r_sq = vec![0.0f32; n];
+                    let mut r_pr = vec![0.0f32; n];
+                    for &(x0, xl, tw, keep, kn) in &tile_spans(w, radius, tile) {
+                        let mut l_blur = vec![0.0f32; tw];
+                        let mut l_act = vec![0.0f32; tw];
+                        let mut l_mu1 = vec![0.0f32; tw];
+                        let mut l_mu2 = vec![0.0f32; tw];
+                        let mut l_sq = vec![0.0f32; tw];
+                        let mut l_pr = vec![0.0f32; tw];
+                        for row in 0..h {
+                            let off = row * w + xl;
+                            let (mut ss, mut sd) = (0.0f32, 0.0f32);
+                            let (mut ssq, mut sprod) = (0.0f32, 0.0f32);
+                            tile_walk(tw, radius, |x, a, rm| {
+                                let (sa, da) = (src[off + a], dst[off + a]);
+                                if x == usize::MAX {
+                                    ss += sa;
+                                    sd += da;
+                                    ssq = sa.mul_add(sa, da.mul_add(da, ssq));
+                                    sprod = sa.mul_add(da, sprod);
+                                    return;
+                                }
+                                l_blur[x] = ss * inv;
+                                l_act[x] = (src[off + x] - ss * inv).abs();
+                                l_mu1[x] = ss * inv;
+                                l_mu2[x] = sd * inv;
+                                l_sq[x] = ssq * inv;
+                                l_pr[x] = sprod * inv;
+                                let (sr, dr) = (src[off + rm], dst[off + rm]);
+                                ss = ss + sa - sr;
+                                sd = sd + da - dr;
+                                ssq = sa.mul_add(
+                                    sa,
+                                    da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, ssq))),
+                                );
+                                sprod = sa.mul_add(da, (-sr).mul_add(dr, sprod));
+                            });
+                            let o = row * w + x0;
+                            r_blur[o..o + kn].copy_from_slice(&l_blur[keep..keep + kn]);
+                            r_act[o..o + kn].copy_from_slice(&l_act[keep..keep + kn]);
+                            r_mu1[o..o + kn].copy_from_slice(&l_mu1[keep..keep + kn]);
+                            r_mu2[o..o + kn].copy_from_slice(&l_mu2[keep..keep + kn]);
+                            r_sq[o..o + kn].copy_from_slice(&l_sq[keep..keep + kn]);
+                            r_pr[o..o + kn].copy_from_slice(&l_pr[keep..keep + kn]);
+                        }
+                    }
+
+                    // Production: the four public H entries, tiled or not by
+                    // their own `width > tile` rule.
+                    let mut g_blur = vec![0.0f32; n];
+                    super::box_blur_h(&src, &mut g_blur, w, h, radius);
+                    let mut g_act = vec![0.0f32; n];
+                    super::box_blur_h_into_abs_diff(&src, &mut g_act, w, h, radius);
+                    let (mut g_m1, mut g_m2) = (vec![0.0f32; n], vec![0.0f32; n]);
+                    super::fused_blur_h_mu(&src, &dst, &mut g_m1, &mut g_m2, w, h, radius);
+                    let (mut s_m1, mut s_m2) = (vec![0.0f32; n], vec![0.0f32; n]);
+                    let (mut s_sq, mut s_pr) = (vec![0.0f32; n], vec![0.0f32; n]);
+                    super::fused_blur_h_ssim(
+                        &src, &dst, &mut s_m1, &mut s_m2, &mut s_sq, &mut s_pr, w, h, radius,
+                    );
+                    let (mut t_m1, mut t_m2) = (vec![0.0f32; n], vec![0.0f32; n]);
+                    let (mut t_sq, mut t_pr) = (vec![0.0f32; n], vec![0.0f32; n]);
+                    super::fused_blur_h_ssim3(
+                        &src, &dst, &mut t_m1, &mut t_m2, &mut t_sq, &mut t_pr, w, h, radius,
+                    );
+
+                    for i in 0..n {
+                        let c = |g: f32, want: f32, what: &str| {
+                            assert_eq!(
+                                g.to_bits(),
+                                want.to_bits(),
+                                "{what} {w}x{h} r={radius} tile={tile} idx {i}: {g} != {want}"
+                            );
+                        };
+                        c(g_blur[i], r_blur[i], "box_blur_h");
+                        c(g_act[i], r_act[i], "box_blur_h_into_abs_diff");
+                        if check_mu {
+                            c(g_m1[i], r_mu1[i], "fused_blur_h_mu.mu1");
+                            c(g_m2[i], r_mu2[i], "fused_blur_h_mu.mu2");
+                        }
+                        c(s_m1[i], r_mu1[i], "fused_blur_h_ssim.mu1");
+                        c(s_m2[i], r_mu2[i], "fused_blur_h_ssim.mu2");
+                        c(s_sq[i], r_sq[i], "fused_blur_h_ssim.sigma_sq");
+                        c(s_pr[i], r_pr[i], "fused_blur_h_ssim.sigma12");
+                        c(t_m2[i], r_mu2[i], "fused_blur_h_ssim3.mu2");
+                        c(t_sq[i], r_sq[i], "fused_blur_h_ssim3.sigma_sq");
+                        c(t_pr[i], r_pr[i], "fused_blur_h_ssim3.sigma12");
+                    }
                 }
             }
         }

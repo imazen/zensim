@@ -2,6 +2,50 @@
 
 ## [Unreleased]
 
+### Fixed — the era-2 column tile could hand the H blurs a `radius + 1`-wide slab, and the right-edge mirror underflowed on it (2026-09-04)
+
+- **12 tests failed on `main` with `attempt to subtract with overflow` in
+  `zensim/src/blur.rs`** — 3 `blur::tests::*_ring_matches_regathered_reference`,
+  `feature_v2::tests::phase_a_blur_bands_are_bit_exact`, and all 8 geometry-sweeping
+  tests in `tests/fold_engine_parity.rs`, including `Zensim::compute` itself. The
+  panic is in PRODUCTION kernel code, not test scaffolding.
+- **Mechanism.** The era-2 column tile stages `width % tile` interior columns plus
+  a `radius`-wide left halo, so the last slab is `tw = (width % tile) + radius`. At
+  `width % H_TILE_WIDTH == 1` that is exactly `radius + 1`, and the H kernels'
+  one-step right-edge mirror `2*(tw - 1) - (x + radius + 1)` — which needs
+  `tw >= radius + 2` — went negative in `usize`. Reproduced at `2049 x 40`
+  (`fold_engine_parity`'s own narrowest-remainder cell): `tw = 6, radius = 5`.
+  `ZENSIM_H_TILE=0` clears all 12, which is what identifies the tile as the trigger.
+- **Release output was never wrong, MEASURED not argued.** `add_raw > 2*(tw - 1)`
+  requires `x > 2*tw - radius - 3`, which at `tw == radius + 1` is satisfied only by
+  the final `x`; every kernel writes its outputs BEFORE the running-sum update, so
+  that update is dead. Evidence: release `foldapp_stream_bigpair` dumps (`to_bits`,
+  944full + 372) at 1025x40 / 2049x40 / 3073x33 and the controls 1024x64 / 1153x72 /
+  2048x40 are **byte-identical across the pre-fix and post-fix builds, 12 of 12
+  files**; `fold_engine_parity` passes in release on BOTH builds, which carries the
+  identity from the fold walk to the buffered one at the same cells. **No shipped
+  score, feature or verdict is affected and no board row is implicated.**
+- **Fix**: one owner for the rule — `blur::h_mirror_add_idx`, `#[inline(always)]`,
+  replacing 38 hand-copied kernel sites (+2 test transcriptions) with the same
+  `saturating_sub` the VERTICAL kernels have carried since they hit this shape at
+  small pyramid scales. H and V now agree on the out-of-domain index instead of
+  disagreeing (`0` vs the wrapped `width - 1`).
+- **New gate**: `blur::tests::h_entries_are_bit_exact_at_a_degenerate_last_column_tile`
+  drives all five public H entries through widths derived from the LIVE
+  `h_blur_tile_width()` (`base+1`, `2*base+1`, plus the `base+2` / `2*base` in-range
+  controls) and compares against a scalar reference that walks the same tile
+  decomposition with the TRUE reflect-101 index — a *different* value in exactly the
+  out-of-range slot. Bit-identical planes are therefore a measurement that the value
+  is unobservable. It panics without the fix.
+- **Scope note**: `width <= radius` (as opposed to `== radius + 1`) makes the slot
+  observable, and there the fix does move the last column (measured: 8491.006 ->
+  2576.6904 at `w=5, r=5`). A probe on all five public H entries across the entire
+  zensim suite recorded **zero** such calls from any product path — the only hits
+  are `phase_a_blur_bands_are_bit_exact`'s deliberately synthetic direct
+  `fused_blur_h_ssim(5, 149)` — and `tests/size_invariance.rs` exercises
+  `Zensim::compute` from 1x1 up with no hits, because the shared reflect-pad runs
+  first. Nothing pinned that output.
+
 ### Added — `--pair-sampling stratified`: make coverage a property of the recipe, not the seed (2026-09-04)
 
 - **`zensim_mlp_train --pair-sampling <uniform|stratified>`.** `uniform` is the
