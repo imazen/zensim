@@ -263,6 +263,31 @@ Its other two regression misses, both real but small:
 A2/A4/A5/A6 all pass comfortably — this grid probes far deeper than the old one
 (D reaches **-94.97** against the mentor's -64.33, reach 194.97 vs 164.33).
 
+### 9.0 Every shipped profile on this instrument — D is the best floor dial by a wide margin
+
+| bake | `avif-rav1e` | `avif-svt` | `jpeg` | `jxl` | `webp` | codecs failing |
+|---|--:|--:|--:|--:|--:|:--:|
+| **peer_ssim2 — THE BAR** | 0.5385 | 1.0000 | 0.5385 | 0.9231 | 1.0000 | — |
+| **Profile D — SHIPPED** | ✓ 0.5385 | ✓ 1.0000 | ✗ 0.5128 | ✓ 0.9615 | ✓ 1.0000 | **1** |
+| Profile D — previous (08-31) | ✓ 0.5385 | ✓ 1.0000 | ✗ 0.5128 | ✓ 0.9615 | ✓ 1.0000 | **1** |
+| `lam1em3` | ✗ 0.2564 | ✓ 1.0000 | ✗ 0.4615 | ✗ 0.7308 | ✓ 1.0000 | 3 |
+| `Dpeaks` | ✗ 0.2821 | ✓ 1.0000 | ✗ 0.3846 | ✗ 0.5769 | ✓ 1.0000 | 3 |
+| Profile A (`v47_strict_qat_native`) | ✗ 0.3333 | ✗ 0.8462 | ✗ 0.3846 | ✗ 0.8077 | ✓ 1.0000 | 4 |
+| Profile B (shipped SDR) | ✗ 0.2051 | ✗ 0.4359 | ✗ 0.3333 | ✗ 0.3846 | ✗ 0.9487 | **5 (all)** |
+
+**The instrument endorses the current default and localises its one gap.** Profile D
+fails a single codec by a single ladder; Profile B fails every codec. B's per-codec
+`dial_min` is POSITIVE everywhere (+3.70 / +2.50 / +5.83 / +3.37 / +3.57) — the
+known collapsed negative tail, now visible per codec rather than as one pooled
+number.
+
+**A natural experiment that confirms §9.2 independently.** Profile D shipped and
+Profile D previous share the ADD156 weights and differ **only in the output
+spline**. Their A7r is **identical on all five codecs** (0.5385 / 1.0000 / 0.5128 /
+0.9615 / 1.0000) while their range moves enormously — `avif-rav1e` `dial_min`
+**-13.49 vs -59.81**. Same rank, different range: exactly what a monotone spline
+can and cannot do, measured on two shipped artifacts rather than argued.
+
 ### 9.1 The JXL inversion PERSISTS — pre-registered expectation confirmed
 
 `d_peaks_jxl_floor_2026-09-05.md` §4 measured the peaks arms' jxl failure as a
