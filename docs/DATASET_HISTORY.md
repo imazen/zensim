@@ -1739,3 +1739,68 @@ invert the permutation; do not change the sort, because the root build's positio
 
 Artifacts: `/mnt/v/output/zensim/dpeaks372-2026-09-05/`. Record:
 `benchmarks/d_peaks_372_postC_2026-09-05.md`.
+
+---
+
+### §3.39 — the floor-dense LADDER instrument: jpeg's "three lowest settings" were one setting sampled three times (2026-09-05)
+
+**Thought-why.** §3.38 rebuilt the dial grid at the runtime era from the surviving
+2026-07-27 pixels and treated the instrument as fixed. The remaining ladder problem was
+assumed to be extraction era.
+
+**Actual-why.** It was the **encoder axis**. `A7r` asks whether a codec's three lowest
+configurable settings still resolve, and on every grid built before this one that question
+was unanswerable for `jpeg`: **zenjpeg emits ONE bitstream for every q in 0..10** —
+identical bytes AND identical ssim2 to 6 dp, on every reference tested — so the grid's
+q 0 / 5 / 10 are one setting sampled three times. The mentor's jpeg bar was therefore a
+vacuous `0.0000`, which anything passes, and the incumbent's own grading shows it as jpeg
+`bottom_medians` **22.22 / 22.22 / 22.22**.
+
+**Per-codec floors, measured** (same setting == same encoded bytes AND same ssim2):
+
+| codec | plateau | first DISTINCT |
+|---|---|---|
+| `zenjpeg` | q 0..10 — **eleven settings, one output** | q = 11 |
+| `zenwebp` | q = 0 | q = 1 |
+| `zenavif`/`zenravif` | q 0..1 | q = 2 |
+| `zenavif`/`svt-rs` | q 0..1, then **pairwise ties** (quality 0..100 onto QP 0..63) | q = 2 |
+| `zenjxl` | **distance >= 25** (26/30/40/50 byte-identical to 25.0) | d = 24 |
+
+**So the rule is DEDUP BY ENCODE HASH, never a per-codec step table.** `avif-svt` is
+**36.4 %** duplicate settings against `avif-rav1e`'s **3.0 %** on the same quality axis —
+a 12x difference no fixed step could express. The instrument keeps DISTINCT settings only
+(which is what lets `dial_addressability.rs` stay unchanged: its "bottom K" become the
+bottom K *configurable* settings by construction); the archive keeps every step flagged.
+
+**What it changed.** jpeg's mentor bar `0.0000` -> **0.5385**, and **shipped Profile D —
+a clean A7r pass on every older grid — FAILS**, on jpeg, by one ladder (20/39 vs 21/39).
+Profile B fails all five codecs with a POSITIVE `dial_min` on each. Nothing installed.
+
+**And the fix cannot be calibration.** All 19 of D's failing jpeg ladders are inversions
+in the RAW pre-spline model (raw-vs-dial ordering verdicts agree **39/39**), and the two
+shipped D bakes — same ADD156 weights, different output spline — have **identical A7r on
+all five codecs** while `avif-rav1e` `dial_min` moves −13.49 → −59.81. A monotone spline
+moves range, never rank. **The A7r lever is the weights.**
+
+**A codec defect this surfaced, filed as `imazen/jxl-encoder#101`:** at butteraugli
+distance **>= 10.0 exactly** (9.9 is fine), the encoder writes a `SizeHeader` rounded UP
+to even, so a 513x769 source declares 514x770 and cannot round-trip. Read from the
+codestream's own header, so encoder-side. Pre-existing — the 2026-07-27 sweep shows the
+identical signature on the same 13 odd-dimensioned images. It removes exactly those
+ladders' FLOOR cells, so they are excluded as truncated-floor rather than graded several
+steps up the curve; jxl carries 26 ladders, not 39. **It was diagnosable with no re-encode
+only because this run persisted encoded bytes** — the discipline §3.38's own grid was
+built in the absence of.
+
+**Two process failures worth recording as data-integrity lessons.** (1) Editing a shell
+script while bash is executing it: bash reads scripts incrementally by byte offset, so a
+mid-run edit made it resume at a stale offset and die with `unexpected EOF` *after* the
+avif leg and *before* jxl, with no COMPLETE marker and no error in the leg logs. Runs now
+launch from a frozen copy. (2) Two long runs died silently when nohup'd inside a
+backgrounded shell — rc=137 and rc=143, the latter at 786 s with 13.7 GiB still available,
+so NOT memory: they were killed with their task's process group. Long jobs now launch
+under `setsid`. Both failures are invisible in the output data; only the exit code and a
+missing marker distinguish them from success.
+
+Artifacts + provenance: `~/work/zen/DATA_PROVENANCE.md` ★ ladder-instrument-2026-09-05.
+Record: `benchmarks/ladder_instrument_2026-09-05.md`.
