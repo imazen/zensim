@@ -58,6 +58,13 @@
   in one process at one commit they are bit-identical on 372 of 372 slots at 11
   geometries. The row stays as a warning about the INSTRUMENTS, relabelled so it
   is not read as a claim about the code.
+- **A `#[cfg]` attribute placed before a `let` binds to the `let`**, not to the
+  statement after it — which left the fold-selection `if` UNCONDITIONAL on a
+  `--no-default-features` build. Caught by `zensim-experimental`, which builds
+  `zensim` without `feature-regime-v2`. Now one `cfg` BLOCK, with the trap named
+  in place. *(This entry restates a paragraph of commit `38e7a586`'s message
+  that the shell mangled: backticks in a `jj describe -m` argument are command
+  substitution. Use a message file, or avoid backticks.)*
 - **The block prerequisite chain is now nested by construction**
   (`LayoutBlocks::for_width`): `append2_block` asserts `append_block` and
   `csfw_block` asserts `append2_block`, and `from_block_profile`'s `everything`

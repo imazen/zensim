@@ -59,6 +59,26 @@ match a result. A phase that fails its gate is reported failed, not re-scoped.
 * `ComputeSet::from_block_profile` becomes a thin wrapper over
   `Plan::derive(&FeatureRequest::for_bake(model)).compute`.
 
+**WHAT ACTUALLY LANDED, and the one deliberate deviation.** `Plan::{derive,
+for_bake, v1, covers, union, toggles}` and `PlanError` landed as specified, and
+`from_block_profile` is now a live call site reached through `Plan::for_bake`
+(it was `allow(dead_code)`). The `FeatureRequest` wrapper collapsed into
+`Plan::derive(&SlotSet, width)` + `Plan::for_bake(&Model)` — the same two
+constructors, without a struct that only ever carried its two arguments.
+
+**`Layout` landed as `layout_width` plus `LayoutBlocks::for_width`, NOT as an
+id→position map, and that is a decision rather than an omission.** Every
+registered layout today is the IDENTITY mapping over its range (`slot_at[i] ==
+Some(i)`), so a `Vec<Option<u16>>` + `HashMap` would be a type with no consumer
+and no test that could distinguish it from the width it wraps — dead weight
+carried into the hot path. What the plan genuinely needs from a layout is
+*which optional blocks the declared width reaches*, and that is what
+`LayoutBlocks` computes, as a NESTED chain (`csfw ⇒ append2 ⇒ append`) matching
+the assertions the walk already makes. **The full id→position map lands with
+phase 4**, where `Layout::dense` gives it its first real consumer and its first
+real test. Recorded here so the gap is a scheduled decision, not a silent
+shortfall.
+
 **Gates:**
 
 * **G1.5** — for every bake in the shipped profile set (A, B, D, BHdr, C) and
