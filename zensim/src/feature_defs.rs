@@ -233,6 +233,35 @@ pub(crate) enum KernelId {
     FreeBoundedErr,
 }
 
+/// Whether a [`Revision`] has LANDED (the values moved) or is PROPOSED (the
+/// defect is known and modelled, the fix is not applied).
+///
+/// Modelling a proposed revision is not the same as making one. The
+/// architecture's job is to make "which slots would this change, and what
+/// would it cost to re-extract?" a lookup — so a fix can be scheduled with its
+/// blast radius known, instead of discovered after it lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RevisionStatus {
+    /// The values moved; tables built before it read a different quantity.
+    Landed,
+    /// Registered, NOT applied. Shipped bytes are unchanged.
+    Proposed,
+}
+
+/// A known defect in a signal's current definition.
+///
+/// Sourced from `docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`, whose ids
+/// (`F4`, `F5`, `F15`, …) are the keys. A defect is a property of the SIGNAL,
+/// so the registry is where it belongs: "does anything I read have a live
+/// defect?" becomes a query over a bake's read set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Defect {
+    /// The audit's id.
+    pub id: &'static str,
+    /// What is wrong, and what currently absorbs it.
+    pub note: &'static str,
+}
+
 /// One registered change to how a signal's value is computed.
 ///
 /// The era axis the identity layer records per TABLE, recorded here per
@@ -240,11 +269,14 @@ pub(crate) enum KernelId {
 /// re-extraction. Append-only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Revision {
-    /// The `feature_set_id` era token this landed in.
+    /// The `feature_set_id` era token this landed in, or the token a proposed
+    /// revision would create.
     pub era: &'static str,
-    /// The byte-changing commit.
+    /// The byte-changing commit, or `"-"` for a proposal.
     pub commit: &'static str,
-    /// What changed, and what it means for numbers read before it.
+    /// Landed, or registered-not-applied.
+    pub status: RevisionStatus,
+    /// What changed (or would), and what it means for numbers read before it.
     pub note: &'static str,
 }
 
@@ -271,6 +303,8 @@ pub(crate) struct SignalDef {
     pub kernel: KernelId,
     /// Retired: the slot keeps its id and its structural zero forever.
     pub deprecated: bool,
+    /// A live defect in the current definition, from the defect audit.
+    pub defect: Option<Defect>,
     pub revisions: &'static [Revision],
 }
 
@@ -313,11 +347,76 @@ const NO_REV: &[Revision] = &[];
 const REV_OPTION_C: &[Revision] = &[Revision {
     era: "v1postc",
     commit: "56bbcda2",
+    status: RevisionStatus::Landed,
     note: "option C: v1 stopped pooling mirror-padded phantom columns. Moves \
            every pooled v1 slot at widths where simd_padded_width(w) != w \
            (512/576/1152/2304 among them). Numbers read on v1pre/v1cur cannot \
            be corrected into v1postc, only re-extracted.",
 }];
+
+/// **F4** — the one LIVE arithmetic defect
+/// (`docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`).
+const DEFECT_F4: Defect = Defect {
+    id: "F4",
+    note: "v1's SSIM per-pixel dissimilarity has a `.max(0)` floor and NO upper \
+           cap, and `num_m = 1 - (mu1-mu2)^2` carries no C1. L4 pooling then \
+           amplifies it: f313 reads 5,814,302 on scanned rows against a \
+           photographic p99.9 of 0.48. Absorbed today by the bake-side winsor \
+           guard, not by the feature.",
+};
+
+/// The PROPOSED fix for [`DEFECT_F4`] — registered, deliberately NOT applied.
+const REV_F4_PROPOSED: &[Revision] = &[
+    Revision {
+        era: "v1postc",
+        commit: "56bbcda2",
+        status: RevisionStatus::Landed,
+        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
+    },
+    Revision {
+        era: "v1ssimcap",
+        commit: "-",
+        status: RevisionStatus::Proposed,
+        note: "F4 fix: cap the per-pixel dissimilarity and restore C1 in \
+               `num_m`. Would change v1's SHIPPED bytes on every image with \
+               high-magnitude chroma, so the migration is re-extract AND \
+               re-verdict the whole 372 lineage. NOT APPLIED — registered here \
+               so the blast radius is a lookup rather than a discovery.",
+    },
+];
+
+/// **F5** — the free-40 raw-moment route-parity skew.
+const DEFECT_F5: Defect = Defect {
+    id: "F5",
+    note: "`global_stats_from_raw_moments` uses the catastrophic-cancellation \
+           form `sum(s^2)/n - (sum(s)/n)^2`, and the two routes reduce at \
+           different granularities (append kernel per ROW, fused kernel per \
+           BAND). 2,607 of 28,601 cells (9.12 %) exceed the 2e-5 parity bar on \
+           real pairs, worst 3.63e-3. The class-C 24 slots are clean (0/18,552).",
+};
+
+/// The PROPOSED fix for [`DEFECT_F5`] — the CHEAPEST window, because no
+/// shipped bake reads these slots yet.
+const REV_F5_PROPOSED: &[Revision] = &[Revision {
+    era: "freecomp",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "F5 fix: compensated (or two-pass) accumulation for the raw second \
+           moment, so the free route and the append kernel agree. Migration \
+           cost is ZERO shipped bytes TODAY — no shipped bake reads the \
+           raw-moment tranche — and rises the moment one does. Land it before \
+           a bake reads these slots, not after.",
+}];
+
+/// **F15** — `PJND_FRAGILITY` is nonzero on an identity pair.
+const DEFECT_F15: Defect = Defect {
+    id: "F15",
+    note: "A fragility measure of an undistorted pair should be 0. It reads \
+           exactly 1.0 on a v1-only 944 walk (from zeroed accumulators) and \
+           0.395 on the full walk — the same slot, two artifacts. It is one of \
+           the two reasons the 944 identity vector is not the zero vector; the \
+           other 15 nonzero slots are correctly reference-only.",
+};
 
 const fn v1(
     family: ComputeToken,
@@ -341,7 +440,33 @@ const fn v1(
         direction: Direction::HigherIsWorse,
         kernel,
         deprecated: false,
+        defect: None,
         revisions: REV_OPTION_C,
+    }
+}
+
+/// A v1 signal carrying the F4 defect and its proposed revision.
+const fn v1_defect(
+    family: ComputeToken,
+    block_local: u16,
+    name: &'static str,
+    statistic: Statistic,
+    kernel: KernelId,
+) -> SignalDef {
+    SignalDef {
+        family,
+        block_local,
+        name,
+        statistic,
+        cost: CostClass::Cheap,
+        tranche: Tranche::None,
+        placement: Placement::AllCells,
+        form: Form::Difference,
+        direction: Direction::HigherIsWorse,
+        kernel,
+        deprecated: false,
+        defect: Some(DEFECT_F4),
+        revisions: REV_F4_PROPOSED,
     }
 }
 
@@ -353,6 +478,7 @@ const fn v2sig(
     direction: Direction,
     kernel: KernelId,
     tranche: Tranche,
+    defect: Option<Defect>,
 ) -> SignalDef {
     SignalDef {
         family: ComputeToken::V2,
@@ -366,6 +492,7 @@ const fn v2sig(
         direction,
         kernel,
         deprecated: false,
+        defect,
         revisions: NO_REV,
     }
 }
@@ -379,6 +506,8 @@ const fn app(
     kernel: KernelId,
     tranche: Tranche,
     placement: Placement,
+    defect: Option<Defect>,
+    revisions: &'static [Revision],
 ) -> SignalDef {
     SignalDef {
         family: ComputeToken::Append,
@@ -392,7 +521,8 @@ const fn app(
         direction,
         kernel,
         deprecated: false,
-        revisions: NO_REV,
+        defect,
+        revisions,
     }
 }
 
@@ -440,9 +570,12 @@ pub(crate) static MASKED: [SignalDef; 6] = {
     use KernelId::V1MaskIw as K;
     use Statistic::{L2, L4, Mean};
     [
-        v1(F, 0, "ssim_mean", Mean, K),
-        v1(F, 1, "ssim_4th", L4, K),
-        v1(F, 2, "ssim_2nd", L2, K),
+        // F4: the per-pixel SSIM dissimilarity these three pool is uncapped
+        // and carries no C1. f241 (masked ssim_4th) and f313 (iw ssim_4th)
+        // are the two worst slots the defect audit scanned.
+        v1_defect(F, 0, "ssim_mean", Mean, K),
+        v1_defect(F, 1, "ssim_4th", L4, K),
+        v1_defect(F, 2, "ssim_2nd", L2, K),
         v1(F, 3, "edge_art_4th", L4, K),
         v1(F, 4, "edge_det_4th", L4, K),
         v1(F, 5, "mse", Mean, K),
@@ -456,9 +589,12 @@ pub(crate) static IW: [SignalDef; 6] = {
     use KernelId::V1MaskIw as K;
     use Statistic::{L2, L4, Mean};
     [
-        v1(F, 0, "ssim_mean", Mean, K),
-        v1(F, 1, "ssim_4th", L4, K),
-        v1(F, 2, "ssim_2nd", L2, K),
+        // F4: the per-pixel SSIM dissimilarity these three pool is uncapped
+        // and carries no C1. f241 (masked ssim_4th) and f313 (iw ssim_4th)
+        // are the two worst slots the defect audit scanned.
+        v1_defect(F, 0, "ssim_mean", Mean, K),
+        v1_defect(F, 1, "ssim_4th", L4, K),
+        v1_defect(F, 2, "ssim_2nd", L2, K),
         v1(F, 3, "edge_art_4th", L4, K),
         v1(F, 4, "edge_det_4th", L4, K),
         v1(F, 5, "mse", Mean, K),
@@ -482,6 +618,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsBetter,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             1,
@@ -491,6 +628,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             2,
@@ -500,6 +638,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             3,
@@ -509,6 +648,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             4,
@@ -518,6 +658,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         // Class C: harvestable from the fused kernel's saturating-MSE sum,
         // despite living in the most expensive block in the layout.
@@ -529,6 +670,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::ClassC,
+            None,
         ),
         v2sig(
             6,
@@ -538,6 +680,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             7,
@@ -547,6 +690,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             8,
@@ -556,6 +700,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         // Soft-saliency peak block (idx 9..11).
         v2sig(
@@ -566,6 +711,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             10,
@@ -575,6 +721,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             11,
@@ -584,6 +731,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         // Masked block (idx 12..15).
         v2sig(
@@ -594,6 +742,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             13,
@@ -603,6 +752,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             14,
@@ -612,6 +762,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             15,
@@ -621,6 +772,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         // IW block (idx 16..19).
         v2sig(
@@ -631,6 +783,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             17,
@@ -640,6 +793,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             18,
@@ -649,6 +803,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             19,
@@ -658,6 +813,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         // Near-threshold core (idx 20..21). FRAGILITY is reference-only
         // masking-susceptibility — see `idx::PJND_FRAGILITY`'s own doc.
@@ -669,7 +825,11 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
+        // F15: nonzero on an identity pair (1.0 on a v1-only walk, 0.395 on
+        // the full one). Declared ReferenceOnly because it IS computed from
+        // the reference — the defect is the VALUE, not the form.
         v2sig(
             21,
             "pjnd_fragility",
@@ -678,6 +838,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             Unsigned,
             V2Dense,
             Tranche::None,
+            Some(DEFECT_F15),
         ),
         // Phase-2 additions (idx 22..28).
         v2sig(
@@ -688,6 +849,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Gradient,
             Tranche::None,
+            None,
         ),
         v2sig(
             23,
@@ -697,6 +859,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             24,
@@ -706,6 +869,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Dense,
             Tranche::None,
+            None,
         ),
         v2sig(
             25,
@@ -715,6 +879,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Gradient,
             Tranche::None,
+            None,
         ),
         v2sig(
             26,
@@ -724,6 +889,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Gradient,
             Tranche::None,
+            None,
         ),
         v2sig(
             27,
@@ -733,6 +899,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Gradient,
             Tranche::None,
+            None,
         ),
         // The one scale-level (not per-pixel) signal in the set — see
         // `idx::EDGE_WIDTH_CHANGE`'s doc and the v2 spec.
@@ -744,6 +911,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             HigherIsWorse,
             V2Gradient,
             Tranche::None,
+            None,
         ),
     ]
 };
@@ -771,6 +939,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
         app(
             1,
@@ -781,6 +951,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
         // The three luminance-binned error means are the class-C tranche, and
         // ONLY at Y: the register-carry constraint the free accumulator works
@@ -794,6 +966,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KB,
             ClassC,
             YOnlyActive,
+            None,
+            NO_REV,
         ),
         app(
             3,
@@ -804,6 +978,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KB,
             ClassC,
             YOnlyActive,
+            None,
+            NO_REV,
         ),
         app(
             4,
@@ -814,6 +990,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KB,
             ClassC,
             YOnlyActive,
+            None,
+            NO_REV,
         ),
         app(
             5,
@@ -824,6 +1002,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
         app(
             6,
@@ -834,6 +1014,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
         app(
             7,
@@ -844,6 +1026,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
         app(
             8,
@@ -854,6 +1038,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
         app(
             9,
@@ -864,6 +1050,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
         app(
             10,
@@ -874,6 +1062,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
         app(
             11,
@@ -884,6 +1074,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
         app(
             12,
@@ -894,6 +1086,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
         // The raw-moment tranche — every append cell the 944 walk computes,
         // i.e. all but `(B, scale 0)` (`APPEND_SKIP_B_SCALE0`).
@@ -906,6 +1100,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KR,
             RawMoments,
             SkipBScale0,
+            Some(DEFECT_F5),
+            REV_F5_PROPOSED,
         ),
         app(
             14,
@@ -916,6 +1112,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KR,
             RawMoments,
             SkipBScale0,
+            Some(DEFECT_F5),
+            REV_F5_PROPOSED,
         ),
         app(
             15,
@@ -926,6 +1124,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KR,
             RawMoments,
             SkipBScale0,
+            Some(DEFECT_F5),
+            REV_F5_PROPOSED,
         ),
         app(
             16,
@@ -936,6 +1136,8 @@ pub(crate) static APPEND: [SignalDef; 17] = {
             KA,
             NoTranche,
             AllCells,
+            None,
+            NO_REV,
         ),
     ]
 };
@@ -956,6 +1158,7 @@ pub(crate) static APPEND2: [SignalDef; 5] = {
         direction: Direction,
         kernel: KernelId,
         tranche: Tranche,
+        defect: Option<Defect>,
     ) -> SignalDef {
         SignalDef {
             family: F,
@@ -971,6 +1174,7 @@ pub(crate) static APPEND2: [SignalDef; 5] = {
             direction,
             kernel,
             deprecated: false,
+            defect,
             revisions: NO_REV,
         }
     }
@@ -983,6 +1187,7 @@ pub(crate) static APPEND2: [SignalDef; 5] = {
             HigherIsWorse,
             KA,
             Tranche::None,
+            None,
         ),
         a2(
             1,
@@ -992,6 +1197,7 @@ pub(crate) static APPEND2: [SignalDef; 5] = {
             HigherIsWorse,
             KA,
             Tranche::None,
+            None,
         ),
         // THE slot that makes the 944 identity probe non-zero: a property of
         // the reference alone, so a perfect copy leaves it at its reference
@@ -1004,6 +1210,7 @@ pub(crate) static APPEND2: [SignalDef; 5] = {
             Unsigned,
             KR,
             Tranche::RawMoments,
+            Some(DEFECT_F5),
         ),
         a2(
             3,
@@ -1013,6 +1220,7 @@ pub(crate) static APPEND2: [SignalDef; 5] = {
             HigherIsWorse,
             KA,
             Tranche::None,
+            None,
         ),
         a2(
             4,
@@ -1022,6 +1230,7 @@ pub(crate) static APPEND2: [SignalDef; 5] = {
             HigherIsWorse,
             KA,
             Tranche::None,
+            None,
         ),
     ]
 };
@@ -1047,6 +1256,7 @@ pub(crate) static CSFW: [SignalDef; 3] = {
             direction: HigherIsWorse,
             kernel: K,
             deprecated: false,
+            defect: None,
             revisions: NO_REV,
         }
     }
@@ -1451,6 +1661,132 @@ mod tests {
         let lum_y = slot_id(ComputeToken::Append, 2, 1, 1, NS).expect("slot");
         assert_eq!(cost_of(lum_x, NS), Some(CostClass::Expensive));
         assert_eq!(cost_of(lum_y, NS), Some(CostClass::Free));
+    }
+
+    /// **The identity decomposition, pinned to the registry.**
+    ///
+    /// The audit measured that a 944-wide identity vector resolves into
+    /// exactly three populations: 15 reference-only slots (correct by design),
+    /// 12 `PJND_FRAGILITY` slots (defect F15), and fp residue <= 1.12e-3. The
+    /// registry's `Form` flag must reproduce the first two counts from its own
+    /// declarations, or it does not encode what the identity probe measures.
+    ///
+    /// 15 = `grad_src_mean` at the 11 append cells the 944 walk computes
+    /// (12 minus the `(B, scale 0)` cell) + `luma_mean_ref` once per scale.
+    #[test]
+    fn identity_nonzero_slots_decompose_exactly_as_the_audit_measured() {
+        let w944 = 944usize;
+        let mut ref_only = Vec::new();
+        let mut fragility = Vec::new();
+        for id in 0..w944 {
+            let d = def_at(id, NS).expect("def");
+            if d.signal.name == "pjnd_fragility" {
+                fragility.push(id);
+                continue;
+            }
+            if d.signal.form == Form::ReferenceOnly
+                && placement_admits(d.signal.placement, usize::from(d.scale), d.channel)
+                // `grad_src_mean` lives in the append block, which the 944
+                // walk skips at `(B, scale 0)` — the same cell the raw-moment
+                // tranche skips, for the same reason.
+                && !(d.signal.family == ComputeToken::Append
+                    && d.channel == Channel::B
+                    && d.scale == 0)
+            {
+                ref_only.push(id);
+            }
+        }
+        assert_eq!(
+            ref_only.len(),
+            15,
+            "reference-only slots at 944 (audit measured 15): {ref_only:?}"
+        );
+        assert_eq!(
+            fragility.len(),
+            12,
+            "PJND_FRAGILITY slots at 944 (audit measured 12): {fragility:?}"
+        );
+        // And the artifact is registered as a defect, not silently accepted.
+        let f = def_at(fragility[0], NS).expect("def");
+        assert_eq!(
+            f.signal.defect.map(|d| d.id),
+            Some("F15"),
+            "PJND_FRAGILITY's identity artifact must be a REGISTERED defect"
+        );
+    }
+
+    /// Every audit defect the registry models is attached to the slots the
+    /// audit named, and to no others.
+    #[test]
+    fn registered_defects_cover_exactly_the_audited_slots() {
+        let mut by_id: std::collections::BTreeMap<&str, Vec<usize>> = Default::default();
+        for id in 0..full_width(NS) {
+            if let Some(d) = def_at(id, NS).expect("def").signal.defect {
+                by_id.entry(d.id).or_default().push(id);
+            }
+        }
+        // F4: the three `ssim_*` signals in BOTH the masked and IW blocks,
+        // per (scale, channel) — 2 blocks x 3 signals x 4 scales x 3 channels.
+        assert_eq!(by_id.get("F4").map(Vec::len), Some(72), "F4 slot count");
+        // The audit's two worst scanned slots must be inside it.
+        for named in [241usize, 313] {
+            assert!(
+                by_id["F4"].contains(&named),
+                "F4 must cover f{named}, the audit's worst scanned slot"
+            );
+        }
+        // F5: the three GLOBAL_* signals over the 11 computed append cells,
+        // plus `luma_mean_ref` per scale — the raw-moment tranche exactly.
+        let f5: std::collections::BTreeSet<usize> = by_id["F5"].iter().copied().collect();
+        let tranche: std::collections::BTreeSet<usize> = tranche_slots(Tranche::RawMoments, NS)
+            .iter_slots()
+            .collect();
+        assert!(
+            tranche.is_subset(&f5),
+            "F5 must cover the whole raw-moment tranche"
+        );
+        // F15: 12 slots.
+        assert_eq!(by_id.get("F15").map(Vec::len), Some(12), "F15 slot count");
+    }
+
+    /// A PROPOSED revision must not claim to have landed, and every LANDED
+    /// revision must name a real commit. This is what keeps "modelled" and
+    /// "applied" from blurring: F4's fix is registered and deliberately NOT
+    /// applied, and the registry has to say so in a machine-checkable way.
+    #[test]
+    fn proposed_revisions_are_distinguishable_from_landed_ones() {
+        let (mut landed, mut proposed) = (0usize, 0usize);
+        for sig in signals() {
+            for r in sig.revisions {
+                match r.status {
+                    RevisionStatus::Landed => {
+                        assert_ne!(
+                            r.commit, "-",
+                            "{}: landed revision needs a commit",
+                            sig.name
+                        );
+                        landed += 1;
+                    }
+                    RevisionStatus::Proposed => {
+                        assert_eq!(
+                            r.commit, "-",
+                            "{}: a PROPOSED revision must not name a commit",
+                            sig.name
+                        );
+                        proposed += 1;
+                    }
+                }
+            }
+        }
+        assert!(landed > 0 && proposed > 0, "expected both kinds");
+        // The two proposals the defect audit asked to be modelled.
+        let eras: std::collections::BTreeSet<&str> = signals()
+            .flat_map(|s| s.revisions.iter())
+            .filter(|r| r.status == RevisionStatus::Proposed)
+            .map(|r| r.era)
+            .collect();
+        assert!(eras.contains("v1ssimcap"), "F4's proposed revision");
+        assert!(eras.contains("freecomp"), "F5's proposed revision");
     }
 
     /// Every v1 slot carries the option-C revision; nothing else claims it.

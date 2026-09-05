@@ -3476,29 +3476,38 @@ fn compute_with_config_core(
     // caller's before/after `check_stop`. Named in `is_fold_backable`'s
     // caller rather than hidden.
     #[cfg(feature = "feature-regime-v2")]
-    // A plan whose layout is wider than the buffered walk can emit MUST take
-    // the fold: falling back to buffered there is not a safe default, it is a
-    // refusal. `use_fold` still governs the narrow case, where both walks can
-    // serve and buffered is the default for every profile except `D`.
-    let plan_needs_fold =
-        plan.is_some_and(|p| p.layout_width > crate::fold_engine::v1_feature_width(config));
-    if (use_fold || plan_needs_fold)
-        && stop.is_none()
-        && crate::fold_engine::is_fold_backable(config)
     {
-        let mut scratch = crate::feature_v2::V2Scratch::new();
-        // The fold's only failure modes here are the dimension/HDR checks the
-        // caller already made; a surprise falls back rather than erroring out
-        // of a path whose signature is infallible.
-        if let Ok(r) = crate::fold_engine::compute_fold_backed(
-            source,
-            distorted,
-            config,
-            weights,
-            &mut scratch,
-            plan,
-        ) {
-            return r;
+        // A plan whose layout is wider than the buffered walk can emit MUST
+        // take the fold: falling back to buffered there is not a safe default,
+        // it is a refusal. `use_fold` still governs the narrow case, where both
+        // walks can serve and buffered is the default for every profile
+        // except `D`.
+        //
+        // The whole decision is one `cfg` BLOCK rather than an attribute on
+        // the `if`: an attribute placed before a `let` binds to the `let`,
+        // which silently leaves the `if` unconditional on a
+        // `--no-default-features` build (caught by zensim-experimental, which
+        // builds zensim without this feature).
+        let plan_needs_fold =
+            plan.is_some_and(|p| p.layout_width > crate::fold_engine::v1_feature_width(config));
+        if (use_fold || plan_needs_fold)
+            && stop.is_none()
+            && crate::fold_engine::is_fold_backable(config)
+        {
+            let mut scratch = crate::feature_v2::V2Scratch::new();
+            // The fold's only failure modes here are the dimension/HDR checks
+            // the caller already made; a surprise falls back rather than
+            // erroring out of a path whose signature is infallible.
+            if let Ok(r) = crate::fold_engine::compute_fold_backed(
+                source,
+                distorted,
+                config,
+                weights,
+                &mut scratch,
+                plan,
+            ) {
+                return r;
+            }
         }
     }
     #[cfg(not(feature = "feature-regime-v2"))]

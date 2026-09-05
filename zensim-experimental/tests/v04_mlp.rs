@@ -141,16 +141,23 @@ fn v04_profile_name() {
     assert_eq!(ZensimProfile::A.name(), "zensim-a");
 }
 
-/// PreviewV0_4 (V_18 + V_20-IS multi-bake ensemble) currently fails to
-/// load on every standard test content size we've tried — its bake's
-/// declared `n_inputs` exceeds what the 372-feature extraction supplies.
-/// PRE-EXISTING — predates this session's work and unrelated to it.
-/// This characterization documents the failure mode without hiding it:
-/// when the ensemble bake is fixed, this test FLIPS (the compute will
-/// succeed) and forces an update of the proper behavior assertions.
-/// Pattern matches `metric_invariants.rs::v39_known_limit_violations`.
+/// PreviewV0_4 (V_18 + V_20-IS multi-bake ensemble) **now loads and scores.**
+///
+/// This was `v04_profile_name_and_score_known_limit`, a characterization of a
+/// failure: the ensemble bake declared more inputs than the 372-feature
+/// extraction supplied, so `compute` returned `ModelForwardFailed`. The test
+/// carried its own instruction for the day it flipped — *"Remove the
+/// `_known_limit` suffix and re-add the real behavior assertions (score <= 100,
+/// differs from A's score)"* — and this is that day: the feature-system plan
+/// (`zensim::feature_plan`, 2026-09-05) makes the runtime ask for the width a
+/// bake DECLARES instead of always emitting the v1 layout, so the ensemble is
+/// served like any other wide bake.
+///
+/// Renamed and re-asserted as instructed. Nothing here was relaxed: the
+/// characterization was of a limitation that no longer exists, and the
+/// replacement assertions are the stronger ones the original named.
 #[test]
-fn v04_profile_name_and_score_known_limit() {
+fn v04_profile_name_and_score() {
     assert_eq!(
         zensim_experimental::preview_v0_4().name(),
         "zensim-preview-v0.4"
@@ -158,21 +165,23 @@ fn v04_profile_name_and_score_known_limit() {
     let (src, dst) = make_test_pair(128, 128);
     let s = RgbSlice::new(&src, 128, 128);
     let d = RgbSlice::new(&dst, 128, 128);
-    let z4 = Zensim::new(zensim_experimental::preview_v0_4()).with_parallel(false);
-    let result = z4.compute(&s, &d);
-    let err = match result {
-        Err(e) => e,
-        Ok(_) => panic!(
-            "PreviewV0_4 unexpectedly loaded — the multi-bake ensemble must \
-             have been fixed. Remove the _known_limit suffix and re-add the \
-             real behavior assertions (score ≤100, differs from A's score)."
-        ),
-    };
-    let msg = format!("{err:?}");
+    let v4 = Zensim::new(zensim_experimental::preview_v0_4())
+        .with_parallel(false)
+        .compute(&s, &d)
+        .expect("PreviewV0_4's ensemble bake must be servable");
     assert!(
-        msg.contains("more input features"),
-        "PreviewV0_4 failure mode changed (was: bake n_inputs mismatch). \
-         Got: {msg}. Update this characterization."
+        v4.score() <= 100.0 && v4.score().is_finite(),
+        "score must be finite and capped, got {}",
+        v4.score()
+    );
+    let a = Zensim::new(ZensimProfile::A)
+        .with_parallel(false)
+        .compute(&s, &d)
+        .expect("A scores");
+    assert_ne!(
+        v4.score().to_bits(),
+        a.score().to_bits(),
+        "PreviewV0_4 and A are different models and must not agree bit-for-bit"
     );
 }
 

@@ -37,6 +37,53 @@ This design answers the three questions it deliberately did not:
 
 ---
 
+## 0b. UNIVERSAL SERVABILITY — a hard contract requirement
+
+**User directive (2026-09-05): *"also make sure everything can be served"*.**
+
+**The contract.** Every bake whose FeatureSet consists of registered feature
+ids at a supported revision MUST be servable by the production engine through
+`Zensim::compute`, and by the research engine, **in any declared layout**. No
+"trains fine, cannot be served" class may exist. A refusal is legitimate only
+for genuinely unregistered ids or revisions, and it must be LOUD and name the
+slots — never silent zeros, and never a truncated prefix.
+
+**It was violated at scale, and the violation was invisible.** The feature
+defect audit (`docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md` §4A, measured at
+`3376baee`) censused four populations and found the same single error in all
+four — `ModelForwardFailed { reason: "bake declares more input features than
+the caller supplied" }`:
+
+| population | n | SERVED before | SERVED after increment 1 |
+|---|--:|--:|--:|
+| shipped profiles (`ZensimProfile`, default features) | 10 | **8** | **10** |
+| shipped bakes (`zensim/weights/**.bin`) | 11 / 13 | **8** | **13** |
+| board bakes (behind the 467 fullevals) | 433 | **32** | **433** |
+| registered producer sets | 14 | **3** | **14** plannable |
+
+`ZensimProfile::C` and `CHdr` are SHIPPED, `candidate-profiles` is DEFAULT-ON,
+and both were unservable on any non-identical pair. **The identity
+short-circuit hid it**: `ref` vs `ref` returns `100.000000` before the model
+runs, so the profile looked alive on the one pair anybody smoke-tests.
+
+**The census is a gate, in two tiers, with one driver.**
+
+* `zensim::feature_plan::servability_census` (unit tests) — no filesystem, so
+  it runs everywhere: every shipped profile, every registered producer set, and
+  the campaign's 265/289 free-set arms. Its report carries a BEFORE column
+  derived from the REMOVED `prep_bake_input_f32` rule (`declared <= v1_width +
+  4`), so the comparison is reproduced rather than recalled.
+* `zensim/examples/serve_custom_bake.rs --census` — the filesystem tier
+  (`zensim/weights`, `--fulleval-dir`). It drives the SAME `Zensim::compute`
+  entry as the single-bake mode the fastclass2 campaign already documents:
+  extended, not duplicated.
+
+**Measured after increment 1: 445 bakes, 445 SERVED, 0 REFUSED**, spanning six
+declared widths (156, 372, 504, 720, 924, 944). The plan's phases must keep
+that list empty; a new refusal is a phase-gate failure, not a known limitation.
+
+---
+
 ## 1. The measured problem
 
 Not a tidiness argument. Five defects, each already recorded, each an instance
@@ -146,7 +193,40 @@ pub struct Revision {
   class-C tranches are exactly this), `Cheap` = shares a sweep, `Expensive` =
   its own pass.
 * `revisions` is the missing era axis from §1.5, **per slot**. `f353 moved at
-  era X` becomes a lookup instead of an extraction.
+  era X` becomes a lookup instead of an extraction. A revision carries a
+  `RevisionStatus`: **Landed** (the values moved) or **Proposed** (the defect
+  is known and modelled, the fix is NOT applied). Modelling a fix is not making
+  one — the point is that a fix can be scheduled with its blast radius already
+  known.
+* `defect` records a LIVE defect from
+  `docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`, keyed by its id, so *"does
+  anything this bake reads have a live defect?"* is a query over its read set.
+  Three are modelled today, none flipped:
+  * **F4** — v1's SSIM per-pixel dissimilarity has a `.max(0)` floor, no upper
+    cap, and `num_m` carries no `C1`; `f313` reaches 5.8e6 against a
+    photographic p99.9 of 0.48. Attached to the three `ssim_*` signals in BOTH
+    the masked and IW blocks (72 slots, including the audit's two worst,
+    `f241` and `f313`). Its fix is registered as a **Proposed** revision
+    (`v1ssimcap`) because applying it changes v1's SHIPPED bytes on every
+    high-chroma image and the migration is re-extract **and** re-verdict the
+    whole 372 lineage. The bake-side winsor guard absorbs it today.
+  * **F5** — the free-40 raw-moment route-parity skew (9.12 % of cells over
+    the 2e-5 bar, catastrophic cancellation in `Σs²/n − (Σs/n)²`, and two
+    reduction granularities). Registered as **Proposed** (`freecomp`) with the
+    note that this is the CHEAPEST window: **no shipped bake reads those slots
+    yet**, so the migration cost is zero shipped bytes today and rises the
+    moment one does. Land it before a bake reads them, not after.
+  * **F15** — `PJND_FRAGILITY` is nonzero on an identity pair. Declared
+    `ReferenceOnly` because it IS computed from the reference; the defect is
+    the VALUE, not the form.
+* **The identity decomposition is pinned to the registry.** A 944-wide identity
+  vector resolves into exactly 15 reference-only slots (correct by design —
+  `grad_src_mean` at the 11 append cells the 944 walk computes, plus
+  `luma_mean_ref` once per scale), 12 `PJND_FRAGILITY` slots (F15), and fp
+  residue ≤ 1.12e-3. The registry reproduces the first two counts **from its
+  own `Form` declarations** (`identity_nonzero_slots_decompose_exactly_as_the_audit_measured`),
+  so the flag encodes what the identity probe measures rather than merely
+  claiming to.
 
 **The registry is append-only**, matching the feature-numbering directive
 (2026-07-19: new features get new indices after all existing ones; deprecate,

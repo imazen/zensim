@@ -2,6 +2,68 @@
 
 ## [Unreleased]
 
+### Added — the FEATURE SYSTEM: a definition registry, an extraction plan, and universal servability (2026-09-05, user directive)
+
+- **USER DIRECTIVE, verbatim:** *"can you refactor all of that into something to
+  be proud of? a comprehensive all-feature version for research, and an
+  optimized version with maximum performance for what is key, and a software
+  shape and contract that just works end to end for any feature subset or
+  feature revision"*, and *"also make sure everything can be served"*.
+- **Design + phased plan:** `docs/FEATURE_SYSTEM_DESIGN_2026-09-05.md`,
+  `docs/PLAN_FEATURE_SYSTEM_2026-09-05.md` (gates pre-registered before the
+  code).
+- **`zensim::feature_defs`** — the DEFINITION registry. 85 signals with name,
+  family, statistic, cost, difference-form, monotone direction, owning kernel,
+  known defects and a per-signal revision history, plus the ONE owner of the
+  layout arithmetic that expands a signal into a slot id. Not feature-gated
+  (same rule as `feature_set_id`). 18 tests hold it equal to the existing
+  owners — block bases `0/156/228/300/372/720/924/944`, `def_at`/`slot_id`
+  round-trip on all 956 slots, family slots equal to
+  `ComputeSet::populated_slots` for every `ComputeToken`, and every registered
+  id in `benchmarks/feature_sets_registry.json` reproduced.
+- **`zensim::feature_plan`** — the extraction PLAN: the pair `(compute,
+  layout)` the runtime never had. `Plan::for_bake` derives it from a loaded
+  bake, `fold_engine::score_plan` unions it over a profile's up-to-three bakes,
+  and `Plan::toggles` resolves it to the walk's request. `None` for the narrow
+  non-skipping case keeps today's path on the SAME code, not an equivalent one.
+- **UNIVERSAL SERVABILITY.** `Zensim::compute` now serves a bake at the layout
+  it declares. MEASURED against the defect audit's baseline (`15680f57`):
+  shipped profiles **8/10 → 10/10**, shipped bakes **8 → 13/13**, board bakes
+  **32/433 → 433/433**, registered producer sets **3/14 → 14/14 plannable**.
+  Combined bake census: **445 SERVED, 0 REFUSED**, six declared widths (156,
+  372, 504, 720, 924, 944). `ZensimProfile::C` and `CHdr` are SHIPPED with
+  `candidate-profiles` DEFAULT-ON and were unservable on any non-identical pair;
+  the identity short-circuit hid it by returning 100.000000 before the model ran.
+- **The census is a gate, in two tiers, one driver:**
+  `feature_plan::servability_census` (no filesystem — every shipped profile,
+  every registered producer set, the 265/289 free-set arms, with a BEFORE column
+  derived from the REMOVED rule rather than recalled) and
+  `serve_custom_bake --census` (filesystem tier; the same `Zensim::compute`
+  entry the single-bake mode uses, extended rather than duplicated).
+- **Defects MODELLED, not flipped** (from `docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`):
+  **F4** (uncapped, C1-less SSIM dissimilarity; 72 masked/IW `ssim_*` slots
+  including the audit's worst, `f241`/`f313`) and **F5** (free-40 raw-moment
+  route-parity skew) carry PROPOSED revisions with their migration cost; **F15**
+  (`PJND_FRAGILITY` nonzero at identity) is recorded on the slot. A
+  `RevisionStatus` distinguishes Landed from Proposed so "modelled" and
+  "applied" cannot blur.
+- **The identity decomposition is pinned to the registry**: 15 reference-only
+  slots + 12 `PJND_FRAGILITY` at 944, reproduced from the registry's own `Form`
+  declarations.
+
+### Fixed
+
+- **`docs/FEATURE_SET_IDS.md` §1 failure #9 corrected in place** — "the v1-372
+  `f0..155` is NOT the 944 fold's" is an ERA artifact of two stored instruments;
+  in one process at one commit they are bit-identical on 372 of 372 slots at 11
+  geometries. The row stays as a warning about the INSTRUMENTS, relabelled so it
+  is not read as a claim about the code.
+- **The block prerequisite chain is now nested by construction**
+  (`LayoutBlocks::for_width`): `append2_block` asserts `append_block` and
+  `csfw_block` asserts `append2_block`, and `from_block_profile`'s `everything`
+  fallback set `append2_dst_activity` unconditionally — so a 720- or 924-wide
+  bake panicked in the walk. Found by the board census, not by reading.
+
 ### Added — inversion attribution: a backwards rung BOTH references confirm is the ENCODER's, not the dial's (2026-09-05, user directive)
 
 - **USER DIRECTIVE, verbatim:** *"for inversions, we should choose say ssim2 and

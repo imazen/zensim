@@ -17,6 +17,7 @@ match a result. A phase that fails its gate is reported failed, not re-scoped.
 | **G-TEST** | `cargo test --workspace` green; `just clippy` (`-D warnings`) green; `cargo fmt` clean. | |
 | **G-OWNER** | No duplicate implementation. Every derivation added here has exactly one owner, and any pre-existing function computing the same thing becomes its caller. | grep + a test asserting the wrapper agrees with the owner. |
 | **G-APPEND** | Append-only. No id renumbered, no registry entry edited or deleted. | a test over the committed registry JSON. |
+| **G-SERVE** | **UNIVERSAL SERVABILITY.** Zero refusals across all four census populations — shipped profiles, shipped bakes, board bakes, registered producer sets — except LOUD, named refusals for genuinely unregistered ids/revisions. | `feature_plan::servability_census` (no filesystem) + `serve_custom_bake --census` (filesystem tier). A new refusal is a phase-gate FAILURE, never a known limitation. |
 
 ---
 
@@ -81,12 +82,46 @@ bake's declared layout width — closing the three hard-codings
   `basic+peaks+moments` scores through `Zensim::compute`, and its feature vector
   is **bit-identical** (`to_bits()`) to the stored pools-944 table's row on the
   same pixels, on every slot the plan populates.
+  **STATUS: PARTIAL, and the blocker is F5, not the plan.** The SERVING half
+  passed — the arms plan to the cheap walk, emit 265 / 289 slots at layout 944,
+  and score (`the_campaign_free_set_arms_plan_to_the_cheap_walk`, and the 392
+  944-wide bakes in the census). The bit-exactness half is split by the defect
+  audit's own measurement: `basic+peaks` (`f0..227`, 228 of the 265) is
+  **bit-identical between the two routes**, and the 37 raw-moment slots are
+  **NOT** — 9.12 % of cells exceed the 2e-5 parity bar, worst 3.63e-3, from
+  catastrophic cancellation in `Σs²/n − (Σs/n)²` plus two reduction
+  granularities. That is **F5, a pre-existing route defect**, and this lane
+  registered it rather than fixing it because fixing it is a byte change to a
+  feature, which the phase's own G-BYTE forbids. **Phase 2b lands it**, and its
+  window is closing: the cost is zero shipped bytes only while no shipped bake
+  reads those slots. Claiming G1.8 green today would require either weakening
+  the bar to a tolerance or fixing a feature inside a byte-identical phase —
+  neither is acceptable, so it is reported PARTIAL.
 * **G1.9 (the refusal is still a refusal)** — a bake reading slots no plan can
   compute is refused with `PlanError::Uncomputable` naming the missing slots.
   Not served with zeros.
 * **G1.10 (nothing that scored changes)** — every currently-servable bake's
   score, `raw_distance`, `mean_offset` and full feature vector are bit-identical
   before and after. This is G-BYTE applied at the scoring entry.
+
+**Also landed in phase 1 (from the defect audit, 2026-09-05):**
+
+* **G1.11 (census)** — the four populations go to zero refusals. MEASURED:
+  profiles 8/10 → **10/10**; shipped bakes 8 → **13/13**; board bakes 32/433 →
+  **433/433**; registered producer sets 3/14 → **14/14 plannable**. Combined
+  bake census: **445 SERVED, 0 REFUSED**, six declared widths.
+* **G1.12 (default-build `C`)** — `ZensimProfile::C` scores a non-identical pair
+  on a default build (`candidate-profiles` is in `default`), and the emitted
+  vector is the bake's full declared width. The test that pinned the opposite
+  is INVERTED, and its original concern kept as its own assertion.
+* **G1.13 (defects modelled, not flipped)** — F4, F5 and F15 are attached to
+  the slots the audit named, with F4's and F5's fixes registered as
+  **Proposed** revisions carrying their migration cost. Nothing is applied;
+  `proposed_revisions_are_distinguishable_from_landed_ones` keeps "modelled"
+  and "applied" from blurring.
+* **G1.14 (identity decomposition)** — the registry reproduces the audit's
+  measured split (15 reference-only + 12 `PJND_FRAGILITY`) from its own `Form`
+  declarations.
 
 **Not in phase 1:** the research engine, provenance output, revision selection,
 dense layouts in anger, any wire-format change, any public API.
@@ -111,6 +146,22 @@ accumulators, emitting values **+ per-feature provenance**.
 * **G2.4 (provenance is checked, not asserted)** — each feature's reported
   owning kernel is verified by a perturbation probe: disabling that kernel must
   change that feature and no other.
+
+---
+
+### Phase 2b — land F5 while it is still free
+
+F5 (the free-40 raw-moment route-parity skew) is registered as a **Proposed**
+revision, and its migration cost is **zero shipped bytes today** because no
+shipped bake reads the raw-moment tranche. That is not a permanent property:
+the campaign's 265/289 free-set arms are exactly the bakes that would start
+reading it.
+
+**Gate G2b.1** — compensated accumulation makes the free route and the append
+kernel agree within the 2e-5 parity bar on the audit's 773-pair real-pixel
+population (the synthetic-only gate that MISSED it must be replaced, not
+re-run). **G2b.2** — no bake that reads those slots exists at landing time, or
+the phase stops and re-prices. Land it BEFORE a bake reads them.
 
 ---
 
