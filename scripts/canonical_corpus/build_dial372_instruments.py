@@ -259,6 +259,129 @@ def build_negtail(args, work: str) -> dict:
             "pixels_dir": px}
 
 
+# ── the LADDER instrument (2026-09-05) ────────────────────────────────────────
+# Built from a `build_ladder_grid.sh` run rather than from the canonical grid's
+# key set. Two things make it a DIFFERENT instrument, both deliberate:
+#
+#  1. **The floor is the codec's own lowest DISTINCT settings.** MEASURED: zenjpeg
+#     emits ONE bitstream for every q in 0..10, so the previous grid's bottom three
+#     steps (q 0/5/10) were a single setting sampled three times and the mentor's
+#     jpeg floor bar was a vacuous 0.0000. Every codec has its own plateau
+#     (avif/svt-rs ties pairwise because quality 0..100 maps onto QP 0..63), so the
+#     grid is dense at the floor and duplicates are removed by ENCODE HASH, never
+#     by a guessed per-codec step table.
+#  2. **The two AVIF backends are two ladders**, `avif-svt` and `avif-rav1e`, because
+#     `FloorRepresentabilityRule` groups by `(image_id, codec)` and they are
+#     different encoders with different quantizer mappings.
+#
+# TWO tables come out, and the difference matters:
+#   * `<tag>_full.parquet`  — EVERY encoded step, with `saturated` / `encode_sha` /
+#     every metric variant. The archive; nothing is thrown away.
+#   * `dial_grid_372col_<tag>.parquet` — DISTINCT settings only, in the canonical
+#     grid's schema. THE instrument. Emitting only distinct rows here is what lets
+#     `dial_addressability.rs` stay unchanged: its "bottom K steps" are then the
+#     bottom K *configurable* settings by construction.
+LADDER_LEGS = {
+    "jpeg":       ("jpeg",       "q"),
+    "webp":       ("webp",       "q"),
+    "avif_svt":   ("avif-svt",   "q"),
+    "avif_rav1e": ("avif-rav1e", "q"),
+    "jxl":        ("jxl",        "distance"),
+}
+
+
+def _ladder_rows(ladder_dir: str) -> list[dict]:
+    """Join each leg's metric TSV to its pairs TSV and hash the persisted bitstream."""
+    out = []
+    for leg, (codec_name, param_kind) in LADDER_LEGS.items():
+        tsv = os.path.join(ladder_dir, "tsv", f"{leg}.tsv")
+        prs = os.path.join(ladder_dir, "pairs", f"{leg}.tsv")
+        if not (os.path.exists(tsv) and os.path.exists(prs)):
+            raise SystemExit(f"ladder leg {leg} is missing {tsv} or {prs} — refusing "
+                             f"a partially-built instrument")
+        key = lambda r: (r["image_path"], r["q"], r["knob_tuple_json"])
+        pair = {key(r): r for r in csv.DictReader(open(prs), delimiter="\t")}
+        enc_dir = os.path.join(ladder_dir, "encoded", leg)
+        for r in csv.DictReader(open(tsv), delimiter="\t"):
+            pr = pair.get(key(r))
+            if pr is None:
+                raise SystemExit(f"{leg}: metric row {key(r)} has no pairs row — refusing")
+            knob = json.loads(r["knob_tuple_json"] or "{}")
+            param = float(knob["distance"]) if param_kind == "distance" else float(r["q"])
+            enc = os.path.join(enc_dir, r["encoded_filename"]) if r.get("encoded_filename") else ""
+            if not enc or not os.path.exists(enc):
+                raise SystemExit(f"{leg}: encoded bitstream missing for {key(r)} — the "
+                                 f"whole point of this rebuild is that bytes are kept")
+            row = {"image_id": stem(os.path.basename(pr["ref_path"])),
+                   "codec": codec_name, "param_kind": param_kind,
+                   "codec_param": param, "q": float(r["q"]),
+                   "ref_path": pr["ref_path"], "dist_path": pr["dist_path"],
+                   "encode_sha": sha256(enc), "encoded_bytes": int(r["encoded_bytes"]),
+                   "encode_ms": float(r["encode_ms"]), "decode_ms": float(r["decode_ms"])}
+            for k, v in r.items():
+                if k.startswith("score_"):
+                    row[k] = float(v) if v not in ("", None) else float("nan")
+            out.append(row)
+    return out
+
+
+def _mark_saturated(rows: list[dict]) -> list[dict]:
+    """Flag every step whose encoded bytes repeat the previous DISTINCT step's.
+
+    Ordered from each codec's FLOOR upward: ascending `q`, but DESCENDING
+    `distance` (JXL's floor is its largest distance — 25.0, beyond which the
+    encoder saturates: 26/30/40/50 are byte-identical to it, measured)."""
+    by = {}
+    for r in rows:
+        by.setdefault((r["image_id"], r["codec"]), []).append(r)
+    for (_img, _c), lad in by.items():
+        desc = lad[0]["param_kind"] == "distance"
+        lad.sort(key=lambda r: -r["codec_param"] if desc else r["codec_param"])
+        last = None
+        for r in lad:
+            r["saturated"] = (last is not None and r["encode_sha"] == last)
+            if not r["saturated"]:
+                last = r["encode_sha"]
+    return [r for lad in by.values() for r in lad]
+
+
+def build_ladder(args, work: str) -> dict:
+    rows = _mark_saturated(_ladder_rows(args.ladder_dir))
+    distinct = [r for r in rows if not r["saturated"]]
+
+    # FULL archive first — it must survive even if extraction later fails.
+    full_cols = {k: [r[k] for r in rows] for k in rows[0] if k not in ("ref_path", "dist_path")}
+    full = os.path.join(args.out_dir, f"ladder_grid_{args.tag}_full.parquet")
+    pq.write_table(pa.table(full_cols), full, compression="zstd")
+
+    tsv = os.path.join(work, "ladder_pairs.tsv")
+    write_pairs(tsv, ["ref_path", "dist_path", "human_score"],
+                [[r["ref_path"], r["dist_path"], f"{r['codec_param']:.6f}"] for r in distinct])
+    feats = extract(args.extractor, tsv, os.path.join(work, "ladder.csv"))
+    cols = {"image_id": [r["image_id"] for r in distinct],
+            "codec": [r["codec"] for r in distinct],
+            "q": [r["q"] for r in distinct],
+            "codec_param": [r["codec_param"] for r in distinct],
+            "param_kind": [r["param_kind"] for r in distinct]}
+    for i in range(NF):
+        cols[f"f{i}"] = [row[i] for row in feats]
+    dst = os.path.join(args.out_dir, f"dial_grid_372col_{args.tag}.parquet")
+    pq.write_table(pa.table(cols), dst, compression="zstd")
+
+    per = {}
+    for r in rows:
+        d = per.setdefault(r["codec"], {"cells": 0, "saturated": 0, "ladders": set()})
+        d["cells"] += 1
+        d["saturated"] += int(r["saturated"])
+        d["ladders"].add(r["image_id"])
+    return {"file": dst, "rows": len(distinct), "sha256": sha256(dst),
+            "full_table": full, "full_rows": len(rows), "full_sha256": sha256(full),
+            "pairs_tsv": tsv,
+            "per_codec": {c: {"cells": d["cells"], "saturated": d["saturated"],
+                              "distinct": d["cells"] - d["saturated"],
+                              "ladders": len(d["ladders"])} for c, d in sorted(per.items())}}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--extractor", required=True,
@@ -268,7 +391,11 @@ def main():
     ap.add_argument("--build-commit", default="", help="the extractor's tree commit")
     ap.add_argument("--negtail-pixels",
                     default="/mnt/v/output/zensim/dpeaks372-2026-09-05/negtail_pixels")
-    ap.add_argument("--what", default="grid,identity,negtail")
+    ap.add_argument("--ladder-dir", default="",
+                    help="a build_ladder_grid.sh output dir; required for --what ladder")
+    ap.add_argument("--what", default="grid,identity,negtail",
+                    help="grid,identity,negtail (canonical key set) and/or `ladder` "
+                         "(a floor-dense per-codec ladder run — see build_ladder)")
     ap.add_argument("--work", default=os.path.expanduser("~/tmp/dial372_instruments"))
     args = ap.parse_args()
     work = os.path.join(args.work, args.tag)
@@ -284,6 +411,11 @@ def main():
         man["instruments"]["identity_probe"] = build_identity(args, work)
     if "negtail" in want:
         man["instruments"]["negtail_probe"] = build_negtail(args, work)
+    if "ladder" in want:
+        if not args.ladder_dir:
+            raise SystemExit("--what ladder needs --ladder-dir")
+        man["ladder_dir"] = args.ladder_dir
+        man["instruments"]["ladder_grid"] = build_ladder(args, work)
     mp = os.path.join(args.out_dir, f"_MANIFEST_{args.tag}.json")
     with open(mp, "w") as f:
         json.dump(man, f, indent=1)
