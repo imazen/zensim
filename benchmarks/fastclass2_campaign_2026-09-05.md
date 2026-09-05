@@ -530,3 +530,40 @@ which is a good argument that the id grammar has the right shape.
 The 372 lane therefore trains on **v1pre** and evaluates on **v1cur**. That is
 stated rather than hidden; the flip lane's own 372 era A/B bounds the rank skew
 at **≤ 7e-4**.
+
+## 8. THE SLICE EFFECT ON A7r, ISOLATED — class and layout held fixed
+
+§3.3 could only say "everything past `f0..155` sits at 4 or 5". This is the
+controlled version: **same model class (sparse additive lasso), same layout
+(372), same id100+negrich anchor chain, same instrument, one variable — the
+slice.** Both bakes come from the d_peaks lane's own arm set.
+
+| bake | slice | contract | **A7r** | C1 mono | avif-rav1e | avif-svt | jpeg | jxl | webp |
+|---|---|---|--:|--:|--:|--:|--:|--:|--:|
+| `CTL_d_id100_negrich_dial` | **156** | PASS | **0** | 0.9931 | 0.6667 ✓ | 1.0000 ✓ | 0.6667 ✓ | 1.0000 ✓ | 1.0000 ✓ |
+| `Dpeaks372_id100negrich_dial` | **228** (+72 peaks) | PASS | **3** | 0.9616 | **0.2821 ✗** | 1.0000 ✓ | **0.5641 ✗** | **0.6923 ✗** | 1.0000 ✓ |
+| *mentor `peer_ssim2`* | — | — | — | — | *0.6410* | *1.0000* | *0.6667* | *0.9615* | *1.0000* |
+| *(context)* `v47_strict_qat_native` | 372-full, **MLP** | PASS | 4 | 0.9803 | 0.3590 ✗ | 0.8462 ✗ | 0.5128 ✗ | 0.8462 ✗ | 1.0000 ✓ |
+| *(context)* shipped Profile B | 372-full linear | FAIL | 5 | 0.9776 | 0.1795 ✗ | 0.4359 ✗ | 0.5641 ✗ | 0.4231 ✗ | 0.9487 ✗ |
+
+**Adding the 72 peaks costs three of five codecs on floor representability, and
+0.0315 of dial monotonicity, at fixed class and fixed layout.** The d_peaks
+lane reached the same attribution from a wider comparison; this removes the
+remaining confounds (different λ, different arms) and puts a number on it.
+
+**Consequence for this campaign's ship decision, stated before its own arms
+land.** The registered ship rule needs A7r PASS. On this evidence:
+
+* **`S156` is the shape most likely to ship** — it is the only slice any scorer
+  has ever passed A7r with, in either class.
+* **`S228` is likely to fail A7r**, and it is the slice with the rank upside
+  (the D+free lane measured the peaks half carrying 97 % of the free set's
+  CID22 gain). So the campaign is walking into a **rank-vs-floor trade**, which
+  is exactly the trade the d_peaks slot-ablation lane hit from the other side
+  (dropping `f162` fixed jxl's A7r and created a new A4 failure — *"a clean
+  either/or with no arm failing both"*).
+* **Two things are still genuinely open**, and this campaign measures both:
+  whether an **MLP** over the same slice inverts the same way (every model in
+  the table above is a linear fit except `v47`, which is 372-**full**, not
+  228), and whether **`--monotonicity-reg`** — the only ordering-aware
+  regularizer in the trainer, alpha-head-only, arm `MR` — moves it.
