@@ -411,3 +411,48 @@ walk at **6.5 ms @576²/1T** (944-full 16.2) with the **front end** — XYB
 convert + downscale — at a third of it, and a separate lane is optimising that
 now. So W4 is measured **last, on the same binary as its baseline**, and no
 number is carried forward from an earlier build.
+
+## 6. GATE G7 — SERVABILITY MEASURED, and a byte-identical short-circuit nobody had connected to C5
+
+### 6.1 The servable lane is not a hypothesis
+
+`zensim/examples/serve_custom_bake.rs` (new) loads an arbitrary ZNPR through
+`ZensimProfile::Custom` and calls the **production** `Zensim::compute` on real
+pixels — the same way the `d_ship_flip` lane found the 944 refusal. On one
+`(q1, q3)` zenjpeg pair:
+
+| bake | declared | `Zensim::compute` |
+|---|---|---|
+| shipped Profile D | `n_inputs=372 caller=372` | **SERVED** −76.863084 |
+| `Dpeaks372_id100negrich_dial` — **reads peaks** | `n_inputs=372 caller=372` | **SERVED** −59.302644 |
+| `F2_S265_H128_p_s4004_id100` (this lane's control) | `n_inputs=265 caller=944` | **REFUSED** `ModelForwardFailed` |
+| `Fpeaks_id100negrich` (D+free's 944 arm) | `n_inputs=944 caller=944` | **REFUSED** `ModelForwardFailed` |
+
+Both sides of the kernel lane's reading confirmed, and the part that needed
+checking — **a 372-layout bake that reads the peaks block serves today** —
+holds.
+
+### 6.2 `Zensim::compute` short-circuits byte-identical input BEFORE the model
+
+The refused bakes still printed `IDENTITY (ref vs ref) score=100.000000`. That
+is not the error being swallowed: `metric.rs` builds `(100.0, 0.0, zeros)` and
+calls `.mark_identical()` (:3509, :5225), and `apply_mlp_scoring_with_codec`
+reads the flag to **skip the MLP forward** — with the reason stated in the
+field's own doc: the forward *"produces garbage (the bake has no signal
+anchoring 'zero feature vector → score 100')"*.
+
+**So for byte-identical input the product returns exactly 100 whatever bake is
+loaded, and it does so without consulting the dial at all.** That reframes what
+C5 protects, and the reframing is worth stating because the gate's own owner
+constant is written in terms of `dial(0⃗)`:
+
+* C5 is a property of the **bake** — what its dial does at the identity feature
+  vector — and remains the right gate, because the short-circuit is keyed on
+  **byte-identical pixels**, not on near-identity. A one-bit difference, a
+  lossless re-encode, a q=100 JPEG: none is byte-identical, all go through the
+  model, and *that* is the regime a near-lossless product dial lives in.
+* But a C5 failure is **not** a claim that `zensim(x, x) != 100` in production.
+  It never is. Reporting it as one would be wrong.
+
+Neither point changes any number in this campaign; both change how the C5 row
+should be read, and neither was on the record.

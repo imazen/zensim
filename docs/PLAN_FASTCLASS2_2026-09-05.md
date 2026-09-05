@@ -499,6 +499,24 @@ script (repo rule against hardcoded per-lane paths).
   campaign can say whether any SET or SHAPE moves it, rather than only that the
   incumbent fails it.
 
+* **G7 — SERVABILITY, measured not inherited (registered AND run 2026-09-05
+  20:50 UTC).** The servable-lane amendment rests on a claim read out of
+  `profile.rs`/`fold_engine.rs`; a claim that load-bearing is measured.
+  `zensim/examples/serve_custom_bake.rs` loads an arbitrary ZNPR through
+  `ZensimProfile::Custom` and calls the PRODUCTION `Zensim::compute` on real
+  pixels. **RESULT, on one `(q1, q3)` zenjpeg pair:**
+
+  | bake | declared | `Zensim::compute` |
+  |---|---|---|
+  | shipped Profile D (156, 372) | `n_inputs=372 caller=372` | **SERVED**, score −76.863084 |
+  | `Dpeaks372_id100negrich_dial` — **reads peaks** `f162-164/f211-212/f224` | `n_inputs=372 caller=372` | **SERVED**, score −59.302644 |
+  | `F2_S265_H128_p_s4004_id100` (this campaign's control) | `n_inputs=265 caller=944` | **REFUSED** — `ModelForwardFailed { reason: "bake declares more input features than the caller supplied" }` |
+  | `Fpeaks_id100negrich` (the D+free lane's 944 arm) | `n_inputs=944 caller=944` | **REFUSED** — same |
+
+  So the kernel lane's reading is confirmed on both sides, and — the part that
+  actually needed checking — **a 372-layout bake that READS THE PEAKS BLOCK
+  serves today.** The servable lane is not a hypothesis.
+
 * **G5a — the W4 instrument has no class-C arm, stated before it matters.**
   `ssim2_speed_bar.rs` carries `add156_156basic` / `peaks156_no_raw` /
   `free156_peaks_raw` and no 289 arm. If S289 wins selection, an additive
