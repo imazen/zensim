@@ -3279,6 +3279,42 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 /// features root and nothing else (the dial grid keeps its own provenance row
 /// in the markdown header, and its era caveat is registry-tracked as
 /// `dial372-grid-thread-dependent-era-2026-08-30`).
+/// The `feature_set` block of `--full-json` (`docs/FEATURE_SET_IDS.md` §6.1).
+///
+/// Recomputes nothing the board could get wrong: the ids come from
+/// `zensim_validate::feature_set`, which owns the derivation, and the
+/// mismatch list is exactly what `check` returned.
+fn feature_set_block(model: &Model, root: &Path) -> serde_json::Value {
+    use zensim_validate::feature_set;
+    let era = feature_set::bake_declared_training_set(model)
+        .map(|id| id.era().to_string())
+        .unwrap_or_else(|| zensim::feature_set_id::ERA_UNKNOWN.to_string());
+    let bake = feature_set::bake_feature_set_ref(model, &era).ok();
+    let table = feature_set::root_feature_set_ref(root);
+    let mismatches: Vec<serde_json::Value> = match (&bake, &table) {
+        (Some(b), Some(t)) => feature_set::check(b, t)
+            .into_iter()
+            .map(|m| serde_json::json!({"kind": format!("{:?}", m.kind), "detail": m.detail}))
+            .collect(),
+        _ => Vec::new(),
+    };
+    serde_json::json!({
+        "bake": bake.as_ref().map(|b| b.id.to_string()),
+        "bake_slots": bake.as_ref().map(|b| b.slots.to_string()),
+        "bake_era_source": if era == zensim::feature_set_id::ERA_UNKNOWN {
+            "not declared (no zentrain.feature_set_id in the bake)"
+        } else {
+            "bake metadata zentrain.feature_set_id"
+        },
+        "table": table.as_ref().map(|t| t.id.to_string()),
+        "table_source": table.as_ref().map(|t| t.source.clone()),
+        // An INFERRED table id is evidence about the root's NAME, never about
+        // its BYTES — consumers must badge it.
+        "inferred": table.as_ref().map(|t| t.inferred).unwrap_or(true),
+        "mismatches": mismatches,
+    })
+}
+
 fn features_root_block(
     root: &Path,
     corpus_prov: &[(String, PathBuf, String, u64)],
@@ -3572,11 +3608,18 @@ fn main() -> ExitCode {
                 .unwrap_or_else(|| zensim::feature_set_id::ERA_UNKNOWN.to_string());
             match feature_set::bake_feature_set_ref(m, &era) {
                 Err(e) => {
-                    eprintln!("bake_verdict: feature-set — cannot derive id for {}: {e}", p.display());
+                    eprintln!(
+                        "bake_verdict: feature-set — cannot derive id for {}: {e}",
+                        p.display()
+                    );
                     refuse |= args.require_feature_set_match;
                 }
                 Ok(b) => {
-                    eprintln!("bake_verdict: feature-set — bake  {} [{}]", b.id, p.display());
+                    eprintln!(
+                        "bake_verdict: feature-set — bake  {} [{}]",
+                        b.id,
+                        p.display()
+                    );
                     if let Some(r) = &root_ref {
                         for mm in feature_set::check(&b, r) {
                             let loud = mm.kind != feature_set::MismatchKind::EraUnknown;
@@ -4996,6 +5039,14 @@ Run the dedicated q-sweep harness for those._\n",
             // sha + declared regime, and the per-corpus files actually read.
             // `regime` above is a campaign flag string and is NOT this fact.
             "features_root": features_root_block(&args.features_root, &corpus_prov),
+            // FEATURE-SET IDS (docs/FEATURE_SET_IDS.md). `regime`/`n_inputs`
+            // above are LEGACY ALIASES — a width, not an identity ("944" alone
+            // has named seven feature sets). This block is the identity: the
+            // bake's CONSUMER id (families read, at its caller width, hashed
+            // over the exact read set), the table's PRODUCER id, whether the
+            // table's id had to be INFERRED, and every disagreement between
+            // them. The board reads this; it recomputes nothing.
+            "feature_set": feature_set_block(model, &args.features_root),
             "n_inputs": n_inputs,
             // Architecture + in/out modifiers (transforms, winsor bounds, spline,
             // heads) — the structured `zenpredict inspect`.

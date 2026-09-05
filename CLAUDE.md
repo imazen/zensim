@@ -1739,6 +1739,32 @@ through `bake()`). Don't write a v2→v3 upgrade tool — the right
 fix is "retrain, evaluate on full Mohammadi panel" per the
 principled experiment workflow. Bakes are cheap; ghost data isn't.
 
+## FEATURE SETS ARE NAMED, NOT COUNTED (2026-09-05, user directive)
+
+**A count is not a feature-set identity.** `156` / `372` / `720` / `924` / `944`
+/ `156+free` / `+classC` are LEGACY ALIASES only: "944" has named **seven**
+different feature sets in this repo (two eras of one compute set; three pool
+states — zeroed / all-216-live / ten carriers — at the same width; two free-set
+arms sharing only `f0..227` with any of them; populated-slot counts
+728/728/944/944/738/265/289), and one root's manifest records its regime as
+"mixed by file". The identity is
+**`<compute>@w<layout>/<era>#<slots-hash8>`** — e.g.
+`basic+peaks+moments@w944/era2r4#4fcef1d6` — where COMPUTE is the closed token
+vocabulary of populated slot families, LAYOUT is the emitted width, ERA is the
+registered extractor build class, and the hash is
+`zensim::feature_set_id::slots_hash8` (the ONE owner) over the sorted slot list,
+so **the name is a handle and the hash is the identity**. Design +
+alias table: [`docs/FEATURE_SET_IDS.md`]; registry (append-only):
+`benchmarks/feature_sets_registry.json`. Every new bake carries
+`zentrain.feature_set_id`, every new table carries `"feature_set_id"` in its
+`_MANIFEST.json`, and `bake_verdict` prints both ids and reports every
+disagreement (`--require-feature-set-match` refuses) — which is what closes the
+`--regime 944` silent-mis-scoring bug at the root rather than at one block.
+This SITS UNDER the append-only feature-numbering directive (2026-07-19: "new
+v2 features use indices after all v1 features; we deprecate not renumber"): an
+id names a SUBSET of the existing numbering and never renumbers it, and a new
+block extends the token vocabulary exactly as it extends the numbering.
+
 ## NO DUPLICATE IMPLEMENTATIONS — one owner per task, extend it or don't do it (2026-07-15, user directive)
 
 **Every task below has exactly ONE canonical implementation. Re-implementing

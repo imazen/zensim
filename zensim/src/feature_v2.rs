@@ -2042,7 +2042,8 @@ impl ComputeSet {
         // rather than a bare `372` magic number.
         let v1_total = crate::NUM_SCALES
             * 3
-            * (crate::metric::FEATURES_PER_CHANNEL_EXTENDED + crate::metric::FEATURES_PER_CHANNEL_IW);
+            * (crate::metric::FEATURES_PER_CHANNEL_EXTENDED
+                + crate::metric::FEATURES_PER_CHANNEL_IW);
         let everything = Self {
             v1_basic: true,
             v1_pools: V1PoolsMode::Full,
@@ -2705,7 +2706,6 @@ fn fused_blur_h_ssim_banded(
     );
 }
 
-
 /// Shared body for [`run_blur_pass`]/[`run_blur_pass_strip`] — the actual
 /// fused H-blur + 4x V-blur + activity sequence, over explicit buffers.
 #[allow(clippy::too_many_arguments)]
@@ -2780,11 +2780,7 @@ fn run_blur_pass_inner(
         height_local,
         BLUR_RADIUS,
     );
-    crate::fold_timing::stop(
-        __t_pa,
-        crate::fold_timing::Phase::PhaseAV2Planes,
-        t_scale,
-    );
+    crate::fold_timing::stop(__t_pa, crate::fold_timing::Phase::PhaseAV2Planes, t_scale);
 }
 
 // ============================================================================
@@ -13313,8 +13309,7 @@ pub(crate) mod tests {
                 let v2_blocks = !t.v1_only;
                 let append_on = t.append_block && v2_blocks;
                 let append2_on = t.append2_block && v2_blocks;
-                let self_blur_core =
-                    !v2_blocks && true && matches!(t.v1_pools, V1PoolsMode::Full);
+                let self_blur_core = !v2_blocks && true && matches!(t.v1_pools, V1PoolsMode::Full);
                 // --- /legacy ---
                 assert_eq!(cs.v2_blocks, v2_blocks, "v2_blocks bits={bits}");
                 assert_eq!(cs.append, append_on, "append bits={bits}");
@@ -13366,7 +13361,11 @@ pub(crate) mod tests {
         assert_eq!(bytes.len(), 1, "B forwards exactly one bake");
         let model = crate::mlp::Model::from_bytes(bytes[0]).expect("shipped B bake parses");
         let cs = ComputeSet::from_block_profile(&model);
-        assert_eq!(cs.v1_pools, V1PoolsMode::Full, "B reads the whole pool block");
+        assert_eq!(
+            cs.v1_pools,
+            V1PoolsMode::Full,
+            "B reads the whole pool block"
+        );
         assert!(!cs.v2_blocks, "B's bake is a 372-wide v1-layout bake");
 
         let config = crate::metric::config_from_params(params, false);
@@ -13396,7 +13395,10 @@ pub(crate) mod tests {
             "fixture must actually be wider than the v1 layout to exercise the fallback"
         );
         let cs = ComputeSet::from_block_profile(&model);
-        assert!(cs.v2_blocks, "a wide, unanalysed bake must fall back to computing everything");
+        assert!(
+            cs.v2_blocks,
+            "a wide, unanalysed bake must fall back to computing everything"
+        );
         assert_eq!(cs.v1_pools, V1PoolsMode::Full);
         assert!(cs.append && cs.append2 && cs.gradient && cs.blockiness && cs.csfw);
     }
@@ -13420,8 +13422,14 @@ pub(crate) mod tests {
         });
         let parts = cs.compute_parts();
         assert_eq!(parts.to_string(), "basic+peaks+masked+iw+v2+append+append2");
-        assert!(!parts.contains(T::Moments), "append owns GLOBAL_* on a full walk");
-        assert!(!parts.contains(T::ClassC), "the v2 kernel owns MSE on a full walk");
+        assert!(
+            !parts.contains(T::Moments),
+            "append owns GLOBAL_* on a full walk"
+        );
+        assert!(
+            !parts.contains(T::ClassC),
+            "the v2 kernel owns MSE on a full walk"
+        );
         assert_eq!(cs.populated_slots(4, 944), SlotSet::parse("0-943").unwrap());
     }
 
@@ -13440,9 +13448,16 @@ pub(crate) mod tests {
         });
         assert_eq!(cs.compute_parts().to_string(), "basic+peaks+moments");
         let slots = cs.populated_slots(4, 944);
-        assert!(slots.covers(&SlotSet::parse("0-227").unwrap()), "basic+peaks live");
+        assert!(
+            slots.covers(&SlotSet::parse("0-227").unwrap()),
+            "basic+peaks live"
+        );
         assert!(!slots.contains(300), "IW is a structural zero here");
-        assert_eq!(slots.len(), 228 + 37, "228 basic+peaks, plus the 37-slot tranche");
+        assert_eq!(
+            slots.len(),
+            228 + 37,
+            "228 basic+peaks, plus the 37-slot tranche"
+        );
     }
 
     /// `+classC` adds **24** slots at EXISTING 944 positions — the width does
@@ -13462,7 +13477,10 @@ pub(crate) mod tests {
             free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
             ..Default::default()
         });
-        assert_eq!(with_c.compute_parts().to_string(), "basic+peaks+moments+classc");
+        assert_eq!(
+            with_c.compute_parts().to_string(),
+            "basic+peaks+moments+classc"
+        );
         let (a, b) = (base.populated_slots(4, 944), with_c.populated_slots(4, 944));
         assert!(b.covers(&a), "class C is a strict superset of the free set");
         assert_eq!(b.len(), a.len() + 24);
@@ -13636,8 +13654,13 @@ pub(crate) mod tests {
 
         let cs = ComputeSet::from_block_profile(&model);
         assert!(
-            !cs.v2_blocks && !cs.gradient && !cs.blockiness && !cs.transducer_bank
-                && !cs.append && !cs.append2 && !cs.csfw,
+            !cs.v2_blocks
+                && !cs.gradient
+                && !cs.blockiness
+                && !cs.transducer_bank
+                && !cs.append
+                && !cs.append2
+                && !cs.csfw,
             "a bake reading only basic+peaks+free slots must get the cheap set, got {cs:?}"
         );
         assert_eq!(
@@ -13645,7 +13668,11 @@ pub(crate) mod tests {
             V1FreeExtras::RawMoments,
             "the bake DOES read free-extras positions, so free_extras must be requested"
         );
-        assert_eq!(cs.v1_pools, V1PoolsMode::Peaks, "reads peaks (idx 200), not masked/IW");
+        assert_eq!(
+            cs.v1_pools,
+            V1PoolsMode::Peaks,
+            "reads peaks (idx 200), not masked/IW"
+        );
     }
 
     /// The same free-set shape, but with NO live weight in the free slots
@@ -13679,8 +13706,13 @@ pub(crate) mod tests {
         let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
         let cs = ComputeSet::from_block_profile(&model);
         assert!(
-            cs.v2_blocks && cs.append && cs.append2 && cs.gradient && cs.blockiness
-                && cs.transducer_bank && cs.csfw,
+            cs.v2_blocks
+                && cs.append
+                && cs.append2
+                && cs.gradient
+                && cs.blockiness
+                && cs.transducer_bank
+                && cs.csfw,
             "a non-free append read must trigger the full fallback, got {cs:?}"
         );
     }
@@ -13711,7 +13743,10 @@ pub(crate) mod tests {
         let bytes = wide_free_set_bake_bytes(&nonzero);
         let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
         let cs_cheap = ComputeSet::from_block_profile(&model);
-        assert!(!cs_cheap.v2_blocks, "fixture must actually resolve to the cheap set");
+        assert!(
+            !cs_cheap.v2_blocks,
+            "fixture must actually resolve to the cheap set"
+        );
 
         let src = tests::textured_image(96, 64, 13);
         let dst = tests::quantize_distort(&src, 96, 64);
@@ -14769,8 +14804,6 @@ pub(crate) mod tests {
         }
     }
 
-
-
     /// **FREE-EXTRAS GATE 1 — the free set is pure ADDITION.**
     ///
     /// [`V1FreeExtras::RawMoments`] on a `v1_only` walk must leave every slot
@@ -14952,15 +14985,22 @@ pub(crate) mod tests {
                     }
                     if std::env::var("ZENSIM_FREE_DIAG").is_ok() && d > 1e-12 {
                         let append0 = full.n_scales() * 3 * (31 + FEATURES_PER_CHANNEL_V2_TOTAL);
-                        let (sc, ch, loc) = if i < append0 + full.n_scales() * 3 * FEATURES_PER_CHANNEL_APPEND {
-                            let r = i - append0;
-                            (r / (3 * FEATURES_PER_CHANNEL_APPEND),
-                             (r % (3 * FEATURES_PER_CHANNEL_APPEND)) / FEATURES_PER_CHANNEL_APPEND,
-                             r % FEATURES_PER_CHANNEL_APPEND)
-                        } else {
-                            (99, 99, 99)
-                        };
-                        eprintln!("DIAG {w}x{h} par={parallel} slot={i} s{sc} c{ch} L{loc} 944={:.12e} free={:.12e} d={d:.3e}", a[i], b[i]);
+                        let (sc, ch, loc) =
+                            if i < append0 + full.n_scales() * 3 * FEATURES_PER_CHANNEL_APPEND {
+                                let r = i - append0;
+                                (
+                                    r / (3 * FEATURES_PER_CHANNEL_APPEND),
+                                    (r % (3 * FEATURES_PER_CHANNEL_APPEND))
+                                        / FEATURES_PER_CHANNEL_APPEND,
+                                    r % FEATURES_PER_CHANNEL_APPEND,
+                                )
+                            } else {
+                                (99, 99, 99)
+                            };
+                        eprintln!(
+                            "DIAG {w}x{h} par={parallel} slot={i} s{sc} c{ch} L{loc} 944={:.12e} free={:.12e} d={d:.3e}",
+                            a[i], b[i]
+                        );
                     }
                     assert!(
                         d <= free_tol(),
@@ -19064,9 +19104,6 @@ impl Lanes8 {
         era2_reduce8(self.0)
     }
 }
-
-
-
 
 /// **THE ERA-2 DENSE KERNEL.**
 ///

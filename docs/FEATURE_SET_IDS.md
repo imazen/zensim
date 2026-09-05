@@ -151,22 +151,33 @@ era `zenanalyze-api` deliberately does not model.
 
 ### 3.1 Every meaning "944" has had
 
-Six distinct feature sets have been called "944" in this repo. All six are on the
-board or in a landed benchmark; all six now have distinct ids.
+**Seven** distinct feature sets have been called "944" in this repo. All seven
+are on the board, in a landed benchmark, or on disk as a canonical root; all
+seven now have distinct ids.
 
-| # | id | what it actually is | `f156..371` | where |
-|---|---|---|---|---|
-| 1 | `basic+v2+append+append2@w944/ext944` | the SOTA-944 campaign root | **ZEROED** | `ext944-canonical-2026-08-01`, build `ec3bdd6a` |
-| 2 | `basic+v2+append+append2@w944/era2r4` | the era-2 re-extraction | **ZEROED** | `ext944-era2r4-2026-09-01/foldapp2_views`, build `75c09149` |
-| 3 | `basic+peaks+masked+iw+v2+append+append2@w944/pools` | `foldapp2pools` — every v1 pool LIVE at the same width | **LIVE (216)** | `dial_grid_944col_POOLS_2026-08-30` |
-| 4 | `basic+carriers+v2+append+append2@w944/pools` | `foldapp2carriers` — 10 carrier slots live | **LIVE (10)** | `V1PoolsMode::Carriers`, the `fused944native` regime |
-| 5 | `basic+peaks+moments@w944/era2r4` | the free-set arm, a.k.a. **"156+free"** | ZEROED except peaks | `benchmarks/free_features_2026-09-01.md` |
-| 6 | `basic+peaks+moments+classc@w944/era2r4` | free set **+ class C**, a.k.a. **"+classC"** | ZEROED except peaks | `benchmarks/free_features_classC_2026-09-04.md` |
+| # | id | what it actually is | `f156..371` | populated | where |
+|---|---|---|---|--:|---|
+| 1 | `basic+v2+append+append2@w944/ext944` | the SOTA-944 campaign root | **ZEROED** | 728 | `ext944-canonical-2026-08-01`, build `ec3bdd6a` |
+| 2 | `basic+v2+append+append2@w944/era2r4` | the era-2 wave-r4 zeroed VIEW | **ZEROED** | 728 | `ext944-era2r4-2026-09-01/foldapp2_views/`, regime `folded720append2` |
+| 3 | `basic+peaks+masked+iw+v2+append+append2@w944/era2r4` | the era-2 wave-r4 ROOT itself | **LIVE (216)** | 944 | `ext944-era2r4-2026-09-01/`, regime `folded720append2pools`, build `75c09149` |
+| 4 | `basic+peaks+masked+iw+v2+append+append2@w944/pools` | the 2026-08-30 all-pools era | **LIVE (216)** | 944 | `dial_grid_944col_POOLS_2026-08-30`, `r1b/wlin7-pools944` |
+| 5 | `basic+carriers+v2+append+append2@w944/pools` | `fused944native` — ten carrier slots live | **LIVE (10)** | 738 | `r1b-a3fused-2026-08-30`, regime `fused944native-carriers` |
+| 6 | `basic+peaks+moments@w944/era2r4` | the free-set arm, a.k.a. **"156+free"** | ZEROED except peaks | 265 | `benchmarks/free_features_2026-09-01.md` |
+| 7 | `basic+peaks+moments+classc@w944/era2r4` | free set **+ class C**, a.k.a. **"+classC"** | ZEROED except peaks | 289 | `benchmarks/free_features_classC_2026-09-04.md` |
 
-Rows 1 and 2 differ ONLY in era — same compute, same width, and measured
-bit-identical everywhere except `f720..923` (max abs 7.2e-9). Rows 3 and 5 are
-the same width and the same era-family and share **zero** of their non-basic
-slots. No count distinguishes any pair here; every id does.
+Rows 1 and 2 differ ONLY in era — same compute, same width, same populated
+slots — and are measured bit-identical everywhere except `f720..923` (max abs
+7.2e-9). **Rows 2 and 3 are the same era and live in the same directory tree**:
+`ext944-era2r4-2026-09-01/` is `folded720append2pools` and its own
+`foldapp2_views/` subdir is the zeroed derivation, whose manifest already has
+to say *"NEVER column-mix with the folded720append2pools tables these came
+from"* in prose. Rows 4 and 6 share the same width and **zero** of their
+non-basic slots. No count distinguishes any pair here; every id does.
+
+One more shape the registry has to model: `wlin7b-2026-08-30`'s manifest
+records its regime as *"mixed by file: `*_pools944` = folded720append2pools,
+`*_ctrl944` = folded720append2"*. A root whose feature set varies per FILE
+resolves to no id at all, and must be addressed per file.
 
 ### 3.2 The rest of the fair board's sets
 
@@ -255,15 +266,28 @@ choice is visible rather than assumed.
 | what | owner | status |
 |---|---|---|
 | the grammar, the token vocabulary, `SlotSet`, the hash | `zensim::feature_set_id` | **LANDED** |
-| `ComputeSet` → COMPUTE tokens | `feature_v2::ComputeSet::compute_parts` (`pub(crate)`) | **LANDED** |
-| a bake's CONSUMER id from its bytes | `zensim_validate::feature_set::bake_feature_set_id` | **LANDED** |
-| a features root's PRODUCER id | `zensim_validate::feature_set::root_feature_set_id` (manifest `feature_set_id` → registry alias → `unknown`) | **LANDED** |
+| `ComputeSet` → COMPUTE tokens + populated slots | `feature_v2::ComputeSet::{compute_parts, populated_slots, feature_set_id}` (`pub(crate)`) | **LANDED** |
+| the extractor-side entry point | `feature_v2::V2NewFeatureToggles::{feature_set_id, populated_slots}` (`#[doc(hidden)] pub`) | **LANDED** |
+| a bake's CONSUMER id from its bytes | `zensim_validate::feature_set::bake_feature_set_ref` | **LANDED** |
+| a features root's PRODUCER id | `zensim_validate::feature_set::root_feature_set_ref` | **LANDED** |
+| the per-caller-line read set | `block_profile::{caller_line_norms, used_caller_lines}` (`profile()` now calls them — one derivation) | **LANDED** |
 | the compatibility check | `zensim_validate::feature_set::check` | **LANDED** |
-| `bake_verdict` warn / `--require-feature-set-match` refuse | `bake_verdict` | **LANDED** |
-| `bake_block_profile` prints the id | `bake_block_profile` | **LANDED** |
+| `bake_verdict` prints both ids, reports every disagreement | `bake_verdict` | **LANDED** |
+| `bake_verdict --require-feature-set-match` refuses | `bake_verdict` | **LANDED** |
+| `--full-json` `feature_set` block | `bake_verdict::feature_set_block` | **LANDED** |
+| `bake_block_profile` prints the id + read set (text and `--json`) | `bake_block_profile` | **LANDED** |
 | trainer embeds `zentrain.feature_set_id` | `zensim_mlp_train` | **LANDED** |
-| extractor writes `feature_set_id` into `_MANIFEST.json` | `scripts/canonical_corpus/*` manifest writers | **REGISTERED, next pass** |
-| board regime column shows the id | `scripts/v_next/gauntlet.py` | **LANDED (alias-inferred rows badged)** |
+| board shows the id, badges an inferred one | `scripts/v_next/gauntlet.py` (`feature_set_id_of`, `fsid()`) | **LANDED** |
+| extractor writes `feature_set_id` into `_MANIFEST.json` | `scripts/canonical_corpus/*` manifest writers | **REGISTERED, not executed** — the writers are another lane's; the helper they need (`V2NewFeatureToggles::feature_set_id`) is landed and the registry's `roots` table covers every existing root meanwhile |
+
+**Measured on shipped B, reproducing three published numbers from three
+different records, independently:** the derived consumer id is
+`basic+peaks+masked+iw@w372/unknown#9403d2a7` over **95** live caller lines,
+**49** of them in `f156..371` and **23** in `f228..371` — matching campaign
+appendix W's "49 structurally-used lines", CLAUDE.md's "23 of its 95 live
+inputs in f228..371". At the `ext944` root the gate names all 49 as
+READ-BUT-NOT-POPULATED, which is the mechanism behind that read's CID22
+**0.3862** against its true **0.8764**.
 
 ### 6.1 What every new artifact MUST carry
 
@@ -293,15 +317,72 @@ choice is visible rather than assumed.
 
 ## 7. Migration
 
-1. **Now:** ids are derived and printed everywhere; mismatches warn. Legacy
-   artifacts resolve via aliases and are labelled `inferred` — an inferred id is
-   evidence about the artifact's *name*, never about its *bytes*.
-2. **Next artifact:** every new bake / root / grid carries a real id per §6.1.
+### 7.1 What keeps working, unchanged
+
+* **`--regime 372|720|944`** — kept verbatim, same defaults, same presets. The
+  flag now means "select this alias's DEFAULT target", and the resolved id is
+  printed so the choice is visible rather than assumed.
+* **`--cross-regime`** and the `folded_root_conflict` guard — untouched. The id
+  check runs *beside* it, not instead of it: the guard refuses, the id check
+  reports (or refuses under `--require-feature-set-match`).
+* **`_MANIFEST.json` `"regime"`** — stays. It is the human sentence; the id is
+  the machine key, and the registry's `regime_strings` table maps the former to
+  the latter so no existing root has to be rewritten.
+* **the board's `regime` column** — stays, as the compact label. Every
+  historical cell has a width and almost none has an id, so removing it would
+  blank 450 rows to prove a point. The id rides in the chip tooltip and is
+  marked `(inferred)` whenever it was derived from the width.
+* **`n_inputs` / `caller_input_width` / `zenanalyze-api`** — all unchanged.
+* **Feature NUMBERING** — append-only, unchanged. An id names a SUBSET of the
+  existing numbering; it never renumbers, and a new block extends the token
+  vocabulary (`hdr` is already reserved) exactly as a new block extends the
+  numbering.
+
+### 7.2 What every new artifact MUST carry
+
+| artifact | carries | who writes it |
+|---|---|---|
+| a **bake** | `zentrain.feature_set_id` metadata = the PRODUCER id of the tables it TRAINED on | `zensim_mlp_train` (landed; refuses to stamp when the training groups span different sets) |
+| a **features root / parquet dir** | a top-level `"feature_set_id"` string in `_MANIFEST.json`, beside `"regime"` | the canonical-corpus manifest writers (registered; `V2NewFeatureToggles::feature_set_id` is the helper) |
+| a **dial / corruption grid** | same as a features root | same |
+| a **verdict** | the `feature_set` block in `--full-json` | `bake_verdict` (landed) |
+| a **board row** | `feature_set.bake` flows through to the chip | `gauntlet.py` (landed) |
+
+A bake's own CONSUMER id is never stored — it is always derivable from the
+bytes, and a stored copy could disagree with them.
+
+### 7.3 The three steps
+
+1. **Now:** ids are derived and printed everywhere; mismatches are reported.
+   Legacy artifacts resolve through the registry's `roots` / `regime_strings`
+   tables and are marked `inferred`. **An inferred id is evidence about the
+   artifact's NAME, never about its BYTES.**
+2. **Next artifact:** every new bake / root / grid carries a real id per §7.2.
    An artifact with a stored id never falls back to inference.
 3. **When the fleet next re-extracts:** the manifest writers stamp
-   `feature_set_id` at write time, and `--require-feature-set-match` can become
-   the default for `bake_verdict`.
+   `feature_set_id` at write time, and `--require-feature-set-match` becomes
+   `bake_verdict`'s default. It is not the default today for one honest reason:
+   every existing bake reads era `unknown`, so strict mode would refuse the
+   entire board — which is a true statement about the artifacts, not a useful
+   one about a given run.
 
-An `unknown` era is never silently treated as a match — it warns exactly like a
-mismatch, because "we do not know which extractor made this" and "we know it was
-a different one" have the same consequence for a published number.
+An `unknown` era is never silently treated as a match — it is reported exactly
+like a mismatch, because "we do not know which extractor made this" and "we
+know it was a different one" have the same consequence for a published number.
+It is reported at `note` rather than `MISMATCH` prominence only so the one
+honest fact common to all 450 legacy cells does not drown the ones specific to
+a run; `--require-feature-set-match` treats it as a refusal like any other.
+
+### 7.4 Adding a new set, era or token
+
+* **A new set** — append an entry to `sets` with its `slots`, and let the
+  registry test compute the hash for you (it fails with the owner's value).
+* **A new era** — append to `eras` with the `build_commit` and root, and add
+  the root to `roots`.
+* **A new token** — append to `compute_tokens` AND to
+  `zensim::feature_set_id::ComputeToken::ALL` (in layout order, scattered
+  tranches last). Both are needed: the enum is the closed vocabulary the parser
+  validates against, the registry is where the slots live.
+* **Never** edit or delete an existing entry — supersede it with a new one and
+  point `superseded_by` at the replacement, the same discipline
+  `benchmarks/eval_annotations.json` uses.

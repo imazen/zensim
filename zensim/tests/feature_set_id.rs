@@ -28,11 +28,21 @@ fn same_slots_different_era_is_a_different_id() {
     let slots = SlotSet::parse("0-155,372-943").unwrap();
     let a = FeatureSetId::from_slots(compute, 944, "ext944", &slots).unwrap();
     let b = FeatureSetId::from_slots(compute, 944, "era2r4", &slots).unwrap();
-    assert_eq!(a.slots_hash(), b.slots_hash(), "same slots ⇒ same slot hash");
+    assert_eq!(
+        a.slots_hash(),
+        b.slots_hash(),
+        "same slots ⇒ same slot hash"
+    );
     assert_ne!(a, b, "a different era MUST be a different id");
     assert_ne!(a.to_string(), b.to_string());
-    assert!(a.to_string().starts_with("basic+v2+append+append2@w944/ext944#"));
-    assert!(b.to_string().starts_with("basic+v2+append+append2@w944/era2r4#"));
+    assert!(
+        a.to_string()
+            .starts_with("basic+v2+append+append2@w944/ext944#")
+    );
+    assert!(
+        b.to_string()
+            .starts_with("basic+v2+append+append2@w944/era2r4#")
+    );
 }
 
 /// GOLDEN pin on the hash algorithm itself (design §2.4: FNV-1a/64 over the
@@ -41,7 +51,10 @@ fn same_slots_different_era_is_a_different_id() {
 /// registered id, so it must never move silently.
 #[test]
 fn slot_hash_algorithm_is_pinned() {
-    assert_eq!(zensim::feature_set_id::hex8(slots_hash8([0usize, 1, 2])), "d404bc88");
+    assert_eq!(
+        zensim::feature_set_id::hex8(slots_hash8([0usize, 1, 2])),
+        "d404bc88"
+    );
     assert_eq!(
         zensim::feature_set_id::hex8(SlotSet::parse("0-155,372-943").unwrap().hash8()),
         "7ed470b4"
@@ -67,7 +80,10 @@ fn same_era_different_slots_is_a_different_id() {
     )
     .unwrap();
     let free = FeatureSetId::from_slots(
-        ComputeParts::EMPTY.with(T::Basic).with(T::Peaks).with(T::Moments),
+        ComputeParts::EMPTY
+            .with(T::Basic)
+            .with(T::Peaks)
+            .with(T::Moments),
         944,
         "pools",
         &SlotSet::parse("0-227,733-735").unwrap(),
@@ -84,7 +100,10 @@ fn same_era_different_slots_is_a_different_id() {
 /// identity (design §2.4).
 #[test]
 fn same_name_different_slots_cannot_collide() {
-    let compute = ComputeParts::EMPTY.with(T::Basic).with(T::Peaks).with(T::Moments);
+    let compute = ComputeParts::EMPTY
+        .with(T::Basic)
+        .with(T::Peaks)
+        .with(T::Moments);
     let with_all_free = FeatureSetId::from_slots(
         compute,
         944,
@@ -92,9 +111,13 @@ fn same_name_different_slots_cannot_collide() {
         &SlotSet::parse("0-227,733-735,750-752").unwrap(),
     )
     .unwrap();
-    let with_some_free =
-        FeatureSetId::from_slots(compute, 944, "era2r4", &SlotSet::parse("0-227,733-735").unwrap())
-            .unwrap();
+    let with_some_free = FeatureSetId::from_slots(
+        compute,
+        944,
+        "era2r4",
+        &SlotSet::parse("0-227,733-735").unwrap(),
+    )
+    .unwrap();
     assert_eq!(with_all_free.compute(), with_some_free.compute());
     assert_ne!(with_all_free, with_some_free);
 }
@@ -111,13 +134,34 @@ fn canonical_form_round_trips() {
         assert_eq!(id.to_string(), s);
     }
     // Strict, exactly like `zenanalyze_api::NamedFeature::parse`.
-    assert!(FeatureSetId::parse("basic@w944/era2r4#ABCDEF01").is_none(), "uppercase hex");
-    assert!(FeatureSetId::parse("basic@w944/era2r4#abcdef0").is_none(), "7 digits");
-    assert!(FeatureSetId::parse("basic@w944/era2r4#abcdef012").is_none(), "9 digits");
-    assert!(FeatureSetId::parse("basic@w944/era2r4").is_none(), "no hash");
-    assert!(FeatureSetId::parse("basic@944/era2r4#abcdef01").is_none(), "no w prefix");
-    assert!(FeatureSetId::parse("basic@w944/Era2R4#abcdef01").is_none(), "era charset");
-    assert!(FeatureSetId::parse("basic+nope@w944/era2r4#abcdef01").is_none(), "unknown token");
+    assert!(
+        FeatureSetId::parse("basic@w944/era2r4#ABCDEF01").is_none(),
+        "uppercase hex"
+    );
+    assert!(
+        FeatureSetId::parse("basic@w944/era2r4#abcdef0").is_none(),
+        "7 digits"
+    );
+    assert!(
+        FeatureSetId::parse("basic@w944/era2r4#abcdef012").is_none(),
+        "9 digits"
+    );
+    assert!(
+        FeatureSetId::parse("basic@w944/era2r4").is_none(),
+        "no hash"
+    );
+    assert!(
+        FeatureSetId::parse("basic@944/era2r4#abcdef01").is_none(),
+        "no w prefix"
+    );
+    assert!(
+        FeatureSetId::parse("basic@w944/Era2R4#abcdef01").is_none(),
+        "era charset"
+    );
+    assert!(
+        FeatureSetId::parse("basic+nope@w944/era2r4#abcdef01").is_none(),
+        "unknown token"
+    );
 }
 
 /// The hash is over a SET: sorted + de-duplicated before hashing, so two
@@ -129,7 +173,10 @@ fn slot_hash_is_order_and_duplicate_insensitive() {
     assert_eq!(a, b);
     assert_ne!(slots_hash8([1usize, 5, 9]), slots_hash8([1usize, 5, 10]));
     // The empty set has a defined, stable hash (FNV-1a/64 offset basis, folded).
-    assert_eq!(slots_hash8(core::iter::empty()), slots_hash8(core::iter::empty()));
+    assert_eq!(
+        slots_hash8(core::iter::empty()),
+        slots_hash8(core::iter::empty())
+    );
 }
 
 #[test]
@@ -153,11 +200,17 @@ fn slot_set_normalizes_and_renders_compactly() {
 fn covers_is_the_subset_test_that_catches_the_regime_944_bug() {
     let ext944 = SlotSet::parse("0-155,372-943").unwrap();
     let b_reads = SlotSet::parse("0-155,300-310").unwrap();
-    assert!(!ext944.covers(&b_reads), "the block B reads is NOT populated at ext944");
+    assert!(
+        !ext944.covers(&b_reads),
+        "the block B reads is NOT populated at ext944"
+    );
     let missing = ext944.missing_from(&b_reads);
     assert_eq!(missing.to_string(), "300-310");
     let add156_reads = SlotSet::parse("0-27").unwrap();
-    assert!(ext944.covers(&add156_reads), "a basic-only reader is safe at any root");
+    assert!(
+        ext944.covers(&add156_reads),
+        "a basic-only reader is safe at any root"
+    );
     assert!(ext944.covers(&ext944));
     assert!(SlotSet::default().is_empty());
     assert!(ext944.covers(&SlotSet::default()));
@@ -165,14 +218,23 @@ fn covers_is_the_subset_test_that_catches_the_regime_944_bug() {
 
 #[test]
 fn compute_parts_render_in_registry_order_regardless_of_insertion_order() {
-    let a = ComputeParts::EMPTY.with(T::Append2).with(T::Basic).with(T::Peaks);
-    let b = ComputeParts::EMPTY.with(T::Peaks).with(T::Append2).with(T::Basic);
+    let a = ComputeParts::EMPTY
+        .with(T::Append2)
+        .with(T::Basic)
+        .with(T::Peaks);
+    let b = ComputeParts::EMPTY
+        .with(T::Peaks)
+        .with(T::Append2)
+        .with(T::Basic);
     assert_eq!(a, b);
     assert_eq!(a.to_string(), "basic+peaks+append2");
     assert_eq!(ComputeParts::parse("basic+peaks+append2"), Some(a));
-    assert_eq!(ComputeParts::parse("append2+peaks+basic"), Some(a), "parse is order-tolerant");
+    assert_eq!(
+        ComputeParts::parse("append2+peaks+basic"),
+        Some(a),
+        "parse is order-tolerant"
+    );
     assert_eq!(ComputeParts::EMPTY.to_string(), "none");
     assert_eq!(ComputeParts::parse("none"), Some(ComputeParts::EMPTY));
     assert!(a.contains(T::Basic) && !a.contains(T::Iw));
 }
-

@@ -4031,7 +4031,11 @@ fn main() {
         let ids: BTreeSet<String> = loaded
             .iter()
             .filter(|g| g.train_w > 0.0)
-            .filter_map(|g| std::path::Path::new(&g.source_path).parent().map(|d| d.to_path_buf()))
+            .filter_map(|g| {
+                std::path::Path::new(&g.source_path)
+                    .parent()
+                    .map(|d| d.to_path_buf())
+            })
             .collect::<BTreeSet<_>>()
             .iter()
             .filter_map(|d| zensim_validate::feature_set::root_feature_set_ref(d))

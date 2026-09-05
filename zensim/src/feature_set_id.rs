@@ -305,7 +305,12 @@ impl SlotSet {
     /// Union.
     #[must_use]
     pub fn union(&self, other: &SlotSet) -> SlotSet {
-        SlotSet::from_ranges(self.ranges.iter().copied().chain(other.ranges.iter().copied()))
+        SlotSet::from_ranges(
+            self.ranges
+                .iter()
+                .copied()
+                .chain(other.ranges.iter().copied()),
+        )
     }
 
     /// Everything below `width` — the LAYOUT clip. A family that does not
@@ -315,7 +320,8 @@ impl SlotSet {
         SlotSet::from_ranges(
             self.ranges
                 .iter()
-                .filter_map(|(a, b)| (*a < width).then(|| (*a, (*b).min(width)))),
+                .filter(|(a, _)| *a < width)
+                .map(|(a, b)| (*a, (*b).min(width))),
         )
     }
 
@@ -339,7 +345,10 @@ impl SlotSet {
             let part = part.trim();
             match part.split_once('-') {
                 Some((a, b)) => {
-                    let (a, b) = (a.trim().parse::<usize>().ok()?, b.trim().parse::<usize>().ok()?);
+                    let (a, b) = (
+                        a.trim().parse::<usize>().ok()?,
+                        b.trim().parse::<usize>().ok()?,
+                    );
                     if b < a {
                         return None;
                     }
@@ -437,7 +446,9 @@ pub fn hex8(h: u32) -> String {
 /// `zenanalyze_api::NamedFeature::is_valid_name`.
 #[must_use]
 pub fn is_valid_token(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 /// A feature-set identifier: `<compute>@w<layout>/<era>#<hash8>`.
@@ -523,7 +534,10 @@ impl FeatureSetId {
         let (era, hash_s) = rest.split_once('#')?;
         let compute = ComputeParts::parse(compute_s)?;
         let layout_width = layout_s.strip_prefix('w')?.parse::<usize>().ok()?;
-        if hash_s.len() != 8 || !hash_s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        if hash_s.len() != 8
+            || !hash_s
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         {
             return None;
         }

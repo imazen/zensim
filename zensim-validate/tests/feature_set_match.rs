@@ -80,7 +80,10 @@ fn build_model(n_raw: usize, live: impl Fn(usize) -> bool) -> Model {
 fn a_372_bake_reading_f156_371_mismatches_the_944_root() {
     let m = build_model(372, |k| k < 156 || (300..349).contains(&k));
     let bake_ref = feature_set::bake_feature_set_ref(&m, "v1cur").expect("derive");
-    assert!(bake_ref.id.compute().contains(T::Iw), "the bake reads the IW block");
+    assert!(
+        bake_ref.id.compute().contains(T::Iw),
+        "the bake reads the IW block"
+    );
     let root = feature_set::registry()
         .set("basic+v2+append+append2@w944/ext944")
         .expect("registered")
@@ -89,10 +92,18 @@ fn a_372_bake_reading_f156_371_mismatches_the_944_root() {
 
     let ms = feature_set::check(&bake_ref, root);
     assert!(!ms.is_empty(), "reading a zeroed block MUST be reported");
-    let joined = ms.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(" | ");
-    assert!(joined.contains("300-348"), "must name the unpopulated slots: {joined}");
+    let joined = ms
+        .iter()
+        .map(|m| m.to_string())
+        .collect::<Vec<_>>()
+        .join(" | ");
     assert!(
-        ms.iter().any(|m| m.kind == feature_set::MismatchKind::SlotsNotPopulated),
+        joined.contains("300-348"),
+        "must name the unpopulated slots: {joined}"
+    );
+    assert!(
+        ms.iter()
+            .any(|m| m.kind == feature_set::MismatchKind::SlotsNotPopulated),
         "the slot-coverage mismatch is the load-bearing one: {joined}"
     );
 }
@@ -114,7 +125,10 @@ fn a_basic_only_bake_is_compatible_with_every_registered_producer() {
             .into_iter()
             .filter(|m| m.kind == feature_set::MismatchKind::SlotsNotPopulated)
             .count();
-        assert_eq!(slot_fails, 0, "basic-only must be slot-compatible with {id}");
+        assert_eq!(
+            slot_fails, 0,
+            "basic-only must be slot-compatible with {id}"
+        );
     }
 }
 
@@ -130,16 +144,22 @@ fn an_era_difference_is_reported_even_when_the_slots_match() {
         .as_ref()
         .expect("pinned");
     let ms = feature_set::check(&a, root);
-    assert!(ms.iter().any(|m| m.kind == feature_set::MismatchKind::EraDiffers));
-    assert!(!ms.iter().any(|m| m.kind == feature_set::MismatchKind::SlotsNotPopulated));
+    assert!(
+        ms.iter()
+            .any(|m| m.kind == feature_set::MismatchKind::EraDiffers)
+    );
+    assert!(
+        !ms.iter()
+            .any(|m| m.kind == feature_set::MismatchKind::SlotsNotPopulated)
+    );
 }
 
 /// An UNKNOWN era is never silently a match.
 #[test]
 fn an_unknown_era_is_reported_not_waved_through() {
     let m = build_model(372, |k| k < 156);
-    let a = feature_set::bake_feature_set_ref(&m, zensim::feature_set_id::ERA_UNKNOWN)
-        .expect("derive");
+    let a =
+        feature_set::bake_feature_set_ref(&m, zensim::feature_set_id::ERA_UNKNOWN).expect("derive");
     let root = feature_set::registry()
         .set("basic+peaks+masked+iw@w372/v1cur")
         .expect("registered")
@@ -172,14 +192,20 @@ fn every_registered_set_agrees_with_the_hash_owner() {
                 p.id.slots_hash(),
                 "{key}: stored hash disagrees with the owner"
             );
-            assert_eq!(p.slots.len(), set.n_slots.expect("pinned sets carry n_slots"));
+            assert_eq!(
+                p.slots.len(),
+                set.n_slots.expect("pinned sets carry n_slots")
+            );
             assert!(
                 p.id.layout_width() >= p.slots.ranges().last().map(|r| r.1).unwrap_or(0),
                 "{key}: slots overflow the declared layout"
             );
         }
     }
-    assert!(pinned >= 12, "the registry must pin every set of the doc's §3 table");
+    assert!(
+        pinned >= 12,
+        "the registry must pin every set of the doc's §3 table"
+    );
     // Every alias target resolves.
     for (name, ids) in reg.aliases() {
         for id in ids {
@@ -187,7 +213,10 @@ fn every_registered_set_agrees_with_the_hash_owner() {
         }
     }
     // "944" is the ambiguous one, by construction.
-    assert!(reg.aliases_for("944").len() >= 6, "944 has had at least six meanings");
+    assert!(
+        reg.aliases_for("944").len() >= 6,
+        "944 has had at least six meanings"
+    );
     assert_eq!(reg.aliases_for("720").len(), 1);
 }
 
@@ -202,8 +231,17 @@ fn a_registered_root_path_resolves_and_is_marked_inferred() {
         // cannot answer, which would be a registry defect, not a missing disk.
         panic!("the registry alone must resolve a registered root path");
     };
-    assert_eq!(r.id.to_string(), "basic+v2+append+append2@w944/ext944#7ed470b4");
-    assert!(r.inferred, "a root with no stored id is INFERRED, never asserted");
-    assert!(!r.slots.contains(300), "f156..371 is not populated at ext944");
+    assert_eq!(
+        r.id.to_string(),
+        "basic+v2+append+append2@w944/ext944#7ed470b4"
+    );
+    assert!(
+        r.inferred,
+        "a root with no stored id is INFERRED, never asserted"
+    );
+    assert!(
+        !r.slots.contains(300),
+        "f156..371 is not populated at ext944"
+    );
     assert!(r.slots.covers(&SlotSet::parse("0-155").unwrap()));
 }

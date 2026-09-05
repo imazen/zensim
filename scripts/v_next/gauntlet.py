@@ -387,13 +387,38 @@ def load_loop_targeting(path=None):
             "models": models, "bakeMap": bake_map, "modelBake": model_bake}
 
 
+def feature_set_id_of(o):
+    """The cell's FEATURE-SET ID (`docs/FEATURE_SET_IDS.md`) — the naming system that
+    replaces the count, returned as `(id_or_None, inferred)`.
+
+    Preference order, and it matters:
+      1. `feature_set.bake` — the id the OWNER (`bake_verdict`) derived and recorded.
+         Asserted, `inferred=False`.
+      2. `model.feature_set_id` — an id embedded in the bake itself.
+      3. an ALIAS-derived id from the recorded width: the count is a legacy alias, and
+         `944` alone has named seven different feature sets, so an alias-derived id is
+         marked `inferred=True` and the board badges it. It is evidence about the
+         cell's NAME, never about its BYTES.
+
+    Nothing is recomputed here — the board renders what the owner produced."""
+    fs = o.get("feature_set") or {}
+    bake_id = fs.get("bake") or (o.get("model") or {}).get("feature_set_id")
+    if isinstance(bake_id, str) and "@w" in bake_id:
+        return bake_id, bool(fs.get("inferred"))
+    return None, True
+
+
 def regime_of(o):
     """Displayed regime = the model's TRUE input width (372/720/924/944-class), derived
     from n_inputs read out of the ZNPR itself. The stored `regime` flag string is
     cosmetic on the sota944 campaign verdicts (every one of the 166 board JSONs says
     "720" while n_inputs spans 156/372/504/720/924/944) — so the flag is only the
     fallback when no width is recorded. For an ensemble the width shown is the ANCHOR
-    member's (the model block describes the anchor; the scoreboard caption says so)."""
+    member's (the model block describes the anchor; the scoreboard caption says so).
+
+    NOTE (2026-09-05): a width is a LEGACY ALIAS, not an identity — see
+    `feature_set_id_of`, which the scoreboard shows beside it. Kept as the compact
+    column label because every historical cell has a width and almost none has an id."""
     m = o.get("model") or {}
     n = m.get("n_inputs") or o.get("n_inputs")
     try:
@@ -1308,6 +1333,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                       "legs": legs, "extras": extras}
         bakes.append({
             "name": name, "regime": regime_of(o), "regime_flag": o.get("regime", "?"),
+            "fsid": feature_set_id_of(o)[0], "fsidInferred": feature_set_id_of(o)[1],
             "train_date": train_date, "recipe": recipe,
             "curated": curated, "family": family_of(name),
             "date": o.get("date", ""), "colorIndex": ci,
@@ -2026,6 +2052,7 @@ function renderBar(){
     const chip=el('label',{class:'chip'+(on?'':' off'),
       title:b.regime+' inputs'
         +(b.regime_flag&&b.regime_flag!==b.regime?' (recorded flag: '+b.regime_flag+')':'')
+        +' · feature-set '+fsid(b)
         +(b.family?' · '+b.family:'')+(b.curated?' · curated':'')
         +(b.is_stub?' (stub)':'')+(isEns(b)?' · ensemble of '+ensK(b)+' bakes':'')
         +(DOM(b)?' · DOMINATED by '+b.dominated_by.join(', '):'')
@@ -2096,6 +2123,13 @@ function makeSortable(tbl){
 }
 
 // ---- SCOREBOARD TABLE (sortable). columns = derived metrics per bake.
+// The cell's FEATURE-SET ID (docs/FEATURE_SET_IDS.md) — the naming system that
+// replaces the count. A width is a legacy ALIAS: '944' alone has named seven
+// different feature sets (two eras of one compute set, three pool states at the
+// same width, two free-set arms). An id that had to be INFERRED from the width is
+// marked, because it is evidence about the cell's NAME, never about its BYTES.
+function fsid(b){return b.fsid?(b.fsid+(b.fsidInferred?' (inferred)':'')):
+  ('NOT RECORDED — width '+b.regime+' is an alias, not an identity');}
 const COLS=[
   ['name','bake',true,b=>b.name],
   // FAIRNESS (2026-09-04). `fair` = the tier glyph; `k` = seed-group size; `cmean` =
@@ -2208,7 +2242,10 @@ function renderTable(){
     +'the <b>ssim2-judged</b> columns are the FAIR cross-bake reading; native columns are per-bake diagnostics '
     +'only — bakes with compressed dial spans are flattered natively (measured: GL2). ') : '';
   const cap=el('div',{class:'cap',html:domNote+pxNote+'Sortable scoreboard — click a header. SROCC is polarity-corrected '
-    +'(|SROCC| for JND corpora). <b>regime</b> = the model’s TRUE input width, derived from the ZNPR’s '
+    +'(|SROCC| for JND corpora). <b>regime</b> = the model’s TRUE input width — a LEGACY ALIAS, not an '
+    +'identity (“944” alone has named seven different feature sets: see docs/FEATURE_SET_IDS.md); hover a '
+    +'bake chip for its feature-set id, and an id shown as <i>(inferred)</i> was derived from the width '
+    +'rather than recorded by the owner. Derived from the ZNPR’s '
     +'<code>n_inputs</code> (372/720/924/944-class) — NOT the recorded flag string, which reads “720” '
     +'cosmetically on the campaign verdicts (the flag shows in the bake-picker tooltip when it differs; for an '
     +'ens×k row the width is the anchor member’s). <b>composite</b> = the Rust <code>product_composite</code> (CID22·1.0 + '

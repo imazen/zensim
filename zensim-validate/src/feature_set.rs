@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use zenpredict::Model;
-use zensim::feature_set_id::{ComputeParts, ComputeToken, FeatureSetId, SlotSet, ERA_UNKNOWN};
+use zensim::feature_set_id::{ComputeParts, ComputeToken, ERA_UNKNOWN, FeatureSetId, SlotSet};
 
 /// The committed registry, embedded at build time.
 const REGISTRY_JSON: &str = include_str!("../../benchmarks/feature_sets_registry.json");
@@ -260,7 +260,16 @@ pub fn compute_parts_for_slots(slots: &SlotSet) -> ComputeParts {
             .unwrap_or(false)
     };
     let mut p = ComputeParts::EMPTY;
-    for t in [T::Basic, T::Peaks, T::Masked, T::Iw, T::V2, T::Append, T::Append2, T::Csfw] {
+    for t in [
+        T::Basic,
+        T::Peaks,
+        T::Masked,
+        T::Iw,
+        T::V2,
+        T::Append,
+        T::Append2,
+        T::Csfw,
+    ] {
         if touches(t) {
             p = p.with(t);
         }
@@ -268,12 +277,13 @@ pub fn compute_parts_for_slots(slots: &SlotSet) -> ComputeParts {
     // `carriers` is a SUBSET of the pool block: name it only when the pool
     // reads are exactly the ten carrier slots (otherwise `peaks`/`masked`/`iw`
     // already describe them).
-    if let (Some(carriers), Some(pool)) = (reg.token_slots(T::Carriers), reg.pool_block()) {
-        if !slots.intersect(pool).is_empty() && slots.intersect(pool) == *carriers {
-            p = ComputeParts::EMPTY
-                .with(T::Carriers)
-                .with_all_except_pools(p);
-        }
+    if let (Some(carriers), Some(pool)) = (reg.token_slots(T::Carriers), reg.pool_block())
+        && !slots.intersect(pool).is_empty()
+        && slots.intersect(pool) == *carriers
+    {
+        p = ComputeParts::EMPTY
+            .with(T::Carriers)
+            .with_all_except_pools(p);
     }
     if !p.contains(T::Append)
         && let Some(m) = reg.token_slots(T::Moments)
@@ -562,9 +572,13 @@ fn parse_registry(txt: &str) -> Result<Registry, String> {
     if let Some(map) = v.get("regime_strings").and_then(|x| x.as_object()) {
         for (k, e) in map {
             let (Some(c), Some(l), Some(s)) = (
-                e.get("compute").and_then(|x| x.as_str()).and_then(ComputeParts::parse),
+                e.get("compute")
+                    .and_then(|x| x.as_str())
+                    .and_then(ComputeParts::parse),
                 e.get("layout").and_then(serde_json::Value::as_u64),
-                e.get("slots").and_then(|x| x.as_str()).and_then(SlotSet::parse),
+                e.get("slots")
+                    .and_then(|x| x.as_str())
+                    .and_then(SlotSet::parse),
             ) else {
                 continue;
             };
@@ -577,7 +591,11 @@ fn parse_registry(txt: &str) -> Result<Registry, String> {
             let ids: Vec<String> = e
                 .get("ids")
                 .and_then(|x| x.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default();
             aliases.insert(k.clone(), ids);
         }
