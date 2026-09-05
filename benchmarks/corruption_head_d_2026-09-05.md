@@ -111,6 +111,150 @@ source-held-out by construction.
 
 ---
 
+## 3. What was rebuilt, and what it cost
+
+| table | rows | note |
+|---|--:|---|
+| `im26_corruption_372_postC.parquet` | 116,928 corruption + 348 anchors | 173 ref_ids, 44 families, **0 skips** (2026-07-24: 141 refs, 95,424 rows, died rc=1) |
+| `negrich_372_postC.parquet` | 60,000 | seed-0 sample of the 280,384, 48,067 distinct `source_id`; PNGs from **R2** — the LAN store has no `distorted/` prefix |
+| `corruption_grid_372col_postC_2026-09-05.parquet` | 2,016 | the persisted `gb82_dog` gate PNGs, re-extracted |
+| broad-honest = the ladder instrument | 9,593 | HONEST current-era imazen codec cells, floor-dense, already at HEAD |
+
+Ran **locally under `run-heavy`**, not on the fleet: generation is the pole
+(25 s/ref single-threaded) at 3,073 s wall for the corpus, while extraction runs
+at 163 pairs/s on the ~1 MP corruption pairs and 1,013/s on the ~0.25 MP KADIS
+pairs — 59 s for all 60,000 negrich rows. Total well under the 2 h fleet
+threshold, and the R2 fetch (60,000 PNGs, 17 GB, 0 errors) is network-bound.
+
+negrich moved on **100 %** of rows (basic 83.3 % of cells over tolerance), row
+alignment gated on `source_id` equality across all 60,000.
+
+## 4. Results
+
+### 4.1 The head, on held-out sources (T = 0.9)
+
+| arm | slice | free for D? | detection | FP severe-honest | FP broad-honest (ladder) | FP matched anchor |
+|---|---|---|--:|--:|--:|--:|
+| `d156` | `f0..155` | yes | 88.1 % | 0.36 % | 15.22 % | 1.72 % |
+| **`d228`** | `f0..227` | **yes** | **89.5 %** | **0.22 %** | 15.83 % | **0.00 %** |
+| `d228nb` | `f0..227`, no codec negatives | yes | 94.5 % | 0.58 % | — | 18.60 % |
+| 2026-07-24 | `f0..371` | **no** | 84.6 % | 0.06 % | 0.34 %\* | 0.00 % |
+
+\*a different broad-honest set (five legacy 720 corpora), not comparable — see §4.3.
+
+**Peaks are free and strictly better.** `f156..227` buys +1.4 points of detection,
+*halves* severe-honest FP and takes the matched-anchor FP to zero, at literally
+zero extraction cost (`Off` and `Peaks` are the same walk). Any D companion should
+be the 228 slice. And D's own free set beats the 2026-07-24 head's detection
+(89.5 % vs 84.6 %) without touching masked/IW at all — so the 2026-07-24 ablation's
+conclusion that the signal *needs* the mask/iw/peak block does not hold once the
+head is fit on the smaller slice directly.
+
+### 4.2 The gate, wired (`bake_verdict --corruption-head`, postC grid, 672 triples)
+
+| scorer | `pass_q20` | `pass_q10` |
+|---|--:|--:|
+| **D dial alone** | **26.8 %** | 15.3 % |
+| head `d228` alone | 99.9 % | 99.7 % |
+| head `d156` alone | 99.4 % | 99.3 % |
+| 2026-07-24 head alone | 100.0 % | 99.9 % |
+| **DEPLOY `min(dial, gate)`, `d228`** | **91.4 %** | 88.2 % |
+| DEPLOY, `d156` | 92.4 % | 88.8 % |
+| DEPLOY, 2026-07-24 | 94.6 % | 92.3 % |
+
+So the registered design does what it claims: D's corruption axis goes from
+**26.8 % to ~91 %** with a companion head, and the head is the owner of that axis
+exactly as the design says.
+
+### 4.3 …but the gate alone must not select the head
+
+`d228nb` — the arm with **no** codec negatives — wins the deploy gate outright
+(**99.1 % / 97.6 %**) because it is more trigger-happy. It is also the worst head
+by a wide margin on honest content. **A head cannot be chosen on the corruption
+gate**, whose only honest rows are two anchors from one reference.
+
+Per-codec FP on honest current-era imazen codec output (`corruption_head_honest_fp.py`,
+held-out ladder images only for the trained heads, all rows for the 2026-07-24 head
+which trained on none):
+
+| head | jpeg | webp | avif-svt | avif-rav1e | jxl | ALL |
+|---|--:|--:|--:|--:|--:|--:|
+| `d228` | 2.70 % | 2.12 % | 2.68 % | **27.15 %** | **22.22 %** | 11.22 % |
+| `d156` | 4.66 % | 2.12 % | 2.98 % | 27.73 % | 23.11 % | 11.94 % |
+| 2026-07-24 | 3.43 % | 4.88 % | 4.17 % | 21.88 % | 16.44 % | 10.25 % |
+
+**And the FP is entirely at HIGH quality, which inverts the obvious worry.**
+q-binned, `d228`, all ladder rows:
+
+| codec | q0-5 | q5-20 | q20-50 | q50-80 | q80-95 | q95-100 |
+|---|--:|--:|--:|--:|--:|--:|
+| avif-rav1e | 0.0 % | 0.0 % | 0.0 % | 0.6 % | 41.8 % | **97.2 %** |
+| jxl | 0.0 % | 0.0 % | 0.0 % | 0.0 % | 0.6 % | 55.9 % |
+| webp | 0.0 % | 0.0 % | 0.0 % | 0.0 % | 6.7 % | 27.5 % |
+| jpeg | 0.0 % | 0.0 % | 0.0 % | 0.0 % | 2.3 % | 18.9 % |
+| avif-svt | 0.0 % | 0.0 % | 0.0 % | 0.9 % | 10.9 % | 14.5 % |
+| **ALL** | **0.0 %** | **0.0 %** | **0.0 %** | 0.3 % | 13.0 % | **53.7 %** |
+
+**1,134 of 1,139 flagged cells sit at q >= 80.** The head does not fire on
+aggressive compression at all — it fires on **near-lossless** output, hardest on
+avif-rav1e (97.2 % of its q95+ cells). The mechanism is visible in the corpus: a
+small-region corruption (`sq8`, `sq16`) is *also* almost identical to its
+reference, so in globally-pooled v1 features "nearly identical, with a little
+localized structure" describes both a near-lossless encode and a tiny structural
+break. Adding the ladder to training did **not** fix this — it is a separability
+limit of the feature set, not a coverage gap.
+
+### 4.4 A dial guard makes it loop-safe, at a measured price
+
+Because the two populations DO separate on D's own dial — flagged honest cells sit
+at dial p5/p50/p95 = **89.8 / 93.3 / 96.9**, flagged corruptions at **-53.5 / 81.2
+/ 99.1** — gating only when the dial is also low recovers most of the win:
+
+| head | guard `dial <` | deploy `pass_q20` | deploy `pass_q10` | honest-cell FP |
+|---|---|--:|--:|--:|
+| `d228` | none | 91.4 % | 88.2 % | 11.87 % |
+| `d228` | 95 | 78.0 % | 74.9 % | 9.11 % |
+| **`d228`** | **90** | **64.0 %** | 60.9 % | **0.74 %** |
+| `d228` | 80 | 47.9 % | 44.8 % | **0.00 %** |
+| `d228nb` | 80 | 53.1 % | 51.6 % | 20.88 % |
+| D dial alone | — | 26.8 % | 15.3 % | 0.00 % |
+
+At `dial < 90` the head still more than **doubles** D's corruption ordering
+(26.8 % -> 64.0 %) while firing on 0.74 % of honest codec output; at `dial < 80` the
+honest cost is zero and the gain is still 1.8x. The guard is a **proposal**, not
+something this lane baked in — `bake_verdict`'s DEPLOY section implements the
+registered unguarded `min(perceptual, gate)` and nothing else.
+
+### 4.5 Runtime cost
+
+**Extraction: zero marginal.** The head reads `f0..227`, which D's walk already
+emits.
+
+**Forward: <= 2.5 us per compare** — 60,000 rows minus 600 rows through
+`predict_features_with_bake`, min of 5, and that bound still *includes* reading an
+89 MB blob and formatting 60,000 output lines. Against D's own compare that is
+**<= 0.03 %** at 576^2/1T and **<= 0.008 %** at 1152^2/1T.
+
+The zenbench arm (`add156_plus_corrhead`, identical extraction and profile forward
+to `add156_156basic` plus the head's forward, interleaved) **cannot resolve it**,
+which is the expected result once the marginal is ~3,000x under the base arm's
+spread. Reported for completeness, not as a measurement of the head:
+
+| threads | size | `add156_156basic` | `add156_plus_corrhead` |
+|---|---|--:|--:|
+| 1 | 576^2 | 8.0 +-0.3 ms | 9.0 +-2.8 ms |
+| 1 | 1152^2 | 33.2 +-2.3 ms | 35.2 +-4.2 ms |
+| 8 | 1152^2 | 8.1 +-0.8 ms | 8.3 +-1.0 ms |
+
+Every delta is inside its own error bar. The 8T/576^2 cell is **discarded as
+degenerate** — `add156_156basic` read 59.9 +-6.1 ms there while
+`add156_plus_corrhead`, which strictly contains it, read 4.9 ms; an arm cannot be
+12x slower than its own superset. That is the failure mode
+`benchmarks/profile_d_notax_2026-09-01.md` §4 documents, and it is why the
+per-row bound above is the number to quote.
+
+---
+
 ## 5. Proposed API shape (NOT implemented — no public API changed by this lane)
 
 The head is bytes plus a dot product; the only design question is who owns the
@@ -161,3 +305,38 @@ Four constraints that are NOT negotiable, each for a measured reason:
    same coefficients at both caller widths rather than fitting twice. Whichever
    layout the caller holds, one of the two bakes accepts it and neither is a
    reinterpretation of the other's bytes.
+
+---
+
+## 6. Verdict, and what is NOT done
+
+**The companion-head design is validated for D and the head is built, baked and
+wired** — `bake_verdict --corruption-head` now reports three sections (dial alone,
+head alone, and the registered `min(perceptual, gate)` composition) and D's board
+cell carries a `corruption_head` block for the first time.
+
+**It is not yet loop-safe unguarded**, and the reason is specific and measured:
+53.7 % of near-lossless honest cells false-fire, because globally-pooled v1
+features cannot separate "near-lossless encode" from "corruption confined to an
+8x8 square". The `dial < 90` guard is the cheap mitigation (0.74 % honest FP,
+still 2.4x D's dial alone) and wants a user decision before it becomes the
+composition rule.
+
+**Registered, NOT run:**
+
+1. Rebuild the corruption corpus on the CANONICAL imazen-26 (`imazen-26-png-v3` +
+   `imazen26_manifest.tsv`), replacing the quarantined inspo tree. This lane kept
+   the old population deliberately so the era comparison stayed clean.
+2. Replace the PIL Lanczos reference downscale and the `image`-crate q10/q20
+   anchors with `zenresize` / `zenjpeg`, per IMAZEN-ONLY. Both change the pixels,
+   so this is its own change with its own before/after.
+3. A multi-source gate grid. 672 triples from one reference is the whole
+   corruption instrument today, and every gate number in this document inherits
+   that.
+4. Region-localized corruption features. §4.3 is a separability limit, not a data
+   gap — more negatives will not fix it, and the head's own confusion (tiny local
+   break vs near-lossless) names exactly the feature that is missing.
+5. The `dial < G` guard as a first-class composition, if the user wants it. It is
+   measured here and implemented nowhere.
+
+**Nothing was installed in `zensim/weights/`** and no public API changed.

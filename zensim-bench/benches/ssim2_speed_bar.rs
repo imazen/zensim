@@ -44,6 +44,7 @@
 //! | `hybrid_944pools`  | `V1PoolsMode::Full`                               | MLP **and** linear |
 //! | `free156_peaks_raw` | `V1PoolsMode::Peaks` + `V1FreeExtras::RawMoments`, v1-only, 944 layout | the 156+free MLP (A3b/A4b class) |
 //! | `peaks156_no_raw`  | `V1PoolsMode::Peaks`, `V1FreeExtras::Off`, v1-only, 944 layout | the 156+peaks head — the ZERO-marginal-compute half of the free set |
+//! | `add156_plus_corrhead` | identical to `add156_156basic` | the additive head **and** the companion corruption head (`ZEN_HY_CORRHEAD`) — the delta against `add156_156basic` prices attaching the head |
 //!
 //! Bake bytes come from the environment so none enter git:
 //! `ZEN_HY_MLP` (the 944 MLP flagship), `ZEN_HY_LIN` (the 944 pools linear),
@@ -221,6 +222,13 @@ fn main() {
     // arm is the first half without the second, so the two halves can be read
     // apart in ONE binary instead of across two runs.
     let peaks: Option<&'static Head> = Head::load("ZEN_HY_PEAKS").map(|h| &*Box::leak(Box::new(h)));
+    // The companion CORRUPTION head. Priced as a MARGINAL cost, not as its own
+    // arm: `add156_plus_corrhead` runs the identical extraction and the identical
+    // profile forward as `add156_156basic`, plus one extra forward. The delta
+    // between the two arms — interleaved, so the box's state is common-mode — is
+    // what attaching the head actually costs.
+    let corrhead: Option<&'static Head> =
+        Head::load("ZEN_HY_CORRHEAD").map(|h| &*Box::leak(Box::new(h)));
     // The fold engine + the two pool modes the two regimes correspond to.
     let zf: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::B)));
     // Byte-identical to `zensim/benches/extract_paths_bench.rs`'s `toggles_off`
@@ -345,6 +353,34 @@ fn main() {
                                 )
                                 .unwrap();
                             zenbench::black_box(h.forward(&mut pred, &mut x, v2.features()))
+                        })
+                    });
+                }
+                if let (Some(h), Some(ch)) = (add, corrhead) {
+                    group.bench("add156_plus_corrhead", move |b| {
+                        let mut scratch = zensim::feature_v2::V2Scratch::new();
+                        let mut pred = Predictor::new(&h.model);
+                        let mut cpred = Predictor::new(&ch.model);
+                        let mut x: Vec<f32> = Vec::new();
+                        let mut cx: Vec<f32> = Vec::new();
+                        // The corruption head reads a SUBSET of the profile's own
+                        // read-set (basic, or basic+peaks — both are emitted by the
+                        // walk `add156_156basic` already runs), so the extraction
+                        // toggles are identical and only the second forward is new.
+                        b.iter(move || {
+                            let rs = RgbSlice::new(src_s, n, n);
+                            let ds = RgbSlice::new(dst_s, n, n);
+                            let v2 = zf
+                                .compute_folded720_features_streaming(
+                                    &rs,
+                                    &ds,
+                                    v1_basic,
+                                    &mut scratch,
+                                )
+                                .unwrap();
+                            let a = h.forward(&mut pred, &mut x, v2.features());
+                            let c = ch.forward(&mut cpred, &mut cx, v2.features());
+                            zenbench::black_box(a + c)
                         })
                     });
                 }

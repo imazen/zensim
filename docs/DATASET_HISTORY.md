@@ -1827,3 +1827,47 @@ a model limiting dial range cannot ship, that disqualifies it on its own.
 2026-09-04 proposal cut 96.85 -> 85.74 and was likewise not shipped). Two builds,
 different codec sets, different eras, same direction — enough to treat "imazen-26
 anchors lose dial reach" as a pattern wanting a named cause before a third attempt.
+
+
+### §3.40 — the postC corruption-head corpus (2026-09-05)
+
+`/mnt/v/output/zensim/corruption-head-2026-09-05/` (LAN mirror
+`s3://zentrain/corruption-head-2026-09-05/`), `_MANIFEST.json` with `build_commit`
++ per-file sha256. Four tables, all extracted at HEAD (post-`56bbcda2`, option C):
+
+| file | rows | what |
+|---|--:|---|
+| `im26_corruption_372_postC.parquet` | 117,276 | 116,928 structural corruptions + 348 matched q10/q20 anchors; 173 ref_ids, 44 families, **0 skips** |
+| `negrich_372_postC.parquet` | 60,000 | seed-0 sample of the 280,384 KADIS severe-honest rows, PNGs re-fetched from R2 and re-extracted |
+| `corruption_grid_372col_postC_2026-09-05.parquet` | 2,016 | the persisted `gb82_dog` gate triples, re-extracted |
+| `d{156,228,228nb}/corruption_head_*.bin` | — | the heads, ZNPR v3, at caller widths 372 and 944 |
+
+**Why it exists.** Every pre-existing corruption table is one extraction era behind
+the runtime. Re-extracting the same pixels at HEAD moves **51.8 %** of basic cells
+on the corruption corpus (max |Δ| 0.336), **73.7 %** on the gate grid (max |Δ|
+4.35, 2013/2016 rows) and **83.3 %** on negrich (100 % of rows). All three are the
+padded-width class option C removed.
+
+**Provenance hazards, recorded so they are not re-discovered:**
+
+* The corruption sources are the 2026-07-24 set with `/mnt/v/imazen-26/` rewritten
+  to `/mnt/v/imazen-26-inspo/` — the **quarantined** tree (renamed 2026-08-27).
+  Kept deliberately so the era comparison is an era comparison; rebuilding on the
+  canonical `imazen-26-png-v3` is REGISTERED, NOT RUN.
+* The corruption pixels are **not stored** and never were — the builder discards
+  them because they are a pure function of `(ref_id, seed, params)`. The generator
+  (`codec-corpus` @ `3e7a8a2`, `--seed` default 1) is what makes that safe.
+* negrich's `distorted_url` lives on the **GPU** canonical (2026-07-01), not the
+  zensim-only one the subset was cut from; they join exactly on
+  `(source_id, dist_type, severity_level)`, 280,384/280,384. The PNGs are on **R2
+  only** — the LAN store carries `kadis-700k-gpu/canonical/` and no `distorted/`.
+* Every distorted basename embeds `..._zenjpeg_q<N>_...` **regardless of the actual
+  distortion** — a chunk-pipeline naming artifact. `dist_name` is the truth (24
+  KADIS types; `color_saturate_hsv` is the mode). Do not read those rows as codec
+  output.
+* The reference downscale is PIL Lanczos and the q10/q20 anchors come from the
+  `image` crate, both inherited from the 2026-07-24 instrument and deliberately
+  unchanged (swapping either changes the PIXELS and confounds the era A/B).
+  Replacing them with `zenresize`/`zenjpeg` per IMAZEN-ONLY is its own change.
+
+Record: `benchmarks/corruption_head_d_2026-09-05.md`; ledger ROUND 97.

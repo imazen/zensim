@@ -8131,3 +8131,48 @@ dependency edge from `zensim-bench/Cargo.toml`, then fully reverted (`jj status`
 the pre-edit file empty) before this lane ended. Nothing installed;
 `ZensimProfile::D`/`zensim/weights/` untouched; no registry write. Full census tables, per-codec
 breakdowns, and reproduction: [`d_inversions_2026-09-05.md`](d_inversions_2026-09-05.md).
+
+## ROUND 97 — 2026-09-05: D's companion corruption head, at the runtime era — the design works (26.8% → 91.4%), and it false-fires on NEAR-LOSSLESS, not on low q
+
+The fair gauntlet flags shipped Profile D on corruption (`pass_q20` **0.269**, vs `peer_ssim2`
+0.345, B 0.188, A 0.196) and D carried **no** companion head, which the registered design
+(`corruption_head_2026-07-24.md`) makes the OWNER of that axis. Built one. **The weakness is
+intrinsic, not an era artifact:** re-extracting the 2,016 persisted gate PNGs at HEAD moves
+**73.7 %** of basic cells (max |Δ| 4.35, 2013/2016 rows) and D's `pass_q20` reads **26.9 % →
+26.8 %**. Five blockers had to be cleared first, each measured: the corruption pixels are
+DELETED by design (regenerable — the generator is deterministic in `(ref_id, seed, params)`);
+the 2026-07-24 `sources.tsv` points into the **quarantined imazen-26 inspo tree** (154 of 174
+paths dead until rewritten); that build **never finished** (`rc=1` after 5,420 s at 141/174 on
+a truncated-CSV guard); `bake_verdict --corruption-head` takes a **BAKE** while every
+2026-07-24 head is `.json`, so **no 372 head had ever been through the gate**; and the
+2026-07-24 head reads `f228..371`, which D's walk does not compute — its own ablation puts top
+features in `mask/iw/peak f255-334`. **`Off` and `Peaks` cost the SAME** (`fold_engine.rs`), so
+`f0..227` is FREE for D and masked/IW is not. Rebuilt at HEAD: 116,928 corruption rows over 173
+refs / 44 families / **0 skips**, 60,000 negrich rows re-extracted from the R2-persisted PNGs
+(100 % moved; LAN store has no `distorted/` prefix), and the **2026-09-05 ladder** (9,593
+honest current-era imazen codec cells) as broad-honest. **Peaks are free and strictly better:**
+`d228` reads detection **89.5 %** / severe-honest FP **0.22 %** / anchor FP **0.00 %** against
+`d156`'s 88.1 / 0.36 / 1.72 — and beats the 2026-07-24 head's 84.6 % detection without touching
+masked/IW at all. Wired: `bake_verdict` gained `--corruption-head-threshold` and a third
+section + `corruption_deploy` JSON for the registered `final = min(perceptual, gate)`. **D goes
+26.8 % → 91.4 % `pass_q20`** (head alone 99.9 %). **But the gate must NOT select the head:** the
+`--no-broad-honest` ablation WINS the deploy gate (**99.1 %**) by being trigger-happy and is the
+worst head on honest content, and the gate's only honest rows are two anchors from one
+reference. On the ladder, `d228` fires on **11.2 %** of honest codec output — and **the FP is
+entirely at HIGH quality**: 0.0 % below q50, **53.7 % at q95-100** (avif-rav1e **97.2 %**), 1,134
+of 1,139 flagged cells at q ≥ 80. Mechanism: a corruption confined to an 8×8 square is *also*
+nearly identical to its reference, so globally-pooled v1 features cannot separate it from a
+near-lossless encode — training on the ladder did not fix it, it is a **separability limit**.
+The populations DO separate on D's own dial (flagged honest p5/p50/p95 = 89.8/93.3/96.9 vs
+flagged corruptions −53.5/81.2/99.1), so a `dial < 90` guard reads **64.0 % gate at 0.74 %
+honest FP** and `dial < 80` reads **47.9 % at 0.00 %** — measured as a PROPOSAL, implemented
+nowhere. Cost: **zero** extra extraction, forward **≤ 2.5 µs/compare** (60k-vs-600-row bound
+including blob IO + output formatting) = ≤ 0.03 % of D's 576²/1T compare; the zenbench arm
+cannot resolve it and its 8T/576² cell is **discarded as degenerate** (base 59.9 ms vs its own
+superset 4.9 ms). The board cell `d_id100_negrich@did100lane` carries a `corruption_head` block
+for the first time (sha-gated graft); both boards regenerated, gates clean. Side note: the
+ROUND 96 `zenjxl ^0.3.2` build breakage **resolved itself mid-session** — that sibling checkout
+advanced to `06a8a94`, which requires `^0.4.0` and matches the local crate; a git-rev workaround
+was landed and then reverted with the episode recorded at the patch line. Nothing installed in
+`zensim/weights/`; no public API changed. Full record:
+[`corruption_head_d_2026-09-05.md`](corruption_head_d_2026-09-05.md).

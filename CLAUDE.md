@@ -2411,7 +2411,45 @@ Mohammadi panel (SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE) aggregate +
 <head.bin>` adds the companion corruption-head joint report (the shipping
 design's corruption owner — the 924 dial's own ordering is broken by design;
 dial-alone numbers kept for honesty; `corruption_head` block in
-`--full-json`). **`freeze_check`** (same crate) turns one bake's fulleval
+`--full-json`).
+
+**⚠ THE CORRUPTION HEAD: read this before quoting any corruption number
+(2026-09-05, `benchmarks/corruption_head_d_2026-09-05.md`, ledger ROUND 97).**
+
+* **`--corruption-head` takes a ZNPR BAKE, never the JSON head.** Every
+  2026-07-24 artifact under `corruption-head-2026-07-24/` is a `.json`, so
+  **no 372 head had ever been through the gate** until this lane baked one.
+  `train_corruption_head.py --bake-out` now emits it (via `zenpredict-bake`;
+  the winsor clip rides as a raw-space `winsor_p99`, unused lines are `drop`
+  so `caller_input_width` stays at the grid's width, and the layer is NEGATED
+  so the score is quality-oriented `100*(1-P)` and the spline stays monotone).
+* **A head must match its profile's read-set or it is not free.** `Off` and
+  `Peaks` cost the SAME (`fold_engine.rs`), so `f0..227` is free for shipped D
+  and `f228..371` would force `V1PoolsMode::Full`. The 2026-07-24 head reads all
+  372, so attaching it to D would silently change extraction cost. D's own free
+  `f0..227` head (`d228`) reads **89.5 %** detection to that head's 84.6 %, so
+  the 2026-07-24 ablation's "the signal needs mask/iw/peak" does NOT hold once
+  the head is fit on the smaller slice.
+* **The gate cannot select a head.** Its only honest rows are two anchors from
+  ONE reference (`gb82_dog`, 672 triples). The `--no-broad-honest` ablation WINS
+  the deploy gate (99.1 % vs 91.4 %) by being trigger-happy and is the worst arm
+  on honest content. Always read the gate beside
+  `scripts/v_next/corruption_head_honest_fp.py`.
+* **The false positives are at NEAR-LOSSLESS, not at low q.** On the ladder
+  instrument `d228` fires on 0.0 % of cells below q50 and **53.7 % at q95-100**
+  (avif-rav1e **97.2 %**); 1,134 of 1,139 flagged cells sit at q ≥ 80. A
+  corruption confined to an 8×8 square is *also* nearly identical to its
+  reference, so globally-pooled v1 features cannot separate the two — more
+  negatives do not fix it. A `dial < 90` guard reads 64.0 % gate at 0.74 %
+  honest FP (`dial < 80`: 47.9 % at 0.00 %); that guard is a **proposal**,
+  measured and implemented nowhere. `bake_verdict`'s DEPLOY section implements
+  the registered unguarded `min(perceptual, gate)` (`--corruption-head-threshold`,
+  default 10.0 = `T = 0.9` in `100*(1-P)` units) and nothing else.
+* **D's corruption weakness is intrinsic, not an era artifact.** Re-extracting
+  the persisted gate PNGs at HEAD moves 73.7 % of basic cells (max |Δ| 4.35) and
+  D's `pass_q20` goes 26.9 % → 26.8 %. The era DOES matter for the tables (every
+  stored corruption table is pre-option-C; negrich moved on 100 % of rows) — it
+  does not matter for this ordering. **`freeze_check`** (same crate) turns one bake's fulleval
 JSON into the freeze-bar PASS/FAIL table:
 `freeze_check --fulleval <bake.fulleval.json> [--bar csiq=X --bar live=X]` —
 externally-owned rows (UPIQ/Korshunov/perf/LOO/corruption-ORDERING) print as
