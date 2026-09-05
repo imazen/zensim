@@ -2251,19 +2251,54 @@ mod profile_c_tests {
         );
     }
 
-    /// Pin the documented limitation: the standard 372-feature
-    /// `compute()` pipeline cannot feed the 944-wide `C` bake, so a
-    /// non-identical pair fails LOUD (`ModelForwardFailed`) instead of
-    /// silently scoring a prefix. Full-fidelity scoring goes through the
-    /// folded-944 extraction + `score_features_with_profile` (see the
-    /// `ZensimProfile::C` docs).
+    /// **The limitation this used to pin is GONE, and the concern behind it
+    /// is not.**
+    ///
+    /// This test read `compute_on_non_identical_pair_fails_loud` and asserted
+    /// `ModelForwardFailed`, with the message *"372-wide extraction must not
+    /// silently feed a 944 bake"*. That concern was exactly right and is
+    /// preserved below; what changed is that the runtime no longer HAS to
+    /// choose between refusing and truncating, because it now asks for the
+    /// width the bake declares (`fold_engine::score_plan` →
+    /// `feature_plan::Plan`). `C` is a shipped profile whose bake could not be
+    /// served by its own crate's primary entry point; "trains fine, cannot be
+    /// served" is the class the feature-system contract exists to abolish.
+    ///
+    /// So the assertion is INVERTED, not relaxed, and it is strictly stronger:
+    /// the pair scores, the emitted vector is the bake's full declared width
+    /// (never a truncated prefix), and the score is finite and in range.
     #[test]
-    fn compute_on_non_identical_pair_fails_loud() {
+    fn compute_on_non_identical_pair_serves_at_the_declared_width() {
         let (src, dst) = sdr_pair(64, 64);
         let z = Zensim::new(ZensimProfile::C);
-        let err = z
+        let r = z
             .compute(&RgbSlice::new(&src, 64, 64), &RgbSlice::new(&dst, 64, 64))
-            .expect_err("372-wide extraction must not silently feed a 944 bake");
+            .expect("a 944-declared bake must be servable by compute()");
+        let bake = (ZensimProfile::C.params().mlp_bytes.expect("C has a bake"))();
+        let want = crate::mlp::Model::from_bytes(bake)
+            .expect("C's bake parses")
+            .caller_input_width();
+        assert_eq!(
+            r.features().len(),
+            want,
+            "the emitted vector must be the bake's DECLARED width, not a prefix"
+        );
+        assert!(
+            r.score().is_finite() && r.score() <= 100.0,
+            "score must be finite and capped, got {}",
+            r.score()
+        );
+    }
+
+    /// The refusal side of the same contract: a vector NARROWER than the bake
+    /// declares must still fail loud rather than being scored as a prefix.
+    /// This is the original test's concern, kept as its own assertion now
+    /// that serving and truncating are no longer the same decision.
+    #[test]
+    fn a_narrow_vector_still_fails_loud_against_a_wide_bake() {
+        let features = vec![0.0f64; 372];
+        let err = crate::score_features_with_profile(ZensimProfile::C, &features, 64, 64)
+            .expect_err("a 372-wide vector must not feed a 944 bake");
         assert!(
             matches!(err, ZensimError::ModelForwardFailed { .. }),
             "expected ModelForwardFailed, got {err:?}"

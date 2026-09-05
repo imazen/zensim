@@ -141,9 +141,9 @@ pub(crate) fn compute_fold_backed(
     config: &ZensimConfig,
     weights: &[f64],
     scratch: &mut V2Scratch,
-    // Per-profile weight-skipping; `None` = `V1PoolsMode::Full`, today's
-    // unconditional behaviour. See `score_pool_mode`.
-    pool_mode: Option<crate::feature_v2::V1PoolsMode>,
+    // The serving plan; `None` = today's unconditional v1 walk at
+    // `V1PoolsMode::Full`. See `score_plan`.
+    plan: Option<&crate::feature_plan::Plan>,
 ) -> Result<ZensimResult, ZensimError> {
     let (mut features, mean_offset) = crate::feature_v2::compute_folded_v1_372_streaming_impl(
         source,
@@ -151,11 +151,16 @@ pub(crate) fn compute_fold_backed(
         None,
         config.allow_multithreading,
         scratch,
-        pool_mode,
+        plan,
     )?;
-    // The fold emits its regime's width (720) with `f372..` structurally
-    // zero; the config's v1 width is a prefix of that.
-    features.truncate(v1_feature_width(config));
+    // The fold emits its regime's width with `f372..` structurally zero. Keep
+    // whichever is WIDER: the config's v1 width (a prefix, which the linear
+    // tail reads) or the plan's declared layout (which a wide bake reads).
+    // Without a plan this is exactly today's `truncate(v1_feature_width)`.
+    let keep = plan
+        .map_or(0, |p| p.layout_width)
+        .max(v1_feature_width(config));
+    features.truncate(keep);
 
     let (score, raw_distance) =
         crate::metric::score_v1_layout_features(&mut features, weights, config, config.num_scales);
@@ -298,43 +303,63 @@ fn caller_col_spans(model: &crate::mlp::Model, in_dim: usize) -> Option<Vec<(usi
 /// re-parsing bytes it was never given. Handles pruned and expanded bakes
 /// through [`caller_col_spans`].
 pub(crate) fn bake_pool_need_from_model(model: &crate::mlp::Model) -> V1PoolNeed {
-    let layer = model.layer(0);
-    let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
-    let Some(spans) = caller_col_spans(model, in_dim) else {
+    let Some(live) = caller_line_reads(model) else {
         return V1PoolNeed::ALL;
     };
-    // Any caller line at or beyond a family's start whose columns carry a
-    // nonzero weight marks that family read. A dropped line spans no columns,
-    // so it reads nothing — which is exactly pruning's contract (a pruned
-    // column was already an exact zero, or a transform-forced constant folded
-    // into the bias). A bake narrower than a family's start cannot read it.
+    // Any caller line at or beyond a family's start that carries a nonzero
+    // weight marks that family read. A bake narrower than a family's start
+    // cannot read it.
     let reads = |lo: usize, hi: usize| -> bool {
-        let hi = hi.min(spans.len());
-        if lo >= hi {
-            return false;
-        }
-        spans[lo..hi]
-            .iter()
-            .flat_map(|&(a, b)| a..b)
-            .any(|i| match &layer.weights {
-                crate::mlp::WeightStorage::F32(w) => {
-                    w[i * out_dim..(i + 1) * out_dim].iter().any(|&v| v != 0.0)
-                }
-                crate::mlp::WeightStorage::F16(w) => w[i * out_dim..(i + 1) * out_dim]
-                    .iter()
-                    .any(|&h| crate::mlp::f16_bits_to_f32(h) != 0.0),
-                crate::mlp::WeightStorage::I8 { weights, scales } => weights
-                    [i * out_dim..(i + 1) * out_dim]
-                    .iter()
-                    .zip(scales.iter())
-                    .any(|(&q, &s)| q != 0 && s != 0.0),
-            })
+        let hi = hi.min(live.len());
+        lo < hi && live[lo..hi].iter().any(|&b| b)
     };
     V1PoolNeed {
         peaks: reads(V1_PEAKS.0, V1_PEAKS.1),
         masked: reads(V1_MASKED.0, V1_MASKED.1),
         iw: reads(V1_IW.0, V1_IW.1),
     }
+}
+
+/// **THE per-caller-line structural read predicate.** `caller_line_reads(m)[k]`
+/// is true iff caller line `k` carries a nonzero layer-0 weight.
+///
+/// Extracted from [`bake_pool_need_from_model`]'s inner closure so that
+/// [`crate::feature_plan::bake_read_slots`] reads the SAME predicate rather
+/// than a second copy — the block-boundary question ("does it read the masked
+/// family?") and the slot-set question ("exactly which lines does it read?")
+/// are the same fold at two granularities, and a second copy is how the
+/// caller-width bug class keeps recurring.
+///
+/// A dropped line spans no columns and so reads nothing, which is exactly
+/// pruning's contract: a pruned column was already an exact zero, or a
+/// transform-forced constant folded into the bias.
+///
+/// `None` when the layer-0 arities do not tile the input width (a malformed
+/// bake), which callers must treat as "assume everything is read".
+pub(crate) fn caller_line_reads(model: &crate::mlp::Model) -> Option<Vec<bool>> {
+    let layer = model.layer(0);
+    let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
+    let spans = caller_col_spans(model, in_dim)?;
+    Some(
+        spans
+            .iter()
+            .map(|&(a, b)| {
+                (a..b).any(|i| match &layer.weights {
+                    crate::mlp::WeightStorage::F32(w) => {
+                        w[i * out_dim..(i + 1) * out_dim].iter().any(|&v| v != 0.0)
+                    }
+                    crate::mlp::WeightStorage::F16(w) => w[i * out_dim..(i + 1) * out_dim]
+                        .iter()
+                        .any(|&h| crate::mlp::f16_bits_to_f32(h) != 0.0),
+                    crate::mlp::WeightStorage::I8 { weights, scales } => weights
+                        [i * out_dim..(i + 1) * out_dim]
+                        .iter()
+                        .zip(scales.iter())
+                        .any(|(&q, &s)| q != 0 && s != 0.0),
+                })
+            })
+            .collect(),
+    )
 }
 
 /// For a bake WIDER than the v1 372-layout: does it read anything beyond
@@ -517,6 +542,72 @@ pub(crate) fn score_pool_mode(
     pools_mode_for_need(need)
 }
 
+/// The **serving plan** for a profile: the pair `(compute, layout)` one walk
+/// must run so that every one of the profile's bakes can be scored from it.
+///
+/// `None` means "today's path, unchanged" — the profile's widest bake fits the
+/// v1 layout and the caller did not opt into pool skipping, so nothing about
+/// the extraction needs to change. This is the byte-identity guarantee: the
+/// narrow case does not merely produce the same numbers, it takes the same
+/// code path.
+///
+/// `Some(plan)` is returned when the extraction must differ from that default
+/// — because a bake declares a LAYOUT wider than the v1 walk can emit (the
+/// servability case), or because pool skipping was requested (today's
+/// `score_pool_mode` case, now expressed as one axis of a plan).
+///
+/// A profile can carry up to three scoring bakes and must serve all of them
+/// from ONE extraction, so the plan is the UNION over them — never any single
+/// bake's, which would under-compute for the others.
+pub(crate) fn score_plan(
+    params: &crate::profile::ProfileParams,
+    config: &crate::metric::ZensimConfig,
+    skip_unread: bool,
+) -> Option<crate::feature_plan::Plan> {
+    use crate::feature_plan::Plan;
+    let v1_width = v1_feature_width(config);
+    let mut widest = 0usize;
+    let mut union: Option<Plan> = None;
+    for bytes in params.scoring_bake_bytes() {
+        let Ok(model) = crate::mlp::Model::from_bytes(bytes) else {
+            // An unparseable bake is not a planning input: the scoring path
+            // reports it on its own terms. Assume the widest safe plan.
+            return None;
+        };
+        widest = widest.max(model.caller_input_width());
+        let Ok(p) = Plan::for_bake(&model) else {
+            return None;
+        };
+        union = Some(match union {
+            Some(u) => u.union(&p),
+            None => p,
+        });
+    }
+    // Nothing to plan for: a purely linear profile reads `f0..228` only, and
+    // the existing `score_pool_mode` policy already covers it.
+    let mut plan = union?;
+    if widest <= v1_width && !skip_unread {
+        // The narrow, non-skipping case IS today's path. Returning `None`
+        // keeps it on the identical code path rather than on an equivalent
+        // one — which is a stronger guarantee than equal output.
+        return None;
+    }
+    // Pool skipping is opt-in. Without it the walk computes the whole pool
+    // block exactly as it does today, whatever the bakes read.
+    if !skip_unread {
+        plan.compute.v1_pools = crate::feature_v2::V1PoolsMode::Full;
+        plan.emit = plan
+            .compute
+            .populated_slots(crate::NUM_SCALES, plan.layout_width);
+    }
+    // The emitted vector must be at least as wide as the linear tail reads.
+    if plan.layout_width < v1_width {
+        plan.layout_width = v1_width;
+        plan.emit = plan.compute.populated_slots(crate::NUM_SCALES, v1_width);
+    }
+    Some(plan)
+}
+
 /// The [`V1PoolsMode`] to run for a given structural read-set.
 ///
 /// **Never returns [`V1PoolsMode::Off`]**, even when nothing reads the pool
@@ -648,7 +739,10 @@ mod skip_policy_tests {
                     &config,
                     params.weights,
                     &mut scratch,
-                    Some(V1PoolsMode::Full),
+                    Some(&crate::feature_plan::Plan::v1(
+                        V1PoolsMode::Full,
+                        v1_feature_width(&config),
+                    )),
                 )
                 .expect("full");
                 let peaks = compute_fold_backed(
@@ -657,7 +751,10 @@ mod skip_policy_tests {
                     &config,
                     params.weights,
                     &mut scratch,
-                    Some(V1PoolsMode::Peaks),
+                    Some(&crate::feature_plan::Plan::v1(
+                        V1PoolsMode::Peaks,
+                        v1_feature_width(&config),
+                    )),
                 )
                 .expect("peaks");
                 assert_eq!(

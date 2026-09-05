@@ -267,13 +267,15 @@ pub mod feature_set_id;
 // consumer need it on a `--no-default-features` build too.
 // docs/FEATURE_SYSTEM_DESIGN_2026-09-05.md
 //
-// `allow(dead_code)` outside `cfg(test)` while increment 1a stands alone: the
-// registry is a DATA surface whose consumer is the plan derivation (increment
-// 1b), and the cross-check gates that prove it correct are tests. Same
-// treatment `ComputeSet::from_block_profile` carries for the same reason.
-// REMOVE the attribute when the plan consumes it — a permanent blanket allow
-// here would hide genuinely-unreachable definitions later.
-#[cfg_attr(not(test), allow(dead_code))]
+// `allow(dead_code)` while increment 1a stands alone: the registry is a DATA
+// surface whose consumer is the plan derivation (increment 1b). Some of it is
+// unread even by the gates — `Form::Undeclared` and `Direction::Undeclared`
+// are deliberately unconstructed today (no signal's identity behaviour is
+// unestablished yet) and must stay in the vocabulary so a future signal can
+// say "not measured" instead of claiming a form nobody checked.
+// NARROW this the moment the plan consumes the registry — a permanent blanket
+// allow here would hide genuinely-unreachable definitions later.
+#[allow(dead_code)]
 pub(crate) mod feature_defs;
 
 // V2 "bounded" feature extraction — opt-in, strictly additive. See
@@ -285,6 +287,19 @@ pub mod feature_v2;
 // (docs/STREAMING_FOLDAPP_C0_DESIGN_2026-07-26.md).
 #[cfg(feature = "feature-regime-v2")]
 pub(crate) mod feature_v2_stream;
+
+// The extraction PLAN: one derivation from "what a consumer needs" to "what
+// the walk must run and how wide the answer is" — the pair (compute, layout)
+// the runtime was missing. Gated with `feature_v2` because it resolves to a
+// `ComputeSet`. docs/FEATURE_SYSTEM_DESIGN_2026-09-05.md
+// `allow(dead_code)`: `Plan::derive` / `Plan::v1` / `Plan::covers` are the
+// request-side half of the contract, exercised by the plan gates and the
+// servability census; the runtime reaches a plan through `Plan::for_bake`.
+// NARROW when a runtime caller takes an explicit slot request (phase 2's
+// research engine is the first).
+#[cfg(feature = "feature-regime-v2")]
+#[allow(dead_code)]
+pub(crate) mod feature_plan;
 
 // Env-gated (`ZENSIM_FOLD_TIMING`) per-phase wall/busy accounting for the
 // streaming fold walk — diagnostic only, no public surface, and every hook is

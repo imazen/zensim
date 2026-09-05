@@ -1344,19 +1344,23 @@ impl Zensim {
         crate::fold_engine::score_pool_mode(params, &config, self.skip_unread_pools)
     }
 
-    /// The `pool_mode` argument for a SCORING entry: `None` (compute
-    /// everything) unless this instance opted in and the profile's bakes
-    /// structurally ignore the masked/IW block.
+    /// The serving PLAN for a SCORING entry: `None` (today's unconditional v1
+    /// walk) unless the extraction must differ — because this instance opted
+    /// into pool skipping, or because a bake declares a LAYOUT wider than the
+    /// v1 walk emits.
+    ///
+    /// The second case is what makes a wide bake servable at all. Before it,
+    /// a 944-declared bake reached `prep_bake_input_f32` with a 372-wide
+    /// vector and was refused with `"bake declares more input features than
+    /// the caller supplied"` — a true statement about a situation the runtime
+    /// created by never asking for the width the bake declared.
     #[cfg(feature = "feature-regime-v2")]
-    fn scoring_pool_mode(
+    fn scoring_plan(
         &self,
         params: &ProfileParams,
         config: &ZensimConfig,
-    ) -> Option<crate::feature_v2::V1PoolsMode> {
-        if !self.skip_unread_pools {
-            return None;
-        }
-        Some(crate::fold_engine::score_pool_mode(params, config, true))
+    ) -> Option<crate::feature_plan::Plan> {
+        crate::fold_engine::score_plan(params, config, self.skip_unread_pools)
     }
 
     /// The walk this instance's scoring entries run — the read-back of
@@ -1555,7 +1559,7 @@ impl Zensim {
             self.stop_ref(),
             self.fold_engine,
             #[cfg(feature = "feature-regime-v2")]
-            self.scoring_pool_mode(params, &config),
+            self.scoring_plan(params, &config).as_ref(),
         );
         self.check_stop()?;
         apply_mlp_scoring_with_codec(
@@ -2185,7 +2189,13 @@ impl Zensim {
                     &mut owned
                 }
             };
-            let pool_mode = self.scoring_pool_mode(self.profile.params(), config);
+            // The ref-cached walk emits the v1 layout only; a wide bake is
+            // not servable through it yet (phase 2 — registered, and the
+            // servability census reports it as such rather than silently
+            // scoring a truncated vector). Take just the pool axis.
+            let pool_mode = self
+                .scoring_plan(self.profile.params(), config)
+                .map(|p| p.compute.v1_pools);
             if let Some(r) = crate::fold_engine::compute_fold_backed_with_ref(
                 precomputed,
                 distorted,
@@ -3398,12 +3408,12 @@ fn compute_with_config_inner(
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
     use_fold: bool,
-    // Per-profile weight-skipping, resolved by the CALLER (only `Zensim`
-    // knows the profile's bakes). `None` = today's unconditional behaviour.
-    // Deliberately a resolved mode rather than a bool: the decision belongs
-    // to `fold_engine::score_pool_mode`, and passing the answer keeps this
-    // shared front ignorant of bakes.
-    #[cfg(feature = "feature-regime-v2")] pool_mode: Option<crate::feature_v2::V1PoolsMode>,
+    // The serving plan, resolved by the CALLER (only `Zensim` knows the
+    // profile's bakes). `None` = today's unconditional behaviour.
+    // Deliberately a resolved plan rather than a flag: the decision belongs
+    // to `fold_engine::score_plan`, and passing the answer keeps this shared
+    // front ignorant of bakes.
+    #[cfg(feature = "feature-regime-v2")] plan: Option<&crate::feature_plan::Plan>,
 ) -> ZensimResult {
     // Sub-64px inputs can't form the 4-scale pyramid. Reflect-pad both sides
     // to the pyramid minimum so every metric/bake gets 4 genuinely-computed
@@ -3420,7 +3430,7 @@ fn compute_with_config_inner(
             stop,
             use_fold,
             #[cfg(feature = "feature-regime-v2")]
-            pool_mode,
+            plan,
         );
     }
     compute_with_config_core(
@@ -3431,7 +3441,7 @@ fn compute_with_config_inner(
         stop,
         use_fold,
         #[cfg(feature = "feature-regime-v2")]
-        pool_mode,
+        plan,
     )
 }
 
@@ -3442,11 +3452,20 @@ fn compute_with_config_core(
     weights: &[f64],
     stop: Option<&dyn enough::Stop>,
     use_fold: bool,
-    #[cfg(feature = "feature-regime-v2")] pool_mode: Option<crate::feature_v2::V1PoolsMode>,
+    #[cfg(feature = "feature-regime-v2")] plan: Option<&crate::feature_plan::Plan>,
 ) -> ZensimResult {
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
     if images_byte_identical(source, distorted) {
+        #[cfg(feature = "feature-regime-v2")]
+        {
+            // An identity result must be as wide as the bake that will read
+            // it, or a wide bake is refused on a PERFECT COPY — the one pair
+            // every metric must handle. The extra slots are zeros either way;
+            // what changes is the length.
+            return identical_result_at(config, plan.map_or(0, |p| p.layout_width));
+        }
+        #[cfg(not(feature = "feature-regime-v2"))]
         return identical_result(config);
     }
 
@@ -3457,7 +3476,16 @@ fn compute_with_config_core(
     // caller's before/after `check_stop`. Named in `is_fold_backable`'s
     // caller rather than hidden.
     #[cfg(feature = "feature-regime-v2")]
-    if use_fold && stop.is_none() && crate::fold_engine::is_fold_backable(config) {
+    // A plan whose layout is wider than the buffered walk can emit MUST take
+    // the fold: falling back to buffered there is not a safe default, it is a
+    // refusal. `use_fold` still governs the narrow case, where both walks can
+    // serve and buffered is the default for every profile except `D`.
+    let plan_needs_fold =
+        plan.is_some_and(|p| p.layout_width > crate::fold_engine::v1_feature_width(config));
+    if (use_fold || plan_needs_fold)
+        && stop.is_none()
+        && crate::fold_engine::is_fold_backable(config)
+    {
         let mut scratch = crate::feature_v2::V2Scratch::new();
         // The fold's only failure modes here are the dimension/HDR checks the
         // caller already made; a surprise falls back rather than erroring out
@@ -3468,7 +3496,7 @@ fn compute_with_config_core(
             config,
             weights,
             &mut scratch,
-            pool_mode,
+            plan,
         ) {
             return r;
         }
@@ -3495,12 +3523,23 @@ fn compute_with_config_core(
 /// 300-input) needs only the extended 300-width vector. A missing block
 /// triggers InvalidDataLength downstream when the bake's MLP runs.
 fn identical_result(config: &ZensimConfig) -> ZensimResult {
+    identical_result_at(config, 0)
+}
+
+/// [`identical_result`] widened to at least `min_width` slots.
+///
+/// A perfect copy is the one pair every metric must handle, and a wide bake
+/// was refused on it for the same reason it was refused everywhere else: the
+/// vector handed to `prep_bake_input_f32` was the v1 width. The extra slots
+/// are zeros either way — what changes is the LENGTH, which is what the bake
+/// checks. `min_width = 0` is exactly today's behaviour.
+fn identical_result_at(config: &ZensimConfig, min_width: usize) -> ZensimResult {
     let fpc = match (config.extended_features, config.compute_iw_features) {
         (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
         (true, false) => FEATURES_PER_CHANNEL_EXTENDED,
         (false, _) => FEATURES_PER_CHANNEL_WITH_PEAKS,
     };
-    let num_features = config.num_scales * 3 * fpc;
+    let num_features = (config.num_scales * 3 * fpc).max(min_width);
     ZensimResult::new(
         100.0,
         0.0,

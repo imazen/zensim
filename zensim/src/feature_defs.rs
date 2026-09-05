@@ -1791,7 +1791,7 @@ mod owner_gates {
     fn registered_sets_are_reproducible_from_the_definition_registry() {
         let json = include_str!("../../benchmarks/feature_sets_registry.json");
         let (mut producers, mut consumers, mut classes) = (0usize, 0usize, 0usize);
-        for (key, obj) in registry_sets(&json) {
+        for (key, obj) in registry_sets(json) {
             let compute = json_str_field(&obj, "compute").expect("compute");
             let era = json_str_field(&obj, "era").expect("era");
             let role = json_str_field(&obj, "role").unwrap_or_default();

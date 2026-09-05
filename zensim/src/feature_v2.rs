@@ -2052,7 +2052,6 @@ impl ComputeSet {
     /// today by the cross-check tests that gate it against
     /// `bake_block_profile`'s independently-reported numbers, hence `test`
     /// rather than a blanket allow.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn from_block_profile(model: &crate::mlp::Model) -> Self {
         // The v1-layout total: `num_scales * 3 channels *
         // (extended-per-channel + IW-per-channel)` = 4*3*(25+6) = 372. Named
@@ -7561,20 +7560,27 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
     max_pixels: Option<usize>,
     parallel: bool,
     scratch: &mut V2Scratch,
-    // `None` = `V1PoolsMode::Full` (compute everything), the unconditional
-    // pre-2026-08-31 behaviour. `Some(Peaks)` is per-profile weight-skipping,
-    // resolved by `fold_engine::score_pool_mode` from the bake's layer 0.
-    pool_mode: Option<V1PoolsMode>,
+    // The serving PLAN, resolved by `fold_engine::score_plan` from the
+    // profile's bakes. `None` = the unconditional pre-2026-08-31 behaviour
+    // (`V1PoolsMode::Full`, v1-only, v1 layout) — spelled out below as a
+    // literal rather than reconstructed from a plan, so the default path is
+    // the SAME code, not merely an equivalent one.
+    plan: Option<&crate::feature_plan::Plan>,
 ) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
     if source.is_hdr() || distorted.is_hdr() {
         return Err(ZensimError::HdrInputRequiresPuPath);
     }
-    let toggles = V2NewFeatureToggles {
-        v1_pools: pool_mode.unwrap_or(V1PoolsMode::Full),
-        v1_only: true,
-        ..V2NewFeatureToggles::default()
+    let toggles = match plan {
+        // A plan asks for its own (compute, layout) pair — which is how a
+        // bake declaring a layout wider than 372 becomes servable at all.
+        Some(p) => p.toggles(),
+        None => V2NewFeatureToggles {
+            v1_pools: V1PoolsMode::Full,
+            v1_only: true,
+            ..V2NewFeatureToggles::default()
+        },
     };
     // Sub-64 reflect-pad BEFORE the walk, exactly as
     // `metric::compute_with_config_inner` does — so both engines' features
