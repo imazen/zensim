@@ -7435,3 +7435,15 @@ not fixed: **`affine_calibrate` cannot read a current compressed ZNPR v3 bake** 
 `benchmarks/d_id100_2026-09-04.md`; artifacts `benchmarks/d_id100_bakes_2026-09-04.pointer.md`. **PROPOSAL ONLY,
 no default flipped** — the ship text (identity reads 100 not 96.1; near-lossless up to +3.3 pts and closer to
 ssim2; floor −12.2→−57.2; reach 108→157; rank and speed unchanged; the cost is a D-dial ERA BREAK) is §10.
+
+## ROUND 79 — 2026-09-04/05: limits pause + resume; D-id100 passes the CONTRACT tier
+User paused ("hitting limits"); four lanes parked with resume files; limit reset 01:10Z → resumed. **D-id100
+(`abfe13de`): Profile D + 21 identity anchor rows in the spline step → CONTRACT 6/6 (identity 100.0000) with rank
+byte-untouched; `D-id100-negrich` adds unclamped negative-rich anchors → REG 7/9 vs ssim2's bars (A2 −57.2, A5 156.6,
+A8 −211.7; A7/A9 structural). The first candidate to satisfy the user's addressability rule at zero rank cost — ship
+proposal §10, a D-dial era break, user's call.** Owner fixes landed: `--select --seed-group` (parity-gated vs the
+board's rule on 432 fullevals), multi-layer `--keep-features`, `--init-seed`/`--sample-seed` split, `zentrain.
+sample_coverage` (exact replay digest; two seeds of one recipe: 0.9988 vs 1.0000 pooled coverage). Parked WIP:
+`--pair-sampling stratified` (2 compile errors, labelled); gaddrinst measured 5 premise corrections before pausing
+(two 944 eras not three; 39 refs; the 372-slice control doesn't hold; the ssim2 944 reference reading already exists;
+the percentile owner exists). Next: replication wave for the k=1 fair leaders using the split seeds + coverage.
