@@ -226,6 +226,25 @@ uneven per-codec coverage that this instrument does not inherit.
 axis — the clearest possible argument that a per-codec step table could not have
 expressed either one, and that dedup had to key on the encoded bytes.
 
+### 8.0 Reproducibility gate — the instrument rebuilds bit-for-bit
+
+The whole point of persisting encoded bytes is that the instrument can be rebuilt.
+Tested rather than claimed: the `jpeg` leg was re-run from scratch into a clean
+directory with the same sources, pins and driver.
+
+| | result |
+|---|--:|
+| cells compared | 2,574 |
+| identical `encoded_bytes` | **2,574 / 2,574** |
+| identical ssim2 (exact string) | **2,574 / 2,574** |
+| identical output filename set | **yes** |
+| identical bitstream sha256 (300-file random sample, seed 20260905) | **300 / 300** |
+
+So the encode path is deterministic at these pins and the instrument is
+reconstructible from its recorded inputs — which is exactly the property the
+2026-05-29 grid lacked, and the reason that grid could not be re-extracted when its
+decode cache was deleted.
+
 ### 8.1 A defect this surfaced, filed: `imazen/jxl-encoder#101`
 
 130 jxl cells failed to decode, and they were not noise: **13 odd-dimensioned
