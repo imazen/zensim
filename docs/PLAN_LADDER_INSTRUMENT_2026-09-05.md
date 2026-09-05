@@ -255,8 +255,8 @@ for writing.
 | **ARM 1** grid spec | DONE, and the floor map (§1) is what specified it. 5 ladders x 39 refs, 66-step floor-dense q axis, dedup by encode hash. |
 | **ARM 2** execution | LOCAL, by the pre-registered decision rule: measured ~28 min against a ~2 h threshold, so the fleet was not stood up. node-2/node-3 were **off**; r7900x and mac idle and left alone. |
 | **ARM 3** registration | DONE at **both** widths (372 `4c3874a7…`, 944 `0e8e5fb7…`), append-only, bars derived through the owner. Board re-grade scoped and deferred with a census (§11a). |
-| **ARM 4** anchor set | 32 k-means imazen-26 picks (12 content classes, 1,082-image population). **CID22 disjointness GATE PASSED: 0 hits at d <= 10**, closest d=19. |
-| **ARM 5(i)** D re-anchored | **Provably cannot pass** — §9.2 measures all 19 failing jpeg ladders as RAW inversions (raw-vs-dial verdicts agree 39/39), and two shipped D bakes with identical weights and different splines have identical A7r. A monotone spline moves range, never rank. |
+| **ARM 4** anchor set | DONE. 32 k-means imazen-26 picks (12 content classes, 1,082-image population); **CID22 disjointness GATE PASSED: 0 hits at d <= 10**, closest d=19. 4,552 rows, **UNCLAMPED** target (min −69.97, **404 negative rows** the shipped anchor would collapse to one 0), 32 identity rows at 100, single-era. Registered as an asset; **not installed**. |
+| **ARM 5(i)** D re-anchored | BUILT + GRADED (§9.6). **A7r identical on all five codecs** and CID22 identical to 5 dp — §9.2's prediction confirmed to the digit — while reach falls **194.97 -> 160.07** and A2/A5/A6 flip PASS -> FAIL. Cannot pass, and is worse where a spline *can* act. |
 | **ARM 5(ii)** peaks arms on the new grid | Inversion **PERSISTS** and widens to three codecs — the pre-registered expectation. §9.4 then exhausts the whole λ family: every arm worse than the incumbent on every codec at every λ. |
 | **ARM 5(iii)** JXL-floor calibration gap | MEASURED: mean **−8.55** at the jxl floor, **not** the 20-30 the brief assumed (§9.3) — and jpeg's floor gap has the **opposite sign**. |
 

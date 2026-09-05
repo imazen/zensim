@@ -457,6 +457,57 @@ near-tie phenomenon, and that **ssim2 itself wobbles on 18 of the same 39 ladder
 
 ---
 
+## 9.6 The ANCHOR (ARM 4) and the re-anchored D (ARM 5i) — the prediction, confirmed exactly
+
+**The anchor.** 32 k-means imazen-26 representatives (12 content classes, drawn from
+a 1,082-image train-origin population; the committed
+`avif_subsample_picks_2026-09-01.tsv` selection, reused rather than re-clustered),
+four ladders, floor-preserving 41-step q axis.
+**CID22 disjointness GATE PASSED: 0 hits at d <= 10** against all 49 validation
+references (closest d = 19 — above even the d <= 16 screening tier).
+
+| | value |
+|---|---|
+| file | `ladder_anchor_372col_anchor.parquet`, sha256 `4683ed51ac6acf8c` |
+| rows | **4,552** = 4,520 distinct cells + **32 identity rows at 100.0** |
+| by codec | jpeg 992 · webp 1,312 · avif-svt 896 · jxl 1,320 · identity 32 |
+| target | **UNCLAMPED ssim2**: min **−69.97**, p5 −19.55, median 57.07, max 100.0 |
+| **negative-target rows** | **404 (8.9 %)** — *the rows the shipped anchor's `max(ssim2,0)` collapses to a single 0* |
+| dropped | 120 jxl cells (the §8.1 encoder defect) |
+
+Both defects the shipped anchor has are closed: its target is unclamped, and its
+targets and features come from **one** fresh sweep rather than a stored-era score
+against today's decode.
+
+**The re-anchored D.** `bake_dial_refit shared-anchor` on shipped D against it —
+19 knots, dial y-range [−52.9, 100.0]:
+
+| | shipped D | D re-anchored |
+|---|--:|--:|
+| CID22 SROCC | 0.86333 | **0.86333** (identical — rank untouched) |
+| **A7r per codec** | 0.5385 / 1.0000 / 0.5128 / 0.9615 / 1.0000 | **identical, all five** |
+| reach | 194.970 | **160.071** |
+| p95 | 93.884 | 90.812 |
+| regression fails | A1, A3, A7r | **A1, A2, A3, A5, A6, A7r** |
+
+**§9.2's prediction is confirmed to the digit: A7r did not move on a single codec.**
+A monotone spline preserves rank, the failures are raw-level, and re-anchoring
+therefore cannot touch them — measured now on a real anchor rather than argued.
+
+**And the anchor makes the dial WORSE where a spline *can* act.** Reach falls
+**194.97 -> 160.07** and three further range axes (A2, A5, A6) flip PASS -> FAIL. Under
+the user's standing rule — *"any model that limits dial range cannot ship"* — that
+alone disqualifies it. **This is the SECOND independent imazen-26-based anchor to cut
+dial reach**: the 2026-09-04 proposal cut it 96.85 -> 85.74 and was not shipped
+either. Two different builds, different codecs, different eras, same direction —
+which promotes "imazen-26 anchors lose reach" from a one-off to a pattern worth a
+named cause before a third is attempted.
+
+The anchor is kept as a registered current-era asset (it is the only unclamped,
+single-era, CID22-disjoint anchor that exists), **not** installed.
+
+---
+
 ## 10. SHIP DECISION — nothing installs
 
 The pre-registered gate (plan §7) required all four: contract 6/6, **floor
