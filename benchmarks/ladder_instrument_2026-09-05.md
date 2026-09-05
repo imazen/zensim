@@ -232,12 +232,23 @@ parse, not from a decoder's buffer), a 513x769 source declares:
 |---|---|---|---|---|---|---|---|---|
 | declared | 513x769 | 513x769 | 513x769 | 513x769 | **513x769** | **514x770** | 514x770 | 514x770 |
 
-The threshold is exact. Both dimensions round independently (`769x513 -> 770x514`),
-even-dimensioned sources are unaffected, and the 2026-07-27 run of the same sources
+The threshold is exact. Both dimensions round independently (`769x513 -> 770x514`);
+**even-dimensioned sources are unaffected — tested directly, not inferred from the
+failure list** (`1022x818` and `512x512` declare their true size at 9.9 / 10.0 / 25.0
+and all six cells round-trip); and the 2026-07-27 run of the same sources
 shows the identical signature — so it is **pre-existing, not introduced here**. The
 decoder is correct; it reproduces what was signalled. A supporting oddity consistent
 with a mode switch at that threshold: encoded size is **not monotone** across it
 (d=10.0 gives 8,813 B against d=8.0's 8,635 B on the same image).
+
+**An independent signal that `>= 10.0` is a MODE SWITCH, not merely a header bug.**
+On the even-dimensioned `1022x818`, where the header is correct and nothing fails,
+ssim2 falls off a cliff at exactly the same threshold: **15.28 at d=9.9 -> −20.82 at
+d=10.0**, a 36-point drop, against 19 points across the entire 10.0 -> 25.0 range
+above it. So the size-header symptom, the quality cliff, and the non-monotone encoded
+size are three views of one switch — consistent with 2x downsampling engaging there,
+and with the header being written from the post-switch grid rather than from the
+original `xsize`/`ysize`. (Posted as a follow-up on the issue.)
 
 **This was diagnosable only because the run persisted encoded bytes.** No re-encode
 was needed to find, bound, or file it.
