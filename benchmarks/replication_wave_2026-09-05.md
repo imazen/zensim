@@ -321,6 +321,108 @@ Wall clock: 505 s and 477 s. The 17-fit wave is ~2.4 h, serial, on this box.
 
 ---
 
+## 4c. RESULTS (all 17 fits landed, 0 nonzero rc; 2026-09-05)
+
+Wall clock 336–576 s/fit, 2 h 11 m total, serial, local. Trainer binary sha256
+`9eff0caf…` re-checked unchanged at harvest.
+
+### 4c.1 What moved at the top once the leaders were replicated: they went DOWN
+
+Fair-board k-mean composite, k≥2 groups, before vs after the wave's arms joined:
+
+| recipe | k before | k-mean before | rank before | k after | k-mean after | rank after |
+|---|--:|--:|--:|--:|--:|--:|
+| `LSTAR` | 3 | 0.861467 | **1** | 7 | **0.856414** | **8** |
+| `LSTAR3` | 3 | 0.860367 | **2** | 7 | **0.856843** | **6** |
+| `W11J` | 3 | 0.857667 | 7 | 7 | **0.859286** | **3** |
+
+**Two of the three corrected leaders fall out of the top five when they are
+actually replicated.** The new top three — `A5_r4` (k=2, 0.859450),
+`W10L9PH` (k=6, 0.859350), `W11J` (k=7, 0.859286) — span **0.0002** on k-spreads
+of 0.010–0.012, i.e. still not distinguishable. Best-of-k inflation over the 18
+combined-fair k≥2 groups rose from median +0.0061 to **median +0.0070, max
++0.0223**, and median k-spread from 0.0141 to **0.0160**: adding honest draws
+makes the best-of-k premium bigger, not smaller, which is what a real
+selection-on-noise effect does.
+
+### 4c.2 ORDER vs INIT — the decomposition
+
+Per-axis spread over k=3 models per arm, against the owner's own bootstrap CI
+half-width (median over the arm's models). Nothing is recomputed: every SROCC
+and CI is read from a `bake_verdict --full-json` fulleval.
+
+| recipe | axis | spread(ORDER) | spread(INIT) | CI half | call |
+|---|---|--:|--:|--:|---|
+| LSTAR | cid22 | 0.019251 | 0.011077 | 0.0066 | **ORDER > INIT** |
+| LSTAR3 | cid22 | 0.013457 | 0.001897 | 0.0067 | **ORDER > INIT** |
+| W11J | cid22 | 0.014305 | 0.002049 | 0.0069 | **ORDER > INIT** |
+| LSTAR | konjnd | 0.124678 | 0.125075 | 0.0733 | init > order (0.0004 — noise) |
+| LSTAR3 | konjnd | 0.059300 | 0.038778 | 0.0745 | UNRESOLVED |
+| W11J | konjnd | 0.055952 | 0.037722 | 0.0740 | UNRESOLVED |
+| LSTAR | aic3 | 0.017685 | 0.012590 | 0.0349 | UNRESOLVED |
+| LSTAR3 | aic3 | 0.016536 | 0.013042 | 0.0345 | UNRESOLVED |
+| W11J | aic3 | 0.013511 | 0.016117 | 0.0342 | UNRESOLVED |
+| LSTAR | composite | 0.017478 | 0.012575 | — | ORDER > INIT |
+| LSTAR3 | composite | 0.010431 | 0.003253 | — | ORDER > INIT |
+| W11J | composite | 0.003213 | 0.006620 | — | init > order |
+
+**CID22 is the verdict: ORDER dominates INIT, 3 of 3 recipes**, and it is the
+only axis where the effect clears the noise floor — the order spread is 2–7×
+the per-model CI half-width on all three, while the init spread is *inside* it
+on LSTAR3 and W11J. That **confirms the subset study's n=3 pilot read
+(0.0078 vs 0.0017) on real leaders with k=3 per arm.**
+
+**The pilot's KonJND / AIC-3 "flip" does NOT survive.** On both axes the
+per-model CI half-width (0.073–0.075 KonJND, 0.034 AIC-3) is larger than either
+arm's spread on essentially every cell: 5 of 6 are UNRESOLVED and the sixth
+(LSTAR KonJND) separates the arms by **0.0004** on a 0.073 CI. The honest
+statement is *not resolved at k=3*, not "init dominates there".
+
+Secondary axes split (csiq/live/nonphoto/imazen26 give 4 ORDER, 3 init, 5
+UNRESOLVED across the three recipes) — consistent with one real effect on the
+human-MOS axis and noise elsewhere.
+
+### 4c.3 A3b — the one genuinely-k=1 recipe (era-2, reported separately)
+
+k=3 arm S (re-run diagonal + 2 order seeds), scored at its **native**
+`ext944-era2r4-2026-09-01` root: CID22 mean **+0.885487**, spread 0.009957 (CI
+half 0.0069); KonJND −0.337323, spread 0.088567 (CI half 0.0790); AIC-3
++0.804181, spread 0.013933. Same shape as the canonical three — an order-spread
+on CID22 that clears its CI, and a KonJND spread that does not.
+
+It has **no arm I** (registered that way) and is **not promoted to the board**:
+`bake_verdict` correctly REFUSES to score it on the canonical folded root (it
+structurally uses 72 caller lines in `f156-371` that the folded root feeds as
+structural zeros — the registered wrong-regime class), and `run_full_eval.sh`
+has no `--features-root` passthrough, so a board cell for it cannot be produced
+without changing that owner. Named gap, not a silent omission. This also
+explains a first attempt that packed it against the CANONICAL anchor and read
+CID22 0.6424; with its native anchor the same bakes read 0.8808–0.8908.
+
+### 4c.4 `freeze_check --select --seed-group`
+
+Over the 14 promoted wave cells plus the 99 combined-fair board cells (113
+inputs). The arms DO join their diagonals now: `LSTAR` k=7/13 cells, `LSTAR3`
+k=7/7, `W11J` k=7/11.
+
+**The owner's pick is `62df0d51a60e` = `W10L9_s4003_packed`, k=1, UNREPLICATED**,
+8.00/8 floors, selection_composite 0.9841. Worth stating plainly: the registered
+selection rule's PRIMARY key is the profile floor count, so **a single draw can
+still win it** — the `--seed-group` flag makes the k visible and ranks groups by
+their mean, but it does not stop an unreplicated cell from topping the table
+when its floor count is highest. The three replicated wave groups rank 4, 8 and
+11 on that rule with 6.14–7.14 mean floors.
+
+### 4c.5 `sample_coverage` — reported, not explanatory
+
+Every wave bake embeds `zentrain.sample_coverage` (band edges, per-group band
+pair counts, duplicate-pair rate, near-threshold share, and a replay `digest`).
+It is recorded and readable per seed. It is **not** offered as an explanation of
+anything above: the subset-quality study (`92caf565`) measured whole-run
+coverage as saturated, with no coverage descriptor beating a luck control and
+lucky seeds no better covered. The axis this wave finds live is **ORDER**, which
+is what the sample seed actually changes.
+
 ## 5. What this wave does NOT do
 
 * It does not enable `--stratified-bands`, or change any recipe.
@@ -332,7 +434,12 @@ Wall clock: 505 s and 477 s. The 17-fit wave is ~2.4 h, serial, on this box.
 
 ## 6. Open, blocking, and honest
 
-**Board regeneration is HELD.** `d3a948ca` (G-ADDR board coverage: NOT-SHIPPABLE badges,
+**RESOLVED — the board was regenerated.** `d3a948ca` was re-landed as `be604c12`
+before this wave's endgame; both boards were rebuilt on it (NOT-SHIPPABLE badges
+verified present) and again after promotion. Original note kept below for the
+record.
+
+**Board regeneration was HELD.** `d3a948ca` (G-ADDR board coverage: NOT-SHIPPABLE badges,
 `--graft-gaddr`) was dropped from `origin/main` by a sideways push and is **not an
 ancestor of this workspace**. Both `summer_gauntlet_fair.html` and
 `summer_gauntlet.html` were regenerated at 19:14 local **before** that was known, from a
@@ -353,3 +460,26 @@ by one `zensim_mlp_train` whose sha256 is
 binary beside it, and re-checked at harvest. A `trainer_head_at_train` stamp on a fit
 records whatever `@-` was when that fit started, which is NOT the same thing once `main`
 advances — read the binary hash, not the stamp.
+
+---
+
+## 7. Owner defects found by running this wave — four, all fixed and gated
+
+Every one was invisible until a recipe was actually replayed and re-grouped.
+
+| # | defect | owner(s) | how found | measured effect |
+|---|---|---|---|---|
+| 1 | `--dump-checkpoints-dir` not in `SEED_GROUP_DROP_FLAGS` (its value embeds the seed) | `gauntlet.py` + `freeze_check.rs` | diffing normalized argv of two "distinct" leaders | k≥2 groups 78→82; 8 of the 10 top combined-fair cells k=1 → true k=3 |
+| 2 | `zentrain.repro` never recorded `init_seed`/`sample_seed` | `zensim_mlp_train.rs` | reading the emission site before the third fit | a k-arm split-seed study would report **k=1** (all arms identity `"1"`) |
+| 3 | `argv[0]` (the trainer's build path) part of the recipe key | `gauntlet.py` + `freeze_check.rs` | this wave's arms would not group with their own diagonal | 32 distinct `argv[0]` on the board; groups 101→98, both merges genuine |
+| 4 | a cell with NO recorded seed counted as a distinct draw; and `init == sample` counted as a second draw | `freeze_check.rs` (4a) + both (4b) | the cross-owner parity gate, immediately after fix 3 | two seedless cells reported k=2 off zero seeds; CTL-A/CTL-B inflated LSTAR's k 7→8 |
+
+All four are the same shape: **a value that is not part of the recipe was being
+treated as part of the recipe's identity, or a non-draw was being counted as a
+draw.** Both directions corrupt `k`, and `k` is the number every seed-group
+statistic divides by.
+
+**Carry forward.** `run_full_eval.sh` hard-codes its `--features-root` per
+regime, so a bake trained on a non-default root (era-2 × radius-4 here) cannot
+be given a board cell at all. That is the next one in this family: it is not a
+wrong number, it is a missing row, which is harder to notice.
