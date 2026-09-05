@@ -1876,14 +1876,26 @@ function resolveCompare(raw){
   const ids=parseCompareHash(raw);
   if(!ids||!ids.length)return null;
   const exact=new Set(BOARDNAMES),seen=new Set();
-  const found=[],missing=[],ci=[];
+  const found=[],missing=[],ci=[],prefixed=[];
   ids.forEach(id=>{
     let hit=null;
     if(exact.has(id))hit=id;
-    else{const alt=NAMECI[id.toLowerCase()];if(alt!==undefined){hit=alt;ci.push([id,alt]);}}
+    else{
+      const alt=NAMECI[id.toLowerCase()];
+      if(alt!==undefined){hit=alt;ci.push([id,alt]);}
+      else{
+        // Bare-prefix convenience (2026-09-05): accepted ONLY when it names EXACTLY one
+        // board row. An ambiguous prefix (0, or >=2 matches) is never guessed at — it
+        // reports as a plain miss, same as any other typo, with the usual nearest-name
+        // suggestions. Checked last, after exact and case-insensitive, so a real name
+        // always wins over a shorter name that merely prefixes it.
+        const pfx=BOARDNAMES.filter(n=>n.indexOf(id)===0);
+        if(pfx.length===1){hit=pfx[0];prefixed.push([id,pfx[0]]);}
+      }
+    }
     if(hit===null){missing.push(id);return;}
     if(seen.has(hit))return;seen.add(hit);found.push(hit);});
-  return {ids:ids,found:found,missing:missing,ci:ci};
+  return {ids:ids,found:found,missing:missing,ci:ci,prefixed:prefixed};
 }
 // Nearest board names for a miss. Prefix/substring dominate, then a bounded Levenshtein
 // on the lowercased names. Deliberately tiny and dependency-free — a typo hint, not a
@@ -1942,8 +1954,18 @@ function currentURL(){
 // Selection -> hash, in the fragment order for ids still selected, then anything added
 // afterwards. The URL is rewritten ONLY when the set actually changed, so a shared link
 // carrying a typo keeps its evidence across a reload (and a theme re-render writes nothing).
+// Guarded on CMPON(), not merely `state.cmp` truthiness (bug found + fixed 2026-09-05):
+// when EVERY id in a `#compare=` list fails to resolve, applyCompare leaves state.cmp as a
+// non-null {found:[],...} and — by documented design — leaves state.visible untouched
+// (the default-visible set), so the page renders the default view. A bare `state.cmp`
+// check here does not see the difference: with found=[] it read "no rows selected yet" and
+// folded the ENTIRE untouched default-visible set into state.cmp.found on the very first
+// render, silently turning "banner + default view" into "compare mode pinned to whatever
+// the default happened to be" (CMPON() flips true, the pool narrows, sortKey stays stuck
+// at 'composite' instead of adopting 'cmp' — the sort-order regression that surfaced this).
+// Nothing to sync exists while no id has resolved, so this is a plain no-op then.
 function syncHash(){
-  if(!state.cmp)return;
+  if(!CMPON())return;
   const inOrder=state.cmp.found.filter(n=>state.visible.has(n));
   const extra=BOARDNAMES.filter(n=>state.visible.has(n)&&inOrder.indexOf(n)<0);
   const next=inOrder.concat(extra);
@@ -1969,12 +1991,49 @@ function clearCompare(){
     else if(loc)loc.hash='';}catch(e){}
   renderBar();rerender();
 }
-function addToCompare(name){
-  state.visible.add(name);
-  if(state.cmp){
-    if(state.cmp.found.indexOf(name)<0)state.cmp.found.push(name);
-    _lastHash=null;writeHash(state.cmp.found);
-  }
+// Where a resolved replacement lands in `found` — the position its source id held in the
+// original request, counting only the ids before it that are ALREADY resolved. Keeps a
+// mid-list fix from jumping to the end of the comparison (A,[B-missing],C -> A,B',C, not
+// A,C,B').
+function missingInsertPos(missingId){
+  const ids=state.cmp.ids,idx=ids.indexOf(missingId);
+  if(idx<0)return state.cmp.found.length;
+  let n=0;
+  for(let j=0;j<idx;j++)if(state.cmp.missing.indexOf(ids[j])<0)n++;
+  return Math.min(n,state.cmp.found.length);
+}
+// Replace one missing id with a suggested board name — the SAME edit a picker control
+// makes (state.visible is the one owner of what is shown). Writes the hash EXPLICITLY
+// rather than leaving it to rerender()'s syncHash(): syncHash short-circuits on `found`
+// array equality, so when the suggestion happens to already be in `found` (e.g. a second
+// typo of a name already in the set) nothing would otherwise touch location.hash, and the
+// address bar would keep showing the resolved typo forever — a link copied at that moment
+// would raise the very banner this click just cleared. `_lastHash=null` first matches the
+// established pattern (the deleted addToCompare did the same) so a stale value can never
+// block the write.
+function replaceMissing(missingId,suggestion){
+  if(!state.cmp)return;
+  const mi=state.cmp.missing.indexOf(missingId);
+  if(mi<0)return;                                    // stale click: already resolved/dropped
+  state.cmp.missing.splice(mi,1);
+  if(state.cmp.found.indexOf(suggestion)<0)
+    state.cmp.found.splice(missingInsertPos(missingId),0,suggestion);
+  state.visible.add(suggestion);
+  _lastHash=null;writeHash(state.cmp.found);
+  renderBar();rerender();
+}
+// Drop every currently-missing id from the compare set at once. A requested id that never
+// resolved has no board-name identity, so there is nothing to remove from state.visible —
+// only the bookkeeping (`ids`/`missing`) needs pruning. The explicit writeHash (same reason
+// as replaceMissing above) makes sure the now-clean `found` list overwrites whatever raw
+// fragment the page loaded with, even though `found` itself never changed here — without
+// it a shared link would keep re-raising the banner this click just cleared.
+function dropAllMissing(){
+  if(!state.cmp||!state.cmp.missing.length)return;
+  const dropped=new Set(state.cmp.missing);
+  state.cmp.ids=state.cmp.ids.filter(id=>!dropped.has(id));
+  state.cmp.missing=[];
+  _lastHash=null;writeHash(state.cmp.found);
   renderBar();rerender();
 }
 // The banner. Raised on a MISS (big, red, role=alert) or on a case-insensitive FALLBACK
@@ -2003,8 +2062,8 @@ function renderCmpBanner(){
       li.append(el('span',{class:'cap',text:'  not on this board \u2014 did you mean: '}));
       nearestNames(id,3).forEach(n=>{
         const b=el('button',{class:'btn',style:'margin:0 .2rem;padding:.1rem .4rem;font-size:11px',
-          text:n,title:'add '+n+' to the comparison (and to the link)'});
-        b.onclick=()=>addToCompare(n);
+          text:n,title:'replace '+id+' with '+n+' in the comparison (and the link)'});
+        b.onclick=()=>replaceMissing(id,n);
         li.append(b);});
       ul.append(li);});
     host.append(ul);
@@ -2016,6 +2075,12 @@ function renderCmpBanner(){
         +'  (matching is exact and case-sensitive first; this is the fallback.)'}));
   }
   const act=el('div',{style:'margin-top:.45rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:center'});
+  if(c.missing.length){
+    const dr=el('button',{class:'btn',text:'drop missing ids',
+      title:'remove the '+c.missing.length+' not-found id(s) from the compare set and link, '
+        +'keeping the '+c.found.length+' that matched'});
+    dr.onclick=dropAllMissing;act.append(dr);
+  }
   const cl=el('button',{class:'btn',text:'clear compare set',
     title:'drop the URL compare set and return to the default view'});
   cl.onclick=clearCompare;act.append(cl);
@@ -2186,6 +2251,16 @@ function renderBar(){
     bar.append(st);
     bar.append(mk('clear compare set',clearCompare,
       'drop the URL compare set and return to the default view'));
+    // Bare-prefix convenience (2026-09-05): reported here, under the pickers \u2014 never in
+    // the banner above, which is reserved for problems (missing ids / case fallback). A
+    // unique-prefix match is not a problem; it is still never silent.
+    if(state.cmp.prefixed&&state.cmp.prefixed.length){
+      bar.append(el('span',{class:'cmpurl',id:'cmpprefixnote',
+        title:'a bare prefix in the URL matched exactly one board row and was expanded '
+          +'automatically; an AMBIGUOUS prefix (matching more than one row) is never '
+          +'guessed at \u2014 it reports as a plain miss in the banner instead.',
+        text:'prefix expanded \u2014 '+state.cmp.prefixed.map(p=>p[0]+' \u2192 '+p[1]).join(', ')}));
+    }
   }
   bar.append(mk('\u29C9 copy link to this comparison',()=>{
     const vis=DATA.bakes.filter(b=>state.visible.has(b.name)).map(b=>b.name);

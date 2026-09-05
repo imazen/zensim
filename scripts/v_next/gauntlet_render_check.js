@@ -8,6 +8,8 @@
  *                                      [--dump-failures <bake-name>]
  *                                      [--hash <fragment>] [--expect-visible a,b]
  *                                      [--expect-missing id1,id2] [--expect-no-banner]
+ *                                      [--expect-prefix-resolved id=name]
+ *                                      [--click-first-suggestion] [--click-drop-missing]
  *
  * `--hash` sets location.hash in the SHIM before the app script runs, which is how the
  * URL compare-set cases (`#compare=<id1>,<id2>,...`) are gated. The location/history
@@ -16,6 +18,23 @@
  * holds exactly those rows in that order; `--expect-missing` asserts the warning banner
  * names each id verbatim and offers nearest-name suggestions; `--expect-no-banner`
  * asserts the banner host stayed empty.
+ *
+ * `--expect-prefix-resolved <id>=<name>` asserts a bare-prefix convenience match (2026-
+ * 09-05): `<id>` uniquely resolved to board row `<name>` and a "prefix expanded" note
+ * names both, verbatim, under the picker bar (combine with `--expect-no-banner` — a clean
+ * prefix match raises no banner, unlike a miss or a case-insensitive fallback). An
+ * AMBIGUOUS prefix is not a new case: it never resolves, so it is gated exactly like any
+ * other typo via `--expect-missing`.
+ *
+ * `--click-first-suggestion` clicks the first nearest-name suggestion button in the
+ * (already-rendered) missing-id banner and asserts: the app's own state.cmp reflects the
+ * replacement (the clicked id left `missing`, the suggestion joined `found`), the banner
+ * text no longer names the resolved id (empty outright if it was the last one), and
+ * location.hash was rewritten to carry the suggestion. `--click-drop-missing` clicks the
+ * "drop missing ids" control and asserts state.cmp.missing is empty afterward and the
+ * banner reads clean (minus any ci-fallback note, which "drop missing ids" does not touch).
+ * Both read the app's OWN resolved state through the same vm snapshot as CMPSET below —
+ * never a second, hand-rolled copy of the compare-set matching rule.
  *
  * `--dump-row` prints the RENDERED scoreboard row (header -> displayed cell text) for one
  * bake after the assertions pass. It exists so a reviewer can spot-check what the page
@@ -53,6 +72,10 @@ const HASH = argOf('--hash');
 const EXPECT_VIS = listOf('--expect-visible');
 const EXPECT_MISSING = listOf('--expect-missing');
 const EXPECT_NO_BANNER = process.argv.includes('--expect-no-banner');
+// id=name — split on the FIRST '=' (board names use letters/digits/_/-/. only, never '=').
+const EXPECT_PREFIX = argOf('--expect-prefix-resolved');
+const CLICK_FIRST_SUGGESTION = process.argv.includes('--click-first-suggestion');
+const CLICK_DROP_MISSING = process.argv.includes('--click-drop-missing');
 // CMPMODE / CMPSET are read from the APP's own resolved state after the render (see
 // below) — never re-parsed here. A second copy of the `#compare=` matching rule in the
 // harness would be exactly the duplicate-owner defect the gate exists to catch.
@@ -237,14 +260,20 @@ try {
   process.exit(1);
 }
 
-// ---- the app's OWN compare-set resolution (single owner; the harness re-parses nothing)
-let APP_CMP = null;
-try {
-  APP_CMP = vm.runInContext(
-    '(typeof state!=="undefined"&&state&&state.cmp)?{found:state.cmp.found.slice(),'
-    + 'missing:state.cmp.missing.slice(),ci:state.cmp.ci.length,ids:state.cmp.ids.slice()}:null',
-    sandbox);
-} catch (e) { APP_CMP = null; }
+// ---- the app's OWN compare-set resolution (single owner; the harness re-parses nothing).
+// A function, not a one-shot const, so --click-first-suggestion / --click-drop-missing can
+// re-read state.cmp AFTER a click mutates it — always the SAME snapshot shape, never a
+// second copy of the matching rule.
+function readCmp() {
+  try {
+    return vm.runInContext(
+      '(typeof state!=="undefined"&&state&&state.cmp)?{found:state.cmp.found.slice(),'
+      + 'missing:state.cmp.missing.slice(),ci:state.cmp.ci.length,'
+      + 'prefixed:(state.cmp.prefixed||[]).slice(),ids:state.cmp.ids.slice()}:null',
+      sandbox);
+  } catch (e) { return null; }
+}
+const APP_CMP = readCmp();
 // A compare set that RESOLVED to at least one row restricts the board, so the assertions
 // written against the default-visible set read that set instead. Nothing is skipped in
 // the default (no --hash) invocation gauntlet_gates.sh runs first.
@@ -709,16 +738,44 @@ if (process.argv.includes('--dump-failures')) {
 }
 
 // ---- URL COMPARE SETS (2026-09-05) ---------------------------------------------------
-// Three gated cases, one process each (gauntlet_gates.sh runs all three):
+// Gated cases (gauntlet_gates.sh runs all of them, one process each):
 //   (a) --hash '#compare=<known>,<known>' --expect-visible <known>,<known>
 //   (b) --hash '#compare=<known>,<typo>'  --expect-visible <known> --expect-missing <typo>
 //   (c) --hash '#compare='               --expect-no-banner
+//   (d) a (b)-shaped hash + --click-first-suggestion (+ --click-drop-missing when a second
+//       typo is left over): the resolved id leaves the banner (or the banner empties
+//       outright when it was the last one), and location.hash is rewritten to carry the
+//       suggestion; a follow-up "drop missing ids" click then empties what remains.
+//   (e) --hash '#compare=<unique-prefix>' --expect-no-banner
+//       --expect-prefix-resolved '<prefix>=<name>'                (resolves + notes)
+//       --hash '#compare=<ambiguous-prefix>' --expect-missing '<ambiguous-prefix>'
+//                                                                  (stays a plain miss)
 // Plus the two-way check: clicking the copy-link control must put a `#compare=` URL into
 // location AND show it as text (this environment has no clipboard, by construction).
-if (DATA && (HASH !== null || EXPECT_VIS || EXPECT_MISSING || EXPECT_NO_BANNER)) (function compareSetTest() {
+if (DATA && (HASH !== null || EXPECT_VIS || EXPECT_MISSING || EXPECT_NO_BANNER
+    || EXPECT_PREFIX || CLICK_FIRST_SUGGESTION || CLICK_DROP_MISSING)) (function compareSetTest() {
   const host = query('#cmpbanner');
   if (!host) { fail('compare test: no #cmpbanner host in the rendered page'); return; }
   const bannerText = deepText(host).trim();
+  const known = new Set(DATA.bakes.map(b => b.name));
+  // Missing-id groups as rendered: one per <li>, each holding its `.miss` id text and its
+  // nearest-name suggestion buttons. Located STRUCTURALLY — a banner <li> holds ONLY
+  // suggestion buttons — never by matching a button's label, so "drop missing ids" and
+  // "clear compare set" (both in a sibling <div>, never inside a <li>) can never be
+  // mistaken for a suggestion, and a future action button added to that div stays inert
+  // to this walk without needing an update here.
+  const collectMissingGroups = () => {
+    const lis = [];
+    (function walk(e) { if (!e || !e.children) return; if (e.tagName === 'LI') lis.push(e); e.children.forEach(walk); })(host);
+    return lis.map(li => {
+      let id = null; const buttons = [];
+      li.children.forEach(c => {
+        if (c.tagName === 'SPAN' && classesOf(c).includes('miss')) id = deepText(c).trim();
+        if (c.tagName === 'BUTTON') buttons.push({ el: c, text: String(c.textContent || '').trim() });
+      });
+      return { id, buttons };
+    });
+  };
 
   if (EXPECT_NO_BANNER) {
     if (bannerText) fail('compare test: expected NO banner, got: ' + bannerText.slice(0, 220));
@@ -733,20 +790,10 @@ if (DATA && (HASH !== null || EXPECT_VIS || EXPECT_MISSING || EXPECT_NO_BANNER))
       if (bannerText.indexOf(id) < 0)
         fail('compare test: banner does not name the missing id verbatim: ' + id);
     });
-    // nearest-name suggestions: buttons inside the banner other than "clear compare set"
-    const sugg = [];
-    (function walk(e) {
-      if (!e || !e.children) return;
-      if (e.tagName === 'BUTTON') {
-        const t = String(e.textContent || '').trim();
-        if (t && t !== 'clear compare set') sugg.push(t);
-      }
-      e.children.forEach(walk);
-    })(host);
+    const sugg = collectMissingGroups().reduce((a, g) => a.concat(g.buttons.map(b => b.text)), []);
     if (sugg.length < EXPECT_MISSING.length)
       fail('compare test: ' + EXPECT_MISSING.length + ' missing id(s) but only '
         + sugg.length + ' nearest-name suggestion(s) rendered');
-    const known = new Set(DATA.bakes.map(b => b.name));
     const bogus = sugg.filter(s => !known.has(s));
     if (bogus.length) fail('compare test: suggestion(s) are not board names: ' + bogus.join(', '));
     console.log('compare check OK: banner names ' + EXPECT_MISSING.length
@@ -766,6 +813,100 @@ if (DATA && (HASH !== null || EXPECT_VIS || EXPECT_MISSING || EXPECT_NO_BANNER))
     // an explicit list overrides the forced peer_ssim2 reference row
     if (EXPECT_VIS.indexOf('peer_ssim2') < 0 && got.indexOf('peer_ssim2') >= 0)
       fail('compare test: peer_ssim2 rendered although the explicit list does not name it');
+  }
+
+  // ---- (e) bare-prefix convenience: read-only, so it runs before anything clicks -----
+  if (EXPECT_PREFIX) {
+    const eq = EXPECT_PREFIX.indexOf('=');
+    if (eq < 0) {
+      fail('compare test: --expect-prefix-resolved needs "id=name", got: ' + EXPECT_PREFIX);
+    } else {
+      const pid = EXPECT_PREFIX.slice(0, eq), pname = EXPECT_PREFIX.slice(eq + 1);
+      const note = query('#cmpprefixnote');
+      if (!note) {
+        fail('compare test: prefix "' + pid + '" should have resolved to "' + pname
+          + '" with a note rendered under the picker, but #cmpprefixnote is missing');
+      } else {
+        const t = deepText(note);
+        if (t.indexOf(pid) < 0 || t.indexOf(pname) < 0)
+          fail('compare test: prefix note does not name both the typed prefix and its expansion: ' + t);
+        else console.log('compare check OK: prefix "' + pid + '" uniquely resolved to "' + pname
+          + '" with a note rendered under the picker');
+      }
+      if (!APP_CMP || APP_CMP.found.indexOf(pname) < 0)
+        fail('compare test: resolved found set does not contain prefix target "' + pname + '"');
+    }
+  }
+
+  // ---- (d) suggestion click -> replace; drop-missing click -> clear the rest ---------
+  // Both mutate state, so they run after every read-only assertion above and before the
+  // copy-link check (which the file's own convention already runs last).
+  if (CLICK_FIRST_SUGGESTION) {
+    const groups = collectMissingGroups().filter(g => g.buttons.length);
+    if (!groups.length) {
+      fail('compare test: --click-first-suggestion requested but no suggestion buttons are rendered');
+    } else {
+      const targetId = groups[0].id, btn = groups[0].buttons[0];
+      const preHash = locationShim.hash;
+      if (typeof btn.el.onclick !== 'function') {
+        fail('compare test: suggestion button "' + btn.text + '" has no click handler');
+      } else {
+        btn.el.onclick();
+        const cmp2 = readCmp();
+        if (!cmp2) {
+          fail('compare test: app state.cmp disappeared after clicking a suggestion');
+        } else {
+          if (cmp2.missing.indexOf(targetId) >= 0)
+            fail('compare test: clicking "' + btn.text + '" did not remove "' + targetId + '" from missing');
+          if (cmp2.found.indexOf(btn.text) < 0)
+            fail('compare test: clicking "' + btn.text + '" did not add it to found');
+          const nowBanner = deepText(host).trim();
+          if (cmp2.missing.length === 0 && cmp2.ci === 0) {
+            if (nowBanner) fail('compare test: banner should be EMPTY once every id resolved, got: '
+              + nowBanner.slice(0, 220));
+            else console.log('compare check OK: clicking a suggestion resolved the last missing id ("'
+              + targetId + '" -> "' + btn.text + '") and the banner disappeared');
+          } else {
+            if (nowBanner.indexOf(targetId) >= 0)
+              fail('compare test: resolved id "' + targetId + '" is still named in the banner');
+            else console.log('compare check OK: clicking a suggestion resolved "' + targetId + '" -> "'
+              + btn.text + '"; banner still shows the remaining ' + cmp2.missing.length + ' missing id(s)');
+          }
+          if (locationShim.hash === preHash)
+            fail('compare test: clicking a suggestion did not rewrite location.hash');
+          else if (decodeURIComponent(locationShim.hash).indexOf(btn.text) < 0)
+            fail('compare test: rewritten hash does not carry the resolved name "' + btn.text
+              + '": ' + locationShim.hash);
+        }
+      }
+    }
+  }
+
+  if (CLICK_DROP_MISSING) {
+    const btns = [];
+    (function walk(e) { if (!e || !e.children) return; if (e.tagName === 'BUTTON') btns.push(e); e.children.forEach(walk); })(host);
+    const drop = btns.find(b => String(b.textContent || '').trim() === 'drop missing ids');
+    if (!drop) {
+      fail('compare test: --click-drop-missing requested but no "drop missing ids" control is rendered');
+    } else if (typeof drop.onclick !== 'function') {
+      fail('compare test: "drop missing ids" control has no click handler');
+    } else {
+      drop.onclick();
+      const cmp3 = readCmp();
+      if (!cmp3) {
+        fail('compare test: app state.cmp disappeared after clicking "drop missing ids"');
+      } else if (cmp3.missing.length !== 0) {
+        fail('compare test: "drop missing ids" left ' + cmp3.missing.length + ' id(s) missing: '
+          + cmp3.missing.join(', '));
+      } else {
+        const nowBanner = deepText(host).trim();
+        if (cmp3.ci === 0 && nowBanner)
+          fail('compare test: banner should be EMPTY after dropping every missing id, got: '
+            + nowBanner.slice(0, 220));
+        else console.log('compare check OK: "drop missing ids" cleared every not-found id'
+          + (nowBanner ? ' (a ci-fallback note remains, as expected)' : ' and the banner disappeared'));
+      }
+    }
   }
 
   // ---- two-way: the copy-link control writes the hash and shows the URL --------------

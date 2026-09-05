@@ -9,7 +9,7 @@
 #           sortability (real header clicks reorder the ATTACHED tables), ECharts mounts
 #           with built option payloads, light+dark chart themes, and the JXL
 #           loop-targeting panel when the payload carries it
-#   gate 4: URL COMPARE SETS (`#compare=<id>,<id>`) — three cases, one process each,
+#   gate 4: URL COMPARE SETS (`#compare=<id>,<id>`) — cases (a)-(c) one process each,
 #           with the ids READ OUT OF THE BOARD so the gate cannot go stale as the board
 #           changes: (a) two known ids -> exactly those rows, in fragment order, no
 #           banner; (b) one known + one deliberate typo -> the known row plus a banner
@@ -17,6 +17,18 @@
 #           empty -> the default view and no banner. Each case also click-tests the
 #           copy-link control (this environment has no clipboard, by construction, so
 #           it exercises the visible-URL fallback).
+#           (d) a known id + two typos -> clicking the first suggestion replaces one typo
+#           (rewriting the hash, even when the suggestion collapses into an id already in
+#           the set — the syncHash() bug this regression-guards: found-array equality is
+#           not the same question as "does the URL still show stale evidence") while the
+#           banner stays up for the other typo; "drop missing ids" then clears it and the
+#           banner empties.
+#           (e) a bare-prefix convenience (2026-09-05): (i) a prefix that names EXACTLY
+#           one board row resolves with no banner and a "prefix expanded" note under the
+#           picker; (ii) a prefix shared by >=2 rows never guesses — it stays a plain miss
+#           with suggestions, on an ALL-ids-miss hash (the exact shape that exposed the
+#           syncHash() defect: every id failing to resolve must render the untouched
+#           default view, not silently fold the default-visible set into the compare set).
 #   gate 3: STRICT JSON validity of every `*.fulleval.json` the board is built from —
 #           `node --check` for data. Python's `json` accepts a bare `NaN`/`Infinity` in
 #           BOTH directions, so a producer that used the default `allow_nan=True` could
@@ -53,9 +65,11 @@ echo "GATE 2 PASS: DOM-shim render harness"
 
 # ── gate 4: URL compare sets ───────────────────────────────────────────────────────────
 # The ids come from the board itself (curated first — those cells carry the richest
-# panels), and the typo is a mutation of a real name that is PROVEN absent from the
-# board, so the case cannot silently degenerate into "unknown id resolves to nothing
-# because every id does".
+# panels), the typos are mutations of real names PROVEN absent from the board (so a case
+# cannot silently degenerate into "unknown id resolves to nothing because every id does"
+# except (e)-ii and the all-miss half of (d), which deliberately exercise that shape), and
+# the unique/ambiguous prefixes are derived from real board-name overlaps rather than
+# hand-picked, so the gate cannot go stale as the board's naming conventions drift.
 python3 - "$HTML" > "$D/cmpids.txt" <<'PY'
 import json, re, sys
 html = open(sys.argv[1], encoding="utf-8").read()
@@ -67,15 +81,59 @@ assert len(names) >= 2, f"gate 4 needs >= 2 board rows, got {len(names)}"
 pref = [b["name"] for b in bakes if b.get("curated")] or names
 pick = (pref + [n for n in names if n not in pref])[:2]
 have = set(names)
-typo = pick[0][:-1] + "X"
-i = 0
-while typo in have:                      # never collide with a real row
-    i += 1
-    typo = pick[0][:-1] + "X" * i + "q"
-print(pick[0]); print(pick[1]); print(typo)
+
+def mutate(name, have, salt=""):
+    typo = name[:-1] + "X" + salt
+    i = 0
+    while typo in have:                  # never collide with a real row
+        i += 1
+        typo = name[:-1] + "X" * i + "q" + salt
+    return typo
+
+typo = mutate(pick[0], have)
+typo2 = mutate(pick[1], have, salt="2")
+assert typo != typo2, "gate 4d needs two DISTINCT typo tokens"
+
+# (e) bare-prefix convenience: found by inspecting real board-name overlaps, never
+# hand-picked, so a renamed convention on either board still finds a fresh pair.
+def find_unique_prefix(names):
+    name_set, lower_set = set(names), {n.lower() for n in names}
+    for name in names:
+        cands = [name.rsplit("_", 1)[0]] if "_" in name else []
+        cands += [name[:-k] for k in (1, 2, 3, 4, 5) if len(name) > k]
+        for p in cands:
+            if not p or p in name_set or p.lower() in lower_set:
+                continue
+            if sum(1 for n in names if n.startswith(p)) == 1:
+                return p, name
+    return None, None
+
+def find_ambiguous_prefix(names):
+    name_set, lower_set = set(names), {n.lower() for n in names}
+    best = None
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            L, m2 = 0, min(len(a), len(b))
+            while L < m2 and a[L] == b[L]:
+                L += 1
+            p = a[:L]
+            if L == 0 or p in name_set or p.lower() in lower_set:
+                continue
+            if sum(1 for n in names if n.startswith(p)) >= 2 and (best is None or len(p) > len(best)):
+                best = p
+    return best
+
+uniq_prefix, uniq_target = find_unique_prefix(names)
+assert uniq_prefix, "gate 4e needs a board name with a uniquely-resolving prefix; none found"
+ambig_prefix = find_ambiguous_prefix(names)
+assert ambig_prefix, "gate 4e needs two board names sharing an ambiguous prefix; none found"
+
+for v in (pick[0], pick[1], typo, typo2, uniq_prefix, uniq_target, ambig_prefix):
+    print(v)
 PY
 mapfile -t CMPIDS < "$D/cmpids.txt"
-CA="${CMPIDS[0]}"; CB="${CMPIDS[1]}"; CT="${CMPIDS[2]}"
+CA="${CMPIDS[0]}"; CB="${CMPIDS[1]}"; CT="${CMPIDS[2]}"; CT2="${CMPIDS[3]}"
+UNIQ_PFX="${CMPIDS[4]}"; UNIQ_TGT="${CMPIDS[5]}"; AMBIG_PFX="${CMPIDS[6]}"
 node "$HERE/gauntlet_render_check.js" "$HTML" \
   --hash "#compare=${CA},${CB}" --expect-visible "${CA},${CB}" --expect-no-banner
 echo "GATE 4a PASS: two known ids -> exactly those rows, fragment order, no banner"
@@ -84,6 +142,16 @@ node "$HERE/gauntlet_render_check.js" "$HTML" \
 echo "GATE 4b PASS: known + unknown id -> banner names the unknown verbatim + suggestions"
 node "$HERE/gauntlet_render_check.js" "$HTML" --hash "#compare=" --expect-no-banner
 echo "GATE 4c PASS: empty #compare= -> default view, no banner"
+node "$HERE/gauntlet_render_check.js" "$HTML" \
+  --hash "#compare=${CA},${CT},${CT2}" --expect-visible "${CA}" --expect-missing "${CT},${CT2}" \
+  --click-first-suggestion --click-drop-missing
+echo "GATE 4d PASS: suggestion click replaces one typo (hash rewritten) + 'drop missing ids' clears the rest, banner empties"
+node "$HERE/gauntlet_render_check.js" "$HTML" \
+  --hash "#compare=${UNIQ_PFX}" --expect-no-banner --expect-prefix-resolved "${UNIQ_PFX}=${UNIQ_TGT}"
+echo "GATE 4e-i PASS: a prefix naming exactly one board row resolves + notes the expansion, no banner"
+node "$HERE/gauntlet_render_check.js" "$HTML" \
+  --hash "#compare=${AMBIG_PFX}" --expect-missing "${AMBIG_PFX}"
+echo "GATE 4e-ii PASS: an ambiguous prefix stays a plain miss (untouched default view + banner + suggestions)"
 
 # ── gate 3: strict JSON validity of the board's inputs ──────────────────────────────
 if [ "$FULLEVAL_DIR" = "skip" ]; then

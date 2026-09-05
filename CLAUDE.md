@@ -1459,10 +1459,18 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   header click sorts normally after that. A missing id raises a full-width `role=alert`
   banner (`#cmpbanner`, above the sticky bar, theme-aware in both modes, not dismissible)
   giving requested/found counts, every missing id verbatim, and up to 3 nearest board
-  names per miss as one-click adds (bounded Levenshtein + prefix/substring, client-side —
-  no library, no request); if NONE resolve, the banner shows and the normal default view
-  is rendered rather than an empty board; a fully exact list renders NO banner (the
-  compare strip in the bar is that status surface). Two-way: a selection edit rewrites
+  names per miss as one-click REPLACEMENTS (bounded Levenshtein + prefix/substring,
+  client-side — no library, no request); if NONE resolve, the banner shows and the normal
+  default view is rendered rather than an empty board; a fully exact list renders NO
+  banner (the compare strip in the bar is that status surface). Plus (2026-09-05): a
+  suggestion click REPLACES the missing id and rewrites the hash even when the
+  replacement collapses into an id already present (the `syncHash()` found-array-equality
+  bug this closed), a "drop missing ids" control clears every not-found id at once so the
+  banner keeps shrinking toward empty rather than requiring one click per id, and a bare
+  prefix resolves automatically when it names EXACTLY one board row — reported in a small
+  "prefix expanded" note under the pickers, never the banner — while an ambiguous prefix
+  (>=2 rows) is never guessed at and stays a plain miss with suggestions; gated by
+  `gauntlet_gates.sh` cases (d) and (e). Two-way: a selection edit rewrites
   `location.hash` via `history.replaceState` — no scroll jump, no `hashchange` — and ONLY
   when the set actually changed, so a shared link keeps a typo's evidence across a reload;
   `hashchange` re-applies an in-place edit; *copy link to this comparison* sits by the

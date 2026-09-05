@@ -362,16 +362,60 @@ http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=W10L9
 ```
 
 **With a deliberate typo** — the found row still renders, and a full-width red banner names
-the missing id verbatim with its three nearest board names as one-click adds:
+the missing id verbatim with its three nearest board names as one-click **replacements**:
 
 ```
 http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=W10L9PH_s4004_packed,W10L9PH_s4004_pack
 ```
 
-Gated by `gauntlet_gates.sh` gate 4 — two known ids (exact rows, fragment order, no
-banner) / known + typo (banner names it, suggestions are real board names) / empty
-`#compare=` (default view, no banner) — with the ids read out of the board under test, so
-the gate cannot go stale as the board changes.
+### The banner is actionable (2026-09-05)
+
+The report this doc opened with — a user hitting the missing-id banner with a mangled URL
+(`W10L9PH_claude`, a truncated `HDR944_L`) and having to retype it by hand — is fixed. Every
+nearest-name button now **replaces** the missing id with that suggestion in place (not merely
+adds it alongside): `state.visible` is edited exactly as a picker click would edit it, the
+suggestion is inserted at the position its source id held in the request (a mid-list fix does
+not jump to the end), and the hash is rewritten even when the replacement collapses into an id
+already in the set — `syncHash()`'s own found-array-equality short-circuit used to skip that
+write, which would have let a cleaned-up banner keep re-raising itself on the next reload; fixed
+by writing the hash unconditionally on every replace, the same way the URL compare owner
+(`writeHash`) always has. A **"drop missing ids"** control sits next to "clear compare set" and
+removes every not-found id from the set and link at once. The banner stays big and visible —
+nothing shrinks it early — until every listed id is either found or dropped; a partial fix (one
+of two typos resolved) keeps the banner up for whatever remains.
+
+A bare **prefix** is also accepted, but only when it names **exactly one** board row — checked
+last, after exact and case-insensitive matching, so a real name always wins over a shorter name
+that merely prefixes it:
+
+```
+http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=HDR944_L1T1_s4005
+```
+
+resolves to `HDR944_L1T1_s4005_hfpack` with **no banner** and a small "prefix expanded" note
+under the pickers (never inside the banner, which stays reserved for problems) — never silent.
+An **ambiguous** prefix (matching two or more rows — e.g. `LSTAR3__S__i4041_p500`, shared by both
+its `_packed` seed variants) is never guessed at: it stays a plain miss with the usual
+nearest-name suggestions, exactly like any other typo.
+
+Fixing the banner's actionability also surfaced and fixed a real pre-existing defect,
+independent of this feature: when **every** id in a `#compare=` list fails to resolve,
+`syncHash()` used to fold the untouched default-visible set into `state.cmp.found` on the very
+first render — silently turning "banner shown, default view rendered" (the documented contract)
+into "compare mode quietly pinned to whatever the default happened to be," which also broke the
+scoreboard's sort-direction assumptions. `syncHash()` is now a no-op whenever no id has resolved
+(`CMPON()` false), matching the contract exactly; gate 4e-ii below is also this bug's permanent
+regression guard.
+
+Gated by `gauntlet_gates.sh` gate 4 — (a) two known ids (exact rows, fragment order, no banner)
+/ (b) known + typo (banner names it, suggestions are real board names) / (c) empty `#compare=`
+(default view, no banner) / (d) known + two typos: clicking the first suggestion replaces one
+(rewriting the hash even through the found-array-equality collapse above) while the banner stays
+up for the other, then "drop missing ids" clears it and the banner empties / (e) a prefix naming
+exactly one row resolves with the "prefix expanded" note and no banner, while a prefix shared by
+two or more rows (on an all-ids-miss hash — the exact shape that exposed the `syncHash()` defect)
+stays a plain miss and renders the untouched default view — with the ids AND the unique/ambiguous
+prefixes read out of the board under test, so the gate cannot go stale as the board changes.
 
 ## Reproduce
 
