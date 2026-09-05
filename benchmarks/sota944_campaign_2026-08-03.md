@@ -4608,6 +4608,97 @@ with zero:**
 A missing M3a therefore *blocks selection* rather than silently scoring 0 —
 which is the whole point of making coherence first-class.
 
+### E.4 AMENDMENT — the REPLICATION FLOOR (registered 2026-09-05, owner lane `claude-selectfix`)
+
+The E.4 rule above is amended in two places. Both are TIGHTENINGS: each can
+only remove a candidate from selection, never admit one the pre-amendment rule
+refused (asserted directly by
+`freeze_check::tests::amendment_only_ever_removes_candidates`).
+
+**Why now — the defect, measured on the live board.** `--seed-group`
+(2026-09-04, fastclass §7.7) made `k` VISIBLE. It did not make it BINDING: the
+rule's PRIMARY key is the floor count, so a group with ONE draw and 8/8 floors
+outranks a replicated group at 7.22/8. Run over the 113 combined-fair cells,
+the owner's pick was **`62df0d51a60e` = `W10L9_s4003_packed`, k = 1**, 8.00/8
+floors, selection_composite 0.9841
+(`benchmarks/replication_wave_2026-09-05.md` §4c.4 — recorded there as a known
+property of the rule, not fixed).
+
+The same wave measured why a single draw must not be selectable:
+
+* **Replicating the leaders moved them DOWN.** `LSTAR` read composite 0.8615 as
+  its best cell and **0.856414** as its k=7 mean; `LSTAR3` 0.8608 → 0.856843.
+  Their ranks went 1 → 7 and 2 → 6 (§4c.1).
+* **Best-of-k inflation is real and one-sided.** Over the 18 combined-fair
+  k ≥ 2 groups, best-of-k minus k-mean has a **+0.0061 median** (§2) — larger
+  than the **0.0021** span that separated the top four groups.
+
+A k=1 number is therefore a draw from a distribution whose maximum sits
+systematically ~0.006 above its mean, competing against groups reported AT
+their means. That is a units error, not a tie-break question.
+
+**AMENDMENT PART A — REPLICATION FLOOR.** A seed group is SELECTABLE only when
+`k >= min_k`, **default 2** (`freeze_check --select --min-k N`). Groups below
+the floor are LISTED, ranked in their own section with the reason spelled out
+(`NO — UNREPLICATED (k=1 < min-k 2)`), and never selected. Nothing is dropped:
+the number is real, it is simply one draw, and the measured best-of-k premium
+is not a correction that can be applied to it. The remedy for an unreplicated
+candidate is to train it again with a different seed and re-harvest — never to
+lower the floor.
+
+Because the floor makes the SEED GROUP the unit of selection, the grouped
+section is printed whenever it is active (hiding the basis of a selection would
+be worse than the defect), and `**SELECTED:`** now names a **RECIPE**, not a
+cell — naming the group's best member would re-introduce exactly the best-of-k
+selection this amendment exists to stop. The per-cell table is unchanged and is
+relabelled `**BEST CELL:**`, which is the question it actually answers.
+
+**AMENDMENT PART B — FLOOR BASIS = every representative** (`--floor-basis all`,
+default; `mean` restores the pre-amendment basis). A group is credited a floor
+only when EVERY distinct-seed representative passes it — the INTERSECTION of
+their passing-floor sets, folded over `reps` (one cell per distinct seed) so a
+duplicate promotion of one training run cannot vote twice.
+
+Why the stricter of the two readings: **a floor is a certification, and a mean
+is not one.** Two members at 8/8 and 6/8 average 7.0 whether they fail the same
+floor twice or two DIFFERENT floors; in the second case the group is credited
+7 floors of which two are cleared by no member reliably. The intersection
+cannot do that, and it names the difference — the report and TSV carry a
+`split floors` column listing exactly the floors some seeds pass and some do
+not. It is also the reading already used elsewhere in this profile (an ABSENT
+axis counts as not-passed, never averaged away) and the one consistent with
+part A: a number nobody replicated is not a certification. The k-seed mean
+stays REPORTED in its own column, because it remains the right estimator for
+RANKING within a tier — it is simply not a floor count.
+
+**Reproducing a historical selection.** `--min-k 1 --floor-basis mean` is the
+pre-amendment rule exactly. VERIFIED on the same 113 combined-fair inputs: the
+seed-grouped table reproduces the pre-amendment run's **34 rows in identical
+order with identical values**, and the same
+`SEED-GROUP SELECTED: 62df0d51a60e`.
+
+**What the amended rule picks on that board** (113 combined-fair cells,
+2026-09-05):
+
+| rule | selected | k | floors | mean sel_comp |
+|---|---|---:|---|---:|
+| pre-amendment (`--min-k 1 --floor-basis mean`) | `62df0d51a60e` = `W10L9_s4003_packed` | **1** | 8.00/8 mean | 0.9841 |
+| replication floor only (`--floor-basis mean`) | `2de29bc5ae93` = **W10L9P** | 9 | 7.22/8 mean | 0.9768 |
+| **amended default** (`--min-k 2 --floor-basis all`) | **`4ec838fb58b9` = W11J** | **7** | **6/8 every seed** (mean 7.14/8) | **0.9785** |
+
+W11J clears `bandtail, breadth, dialrange, hfnl, konjnd, nonphoto` on every one
+of its 7 seeds, and SPLITS on `cid22` and `dial` — two floors the mean basis
+would have credited it. `W10L9_s4003_packed` is now the top row of the
+UNREPLICATED section, listed with its full numbers and its reason.
+
+**Gates.** `freeze_check::tests::replication_floor_excludes_the_single_draw`
+(asserts BOTH halves: pre-amendment selects the lone draw, amended refuses it
+and selects the replicated recipe),
+`all_reps_basis_refuses_a_floor_no_member_reliably_clears` (two seeds at 7/8
+failing DIFFERENT floors ⇒ mean 7.0, intersection 6, split named), and
+`amendment_only_ever_removes_candidates` (the tightening property, over both
+bases × `min_k ∈ {1,2,3}`).
+
 ### E.5 Cheap-M3a — registered definition + agreement gate (conditional)
 
 **First measure the cost** of the 27-cell instrument on one 944 bake

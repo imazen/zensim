@@ -134,7 +134,7 @@ fn usage() -> ! {
                 freeze_check --fulleval <f> --profile balanced-2026-08-04 [--tsv]\n\
                              [--annotations <registry.json|none>]\n\
                 freeze_check --select <a.fulleval.json> <b...> [--tsv]\n\
-                             [--seed-group]\n\
+                             [--seed-group] [--min-k N] [--floor-basis all|mean]\n\
                 freeze_check --tsv-header | --select-tsv-header | \
                 --seed-group-tsv-header\n\n\
          --select: the REGISTERED k-seed selection rule (campaign appendix\n\
@@ -168,7 +168,26 @@ fn usage() -> ! {
          Read spread + per-seed rows with it (and a bake's own\n\
          zentrain.sample_coverage for what it actually touched).\n\
          Prints an ADDITIONAL section after the unchanged per-cell table;\n\
-         exit code reflects the SEED-GROUP winner.\n\n\
+         exit code reflects the SEED-GROUP winner.\n\
+         --min-k N (REGISTERED AMENDMENT 2026-09-05, default 2): the\n\
+         REPLICATION FLOOR. A seed group with fewer than N distinct seeds is\n\
+         UNREPLICATED -- listed and ranked in its own section, never\n\
+         selected. Active by default, which also turns the seed-grouped\n\
+         section on (it is the basis of the pick) and makes the selection a\n\
+         RECIPE rather than a cell. Measured reason: replicating the board\n\
+         leaders moved them DOWN (LSTAR 0.8615 best cell -> 0.856414 at k=7)\n\
+         and best-of-k minus k-mean has a +0.0061 median over the 18\n\
+         combined-fair k>=2 groups, larger than the 0.0021 separating the top\n\
+         four (benchmarks/replication_wave_2026-09-05.md). --min-k 1 turns\n\
+         the floor off entirely, for reproducing a historical selection.\n\
+         --floor-basis all|mean (default all): how a GROUP's floor count is\n\
+         computed -- `all` = floors EVERY distinct-seed representative\n\
+         passes (a floor is a certification, and a mean is not one: two\n\
+         members at 8/8 and 6/8 average 7.0 even when they fail DIFFERENT\n\
+         floors, crediting a floor no member reliably clears); `mean` = the\n\
+         k-seed mean, the pre-amendment basis. The mean is reported either\n\
+         way. Neither flag can admit a candidate the pre-amendment rule\n\
+         refused -- both only remove.\n\n\
          default (no --profile): the §5 freeze bar (unchanged).\n\
          --bar sets/overrides a cross-bake numeric bar for: csiq, live\n\
          (§5 only; their §5 bars are \"≥ best 924-arm\" — externally chosen, so\n\
@@ -1196,6 +1215,11 @@ struct SelectRow {
     class: &'static str,
     n_pass: usize,
     n_floors: usize,
+    /// The IDs of the floors this cell PASSED. `n_pass` is its length; the
+    /// set itself is what a seed group intersects under
+    /// [`FloorBasis::AllReps`] — two members can both pass 7/8 while failing
+    /// DIFFERENT floors, and a count alone cannot see that.
+    floors_passed: std::collections::BTreeSet<&'static str>,
     composite: Option<f64>,
     m3a: M3aState,
     /// `balanced_composite + W_M3A·m3a`; None when either term is absent.
@@ -1439,6 +1463,89 @@ fn seed_identity(v: &serde_json::Value) -> Option<String> {
     }
 }
 
+// ── REGISTERED AMENDMENT to E.4 — the REPLICATION FLOOR (2026-09-05) ──────
+//
+// `--seed-group` made `k` VISIBLE. It did not make it BINDING: the rule's
+// PRIMARY key is the floor count, so a group with one draw and 8/8 floors
+// still outranks a replicated group at 7.22/8. That is exactly what happened
+// on the live board — the pick was `62df0d51a60e` = `W10L9_s4003_packed`,
+// **k = 1**, 8.00/8 floors, selection_composite 0.9841
+// (`benchmarks/replication_wave_2026-09-05.md` §4c.4).
+//
+// The same wave measured why a single draw must not be selectable:
+//
+//   * **Replicating the leaders moved them DOWN.** `LSTAR` read composite
+//     0.8615 as its best cell and **0.856414** as its k=7 mean; `LSTAR3`
+//     0.8608 → 0.856843. Ranks 1 and 2 became 7 and 6 (§4c.1).
+//   * **Best-of-k inflation is real and one-sided**: over the 18 combined-fair
+//     k≥2 groups, best-of-k minus k-mean has a **+0.0061 median** (§2), which
+//     is larger than the 0.0021 span separating the top four groups.
+//
+// So a k=1 cell's number is a draw from a distribution whose maximum is
+// systematically ~0.006 above its mean, competing against groups reported at
+// their means. Ranking them together is not a tie-break question, it is a
+// units error.
+//
+// THE AMENDMENT, in two parts:
+//
+//   A. **REPLICATION FLOOR.** A seed group is SELECTABLE only when
+//      `k >= min_k`, default **2** (`--min-k`). Groups below it are LISTED,
+//      ranked in their own section, and never selected. `--min-k 1` restores
+//      the pre-amendment behavior for reproducing a historical selection.
+//
+//   B. **FLOOR BASIS = every representative** ([`FloorBasis::AllReps`],
+//      default). A group is credited a floor only when EVERY distinct-seed
+//      representative passes it. `--floor-basis mean` restores the k-seed
+//      mean count.
+//
+//      Why the stricter reading: a floor is a CERTIFICATION ("this recipe
+//      clears CID22"), and a mean is not one. Two members at 8/8 and 6/8
+//      average 7.0 whether they fail the same floor twice or two different
+//      floors — in the second case the group is credited 7 floors that NO
+//      member reliably clears. The intersection cannot do that. It is also
+//      the reading consistent with how the balanced profile already treats an
+//      ABSENT axis (not-passed, never averaged away), and with part A: both
+//      say a number nobody replicated is not a certification. The mean stays
+//      REPORTED in its own column, because it is the right estimator for
+//      RANKING within a tier — it is just not a floor count.
+//
+// Neither part relaxes anything: both can only remove a candidate from
+// selection, never admit one the pre-amendment rule refused.
+
+/// How a seed group's floor count is computed. Selection uses this count as
+/// the PRIMARY key, exactly as the per-cell rule uses `n_pass`.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+enum FloorBasis {
+    /// **Default.** Floors that EVERY distinct-seed representative passes.
+    AllReps,
+    /// The k-seed mean floor count — the pre-amendment basis, kept so a
+    /// historical seed-grouped table can be reproduced.
+    Mean,
+}
+
+/// Why a group is not selectable, in the order the rule applies. `None` = it
+/// is selectable. Never blank, never conflated with a low score.
+fn group_unselectable_reason(
+    g: &SeedGroupRow<'_>,
+    basis: FloorBasis,
+    min_k: usize,
+) -> Option<String> {
+    if g.k_seeds < min_k {
+        return Some(if g.ungroupable {
+            format!("UNGROUPABLE (k={} < min-k {min_k})", g.k_seeds)
+        } else {
+            format!("UNREPLICATED (k={} < min-k {min_k})", g.k_seeds)
+        });
+    }
+    if g.m3a == M3aState::Unmeasured {
+        return Some("M3a UNMEASURED".into());
+    }
+    if g.floor_count(basis) <= 0.0 {
+        return Some("0 floors".into());
+    }
+    None
+}
+
 struct SeedGroupRow<'a> {
     key: String,
     /// EVERY cell in the group, including duplicate promotions of one
@@ -1453,6 +1560,18 @@ struct SeedGroupRow<'a> {
     /// member wrote down a seed, which is why it is not `reps.len()`.
     k_seeds: usize,
     mean_n_pass: f64,
+    /// The number of floors EVERY distinct-seed representative passes — the
+    /// intersection of their `floors_passed` sets. This is the
+    /// [`FloorBasis::AllReps`] primary key (registered amendment, part B).
+    /// `<= mean_n_pass` always, and STRICTLY less whenever two members fail
+    /// different floors.
+    n_pass_all: usize,
+    /// The floor IDs in that intersection, for the report.
+    floors_all: std::collections::BTreeSet<&'static str>,
+    /// Floors SOME representative passes and some does not — the exact
+    /// difference between the two bases, named so a reader can see which
+    /// certification the mean would have invented.
+    floors_split: Vec<&'static str>,
     mean_composite: Option<f64>,
     /// `Measured(mean_m3a)` only when EVERY representative is `Measured` (a
     /// group with even one `Unmeasured` member cannot be certified on this
@@ -1472,6 +1591,16 @@ struct SeedGroupRow<'a> {
     /// Cells that share a seed with another cell in this group (clause 3's
     /// duplicate promotions), excluded from `reps`.
     n_duplicate_cells: usize,
+}
+
+impl SeedGroupRow<'_> {
+    /// The group's floor count under `basis` — the PRIMARY ranking key.
+    fn floor_count(&self, basis: FloorBasis) -> f64 {
+        match basis {
+            FloorBasis::AllReps => self.n_pass_all as f64,
+            FloorBasis::Mean => self.mean_n_pass,
+        }
+    }
 }
 
 fn mean_opt(xs: impl Iterator<Item = Option<f64>>) -> Option<f64> {
@@ -1542,6 +1671,27 @@ fn group_by_seed<'a>(rows: &[&'a SelectRow]) -> Vec<SeedGroupRow<'a>> {
             }
             let n_duplicate_cells = members.len() - reps.len();
             let mean_n_pass = reps.iter().map(|m| m.n_pass as f64).sum::<f64>() / reps.len() as f64;
+            // Registered amendment part B: the floors EVERY representative
+            // passes. Folded over `reps` (one cell per distinct seed), never
+            // over `members` — a duplicate promotion of one training run is
+            // the same draw and must not vote twice.
+            let floors_all: std::collections::BTreeSet<&'static str> = reps
+                .iter()
+                .map(|m| m.floors_passed.clone())
+                .reduce(|a, b| a.intersection(&b).copied().collect())
+                .unwrap_or_default();
+            let n_pass_all = floors_all.len();
+            // Floors passed by SOME representative but not ALL — exactly the
+            // set a mean floor count would credit and the intersection will
+            // not. Named in the report so part B's effect is visible rather
+            // than a silently smaller number.
+            let floors_split: Vec<&'static str> = reps
+                .iter()
+                .flat_map(|m| m.floors_passed.iter().copied())
+                .collect::<std::collections::BTreeSet<_>>()
+                .difference(&floors_all)
+                .copied()
+                .collect();
             let mean_composite = mean_opt(reps.iter().map(|m| m.composite));
             let m3a_vals: Vec<f64> = reps
                 .iter()
@@ -1579,6 +1729,9 @@ fn group_by_seed<'a>(rows: &[&'a SelectRow]) -> Vec<SeedGroupRow<'a>> {
                 members,
                 reps,
                 mean_n_pass,
+                n_pass_all,
+                floors_all,
+                floors_split,
                 mean_composite,
                 m3a,
                 mean_selection_composite,
@@ -1609,10 +1762,10 @@ fn group_state(g: &SeedGroupRow<'_>) -> &'static str {
 
 /// Rank seed groups by the SAME primary/tie-break rule as [`rank_pool`]:
 /// mean floor count DESC, then mean `selection_composite` DESC.
-fn rank_seed_groups(groups: &mut [SeedGroupRow<'_>]) {
+fn rank_seed_groups(groups: &mut [SeedGroupRow<'_>], basis: FloorBasis) {
     groups.sort_by(|a, b| {
-        b.mean_n_pass
-            .partial_cmp(&a.mean_n_pass)
+        b.floor_count(basis)
+            .partial_cmp(&a.floor_count(basis))
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| {
                 b.mean_selection_composite
@@ -1624,7 +1777,7 @@ fn rank_seed_groups(groups: &mut [SeedGroupRow<'_>]) {
 
 const SELECT_TSV_COLS: &str = "rank\tpool\tname\tclass\tn_pass\tbal_composite\tm3a\tm3a_state\tselection_composite\tsdr25\tselectable\tpath";
 
-const SEED_GROUP_TSV_COLS: &str = "rank\tgroup\tk\tn_cells\tn_duplicate_cells\tmean_n_pass\tmean_bal_composite\tmean_m3a\tmean_selection_composite\tsel_composite_min\tsel_composite_max\tstate\tselectable";
+const SEED_GROUP_TSV_COLS: &str = "rank\tgroup\tk\tn_cells\tn_duplicate_cells\tn_pass_all\tmean_n_pass\tsplit_floors\tmean_bal_composite\tmean_m3a\tmean_selection_composite\tsel_composite_min\tsel_composite_max\tstate\tselectable\tunselectable_reason";
 
 const TSV_COLS: &str = "name\tclass\tverdict\tn_pass\tcid22\tkonjnd_abs\tnonphoto\tcsiq\tlive\thfnl_perref\tband_scheme\tband_lo\tband_lo_n\tband_hi\tband_hi_label\tband_hi_n\tband_hi_span\tmono\ttied\tdynrange\tm3a\tm3a_tier\tcorr_head_q20\tbal_composite\tproduct_composite\tsdr25\tkadid_signed\ttid_signed\tspline\trepro\tfails\tn_measured\tabsent\tannotations\tblocks\tdominated_by";
 
@@ -1842,7 +1995,20 @@ fn load_annotations_arg_inner(arg: Option<&str>) -> Vec<AnnEntry> {
 /// `--select` driver: read N fullevals, apply the registered rule, print the
 /// ranked table (+ optional TSV). Exit 0 if a selectable winner exists,
 /// 1 if none does (every candidate UNMEASURED or zero-floor), 2 on usage.
-fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool) -> i32 {
+fn run_select(
+    paths: &[PathBuf],
+    anns: &[AnnEntry],
+    tsv: bool,
+    seed_group: bool,
+    min_k: usize,
+    basis: FloorBasis,
+) -> i32 {
+    // The replication floor makes the SEED GROUP the unit of selection, so the
+    // grouped section is printed whenever it is active — hiding the basis of a
+    // selection would be worse than the defect it fixes. `--seed-group` still
+    // forces the section at `--min-k 1`.
+    let floor_active = min_k >= 2;
+    let show_groups = seed_group || floor_active;
     let mut rows: Vec<SelectRow> = Vec::new();
     for p in paths {
         let bytes = match std::fs::read(p) {
@@ -1871,6 +2037,7 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
             class: r.class,
             n_pass: r.floors.iter().filter(|x| x.pass).count(),
             n_floors: r.floors.len(),
+            floors_passed: r.floors.iter().filter(|x| x.pass).map(|x| x.id).collect(),
             composite: r.composite,
             m3a,
             selection_composite,
@@ -1974,15 +2141,32 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
         }
     }
 
-    match winner {
-        Some(w) => println!(
+    // The per-cell table answers "the best CELL". Under the replication floor
+    // that is NOT the selection (a cell has no k), so it is labelled as what
+    // it is; `**SELECTED:`** is emitted once, by whichever section is the
+    // authoritative one. At `--min-k 1` the historical strings are unchanged.
+    match (winner, floor_active) {
+        (Some(w), false) => println!(
             "\n**SELECTED: `{}`** — {}/{} floors, selection_composite {}.",
             w.name,
             w.n_pass,
             w.n_floors,
             num(w.selection_composite)
         ),
-        None => println!("\n**NO SELECTABLE CANDIDATE** (every row is UNMEASURED or 0-floor)."),
+        (Some(w), true) => println!(
+            "\n**BEST CELL: `{}`** — {}/{} floors, selection_composite {}. \
+             NOT the selection: a cell has no `k`, and the registered \
+             replication floor (--min-k {}) selects a RECIPE. See the \
+             seed-grouped section below.",
+            w.name,
+            w.n_pass,
+            w.n_floors,
+            num(w.selection_composite),
+            min_k
+        ),
+        (None, _) => {
+            println!("\n**NO SELECTABLE CANDIDATE** (every row is UNMEASURED or 0-floor).")
+        }
     }
 
     if tsv {
@@ -2020,68 +2204,132 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
         }
     }
 
-    // ── `--seed-group <REGEX>` (2026-09-04 owner-fix, §7.7): everything
-    // above is UNCHANGED — this is an ADDITIONAL section, printed only when
-    // the flag is passed, so the default invocation stays byte-identical.
+    // ── The seed-grouped section (2026-09-04 owner-fix §7.7, AMENDED
+    // 2026-09-05 with the replication floor). Everything above is UNCHANGED.
     // Aggregates `single` into seed groups (see `SeedGroupRow` /
-    // `group_by_seed` above the top of this rule) and re-ranks by the SAME
-    // primary/tie-break rule, over k-seed MEANS. `ens` is not seed-grouped
-    // (see the module note); its per-cell section above already covers it.
-    if seed_group {
+    // `group_by_seed`) and re-ranks by the same PRIMARY/TIE-BREAK rule over
+    // the group, under `basis`. `ens` is not seed-grouped (see the module
+    // note); its per-cell section above already covers it.
+    if show_groups {
         let mut groups = group_by_seed(&single);
-        rank_seed_groups(&mut groups);
+        rank_seed_groups(&mut groups, basis);
 
         let num = |x: Option<f64>| x.map_or("—".into(), |v| format!("{v:.4}"));
         let spread_str = |s: Option<(f64, f64)>| match s {
             Some((lo, hi)) => format!("{lo:.4}–{hi:.4}"),
             None => "—".into(),
         };
+        let basis_str = match basis {
+            FloorBasis::AllReps => "all-reps (floors EVERY seed passes)",
+            FloorBasis::Mean => "mean (k-seed mean floor count)",
+        };
 
         println!(
-            "\n## Seed-grouped ranking (`--seed-group`) — same PRIMARY/TIE-BREAK rule, over \
-             k-seed MEANS\n\nGroup key = `sha1(zentrain.repro.argv minus the seed and \
+            "\n## Seed-grouped ranking — same PRIMARY/TIE-BREAK rule, over the GROUP\n\n\
+             Group key = `sha1(zentrain.repro.argv minus the seed and \
              output-path flags)[:12]`, and duplicate promotions of ONE training run collapse by \
              seed identity, so **k = distinct seeds, never cells** — the board's rule \
              (`gauntlet.seed_group_key`, `benchmarks/fair_gauntlet_2026-09-04.md` §1.1), \
-             mirrored here so a `--select` group and a board group are the SAME handle. A \
-             grouped cell with `k=1` is UNREPLICATED; an ensemble or a cell with no embedded \
-             argv is UNGROUPABLE — both listed, never merged or dropped. Read a group's rank as \
-             \"the best RECIPE\"; the per-cell table above answers a different question, \"the \
-             best CELL\" (freeze_check §7.7).\n\n\
+             mirrored here so a `--select` group and a board group are the SAME handle. An \
+             ensemble or a cell with no embedded argv is UNGROUPABLE — listed, never merged \
+             or dropped. Read a group's rank as \"the best RECIPE\"; the per-cell table above \
+             answers a different question, \"the best CELL\" (freeze_check §7.7).\n\n\
+             **REPLICATION FLOOR (registered amendment, 2026-09-05): `--min-k {}`.** A group \
+             with fewer than {} distinct seeds is UNREPLICATED and is NOT selectable — it is \
+             listed and ranked in its own section below. Measured reason: replicating the \
+             board leaders moved them DOWN (`LSTAR` 0.8615 best cell → 0.856414 at k=7), and \
+             best-of-k minus k-mean has a **+0.0061 median** over the 18 combined-fair k≥2 \
+             groups — larger than the 0.0021 that separated the top four \
+             (`benchmarks/replication_wave_2026-09-05.md` §2, §4c.1). A one-draw number is a \
+             sample from a distribution whose maximum sits above its mean; ranking it against \
+             means is a units error, not a tie-break. `--min-k 1` restores the pre-amendment \
+             behavior.\n\n\
+             **FLOOR BASIS: {}.** A group is credited a floor only when EVERY distinct-seed \
+             representative passes it (`--floor-basis mean` restores the k-seed mean count). \
+             A floor is a certification, and a mean is not one: two members at 8/8 and 6/8 \
+             average 7.0 whether they fail the same floor twice or two different floors, and \
+             in the second case the group would be credited a floor no member reliably \
+             clears. The mean is still reported in its own column.\n\n\
              **The mean is NOT \"the group's true score.\"** Seeds differ in what they SAW, not \
              only in where they landed: the sampler stream is seeded, so two seeds walk the same \
              fixed row population in a different ORDER and a finite-epoch run emphasises a \
              different subset of pairs — objectively different coverage, not noise around one \
-             underlying number. The mean summarises k such draws; the spread column and the \
-             per-seed table below are the rest of the answer and must be read with it. Each \
-             bake's own `zentrain.sample_coverage` metadata is the per-seed record of what that \
-             run actually touched.\n"
+             underlying number. The spread column and the per-seed table below are the rest of \
+             the answer. Each bake's own `zentrain.sample_coverage` metadata is the per-seed \
+             record of what that run actually touched.\n",
+            min_k, min_k, basis_str
         );
-        println!(
-            "| rank | group | k | cells | mean_floors | mean_bal_comp | mean_m3a | \
-             mean_sel_comp | sel_comp spread (min\u{2013}max) | state | selectable |"
-        );
-        println!("|---:|---|---:|---:|---:|---:|---|---:|---|---|---|");
-        let mut group_winner: Option<&SeedGroupRow<'_>> = None;
-        for (i, g) in groups.iter().enumerate() {
-            let selectable = g.m3a != M3aState::Unmeasured && g.mean_n_pass > 0.0;
-            if selectable && group_winner.is_none() {
-                group_winner = Some(g);
-            }
+
+        // Partition, rank each pool separately, and print both. `min_k <= 1`
+        // disables the floor entirely (the historical behavior, in which `k`
+        // was not a selectability term at all) so a pre-amendment table is
+        // reproducible byte-for-byte with `--min-k 1 --floor-basis mean`.
+        let floor_ok = |g: &SeedGroupRow<'_>| min_k <= 1 || g.k_seeds >= min_k;
+        let (eligible, below): (Vec<&SeedGroupRow<'_>>, Vec<&SeedGroupRow<'_>>) =
+            groups.iter().partition(|g| floor_ok(g));
+
+        let header = || {
             println!(
-                "| {} | {} | {} | {} | {:.2} | {} | {} | {} | {} | {} | {} |",
+                "| rank | group | k | cells | floors_all | mean_floors | mean_bal_comp | \
+                 mean_m3a | mean_sel_comp | sel_comp spread (min\u{2013}max) | split floors | \
+                 state | selectable |"
+            );
+            println!("|---:|---|---:|---:|---:|---:|---:|---|---:|---|---|---|---|");
+        };
+        let row = |i: usize, g: &SeedGroupRow<'_>| {
+            let why = group_unselectable_reason(g, basis, min_k);
+            println!(
+                "| {} | {} | {} | {} | {} | {:.2} | {} | {} | {} | {} | {} | {} | {} |",
                 i + 1,
                 g.key,
                 g.k_seeds,
                 g.members.len(),
+                g.n_pass_all,
                 g.mean_n_pass,
                 num(g.mean_composite),
                 m3a_cell(g.m3a),
                 num(g.mean_selection_composite),
                 spread_str(g.selection_composite_spread),
+                if g.floors_split.is_empty() {
+                    "\u{2014}".to_string()
+                } else {
+                    g.floors_split.join(",")
+                },
                 group_state(g),
-                if selectable { "yes" } else { "NO" }
+                match &why {
+                    None => "yes".to_string(),
+                    Some(r) => format!("NO — {r}"),
+                }
             );
+        };
+
+        header();
+        let mut group_winner: Option<&SeedGroupRow<'_>> = None;
+        for (i, g) in eligible.iter().enumerate() {
+            if group_unselectable_reason(g, basis, min_k).is_none() && group_winner.is_none() {
+                group_winner = Some(g);
+            }
+            row(i, g);
+        }
+        if eligible.is_empty() {
+            println!("| — | *(no group meets the replication floor)* | | | | | | | | | | | |");
+        }
+
+        if !below.is_empty() {
+            println!(
+                "\n### UNREPLICATED — {} group(s) below the `--min-k {}` replication floor\n\n\
+                 Ranked among themselves by the same rule, and **never selected**. These are \
+                 listed rather than dropped: the number is real, it is simply ONE DRAW, and \
+                 the measured best-of-k premium (+0.0061 median composite) is not a \
+                 correction that can be applied to it. To make one selectable, train it again \
+                 with a different seed and re-harvest — not lower the floor.\n",
+                below.len(),
+                min_k
+            );
+            header();
+            for (i, g) in below.iter().enumerate() {
+                row(i, g);
+            }
         }
 
         println!(
@@ -2108,8 +2356,51 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
             }
         }
 
-        match group_winner {
-            Some(w) => println!(
+        match (group_winner, floor_active) {
+            // `**SELECTED:` is emitted exactly once per run, by whichever
+            // section is authoritative. Under the floor that is this one, and
+            // it names a RECIPE (a group), not a cell — picking the group's
+            // best member would re-introduce the very best-of-k selection the
+            // amendment exists to stop.
+            (Some(w), true) => {
+                println!(
+                    "\n**SELECTED: `{}`** — a RECIPE, k={}, {} floors passed by every seed \
+                     (mean {:.2}/{}), mean selection_composite {} (per-seed spread {}).",
+                    w.key,
+                    w.k_seeds,
+                    w.n_pass_all,
+                    w.mean_n_pass,
+                    w.reps.first().map(|m| m.n_floors).unwrap_or(0),
+                    num(w.mean_selection_composite),
+                    spread_str(w.selection_composite_spread)
+                );
+                println!(
+                    "\nFloors every seed clears: {}{}",
+                    if w.floors_all.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        w.floors_all.iter().copied().collect::<Vec<_>>().join(", ")
+                    },
+                    if w.floors_split.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            " · SPLIT (passed by some seeds, not all — NOT credited): {}",
+                            w.floors_split.join(", ")
+                        )
+                    }
+                );
+                println!(
+                    "\nIts {} member cell(s): {}",
+                    w.members.len(),
+                    w.members
+                        .iter()
+                        .map(|m| format!("`{}`", m.name))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            (Some(w), false) => println!(
                 "\n**SEED-GROUP SELECTED: `{}`** — k={}, mean {:.2}/{} floors, mean \
                  selection_composite {} (per-seed spread {}).",
                 w.key,
@@ -2119,7 +2410,12 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
                 num(w.mean_selection_composite),
                 spread_str(w.selection_composite_spread)
             ),
-            None => {
+            (None, true) => println!(
+                "\n**NO SELECTABLE RECIPE** — no seed group reaches k={min_k} with a measured \
+                 M3a and a nonzero floor count. Replicate a candidate (same recipe, new seed) \
+                 rather than lowering --min-k."
+            ),
+            (None, false) => {
                 println!("\n**NO SELECTABLE SEED-GROUP** (every group is UNMEASURED or 0-floor).")
             }
         }
@@ -2127,17 +2423,23 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
         if tsv {
             eprintln!("{SEED_GROUP_TSV_COLS}");
             for (i, g) in groups.iter().enumerate() {
-                let selectable = g.m3a != M3aState::Unmeasured && g.mean_n_pass > 0.0;
+                let why = group_unselectable_reason(g, basis, min_k);
                 let n = |x: Option<f64>| x.map_or("-".into(), |v| format!("{v:.6}"));
                 let (lo, hi) = g.selection_composite_spread.unwrap_or((f64::NAN, f64::NAN));
                 eprintln!(
-                    "{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{}\t{}\t{}",
                     i + 1,
                     g.key,
                     g.k_seeds,
                     g.members.len(),
                     g.n_duplicate_cells,
+                    g.n_pass_all,
                     g.mean_n_pass,
+                    if g.floors_split.is_empty() {
+                        "-".to_string()
+                    } else {
+                        g.floors_split.join(",")
+                    },
                     n(g.mean_composite),
                     match g.m3a {
                         M3aState::Measured(x) => format!("{x:.6}"),
@@ -2147,7 +2449,8 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
                     lo,
                     hi,
                     group_state(g),
-                    if selectable { "yes" } else { "no" },
+                    if why.is_none() { "yes" } else { "no" },
+                    why.unwrap_or_else(|| "-".into()),
                 );
             }
         }
@@ -2168,6 +2471,10 @@ fn main() {
     let mut select: Vec<PathBuf> = Vec::new();
     let mut in_select = false;
     let mut seed_group = false;
+    // Registered amendment (2026-09-05): the replication floor is ON by
+    // default. `--min-k 1` is the documented pre-amendment escape.
+    let mut min_k: usize = 2;
+    let mut basis = FloorBasis::AllReps;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         // After `--select`, bare paths accumulate until the next flag.
@@ -2187,6 +2494,29 @@ fn main() {
             // collects b.json as a path.
             "--seed-group" => {
                 seed_group = true;
+                in_select = was_in_select;
+            }
+            "--min-k" => {
+                min_k = match args.next().and_then(|v| v.parse::<usize>().ok()) {
+                    Some(k) => k,
+                    None => {
+                        eprintln!("freeze_check: --min-k needs a non-negative integer");
+                        std::process::exit(2);
+                    }
+                };
+                in_select = was_in_select;
+            }
+            "--floor-basis" => {
+                basis = match args.next().as_deref() {
+                    Some("all") => FloorBasis::AllReps,
+                    Some("mean") => FloorBasis::Mean,
+                    other => {
+                        eprintln!(
+                            "freeze_check: --floor-basis takes `all` or `mean` (got {other:?})"
+                        );
+                        std::process::exit(2);
+                    }
+                };
                 in_select = was_in_select;
             }
             "--profile" => profile = args.next(),
@@ -2247,10 +2577,14 @@ fn main() {
             std::process::exit(2);
         }
         let anns = load_annotations_arg(annotations_arg.as_deref());
-        std::process::exit(run_select(&select, &anns, tsv, seed_group));
+        std::process::exit(run_select(&select, &anns, tsv, seed_group, min_k, basis));
     }
     if seed_group {
         eprintln!("freeze_check: --seed-group only applies to --select");
+        std::process::exit(2);
+    }
+    if min_k != 2 || basis != FloorBasis::AllReps {
+        eprintln!("freeze_check: --min-k / --floor-basis only apply to --select");
         std::process::exit(2);
     }
     if tsv && profile.is_none() {
@@ -3118,6 +3452,7 @@ mod tests {
             class: r.class,
             n_pass: r.floors.iter().filter(|x| x.pass).count(),
             n_floors: r.floors.len(),
+            floors_passed: r.floors.iter().filter(|x| x.pass).map(|x| x.id).collect(),
             composite: r.composite,
             m3a,
             selection_composite,
@@ -3427,13 +3762,180 @@ mod tests {
              the per-cell ranking pick CONTROL and the grouped ranking pick ARM"
         );
 
-        rank_seed_groups(&mut groups);
+        rank_seed_groups(&mut groups, FloorBasis::Mean);
         assert_eq!(
             groups[0].key, ak,
             "seed-grouped ranking must select ARM (the group whose MEAN wins), \
              not CONTROL (whose lucky per-cell draw wins the per-cell ranking above) \
              — this is the exact defect §7.7 measured and this fix corrects"
         );
+    }
+
+    // ── REGISTERED AMENDMENT (2026-09-05) — the REPLICATION FLOOR ───────
+
+    /// **FAILING-FIRST for the live-board defect.** Reproduces the exact
+    /// shape `benchmarks/replication_wave_2026-09-05.md` §4c.4 measured: a
+    /// **k = 1** cell that passes every floor (`W10L9_s4003_packed`, 8.00/8,
+    /// selection_composite 0.9841) outranking a replicated group at 7.22/8.
+    ///
+    /// Under the PRE-amendment rule (`--min-k 1 --floor-basis mean`) the
+    /// single draw wins, which is what the board did. Under the amendment it
+    /// is UNREPLICATED, not selectable, and the replicated group wins. Both
+    /// halves are asserted, so a regression in either direction fails.
+    #[test]
+    fn replication_floor_excludes_the_single_draw() {
+        let solo_argv = ["zensim_mlp_train", "--epochs", "77"];
+        let rep_argv = ["zensim_mlp_train", "--epochs", "40"];
+        // The lone draw: 8/8 floors (passing_fixture passes all eight) and
+        // the best m3a, so it wins BOTH terms of the registered rule.
+        let solo = seed_fixture("SOLO_s4003", &solo_argv, 4003, 0.95);
+        // The replicated recipe: same 8/8 floors, lower m3a ⇒ strictly worse
+        // on the tie-break. It can only win by the single draw being
+        // ineligible, which is exactly the amendment.
+        let r1 = seed_fixture("REP_s4004", &rep_argv, 4004, 0.50);
+        let r2 = seed_fixture("REP_s4005", &rep_argv, 4005, 0.50);
+        let r3 = seed_fixture("REP_s4006", &rep_argv, 4006, 0.50);
+        let rows: Vec<SelectRow> = [&solo, &r1, &r2, &r3]
+            .iter()
+            .map(|v| select_row(v))
+            .collect();
+        let refs: Vec<&SelectRow> = rows.iter().collect();
+        let solo_key = seed_group_key(&solo).unwrap();
+        let rep_key = seed_group_key(&rep_argv_probe(&rep_argv)).unwrap();
+
+        // ── PRE-amendment: the single draw is selected. (This is the
+        // behavior `--min-k 1 --floor-basis mean` must keep reproducing.)
+        let mut groups = group_by_seed(&refs);
+        rank_seed_groups(&mut groups, FloorBasis::Mean);
+        assert_eq!(
+            groups[0].key, solo_key,
+            "pre-amendment ranks the lone draw first"
+        );
+        assert!(
+            group_unselectable_reason(&groups[0], FloorBasis::Mean, 1).is_none(),
+            "pre-amendment, k is not a selectability term — the lone draw IS selectable"
+        );
+
+        // ── AMENDED (default `--min-k 2`): the lone draw is listed, ranked
+        // in its own pool, and cannot be selected; the replicated group is.
+        let mut groups = group_by_seed(&refs);
+        rank_seed_groups(&mut groups, FloorBasis::AllReps);
+        let solo_g = groups.iter().find(|g| g.key == solo_key).unwrap();
+        let rep_g = groups.iter().find(|g| g.key == rep_key).unwrap();
+        assert_eq!(solo_g.k_seeds, 1);
+        assert_eq!(rep_g.k_seeds, 3);
+        let why = group_unselectable_reason(solo_g, FloorBasis::AllReps, 2)
+            .expect("the k=1 group must NOT be selectable under the replication floor");
+        assert!(why.contains("UNREPLICATED"), "reason must name it: {why}");
+        assert!(why.contains("k=1"), "reason must carry the k: {why}");
+        assert!(
+            group_unselectable_reason(rep_g, FloorBasis::AllReps, 2).is_none(),
+            "the k=3 group clears the floor and is selectable"
+        );
+        // It is EXCLUDED, never deleted: it is still a group, still listed,
+        // still carrying its own numbers.
+        assert_eq!(solo_g.members.len(), 1);
+        assert!(solo_g.mean_n_pass > rep_g.mean_n_pass - 1e-12);
+        // And the winner among the eligible pool is the replicated recipe.
+        let winner = groups
+            .iter()
+            .find(|g| group_unselectable_reason(g, FloorBasis::AllReps, 2).is_none())
+            .expect("some group clears the floor");
+        assert_eq!(
+            winner.key, rep_key,
+            "the amended rule selects the REPLICATED recipe, not the lucky single draw"
+        );
+    }
+
+    /// Helper: a throwaway fixture carrying only the argv, so a test can ask
+    /// for a recipe's group key without owning one of its rows.
+    fn rep_argv_probe(argv: &[&str]) -> serde_json::Value {
+        seed_fixture("PROBE", argv, 1, 0.0)
+    }
+
+    /// **Amendment part B.** Two seeds of one recipe each pass 7 of 8
+    /// floors, but they fail DIFFERENT floors. The k-seed MEAN credits the
+    /// group 7.0 floors — including two that no member reliably clears. The
+    /// intersection credits 6, and names the split.
+    ///
+    /// This is a certification question, not a rounding one: "this recipe
+    /// clears CID22" must not be true of a group in which one seed does not.
+    #[test]
+    fn all_reps_basis_refuses_a_floor_no_member_reliably_clears() {
+        let argv = ["zensim_mlp_train", "--epochs", "40"];
+        // Seed A fails CID22 only; seed B fails KonJND only.
+        let mut a = seed_fixture("SPLIT_s1", &argv, 1, 0.90);
+        a["rank"]["cid22"]["srocc"] = json!(0.5);
+        let mut b = seed_fixture("SPLIT_s2", &argv, 2, 0.90);
+        b["rank"]["konjnd"]["srocc"] = json!(-0.01);
+        let rows: Vec<SelectRow> = [&a, &b].iter().map(|v| select_row(v)).collect();
+        let refs: Vec<&SelectRow> = rows.iter().collect();
+        assert_eq!(rows[0].n_pass, 7, "seed A passes 7 of 8");
+        assert_eq!(rows[1].n_pass, 7, "seed B passes 7 of 8");
+        assert_ne!(
+            rows[0].floors_passed, rows[1].floors_passed,
+            "the two seeds must fail DIFFERENT floors, else the test is vacuous"
+        );
+        let groups = group_by_seed(&refs);
+        let g = &groups[0];
+        assert!(
+            (g.mean_n_pass - 7.0).abs() < 1e-12,
+            "the MEAN basis credits 7.0: {}",
+            g.mean_n_pass
+        );
+        assert_eq!(
+            g.n_pass_all, 6,
+            "the intersection credits only the 6 floors BOTH seeds pass"
+        );
+        assert!((g.floor_count(FloorBasis::Mean) - 7.0).abs() < 1e-12);
+        assert!((g.floor_count(FloorBasis::AllReps) - 6.0).abs() < 1e-12);
+        let split: std::collections::BTreeSet<&str> = g.floors_split.iter().copied().collect();
+        assert_eq!(
+            split,
+            ["cid22", "konjnd"].into_iter().collect(),
+            "the split floors must be NAMED, not silently subtracted: {:?}",
+            g.floors_split
+        );
+        assert!(
+            !g.floors_all.contains("cid22") && !g.floors_all.contains("konjnd"),
+            "a split floor is not part of what every seed clears"
+        );
+    }
+
+    /// The amendment can only REMOVE a candidate from selection, never admit
+    /// one the pre-amendment rule refused. Asserted directly, because a
+    /// "tightening" that quietly widens anything is not a tightening.
+    #[test]
+    fn amendment_only_ever_removes_candidates() {
+        let argv_a = ["zensim_mlp_train", "--epochs", "40"];
+        let argv_b = ["zensim_mlp_train", "--epochs", "41"];
+        let rows_v = [
+            seed_fixture("A_s1", &argv_a, 1, 0.90),
+            seed_fixture("A_s2", &argv_a, 2, 0.50),
+            seed_fixture("B_s1", &argv_b, 1, 0.95),
+        ];
+        let rows: Vec<SelectRow> = rows_v.iter().map(|v| select_row(v)).collect();
+        let refs: Vec<&SelectRow> = rows.iter().collect();
+        let groups = group_by_seed(&refs);
+        for g in &groups {
+            let pre = group_unselectable_reason(g, FloorBasis::Mean, 1).is_none();
+            for basis in [FloorBasis::Mean, FloorBasis::AllReps] {
+                for min_k in [1usize, 2, 3] {
+                    let post = group_unselectable_reason(g, basis, min_k).is_none();
+                    assert!(
+                        pre || !post,
+                        "group {} became selectable under basis {basis:?} / min-k {min_k} \
+                         when the pre-amendment rule refused it",
+                        g.key
+                    );
+                }
+            }
+            // n_pass_all <= mean_n_pass, always.
+            assert!(
+                g.floor_count(FloorBasis::AllReps) <= g.floor_count(FloorBasis::Mean) + 1e-12,
+                "the strict basis can never credit MORE floors than the mean"
+            );
+        }
     }
 
     /// **Clause 3, the board's measured finding**: two cells with the same
@@ -3502,7 +4004,11 @@ mod tests {
         let groups = group_by_seed(&refs);
         assert_eq!(groups.len(), 1, "one recipe, one group");
         let g = &groups[0];
-        assert_eq!(g.members.len(), 2, "both cells are still LISTED, never dropped");
+        assert_eq!(
+            g.members.len(),
+            2,
+            "both cells are still LISTED, never dropped"
+        );
         assert_eq!(g.k_seeds, 0, "zero RECORDED seeds is k=0, not k=2");
         assert!(g.unreplicated, "k<2 is UNREPLICATED");
         assert_eq!(group_state(g), "UNREPLICATED");
@@ -3608,15 +4114,29 @@ mod tests {
         // argv[0] is a BUILD LOCATION, not a recipe parameter: the same recipe
         // replayed from a sibling jj workspace must land in the same group.
         let mut w = run("4031", "/mnt/v/bakes/LSTAR2_s4031_ckpts");
-        w["repro"]["argv"] = json!(["/home/lilith/work/zen/zensim--replicate/target/release/zensim_mlp_train",
-                                    "--epochs", "120", "--seed", "4031",
-                                    "--out", "/mnt/v/bakes/LSTAR2_s4031.bin",
-                                    "--dump-checkpoints-dir", "/mnt/v/bakes/LSTAR2_s4031_ckpts"]);
+        w["repro"]["argv"] = json!([
+            "/home/lilith/work/zen/zensim--replicate/target/release/zensim_mlp_train",
+            "--epochs",
+            "120",
+            "--seed",
+            "4031",
+            "--out",
+            "/mnt/v/bakes/LSTAR2_s4031.bin",
+            "--dump-checkpoints-dir",
+            "/mnt/v/bakes/LSTAR2_s4031_ckpts"
+        ]);
         let mut o = run("4031", "/mnt/v/bakes/LSTAR2_s4031_ckpts");
-        o["repro"]["argv"] = json!(["/home/lilith/work/zen/zensim/target/release/zensim_mlp_train",
-                                    "--epochs", "120", "--seed", "4031",
-                                    "--out", "/mnt/v/bakes/LSTAR2_s4031.bin",
-                                    "--dump-checkpoints-dir", "/mnt/v/bakes/LSTAR2_s4031_ckpts"]);
+        o["repro"]["argv"] = json!([
+            "/home/lilith/work/zen/zensim/target/release/zensim_mlp_train",
+            "--epochs",
+            "120",
+            "--seed",
+            "4031",
+            "--out",
+            "/mnt/v/bakes/LSTAR2_s4031.bin",
+            "--dump-checkpoints-dir",
+            "/mnt/v/bakes/LSTAR2_s4031_ckpts"
+        ]);
         assert_eq!(
             seed_group_key(&w),
             seed_group_key(&o),
@@ -3624,10 +4144,17 @@ mod tests {
         );
         // ...but the basename still separates two different TOOLS.
         let mut t = o.clone();
-        t["repro"]["argv"] = json!(["/home/lilith/work/zen/zensim/target/release/bake_dial_refit",
-                                    "--epochs", "120", "--seed", "4031",
-                                    "--out", "/mnt/v/bakes/LSTAR2_s4031.bin",
-                                    "--dump-checkpoints-dir", "/mnt/v/bakes/LSTAR2_s4031_ckpts"]);
+        t["repro"]["argv"] = json!([
+            "/home/lilith/work/zen/zensim/target/release/bake_dial_refit",
+            "--epochs",
+            "120",
+            "--seed",
+            "4031",
+            "--out",
+            "/mnt/v/bakes/LSTAR2_s4031.bin",
+            "--dump-checkpoints-dir",
+            "/mnt/v/bakes/LSTAR2_s4031_ckpts"
+        ]);
         assert_ne!(
             seed_group_key(&o),
             seed_group_key(&t),
@@ -3637,10 +4164,17 @@ mod tests {
         // NEGATIVE CONTROL: a genuine hyperparameter difference must still
         // separate two recipes, or the fix would merge unrelated runs.
         let mut c = run("4033", "/mnt/v/bakes/LSTAR2_s4033_ckpts");
-        c["repro"]["argv"] = json!(["zensim_mlp_train", "--epochs", "40",
-                                    "--seed", "4033",
-                                    "--out", "/mnt/v/bakes/LSTAR2_s4033.bin",
-                                    "--dump-checkpoints-dir", "/mnt/v/bakes/LSTAR2_s4033_ckpts"]);
+        c["repro"]["argv"] = json!([
+            "zensim_mlp_train",
+            "--epochs",
+            "40",
+            "--seed",
+            "4033",
+            "--out",
+            "/mnt/v/bakes/LSTAR2_s4033.bin",
+            "--dump-checkpoints-dir",
+            "/mnt/v/bakes/LSTAR2_s4033_ckpts"
+        ]);
         assert_ne!(
             seed_group_key(&a),
             seed_group_key(&c),

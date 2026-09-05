@@ -25,7 +25,9 @@ The compute was fine. The orchestration around it was the whole loss.
        + ENDGAME         --then 'scripts/endgame_<wave>.sh'
                      ... then Monitor exactly ONE file: <heartbeat>.endgame.done
 6. SELECT            freeze_check --select <every fulleval> [--tsv]
-                     (the endgame script runs this — see below)
+                     (the endgame script runs this — see below. The
+                      REPLICATION FLOOR is on by default: k>=2 or not
+                      selectable, so plan k>=2 seeds per arm.)
 7. REVIEW FOREGROUND read the endgame's tables + doc DRAFT; judge; finalize
 8. PUSH + VERIFY     jj bookmark set main -r @ && jj git push --bookmark main
                      scripts/verify_push.sh <sha>   # paste its OK line VERBATIM
@@ -176,6 +178,37 @@ ranking script):
   `NOT COMPUTABLE` (ensemble — the instrument loads one ZNPR) ranks in a
   separate section and is never penalized; `UNMEASURED` is listed but **not
   selectable**, and the tool prints the command to fix it.
+
+### The REPLICATION FLOOR — `--min-k 2`, on by default (registered 2026-09-05)
+
+**Plan k ≥ 2 seeds per arm, or the arm cannot be selected.** A seed group with
+fewer than `--min-k` (default **2**) distinct seeds is UNREPLICATED: listed and
+ranked in its own section, with the reason printed, and **never selected**.
+
+- **Why (measured, `benchmarks/replication_wave_2026-09-05.md`).** Replicating
+  the board leaders moved them DOWN — `LSTAR` 0.8615 as its best cell,
+  **0.856414** as its k=7 mean; ranks 1 → 7. Best-of-k minus k-mean has a
+  **+0.0061 median** over the 18 combined-fair k ≥ 2 groups, larger than the
+  0.0021 that separated the top four. A one-draw number competes at its
+  maximum against groups reported at their means.
+- **The floor makes the SEED GROUP the unit of selection.** `--select` prints
+  the grouped section whenever the floor is active (the basis of a pick is
+  never hidden) and `**SELECTED:**` names a **RECIPE**, not a cell — naming the
+  group's best member would be the very best-of-k pick the floor removes. The
+  per-cell table is unchanged and now says `**BEST CELL:**`.
+- **Floor basis `all` (default): floors EVERY seed passes.** A group is
+  credited a floor only when every distinct-seed representative clears it, and
+  the report names the `split floors` (passed by some seeds, not all). A floor
+  is a certification and a mean is not one — two members at 8/8 and 6/8 average
+  7.0 even when they fail *different* floors. `--floor-basis mean` restores the
+  k-seed mean count; the mean is reported either way.
+- **Reproducing a historical selection:** `--min-k 1 --floor-basis mean` is the
+  pre-amendment rule exactly (verified: same 34 rows, same order, same values,
+  same winner on the 113 combined-fair cells).
+- **The remedy for an UNREPLICATED front-runner is another seed, not a lower
+  floor.** Re-run the same recipe with a new seed and re-harvest.
+
+Registration + the measured before/after: campaign appendix **E.4 AMENDMENT**.
 
 M3a comes free with harvest (`run_full_eval.sh` computes it), so by the time
 step 5 says COMPLETE the selection data already exists. If it does not,
