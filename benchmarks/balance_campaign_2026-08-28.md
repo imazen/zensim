@@ -7949,3 +7949,33 @@ Record: [`dial_addressability_gate_2026-09-04.md`](dial_addressability_gate_2026
 registry entry `gaddr-tail-floor-representability-2026-09-05`, superseding `gaddr-negtail-bars-retired-2026-09-05`.
 Lesson: **"can the dial still tell the codec's lowest settings apart" is a better floor question than "how far down
 does it go"** — the first is calibration-free and has a reference answer; the second was one scorer's accident.
+
+## ROUND 93 — 2026-09-05: the jxl A7r failures are per-ladder classified — the lever is in the fit, not the spline
+
+Follow-up to ROUND 92: `A7r` fails on `jxl` for every λ-sweep arm and `Dpeaks`; this lane
+classified WHICH ladders and WHY, for the best-rank arm (`lam1em3`) and `Dpeaks`/`lam2em3`.
+**Both fail on the identical 4 of jxl's 33 ladders** (`2b79a18d1b7537e0_818x1022`,
+`96a0024c685ead3f_1024sq`, `b2e6e2b5969eaf25_1022x818`, `f65a24b7e176eb47_1022x818`), **all 8
+(4 ladders × 2 arms) are INVERSIONs — zero TIEs, zero CLAMPs** (`n_fail_clamp=0` on both,
+cross-checked against `bake_verdict`'s own `codec_floor` JSON block, which the classification
+script's aggregate output reproduces exactly). **The RAW (pre-spline) model output is already
+inverted at the identical step pair in all 8 cases** — e.g. `lam1em3` on `2b79a18d1b7537e0` reads
+raw `0.4375 → 0.4301` (q0→q8, decreasing) and dial `6.3552 → 5.0949` (same decrease) — so **the
+lever is in the fit (weights), not the spline**: a monotone calibration spline cannot un-invert
+what the linear model already inverted, and isn't the cause of it either. Per the brief's own
+branching rule, the `--anchor-weight` spline-only lever (ROUND 90) was correctly SKIPPED rather
+than tried — and ROUND 90's own control already proved it structurally can't reach this class of
+bug (*"the CD lasso fit … is computed from `--gram` alone … the lever cannot touch
+`w`/`bias`/`mu`/`sd` by construction"*), since a monotone spline preserves rank order by
+definition and the fault is a rank inversion. Shipped D (`ADD156`, `f0..155` only, no peaks block)
+passes all 4 ladders cleanly; `lam1em3` (38 active coeffs) and `Dpeaks` (26 active coeffs) are
+different lasso fits at different λ on the same `0..227` slice yet invert on the *same* 4
+references — pointing at the peaks block (`f162-164, f211-212, f224`), not the specific λ, as the
+structural cause. ssim2's own truth is monotone on all 16 cells in question; only the candidates'
+raw scores dip. Two fixes REGISTERED, neither run: (a) an isotonic/monotone shape term inside
+`fit-lasso`'s CD solver (today's solver reads only frozen Gram moments, no per-row ladder
+identity, so this needs a new solver path); (b) row-level up-weighting of the jxl-floor ladder
+rows in the training GRAM itself (not the existing anchor-weight, which only feeds the spline) —
+a gram-rebuild data-pipeline change, unbuilt. Nothing installed; `ZensimProfile::D`/
+`zensim/weights/` untouched. Full tables + reproduction:
+[`d_peaks_jxl_floor_2026-09-05.md`](d_peaks_jxl_floor_2026-09-05.md).
