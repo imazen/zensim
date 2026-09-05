@@ -126,23 +126,31 @@ the reason a fixed step could never have expressed its floor.
 
 ## 5. What the mentor's bars become
 
-`peer_ssim2`'s own floor representability, previewed on the same three legs
-(the registered values are derived through the owner — §8):
+`peer_ssim2`'s own floor representability. **These were first previewed on the three
+legs that had finished, and the preview was WRONG on one row — the corrected,
+registered values are §9's.** Kept, corrected, because the reason is instructive:
 
-| codec | bar, NEW grid | bar, old grid |
-|---|--:|--:|
-| `avif-svt` | 0.9744 (38/39) | — (family did not exist) |
-| `jpeg` | **0.5385 (21/39)** | **0.0000 (vacuous)** |
-| `webp` | 1.0000 (39/39) | 1.0000 |
+| codec | preview (3 legs) | **REGISTERED (all 5 legs, via the owner)** | old grid |
+|---|--:|--:|--:|
+| `avif-svt` | 0.9744 | **1.0000** | — (family did not exist) |
+| `jpeg` | 0.5385 | **0.5385** | **0.0000 (vacuous)** |
+| `webp` | 1.0000 | **1.0000** | 1.0000 |
+| `avif-rav1e` | — | **0.5385** | — |
+| `jxl` | — | **0.9231** | 0.9697 |
+
+`avif-svt`'s preview lost one ladder to the CLAMP half of the rule — with only three
+legs present, two ladders shared the instrument-wide minimum. Adding the remaining
+legs moved that minimum to a sole holder and the clamp stopped firing. **The rule is
+a property of the WHOLE instrument, not of a codec in isolation, which is exactly why
+bars must be derived on the final instrument through the owner rather than previewed
+beside it.**
 
 **jpeg's bar goes from a vacuous `0.0000` — which anything passes — to a real
 `0.5385`.** That is the user's rule becoming enforceable: jpeg's lowest configurable
-settings are now IN the instrument, and a candidate has to resolve them. The bar is
-not 1.0 because ssim2 itself does not strictly increase across q 11/12/13 on 18 of
-39 images; that is real encoder behaviour at a near-flat part of the curve, and
-pinning to the mentor is exactly what keeps it honest.
-
----
+settings are now IN the instrument, and a candidate has to resolve them. It is not
+1.0 because ssim2 itself does not strictly increase across q 11/12/13 on 18 of 39
+images; that is real encoder behaviour at a near-flat part of the curve, and pinning
+to the mentor is what keeps it honest.
 
 ## 6. Design facts verified against source, not assumed
 
@@ -338,6 +346,34 @@ spline preserves rank by construction, so **no re-anchoring — on any anchor, w
 any knot placement — can turn D's jpeg floor into a pass.** ARM 5's spline-only
 levers can move A1 and A3 (range properties) but provably not A7r.
 
+### 9.3 The calibration gap at each codec's floor — and a correction
+
+Shipped D's dial minus the mentor's own value, over the bottom three DISTINCT
+settings of every ladder (n = cells, not ladders):
+
+| codec | n | mean | median | min | max |
+|---|--:|--:|--:|--:|--:|
+| `jxl` | 78 | **−8.55** | −8.79 | **−25.02** | +9.40 |
+| `avif-svt` | 117 | −6.16 | −5.86 | −30.64 | +7.13 |
+| `webp` | 117 | −4.54 | −3.46 | −22.64 | +7.12 |
+| `avif-rav1e` | 117 | −3.14 | −2.20 | −21.00 | +6.87 |
+| `jpeg` | 117 | **+2.96** | +3.65 | −16.47 | +24.34 |
+
+Whole instrument, all 9,593 cells: mean **−1.78**, median −0.83, p5 −11.92,
+p95 +5.12.
+
+**CORRECTION to the framing this program started from.** The brief described the
+defect as *"the D dial sits 20–30 points below ssim2 at the JXL floor"*. On this
+instrument that is an **overstatement**: the mean gap at the jxl floor is **−8.55**
+and the median −8.79, with only the worst individual cell reaching −25.02. The
+direction is right and the gap is real — jxl is the worst-calibrated floor of the
+five — but the magnitude is roughly a third of the stated one. Note also that
+**jpeg's floor gap has the opposite sign** (+2.96): D reads *above* the mentor
+there, which is a different failure from the one the framing assumed and is
+consistent with §9's finding that D's jpeg problem is ORDER, not level.
+
+---
+
 ### 9.4 The whole λ family, on the new instrument — an exhaustive negative
 
 All ten `Dsweep_lam*` arms re-graded here, sorted by codecs meeting their bar:
@@ -418,34 +454,6 @@ fit that constrains adjacent-step ordering at the floor — the same lever
 `d_peaks_jxl_floor` §7(a) registered for jxl, now with jpeg and `avif-rav1e`
 evidence behind it and an instrument that can actually score it.
 
-
-### 9.3 The calibration gap at each codec's floor — and a correction
-
-Shipped D's dial minus the mentor's own value, over the bottom three DISTINCT
-settings of every ladder (n = cells, not ladders):
-
-| codec | n | mean | median | min | max |
-|---|--:|--:|--:|--:|--:|
-| `jxl` | 78 | **−8.55** | −8.79 | **−25.02** | +9.40 |
-| `avif-svt` | 117 | −6.16 | −5.86 | −30.64 | +7.13 |
-| `webp` | 117 | −4.54 | −3.46 | −22.64 | +7.12 |
-| `avif-rav1e` | 117 | −3.14 | −2.20 | −21.00 | +6.87 |
-| `jpeg` | 117 | **+2.96** | +3.65 | −16.47 | +24.34 |
-
-Whole instrument, all 9,593 cells: mean **−1.78**, median −0.83, p5 −11.92,
-p95 +5.12.
-
-**CORRECTION to the framing this program started from.** The brief described the
-defect as *"the D dial sits 20–30 points below ssim2 at the JXL floor"*. On this
-instrument that is an **overstatement**: the mean gap at the jxl floor is **−8.55**
-and the median −8.79, with only the worst individual cell reaching −25.02. The
-direction is right and the gap is real — jxl is the worst-calibrated floor of the
-five — but the magnitude is roughly a third of the stated one. Note also that
-**jpeg's floor gap has the opposite sign** (+2.96): D reads *above* the mentor
-there, which is a different failure from the one the framing assumed and is
-consistent with §9's finding that D's jpeg problem is ORDER, not level.
-
----
 
 ## 11. Registered, NOT run — with the measured reason in each case
 
