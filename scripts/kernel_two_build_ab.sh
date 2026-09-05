@@ -51,13 +51,22 @@ mkdir -p "$(dirname "$OUT")"
 
 # Wait for an idle window. Uses `pgrep -x` (exact executable name) — NEVER
 # `pgrep -f`, which matches this script's own command line (CLAUDE.md).
+#
+# AND `comm` IS TRUNCATED TO 15 CHARACTERS, so `pgrep -x zensim_mlp_train`
+# (16) can never match and the gate silently never fires. This driver shipped
+# with exactly that bug for one run and produced a table measured beside a live
+# trainer (record §L2.4). The names are therefore truncated HERE, in one place,
+# rather than being written pre-truncated at the call site the way
+# `kernel_fastclass_sweep.sh` does it — so a caller can write the real name and
+# still be gated. CLAUDE.md warns about this; knowing the warning was not
+# enough, having the code do it is.
 wait_idle() {
   local waited=0
   while :; do
     local l busy=0
     l=$(awk '{print $1}' /proc/loadavg)
     for p in zensim_mlp_train v2_ab_extract extract_features_372col cargo rustc bake_verdict; do
-      pgrep -x "$p" >/dev/null 2>&1 && busy=1
+      pgrep -x "${p:0:15}" >/dev/null 2>&1 && busy=1
     done
     if [ "$busy" = 0 ] && awk -v a="$l" -v b="$MAXLOAD" 'BEGIN{exit !(a<b)}'; then return 0; fi
     [ "$waited" -ge "$MAXWAIT" ] && { echo "# GAVE UP waiting: load=$l busy=$busy after ${waited}s" >&2; return 1; }

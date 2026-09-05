@@ -606,6 +606,25 @@ conflict and neither is "the" number: −9.58 % is instructions at `v3`,
 Raw rows (every start, including the `SKIPPED_BOX_BUSY` gate decisions):
 `/mnt/v/output/zensim/kernel-2026-09-05/lane2/ab_downscale_2026-09-05.tsv`.
 
+### ⚠ The first run of this table was UNGATED, and the bug is worth keeping
+
+The table above is the **re-run**. The first run produced numbers that looked
+the same but were measured **beside a live `zensim_mlp_train`**, because this
+driver's own load gate never fired: it called
+`pgrep -x zensim_mlp_train`, and **`/proc/<pid>/comm` is truncated to 15
+characters**, so the 16-character name can never match. `pgrep -x` was chosen
+*specifically* to avoid the `pgrep -f` self-match footgun CLAUDE.md warns
+about — and walked straight into the other half of the same warning, which that
+file also states (*"pgrep name-match truncates comm to 15 chars"*). The
+already-committed `kernel_fastclass_sweep.sh` had it right by writing the names
+pre-truncated (`zensim_mlp_trai`); this driver now truncates **in the gate
+itself**, so a caller may write the real name and still be gated. Knowing the
+warning was not enough; the code doing it is.
+
+The ungated rows are kept as
+`ab_downscale_CONTAMINATED_ungated_2026-09-05.tsv` — not deleted, and not
+quoted anywhere as a result.
+
 ## L2.5 Registered, measured, NOT implemented
 
 | # | finding | measured | why not done |
