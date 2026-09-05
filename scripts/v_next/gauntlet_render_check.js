@@ -6,6 +6,16 @@
  *
  * Usage: node gauntlet_render_check.js <summer_gauntlet.html> [--dump-row <bake-name>]
  *                                      [--dump-failures <bake-name>]
+ *                                      [--hash <fragment>] [--expect-visible a,b]
+ *                                      [--expect-missing id1,id2] [--expect-no-banner]
+ *
+ * `--hash` sets location.hash in the SHIM before the app script runs, which is how the
+ * URL compare-set cases (`#compare=<id1>,<id2>,...`) are gated. The location/history
+ * surface lives in the shim, never as a special case in the app code — the page runs the
+ * same code here as in a browser. `--expect-visible` asserts the attached scoreboard
+ * holds exactly those rows in that order; `--expect-missing` asserts the warning banner
+ * names each id verbatim and offers nearest-name suggestions; `--expect-no-banner`
+ * asserts the banner host stayed empty.
  *
  * `--dump-row` prints the RENDERED scoreboard row (header -> displayed cell text) for one
  * bake after the assertions pass. It exists so a reviewer can spot-check what the page
@@ -31,6 +41,21 @@ const vm = require('vm');
 
 const htmlPath = process.argv[2];
 if (!htmlPath) { console.error('usage: gauntlet_render_check.js <summer_gauntlet.html>'); process.exit(2); }
+const argOf = (flag) => {
+  const i = process.argv.indexOf(flag);
+  return i > 0 && i + 1 < process.argv.length ? process.argv[i + 1] : null;
+};
+const listOf = (flag) => {
+  const v = argOf(flag);
+  return v == null ? null : v.split(',').map(s => s.trim()).filter(Boolean);
+};
+const HASH = argOf('--hash');
+const EXPECT_VIS = listOf('--expect-visible');
+const EXPECT_MISSING = listOf('--expect-missing');
+const EXPECT_NO_BANNER = process.argv.includes('--expect-no-banner');
+// CMPMODE / CMPSET are read from the APP's own resolved state after the render (see
+// below) — never re-parsed here. A second copy of the `#compare=` matching rule in the
+// harness would be exactly the duplicate-owner defect the gate exists to catch.
 const html = fs.readFileSync(htmlPath, 'utf8');
 // The page carries multiple <script> blocks since the ECharts migration (vendored
 // bundle first, app script second). The harness executes only the APP block — the
@@ -130,10 +155,37 @@ const documentShim = {
 // The static skeleton the HTML provides before the script runs.
 const root = mkEl('div'); root.setAttribute('class', 'viz-root');
 rootEl = root;
+const cmpBannerEl = mkEl('div'); cmpBannerEl.setAttribute('id', 'cmpbanner'); cmpBannerEl.setAttribute('class', 'cmpbanner');
 const barEl = mkEl('div'); barEl.setAttribute('id', 'bar'); barEl.setAttribute('class', 'bar');
 const panelsEl = mkEl('div'); panelsEl.setAttribute('id', 'panels');
 const ttEl = mkEl('div'); ttEl.setAttribute('id', 'tt'); ttEl.setAttribute('class', 'tt');
-root.append(barEl, panelsEl, ttEl);
+root.append(cmpBannerEl, barEl, panelsEl, ttEl);
+
+// ---- location / history shim (2026-09-05, URL compare sets) --------------------------
+// The page reads `location.hash` and writes it back through `history.replaceState`. Both
+// live HERE so the app code stays browser-shaped; replaceState mirrors the browser by
+// updating location (and, like the browser, does NOT fire hashchange). `navigator` is
+// deliberately ABSENT so the copy-link control exercises its no-clipboard fallback.
+const locationShim = {
+  origin: 'http://localhost:3300',
+  pathname: '/zensim/reports/summer_gauntlet.html',
+  search: '',
+  hash: HASH ? (HASH.charAt(0) === '#' ? HASH : '#' + HASH) : '',
+  get href() { return this.origin + this.pathname + this.search + this.hash; },
+};
+const historyShim = {
+  replaceState(_s, _t, url) {
+    const u = String(url == null ? '' : url);
+    const i = u.indexOf('#');
+    locationShim.hash = i >= 0 ? u.slice(i) : '';
+    const head = i >= 0 ? u.slice(0, i) : u;
+    const q = head.indexOf('?');
+    locationShim.pathname = q >= 0 ? head.slice(0, q) : head;
+    locationShim.search = q >= 0 ? head.slice(q) : '';
+  },
+  pushState(s, t, u) { historyShim.replaceState(s, t, u); },
+};
+const windowListeners = {};
 
 const matchMediaShim = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 // NOTE: only the DOM surface is injected — the vm context is a fresh realm with its own
@@ -146,6 +198,8 @@ const sandbox = {
   innerHeight: 900,
   setTimeout, clearTimeout,        // zrender scheduling (SSR flushes synchronously)
   console,
+  location: locationShim,
+  history: historyShim,
 };
 
 let failed = false;
@@ -167,7 +221,13 @@ try {
   console.error(err && err.stack || err);
   process.exit(1);
 }
-sandbox.window = { matchMedia: matchMediaShim };
+sandbox.window = {
+  matchMedia: matchMediaShim,
+  location: locationShim,
+  history: historyShim,
+  addEventListener(t, fn) { (windowListeners[t] = windowListeners[t] || []).push(fn); },
+  removeEventListener() {},
+};
 sandbox.matchMedia = matchMediaShim;
 try {
   vm.runInContext(js, sandbox, { filename: 'gauntlet-inline.js', timeout: 60000 });
@@ -176,6 +236,20 @@ try {
   console.error(err && err.stack || err);
   process.exit(1);
 }
+
+// ---- the app's OWN compare-set resolution (single owner; the harness re-parses nothing)
+let APP_CMP = null;
+try {
+  APP_CMP = vm.runInContext(
+    '(typeof state!=="undefined"&&state&&state.cmp)?{found:state.cmp.found.slice(),'
+    + 'missing:state.cmp.missing.slice(),ci:state.cmp.ci.length,ids:state.cmp.ids.slice()}:null',
+    sandbox);
+} catch (e) { APP_CMP = null; }
+// A compare set that RESOLVED to at least one row restricts the board, so the assertions
+// written against the default-visible set read that set instead. Nothing is skipped in
+// the default (no --hash) invocation gauntlet_gates.sh runs first.
+const CMPSET = APP_CMP && APP_CMP.found.length ? APP_CMP.found : null;
+const CMPMODE = !!CMPSET;
 
 // ---------------------------------------------------------------- assertions ----------
 const payload = html.match(/const DATA=(\{[\s\S]*?\});\n/);
@@ -227,13 +301,24 @@ const attachedTables = (headerPred) => {
   return acc;
 };
 
+// Scoreboard row order AS FIRST RENDERED. The sort tests below click headers, so the
+// compare-set order assertion (fragment order is the DEFAULT order under `#compare=`)
+// has to read the board before any of that happens.
+const INITIAL_BOARD = (() => {
+  const t = attachedTables(h => h.includes('bake') && h.includes('composite'));
+  return t.length === 1 ? t[0].slice(1).map(tr => cellText(tr.children[0]).trim()) : null;
+})();
+
 if (panelsEl.children.length < 8) fail('panels not populated: ' + panelsEl.children.length + ' sections (< 8)');
 const chips = registry.filter(e => e.tagName === 'LABEL' && classesOf(e).includes('chip'));
 if (chips.length !== nBakes) fail('control-bar chips ' + chips.length + ' != bakes ' + nBakes);
 const tables = countTag('table');
 if (tables < 2) fail('expected >= 2 tables (scoreboard + Mohammadi), got ' + tables);
 const rows = countTag('tr');
-if (rows < nBakes + 2) fail('too few table rows: ' + rows);
+// Under a URL compare set the scoreboard is RESTRICTED to the listed rows, so the
+// whole-board row-count floor does not apply (the compare assertions below are stricter:
+// they name the exact rows). The default invocation still runs this unchanged.
+if (!CMPMODE && rows < nBakes + 2) fail('too few table rows: ' + rows);
 if (countTag('svg') < 1) fail('no SVG mini-plots at all (model spline/calibration should remain SVG)');
 const h2s = texts('h2');
 if (!h2s.includes('Scoreboard')) fail('Scoreboard heading missing (h2s: ' + h2s.join(' | ') + ')');
@@ -254,7 +339,9 @@ if (DATA) {
   if (badOpt.length) fail(badOpt.length + ' .echart mounts lack a built option with series');
   const kinds = {};
   mounts.forEach(e => { const k = (e.attrs && e.attrs['data-kind']) || '?'; kinds[k] = (kinds[k] || 0) + 1; });
-  const visible = DATA.bakes.filter(b => !DATA.bakes.some(x => x.curated) || b.curated);
+  const visible = CMPMODE
+    ? DATA.bakes.filter(b => CMPSET.indexOf(b.name) >= 0)
+    : DATA.bakes.filter(b => !DATA.bakes.some(x => x.curated) || b.curated);
   const expect = [];
   if (visible.some(b => b.rank && Object.keys(b.rank).length)) expect.push('heat', 'trade');
   if (visible.some(b => b.dial && b.dial.curves && Object.keys(b.dial.curves).length)) expect.push('dial');
@@ -368,26 +455,40 @@ if (DATA) (function scoreboardSortTest() {
   const head0 = boards[0][0].children.map(cellText).map(s => String(s).trim());
   const ci = head0.indexOf('composite');
   const before = compsOf(boards[0]);
-  if (before.length < 3) { fail('sort test: too few scoreboard rows to test (' + before.length + ')'); return; }
-  if (!nonincr(defined(before)) || !nullsLast(before))
-    fail('sort test: default scoreboard order is not composite-descending with nulls last');
+  if (CMPMODE) {
+    // Compare-set default order is the FRAGMENT order, not composite — asserted by name
+    // in compareSetTest below. The composite-descending default is asserted, unchanged,
+    // by the no-hash invocation.
+    if (before.length < 1) { fail('sort test: compare board rendered no rows'); return; }
+  } else {
+    if (before.length < 3) { fail('sort test: too few scoreboard rows to test (' + before.length + ')'); return; }
+    if (!nonincr(defined(before)) || !nullsLast(before))
+      fail('sort test: default scoreboard order is not composite-descending with nulls last');
+  }
   const th1 = boards[0][0].children[ci];
   if (typeof th1.onclick !== 'function') { fail('SORT REGRESSION: scoreboard header has no click handler'); return; }
-  th1.onclick();     // composite is the default sort key -> this click flips to ascending
+  // Default board: composite is ALREADY the sort key, so the first click FLIPS it to
+  // ascending. Under a URL compare set the key is the fragment order ('cmp'), so the
+  // first click ADOPTS composite at its own default direction (descending) and the
+  // second flips to ascending. Both are the same handler; only the starting key differs.
+  const dir1 = CMPMODE ? nonincr : nondecr, dir2 = CMPMODE ? nondecr : nonincr;
+  const lab1 = CMPMODE ? 'descending' : 'ascending', lab2 = CMPMODE ? 'ascending' : 'descending';
+  th1.onclick();
   const after1 = attachedTables(isBoard);
   if (after1.length !== 1) { fail('sort test: after click, attached scoreboards = ' + after1.length); return; }
   const a1 = compsOf(after1[0]);
   const d1 = defined(a1);
-  if (!nondecr(d1) || !nullsLast(a1) || (new Set(d1).size > 1 && nonincr(d1)))
+  if (a1.length >= 2 && (!dir1(d1) || !nullsLast(a1)
+      || (!CMPMODE && new Set(d1).size > 1 && nonincr(d1))))
     fail('SORT REGRESSION: clicking the composite header did not re-sort the ATTACHED scoreboard '
-      + '(expected ascending with nulls last; first=' + a1[0] + ' last=' + a1[a1.length - 1]
+      + '(expected ' + lab1 + ' with nulls last; first=' + a1[0] + ' last=' + a1[a1.length - 1]
       + ' nulls=' + a1.filter(v => v === null).length + ')');
   const th2 = after1[0][0].children[ci];
-  if (typeof th2.onclick === 'function') th2.onclick();  // flip back to descending
+  if (typeof th2.onclick === 'function') th2.onclick();  // flip
   const after2 = attachedTables(isBoard);
   const a2 = after2.length ? compsOf(after2[0]) : [];
-  if (!a2.length || !nonincr(defined(a2)) || !nullsLast(a2))
-    fail('SORT REGRESSION: second composite click did not restore descending order (nulls last)');
+  if (!a2.length || (a2.length >= 2 && (!dir2(defined(a2)) || !nullsLast(a2))))
+    fail('SORT REGRESSION: second composite click did not give ' + lab2 + ' order (nulls last)');
 })();
 
 if (DATA) (function statTableSortTest() {
@@ -430,6 +531,8 @@ if (failed) process.exit(1);
 // the entries that actually cover a rendered column, and require a ⚠ in that cell.
 (function badgeTest() {
   if (!DATA || !DATA.annRegistry) return;                 // nothing to assert
+  if (CMPMODE) { console.log('badge check: skipped (compare set restricts the board to '
+    + CMPSET.length + ' rows; the full-board invocation asserts it)'); return; }
   const COL_FIELD = { composite: 'composite', cid22: 'rank.cid22', nonphoto: 'rank.nonphoto',
     konjnd: 'rank.konjnd', aic3: 'rank.aic3', live: 'rank.live', csiq: 'rank.csiq',
     hfnl: 'rank.hfnlproxy.per_ref_mean', 'dial-mono': 'dial.mono_pct', tied: 'dial.tied_pct',
@@ -522,7 +625,8 @@ if (DATA) (function failurePanelTest() {
   // this rule here does not catch a bug, it INVENTS one, which is exactly what happened
   // when the default changed: the panel drew 6 rows and the harness demanded 16.
   const anyFair = DATA.bakes.some(b => b.fair && b.fair.tier);
-  const vis = DATA.bakes.filter(b => b.curated
+  const vis = CMPMODE ? DATA.bakes.filter(b => CMPSET.indexOf(b.name) >= 0)
+    : DATA.bakes.filter(b => b.curated
     && !(b.dominated_by && b.dominated_by.length)
     && !(b.knob_end_fail && b.knob_end_fail.length)
     && (!anyFair || (b.fair && b.fair.tier !== 'LEGACY')));
@@ -568,7 +672,7 @@ if (DATA) (function failurePanelTest() {
       sevSpans.push(t);
     e.children.forEach(walk);
   })(host);
-  if (!sevSpans.length)
+  if (!sevSpans.length && !CMPMODE)
     fail('failure panel rendered no severity-tagged finding rows at all — every visible '
       + 'model came out clean, which the board data does not support');
   if (!/what breaks, how big, where you meet it/.test(html))
@@ -603,6 +707,86 @@ if (process.argv.includes('--dump-failures')) {
       .replace(/\s*(evidence:)/g, '\n    $1') + '\n');
   });
 }
+
+// ---- URL COMPARE SETS (2026-09-05) ---------------------------------------------------
+// Three gated cases, one process each (gauntlet_gates.sh runs all three):
+//   (a) --hash '#compare=<known>,<known>' --expect-visible <known>,<known>
+//   (b) --hash '#compare=<known>,<typo>'  --expect-visible <known> --expect-missing <typo>
+//   (c) --hash '#compare='               --expect-no-banner
+// Plus the two-way check: clicking the copy-link control must put a `#compare=` URL into
+// location AND show it as text (this environment has no clipboard, by construction).
+if (DATA && (HASH !== null || EXPECT_VIS || EXPECT_MISSING || EXPECT_NO_BANNER)) (function compareSetTest() {
+  const host = query('#cmpbanner');
+  if (!host) { fail('compare test: no #cmpbanner host in the rendered page'); return; }
+  const bannerText = deepText(host).trim();
+
+  if (EXPECT_NO_BANNER) {
+    if (bannerText) fail('compare test: expected NO banner, got: ' + bannerText.slice(0, 220));
+    else console.log('compare check OK: hash "' + HASH + '" -> default view, no banner');
+  }
+
+  if (EXPECT_MISSING) {
+    if (!bannerText) { fail('compare test: expected the missing-id banner, #cmpbanner is empty'); return; }
+    if (bannerText.indexOf('NOT FOUND') < 0)
+      fail('compare test: banner does not announce a NOT FOUND set: ' + bannerText.slice(0, 220));
+    EXPECT_MISSING.forEach(id => {
+      if (bannerText.indexOf(id) < 0)
+        fail('compare test: banner does not name the missing id verbatim: ' + id);
+    });
+    // nearest-name suggestions: buttons inside the banner other than "clear compare set"
+    const sugg = [];
+    (function walk(e) {
+      if (!e || !e.children) return;
+      if (e.tagName === 'BUTTON') {
+        const t = String(e.textContent || '').trim();
+        if (t && t !== 'clear compare set') sugg.push(t);
+      }
+      e.children.forEach(walk);
+    })(host);
+    if (sugg.length < EXPECT_MISSING.length)
+      fail('compare test: ' + EXPECT_MISSING.length + ' missing id(s) but only '
+        + sugg.length + ' nearest-name suggestion(s) rendered');
+    const known = new Set(DATA.bakes.map(b => b.name));
+    const bogus = sugg.filter(s => !known.has(s));
+    if (bogus.length) fail('compare test: suggestion(s) are not board names: ' + bogus.join(', '));
+    console.log('compare check OK: banner names ' + EXPECT_MISSING.length
+      + ' missing id(s) verbatim with ' + sugg.length + ' suggestion(s)');
+  }
+
+  if (EXPECT_VIS) {
+    if (!INITIAL_BOARD) { fail('compare test: no attached scoreboard at first render'); return; }
+    const longest = DATA.bakes.map(b => b.name).sort((a, b) => b.length - a.length);
+    const got = INITIAL_BOARD.map(t => longest.find(n => t.startsWith(n)) || null);
+    const same = got.length === EXPECT_VIS.length && got.every((n, i) => n === EXPECT_VIS[i]);
+    if (!same)
+      fail('compare test: scoreboard rows [' + got.join(', ') + '] != requested order ['
+        + EXPECT_VIS.join(', ') + ']');
+    else console.log('compare check OK: scoreboard holds exactly ' + got.length
+      + ' row(s) in fragment order: ' + got.join(', '));
+    // an explicit list overrides the forced peer_ssim2 reference row
+    if (EXPECT_VIS.indexOf('peer_ssim2') < 0 && got.indexOf('peer_ssim2') >= 0)
+      fail('compare test: peer_ssim2 rendered although the explicit list does not name it');
+  }
+
+  // ---- two-way: the copy-link control writes the hash and shows the URL --------------
+  // Runs LAST: it mutates state and re-renders.
+  const btns = [];
+  (function walk(e) { if (!e || !e.children) return; if (e.tagName === 'BUTTON') btns.push(e); e.children.forEach(walk); })(barEl);
+  const copy = btns.find(b => /copy link to this comparison/.test(String(b.textContent || '')));
+  if (!copy) { fail('compare test: no "copy link to this comparison" control in the bar'); return; }
+  if (typeof copy.onclick !== 'function') { fail('compare test: copy-link control has no click handler'); return; }
+  copy.onclick();
+  if (locationShim.hash.indexOf('#compare=') !== 0)
+    fail('compare test: after copy-link, location.hash is "' + locationShim.hash + '" (want #compare=...)');
+  const urlSpans = [];
+  (function walk(e) { if (!e || !e.children) return; if (classesOf(e).includes('cmpurl')) urlSpans.push(e); e.children.forEach(walk); })(barEl);
+  const shown = urlSpans.map(e => deepText(e)).join(' ');
+  if (shown.indexOf('#compare=') < 0)
+    fail('compare test: copy-link did not show the URL text as a no-clipboard fallback (got: '
+      + shown.slice(0, 160) + ')');
+  else console.log('compare check OK: copy-link wrote ' + locationShim.hash.slice(0, 90)
+    + ' and showed it as text (no clipboard in this environment)');
+})();
 
 // ---------------------------------------------------------------- terminal gate -------
 // GATE HOLE, found + closed 2026-09-04: the only `if (failed) process.exit(1)` sat at

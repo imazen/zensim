@@ -1476,6 +1476,23 @@ svg{display:block;max-width:100%;height:auto}
     border-radius:4px;padding:.25rem .45rem;font-size:11px;z-index:20;opacity:0;transition:opacity .08s;
     box-shadow:0 2px 8px rgba(0,0,0,.18);white-space:nowrap}
 .stub{color:var(--serious);font-weight:600}
+/* URL compare-set banner (2026-09-05): raised ONLY when a `#compare=` list names an id
+   the board does not carry, or when a case-insensitive fallback resolved one. A fully
+   exact, fully-resolved list renders NO banner (the compare strip in the bar is the
+   status surface). :empty keeps the host out of the flow when nothing is wrong. */
+.cmpbanner:empty{display:none}
+.cmpbanner{margin:.35rem 0 .7rem;padding:.75rem .95rem;border-radius:.5rem;
+  border:2px solid var(--critical);color:var(--text-primary);
+  background:color-mix(in srgb, var(--critical) 16%, var(--surface-1))}
+.cmpbanner.note{border-color:var(--warn);
+  background:color-mix(in srgb, var(--warn) 16%, var(--surface-1))}
+.cmpbanner h3{margin:0 0 .25rem;font-size:1.1rem;line-height:1.25;border:0;padding:0}
+.cmpbanner ul{margin:.3rem 0 0;padding-left:1.15rem}
+.cmpbanner li{margin:.2rem 0}
+.cmpbanner .miss{font-family:ui-monospace,monospace;font-weight:700;
+  background:var(--surface-1);border:1px solid var(--border);border-radius:.25rem;padding:.02rem .3rem}
+.cmpurl{font-family:ui-monospace,monospace;font-size:10.5px;word-break:break-all;
+  background:var(--surface-1);border:1px solid var(--border);border-radius:.3rem;padding:.12rem .35rem}
 """
 
 
@@ -1650,6 +1667,9 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
         "<title>" + title + "</title>"
         "<style>" + css + "</style>"
         "<div class='viz-root'>" + head +
+        # URL compare-set banner host — ABOVE the sticky bar so a bad `#compare=` list is
+        # the first thing on the page. Empty (and display:none) unless something is wrong.
+        "<div id='cmpbanner' class='cmpbanner'></div>"
         "<div id='bar' class='bar'></div>"
         "<div id='panels'></div>"
         "<div id='tt' class='tt'></div>"
@@ -1809,13 +1829,198 @@ const _DEFVIS=(()=>{const f=new Set(FAIRSET);
   const c=CURATED.filter(n=>f.has(n));
   return c.length?c:(FAIRSET.length?FAIRSET:DATA.bakes.map(b=>b.name));})();
 const state={shapeNorm:true,visible:new Set(_DEFVIS),
-  ref:null, sortKey:'composite', sortDir:-1, mcorp:null, chipsOpen:false, gateFilter:new Set()};
+  ref:null, sortKey:'composite', sortDir:-1, mcorp:null, chipsOpen:false, gateFilter:new Set(),
+  // URL compare set (`#compare=`): the resolved request, or null. `cmpMsg` is the
+  // copy-link status line, kept in state so renderBar can redraw it.
+  cmp:null, cmpMsg:null};
 function effTheme(){const dt=document.documentElement.getAttribute('data-theme');
   return dt||((window.matchMedia&&matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light');}
 const pal=()=>DATA.palette[effTheme()==='dark'?'dark':'light'];
 const color=b=>pal()[b.colorIndex%8];
 const cssv=n=>getComputedStyle($('.viz-root')).getPropertyValue(n).trim()||'#888';
 const visBakes=()=>DATA.bakes.filter(b=>state.visible.has(b.name));
+
+// ---- URL COMPARE SETS (2026-09-05) ---------------------------------------------------
+// `#compare=<id1>,<id2>,...` pins the board to EXACTLY the listed models; a bare
+// `#<id1>,<id2>` list is accepted when the fragment carries no `key=` pair. An explicit
+// list OVERRIDES every default rule — the curated default, the family toggles, the
+// dominated default-off, the gate pre-filter and the forced peer_ssim2 reference row in
+// the beats-ssim2 table: an explicit list means explicit. Ids match the board name as
+// RENDERED, exactly and case-sensitively, with a case-insensitive FALLBACK that is always
+// reported in the banner. An id that matches nothing is never silently dropped — it
+// raises the banner with its nearest board names. Selection is the ONE owner
+// (state.visible), so every list, table and chart follows without a parallel filter.
+const BOARDNAMES=DATA.bakes.map(b=>b.name);
+const NAMECI=(()=>{const m=Object.create(null);
+  BOARDNAMES.forEach(n=>{const k=n.toLowerCase();if(!(k in m))m[k]=n;});return m;})();
+function hashRaw(){try{return (typeof location!=='undefined'&&location&&location.hash)||'';}
+  catch(e){return '';}}
+function parseCompareHash(raw){
+  let h=String(raw||'');
+  if(h.charAt(0)==='#')h=h.slice(1);
+  if(!h)return null;
+  let val=null;
+  if(h.indexOf('=')>=0){
+    h.split('&').forEach(kv=>{const i=kv.indexOf('=');
+      if(i>0&&kv.slice(0,i)==='compare')val=kv.slice(i+1);});
+    if(val===null)return null;                 // other params, no compare key -> not ours
+  }else{val=h;}                                // bare comma-list form
+  const seen=new Set(),ids=[];
+  String(val).split(',').forEach(tok=>{
+    let s=tok;try{s=decodeURIComponent(String(tok).replace(/\+/g,' '));}catch(e){s=tok;}
+    s=String(s).trim();
+    if(!s||seen.has(s))return;seen.add(s);ids.push(s);});
+  return ids;                                  // may be [] — `#compare=` alone is NOT a set
+}
+function resolveCompare(raw){
+  const ids=parseCompareHash(raw);
+  if(!ids||!ids.length)return null;
+  const exact=new Set(BOARDNAMES),seen=new Set();
+  const found=[],missing=[],ci=[];
+  ids.forEach(id=>{
+    let hit=null;
+    if(exact.has(id))hit=id;
+    else{const alt=NAMECI[id.toLowerCase()];if(alt!==undefined){hit=alt;ci.push([id,alt]);}}
+    if(hit===null){missing.push(id);return;}
+    if(seen.has(hit))return;seen.add(hit);found.push(hit);});
+  return {ids:ids,found:found,missing:missing,ci:ci};
+}
+// Nearest board names for a miss. Prefix/substring dominate, then a bounded Levenshtein
+// on the lowercased names. Deliberately tiny and dependency-free — a typo hint, not a
+// search engine (the page loads no library and makes no network request).
+function lev(a,b){
+  const m=a.length,n=b.length;if(!m)return n;if(!n)return m;
+  let prev=new Array(n+1),cur=new Array(n+1);
+  for(let j=0;j<=n;j++)prev[j]=j;
+  for(let i=1;i<=m;i++){cur[0]=i;
+    for(let j=1;j<=n;j++){const c=a.charAt(i-1)===b.charAt(j-1)?0:1;
+      cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+c);}
+    const t=prev;prev=cur;cur=t;}
+  return prev[n];
+}
+function nearestNames(id,k){
+  const q=String(id).toLowerCase();
+  const sc=BOARDNAMES.map(n=>{const l=n.toLowerCase();
+    let s=lev(q,l)/Math.max(q.length,l.length,1);
+    if(l.indexOf(q)===0||q.indexOf(l)===0)s-=0.55;
+    else if(l.indexOf(q)>=0||q.indexOf(l)>=0)s-=0.35;
+    return [n,s];});
+  sc.sort((a,b)=>(a[1]-b[1])||a[0].localeCompare(b[0]));
+  return sc.slice(0,k||3).map(x=>x[0]);
+}
+// CMPON = a compare set that actually resolved to at least one board row. A list whose
+// ids ALL miss keeps its banner but falls back to the normal default view — an empty
+// board tells the reader nothing.
+const CMPON=()=>!!(state.cmp&&state.cmp.found.length);
+const cmpIdx=n=>{const i=state.cmp?state.cmp.found.indexOf(n):-1;return i<0?1e9:i;};
+let _lastHash=null;
+// '@' is a legal fragment character and every era row carries one, so it is left
+// readable; everything else stays percent-encoded (the reader decodes either form).
+const cmpEnc=n=>encodeURIComponent(n).replace(/%40/g,'@');
+const compareHashFor=names=>'#compare='+names.map(cmpEnc).join(',');
+function writeHash(names){
+  const h=compareHashFor(names);
+  if(h===_lastHash)return h;
+  _lastHash=h;
+  try{
+    const loc=(typeof location!=='undefined')?location:null;
+    // replaceState does NOT fire hashchange and leaves the scroll position alone; the
+    // bare assignment (the fallback) does fire it, which is why _lastHash is compared on
+    // the way back in.
+    if(typeof history!=='undefined'&&history&&typeof history.replaceState==='function'){
+      history.replaceState(null,'',((loc&&loc.pathname)||'')+((loc&&loc.search)||'')+h);
+    }else if(loc){loc.hash=h;}
+  }catch(e){}
+  return h;
+}
+function currentURL(){
+  try{const loc=(typeof location!=='undefined')?location:null;
+    if(loc&&loc.href)return String(loc.href);
+    return ((loc&&loc.origin)||'')+((loc&&loc.pathname)||'')+((loc&&loc.hash)||'');}
+  catch(e){return hashRaw();}
+}
+// Selection -> hash, in the fragment order for ids still selected, then anything added
+// afterwards. The URL is rewritten ONLY when the set actually changed, so a shared link
+// carrying a typo keeps its evidence across a reload (and a theme re-render writes nothing).
+function syncHash(){
+  if(!state.cmp)return;
+  const inOrder=state.cmp.found.filter(n=>state.visible.has(n));
+  const extra=BOARDNAMES.filter(n=>state.visible.has(n)&&inOrder.indexOf(n)<0);
+  const next=inOrder.concat(extra);
+  if(next.length===state.cmp.found.length&&next.every((n,i)=>n===state.cmp.found[i]))return;
+  state.cmp.found=next;
+  writeHash(next);
+}
+function applyCompare(res){
+  state.cmp=res;state.cmpMsg=null;
+  if(!res)return;
+  _lastHash=null;                               // a fresh read: let the next real edit write
+  if(!res.found.length)return;                  // all ids missed -> banner + default view
+  state.visible=new Set(res.found);
+  state.sortKey='cmp';state.sortDir=1;
+  state.gateFilter=new Set();
+}
+function clearCompare(){
+  state.cmp=null;state.cmpMsg=null;_lastHash=null;
+  state.visible=new Set(_DEFVIS);state.sortKey='composite';state.sortDir=-1;
+  try{const loc=(typeof location!=='undefined')?location:null;
+    if(typeof history!=='undefined'&&history&&typeof history.replaceState==='function')
+      history.replaceState(null,'',((loc&&loc.pathname)||'')+((loc&&loc.search)||''));
+    else if(loc)loc.hash='';}catch(e){}
+  renderBar();rerender();
+}
+function addToCompare(name){
+  state.visible.add(name);
+  if(state.cmp){
+    if(state.cmp.found.indexOf(name)<0)state.cmp.found.push(name);
+    _lastHash=null;writeHash(state.cmp.found);
+  }
+  renderBar();rerender();
+}
+// The banner. Raised on a MISS (big, red, role=alert) or on a case-insensitive FALLBACK
+// (amber note). A fully exact, fully-resolved list renders nothing here.
+function renderCmpBanner(){
+  const host=$('#cmpbanner');if(!host)return;
+  host.innerHTML='';host.setAttribute('class','cmpbanner');
+  const c=state.cmp;
+  if(!c||(!c.missing.length&&!c.ci.length))return;
+  const bad=!!c.missing.length;
+  if(!bad)host.setAttribute('class','cmpbanner note');
+  host.setAttribute('role','alert');
+  host.append(el('h3',{text:(bad?'\u26A0 COMPARE SET INCOMPLETE':'\u2139 COMPARE SET')
+    +' \u2014 '+c.ids.length+' requested, '+c.found.length+' found'
+    +(bad?', '+c.missing.length+' NOT FOUND on this board':'')}));
+  if(bad){
+    host.append(el('div',{class:'sub',
+      text:c.found.length?('The models that were found are shown; the ids below match no row on '
+        +'this board. Board names are matched exactly (case-insensitively as a fallback).')
+        :('NONE of the requested ids match a row on this board, so the normal default view is '
+          +'shown instead of an empty one.')}));
+    const ul=el('ul',{});
+    c.missing.forEach(id=>{
+      const li=el('li',{});
+      li.append(el('span',{class:'miss',text:id}));
+      li.append(el('span',{class:'cap',text:'  not on this board \u2014 did you mean: '}));
+      nearestNames(id,3).forEach(n=>{
+        const b=el('button',{class:'btn',style:'margin:0 .2rem;padding:.1rem .4rem;font-size:11px',
+          text:n,title:'add '+n+' to the comparison (and to the link)'});
+        b.onclick=()=>addToCompare(n);
+        li.append(b);});
+      ul.append(li);});
+    host.append(ul);
+  }
+  if(c.ci.length){
+    host.append(el('div',{class:'cap',
+      text:'case-insensitive fallback used for '+c.ci.length+' id'+(c.ci.length===1?'':'s')+': '
+        +c.ci.map(p=>p[0]+' \u2192 '+p[1]).join(', ')
+        +'  (matching is exact and case-sensitive first; this is the fallback.)'}));
+  }
+  const act=el('div',{style:'margin-top:.45rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:center'});
+  const cl=el('button',{class:'btn',text:'clear compare set',
+    title:'drop the URL compare set and return to the default view'});
+  cl.onclick=clearCompare;act.append(cl);
+  host.append(act);
+}
 
 // pick default reference = first one that any bake carries
 function initRef(){const have=new Set();DATA.bakes.forEach(b=>Object.values(b.scatter).forEach(c=>Object.keys(c).forEach(r=>have.add(r))));
@@ -1956,9 +2161,9 @@ function renderBar(){
     mk('legacy / unverified',()=>{state.visible=new Set(DATA.bakes.filter(b=>TIER(b)==='LEGACY').map(b=>b.name));rerender();renderBar();},
        'ONLY the rows that fail a fairness criterion — each badged with which one. Nothing is deleted; these rows keep every stat.'),
     mk('curated',()=>{state.visible=new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name));rerender();renderBar();},
+      'the default set: era flagships + campaign arm candidates/leaders + ensembles'),
     mk('curated+knobfail',()=>{state.visible=new Set(CURATED_ALL);rerender();renderBar();},
       'curated including knob-end failers (dial cannot reach/span the top zone)'),
-      'the default set: era flagships + campaign arm candidates/leaders + ensembles'),
     mk('sprint bests',()=>{state.visible=new Set((DATA.sprintBest||[]).map(x=>x.n));rerender();renderBar();},
       'one selected leader per sprint/era: '+((DATA.sprintBest||[]).map(x=>x.s+' \u2192 '+x.n).join(' \u00b7 ')||'none resolved')),
     mk('all',()=>{DATA.bakes.forEach(b=>state.visible.add(b.name));rerender();renderBar();}),
@@ -1967,6 +2172,50 @@ function renderBar(){
       if(x==null&&y==null)return 0;if(x==null)return 1;if(y==null)return -1;return y-x;};
       const s=[...DATA.bakes].sort(cmp).slice(0,6).map(b=>b.name);
       state.visible=new Set(s);rerender();renderBar();}));
+  // ---- URL compare set (2026-09-05): status + copy-link, next to the pickers --------
+  if(CMPON()){
+    const st=el('span',{class:'gchip',style:'border-style:solid;border-color:var(--seq-hi)',
+      title:'a URL compare set is pinning this board to the '+state.cmp.found.length
+        +' listed model(s), in the order given: '+state.cmp.found.join(', ')
+        +'.  Every default (curated, family toggles, dominated default-off, the gate '
+        +'pre-filter and the forced peer_ssim2 reference row) is overridden by the list. '
+        +'Edit the selection and the link updates itself.'});
+    st.append(el('b',{text:'compare set'}),
+      el('span',{class:'cap',text:' '+state.cmp.found.length+' pinned'
+        +(state.cmp.missing.length?' \u00b7 '+state.cmp.missing.length+' missing':'')}));
+    bar.append(st);
+    bar.append(mk('clear compare set',clearCompare,
+      'drop the URL compare set and return to the default view'));
+  }
+  bar.append(mk('\u29C9 copy link to this comparison',()=>{
+    const vis=DATA.bakes.filter(b=>state.visible.has(b.name)).map(b=>b.name);
+    const ordered=state.cmp
+      ?state.cmp.found.filter(n=>state.visible.has(n))
+        .concat(vis.filter(n=>state.cmp.found.indexOf(n)<0))
+      :vis;
+    if(!ordered.length){state.cmpMsg='nothing selected \u2014 pick at least one model first.';
+      renderBar();return;}
+    if(!state.cmp)state.cmp={ids:ordered.slice(),found:ordered.slice(),missing:[],ci:[]};
+    else state.cmp.found=ordered;
+    if(state.sortKey==='composite')state.sortKey='cmp',state.sortDir=1;
+    _lastHash=null;writeHash(ordered);
+    const url=currentURL();
+    // The clipboard is unavailable in plenty of contexts (no permission, an insecure
+    // origin, the DOM-shim render harness). Always end with the URL VISIBLE so there is
+    // a fallback that needs no clipboard at all.
+    let msg;
+    try{
+      if(typeof navigator!=='undefined'&&navigator&&navigator.clipboard
+         &&typeof navigator.clipboard.writeText==='function'){
+        navigator.clipboard.writeText(url).then(function(){},function(){});
+        msg='copied \u2713  ';
+      }else msg='clipboard unavailable \u2014 select and copy: ';
+    }catch(e){msg='copy failed \u2014 select and copy: ';}
+    state.cmpMsg=msg+url;
+    renderBar();rerender();
+  },'write the '+state.visible.size+' currently visible model(s) into the URL as '
+    +'#compare=... and copy it; the URL text is always shown so it can be copied by hand'));
+  if(state.cmpMsg)bar.append(el('span',{class:'cmpurl',text:state.cmpMsg}));
   // gate pre-filter (user directive 2026-08-28): exclude gate-FAILING rows from the
   // scoreboard list itself (and drop them from the visible chart set). Not-measured
   // gates never exclude. 'usable' = the frozen-gate trio G+E+K (dial-v2 stays opt-in
@@ -2306,9 +2555,17 @@ function renderTable(){
     const vs=DATA.bakes.map(c[3]).filter(v=>v!=null&&isFinite(v));
     ranges[c[0]]=vs.length?[Math.min(...vs),Math.max(...vs)]:[0,1];});
   const col=COLS.find(c=>c[0]===state.sortKey)||COLS[2];
-  const pool=state.gateFilter.size?DATA.bakes.filter(b=>!gateExcluded(b)):DATA.bakes;
+  // A URL compare set RESTRICTS the list to the named models (the default board dims
+  // non-visible rows instead; an explicit list is explicit). The pool still reads from
+  // state.visible, so a chip added afterwards appears here immediately.
+  const pool=CMPON()?DATA.bakes.filter(b=>state.visible.has(b.name))
+    :(state.gateFilter.size?DATA.bakes.filter(b=>!gateExcluded(b)):DATA.bakes);
   const nGateHidden=DATA.bakes.length-pool.length;
-  const rows=[...pool].sort((a,b)=>{let x=col[3](a),y=col[3](b);
+  // sortKey 'cmp' = the FRAGMENT order (the one ordering the reader chose); any header
+  // click replaces it with that column and the list sorts normally from then on.
+  const rows=(state.sortKey==='cmp'&&CMPON())
+    ?[...pool].sort((a,b)=>(cmpIdx(a.name)-cmpIdx(b.name))||a.name.localeCompare(b.name))
+    :[...pool].sort((a,b)=>{let x=col[3](a),y=col[3](b);
     if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1; // nulls last either direction
     if(typeof x==='string')return state.sortDir*String(x).localeCompare(String(y));
     x=x==null?-1e9:x;y=y==null?-1e9:y;return state.sortDir*(x-y);});
@@ -3777,7 +4034,9 @@ function renderBeats(){
   t.append(el('thead',{html:'<tr>'+hd.map(h=>'<th>'+h+'</th>').join('')+'</tr>'}));
   const tb=el('tbody',{});
   const ref={};HELDOUT.forEach(c=>{ref[c]=rs(PEERSSIM2,c);});
-  const rows=DATA.bakes.filter(b=>state.visible.has(b.name)||b.name==='peer_ssim2');
+  // peer_ssim2 is force-included as the reference row — EXCEPT under a URL compare set,
+  // where an explicit list means explicit and the reference appears only if it is listed.
+  const rows=DATA.bakes.filter(b=>state.visible.has(b.name)||(!CMPON()&&b.name==='peer_ssim2'));
   rows.forEach(b=>{
     const tr=el('tr',{});
     const nd=el('td',{class:'lbl'});nameInto(nd,b,b.name==='peer_ssim2'?' ◀ reference':'');tr.append(nd);
@@ -3819,9 +4078,24 @@ function renderBeats(){
 // renderTable() returns a wrapper without an id; mountTable tags it and swaps it in.
 function mountTable(){const w=renderTable();w.id='table';const cur=$('#table');cur?cur.replaceWith(w):$('#panels').prepend(w);}
 function rerender(){disposeCharts();state.renderedTheme=effTheme();
+  renderCmpBanner();syncHash();
   mountTable();renderFair();renderBeats();renderFailures();renderHeat();renderMPanel();renderDial();renderLoop();renderCoverage();renderHfnl();renderGates();renderRecipes();renderModels();renderTrade();renderScatter();}
 
+// A `#compare=` fragment is applied BEFORE the first render, so a shared link never
+// paints the default board first and then jump-cuts to the comparison.
+applyCompare(resolveCompare(hashRaw()));
 initRef();layout();renderBar();rerender();
+// Hash edited in place (back/forward, or typed into the bar) -> re-apply. Our own
+// replaceState writes do not fire this; the assignment fallback does, hence the guard.
+if(typeof window!=='undefined'&&window&&typeof window.addEventListener==='function'){
+  window.addEventListener('hashchange',()=>{
+    const h=hashRaw();
+    if(h===_lastHash)return;
+    const res=resolveCompare(h);
+    if(!res){clearCompare();return;}
+    applyCompare(res);renderBar();rerender();
+  });
+}
 // Theme reactivity: charts (and everything else) rebuild with the other theme's option
 // variant on (a) an OS prefers-color-scheme flip when no explicit data-theme is set, and
 // (b) the artifact viewer stamping data-theme on <html> — watched via MutationObserver

@@ -9,6 +9,14 @@
 #           sortability (real header clicks reorder the ATTACHED tables), ECharts mounts
 #           with built option payloads, light+dark chart themes, and the JXL
 #           loop-targeting panel when the payload carries it
+#   gate 4: URL COMPARE SETS (`#compare=<id>,<id>`) — three cases, one process each,
+#           with the ids READ OUT OF THE BOARD so the gate cannot go stale as the board
+#           changes: (a) two known ids -> exactly those rows, in fragment order, no
+#           banner; (b) one known + one deliberate typo -> the known row plus a banner
+#           naming the typo verbatim with nearest-name suggestions; (c) `#compare=`
+#           empty -> the default view and no banner. Each case also click-tests the
+#           copy-link control (this environment has no clipboard, by construction, so
+#           it exercises the visible-URL fallback).
 #   gate 3: STRICT JSON validity of every `*.fulleval.json` the board is built from —
 #           `node --check` for data. Python's `json` accepts a bare `NaN`/`Infinity` in
 #           BOTH directions, so a producer that used the default `allow_nan=True` could
@@ -42,6 +50,40 @@ for f in "$D"/page_*.js; do node --check "$f"; done
 echo "GATE 1 PASS: node --check ($N_BLOCKS script blocks parse)"
 node "$HERE/gauntlet_render_check.js" "$HTML"
 echo "GATE 2 PASS: DOM-shim render harness"
+
+# ── gate 4: URL compare sets ───────────────────────────────────────────────────────────
+# The ids come from the board itself (curated first — those cells carry the richest
+# panels), and the typo is a mutation of a real name that is PROVEN absent from the
+# board, so the case cannot silently degenerate into "unknown id resolves to nothing
+# because every id does".
+python3 - "$HTML" > "$D/cmpids.txt" <<'PY'
+import json, re, sys
+html = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"const DATA=(\{.*?\});\n", html, re.S)
+assert m, "no DATA payload in the HTML"
+bakes = json.loads(m.group(1))["bakes"]
+names = [b["name"] for b in bakes]
+assert len(names) >= 2, f"gate 4 needs >= 2 board rows, got {len(names)}"
+pref = [b["name"] for b in bakes if b.get("curated")] or names
+pick = (pref + [n for n in names if n not in pref])[:2]
+have = set(names)
+typo = pick[0][:-1] + "X"
+i = 0
+while typo in have:                      # never collide with a real row
+    i += 1
+    typo = pick[0][:-1] + "X" * i + "q"
+print(pick[0]); print(pick[1]); print(typo)
+PY
+mapfile -t CMPIDS < "$D/cmpids.txt"
+CA="${CMPIDS[0]}"; CB="${CMPIDS[1]}"; CT="${CMPIDS[2]}"
+node "$HERE/gauntlet_render_check.js" "$HTML" \
+  --hash "#compare=${CA},${CB}" --expect-visible "${CA},${CB}" --expect-no-banner
+echo "GATE 4a PASS: two known ids -> exactly those rows, fragment order, no banner"
+node "$HERE/gauntlet_render_check.js" "$HTML" \
+  --hash "#compare=${CA},${CT}" --expect-visible "${CA}" --expect-missing "${CT}"
+echo "GATE 4b PASS: known + unknown id -> banner names the unknown verbatim + suggestions"
+node "$HERE/gauntlet_render_check.js" "$HTML" --hash "#compare=" --expect-no-banner
+echo "GATE 4c PASS: empty #compare= -> default view, no banner"
 
 # ── gate 3: strict JSON validity of the board's inputs ──────────────────────────────
 if [ "$FULLEVAL_DIR" = "skip" ]; then
