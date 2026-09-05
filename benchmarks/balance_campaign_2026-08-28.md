@@ -7854,3 +7854,26 @@ passed, because the weight lever always cost old-A8 regardless of λ. No arm dom
 CID22/KonJND, worst on TID; `lam5em4` the only positive AIC-3 delta, worst TID loss in the sweep. **Nothing ships** —
 per lane scope, this is a table and a record; `ZensimProfile::D`/`zensim/weights/` untouched throughout. Full table +
 pre-registration + reproduction: [`d_peaks_lambda_sweep_2026-09-05.md`](d_peaks_lambda_sweep_2026-09-05.md).
+
+## ROUND 90 ADDENDUM — 2026-09-05: the negative-tail correction — "−50, not −5, judged PER CODEC" — reverses the verdict
+The mid-task ruling quoted above as *"below -5-50"* was a GARBLED transcription, corrected by the coordinator
+immediately after: **verbatim, "the number is −50, NOT −5 … the tail is judged PER CODEC — 'codecs are all
+different, some go lower than others'."** This supersedes ROUND 90's "7 of 10 arms pass" headline; **no "−5" number
+survives anywhere in the record.** Re-graded per-family: the negtail probe carries NO codec info (it's KADIS
+synthetic distortions, not zen-encoder output), so its 25-way `dist_type` taxonomy stands in as "distortion family"
+(recovered by a `score_ssim2_gpu` join — the probe's own `f0/f1/f2` don't match the canonical KADIS table closely
+enough across extractor eras to key on, but the ssim2 score does, 2000/2000, 49 ambiguous); the canonical GRID uses
+its real `codec` column (jpeg/webp/avif/jxl). Families ssim2 itself never reaches −50 are exempt (grid: jpeg, jxl).
+**Result: 0 of 11 arms — including SHIPPED D ITSELF — pass the negtail-probe check.** One thin family blocks
+everyone: `mean_shift` (n=8), where ssim2 reaches −63.5 but no arm's dial gets closer than −14 to −28 (D: −28.1,
+more than 35 points short) — not a single-outlier artifact, every one of D's 8 predictions on this family
+undershoots its paired truth. The grid check (avif+webp both ≤ −50) is passed by exactly 3 arms
+(`lam5em4`, `lam1em3_w4`, `lam2em3_w4`) and **failed by shipped D** (webp −48.1, short by 1.9). A D-relative reading
+(context, not the rule — the rule's own family-exemption mechanism is what "per codec" already means) sharpens the
+mechanism finding: the `--anchor-weight` lever regresses the negtail probe on **24 of 24** distortion families
+relative to D for every w2/w4 arm, a universal floor cost, in exchange for the narrow avif/webp grid gain. Applying
+the corrected rule literally: **no arm — and not the incumbent either — satisfies it**; `lam5em4` is offered as the
+single most defensible candidate (zero grid regressions vs D, fewest negtail regressions, CID22 CI positive) if a
+choice must be made, not as a passing verdict. Everything else from ROUND 90 (rank deltas, the spline-only lever
+control, hfnl_cid22band) is unchanged. Still never installed. Full correction:
+[`d_peaks_lambda_sweep_2026-09-05.md`](d_peaks_lambda_sweep_2026-09-05.md) §4-§5.
