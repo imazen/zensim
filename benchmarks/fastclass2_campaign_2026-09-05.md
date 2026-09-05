@@ -456,3 +456,39 @@ constant is written in terms of `dial(0⃗)`:
 
 Neither point changes any number in this campaign; both change how the C5 row
 should be read, and neither was on the record.
+
+## 7. A PRE-FLIGHT THAT SAVED 15 FITS — the 372 lane's target scale
+
+Before the servable lane ran a single cell, its six training legs were checked
+for target ORIENTATION and target SCALE. Orientation was clean —
+`corr(human_score, ssim2_gpu)` reads **+0.803** (kadid), **+0.849** (tid),
+**+1.000** (safesyn), **+1.000** (cid22_train_norm), all quality-oriented, so
+the registered KADID inversion does not touch this root.
+
+**Scale was not.** The recipe convention is `human_score` in **[0,1]** with
+`--target-scale 100`, and the 372 directory carries both forms under names that
+differ by one suffix:
+
+| leg (372) | measured range | 944 twin's range |
+|---|---|---|
+| `safesyn.parquet` | [−7.3904, 0.9870] | [−7.3904, 0.9762] |
+| `kadid.parquet` | [0.0000, 0.9825] | [0.0000, 0.9825] |
+| `tid.parquet` | [0.0269, 0.8016] | [0.0269, 0.8016] |
+| `tbig_372_200k.parquet` | [0.0000, 0.9840] | [0.0000, 0.9840] |
+| **`cid22_train.parquet`** | **[3.0102, 94.1532]** ✗ | [0.0301, 0.9415] |
+| ↳ `cid22_train_norm.parquet` | [0.0301, 0.9415] ✓ | *(identical)* |
+| **`konjnd-dense.parquet`** | **[−65.7108, 96.1549]** ✗ | [−0.6493, 0.9615] |
+| ↳ `konjnd-dense-norm.parquet` | [0.0000, 1.0000] ✓ | — |
+
+The first draft of `train_372_student.sh` named the un-normalised pair. After
+`--target-scale 100` those two groups would have carried targets ~**100×** the
+other four legs', so a RankNet/MSE mix would have been dominated by them
+outright — and nothing would have crashed. Fixed to the `_norm` variants before
+the queue reached stage 2.
+
+**Four of the six legs match their 944 twins' ranges to the digit**, and
+`cid22_train_norm` matches `ext_cid22_train201` exactly, which is the strongest
+available evidence that the two lanes are running the same recipe on two
+layouts. The two that differ are stated in the script's own header: no
+`tbig_hf` twin exists at 372, and the konjnd leg is the older 20,160-row
+`konjnd-dense-norm` rather than the 8,060-row BPG split.

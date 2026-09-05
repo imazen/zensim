@@ -18,8 +18,26 @@
 #   * `safesyn_distill_hya_r4` / `tbig_teacher944` (the distillation teachers)
 #     — ABSENT at 372. This lane trains on human/metric targets only.
 #   * `konjnd_bpg_{train,val}` — ABSENT; the 372 layout has the older
-#     `konjnd-dense` (20,160 rows), used TRAIN-ONLY at the same 1.2 weight the
-#     944 recipe gives its konjnd leg, with no val twin (so no train==val).
+#     `konjnd-dense-norm` (20,160 rows), used TRAIN-ONLY at the same 1.2 weight
+#     the 944 recipe gives its konjnd leg, with no val twin (so no train==val).
+#
+# TARGET SCALE — a defect caught in pre-flight, before this script ever ran.
+# The recipe convention is `human_score` in [0,1] with `--target-scale 100`, and
+# the 372 dir carries BOTH forms. MEASURED ranges:
+#     cid22_train.parquet        [ 3.0102, 94.1532]  <- 0..100, WRONG here
+#     cid22_train_norm.parquet   [ 0.0301,  0.9415]  <- and identical to the
+#                                                       944 lane's own
+#                                                       ext_cid22_train201
+#     konjnd-dense.parquet       [-65.7108, 96.1549] <- 0..100, WRONG here
+#     konjnd-dense-norm.parquet  [ 0.0000,  1.0000]
+# Using the un-normalised pair would have handed the trainer targets ~100x the
+# other legs' after --target-scale, i.e. one group dominating the loss outright.
+# The `_norm` variants are what this script uses; safesyn / kadid / tid /
+# tbig_372_200k are already [0,1] and match their 944 twins' ranges exactly.
+# Orientation was checked at the same time: corr(human_score, ssim2_gpu) is
+# +0.803 (kadid), +0.849 (tid), +1.000 (safesyn), +1.000 (cid22_train_norm) —
+# all quality-oriented, so the registered KADID inversion does NOT apply to this
+# root.
 # Everything else — epochs, pairs/epoch, group weights, loss modes, the 34
 # f0..155 feature transforms, --coarse-decay — is carried over verbatim.
 #
@@ -51,11 +69,11 @@ mkdir -p "$(dirname "$OUT")"
 
 TRAIN_GROUPS=(
   --group "safesyn:$C/safesyn.parquet:1.0:0.5:both"
-  --group "cid22_train:$C/cid22_train.parquet:1.0:2.0:both"
+  --group "cid22_train:$C/cid22_train_norm.parquet:1.0:2.0:both"
   --group "kadid:$C/kadid.parquet:0.5:1.0:rank"
   --group "tid:$C/tid.parquet:0.5:1.0:rank"
   --group "bigcodec:$TBIG:0.5:1.0:both"
-  --group "konjnd:$C/konjnd-dense.parquet:1.2:0.0:both"
+  --group "konjnd:$C/konjnd-dense-norm.parquet:1.2:0.0:both"
 )
 for g in "${TRAIN_GROUPS[@]}"; do case "$g" in --group) ;; *) p="${g#*:}"; p="${p%%:*}"; [ -f "$p" ] || { echo "ABORT: missing $p"; exit 1; };; esac; done
 
