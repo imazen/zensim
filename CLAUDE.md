@@ -693,11 +693,37 @@ width tested — 127×93 went 1.739e-1 → **0.000e0**, 200×150 8.155e-1 →
 option-A PRE-PAD workaround and **does not exist under C**. (2) It is
 CHEAPER, not costlier: buffered v1-372 Ir **−9.02 % at 576, −7.37 % at 1152,
 +0.00 % at the tight-width control 592**. The lane-alignment padding is not
-paying for itself. **Not flipped** — default untouched pending the era
-rollout. ⚠ `v1_golden_bytes` fixtures are 64×64 and `simd_padded_width(64) ==
-64`, so the golden set is entirely in the TIGHT class and is **structurally
-blind to the defect C fixes**; a C rollout needs a non-tight golden
-(200×150 or 576×96).
+paying for itself. ⚠ `v1_golden_bytes` fixtures were 64×64 and
+`simd_padded_width(64) == 64`, so the golden set was entirely in the TIGHT
+class and structurally blind to the defect C fixes; the rollout added a
+non-tight golden (`v1_nontight_fixture_matches_golden`).
+
+**★ C IS FLIPPED — `56bbcda2` (2026-08-30 15:43), "STAGE 1 of the C rollout".**
+*(This paragraph said "**Not flipped** — default untouched pending the era
+rollout" until 2026-09-05; that was stale by six days and cost a lane an
+afternoon. Corrected in place, per DOCS: SEARCH + UPDATE.)* `blur::
+pyramid_plane_stride` now returns the width and is the one greppable owner;
+`mirror_pad_columns` and its three call sites are DELETED.
+`pyramid_stride_has_no_phantom_columns` pins it at the owner over 24 widths.
+
+**Consequence you must know before citing any 372 number: the shipped runtime
+is one extraction era AHEAD of BOTH v1-372 eval roots.** The default root
+`/mnt/v/zen/zensim-training/2026-08-30-full-features-372` was built at
+`ea16c7ee`, **2026-08-30 13:21 — two hours before the flip**. MEASURED
+2026-09-05 by re-extracting CSIQ at HEAD with the same tool on the same input
+the root itself was built from (row alignment verified first: `human_score`
+bit-identical positionally on all 866 rows): basic `f0..155` **120,804 of
+135,096 cells differ, max |Δ| 4.536785**; peaks 34,566/62,352, max |Δ| 0.3264;
+masked and IW 62,346/62,352 each. Every row differs, on 285-341 of 372 slots.
+CSIQ is 512×512 — exactly the padded-width divergence class C removed. Ruled
+out by measurement: `ZENSIM_ERA2_DENSE=0` reproduces HEAD byte-for-byte (so
+`515001dc`'s era-2 flip is not the cause — it moves only `f372+`), and
+`v1_golden_bytes` passes 5/5 because every fixture is tight or below the tile.
+**The 944 roots are NOT affected** — `56bbcda2` verified structurally that the
+fold's production path never references the padding owner. A 372-root
+re-extraction at HEAD (`scripts/canonical_corpus/build_eval372_root.sh` +
+`pack_eval372_root.py`) is REGISTERED, not run. Record:
+`benchmarks/d_ship_flip_2026-09-05.md` §3.
 
 **Block-skipping: `V2NewFeatureToggles::v1_only`.** A 372-only request skips
 every v2-era block AND its phase-A upstream (the four V-blur sweeps + the v2

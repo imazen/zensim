@@ -1603,3 +1603,56 @@ is shallower than KADIS's. A number from the two instrument sets must never be c
 
 Record: `benchmarks/d_free_id100_2026-09-05.md` §§1.4, 2, 3. Artifacts + shas:
 `benchmarks/d_free_id100_bakes_2026-09-05.pointer.md`.
+
+### §3.37 — the v1-372 eval roots predate option C, so every 372 verdict is one era behind the runtime (2026-09-05)
+
+**Thought-why:** the ship-flip lane needed to know which extraction era the *product
+runtime* emits, so it could say whether a candidate bake's published numbers describe what
+users get. The expectation, from the roots' own manifests and from `CLAUDE.md`, was
+"HEAD == the 2026-08-30 root": that root is the DEFAULT `--regime 372` features root, it
+was built the same week, and `CLAUDE.md`'s EXTRACTION PERF section said option C — the one
+known pending v1 semantics change — was *"**Not flipped** — default untouched pending the
+era rollout"*.
+
+**Actual-why:** option C has been flipped since `56bbcda2` (2026-08-30 **15:43**), whose own
+message calls it *"STAGE 1 of the C rollout"*. The default root was built at `ea16c7ee`,
+2026-08-30 **13:21** — **two hours earlier**. `CLAUDE.md` was stale by six days.
+
+**MEASURED.** `extract_features_372col --corpus pairs-tsv --path
+/mnt/v/dataset/csiq/csiq_pairs.tsv` at HEAD — the *same tool* on the *same input file*
+`scripts/canonical_corpus/build_eval372_root.sh` used — against the root's own build output
+`~/tmp/eval372root/csiq.csv`. Row alignment established first, not assumed: `ref_basename`
+order identical and `human_score` **bit-identical positionally on all 866 rows**.
+
+| block | cells differing | max \|Δ\| |
+|---|--:|--:|
+| basic `f0..155` | **120,804 / 135,096** | **4.536785** |
+| peaks `f156..227` | 34,566 / 62,352 | 0.326375 |
+| masked `f228..299` | 62,346 / 62,352 | 0.067955 |
+| iw `f300..371` | 62,346 / 62,352 | 0.079387 |
+
+Identical results against BOTH v1-372 roots (`2026-08-30-full-features-372` and
+`2026-05-15-full-features`) — consistent, since those two agree on basic+peaks. Every row
+differs, on 285–341 of 372 slots; no row and no slot is clean. CSIQ is 512×512, exactly the
+padded-width divergence class C removed (the commit: *"it put 512/576/768/1024/1152/2304
+all in the divergent class"*).
+
+**Two alternatives ruled out by measurement, not by argument.** `ZENSIM_ERA2_DENSE=0`
+reproduces HEAD's output **byte-for-byte**, so `515001dc`'s era-2 dense flip is not the
+cause (it moves only `f372+`). `v1_golden_bytes` passes **5/5** at HEAD, because every
+golden fixture is 64×64 / 96×96 / 128×128 / 200×150 — tight class or below the tile — which
+is the same blindness `CLAUDE.md` had already flagged for the goldens and which the C
+rollout's own non-tight fixture only partly covers.
+
+**What this does and does not invalidate.** It does **not** touch a same-root A/B (both arms
+read the same bytes) and it does not reorder 372 cells relative to each other. It does mean
+every ABSOLUTE `--regime 372` number — shipped D's CID22 **0.86338** included — is an era-1
+read of a model the product now feeds era-3 features. **The 944 roots are NOT affected**:
+`56bbcda2` verified structurally (not just numerically) that the fold's production path
+never references the padding owner, so the 944 regimes are unchanged by construction.
+
+**Registered, not run:** re-extract the 372 root at HEAD
+(`scripts/canonical_corpus/build_eval372_root.sh` + `pack_eval372_root.py` — a decode-bound
+corpus pass, no code change) and re-verdict the D/B lineages on it. Registry:
+`benchmarks/eval_annotations.json` → `v1-372-eval-roots-predate-option-c-2026-09-05`.
+Record: `benchmarks/d_ship_flip_2026-09-05.md` §3.
