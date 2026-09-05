@@ -213,6 +213,15 @@ def main():
                          "has ever been through the gate). Needs zenpredict-bake.")
     ap.add_argument("--bake-bin", default=os.path.expanduser(
                         "~/work/zen/zenanalyze/target/release/zenpredict-bake"))
+    ap.add_argument("--no-broad-honest", action="store_true",
+                    help="train with NO broad-honest negatives (negrich + matched "
+                         "anchors only) — the ablation that prices what the codec "
+                         "negatives buy on honest-output FP")
+    ap.add_argument("--split-out", default=None,
+                    help="write the source-held-out split (source\tfold) here. Needed "
+                         "to measure held-out FP on a broad-honest instrument the head "
+                         "TRAINED on — e.g. per-codec honest FP restricted to the "
+                         "ladder images in the test fold.")
     ap.add_argument("--bake-extra-width", type=int, action="append", default=None,
                     help="ALSO emit the head at this caller width (repeatable). The "
                          "372 v1 layout is what the corruption GRID and the 372 eval "
@@ -296,7 +305,10 @@ def main():
               "(need --severe-720 for a v2/foldable subset)!")
 
     # broad honest easy negatives (span q, diverse content)
-    if a.broad_honest:
+    if a.no_broad_honest:
+        broad = []
+        print("broad_honest: DISABLED (--no-broad-honest)")
+    elif a.broad_honest:
         broad = []
         for spec in a.broad_honest:
             bits = spec.split(":")
@@ -330,6 +342,13 @@ def main():
     tr, va, te = which == "train", which == "val", which == "test"
     print(f"total {len(X)} rows | split train {tr.sum()} / val {va.sum()} / test {te.sum()} | "
           f"subclasses {dict(zip(*np.unique(sub, return_counts=True)))}")
+
+    if a.split_out:
+        with open(a.split_out, "w") as f:
+            f.write("source\tfold\n")
+            for src_i, fold in sorted(set(zip(src.tolist(), which.tolist()))):
+                f.write(f"{src_i}\t{fold}\n")
+        print(f"split written -> {a.split_out}")
 
     sc = StandardScaler().fit(X[tr]); Z = lambda M: np.clip(sc.transform(M), -8, 8)
 
