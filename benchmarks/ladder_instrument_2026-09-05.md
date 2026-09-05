@@ -340,6 +340,42 @@ halves `avif-rav1e` (0.23–0.28 against D's 0.5385) and loses jpeg. **The λ ax
 exhausted as a floor lever** — the sweep is not "not yet tuned", it is pointed the
 wrong way, and no member of the family is a ship candidate.
 
+### 9.5 WHICH features drive D's jpeg inversions — making the registered fix concrete
+
+D is a single linear layer (372 -> 1, f16, 92.7 % near-zero), so a one-hot probe
+through the owner (`bake_dial_refit predict` on 373 synthetic rows) recovers its
+exact per-feature derivative `dRaw/dx`. Exactly **28** are non-zero, matching
+ADD156's documented coefficient count. Decomposing each of the 19 failing jpeg
+ladders' wrong-direction step as `Δraw = Σ_k (dRaw/dx_k)·Δx_k`:
+
+| feature | mean contribution to the wrong-direction move | share |
+|---|--:|--:|
+| **`f93`** | −0.00310 | **49.6 %** |
+| `f94` | −0.00180 | 28.8 % |
+| `f136` | −0.00131 | 21.0 % |
+| `f91` | −0.00068 | 10.9 % |
+| `f138` | −0.00025 | 4.1 % |
+| *(total mean Δraw)* | **−0.00625** | — |
+
+(Shares exceed 100 % because the remaining active features partially offset.)
+
+**`f93` alone is half the defect**, and `f91`/`f93`/`f94` are adjacent. Using only the
+width formula this repo documents (`2 + n_scales·3·31`), those three sit at **scale 0,
+channel index 2, slots 27/29/30**, and `f136`-`f140` at scale 1, channel index 0 —
+i.e. the dominant contributors cluster in the **coarsest scale's third channel**.
+*(The scale/channel arithmetic follows from the documented width formula; the per-slot
+semantics were NOT verified here and should be read from the feature table before
+acting on them.)*
+
+**A magnitude caveat that matters for how hard this should be chased.** The failing
+steps are overwhelmingly **q 12 -> 13** and **q 11 -> 12** — adjacent quantizer
+settings — and the Δraw magnitudes run from **−0.000087** to −0.014 on a ladder whose
+raw span is ~0.1. So D's jpeg failure is a **hair's-breadth ordering wobble between
+nearly-identical settings**, not a gross mis-ranking. The A7r rule is strict by
+design (one inversion fails the ladder) and D misses the mentor by exactly one
+ladder — but a reader deciding how much to spend on the fix should know it is a
+near-tie phenomenon, and that **ssim2 itself wobbles on 18 of the same 39 ladders**.
+
 ---
 
 ## 10. SHIP DECISION — nothing installs
