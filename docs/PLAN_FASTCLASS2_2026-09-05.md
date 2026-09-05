@@ -226,6 +226,37 @@ precondition, never as a null.
 `PP` = `P1α` + `--pjnd-passthrough-*` at its default. k = 3 each. Neither is
 tuned; a swept version is out of scope for this campaign.
 
+### Phase C3 — the A7r lever, which is also alpha-head-only (conditional, ≤3 fits)
+
+**AMENDMENT, registered 2026-09-05 20:40 UTC**, same standing as C2: Phase A
+had 4 of 30 cells scored and only the CONTROL had been read.
+
+G6 established that A7r — a *ladder-ordering* property of the weights — is the
+binding ship clause. The trainer has a regularizer aimed at exactly that,
+`--monotonicity-reg` (*"penalises a predicted pair whose ordering disagrees
+with the target ordering via a quadratic hinge"*), and a correct-by-
+construction mode, `--monotone-cbc` (*"bounded [0,100] + monotone↓ in
+distortion BY CONSTRUCTION (codec goals G1+G3)"*). **Both are wired ONLY on
+`--per-sample-α-head`**, so Phase C is the first thing in this model class that
+can reach either.
+
+**ARM `MR`:** `P1α` + `--monotonicity-reg` at the trainer's own documented
+default margin, k = 3. Same precondition as C2 (run only if `P1α` is not itself
+a KonJND regression ≥0.02).
+
+**`--monotone-cbc` is NOT an arm.** It additionally requires
+`--tanh-output-head-scale > 0` and a per-feature sign-mask TSV, and this repo's
+CLAUDE.md records that without the mask it *"collapses the dial by
+mis-constraining the ~72 sign-flip features"*. The mask that exists
+(`benchmarks/feature_sign_mask_2026-05-26.tsv`) is a **372**-layout artifact and
+this class is 944-layout, so using it would be a silent index mismatch.
+Registered as the named follow-up with its prerequisite stated; not run.
+
+**EXECUTION ORDER (not an arm change).** Phases run C → A-ORACLE → C2/C3 → B,
+because C is the only phase that can move either of the two axes the campaign
+is actually short on. The ARMS are exactly as frozen; only the order they are
+fit in changes.
+
 ### Phase A-ORACLE — the COMPUTE ceiling of this recipe (3 fits)
 
 **AMENDMENT, registered 2026-09-05 20:10 UTC, while Phase A was on its first

@@ -89,3 +89,72 @@ on another, for 1 of its 9 legs.
 would change the teacher and confound every arm against the incumbent — but it
 is now a machine-checkable fact attached to every bake this campaign produces,
 which is what fundamental 3 was for.
+
+## 3. THE SHIP BLOCKER IS A7r, AND THE id100 CHAIN CLOSES THE CONTRACT
+
+*(Measured while Phase A was 4 of 30 cells in; only the CONTROL cell had been
+read. Both results are on bakes that already existed, plus one re-pack.)*
+
+### 3.1 The id100 chain works on this class, unchanged and with rank untouched
+
+The exact command (recorded here because the commit that first reported it lost
+two literals to shell substitution — use a heredoc for messages with backticks):
+
+```sh
+bake_dial_refit pack \
+  --in  bakes/F2_S265_H128_p_s4004.bin \
+  --out bakes/F2_S265_H128_p_s4004_id100.bin \
+  --neg-tail \
+  --anchor anchors/anchor944_pools_id100.parquet --target-col target_score \
+  --verify <root>/ext_cid22val.parquet --verify-col human_score
+```
+
+`anchor944_pools_id100.parquet` = `anchor944_pools_dial.parquet` (2,020 rows)
+**concatenated** with 21 identity rows at `target_score = 100`, built by
+`benchmarks/fastclass2_campaign_2026-09-05/build_id100_anchor.py`. The
+concatenation (rather than a second `--anchor-parquet`) is forced: `pack` takes
+exactly ONE anchor; only `fit-lasso` accepts a repeated flag. `n_id = 21` is
+`d_id100`'s registered value, reused — 1.03 % of anchor mass there, 1.03 %
+here.
+
+| | before | after |
+|---|--:|--:|
+| C5 identity rows outside the band | **39 of 39** | **0** |
+| CONTRACT | 5/6 (FAIL) | **6/6 (PASS)** |
+| C1 monotonicity | 0.9893662271373883 | 0.9893662271373883 |
+| C3 negative-tail frac<0 | 0.8585 | 0.8535 |
+| C4 deepest probe dial | −84.4508 | −84.7335 |
+| C6 cells above identity | 0 | 0 |
+| CID22 (pack verify) | 0.8863 | 0.8863 |
+
+Prune identity gate PASS, all 2,041 anchor scores bit-identical (class 1 only);
+944 → 265 layer-0 inputs, caller width unchanged.
+
+### 3.2 A7r: no 944-width model of ANY class passes, and the dial cannot fix it
+
+944 ladder instrument, `--floor-rule resolvable`. A7r = how many of the 5
+codecs have a floor-representability fraction below the mentor's own.
+
+| bake | class | **A7r** | contract | C1 mono | C3 | C4 |
+|---|---|--:|---|--:|--:|--:|
+| **shipped Profile D** | 372 ADD156 additive | **0 — PASS** | PASS | 0.9931 | 0.9145 | −213.15 |
+| `Fctl_id100negrich` | 156 slice, 944 additive | 2 | PASS | 0.9879 | 0.7725 | −115.82 |
+| `Fpeaks_id100negrich` | 228 slice, 944 additive | 4 | PASS | 0.9628 | 0.7790 | −118.78 |
+| `Ffree_id100negrich` | 265 slice, 944 additive | 4 | PASS | 0.9615 | 0.7855 | −138.26 |
+| `W11J_s4013` | 944-full MLP leader | 4 | PASS | 0.9902 | 0.0010 | −7.14 |
+| `FC_D3_s4004` | the fast-class incumbent | **5** | FAIL (C5) | 0.9398 | 0.8405 | −132.95 |
+| `F2_S265_H128_p_s4004` (control) | 944 MLP | **5** | FAIL (C5) | 0.9402 | 0.8585 | −84.45 |
+| ↳ same, id100-packed | 944 MLP | **5** | **PASS** | 0.9401 | 0.8535 | −84.73 |
+
+**Only the shipped 372 additive passes, and the id100 chain does not move A7r
+by a single codec** — which is the point: A7r is a ladder-*ordering* property of
+the weights, and a monotone output spline cannot reorder anything. The d_peaks
+lane reached the same conclusion independently at 372 width (*"the raw
+pre-spline model is already inverted at the same step — lever is in the fit,
+not the spline"*).
+
+**Consequence for this campaign, stated before the arms land:** rank
+competitiveness and shippability are now two separate questions with two
+different blockers. The plan's ship rule is unrelaxed; A7r becomes a reported
+axis on every arm (gate G6) so the answer to "does any set or shape move it?"
+is data rather than a single end-of-campaign verdict.
