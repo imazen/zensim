@@ -23,12 +23,18 @@
 #   preC       the same pixels extracted at 27cfde15, the commit immediately
 #              before option C. Exists so `postC - preC` is an era measurement
 #              with the pixels held fixed.
+#   ladder     the 2026-09-05 FLOOR-DENSE instrument: each codec's own lowest
+#              DISTINCT settings at the bottom (jpeg emits ONE bitstream for
+#              every q in 0..10, so the older grids' bottom three jpeg steps are
+#              one setting sampled three times), and TWO avif ladders. Carries
+#              its own peer_ssim2 bars, keyed by grid sha256.
 # Individual overrides (ZL_GRID / ZL_NEGTAIL / ZL_IDENTITY / ZL_ROOT / ZL_OUT)
 # still win, so a one-off instrument needs no new era name.
 set -euo pipefail
 REPO=/home/lilith/work/zen/zensim
 D=/mnt/v/output/zensim/dialgate-2026-09-04
 I=/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments
+L=/mnt/v/output/zensim/ladder-2026-09-05/instruments
 R="${ZL_BDR:-$REPO/target/release/bake_dial_refit}"
 V="${ZL_BV:-$REPO/target/release/bake_verdict}"
 INC=/mnt/v/output/zensim-jxl-nearlossless/inclusive_winsor_corpus.parquet
@@ -54,13 +60,27 @@ case "${ZL_ERA:-canonical}" in
     IDENTITY_DEF=$I/identity_probe_372_postC_2026-09-05.parquet
     ROOT_DEF=/mnt/v/zen/zensim-training/2026-08-30-full-features-372
     OUT_DEF=/mnt/v/output/zensim/dpeaks372-2026-09-05/arms/preC ;;
-  *) echo "unknown ZL_ERA=${ZL_ERA} (canonical|postC|preC)" >&2; exit 2 ;;
+  ladder)
+    # The 2026-09-05 FLOOR-DENSE instrument: five per-codec ladders whose bottom
+    # is each codec's own lowest DISTINCT settings, on the 2026-07-27 pixels
+    # re-encoded at the current encoder era (zenav1-svt @ 2d75a105f). It is a
+    # DIFFERENT instrument from `postC`, not a re-read of it — same 39 sources,
+    # but a denser q axis, saturated steps removed by encode hash, and TWO avif
+    # ladders (`avif-svt` / `avif-rav1e`) where the older grids have one `avif`.
+    # Its own peer_ssim2 bars are registered separately, keyed by grid sha256.
+    GRID_DEF=$L/dial_grid_372col_ladder.parquet
+    NEGTAIL_DEF=$I/negtail_probe_372_postC_2026-09-05.parquet
+    IDENTITY_DEF=$I/identity_probe_372_postC_2026-09-05.parquet
+    ROOT_DEF=/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC
+    GRIDTRUTH_DEF=$L/dialcells_ssim2_ladder.tsv
+    OUT_DEF=/mnt/v/output/zensim/ladder-2026-09-05/arms ;;
+  *) echo "unknown ZL_ERA=${ZL_ERA} (canonical|postC|preC|ladder)" >&2; exit 2 ;;
 esac
 # The REFERENCE metric's own per-cell scores on the dial grid. Only the
 # report-only per-codec column needs it; A7r's bars come from the registry. Same
 # table --dial-peer-scores reads, and the ssim2 truth is a property of the
 # PIXELS, so one file serves all three 372 eras.
-GRIDTRUTH="${ZL_GRIDTRUTH:-/mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_qv2grid.tsv}"
+GRIDTRUTH="${ZL_GRIDTRUTH:-${GRIDTRUTH_DEF:-/mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_qv2grid.tsv}}"
 # Which NEGATIVE-TAIL pin set is in force: `product` (the 2026-09-05 per-codec
 # FLOOR REPRESENTABILITY rule, the default) or `retired` (the pre-ruling mentor
 # probe-depth pins).

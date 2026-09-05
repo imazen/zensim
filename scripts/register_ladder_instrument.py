@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Derive `peer_ssim2`'s bars on a NEW dial grid and APPEND them to the floor registry.
+
+The bars are DERIVED THROUGH THE OWNER (`bake_verdict --dial-peer-scores` +
+`--gaddr-json`) and copied verbatim. This script computes no statistic of its own —
+if it did, the registry would hold a number the grading path cannot reproduce.
+
+APPEND-ONLY, and enforced: a row whose `(dial_grid_sha256, reference)` key already
+exists is REFUSED, never rewritten. An unregistered grid grades NOT-MEASURABLE, which
+is the property that stops a candidate dodging a bar by picking a friendlier
+instrument — so silently replacing a row would be worse than adding none.
+
+Usage:
+  register_ladder_instrument.py --grid <parquet> --truth <ssim2 cells.tsv> \
+      --label <text> [--registry <json>] [--bake <any 372 bake>] [--dry-run]
+"""
+from __future__ import annotations
+import argparse, hashlib, json, os, subprocess, sys, tempfile
+
+REPO = "/home/lilith/work/zen/zensim"
+REG_DEFAULT = os.path.join(REPO, "benchmarks/dial_addressability_floor_2026-09-04.json")
+
+
+def sha256(p: str) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for c in iter(lambda: f.read(1 << 20), b""):
+            h.update(c)
+    return h.hexdigest()
+
+
+def derive(bv: str, bake: str, grid: str, truth: str, out: str) -> dict:
+    """peer mode: the scorer described is the REFERENCE metric, not `--bake`."""
+    cmd = [bv, "--bake", bake, "--corpora", "cid22", "--dial-grid", grid,
+           "--gaddr-grid-truth", truth,
+           "--dial-peer-scores", f"peer_ssim2={truth}",
+           "--gaddr-json", out]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.stderr.write(r.stdout + r.stderr)
+        raise SystemExit(f"bake_verdict failed rc={r.returncode}")
+    d = json.load(open(out))
+    who = d.get("scorer") or d.get("describes") or ""
+    if who and "peer" not in str(who).lower():
+        raise SystemExit(f"--gaddr-json describes {who!r}, not the peer — refusing to "
+                         f"register a candidate's numbers as the mentor's bar")
+    return d
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--grid", required=True)
+    ap.add_argument("--truth", required=True)
+    ap.add_argument("--label", required=True)
+    ap.add_argument("--registry", default=REG_DEFAULT)
+    ap.add_argument("--bake", default=os.path.join(
+        REPO, "zensim/weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin"))
+    ap.add_argument("--bv", default=os.path.join(REPO, "target/release/bake_verdict"))
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+
+    gsha = sha256(a.grid)
+    reg = json.load(open(a.registry))
+    for row in reg.get("grids", []):
+        if row["dial_grid_sha256"] == gsha:
+            raise SystemExit(f"grid {gsha[:16]} is ALREADY registered as {row['label']!r} "
+                             f"— this registry is append-only; refusing")
+    for row in reg.get("grid_floor_representability", []):
+        if row["dial_grid_sha256"] == gsha and row["reference"] == "peer_ssim2":
+            raise SystemExit(f"(grid {gsha[:16]}, peer_ssim2) already has a floor row "
+                             f"— refusing")
+
+    work = tempfile.mkdtemp(prefix="ladderreg_")
+    d = derive(a.bv, a.bake, a.grid, a.truth, os.path.join(work, "peer.json"))
+    dial, meas = d["dial"], d["dial"]["addressability"]["measured"]
+    import pyarrow.parquet as pq
+    n_rows = pq.read_metadata(a.grid).num_rows
+
+    grid_row = {"dial_grid_sha256": gsha, "label": a.label, "path": os.path.abspath(a.grid),
+                "n_rows": n_rows,
+                **{k: dial[k] for k in ("min", "max", "p5", "p95", "reach")},
+                "dynamic_range": dial["dynamic_range"],
+                "mono": dial["mono_pct"], "tied": dial["tied_pct"],
+                "registered": "2026-09-05", "active": True}
+    floor_row = {
+        "dial_grid_sha256": gsha, "reference": "peer_ssim2",
+        "label": f"{a.label} -- per-CODEC FLOOR REPRESENTABILITY",
+        "path": os.path.abspath(a.grid), "bottom_k": 3,
+        "registered": "2026-09-05", "active": True,
+        "codecs": [{"codec": c["codec"], "n_ladders": c["n_ladders"],
+                    "represented_frac": c["represented_frac"]}
+                   for c in meas["codec_floor"]],
+        "grid_truth_sha256": sha256(a.truth),
+        "note": ("THE BAR for this instrument. `peer_ssim2`'s own floor representability, "
+                 "derived through the owner (`bake_verdict --dial-peer-scores "
+                 "peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each "
+                 "codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) "
+                 "are removed from the instrument, so jpeg's bottom three are three SETTINGS "
+                 "rather than three samples of one. `avif-svt` and `avif-rav1e` are separate "
+                 "ladders — different encoders, different quantizer mappings."),
+    }
+    print(json.dumps({"grid": grid_row, "floor": floor_row}, indent=1))
+    if a.dry_run:
+        print("\n--dry-run: registry NOT written"); return
+    reg.setdefault("grids", []).append(grid_row)
+    reg.setdefault("grid_floor_representability", []).append(floor_row)
+    with open(a.registry, "w") as f:
+        json.dump(reg, f, indent=1)
+    print(f"\nappended 2 rows to {a.registry}")
+
+
+if __name__ == "__main__":
+    main()
