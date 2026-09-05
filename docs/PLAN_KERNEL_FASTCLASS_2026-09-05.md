@@ -219,3 +219,65 @@ Measurement is serialized behind box idle (the campaign lane's extraction and
 fits have priority; the sweep script self-checks load and refuses rather than
 producing a contaminated number). Levers are implemented in ranked order and
 each is landed or falsified before the next begins — no parked work.
+
+---
+
+# LANE 2 — the front end (pre-registered 2026-09-05, before any measurement or code)
+
+Lane 1 closed with a map whose headline is *"for the fast class the FRONT END is
+the biggest phase, and it is not the part anybody has been optimising"*:
+producer **32.5 %** of the 6.509 ms `156` walk, `ProdConvert` alone **22.0 %**,
+`ProdDownscale` **10.5 %**. Lane 1 declined L2 on the grounds that the producer
+is *already parallel* (sides `rayon::join`, cascade 6-way) — which settles
+**scheduling** and says nothing about the **per-pixel work inside a chunk**.
+Lane 2 takes that inside.
+
+## L2.0 Stage split (deliverable 1) — no pass/fail bar
+
+`ProdConvert` is one timer over five distinguishable stages: the `[u8;3]`
+gather + `srgb_u8_to_linear` LUT expansion, the 3×3 opsin matrix, the three
+`cbrt_midp` calls, the XYB mix + positive shift, and the buffer plumbing
+(`rgb_buf` staging copy, `Vec<&mut [f32]>` chunk collections, the pad spread).
+Instrument: **callgrind Ir attribution**, which is deterministic and therefore
+**valid on a loaded box** — the one measurement in this lane that does not have
+to wait for an idle window. Tier caveat stated on every number: valgrind cannot
+execute AVX-512, so the profile is the **`v3`/AVX2** tier
+(`X64V3Token` = AVX2+FMA+BMI1/2) and kernel *ratios* may shift at `v4x`.
+Wall-clock confirmation of any landed lever follows the §1b ASLR protocol on an
+idle box.
+
+## L2.x levers, with pre-registered gates
+
+Universal admission gate is §3's (G-EXACT / G-PERF / G-API / G-CLEAN),
+unchanged. **G-PERF is ≥ 2 % of the fast walk at some cell with the
+bit-identical control arm reading 1.000 ± that cell's own measured noise
+floor.** A lever inside the noise band is *unestablished*, not a result. A
+lever that fails is reverted and recorded as falsified.
+
+| # | Lever | Hypothesis | Pre-registered gate / decision rule |
+|---|---|---|---|
+| **L9** | **The `rgb_buf` staging copy is a per-chunk `Vec` allocation.** `streaming.rs:1299` does `Vec::with_capacity(rows*width)` inside `process_chunk`, then memcpys every row into it, then hands it to the kernel. At 1152²/64-row chunks that is a **221 kB** buffer per chunk (past glibc's 128 kB mmap threshold ⇒ fresh pages + faults + `munmap`), and it is 3 more `Vec`s for the `p{0,1,2}_chunks` collections. | These are a large share of the **~175 per-walk allocations lane 1 could not locate** (§3.2), and the mmap/first-touch is real time at ≥1152². | Count first: extend `fastclass_alloc_steady_state` attribution to name the producer. Then remove what is removable **bit-exactly** — the three chunk-collection `Vec`s become indexed `par_chunks_mut` zips (same boundaries, same body). The staging copy is only removable bit-exactly if the kernel sees the **same element count**; see L10. Land under G-PERF, or record the allocation win alone with the wall-clock delta stated as unestablished. |
+| **L10** | **Per-row kernel calls are NOT bit-exact** and this must be established before anyone tries it. The kernel's vector body uses `cbrt_midp` and its scalar remainder uses `cbrtf_fast` — *different cube roots*. A call over `rows·width` elements has remainder `(rows·width) % 16`; per-row calls have remainder `width % 16` on **every** row. | Equal only when `width % 16 == 0`. Otherwise per-row conversion moves bytes. | **Prove it by measurement, not by reading:** a test that converts the same pixels in one bulk call and in per-row calls and compares `to_bits()`, at a width with `width % 16 == 0` and at one without. If the non-aligned case differs, per-row conversion is registered as an **era break**, never flipped, and the staging copy stays for non-aligned widths. |
+| **L11** | **`cbrt_midp` carries sign/zero handling this call site cannot need.** The kernel's own comment states `mixed >= K_B0 ≈ 0.0038` — "no zeros, denormals, NaN, or infinities". `cbrt_midp` still does sign-extract, `abs`, and a zero-select per call, ×3 per 16 pixels. | A positive-domain cube root is bit-exact here and strictly less work. | Bit-exactness is the gate: the positive-domain form must reproduce `cbrt_midp` `to_bits()`-exactly **over the whole reachable input domain** (all 2²⁴ `mixed` values in `[K_B0, matrix max]`, brute-forced), not on samples. It lives in **zensim** — archmage is a different repo and is not to be touched. Land under G-PERF. |
+| **L12** | **The de-interleave is 48 scalar LUT loads + 3 stack arrays per 16 pixels.** `r_arr[i] = srgb_u8_to_linear(p[0])` etc., then `from_array`. | LLVM may already turn this into shuffles (CLAUDE.md's fixed-array pattern) — or the 256-entry LUT gather may block it. | **Read the disassembly before proposing anything** (`objdump` on the release binary), per the `fused_vblur_ssim` lesson: locate the cost against loop structure first. A LUT lookup is bit-exact under any correct implementation, so a SIMD form is admissible; a polynomial is not (era break). Report clean if LLVM already vectorised it. |
+| **L13** | **`ProdDownscale` is 10.5 %** and `downscale_2x_into` is called 6× per scale per produce with a `par_iter_mut` fan-out of 6. | Unknown; not yet split. | Report its Ir share and whether it is bound by the 2×2 average or by the plane plumbing. Implement only under G-PERF. |
+| **L14** | **`linear-srgb` batch API.** `srgb_u8_to_linear` already routes to `linear_srgb::default`; the crate also ships batch/SIMD forms. | A batch call may beat the scalar-per-component form. | Admissible **only** if it is bit-identical on **all 256** u8 inputs against the current scalar entry point, proven by an exhaustive test. Otherwise era break, registered not flipped. |
+
+## L2 obligations carried from lane 1
+
+* Finish lane 1's **NOT MEASURED** cells when the box goes idle: L1's 8T half
+  (`Off` vs `Peaks`), and the 8T/2304² + both-tier sweep of the shipped `D`
+  path through the new `zensim_D` bench arm. Publish as MEASURED into lane 1's
+  tables, or leave them NOT MEASURED **with the reason**.
+* Keep lane 1's ratchets green: `fastclass_alloc_steady_state` (bar 200/walk —
+  *lower it, never raise it*) and
+  `self_blur_sizing_predicate_matches_the_strip_loop_predicate`.
+
+## Measurement discipline specific to this lane
+
+The box is carrying the campaign lane's fits and extractions. **Callgrind Ir is
+load-immune and is therefore the primary instrument for the stage split.**
+Every wall-clock cell goes through `scripts/kernel_fastclass_sweep.sh`, which
+self-checks load and emits `SKIPPED_BOX_BUSY` rather than a contaminated
+number. No cell is published without its control-arm reading. No idle-attached
+waiting: the sweep is a script that gates itself.
