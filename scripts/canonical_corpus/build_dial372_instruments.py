@@ -571,6 +571,51 @@ def build_anchor(args, work: str) -> dict:
                     "rows carry 100.0"}
 
 
+def build_ladder944(args, work: str) -> dict:
+    """Attach a 944-wide extraction to the ladder instrument's OWN key columns.
+
+    ORDER CONTRACT, verified rather than assumed. `extract_features_372col` sorts
+    its output by `ref_basename` (:216) and so scrambles positional attachment;
+    **`v2_ab_extract` does NOT** — tested on a deliberately non-alphabetical 6-row
+    input, its output order matched its input exactly. This function therefore
+    joins POSITIONALLY, and GATES that decision: the 944 CSV's `ref_basename` must
+    equal the pairs TSV's ref basename on every row, and the pairs TSV's `row_id`
+    must be the identity permutation. Either mismatch refuses.
+
+    Regime: `ZENSIM_AB_MODE=foldapp2pools` — the runtime regime of
+    `dial_grid_944col_POOLS_2026-08-30`. Never column-mix regimes.
+    """
+    pairs = list(csv.DictReader(open(args.ladder944_pairs), delimiter="\t"))
+    rows = list(csv.DictReader(open(args.ladder944_csv)))
+    if len(rows) != len(pairs):
+        raise SystemExit(f"944 csv has {len(rows)} rows for {len(pairs)} pairs — refusing")
+    for i, (pr, r) in enumerate(zip(pairs, rows)):
+        if int(round(float(pr["row_id"]))) != i:
+            raise SystemExit(f"pairs TSV row {i} carries row_id {pr['row_id']} — the 944 "
+                             f"join is POSITIONAL and needs the identity permutation")
+        if stem(os.path.basename(pr["ref_path"])) != stem(r["ref_basename"]):
+            raise SystemExit(f"944 row {i} is {r['ref_basename']!r} but the pairs TSV says "
+                             f"{os.path.basename(pr['ref_path'])!r} — order is NOT preserved, "
+                             f"refusing to attach keys positionally")
+    keys = pq.read_table(args.ladder944_keys,
+                         columns=["image_id", "codec", "q", "codec_param",
+                                  "param_kind"]).to_pydict()
+    if len(keys["image_id"]) != len(rows):
+        raise SystemExit("key parquet and 944 csv disagree on row count — refusing")
+    for i in range(len(rows)):
+        if keys["image_id"][i] != stem(os.path.basename(pairs[i]["ref_path"])):
+            raise SystemExit(f"key parquet row {i} disagrees with the pairs TSV — refusing")
+    nf = sum(1 for c in rows[0] if c.startswith("f") and c[1:].isdigit())
+    cols = dict(keys)
+    for j in range(nf):
+        cols[f"f{j}"] = [float(r[f"f{j}"]) for r in rows]
+    dst = os.path.join(args.out_dir, f"dial_grid_944col_{args.tag}.parquet")
+    pq.write_table(pa.table(cols), dst, compression="zstd")
+    return {"file": dst, "rows": len(rows), "n_features": nf, "sha256": sha256(dst),
+            "regime": "folded720append2pools (ZENSIM_AB_MODE=foldapp2pools)",
+            "join": "positional, GATED on ref_basename equality and an identity row_id"}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--extractor", required=True,
@@ -580,6 +625,9 @@ def main():
     ap.add_argument("--build-commit", default="", help="the extractor's tree commit")
     ap.add_argument("--negtail-pixels",
                     default="/mnt/v/output/zensim/dpeaks372-2026-09-05/negtail_pixels")
+    ap.add_argument("--ladder944-csv", default="", help="v2_ab_extract output")
+    ap.add_argument("--ladder944-pairs", default="", help="the pairs TSV it was run on")
+    ap.add_argument("--ladder944-keys", default="", help="the 372 ladder instrument (keys)")
     ap.add_argument("--ladder-dir", default="",
                     help="a build_ladder_grid.sh output dir; required for --what ladder")
     ap.add_argument("--what", default="grid,identity,negtail",
@@ -605,6 +653,11 @@ def main():
             raise SystemExit("--what ladder needs --ladder-dir")
         man["ladder_dir"] = args.ladder_dir
         man["instruments"]["ladder_grid"] = build_ladder(args, work)
+    if "ladder944" in want:
+        for f in ("ladder944_csv", "ladder944_pairs", "ladder944_keys"):
+            if not getattr(args, f):
+                raise SystemExit(f"--what ladder944 needs --{f.replace('_','-')}")
+        man["instruments"]["ladder_grid_944"] = build_ladder944(args, work)
     if "anchor" in want:
         if not args.ladder_dir:
             raise SystemExit("--what anchor needs --ladder-dir")
