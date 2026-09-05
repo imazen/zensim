@@ -1804,3 +1804,26 @@ missing marker distinguish them from success.
 
 Artifacts + provenance: `~/work/zen/DATA_PROVENANCE.md` ★ ladder-instrument-2026-09-05.
 Record: `benchmarks/ladder_instrument_2026-09-05.md`.
+
+**§3.39 addendum — the ANCHOR arm (2026-09-05).** A current-era, **UNCLAMPED**,
+CID22-disjoint dial anchor was built alongside the instrument
+(`ladder_anchor_372col_anchor.parquet`, sha `4683ed51ac6acf8c`, 4,552 rows = 4,520
+distinct cells + 32 identity rows at 100). 32 k-means imazen-26 representatives x 4
+ladders; `check_holdout_overlap --threshold 10` against the 49 CID22 validation
+references returns **0 hits** (closest d = 19). It closes both defects of the shipped
+anchor: the target keeps its sign (min **−69.97**, **404 negative rows — 8.9 %** — where
+`max(ssim2, 0)` collapses that whole run onto one bottom knot), and targets and
+features come from ONE fresh sweep instead of a stored-era score read against today's
+decode.
+
+**It is a registered asset and is NOT installed, for a measured reason.** Re-anchoring
+shipped D on it (`shared-anchor`, 19 knots) leaves **A7r identical on all five codecs**
+and CID22 identical to 5 dp — confirming, on a real anchor rather than by argument,
+that a monotone spline cannot move a rank-level failure — while **cutting dial reach
+194.97 -> 160.07** and flipping A2/A5/A6 from PASS to FAIL. Under the standing rule that
+a model limiting dial range cannot ship, that disqualifies it on its own.
+
+**This is the SECOND independent imazen-26-based anchor to lose reach** (§3.35's
+2026-09-04 proposal cut 96.85 -> 85.74 and was likewise not shipped). Two builds,
+different codec sets, different eras, same direction — enough to treat "imazen-26
+anchors lose dial reach" as a pattern wanting a named cause before a third attempt.
