@@ -25,7 +25,12 @@ ZM="${3:-/mnt/v/output/zensim/ladder-2026-09-05/bin/zenmetrics_svtnew}"
 
 # The 66-step floor-dense q grid. 0..30 step 1 is the NEW part: it guarantees three
 # DISTINCT lowest settings exist for every codec (jpeg's first distinct step is q=11).
-QG="$(python3 -c '
+# LADDER_QGRID overrides the q axis. The ANCHOR run uses a floor-preserving trim
+# (0..30 step 1 kept verbatim — the whole point of a new anchor is that the shipped
+# one's max(ssim2,0) clamp collapsed the floor — with the top thinned), because an
+# anchor needs score-range coverage, not the instrument's grading density.
+QG="${LADDER_QGRID:-}"
+[ -n "$QG" ] || QG="$(python3 -c '
 q =[float(i) for i in range(0,31)]
 q+=[float(i) for i in range(35,71,5)]
 q+=[float(i) for i in range(72,91,2)]
