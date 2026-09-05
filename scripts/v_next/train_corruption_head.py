@@ -201,6 +201,15 @@ def main():
                          "has ever been through the gate). Needs zenpredict-bake.")
     ap.add_argument("--bake-bin", default=os.path.expanduser(
                         "~/work/zen/zenanalyze/target/release/zenpredict-bake"))
+    ap.add_argument("--bake-extra-width", type=int, action="append", default=None,
+                    help="ALSO emit the head at this caller width (repeatable). The "
+                         "372 v1 layout is what the corruption GRID and the 372 eval "
+                         "root speak; the runtime fold emits the 944 layout, whose "
+                         "f0..155 basic and f156..227 peaks sit at the SAME indices "
+                         "(zensim-bench's `peaks156_no_raw` arm is a 156+peaks head "
+                         "in the 944 layout). Same coefficients, wider drop list, so "
+                         "one fit serves both without a second training run. Written "
+                         "next to --bake-out as `<stem>_w<width>.bin`.")
     ap.add_argument("--feat-subset", default=None,
                     help="npy of feature indices to restrict to (e.g. the dial+diffmap "
                          "foldable subset). Default: f0..f{nfeat-1}.")
@@ -436,6 +445,19 @@ def main():
                    "n_features": len(FEAT_IDX), "seed": 0,
                    "recommended_deadband_T": rec,
                    "broad_honest": [list(b) for b in broad]})
+        for w in (a.bake_extra_width or []):
+            if w < (max(FEAT_IDX) + 1):
+                raise SystemExit(f"--bake-extra-width {w} is narrower than the "
+                                 f"head's highest read line f{max(FEAT_IDX)}")
+            stem, ext = os.path.splitext(a.bake_out)
+            emit_znpr(f"{stem}_w{w}{ext}", a.bake_bin, w, FEAT_IDX,
+                      sc.mean_[:], sc.scale_[:], lr.coef_[0], float(lr.intercept_[0]),
+                      8.0, iso, float(u_tr.min()), float(u_tr.max()),
+                      {"corpus": a.corpus, "corpus_nfeat": CORPUS_NFEAT,
+                       "negrich": a.negrich, "feat_range": a.feat_range,
+                       "n_features": len(FEAT_IDX), "seed": 0, "caller_width": w,
+                       "recommended_deadband_T": rec,
+                       "broad_honest": [list(b) for b in broad]})
     json.dump(metrics, open(os.path.join(outdir, "metrics.json"), "w"), indent=1)
     try:
         commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
