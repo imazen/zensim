@@ -1339,6 +1339,28 @@ const SEED_GROUP_DROP_FLAGS: [&str; 9] = [
 /// `gauntlet._norm_argv_for_seed_group`.
 fn norm_argv_for_seed_group(argv: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::with_capacity(argv.len());
+    // `argv[0]` is reduced to its BASENAME: the program path is a build
+    // location, not a recipe parameter. The board carries 32 distinct
+    // `argv[0]` values for two tools — one per lane worktree — so keeping the
+    // full path meant a replay from a sibling jj workspace (which the
+    // workspace protocol mandates) could never group with the cell it
+    // replayed. Basename, not removal: `zensim_mlp_train` still never merges
+    // with `bake_dial_refit`. MEASURED: 436 board fullevals, groups 101 -> 98,
+    // both merges genuine (zero other differing tokens).
+    // (2026-09-05, `benchmarks/replication_wave_2026-09-05.md`)
+    let argv: Vec<String> = if argv.is_empty() {
+        Vec::new()
+    } else {
+        std::iter::once(
+            std::path::Path::new(&argv[0])
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| argv[0].clone()),
+        )
+        .chain(argv[1..].iter().cloned())
+        .collect()
+    };
+    let argv = &argv[..];
     let mut i = 0usize;
     while i < argv.len() {
         if SEED_GROUP_DROP_FLAGS.contains(&argv[i].as_str()) {
@@ -1415,8 +1437,13 @@ struct SeedGroupRow<'a> {
     /// training run — listed, so nothing disappears from the report.
     members: Vec<&'a SelectRow>,
     /// One cell per DISTINCT seed (clause 3): the unit every statistic
-    /// below is computed over. `k = reps.len()`.
+    /// below is computed over. Note this is NOT `k` — a member with no
+    /// recorded seed is a representative (it is a distinct artifact) but not a
+    /// distinct DRAW; see [`SeedGroupRow::k_seeds`].
     reps: Vec<&'a SelectRow>,
+    /// `k` — the number of distinct RECORDED seed identities. Zero when no
+    /// member wrote down a seed, which is why it is not `reps.len()`.
+    k_seeds: usize,
     mean_n_pass: f64,
     mean_composite: Option<f64>,
     /// `Measured(mean_m3a)` only when EVERY representative is `Measured` (a
@@ -1477,13 +1504,32 @@ fn group_by_seed<'a>(rows: &[&'a SelectRow]) -> Vec<SeedGroupRow<'a>> {
             // anything, so it is its own representative (keyed by name).
             let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
             let mut reps: Vec<&'a SelectRow> = Vec::new();
+            // `k` counts distinct RECORDED seeds. A member with no recorded
+            // seed is still listed and still a representative (so the group's
+            // means are computed over every distinct artifact), but it is NOT
+            // a distinct DRAW: "how many times was this recipe trained" cannot
+            // be answered by a cell that never wrote down its seed. Counting
+            // it inflated k — two seedless cells of one recipe reported k=2,
+            // i.e. "replicated", off zero recorded seeds. Python's owner
+            // (`gauntlet.build_seed_groups`) has always skipped seedless rows;
+            // this divergence was invisible while such cells happened to land
+            // in different groups, and `scripts/verify_seed_group_parity.py`
+            // caught it the moment the argv[0] fix merged two of them.
+            // (2026-09-05, `benchmarks/replication_wave_2026-09-05.md`)
+            let mut k_seeds = 0usize;
             for m in &members {
-                let sid = m
-                    .seed_id
-                    .clone()
-                    .unwrap_or_else(|| format!("noseed:{}", m.name));
-                if seen.insert(sid) {
-                    reps.push(m);
+                match &m.seed_id {
+                    Some(s) => {
+                        if seen.insert(s.clone()) {
+                            reps.push(m);
+                            k_seeds += 1;
+                        }
+                    }
+                    None => {
+                        if seen.insert(format!("noseed:{}", m.name)) {
+                            reps.push(m);
+                        }
+                    }
                 }
             }
             let n_duplicate_cells = members.len() - reps.len();
@@ -1519,7 +1565,7 @@ fn group_by_seed<'a>(rows: &[&'a SelectRow]) -> Vec<SeedGroupRow<'a>> {
                     sel_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
                 ))
             };
-            let unreplicated = reps.len() == 1;
+            let unreplicated = k_seeds < 2;
             SeedGroupRow {
                 key,
                 members,
@@ -1529,6 +1575,7 @@ fn group_by_seed<'a>(rows: &[&'a SelectRow]) -> Vec<SeedGroupRow<'a>> {
                 m3a,
                 mean_selection_composite,
                 selection_composite_spread,
+                k_seeds,
                 unreplicated,
                 ungroupable,
                 n_duplicate_cells,
@@ -2017,7 +2064,7 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
                 "| {} | {} | {} | {} | {:.2} | {} | {} | {} | {} | {} | {} |",
                 i + 1,
                 g.key,
-                g.reps.len(),
+                g.k_seeds,
                 g.members.len(),
                 g.mean_n_pass,
                 num(g.mean_composite),
@@ -2058,7 +2105,7 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
                 "\n**SEED-GROUP SELECTED: `{}`** — k={}, mean {:.2}/{} floors, mean \
                  selection_composite {} (per-seed spread {}).",
                 w.key,
-                w.reps.len(),
+                w.k_seeds,
                 w.mean_n_pass,
                 w.reps.first().map(|m| m.n_floors).unwrap_or(0),
                 num(w.mean_selection_composite),
@@ -2079,7 +2126,7 @@ fn run_select(paths: &[PathBuf], anns: &[AnnEntry], tsv: bool, seed_group: bool)
                     "{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{}\t{:.6}\t{:.6}\t{}\t{}",
                     i + 1,
                     g.key,
-                    g.reps.len(),
+                    g.k_seeds,
                     g.members.len(),
                     g.n_duplicate_cells,
                     g.mean_n_pass,
@@ -3418,6 +3465,49 @@ mod tests {
         }
     }
 
+    /// REGRESSION (2026-09-05): two cells of ONE recipe that never recorded a
+    /// seed reported k=2 — "replicated" off ZERO recorded seeds — because a
+    /// seedless member was given the synthetic identity `noseed:<name>` and
+    /// counted as a distinct draw. `gauntlet.build_seed_groups` has always
+    /// skipped seedless rows; the divergence was invisible until the argv[0]
+    /// fix put two such cells in one group, and the cross-owner parity gate
+    /// caught it. `benchmarks/replication_wave_2026-09-05.md`.
+    #[test]
+    fn seed_group_members_with_no_recorded_seed_do_not_count_as_draws() {
+        let mk = |name: &str| {
+            let mut v = passing_fixture();
+            merge(&mut v, &json!({"name": name, "m3a_coherence": 0.5}));
+            // Replace the repro wholesale: the fixture carries a seed, and this
+            // test is about a cell that never recorded one.
+            v["repro"] = json!({"argv": ["zensim_mlp_train", "--epochs", "120"]});
+            v
+        };
+        let (a, b) = (mk("NOSEED_A"), mk("NOSEED_B"));
+        assert_eq!(seed_identity(&a), None, "no seed recorded");
+        assert_eq!(
+            seed_group_key(&a),
+            seed_group_key(&b),
+            "same recipe, so they share a key"
+        );
+        let rows: Vec<SelectRow> = [&a, &b].into_iter().map(select_row).collect();
+        let refs: Vec<&SelectRow> = rows.iter().collect();
+        let groups = group_by_seed(&refs);
+        assert_eq!(groups.len(), 1, "one recipe, one group");
+        let g = &groups[0];
+        assert_eq!(g.members.len(), 2, "both cells are still LISTED, never dropped");
+        assert_eq!(g.k_seeds, 0, "zero RECORDED seeds is k=0, not k=2");
+        assert!(g.unreplicated, "k<2 is UNREPLICATED");
+        assert_eq!(group_state(g), "UNREPLICATED");
+
+        // ...and one recorded seed alongside a seedless cell is still k=1.
+        let mut c = mk("HAS_SEED");
+        c["repro"]["seed"] = json!(4021);
+        let rows2: Vec<SelectRow> = [&a, &c].into_iter().map(select_row).collect();
+        let refs2: Vec<&SelectRow> = rows2.iter().collect();
+        let g2 = group_by_seed(&refs2);
+        assert_eq!(g2[0].k_seeds, 1, "one recorded seed is one draw");
+    }
+
     /// Clause 1 + 2's UNGROUPABLE cases are LISTED and LABELLED, never
     /// silently merged with each other or dropped. (The board's
     /// `build_seed_groups` drops them because it renders k=1 rows by another
@@ -3505,6 +3595,35 @@ mod tests {
                 "40"
             ])),
             v(&["t", "--epochs", "40"])
+        );
+
+        // argv[0] is a BUILD LOCATION, not a recipe parameter: the same recipe
+        // replayed from a sibling jj workspace must land in the same group.
+        let mut w = run("4031", "/mnt/v/bakes/LSTAR2_s4031_ckpts");
+        w["repro"]["argv"] = json!(["/home/lilith/work/zen/zensim--replicate/target/release/zensim_mlp_train",
+                                    "--epochs", "120", "--seed", "4031",
+                                    "--out", "/mnt/v/bakes/LSTAR2_s4031.bin",
+                                    "--dump-checkpoints-dir", "/mnt/v/bakes/LSTAR2_s4031_ckpts"]);
+        let mut o = run("4031", "/mnt/v/bakes/LSTAR2_s4031_ckpts");
+        o["repro"]["argv"] = json!(["/home/lilith/work/zen/zensim/target/release/zensim_mlp_train",
+                                    "--epochs", "120", "--seed", "4031",
+                                    "--out", "/mnt/v/bakes/LSTAR2_s4031.bin",
+                                    "--dump-checkpoints-dir", "/mnt/v/bakes/LSTAR2_s4031_ckpts"]);
+        assert_eq!(
+            seed_group_key(&w),
+            seed_group_key(&o),
+            "the same recipe replayed from a sibling workspace must group with its own diagonal"
+        );
+        // ...but the basename still separates two different TOOLS.
+        let mut t = o.clone();
+        t["repro"]["argv"] = json!(["/home/lilith/work/zen/zensim/target/release/bake_dial_refit",
+                                    "--epochs", "120", "--seed", "4031",
+                                    "--out", "/mnt/v/bakes/LSTAR2_s4031.bin",
+                                    "--dump-checkpoints-dir", "/mnt/v/bakes/LSTAR2_s4031_ckpts"]);
+        assert_ne!(
+            seed_group_key(&o),
+            seed_group_key(&t),
+            "a different tool is a different recipe"
         );
 
         // NEGATIVE CONTROL: a genuine hyperparameter difference must still

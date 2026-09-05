@@ -650,8 +650,23 @@ SEED_GROUP_DROP_FLAGS = {"--seed", "--init-seed", "--sample-seed",
 
 
 def _norm_argv_for_seed_group(argv):
+    """argv -> the recipe-identifying token list.
+
+    `argv[0]` is reduced to its BASENAME. The program path is a build location,
+    not a recipe parameter, and the board carries 32 distinct `argv[0]` values
+    for what are two tools — one per lane worktree / target dir. Keeping the
+    full path meant a replay of a recipe from a sibling jj workspace (which the
+    workspace protocol mandates) could never group with the very cell it
+    replayed. Basename, not removal: it still separates `zensim_mlp_train` from
+    `bake_dial_refit`. MEASURED on 436 board fullevals: groups 101 -> 98, and the
+    only two merges are genuine — `C_co3a_s1301` vs `C_co3a_s1301_w4repro`
+    differ in ZERO other tokens, `H_co3abpg_s2501` vs `W10L0_s4001` in none but
+    the build dir. (2026-09-05, benchmarks/replication_wave_2026-09-05.md)
+    """
     out, i = [], 0
     argv = [str(x) for x in argv]
+    if argv:
+        argv = [os.path.basename(argv[0])] + argv[1:]
     while i < len(argv):
         tok = argv[i]
         if tok in SEED_GROUP_DROP_FLAGS:
