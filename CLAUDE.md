@@ -1655,6 +1655,59 @@ anywhere in the active tier**; a test fails if any retired bar key reappears.)
   2026-09-05; it reconstructs every cell's invocation from the 2026-09-04 as-run logs and
   refuses to graft if the contract-fail count moves).
 
+**★ THE FLOOR-DENSE LADDER INSTRUMENT (2026-09-05) — and it FAILS the shipped dial.**
+Record: [`benchmarks/ladder_instrument_2026-09-05.md`](benchmarks/ladder_instrument_2026-09-05.md);
+plan: [`docs/PLAN_LADDER_INSTRUMENT_2026-09-05.md`](docs/PLAN_LADDER_INSTRUMENT_2026-09-05.md).
+Grade on it with `ZL_ERA=ladder scripts/dialgate_arms.sh score <label> <bake> 372`.
+
+- **Every grid before this one asked the A7r question of jpeg and could not answer
+  it.** MEASURED: **zenjpeg emits ONE bitstream for every q in 0..10** (identical
+  bytes AND identical ssim2, on every reference), so the old grids' bottom three
+  jpeg steps — q 0/5/10 — are one setting sampled three times, and the mentor's jpeg
+  bar was a vacuous **0.0000** that anything passes. It is visible in the incumbent's
+  own grading as jpeg `bottom_medians` **22.22 / 22.22 / 22.22**.
+- **Per-codec floors, measured** (two settings are the same setting when encoded
+  bytes AND ssim2 agree): `zenjpeg` plateaus q 0..10, first distinct **q=11**;
+  `zenwebp` q=0 only; `zenavif/zenravif` q 0..1; `zenavif/svt-rs` q 0..1 then
+  **pairwise ties** (quality 0..100 onto QP 0..63); `zenjxl` **distance >= 25
+  saturates** — 26/30/40/50 are byte-identical to 25.0, so 25.0 IS the floor and
+  "extending" it buys nothing.
+- **The rule is dedup by encode hash, never a per-codec step table.** `avif-svt` is
+  **36.4 %** duplicate settings against `avif-rav1e`'s **3.0 %** on the same axis.
+  The instrument keeps DISTINCT settings only (which is what lets
+  `dial_addressability.rs` stay unchanged — its "bottom K" are then the bottom K
+  *configurable* settings); the full archive keeps every step with a `saturated`
+  flag.
+- **The two AVIF backends are two ladders** (`avif-svt`, `avif-rav1e`). Verified
+  against source: `FloorMeasure::from_grid` groups by `(image_id, codec)` from
+  whatever strings the grid carries, so this needed **zero** production code change.
+  The backend is a KNOB (`--codec zenavif --knob-grid '{"backend":["svt-rs"]}'`,
+  feature `avif-svt`) — there is no `zenavif-svt` codec string.
+- **⛔ SHIPPED PROFILE D FAILS A7r ON THIS INSTRUMENT — on `jpeg`, by one ladder**
+  (0.5128 vs the mentor's 0.5385; 20/39 vs 21/39), plus A1 (99.99996372 vs ssim2's
+  exact 100.0) and A3 (p95 93.884 vs 93.974). It passes A7r on every older grid.
+  **Do not read a pre-2026-09-05 A7r pass as evidence the dial resolves jpeg's
+  lowest settings — it never measured that.**
+- **MEASURED, and it closes off a whole class of fix: re-anchoring cannot repair
+  it.** All **19** of D's failing jpeg ladders are inversions in the RAW
+  (pre-spline) model, and raw-vs-dial ordering verdicts agree on **39/39**. A
+  monotone spline preserves rank, so no `shared-anchor` / `extend-top` / anchor
+  choice can turn A7r into a pass. **The lever is the WEIGHTS.** Spline-only levers
+  still move A1/A3 (range properties).
+- The peaks arms (`lam1em3`, `Dpeaks`) fail **three** codecs each here — the jxl
+  inversion `d_peaks_jxl_floor` §4 localised to the weights **persists** on new
+  pixels and a new encoder era, as pre-registered.
+- **`zenav1-svt` is pinned at `2d75a105f`** in zenavif (`2ebca1b4`). MEASURED on
+  zenavif's own AVIF still-encode path: **1.498x** on summed `encode_ms` / 1.482x
+  wall, with **9/9 cells byte-identical**. That is 1.50x, **not** the "2x" the
+  encoder work was described as.
+- **`imazen/jxl-encoder#101` came out of this run**: at butteraugli **distance >=
+  10.0 exactly** (9.9 is fine), the encoder writes a `SizeHeader` rounded UP to even,
+  so a 513x769 source declares 514x770 and cannot round-trip. Read from the
+  codestream's own header, so it is encoder-side. Pre-existing (the 2026-07-27 sweep
+  shows it). It removes those 13 ladders' entire jxl FLOOR, so they are excluded as
+  truncated-floor rather than graded several steps up the curve.
+
 **Facts that are now measured and must not be re-derived:**
 
 - **The identity feature vector is the ZERO vector, for every image — AT 372 ONLY** (38/38

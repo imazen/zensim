@@ -179,6 +179,131 @@ pinning to the mentor is exactly what keeps it honest.
 
 ---
 
-## 8. RESULTS
+## 8. The instrument as built
 
-*(filled as the remaining arms land)*
+| | value |
+|---|---|
+| instrument | `dial_grid_372col_ladder.parquet`, sha256 `4c3874a78c469e15…` |
+| rows (DISTINCT settings) | **9,593** (the postC grid holds 4,424) |
+| full archive (every step + `saturated` + `encode_sha` + every metric) | 11,921 rows |
+| ladders | `jpeg` 39 · `webp` 39 · `avif-svt` 39 · `avif-rav1e` 39 · `jxl` **26** |
+
+The canonical grid, for contrast, carries `avif` 35 / `jpeg` 22 / `jxl` 33 / `webp` 16 —
+uneven per-codec coverage that this instrument does not inherit.
+
+**Saturated (duplicate) settings removed per codec:**
+
+| codec | cells | saturated | distinct |
+|---|--:|--:|--:|
+| `avif-svt` | 2,574 | **936 (36.4 %)** | 1,638 |
+| `jpeg` | 2,574 | 585 (22.7 %) | 1,989 |
+| `webp` | 2,574 | 274 (10.6 %) | 2,300 |
+| `avif-rav1e` | 2,574 | **78 (3.0 %)** | 2,496 |
+| `jxl` | 1,625 | 0 | 1,625 |
+
+`avif-svt` and `avif-rav1e` differ by **12x** in duplicate rate on the same quality
+axis — the clearest possible argument that a per-codec step table could not have
+expressed either one, and that dedup had to key on the encoded bytes.
+
+### 8.1 A defect this surfaced, filed: `imazen/jxl-encoder#101`
+
+130 jxl cells failed to decode, and they were not noise: **13 odd-dimensioned
+sources x the 10 largest distances**. Chasing it produced a precisely-bounded
+encoder bug.
+
+**At butteraugli distance >= 10.0, `jxl-encoder` writes a `SizeHeader` rounded UP to
+even.** Read from the codestream's own header (a minimal `FF 0A` + LSB-first bit
+parse, not from a decoder's buffer), a 513x769 source declares:
+
+| distance | 8.0 | 8.5 | 9.0 | 9.5 | **9.9** | **10.0** | 10.5 | 11.0 |
+|---|---|---|---|---|---|---|---|---|
+| declared | 513x769 | 513x769 | 513x769 | 513x769 | **513x769** | **514x770** | 514x770 | 514x770 |
+
+The threshold is exact. Both dimensions round independently (`769x513 -> 770x514`),
+even-dimensioned sources are unaffected, and the 2026-07-27 run of the same sources
+shows the identical signature — so it is **pre-existing, not introduced here**. The
+decoder is correct; it reproduces what was signalled. A supporting oddity consistent
+with a mode switch at that threshold: encoded size is **not monotone** across it
+(d=10.0 gives 8,813 B against d=8.0's 8,635 B on the same image).
+
+**This was diagnosable only because the run persisted encoded bytes.** No re-encode
+was needed to find, bound, or file it.
+
+Consequence for the instrument: those 13 ladders lost exactly their FLOOR cells, so
+they are **excluded as truncated-floor** rather than graded on distance 8 — which
+would have flattered jxl's bar. jxl therefore carries 26 ladders.
+
+---
+
+## 9. THE RESULT — the shipped dial fails a floor it used to pass
+
+`peer_ssim2`'s bars on this instrument, and every candidate against them
+(`ZL_ERA=ladder`, `scripts/dialgate_arms.sh score`):
+
+| bake | `avif-rav1e` | `avif-svt` | `jpeg` | `jxl` | `webp` | A7r |
+|---|--:|--:|--:|--:|--:|:--:|
+| **peer_ssim2 — THE BAR** | 0.5385 | 1.0000 | **0.5385** | 0.9231 | 1.0000 | — |
+| **Profile D — SHIPPED** | 0.5385 ✓ | 1.0000 ✓ | **0.5128 ✗** | 0.9615 ✓ | 1.0000 ✓ | **FAIL** |
+| `lam1em3` | 0.2564 ✗ | 1.0000 ✓ | 0.4615 ✗ | 0.7308 ✗ | 1.0000 ✓ | FAIL |
+| `Dpeaks` (`lam2em3`) | 0.2821 ✗ | 1.0000 ✓ | 0.3846 ✗ | 0.5769 ✗ | 1.0000 ✓ | FAIL |
+
+**Shipped Profile D reads a clean A7r PASS on every prior grid and FAILS here, on
+jpeg, by one ladder (20/39 against the mentor's 21/39).** That gap was structurally
+invisible before: jpeg's bar was `0.0000` because its three lowest "settings" were
+one setting sampled three times. This is the instrument doing the job it was built
+for.
+
+Its other two regression misses, both real but small:
+
+| axis | shipped D | bar (mentor) |
+|---|--:|--:|
+| A1 ceiling — pooled dial max | 99.99996372 | **100.0** (ssim2 reaches exactly 100) |
+| A3 robust ceiling — dial p95 | 93.8842 | **93.9743** |
+
+A2/A4/A5/A6 all pass comfortably — this grid probes far deeper than the old one
+(D reaches **-94.97** against the mentor's -64.33, reach 194.97 vs 164.33).
+
+### 9.1 The JXL inversion PERSISTS — pre-registered expectation confirmed
+
+`d_peaks_jxl_floor_2026-09-05.md` §4 measured the peaks arms' jxl failure as a
+RAW-level inversion (8/8) and concluded the lever is in the weights. The plan
+therefore pre-registered that it should **persist** on new pixels and a new encoder
+era. It does, and worse: jxl 0.7308 / 0.5769 against a 0.9231 bar, plus new failures
+on `avif-rav1e` and `jpeg`. A "fixed by re-anchoring" result here would have been
+the suspicious one.
+
+### 9.2 MEASURED: re-anchoring cannot fix this, so no spline-only arm can ship
+
+Not argued from monotonicity — measured, by the same method §4 of the jxl-floor lane
+used. `bake_dial_refit predict` on all 9,593 rows, with and without `--score-units`,
+over shipped D's 39 jpeg ladders:
+
+| | count |
+|---|--:|
+| RAW (pre-spline) bottom-3 not ordered | **19** |
+| DIAL (post-spline) bottom-3 not ordered | **19** |
+| ladders where raw and dial verdicts AGREE | **39 / 39** |
+
+Every jpeg failure is already an inversion in the raw model. A monotone output
+spline preserves rank by construction, so **no re-anchoring — on any anchor, with
+any knot placement — can turn D's jpeg floor into a pass.** ARM 5's spline-only
+levers can move A1 and A3 (range properties) but provably not A7r.
+
+---
+
+## 10. SHIP DECISION — nothing installs
+
+The pre-registered gate (plan §7) required all four: contract 6/6, **floor
+representability >= mentor on EVERY codec**, CID22 >= today's D with the CI not
+excluding a gain, and no regression axis lost.
+
+**No arm passes, including the incumbent.** `ZensimProfile::D` is unchanged and
+`zensim/weights/` was not opened for writing.
+
+That is a stronger outcome than an install would have been: the instrument now
+detects a real, previously-unmeasurable gap in the shipped dial, and §9.2 says the
+fix has to be in the **weights**, not the calibration. The registered next arm is a
+fit that constrains adjacent-step ordering at the floor — the same lever
+`d_peaks_jxl_floor` §7(a) registered for jxl, now with jpeg and `avif-rav1e`
+evidence behind it and an instrument that can actually score it.
+
