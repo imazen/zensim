@@ -7,6 +7,26 @@
  ],
  "sets": [
   {
+   "id": "2026-09-05-d-free-id100",
+   "date": "2026-09-05",
+   "label": "2026-09-05 \u00b7 D + free: the free-set / peaks-only / class-C variants of the D-id100-negrich recipe (proposal, no default flipped)",
+   "bakes": [
+    "Fctl@dfreelane",
+    "Fpeaks@dfreelane",
+    "Ffree@dfreelane",
+    "FfreeC@dfreelane",
+    "Fctl_id100@dfreelane",
+    "Fpeaks_id100@dfreelane",
+    "Ffree_id100@dfreelane",
+    "FfreeC_id100@dfreelane",
+    "Fctl_id100negrich@dfreelane",
+    "Fpeaks_id100negrich@dfreelane",
+    "Ffree_id100negrich@dfreelane",
+    "FfreeC_id100negrich@dfreelane"
+   ],
+   "note": "FOUR coordinate slices (156 / +72 peaks / +109 free / +133 free+classC) x THREE dial variants (base / -id100 clamped anchor / -id100-negrich unclamped + identity x21), all on ONE leg (r1b-pools944 safesyn, 111k) at lambda=0.3 \u2014 so a difference between rows of one variant is the SLICE and a difference down a slice's three rows is the DIAL. Rank is identical across a slice's three variants to <=1e-4 (monotone remap), so read rank ACROSS and dial DOWN. Every -id100-negrich arm is CONTRACT 6/6 + REGRESSION 7/9 against the ssim2 bars on this era's own 944-POOLS instruments (grid 694e16c4, negtail bafc8994, identity 31fc4403 \u2014 registered 2026-09-05, NOT the 372 bars; A8 in particular is a far easier bar on this probe, -64.23 vs -187.13). The clamped -id100 arms fix C5 and break C3/C4, re-deriving the D lane's 'the lever is the clamp, not the anchor'. HEADLINE: the ZERO-marginal-compute half of the free set carries it \u2014 Fpeaks gets 97% of the CID22 gain, 95% of KonJND, 99.5% of hfnlproxy and 96%/98% of the hfnl_cid22band pooled/per-ref gain, and BEATS the full free set on 8 of 12 corpora. NOT COMPARABLE to D-id100-negrich's published numbers: different training leg, measured here at -0.056 CID22 on the matched 156-only control. Record: benchmarks/d_free_id100_2026-09-05.md."
+  },
+  {
    "id": "2026-09-04-b-imazen26-anchor",
    "date": "2026-09-04",
    "label": "2026-09-04 \u00b7 B dial re-anchor: imazen-26 vs safesyn, ERA vs CONTENT (proposal, no default flipped)",

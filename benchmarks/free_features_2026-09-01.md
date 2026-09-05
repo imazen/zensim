@@ -384,3 +384,18 @@ covers the 196k safesyn leg at pools-944 width, not a new one from this lane.
 
 This section is this lane's hand-off; `benchmarks/wave_r4_2026-09-01.md` is
 wave-r4's own coordination doc and was not edited to write it.
+
+**Follow-up, 2026-09-05 — a lane took this hand-off and split the free set in
+two.** `benchmarks/d_free_id100_2026-09-05.md` re-fit this lane's λ=0.3 arms
+(byte-identical models, verified) plus a **peaks-only** arm, and measured with
+paired bootstrap CIs: the 72 peaks — the half §2.1 prices at nothing — deliver
+**97 % of the CID22 gain, 95 % of KonJND, 99.5 % of hfnlproxy and 96 %/98 % of
+the `hfnl_cid22band` pooled/per-ref gain**, and beat the full free set on 8 of
+12 corpora. Two notes for anyone reusing THIS lane's artifacts: (a) the
+published `FF_*_l0.3.bin` bakes carry a **pre-`abfe13de` output spline** —
+their bottom knot is y = −9.55 where the same fit today gives −56.61, so their
+dial floors at −113.5 instead of −207.6 (rank is untouched; the fix is
+byte-inert only for anchors clamped at 0, and this lane's is clipped at −100);
+(b) §2.2's `15f`/`15c` marginal re-measured on 2026-09-05 at 2304²/1T under the
+same protocol reads **1.0020 min-of-min / 0.9988 median-of-min** — consistent
+with, and at the low end of, the +0.8–1.6 % published here.
