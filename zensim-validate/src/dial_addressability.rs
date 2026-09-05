@@ -243,6 +243,58 @@ impl TailPins {
     }
 }
 
+/// Which TIER the six dial-VALUE rows `A1`-`A6` sit in.
+///
+/// **USER RULING 2026-09-05.** Asked whether the dial has *"poor resolution
+/// compared to ssim2"*, the lane reported that `A1`-`A6` bar a candidate
+/// against `peer_ssim2`'s own `max`/`p95`/`min`/`p5`/`reach`/`dynamic_range`
+/// — incidental properties of where the mentor's distribution happens to land
+/// on one instrument — and recommended demoting them to reporting, leaving the
+/// CONTRACT tier `C1`-`C6` plus the per-codec floor `A7r` to carry the product
+/// requirements. The user answered **"ok"**, read as accepting that.
+///
+/// **The values are still measured and still printed** — only their tier
+/// changes, so nothing stops being visible. `Hard` restores the pre-ruling
+/// grading row-for-row (`--gaddr-value-pins hard`), which is the reversibility
+/// lever; the CONTRACT tier is untouched by either setting, so the board's
+/// NOT-SHIPPABLE badge cannot move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ValuePins {
+    /// A1-A6 on [`Tier::Report`] — measured, printed, gating nothing. Default
+    /// since the 2026-09-05 ruling.
+    #[default]
+    Report,
+    /// A1-A6 back on [`Tier::Regression`] — the pre-ruling grading.
+    Hard,
+}
+
+impl ValuePins {
+    pub fn tag(self) -> &'static str {
+        match self {
+            ValuePins::Report => "report",
+            ValuePins::Hard => "hard",
+        }
+    }
+    /// The tier `A1`-`A6` are emitted on.
+    pub fn tier(self) -> Tier {
+        match self {
+            ValuePins::Report => Tier::Report,
+            ValuePins::Hard => Tier::Regression,
+        }
+    }
+    /// Parse `--gaddr-value-pins`. Unknown values are an error, never a silent
+    /// fallback — same discipline as [`TailPins::parse`].
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "report" | "report-only" => Ok(ValuePins::Report),
+            "hard" | "regression" => Ok(ValuePins::Hard),
+            other => Err(format!(
+                "unknown --gaddr-value-pins `{other}` (expected `report` or `hard`)"
+            )),
+        }
+    }
+}
+
 /// Which STEPS of a ladder `A7r` tests — an OWNER-EXTENSION, opt-in variant of
 /// the pinned FLOOR-REPRESENTABILITY rule, added 2026-09-06 to let a pending
 /// user ruling be graded without moving the default.
@@ -367,6 +419,38 @@ pub struct FloorRepresentabilityRule {
     pub bottom_k: usize,
     /// A dial value within this of the instrument-wide minimum is ON THE CLAMP.
     pub clamp_eps: f64,
+    /// WHICH WINDOW the active pin set grades — `distinct` / `resolvable` /
+    /// `spaced`, the tags [`FloorRule::parse`] accepts. Absent ⇒ `distinct`,
+    /// so every pin set written before 2026-09-05 keeps its meaning.
+    ///
+    /// This is what makes the OPERATIVE rule a registry property rather than
+    /// a hardcoded default: flipping `negative_tail_bars.active` back to a pin
+    /// set carrying `distinct` restores the pre-ruling grading with no code
+    /// change. See [`operative_floor_rule`].
+    #[serde(default = "default_floor_rule_tag")]
+    pub floor_rule: String,
+    /// `resolvable`'s minimum `|Δ mentor|` between selected steps. Ignored by
+    /// the other two rules.
+    #[serde(default = "default_floor_margin")]
+    pub floor_margin: f64,
+}
+
+fn default_floor_rule_tag() -> String {
+    FloorRule::Distinct.tag().to_string()
+}
+
+fn default_floor_margin() -> f64 {
+    FloorRule::RESOLVABLE_MARGIN_DEFAULT
+}
+
+impl FloorRepresentabilityRule {
+    /// The [`FloorRule`] this pin set grades under. An unparseable tag is an
+    /// ERROR, never a silent fallback to `Distinct` — a registry typo that
+    /// quietly re-grades every board cell under a different window is exactly
+    /// the failure this whole file is built to make impossible.
+    pub fn rule(&self) -> Result<FloorRule, String> {
+        FloorRule::parse(&self.floor_rule, self.floor_margin)
+    }
 }
 
 /// One codec's REFERENCE floor-representability on a registered dial grid —
@@ -389,6 +473,18 @@ pub struct GridFloorRepresentability {
     pub reference: String,
     pub label: String,
     pub bottom_k: usize,
+    /// WHICH WINDOW this row's fractions were measured under. Absent ⇒
+    /// `distinct`, so every row written before 2026-09-05 keeps its meaning.
+    /// **Load-bearing as part of the key**: a `resolvable` fraction and a
+    /// `distinct` fraction on the same grid are different quantities (shipped
+    /// D reads jpeg 0.5128 under one and 0.6667 under the other), so a lookup
+    /// that ignored this field would bar a candidate against the wrong number.
+    #[serde(default = "default_floor_rule_tag")]
+    pub floor_rule: String,
+    /// The `--floor-margin` these fractions were measured at, when the rule
+    /// takes one. Absent ⇒ [`FloorRule::RESOLVABLE_MARGIN_DEFAULT`].
+    #[serde(default = "default_floor_margin")]
+    pub floor_margin: f64,
     pub codecs: Vec<CodecFloorRow>,
 }
 
@@ -406,6 +502,11 @@ struct TailPinSetRow {
     clamp_eps: Option<f64>,
     #[serde(default)]
     report_floor_threshold: Option<f64>,
+    /// Absent ⇒ `distinct`, so a pre-2026-09-05 pin set keeps its meaning.
+    #[serde(default)]
+    floor_rule: Option<String>,
+    #[serde(default)]
+    floor_margin: Option<f64>,
 }
 
 impl TailPinSetRow {
@@ -413,6 +514,11 @@ impl TailPinSetRow {
         Some(FloorRepresentabilityRule {
             bottom_k: self.bottom_k?,
             clamp_eps: self.clamp_eps?,
+            floor_rule: self
+                .floor_rule
+                .clone()
+                .unwrap_or_else(default_floor_rule_tag),
+            floor_margin: self.floor_margin.unwrap_or_else(default_floor_margin),
         })
     }
 }
@@ -434,6 +540,27 @@ pub fn floor_rule() -> FloorRepresentabilityRule {
         .find(|p| p.id == want)
         .and_then(|p| p.rule())
         .expect("the active negative-tail pin set must carry the floor rule")
+}
+
+/// THE OPERATIVE [`FloorRule`] — the window `A7r` grades under when the caller
+/// does not name one. Owned by the registry's ACTIVE pin set, not by this
+/// file.
+///
+/// **USER RULING 2026-09-05.** Asked *"is there poor resolution compared to
+/// ssim2?"*, the lane reported that `distinct`'s literal bottom-3 window
+/// grades steps the mentor itself cannot tell apart, and recommended grading
+/// only the steps ssim2 resolves by ≥ 0.5 points. The user answered **"ok"**,
+/// which is read as accepting that recommendation — so the active pin set
+/// carries `floor_rule: "resolvable"`, `floor_margin: 0.5`.
+///
+/// **Reversible with no code change**: point `negative_tail_bars.active` back
+/// at `floor-representability-2026-09-05` (which carries no `floor_rule`, so
+/// it reads `distinct`) and the pre-ruling window returns. The per-invocation
+/// lever is `--floor-rule distinct`.
+pub fn operative_floor_rule() -> FloorRule {
+    floor_rule()
+        .rule()
+        .expect("the active pin set's `floor_rule` must be a known FloorRule tag")
 }
 
 /// The REPORTING threshold for the per-codec column folded in from the dropped
@@ -459,14 +586,44 @@ pub fn active_tail_pin_set() -> String {
 /// The registered per-codec floor representability for a dial grid, keyed by
 /// `(grid sha256, reference)` — the same two-part key every other registry
 /// lookup uses, for the same reason.
+/// The registered per-codec floor representability for one
+/// `(grid, reference, RULE)`. **All three are load-bearing.** The rule joined
+/// the key on 2026-09-05: the same grid now carries a `distinct` row and a
+/// `resolvable` row for the same reference, and they are different
+/// measurements — returning either one for the other would bar a candidate
+/// against a window it was never graded on.
+///
+/// `margin` is matched only for rules that take one, and only to
+/// `f64::EPSILON` — a row measured at 0.5 does not answer a query at 0.25.
+pub fn floor_repr_for_grid_under(
+    grid_sha256: &str,
+    reference: &str,
+    rule: FloorRule,
+) -> Option<GridFloorRepresentability> {
+    let tag = rule.tag();
+    registry()
+        .grid_floor_representability
+        .into_iter()
+        .find(|g| {
+            g.dial_grid_sha256 == grid_sha256
+                && g.reference == reference
+                && g.floor_rule == tag
+                && match rule {
+                    FloorRule::Resolvable { margin } => {
+                        (g.floor_margin - margin).abs() <= f64::EPSILON
+                    }
+                    _ => true,
+                }
+        })
+}
+
+/// [`floor_repr_for_grid_under`] at the PINNED rule (`distinct`). Retained so
+/// pre-2026-09-05 callers and their tests keep asking exactly what they asked.
 pub fn floor_repr_for_grid(
     grid_sha256: &str,
     reference: &str,
 ) -> Option<GridFloorRepresentability> {
-    registry()
-        .grid_floor_representability
-        .into_iter()
-        .find(|g| g.dial_grid_sha256 == grid_sha256 && g.reference == reference)
+    floor_repr_for_grid_under(grid_sha256, reference, FloorRule::Distinct)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1232,6 +1389,12 @@ pub struct Verdict {
     /// 2026-09-05 absolute per-codec-family bar, the default) or `Retired`
     /// (the mentor pins every pre-2026-09-05 number was graded on).
     pub tail_pins: TailPins,
+    /// Which tier the dial-VALUE rows `A1`-`A6` were emitted on — `Report`
+    /// (the default since the 2026-09-05 ruling: measured and printed, gating
+    /// nothing) or `Hard` (the pre-ruling grading). Stamped on every rendering
+    /// and in the JSON, so a REGRESSION verdict can never be read without
+    /// knowing which rows were eligible to fail it.
+    pub value_pins: ValuePins,
     /// The per-codec-family tail rows, joined to their registered reference
     /// floors. Printed as its own table — the ruling's "codecs are all
     /// different" is not a footnote, it is the shape of the measurement.
@@ -1424,6 +1587,29 @@ pub fn evaluate_with_reference(
     negtail: Option<(&NegTailMeasure, &str)>,
     identity: Option<(&IdentityMeasure, &str)>,
 ) -> Verdict {
+    evaluate_with_reference_and_pins(
+        reference,
+        grid_sha256,
+        grid_label,
+        m,
+        negtail,
+        identity,
+        ValuePins::default(),
+    )
+}
+
+/// [`evaluate_with_reference`] naming the [`ValuePins`] explicitly. Exists so a
+/// caller can ask "how would this have graded when A1-A6 were bars?" without
+/// the answer depending on which setting happens to be the default.
+pub fn evaluate_with_reference_and_pins(
+    reference: &str,
+    grid_sha256: &str,
+    grid_label: &str,
+    m: &GridMeasure,
+    negtail: Option<(&NegTailMeasure, &str)>,
+    identity: Option<(&IdentityMeasure, &str)>,
+    value_pins: ValuePins,
+) -> Verdict {
     evaluate_full(
         reference,
         TailPins::default(),
@@ -1434,6 +1620,7 @@ pub fn evaluate_with_reference(
         identity,
         None,
         FloorRuleContext::default(),
+        value_pins,
     )
 }
 
@@ -1459,6 +1646,7 @@ pub fn evaluate_full(
     identity: Option<(&IdentityMeasure, &str)>,
     floors: Option<&FloorMeasure>,
     floor_ctx: FloorRuleContext,
+    value_pins: ValuePins,
 ) -> Verdict {
     let bars = fixed_bars();
     let floor = floor_for_grid(grid_sha256, reference);
@@ -1476,7 +1664,7 @@ pub fn evaluate_full(
     let mut rows: Vec<CheckRow> = vec![
         row(
             "A1",
-            Tier::Regression,
+            value_pins.tier(),
             "ceiling — pooled dial max",
             Some(m.max),
             f.map(|x| x.max),
@@ -1486,7 +1674,7 @@ pub fn evaluate_full(
         ),
         row(
             "A2",
-            Tier::Regression,
+            value_pins.tier(),
             "floor — pooled dial min",
             Some(m.min),
             f.map(|x| x.min),
@@ -1496,7 +1684,7 @@ pub fn evaluate_full(
         ),
         row(
             "A3",
-            Tier::Regression,
+            value_pins.tier(),
             "robust ceiling — dial p95",
             Some(m.p95),
             f.map(|x| x.p95),
@@ -1506,7 +1694,7 @@ pub fn evaluate_full(
         ),
         row(
             "A4",
-            Tier::Regression,
+            value_pins.tier(),
             "robust floor — dial p5",
             Some(m.p5),
             f.map(|x| x.p5),
@@ -1516,7 +1704,7 @@ pub fn evaluate_full(
         ),
         row(
             "A5",
-            Tier::Regression,
+            value_pins.tier(),
             "reach (max − min)",
             Some(m.reach),
             f.map(|x| x.reach),
@@ -1526,7 +1714,7 @@ pub fn evaluate_full(
         ),
         row(
             "A6",
-            Tier::Regression,
+            value_pins.tier(),
             "dynamic range (p95 − p5)",
             Some(m.dynamic_range),
             f.map(|x| x.dynamic_range),
@@ -1619,9 +1807,55 @@ pub fn evaluate_full(
             // behaviour); `Resolvable`/`Spaced` have no registry entry — they
             // are report-derived windows, not pinned — so their bar is
             // ALWAYS the mentor's own LIVE fraction under the same rule.
-            let (a7r, rows_out) = match floor_ctx.rule {
-                FloorRule::Distinct => per_codec_floor_rows(grid_sha256, reference, floors),
-                _ => per_codec_floor_rows_live(floor_ctx.rule, floors, floor_ctx.mentor),
+            //
+            // Three cases, in order:
+            //
+            // 1. The rule needs the mentor's per-cell truth and none was
+            //    supplied — the WINDOW itself is uncomputable, so A7r is NOT
+            //    MEASURED. Never a silent fall-back to `distinct`'s window:
+            //    that would grade a different question under the same row id.
+            // 2. A registry row exists for this (grid, reference, RULE) — use
+            //    the PINNED bar. This is what "register the mentor's bars"
+            //    buys: the number is committed and auditable rather than
+            //    re-derived on every run.
+            // 3. No registered row — fall back to the mentor's LIVE fraction
+            //    under the identical call the candidate went through.
+            let (a7r, rows_out) = if floor_ctx.rule.needs_mentor_truth()
+                && floor_ctx.mentor.is_none()
+            {
+                (
+                    row(
+                        "A7r",
+                        Tier::Regression,
+                        "floor representability — lowest configurable settings resolve, per codec",
+                        None,
+                        None,
+                        "≤",
+                        None,
+                        format!(
+                            "NOT MEASURED — the operative floor rule `{}` chooses each ladder's \
+                             window from the MENTOR's own per-cell values, and no \
+                             `--gaddr-grid-truth` was supplied for this instrument. The window \
+                             is uncomputable, so nothing is graded; this is NEVER silently \
+                             re-graded under `distinct`'s literal window, which asks a \
+                             different question. Supply the reference metric's per-cell TSV, \
+                             or pass `--floor-rule distinct` to ask the pinned question.",
+                            floor_ctx.rule.tag()
+                        ),
+                    ),
+                    Vec::new(),
+                )
+            } else if !floor_ctx.rule.needs_mentor_truth()
+                || floor_repr_for_grid_under(grid_sha256, reference, floor_ctx.rule).is_some()
+            {
+                // `Distinct` is the PINNED rule: it reads the registry even
+                // when no row is registered (yielding NOT MEASURED), because
+                // live-computing its bar would let a caller dodge the pins by
+                // supplying their own mentor. A mentor-windowed rule uses the
+                // registry only when a row for THAT rule exists.
+                per_codec_floor_rows(grid_sha256, reference, floors, floor_ctx.rule)
+            } else {
+                per_codec_floor_rows_live(floor_ctx.rule, floors, floor_ctx.mentor)
             };
             codec_floor_rows = rows_out;
             rows.push(a7r);
@@ -1821,7 +2055,26 @@ pub fn evaluate_full(
         }
     };
     let mut regression = tier_state(&rows, Tier::Regression);
-    if floor.is_none() {
+    // NOT MEASURABLE means the INSTRUMENT cannot support the tier's
+    // measurement — as distinct from INCOMPLETE, which means it can but an
+    // input was not supplied. The two are different facts about a board cell
+    // and must not be collapsed. WHICH rows constitute the tier depends on
+    // the value pins, so the test does too:
+    //
+    //  * `Hard`   — A1-A6 are the tier; they are barred from the GRID row.
+    //               This is byte-for-byte the pre-2026-09-05 guard.
+    //  * `Report` — A7r alone is the tier; its bar comes from the registry
+    //               row for THIS rule, or is computed live from the mentor.
+    //               Keying on the grid row here would blank a perfectly good
+    //               floor result behind an unrelated missing row.
+    let regression_unmeasurable = match value_pins {
+        ValuePins::Hard => floor.is_none(),
+        ValuePins::Report => {
+            floor_repr_for_grid_under(grid_sha256, reference, floor_ctx.rule).is_none()
+                && floor_ctx.mentor.is_none()
+        }
+    };
+    if regression_unmeasurable {
         regression = Overall::NotMeasurable;
     }
     let contract = tier_state(&rows, Tier::Contract);
@@ -1848,6 +2101,7 @@ pub fn evaluate_full(
             .map(|x| format!("{} — {}", INCUMBENT_REFERENCE, x.label))
             .unwrap_or_else(|| format!("{INCUMBENT_REFERENCE} (no registry row)")),
         tail_pins,
+        value_pins,
         codec_floor_rows,
         floor_rule: floor_ctx.rule.tag().to_string(),
     }
@@ -1865,10 +2119,11 @@ fn per_codec_floor_rows(
     grid_sha256: &str,
     reference: &str,
     floors: Option<&FloorMeasure>,
+    frule: FloorRule,
 ) -> (CheckRow, Vec<CodecFloorReport>) {
     let rule = floor_rule();
-    let reg = floor_repr_for_grid(grid_sha256, reference);
-    let inc = floor_repr_for_grid(grid_sha256, INCUMBENT_REFERENCE);
+    let reg = floor_repr_for_grid_under(grid_sha256, reference, frule);
+    let inc = floor_repr_for_grid_under(grid_sha256, INCUMBENT_REFERENCE, frule);
     // A missing MENTOR row leaves the axis NOT MEASURED — but the measurement
     // is still REPORTED, because that is how the mentor's own pins get derived
     // in the first place (run the gate on the peer, read the fractions, append
@@ -2178,7 +2433,8 @@ pub fn render_markdown(v: &Verdict) -> String {
          fail, so a standing contract failure is never misread as a regression this candidate \
          introduced.\n\
          - **negative-tail pin set: `{}`** — {}\n\
-         - **floor-rule: `{}`** — {}\n\n",
+         - **floor-rule: `{}`** — {}\n\
+         - **dial-VALUE pins (`A1`-`A6`): `{}`** — {}\n\n",
         v.headline(),
         v.n_pass(),
         v.n_fail(),
@@ -2210,22 +2466,33 @@ pub fn render_markdown(v: &Verdict) -> String {
         },
         v.floor_rule,
         match v.floor_rule.as_str() {
-            "resolvable" => "**owner-extension, opt-in (2026-09-06)** — variant (a) of \
-                 `benchmarks/ladder_floor_resolution_2026-09-05.md`: `A7r`'s window skips \
+            "resolvable" => "**THE OPERATIVE RULE (USER RULING 2026-09-05)** — variant (a) \
+                 of `benchmarks/ladder_floor_resolution_2026-09-05.md`: `A7r`'s window skips \
                  forward past any step the MENTOR itself cannot resolve (`|Δ mentor| < \
-                 margin`), then tests the next K+1 resolvable steps. Bar is LIVE-computed on \
-                 this instrument, never read from the `distinct` registry pins."
+                 margin`), then tests the next K+1 resolvable steps. This exists because \
+                 `distinct`'s literal bottom-3 window graded steps ssim2 cannot tell apart — \
+                 on jpeg it graded ELEVEN encoder-identical settings as three. Bar = the \
+                 REGISTRY row for this grid AND this rule when one is registered, else the \
+                 mentor's LIVE fraction under the identical call; a `distinct` fraction is \
+                 NEVER substituted. Reverse with `--floor-rule distinct`."
                 .to_string(),
             "spaced" => "**owner-extension, opt-in (2026-09-06)** — variant (b): `A7r`'s \
                  window is the lowest setting plus the steps nearest +2 and +5 mentor points \
-                 above it, re-sorted by quality. Bar is LIVE-computed on this instrument, \
-                 never read from the `distinct` registry pins."
+                 above it, re-sorted by quality. Bar = the registry row for this rule if one \
+                 is registered, else LIVE-computed; never the `distinct` pins."
                 .to_string(),
             _ => format!(
                 "the pinned rule — literal positions `0..=K` by quality (K={}); bar is the \
                  REGISTRY-pinned mentor fraction, as in every prior G-ADDR report.",
                 floor_rule().bottom_k
             ),
+        },
+        v.value_pins.tag(),
+        match v.value_pins {
+            ValuePins::Report => "**REPORT-ONLY (USER RULING 2026-09-05)** — the six dial-VALUE                  rows are measured and printed with their bars, but sit on tier `report-only`                  and gate NOTHING. They bar against `peer_ssim2`'s own max/p95/min/p5/reach/                 dynamic_range, which are incidental properties of where the mentor's                  distribution lands on one instrument, not product requirements; the product                  requirements are the CONTRACT tier (`C1`-`C6`) and the per-codec floor                  (`A7r`). The REGRESSION headline above is therefore carried by `A7r` alone.                  Reverse with `--gaddr-value-pins hard`."
+                .to_string(),
+            ValuePins::Hard => "**pre-ruling grading** — `A1`-`A6` are REGRESSION rows and can                  fail the tier, exactly as every G-ADDR number published before 2026-09-05 was                  graded. Reproduces that grading row-for-row."
+                .to_string(),
         },
     ));
     if v.regression == Overall::NotMeasurable {
@@ -2369,6 +2636,11 @@ pub fn to_json(v: &Verdict) -> serde_json::Value {
         // fraction under one rule is never comparable to another's; this
         // field is what lets a reader of the raw JSON enforce that.
         "floor_rule": v.floor_rule,
+        // Which tier A1-A6 were emitted on. A REGRESSION verdict is only
+        // readable together with this: under "report" (the default since the
+        // 2026-09-05 ruling) the six dial-VALUE rows are measured and printed
+        // but cannot fail the tier, which is carried by `A7r` alone.
+        "value_pins": v.value_pins.tag(),
         "measured": {
             "grid": {
                 "min": v.grid.min, "max": v.grid.max,
@@ -2687,6 +2959,7 @@ mod tests {
             None,
             fl,
             FloorRuleContext::default(),
+            ValuePins::default(),
         )
     }
 
@@ -2709,6 +2982,7 @@ mod tests {
             None,
             fl,
             ctx,
+            ValuePins::default(),
         )
     }
 
@@ -2808,8 +3082,36 @@ mod tests {
         c.dynamic_range = c.p95 - c.p5;
         let v = evaluate(&f.dial_grid_sha256, &f.label, &c, None, None);
         assert_eq!(row_by_id(&v, "A4").state, State::Fail, "A4 on a higher p5");
-        assert_eq!(v.regression, Overall::Fail);
-        assert!(!v.shippable());
+        // TIER, both settings. Since the 2026-09-05 ruling A1-A6 are REPORT
+        // rows: every per-row FAIL above still stands (the values and their
+        // bars are unchanged — that is the whole "still printed" claim), but
+        // they no longer fail the REGRESSION tier. Under `--gaddr-value-pins
+        // hard` they do, which is the reversibility lever. Asserting both is
+        // what keeps this test honest about which axis discriminates and which
+        // tier it lands in.
+        let vh = evaluate_with_reference_and_pins(
+            ACTIVE_REFERENCE,
+            &f.dial_grid_sha256,
+            &f.label,
+            &c,
+            None,
+            None,
+            ValuePins::Hard,
+        );
+        for id in ["A4", "A6"] {
+            assert_eq!(
+                row_by_id(&vh, id).state,
+                row_by_id(&v, id).state,
+                "{id}: the row state must not depend on the tier"
+            );
+        }
+        assert_eq!(vh.regression, Overall::Fail, "A4/A6 are bars under `hard`");
+        assert!(!vh.shippable());
+        assert_ne!(
+            v.regression,
+            Overall::Fail,
+            "under the operative `report` pins a dial-VALUE row cannot fail the tier"
+        );
     }
 
     /// A shallower negative tail is a floor regression even when the dial grid
@@ -3021,6 +3323,18 @@ mod tests {
                 "{id}: the incumbent's floor is far short of the mentor's"
             );
         }
+        // The TIER verdict needs `hard`: since the 2026-09-05 ruling A1-A6 are
+        // REPORT rows, so the row-level FAILs above (which are the substance
+        // of this test) no longer drive the regression tier by themselves.
+        let vbs = evaluate_with_reference_and_pins(
+            ACTIVE_REFERENCE,
+            &b.dial_grid_sha256,
+            &b.label,
+            &measure_of(&b),
+            None,
+            None,
+            ValuePins::Hard,
+        );
         assert_eq!(
             vbs.regression,
             Overall::Fail,
@@ -3118,6 +3432,7 @@ mod tests {
             None,
             None,
             FloorRuleContext::default(),
+            ValuePins::default(),
         );
         for id in ["A7", "A8", "A9"] {
             assert_eq!(row_by_id(&vb, id).state, State::Pass, "{id}");
@@ -3311,7 +3626,14 @@ mod tests {
         let r = floor_rule();
         assert_eq!(r.bottom_k, 3, "K = the 3 lowest configurable settings");
         assert_eq!(r.clamp_eps, 1e-9);
-        assert_eq!(active_tail_pin_set(), "floor-representability-2026-09-05");
+        assert_eq!(
+            active_tail_pin_set(),
+            "floor-representability-resolvable-2026-09-05"
+        );
+        // The operative window since the 2026-09-05 ruling. `bottom_k` and
+        // `clamp_eps` above are unchanged by it — only WHICH steps are chosen.
+        assert_eq!(r.floor_rule, "resolvable");
+        assert_eq!(r.floor_margin, 0.5);
         assert_eq!(TailPins::default(), TailPins::Product);
         // The whole point of the final ruling: no threshold in the ACTIVE pin
         // set is a bar. `report_floor_threshold` exists, and is barred against
@@ -3321,7 +3643,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|p| p["id"] == "floor-representability-2026-09-05")
+            .find(|p| p["id"] == "floor-representability-resolvable-2026-09-05")
             .expect("active pin set");
         for k in [
             "product_bar",
@@ -3556,6 +3878,7 @@ mod tests {
             None,
             Some(&fm),
             FloorRuleContext::default(),
+            ValuePins::default(),
         );
         assert_eq!(row_by_id(&v, "A7r").state, State::NotMeasured);
         assert!(row_by_id(&v, "A7r").note.contains("MENTOR"));
@@ -3690,6 +4013,7 @@ mod tests {
                     Some((&im, &idr.probe_sha256)),
                     Some(&fm),
                     FloorRuleContext::default(),
+                    ValuePins::default(),
                 )
             };
             let a = go(TailPins::Product);
@@ -4257,6 +4581,7 @@ mod tests {
             "no-such-sha-in-any-registry-row",
             ACTIVE_REFERENCE,
             Some(&candidate),
+            FloorRule::Distinct,
         );
         assert!(registry_table.iter().all(|r| r.state == State::NotMeasured));
         assert_eq!(registry_row.state, State::NotMeasured);
@@ -4323,7 +4648,13 @@ mod tests {
             assert_eq!(j["floor_rule"], tag);
             let md = render_markdown(&v);
             assert!(md.contains(&format!("floor-rule: `{tag}`")), "{tag}");
-            assert!(md.contains("LIVE-computed"), "{tag}");
+            // The invariant that matters is not HOW the bar was obtained (a
+            // `resolvable` bar can now be registry-pinned) but that a
+            // `distinct` fraction is never substituted for it.
+            assert!(
+                md.contains("NEVER substituted") || md.contains("never the `distinct` pins"),
+                "{tag}: the report must say the distinct pins are not substituted"
+            );
             for r in &v.codec_floor_rows {
                 assert!(
                     r.note.contains(&format!("rule=`{tag}`")),
@@ -4336,5 +4667,276 @@ mod tests {
             // proving the live bar isn't vacuously NotMeasured throughout.
             assert_eq!(row_by_id(&v, "A7r").state, State::Pass, "{tag}");
         }
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // THE 2026-09-05 RULING: `resolvable` is OPERATIVE, and A1-A6 report.
+    //
+    // Each of these fails on the pre-ruling tree. Negative control, run and
+    // recorded: pointing `negative_tail_bars.active` back at
+    // `floor-representability-2026-09-05` fails the first three; deleting the
+    // `ValuePins` plumbing fails the last three.
+    // ───────────────────────────────────────────────────────────────────
+
+    const LADDER_372_SHA: &str = "4c3874a78c469e15c664a63e10216760317bd9501b9fe9365b6b93845cb5f980";
+    const LADDER_944_SHA: &str = "0e8e5fb789bd21b263edc3531b243b4086b5ba9c6757de37188ac912bd392f2a";
+
+    /// The OPERATIVE rule is a REGISTRY property, not a hardcoded default —
+    /// which is what makes the ruling reversible without touching code.
+    #[test]
+    fn the_operative_floor_rule_is_resolvable_at_the_registered_margin() {
+        let r = registry();
+        assert_eq!(
+            r.negative_tail_bars.active, "floor-representability-resolvable-2026-09-05",
+            "the active pin set must be the one minted by the 2026-09-05 ruling"
+        );
+        match operative_floor_rule() {
+            FloorRule::Resolvable { margin } => assert_eq!(
+                margin,
+                FloorRule::RESOLVABLE_MARGIN_DEFAULT,
+                "the registered margin is the 0.5 the ruling named"
+            ),
+            other => panic!("operative rule must be `resolvable`, got {other:?}"),
+        }
+        // The superseded set is RETAINED and still reachable — every A7r
+        // number published between 2026-09-05 and the flip is graded on it.
+        assert!(
+            r.negative_tail_bars
+                .pin_sets
+                .iter()
+                .any(|p| p.id == "floor-representability-2026-09-05"),
+            "the superseded pin set must stay in the registry, never be deleted"
+        );
+    }
+
+    /// The mentor's bars under the OPERATIVE rule are PINNED on both ladder
+    /// instruments — measured once through the owner, then committed.
+    #[test]
+    fn both_ladder_instruments_carry_registered_resolvable_bars() {
+        let want: &[(&str, f64)] = &[
+            ("avif-rav1e", 0.6410256410256411),
+            ("avif-svt", 1.0),
+            ("jpeg", 0.6666666666666666),
+            ("jxl", 0.9615384615384616),
+            ("webp", 1.0),
+        ];
+        for sha in [LADDER_372_SHA, LADDER_944_SHA] {
+            let g = floor_repr_for_grid_under(
+                sha,
+                ACTIVE_REFERENCE,
+                FloorRule::Resolvable {
+                    margin: FloorRule::RESOLVABLE_MARGIN_DEFAULT,
+                },
+            )
+            .unwrap_or_else(|| panic!("no resolvable floor row registered for {sha}"));
+            assert_eq!(g.floor_rule, "resolvable");
+            assert_eq!(g.floor_margin, 0.5);
+            assert_eq!(g.codecs.len(), want.len(), "{sha}");
+            for (codec, frac) in want {
+                let row = g
+                    .codecs
+                    .iter()
+                    .find(|c| c.codec == *codec)
+                    .unwrap_or_else(|| panic!("{sha}: no `{codec}` row"));
+                // Bit-exact: these are copied from the owner's own f64 output.
+                assert_eq!(
+                    row.represented_frac.to_bits(),
+                    frac.to_bits(),
+                    "{sha} / {codec}"
+                );
+            }
+        }
+        // The mentor's per-cell scores are a property of the PIXELS, so the
+        // two widths must agree exactly. A disagreement means one of the two
+        // grids is not the cells it claims to be.
+        let a = floor_repr_for_grid_under(
+            LADDER_372_SHA,
+            ACTIVE_REFERENCE,
+            FloorRule::Resolvable { margin: 0.5 },
+        )
+        .unwrap();
+        let b = floor_repr_for_grid_under(
+            LADDER_944_SHA,
+            ACTIVE_REFERENCE,
+            FloorRule::Resolvable { margin: 0.5 },
+        )
+        .unwrap();
+        for (x, y) in a.codecs.iter().zip(b.codecs.iter()) {
+            assert_eq!(x.codec, y.codec);
+            assert_eq!(x.represented_frac.to_bits(), y.represented_frac.to_bits());
+        }
+    }
+
+    /// THE key discipline: a `distinct` fraction and a `resolvable` fraction on
+    /// the SAME grid are different quantities, and the lookup must never serve
+    /// one for the other. On the 372 ladder they genuinely differ on jpeg
+    /// (0.5385 pinned vs 0.6667), so this is a real discriminator.
+    #[test]
+    fn a_registry_lookup_never_serves_one_rules_bar_for_another() {
+        let d = floor_repr_for_grid_under(LADDER_372_SHA, ACTIVE_REFERENCE, FloorRule::Distinct)
+            .expect("the distinct row is RETAINED, not replaced");
+        let r = floor_repr_for_grid_under(
+            LADDER_372_SHA,
+            ACTIVE_REFERENCE,
+            FloorRule::Resolvable { margin: 0.5 },
+        )
+        .expect("resolvable row registered");
+        assert_eq!(d.floor_rule, "distinct");
+        assert_eq!(r.floor_rule, "resolvable");
+        let jpeg = |g: &GridFloorRepresentability| {
+            g.codecs
+                .iter()
+                .find(|c| c.codec == "jpeg")
+                .unwrap()
+                .represented_frac
+        };
+        assert!(
+            (jpeg(&d) - jpeg(&r)).abs() > 1e-6,
+            "the two rules must disagree on jpeg, else this test proves nothing: {} vs {}",
+            jpeg(&d),
+            jpeg(&r)
+        );
+        // A margin the registry was never measured at must NOT match.
+        assert!(
+            floor_repr_for_grid_under(
+                LADDER_372_SHA,
+                ACTIVE_REFERENCE,
+                FloorRule::Resolvable { margin: 0.25 },
+            )
+            .is_none(),
+            "a row measured at margin 0.5 does not answer a query at 0.25"
+        );
+        // `spaced` was never registered — LIVE-computed only.
+        assert!(
+            floor_repr_for_grid_under(
+                LADDER_372_SHA,
+                ACTIVE_REFERENCE,
+                FloorRule::Spaced {
+                    near_lo: 2.0,
+                    near_hi: 5.0
+                },
+            )
+            .is_none()
+        );
+    }
+
+    fn ev_pins(vp: ValuePins) -> Verdict {
+        let f = canonical();
+        let fm = fm_clean();
+        evaluate_full(
+            ACTIVE_REFERENCE,
+            TailPins::Product,
+            &f.dial_grid_sha256,
+            &f.label,
+            &tie(&f),
+            None,
+            None,
+            Some(&fm),
+            FloorRuleContext::default(),
+            vp,
+        )
+    }
+
+    /// A1-A6 move TIER, and nothing else about them moves: same measured
+    /// value, same bar, same state. "Still printed" is the whole point.
+    #[test]
+    fn value_pins_report_demotes_a1_a6_and_hard_restores_them() {
+        let rep = ev_pins(ValuePins::Report);
+        let hard = ev_pins(ValuePins::Hard);
+        for id in ["A1", "A2", "A3", "A4", "A5", "A6"] {
+            let r = row_by_id(&rep, id);
+            let h = row_by_id(&hard, id);
+            assert_eq!(r.tier, Tier::Report, "{id} must be report-only by default");
+            assert_eq!(
+                h.tier,
+                Tier::Regression,
+                "{id} under --gaddr-value-pins hard"
+            );
+            assert_eq!(r.measured, h.measured, "{id}: the VALUE must not move");
+            assert_eq!(r.bar, h.bar, "{id}: the bar must not move");
+            assert_eq!(r.state, h.state, "{id}: the pass/fail must not move");
+        }
+        assert_eq!(rep.value_pins, ValuePins::Report);
+        assert_eq!(hard.value_pins, ValuePins::Hard);
+        // Under `report` the REGRESSION tier is carried by A7r alone.
+        let reg_ids: Vec<&str> = rep
+            .rows
+            .iter()
+            .filter(|r| r.tier == Tier::Regression)
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(reg_ids, vec!["A7r"], "regression tier under `report`");
+    }
+
+    /// THE BADGE INVARIANT. The board's NOT SHIPPABLE badge is contract-driven,
+    /// and this setting touches the REGRESSION tail only — asserted, never
+    /// assumed. If this ever fails, a board re-grade would silently move
+    /// badges.
+    #[test]
+    fn value_pins_moves_no_contract_row() {
+        let rep = ev_pins(ValuePins::Report);
+        let hard = ev_pins(ValuePins::Hard);
+        let c = |v: &Verdict| {
+            v.rows
+                .iter()
+                .filter(|r| r.tier == Tier::Contract)
+                .map(|r| (r.id, r.measured, r.bar, r.state, r.note.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            c(&rep),
+            c(&hard),
+            "no contract row may move with value pins"
+        );
+        assert_eq!(
+            rep.contract, hard.contract,
+            "the contract verdict is identical"
+        );
+        assert!(
+            !c(&rep).is_empty(),
+            "the fixture must actually carry contract rows"
+        );
+    }
+
+    /// A rule whose WINDOW comes from the mentor cannot be graded without the
+    /// mentor's per-cell truth. It must read NOT MEASURED — never silently
+    /// fall back to `distinct`'s window, which asks a different question, and
+    /// never default to a pass.
+    #[test]
+    fn the_operative_rule_reads_not_measured_without_mentor_truth() {
+        let f = canonical();
+        let fm = fm_clean();
+        let v = evaluate_full(
+            ACTIVE_REFERENCE,
+            TailPins::Product,
+            &f.dial_grid_sha256,
+            &f.label,
+            &tie(&f),
+            None,
+            None,
+            Some(&fm),
+            FloorRuleContext {
+                rule: operative_floor_rule(),
+                mentor: None,
+            },
+            ValuePins::default(),
+        );
+        let a7 = row_by_id(&v, "A7r");
+        assert_eq!(a7.state, State::NotMeasured);
+        assert!(a7.measured.is_none(), "nothing may be reported as graded");
+        assert!(
+            a7.note.contains("gaddr-grid-truth"),
+            "the note must name the missing input, got: {}",
+            a7.note
+        );
+        assert!(
+            a7.note.contains("distinct"),
+            "the note must say the distinct window is NOT substituted, got: {}",
+            a7.note
+        );
+        // And the same call WITH the distinct rule still grades normally, so
+        // the NOT MEASURED above is about the missing truth, not a broken row.
+        let d = ev(TailPins::Product, &f, None, Some(&fm));
+        assert_ne!(row_by_id(&d, "A7r").state, State::NotMeasured);
     }
 }

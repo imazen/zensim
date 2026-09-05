@@ -8041,3 +8041,47 @@ mentor's 0.923/0.962/0.962 on THIS denser grid — the fix closed 4 specific lad
 coarser floor and the fix does not reach this instrument's failures. Nothing installed; no
 registry write (this is a report, not a bar change); `ZensimProfile::D`/`zensim/weights/`
 untouched. Full tables + reproduction: [`ladder_floor_resolution_2026-09-05.md`](ladder_floor_resolution_2026-09-05.md).
+
+## ROUND 90 — 2026-09-05: the floor is graded where the MENTOR can see, A1-A6 stop being bars, and the SDR/HDR default answer is "keep both"
+USER RULING (verbatim): *"ok, is there poor resolution compared to ssim2? update and share thw gauntlet for what should
+be the. ew sdr and bdr"* then *"hdr"*. The "ok" answers two standing recommendations and is READ AS ACCEPTING BOTH —
+recorded as an INFERENCE in `dial_addressability_gate_2026-09-04.md` §17.1 and in the registry, because both halves are
+reversible with no code change. **(1)** `A7r`'s window is now `resolvable` (margin 0.5): grade only the lowest settings
+`peer_ssim2` itself separates by ≥ 0.5 points. **(2)** the six dial-VALUE rows `A1`-`A6` moved to `Tier::Report` —
+still measured, still printed with their bars, gating nothing — so the REGRESSION headline is `A7r` alone. The
+OPERATIVE window is a REGISTRY property (`negative_tail_bars.active` → `floor-representability-resolvable-2026-09-05`,
+read by `operative_floor_rule()`), so reverting is a one-line edit; per-invocation levers `--floor-rule distinct` /
+`--gaddr-value-pins hard` **reproduce `main@origin` (`65267020`) row-for-row on 4 cells against a PRISTINE binary**
+(all 14 checks rows, both tier verdicts, every measured value, 0 diffs). ⚠ the FIRST attempt at that proof was
+VACUOUSLY TRUE — the baseline binary predated `--gaddr-tail-pins`, wrote no JSON, and the comparison globbed an empty
+dir; asserting the baseline file COUNT is what caught it. Registry is append-only: `diff` shows exactly TWO changed
+lines, both the file's own retirement idiom; the superseded pin set and every `distinct` bar are RETAINED. Mentor bars
+registered on BOTH ladder instruments and **BIT-IDENTICAL between the 372 (`4c3874a7…`) and 944 (`0e8e5fb7…`) widths**,
+as they must be. Lookup is now keyed `(grid, reference, RULE)` — shipped D reads jpeg 0.5128 under one window and
+0.6667 under the other, so serving either for the other would bar against a window the cell never saw; `Distinct`
+ALWAYS reads the registry (live-computing its bar would let a caller dodge the pins with their own mentor); a
+mentor-windowed rule with no `--gaddr-grid-truth` reads **NOT MEASURED**, never a silent fall-back. 6 new tests, all
+failing-first under TWO independent negative controls; 3 pre-existing tests updated, none relaxed (two now assert the
+tier verdict under `Hard`, their per-ROW FAIL assertions untouched); `cargo test -p zensim-validate` 240 lib + every
+integration test, 0 failures. BOARD: 95-cell graft + a 19-cell lane pass, **NOT SHIPPABLE 63 → 63** (asserted, and the
+guard refuses on any mismatch), `A7r` gradeable 13 → 14, 684 rows moved to `report-only`. A badge DID move to 64
+mid-pass — an early script handed 372 probes to three cells whose originals had none, turning `C5` NOT MEASURED into a
+measured FAIL; **supplying an input the original grading lacked is a different measurement, not a re-grade**, so the
+probe decision now comes from each cell's own source verdict. 16 cells stay on pre-ruling tiering, deliberately (12
+POOLS with unidentifiable probes, 4 `A3b_*` that `bake_verdict` correctly refuses as wrong-regime). **THE ANSWER —
+SDR: keep Profile D.** On the FLOOR-DENSE 372 ladder under the operative rule it is the ONLY scorer passing both tiers
+(`SHIPPABLE`): 5/5 codec floors, CONTRACT 6/6, **exceeding** the mentor on `avif-rav1e` (0.6667 vs 0.6410) and `jxl`
+(1.0000 vs 0.9615); under the retired window it failed jpeg by one ladder, so the ruling is what lets the installed
+default pass the axis it is best at. **All 97 re-graded board cells fail `A7r` there — zero alternatives**, so the
+"top 3" the ask requested does not have three members and inventing one was declined. Profile B still leads RANK
+(CID22 0.8821 vs D's 0.8634) and fails the dial on every codec. ⚠ shipped D is on the board only as
+`d_id100_negrich@did100lane` (bake sha verified byte-identical) — promoting it under its own name is registered.
+**HDR: keep BHdr** — UPIQ pooled **0.7536**, above ssim2-PU 0.7044, PU-SSIM 0.7395, and above all 24 HDR944 cells and
+every arm seed-group mean (best single seed 0.7254, `CHdr` 0.6664, −0.0872 at paired p=0.0000); ranked by SEED GROUP,
+never best cell. But **G-ADDR on HDR is NOT MEASURED and no instrument can measure it** (HDR ladder = registered
+follow-up), `bhdr_…@cur372`'s G-ADDR is an SDR-instrument grading of an HDR-only profile and must never be quoted as
+its HDR dial, BHdr's own promotion was maxT **p = 0.221** (not significant), and it overlaps its own census instrument.
+The 97-cell LADDER re-grade is NOT on the board and cannot be: `--graft-gaddr` refuses every cell on the same-grid gate
+(measured, not reasoned) because a cell's `dial.addressability` describes ITS OWN grid; nothing was forced. New board
+column `floors ok` (n_pass/n_gradeable) with the RULE in its hover. Both boards regenerated, all gates PASS, fair
+9.66 MB < 12 MB cap. Records: `benchmarks/default_proposals_2026-09-05.md`, gate doc §17.

@@ -38,7 +38,7 @@
   "_which_is_in_force": "The THIRD form is OPERATIVE. The first two are recorded because they are the sequence the rule was arrived at and because the intermediate reading briefly landed in this file, but NEITHER -5 NOR -50 IS A BAR ANYWHERE in the active pin set. The only numbers the active rule carries are `bottom_k` (how many of a codec's lowest settings must resolve) and `clamp_eps` (float tolerance for 'sitting on the clamp'); the per-codec BAR is the reference metric's own measured fraction on the same cells.",
   "_ruling_reading": "A dial serves a codec's low end when the codec's lowest configurable settings are still DISTINGUISHABLE on it. Depth is not the question - a dial could reach -700 and still be useless at the bottom if its three lowest steps tie or invert, and a dial that stops at -12 is fine if every step still resolves. So: for each `(image_id, codec)` ladder on the canonical dial grid (REAL CODEC OUTPUT), take the `bottom_k` lowest configurable settings - the lowest q steps; for JXL the largest distances, which the grid stores as its lowest `q`, so 'lowest q' is correct on every codec - and require (i) the dial strictly increases across those steps AND into the next step up (no ties, no inversions), and (ii) no bottom step sits within `clamp_eps` of the dial's instrument-wide minimum, UNLESS that ladder is the SINGLE ladder attaining the minimum. Somebody has to be lowest; two or more ladders sharing the bottom value is a floor that has collapsed onto a clamp, and neither ladder is addressable there.",
   "_scope": "The ruling is about the REGRESSION tail. NO contract row was added, removed or moved, so the CONTRACT tier -- and therefore the board's NOT SHIPPABLE badge, which is contract-driven -- is unaffected. C3 ('some row of an all-negative-truth probe scores < 0') and C4 ('the deepest probe dial is below 0') keep their absolute 0.0 bars, which are SIGN requirements, not depth bars.",
-  "active": "floor-representability-2026-09-05",
+  "active": "floor-representability-resolvable-2026-09-05",
   "pin_sets": [
    {
     "id": "mentor-2026-09-04",
@@ -57,8 +57,11 @@
    },
    {
     "id": "floor-representability-2026-09-05",
-    "status": "active",
+    "status": "retired",
     "registered": "2026-09-05",
+    "retired_on": "2026-09-05",
+    "retired_by": "USER RULING 2026-09-05. Asked \"ok, is there poor resolution compared to ssim2?\", the lane reported that this set's `distinct` window grades each ladder's three literal lowest positions -- including steps the MENTOR itself cannot resolve -- and recommended grading only the steps ssim2 separates by >= 0.5 points. The user answered \"ok\", read as accepting that recommendation. Superseded by `floor-representability-resolvable-2026-09-05`.",
+    "retained_because": "Every A7r number published between 2026-09-05 and this flip -- gate record section 16, the 11-arm lambda sweep table, the 2026-09-05 board grading -- is graded on THIS set's `distinct` window. Reachable with `--floor-rule distinct`, or by pointing `negative_tail_bars.active` back here (no code change).",
     "axes": [
      "A7r",
      "A8r"
@@ -80,6 +83,39 @@
      "per_codec_bars": "MEASURED, not chosen: each codec's bar is `peer_ssim2`'s own representability fraction on the same cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) and appended to `grid_floor_representability`. Re-implementing the ladder walk outside the owner to produce these would be exactly the duplication the no-duplicate-implementations rule forbids."
     },
     "quality_orientation": "`q` is QUALITY-ORIENTED on every codec in the dial grid, including JXL: its `param_kind` is `distance` and its q=0 cells carry `codec_param` 25.0 (the largest distance = the worst quality), rising to q=99.8 at distance 0.05. So 'the lowest configurable settings' is always the smallest `q`, and no per-codec direction switch is needed. VERIFIED 2026-09-05 on the canonical grid: avif/jpeg/webp q in [0,100] with codec_param == q, jxl q in [0,99.8] with codec_param 25.0 -> 0.05 monotonically decreasing."
+   },
+   {
+    "id": "floor-representability-resolvable-2026-09-05",
+    "status": "active",
+    "registered": "2026-09-05",
+    "supersedes": "floor-representability-2026-09-05",
+    "axes": [
+     "A7r",
+     "A8r"
+    ],
+    "bottom_k": 3,
+    "clamp_eps": 1e-09,
+    "report_floor_threshold": -50.0,
+    "floor_rule": "resolvable",
+    "floor_margin": 0.5,
+    "user_messages_verbatim_2026-09-05": [
+     "ok, is there poor resolution compared to ssim2? update and share thw gauntlet for what should be the. ew sdr and bdr",
+     "hdr"
+    ],
+    "_ruling_reading": "The two messages are one instruction: the second supplies the word the first mistyped, so the ask is \"update and share the gauntlet for what should be the new SDR and HDR [defaults]\". The leading \"ok\" answers the two recommendations the previous report put to the user, and IS READ AS ACCEPTING BOTH: (1) grade floor representability under the RESOLVABLE window (margin 0.5) instead of the literal bottom-3 window, and (2) demote the six dial-VALUE rows A1-A6 from hard regression bars to the Report tier. This reading is recorded explicitly because \"ok\" is terse: it is an INFERENCE from the conversation, not a verbatim instruction, and both halves are reversible without a code change -- point `active` back at `floor-representability-2026-09-05` for the window, pass `--gaddr-value-pins hard` for the tier.",
+    "axis_definitions": {
+     "A7r": "FLOOR REPRESENTABILITY, per codec, under the RESOLVABLE window. Identical to the superseded set's rule -- a ladder is REPRESENTED when the dial strictly increases across the selected steps and into the next one up, and no bottom step sits within `clamp_eps` of the instrument-wide minimum unless that ladder is its sole holder -- EXCEPT in which steps it selects. `distinct` took each ladder's literal three lowest settings; `resolvable` walks up from the lowest setting, SKIPPING any step whose |delta mentor| from the last SELECTED step is below `floor_margin`, until bottom_k+1 mentor-resolvable steps are collected. BAR = the reference metric's own fraction on the same cells under the SAME rule, pinned per codec in `grid_floor_representability` rows carrying `\"floor_rule\": \"resolvable\"`; where no such row is registered the bar is computed LIVE through the identical owner call. A `distinct` fraction is NEVER substituted for a `resolvable` one.",
+     "A8r": "Unchanged from the superseded set: the negative-tail probe, REPORT-ONLY, no bar."
+    },
+    "why_resolvable": "MEASURED, `benchmarks/ladder_floor_resolution_2026-09-05.md` sections 2-4 and 8.3. The `distinct` window grades steps the MENTOR itself cannot separate, so it charges a candidate for disagreeing with noise. The extreme case is jpeg on the pre-ladder grids, where q=0/5/10 are BYTE-IDENTICAL encoder output and the bar was a vacuous 0.0000; the ladder instrument fixed the instrument, and this rule fixes the WINDOW. On the ladder instrument the mentor's own bottom-triplet failures are 78% (jpeg) / 67% (avif-rav1e) genuine inversions rather than ties, so the flat zone is real and skipping it is not hiding a defect -- it is declining to grade where the reference cannot.",
+    "value_pins": {
+     "_what": "Which tier the six dial-VALUE rows A1-A6 are emitted on. `report` is the default from 2026-09-05: they are still MEASURED and still PRINTED with their bars, but sit on tier `report-only` and gate nothing, so the REGRESSION headline is carried by A7r alone. `--gaddr-value-pins hard` restores them to the regression tier and reproduces the pre-ruling grading row-for-row.",
+     "default": "report",
+     "why": "A1-A6 bar a candidate against `peer_ssim2`'s own max / p95 / min / p5 / reach / dynamic_range on one instrument. Those are incidental properties of where the mentor's distribution happens to land, not product requirements -- and the gate record's own section 14.6 measured the resulting absurdity under the RETIRED shipped-B pins, where A1/A3/A6 sat ABOVE what the reference metric itself reaches, so a dial calibrated exactly to the truth failed three rows. The product requirements live in the CONTRACT tier (C1-C6) and the per-codec floor (A7r).",
+     "scope": "TIER ONLY. No contract row was added, removed, moved or re-barred, so the board's NOT SHIPPABLE badge -- which is contract-driven -- cannot move with this setting. Asserted by a unit test, not assumed."
+    },
+    "reversibility": "Two independent levers, neither requiring a code change: point `negative_tail_bars.active` back at `floor-representability-2026-09-05` to restore the `distinct` window everywhere, or pass `--floor-rule distinct` / `--gaddr-value-pins hard` per invocation.",
+    "not_measurable_note": "`resolvable` chooses each ladder's window from the MENTOR's own per-cell values, so it REQUIRES `--gaddr-grid-truth`. Where none is supplied A7r reads NOT MEASURED with that reason -- it is never silently re-graded under `distinct`'s window, which asks a different question, and never defaulted to a pass."
    }
   ]
  },
@@ -383,6 +419,86 @@
    ],
    "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
    "note": "THE BAR for this instrument. `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) are removed from the instrument, so jpeg's bottom three are three SETTINGS rather than three samples of one. `avif-svt` and `avif-rav1e` are separate ladders \u2014 different encoders, different quantizer mappings."
+  },
+  {
+   "dial_grid_sha256": "4c3874a78c469e15c664a63e10216760317bd9501b9fe9365b6b93845cb5f980",
+   "reference": "peer_ssim2",
+   "label": "dial_grid_372col_ladder_2026-09-05 (FLOOR-DENSE) -- per-CODEC FLOOR REPRESENTABILITY, RESOLVABLE window",
+   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
+   "bottom_k": 3,
+   "floor_rule": "resolvable",
+   "floor_margin": 0.5,
+   "registered": "2026-09-05",
+   "active": true,
+   "codecs": [
+    {
+     "codec": "avif-rav1e",
+     "n_ladders": 39,
+     "represented_frac": 0.6410256410256411
+    },
+    {
+     "codec": "avif-svt",
+     "n_ladders": 39,
+     "represented_frac": 1.0
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 39,
+     "represented_frac": 0.6666666666666666
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 26,
+     "represented_frac": 0.9615384615384616
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 39,
+     "represented_frac": 1.0
+    }
+   ],
+   "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
+   "note": "THE BAR for this instrument UNDER THE RESOLVABLE WINDOW (the operative rule since the USER RULING 2026-09-05). `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-grid-truth <cells> --floor-rule resolvable --gaddr-json`), copied verbatim at full f64. This row does NOT replace the `distinct` row for the same grid -- both stay active and answer different questions, and the lookup key includes `floor_rule` so neither can be served for the other. Reproduces benchmarks/ladder_floor_resolution_2026-09-05.md section 8.3's mentor row exactly (0.6410 / 1.0000 / 0.6667 / 0.9615 / 1.0000). MEASURED on BOTH ladder widths and BIT-IDENTICAL between them, as it must be: the mentor's per-cell scores are a property of the pixels, not of the feature width."
+  },
+  {
+   "dial_grid_sha256": "0e8e5fb789bd21b263edc3531b243b4086b5ba9c6757de37188ac912bd392f2a",
+   "reference": "peer_ssim2",
+   "label": "dial_grid_944col_ladder_2026-09-05 (FLOOR-DENSE, foldapp2pools) -- per-CODEC FLOOR REPRESENTABILITY, RESOLVABLE window",
+   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet",
+   "bottom_k": 3,
+   "floor_rule": "resolvable",
+   "floor_margin": 0.5,
+   "registered": "2026-09-05",
+   "active": true,
+   "codecs": [
+    {
+     "codec": "avif-rav1e",
+     "n_ladders": 39,
+     "represented_frac": 0.6410256410256411
+    },
+    {
+     "codec": "avif-svt",
+     "n_ladders": 39,
+     "represented_frac": 1.0
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 39,
+     "represented_frac": 0.6666666666666666
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 26,
+     "represented_frac": 0.9615384615384616
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 39,
+     "represented_frac": 1.0
+    }
+   ],
+   "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
+   "note": "THE BAR for this instrument UNDER THE RESOLVABLE WINDOW (the operative rule since the USER RULING 2026-09-05). `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-grid-truth <cells> --floor-rule resolvable --gaddr-json`), copied verbatim at full f64. This row does NOT replace the `distinct` row for the same grid -- both stay active and answer different questions, and the lookup key includes `floor_rule` so neither can be served for the other. Reproduces benchmarks/ladder_floor_resolution_2026-09-05.md section 8.3's mentor row exactly (0.6410 / 1.0000 / 0.6667 / 0.9615 / 1.0000). MEASURED on BOTH ladder widths and BIT-IDENTICAL between them, as it must be: the mentor's per-cell scores are a property of the pixels, not of the feature width."
   }
  ],
  "grids": [

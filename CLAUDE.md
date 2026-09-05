@@ -1558,6 +1558,49 @@ pass; an unregistered dial grid = NOT MEASURABLE. Run it with `--negtail-probe` 
 `--identity-probe` (both pinned under `/mnt/v/output/zensim/dialgate-2026-09-04/`) or those
 axes read `—`.
 
+**⛔ SINCE 2026-09-05 THE OPERATIVE FLOOR WINDOW IS `resolvable`, AND `A1`-`A6`
+ARE REPORT-ONLY.** USER RULING (the "ok" opening *"ok, is there poor resolution
+compared to ssim2? … what should be the new SDR and HDR [defaults]"*, read as
+accepting both recommendations put to the user — the reading is recorded in the
+gate doc **§17.1** and in the registry, because it is an inference, not a
+verbatim instruction). Two changes, both reversible with no code change:
+**(1)** `A7r` grades only the lowest settings the MENTOR itself resolves by
+≥ 0.5 points (`--floor-rule resolvable --floor-margin 0.5`), not the three
+literal lowest positions — the old window graded steps ssim2 cannot separate,
+and on jpeg it graded ELEVEN encoder-identical settings as three. **(2)** the six
+dial-VALUE rows `A1`-`A6` moved from hard regression bars to `Tier::Report`:
+still measured, still printed with their bars, gating nothing, so the REGRESSION
+headline is carried by `A7r` alone. The CONTRACT tier is untouched, so **the
+board's NOT SHIPPABLE badge cannot move with either change** (asserted by a unit
+test AND by a measured board count, 63 → 63). The OPERATIVE window is a REGISTRY
+property (`negative_tail_bars.active` → `floor-representability-resolvable-2026-09-05`,
+read by `dial_addressability::operative_floor_rule`), so reverting is a
+one-line registry edit; per-invocation levers are `--floor-rule distinct` and
+`--gaddr-value-pins hard`, **proven to reproduce `main@origin`'s grading
+row-for-row on 4 cells against a pristine binary**. A mentor-windowed rule with
+no `--gaddr-grid-truth` reads `A7r` **NOT MEASURED** — never a silent fall-back
+to `distinct`'s window. Record: `benchmarks/dial_addressability_gate_2026-09-04.md`
+§17; proposals: `benchmarks/default_proposals_2026-09-05.md`.
+
+**THE 2026-09-05 DEFAULT PROPOSALS (nothing installed; the user decides).**
+**SDR — keep Profile D.** On the FLOOR-DENSE 372 ladder under the operative rule
+it is the ONLY scorer passing both tiers (`SHIPPABLE`): 5/5 codec floors,
+CONTRACT 6/6, **exceeding** the mentor on `avif-rav1e` (0.6667 vs 0.6410) and
+`jxl` (1.0000 vs 0.9615). Under the retired `distinct` window it FAILED jpeg by
+one ladder — the ruling is what lets the installed default pass the axis it is
+in fact best at. **All 97 re-graded board cells fail `A7r` on that instrument;
+zero alternative candidates exist.** Profile B still leads RANK (CID22 0.8821 vs
+D's 0.8634) and fails the dial on every codec — the dial and the ranker are not
+the same decision. Shipped D is on the board only as `d_id100_negrich@did100lane`
+(bake sha verified identical). **HDR — keep `BHdr`**: UPIQ pooled **0.7536**,
+above ssim2-PU (0.7044), above PU-SSIM (0.7395), and above every one of the 24
+HDR944 cells and every arm mean (best single seed 0.7254, `CHdr` 0.6664). But
+**G-ADDR on HDR is NOT MEASURED and no instrument can measure it** — an HDR
+ladder is the registered follow-up — and `bhdr_…@cur372`'s G-ADDR verdict is an
+SDR-instrument grading of an HDR-only profile and must never be quoted as its HDR
+dial. BHdr's own promotion was **maxT p = 0.221, not significant**, and it
+overlaps its own HDR census instrument.
+
 **⛔ THE REGRESSION BARS ARE `peer_ssim2`, NOT SHIPPED B (re-pinned 2026-09-04).** USER
 DECISION, verbatim: *"I don't think we should pin to B, ssim2 seems a better mentor."* The
 gate's first run measured its own shipped-B pins to be defective — A1/A3/A6 sat ABOVE what

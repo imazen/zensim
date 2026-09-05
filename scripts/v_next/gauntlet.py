@@ -1261,7 +1261,19 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                      "nm": addr.get("n_not_measured"),
                      "ref": addr.get("reference") or addr.get("active_reference"),
                      "grid": addr.get("grid_label"),
-                     "cfail": cfail, "cnm": cnm}
+                     "cfail": cfail, "cnm": cnm,
+                     # The per-codec FLOOR REPRESENTABILITY table, copied from
+                     # the owner's `measured.codec_floor` (nothing re-derived).
+                     # `rule` is load-bearing: a `resolvable` fraction and a
+                     # `distinct` one are different quantities on the same grid,
+                     # so a column that showed the number without the rule would
+                     # invite exactly the comparison the owner refuses to make.
+                     "rule": addr.get("floor_rule"),
+                     "vpins": addr.get("value_pins"),
+                     "floors": [[c.get("codec"), c.get("represented_frac"),
+                                 c.get("represented_frac_reference"),
+                                 c.get("n_ladders"), c.get("state")]
+                                for c in ((addr.get("measured") or {}).get("codec_floor") or [])]}
         elif gaddr and gaddr.get("grid"):
             _grid = gaddr["grid"]
             _fx = gaddr["fixed_bars"]
@@ -2495,6 +2507,13 @@ const COLS=[
   // against the committed floor registry. The other nine axes are NOT MEASURED for
   // these cells (the gate landed after their verdicts) and are never counted as zeros.
   ['gaddr','G-ADDR p/f',false,b=>b.gaddr?b.gaddr.pass:null],
+  // FLOOR REPRESENTABILITY per codec (A7r): how many of this cell's codec
+  // families reach the MENTOR's own fraction on the same instrument. Sorts on
+  // the count; the hover carries every fraction, its bar, and the RULE the
+  // window was cut under -- read the rule before comparing two cells.
+  ['floors','floors ok',false,b=>{const F=b.gaddr&&b.gaddr.floors;
+      if(!F||!F.length)return null;
+      return F.filter(r=>r[4]==='pass').length;}],
   // ssim2 EXAM (transcribed verdicts, benchmarks/ssim2_exam_scorecard_2026-08-31.json)
   ['w1','W1 no-reg',true,b=>{const e=examOf(b.name);return e?e.W1.v:null;}],
   ['w2','W2 real-win',true,b=>{const e=examOf(b.name);return e?e.W2.v:null;}],
@@ -2554,6 +2573,10 @@ function fmtCell(key,v,b){
   if(key==='cspread')return v==null?'—':f3(v);
   if(key&&key.charAt(0)==='w'&&key.length===2)return v==null?'—':v;
   if(key==='gaddr')return v==null?'—':v+'/'+((b&&b.gaddr&&b.gaddr.total)||6);
+  if(key==='floors'){const F=b&&b.gaddr&&b.gaddr.floors;
+    if(!F||!F.length)return '—';
+    const g=F.filter(r=>r[4]!=='not_measured').length;
+    return g?(v+'/'+g):'—';}
   if(key==='trained')return v==null?'—':v;
   if(key==='gates')return v;
   if(key==='cid22_bwd')return v==null?'—':pct(v);
@@ -2674,6 +2697,26 @@ function renderTable(){
         td.style.cursor='help';}
       if(c[0]==='gaddr'){td.setAttribute('title',gaddrTitle(b));td.style.cursor='help';
         if(b.gaddr&&b.gaddr.fail)td.style.color='var(--critical)';}
+      if(c[0]==='floors'){
+        const F=(b.gaddr&&b.gaddr.floors)||[],R=(b.gaddr&&b.gaddr.rule)||'?';
+        let t='A7r FLOOR REPRESENTABILITY, per codec — the fraction of this '+
+          'codec\u2019s (image, codec) ladders whose lowest configurable '+
+          'settings still RESOLVE on the dial.\nrule=`'+R+'`'+
+          (R==='resolvable'?' (the OPERATIVE rule since the 2026-09-05 ruling: '+
+           'the window skips steps the MENTOR itself cannot separate by the '+
+           'registered margin)':'')+
+          '\ninstrument: '+((b.gaddr&&b.gaddr.grid)||'?')+'\n';
+        if(!F.length){t+='\nNOT MEASURED — this cell carries no per-codec floor table.';}
+        else{for(const r of F){
+          t+='\n  '+r[0]+': '+(r[1]==null?'—':(+r[1]).toFixed(4))+
+             (r[2]==null?'  (bar NOT MEASURED)':('  vs mentor '+(+r[2]).toFixed(4)))+
+             '  ['+r[3]+' ladders]  '+String(r[4]).toUpperCase();}
+          t+='\n\nA fraction under one rule is NOT comparable with one under '+
+             'another. Read DOWN a column only among cells sharing rule AND '+
+             'instrument.';}
+        td.setAttribute('title',t);td.style.cursor='help';
+        const nf=F.filter(r=>r[4]==='fail').length;
+        if(nf)td.style.color='var(--critical)';}
       if(c[0].charAt(0)==='w'&&c[0].length===2){
         const e=examOf(b.name);
         if(e){const cl=e[c[0].toUpperCase()];

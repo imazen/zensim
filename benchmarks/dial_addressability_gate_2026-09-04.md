@@ -1333,3 +1333,234 @@ As-run: `/mnt/v/output/zensim/gaddr-repin-2026-09-05/{derive,postC}/` (the bar
 derivations and the 16 graded scorers) and
 `/mnt/v/output/zensim/gaddr-board-2026-09-05/{product,retired,logs}/` (the 97
 board cells).
+
+---
+
+## 17. USER RULING 2026-09-05 — `resolvable` becomes OPERATIVE, and `A1`-`A6` become REPORT
+
+### 17.1 The messages, and how they were read
+
+Two messages, verbatim, in order:
+
+1. *"ok, is there poor resolution compared to ssim2? update and share thw gauntlet
+   for what should be the. ew sdr and bdr"*
+2. *"hdr"*
+
+The second supplies the word the first mistyped, so the ask is **"update and share
+the gauntlet for what should be the new SDR and HDR [defaults]"**.
+
+**The leading "ok" is read as ACCEPTING the two recommendations the previous
+report put to the user**, and this file says so explicitly because "ok" is terse
+and the reading is an INFERENCE, not a verbatim instruction:
+
+1. grade floor representability under the **RESOLVABLE** window (`--floor-rule
+   resolvable --floor-margin 0.5`) — order only across the three lowest settings
+   the mentor itself resolves by ≥ 0.5 points, agreeing with the mentor's
+   direction, never on the clamp; and
+2. move the six dial-VALUE pins `A1`-`A6` (ceiling `max`/`p95`, floor
+   `min`/`p5`, `reach`, `dynamic_range`) from hard REGRESSION bars to the
+   **Report** tier, leaving the CONTRACT tier `C1`-`C6` plus the per-codec floor
+   `A7r` to carry the product requirements.
+
+**Both halves are reversible without a code change** — that is the property that
+makes acting on an inferred "ok" safe. Point `negative_tail_bars.active` back at
+`floor-representability-2026-09-05` and the `distinct` window returns; pass
+`--gaddr-value-pins hard` and the pre-ruling tiering returns.
+
+### 17.2 Why the answer to *"is there poor resolution compared to ssim2?"* is "yes, and it was partly the ruler"
+
+The `distinct` window graded each ladder's three **literal** lowest positions.
+On the pre-ladder grids that was measurably the wrong question for `jpeg`: q =
+0 / 5 / 10 are **byte-identical encoder output** on 22 of 22 ladders, so the bar
+read a vacuous `0.0000` that anything passed. The 2026-09-05 ladder instrument
+fixed the *instrument* (dedup by encode hash → three real SETTINGS, bar
+`0.5385`); this ruling fixes the *window*.
+
+MEASURED (`benchmarks/ladder_floor_resolution_2026-09-05.md` §2-§4): the codecs
+whose floors look worst are exactly the two whose per-step ssim2 motion is
+smallest — jpeg median Δ **0.426**, `avif-rav1e` **1.025**, against webp 5.6 and
+`avif-svt` 6.4 — at essentially flat bitrate (+0.7 % / +1.6 % bytes per step).
+The mentor's own failures there are **78 % / 67 % genuine inversions**, so the
+flat zone is real; `resolvable` declines to grade where the reference cannot
+separate, rather than charging a candidate for disagreeing with noise.
+
+### 17.3 What is registered
+
+Registry (`benchmarks/dial_addressability_floor_2026-09-04.json`), **append-only
+— exactly two pre-existing lines changed**, both the registry's own retirement
+idiom (verified: `diff` reports two `<` lines and nothing else):
+
+* new ACTIVE pin set **`floor-representability-resolvable-2026-09-05`** carrying
+  `floor_rule: "resolvable"`, `floor_margin: 0.5`, both user messages verbatim,
+  the reading above, and a `value_pins` block;
+* `floor-representability-2026-09-05` flipped to `status: "retired"` with
+  `retired_on` / `retired_by` / `retained_because` — **kept, never deleted**,
+  because every `A7r` number in §16 is graded on it;
+* two new `grid_floor_representability` rows carrying `"floor_rule":
+  "resolvable"` — the mentor's bars on **both** 2026-09-05 ladder instruments,
+  derived through the owner and copied verbatim at full f64.
+
+**The bars, MEASURED this pass** (`bake_verdict --dial-peer-scores
+peer_ssim2=… --gaddr-grid-truth … --floor-rule resolvable --gaddr-json`):
+
+| codec | ladders | **mentor bar (resolvable)** | the `distinct` bar it does NOT replace |
+|---|--:|--:|--:|
+| `avif-rav1e` | 39 | **0.6410256410256411** | 0.5384615384615384 |
+| `avif-svt` | 39 | **1.0** | 1.0 |
+| `jpeg` | 39 | **0.6666666666666666** | 0.5384615384615384 |
+| `jxl` | 26 | **0.9615384615384616** | 0.9230769230769231 |
+| `webp` | 39 | **1.0** | 1.0 |
+
+Reproduces `ladder_floor_resolution_2026-09-05.md` §8.3's mentor row exactly, and
+is **BIT-IDENTICAL between the 372 (`4c3874a7…`) and 944 (`0e8e5fb7…`) ladder
+instruments** — as it must be, since the mentor's per-cell scores are a property
+of the pixels, not the feature width. Asserted by a test, not assumed.
+
+### 17.4 What the owner does now
+
+* `FloorRepresentabilityRule` gained `floor_rule` + `floor_margin`, so **the
+  operative window is a REGISTRY property**, not a hardcoded default —
+  `operative_floor_rule()` is its one reader, and `bake_verdict` uses it whenever
+  `--floor-rule` is omitted.
+* The registry lookup is keyed **`(grid, reference, RULE)`**
+  (`floor_repr_for_grid_under`). A `resolvable` fraction and a `distinct` one are
+  different quantities on the same grid — shipped D reads jpeg 0.5128 under one
+  and 0.6667 under the other — so serving either for the other would bar a
+  candidate against a window it was never graded on. A row measured at margin 0.5
+  does not answer a query at 0.25.
+* `Distinct` **always** reads the registry, even when no row is registered (→ NOT
+  MEASURED). Live-computing its bar would let a caller dodge the pins by
+  supplying their own mentor. Only the mentor-windowed rules may fall back to a
+  live bar, and only when no row for that rule exists.
+* A mentor-windowed rule with **no `--gaddr-grid-truth` reads `A7r` NOT
+  MEASURED**, naming the missing input — never a silent fall-back to `distinct`'s
+  window, never a pass. An **explicitly named** rule without truth is still a
+  parse-time REFUSAL: a request that cannot be honoured is an error, while a
+  default that cannot be applied is a measurement gap.
+* `ValuePins { Report, Hard }` selects the tier of `A1`-`A6`. Their **measured
+  value, bar and pass/fail are unchanged** — only the tier moves — so nothing
+  stops being visible. Stamped in the markdown and as `"value_pins"` in the JSON,
+  because a REGRESSION verdict is unreadable without knowing which rows were
+  eligible to fail it.
+* `NOT MEASURABLE` now means *the instrument cannot support the tier's
+  measurement*, as distinct from `INCOMPLETE` (*it can, but an input was not
+  supplied*). Which rows constitute the tier depends on the pins, so the test
+  does too. Under `Hard` it is byte-for-byte the pre-ruling guard.
+
+**Tests: 6 new, all failing-first, proven by two independent negative controls.**
+Pointing `active` back at the `distinct` pin set fails
+`the_operative_floor_rule_is_resolvable_at_the_registered_margin`,
+`the_active_rule_carries_no_dial_value_bar` and
+`the_operative_rule_reads_not_measured_without_mentor_truth`; deleting the two
+registered `resolvable` rows fails
+`both_ladder_instruments_carry_registered_resolvable_bars` and
+`a_registry_lookup_never_serves_one_rules_bar_for_another`. Full suite:
+`cargo test -p zensim-validate` — **240 lib + every integration test, 0 failures.**
+
+Three pre-existing tests were UPDATED, none relaxed: two now assert the tier
+verdict under `ValuePins::Hard` (their per-ROW `State::Fail` assertions are
+untouched and still pass, which is the "values still printed" claim made
+executable), and one had a hardcoded pin-set id.
+
+### 17.5 REVERSIBILITY, proven against a pristine binary
+
+A throwaway sibling workspace was built at **`main@origin` (`65267020`)** — before
+any of §17's code existed — and four board cells spanning all four instrument
+classes were graded by both binaries. With `--floor-rule distinct
+--gaddr-value-pins hard` the new binary reproduces the pristine one **row-for-row
+on all four cells**: all 14 `checks` rows, both tier verdicts, every `measured`
+value, every bar, `n_pass`/`n_fail`/`n_not_measured`, and the whole `measured`
+block — programmatically compared key-by-key, `0` differences.
+
+The only fields that move are the two that must: `tail_pin_set`
+(`floor-representability-2026-09-05` → `…-resolvable-2026-09-05`, a provenance
+label) and the new `value_pins`. The workspace was `jj workspace forget`-ten and
+deleted immediately after use.
+
+⚠ **A first attempt at this proof was VACUOUSLY TRUE** and is recorded so nobody
+repeats it: the baseline binary chosen was the primary checkout's, built at
+`4fbd8ff8`, which predates `--gaddr-tail-pins` entirely — it wrote **no JSON at
+all**, the comparison globbed an empty directory, and the check printed PASS. The
+fix that caught it was asserting the baseline file COUNT before comparing.
+
+### 17.6 The board — badge count asserted, and it did not move
+
+| | before | after |
+|---|--:|--:|
+| board cells carrying a G-ADDR verdict | 130 | 130 |
+| **NOT SHIPPABLE (≥ 1 CONTRACT-row FAIL)** | **63** | **63** |
+| cells with ≥ 1 CONTRACT row NOT MEASURED | 113 | 113 |
+| `A7r` gradeable (pass + fail) | 13 | **14** |
+| `A1`-`A6` rows on tier `report-only` | 0 | **684** (114 cells) |
+
+The badge is contract-driven and the ruling touched the REGRESSION tail only, so
+it must not move — and did not. `gaddr_board_regrade.py graft` refuses to write
+unless the contract-fail count matches (`47/97` both sides); the 95-cell graft
+plus a 19-cell lane pass were verified against a directly-measured board count.
+
+**A badge DID move once, mid-pass, and the cause is worth recording.** Re-grading
+19 lane-emitted cells, an early script handed the 372 probes to every cell on a
+372-class grid. Three of those cells' original gradings had **no** probes, so
+`C5` went NOT MEASURED → measured **FAIL**, and the count read **64**. That is
+not a false badge — it is a genuinely new measurement — but it is a scope change
+the ruling did not authorise. The probe decision now comes from **each cell's own
+source verdict** (`want_probes = source C3 ∈ {pass, fail}`), reproducing the
+original invocation, and the count returned to **63**. **Supplying an input the
+original grading lacked is a different measurement, not a re-grade.**
+
+Still on the pre-ruling tiering, deliberately: **16 cells**. Twelve on the
+944-POOLS grid whose contract rows ARE probe-derived from probes this pass cannot
+identify (re-grading without them would move contract state), and four `A3b_*`
+cells that `bake_verdict` **correctly refuses** as a wrong-regime read (they use
+72 caller lines in `f156-371`, which the 944 root zeroes). Neither is papered
+over.
+
+### 17.7 The ladder re-grade — and why it is NOT on the board
+
+All **97** reconstructible cells were additionally re-graded on the 2026-09-05
+FLOOR-DENSE ladder instrument of their own width (94 → 944, 3 → 372; full
+coverage, 0 skipped), under the operative rule. Summary TSV:
+`/mnt/v/output/zensim/gaddr-board-ladder-2026-09-05/ladder_regrade_summary.tsv`.
+
+**THE RESULT: all 97 fail `A7r`** — 48 cells miss all five codec bars, 33 miss
+four, 13 miss three, 2 miss two, 1 misses one. One cell reaches CONTRACT PASS.
+
+**It is not grafted, and cannot be.** MEASURED, not reasoned:
+`promote_fulleval.py --graft-gaddr` refuses every such cell —
+*"`dial.mono_pct` differs between the board (0.9946831135686942) and the G-ADDR
+read (0.9758792901923281) — the read was NOT taken on the board's dial grid;
+refusing"* — and `gaddr_board_regrade.py graft`'s own count guard would refuse
+the batch as well (contract-FAIL 47 → 43). Both refusals are correct: a board
+cell's `dial.addressability` describes **its own** dial grid, and a
+ladder-instrument reading is a different measurement of a different instrument.
+Nothing was forced; `--force` was not used and does not exist on this path.
+
+### 17.8 Reproduction
+
+```sh
+cargo build --release -p zensim-validate --bin bake_verdict
+L=/mnt/v/output/zensim/ladder-2026-09-05/instruments
+
+# the mentor's OPERATIVE bars on either ladder width (peer mode, through the owner)
+target/release/bake_verdict --bake zensim/weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin \
+  --dial-peer-scores "peer_ssim2=$L/dialcells_ssim2_ladder.tsv" \
+  --dial-grid "$L/dial_grid_372col_ladder.parquet" \
+  --gaddr-grid-truth "$L/dialcells_ssim2_ladder.tsv" \
+  --floor-rule resolvable --corpora cid22 --gaddr-json /tmp/peer.json
+
+# the board, under the OPERATIVE rule (omit --floor-rule: naming it turns a cell
+# with no mentor truth into a REFUSAL instead of a NOT MEASURED)
+scripts/gaddr_board_regrade.py grade --bv target/release/bake_verdict \
+  --src /mnt/v/output/zensim/gaddr-board-2026-09-04 \
+  --out /mnt/v/output/zensim/gaddr-board-op-2026-09-05 \
+  --grid-truth "$L/dialcells_ssim2_ladder.tsv" --value-pins report
+scripts/gaddr_board_regrade.py graft --src /mnt/v/output/zensim/gaddr-board-2026-09-04 \
+  --out /mnt/v/output/zensim/gaddr-board-op-2026-09-05 \
+  --board /mnt/v/output/zensim/reports/fulleval
+
+# the same 97 cells on the ladder instruments (report-only; never grafted)
+scripts/gaddr_board_regrade.py grade ... --ladder --floor-rule resolvable --floor-margin 0.5
+
+# reproduce the PRE-ruling grading, row-for-row
+target/release/bake_verdict ... --floor-rule distinct --gaddr-value-pins hard
+```

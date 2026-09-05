@@ -844,6 +844,13 @@ struct Args {
     /// what every G-ADDR number published before that date was graded on.
     /// A1-A6 are unaffected by either value.
     gaddr_tail_pins: Option<String>,
+    /// `--gaddr-value-pins <report|hard>`: which TIER the six dial-VALUE rows
+    /// `A1`-`A6` sit on. `report` (default since the USER RULING 2026-09-05)
+    /// measures and prints them but lets them gate nothing; `hard` restores
+    /// the pre-ruling grading, where they are REGRESSION rows. The CONTRACT
+    /// tier is identical either way, so the board's NOT-SHIPPABLE badge cannot
+    /// move with this flag.
+    gaddr_value_pins: Option<String>,
     /// `--gaddr-grid-truth <tsv>`: the REFERENCE metric's own per-cell scores
     /// on the dial grid (`image_id\tcodec\tq\tpred` — the same table
     /// `--dial-peer-scores` reads). Fills the per-codec-family `A9r` columns,
@@ -1037,6 +1044,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut gaddr_json: Option<PathBuf> = None;
     let mut gaddr_reference: Option<String> = None;
     let mut gaddr_tail_pins: Option<String> = None;
+    let mut gaddr_value_pins: Option<String> = None;
     let mut gaddr_grid_truth: Option<PathBuf> = None;
     let mut floor_rule: Option<String> = None;
     let mut floor_margin: Option<f64> = None;
@@ -1124,6 +1132,14 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 // bars nobody selected.
                 zensim_validate::dial_addressability::TailPins::parse(&v)?;
                 gaddr_tail_pins = Some(v);
+            }
+            "--gaddr-value-pins" => {
+                let v = args
+                    .next()
+                    .ok_or("--gaddr-value-pins requires <report|hard>")?;
+                // Validate here so a typo fails at argv, not silently at grading.
+                zensim_validate::dial_addressability::ValuePins::parse(&v)?;
+                gaddr_value_pins = Some(v);
             }
             "--gaddr-grid-truth" => {
                 let v = args.next().ok_or("--gaddr-grid-truth requires <tsv>")?;
@@ -1462,6 +1478,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         gaddr_json,
         gaddr_reference,
         gaddr_tail_pins,
+        gaddr_value_pins,
         gaddr_grid_truth,
         floor_rule,
         floor_margin,
@@ -2229,6 +2246,7 @@ fn dial_panel(
     gaddr_tail_pins: zensim_validate::dial_addressability::TailPins,
     gaddr_grid_truth: Option<&PathBuf>,
     floor_rule: zensim_validate::dial_addressability::FloorRule,
+    value_pins: zensim_validate::dial_addressability::ValuePins,
 ) -> (String, DialMetrics) {
     if !grid_path.exists() {
         return (
@@ -3065,6 +3083,7 @@ fn dial_panel(
             rule: floor_rule,
             mentor: mentor_floor_measure.as_ref(),
         },
+        value_pins,
     );
     s.push_str(&gaddr::render_markdown(&addr_verdict));
 
@@ -4553,6 +4572,16 @@ Run the dedicated q-sweep harness for those._\n",
                     ),
                 )
                 .expect("validated at argument-parse time")
+            })
+            // No `--floor-rule` ⇒ the OPERATIVE rule, owned by the registry's
+            // active pin set (`resolvable`, margin 0.5, since the 2026-09-05
+            // ruling) — NOT a hardcoded `Distinct`.
+            .unwrap_or_else(zensim_validate::dial_addressability::operative_floor_rule),
+        args.gaddr_value_pins
+            .as_deref()
+            .map(|v| {
+                zensim_validate::dial_addressability::ValuePins::parse(v)
+                    .expect("validated at argument-parse time")
             })
             .unwrap_or_default(),
     );

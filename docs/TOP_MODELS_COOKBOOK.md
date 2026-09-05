@@ -114,6 +114,32 @@ Recipe: [`../benchmarks/d_id100_2026-09-04.md`](../benchmarks/d_id100_2026-09-04
 install + gates + the two blockers that stopped the `-peaks-` variant:
 [`../benchmarks/d_ship_flip_2026-09-05.md`](../benchmarks/d_ship_flip_2026-09-05.md).
 
+**STATUS after the 2026-09-05 G-ADDR ruling — `D` is the SDR proposal, and its
+row above is now understated.** Re-graded on the FLOOR-DENSE 372 ladder
+instrument under the OPERATIVE `resolvable` window, shipped `D` reads
+**`SHIPPABLE (regression PASS + contract PASS)`** — 5/5 codec floor
+representability (exceeding the mentor on `avif-rav1e` 0.6667 vs 0.6410 and
+`jxl` 1.0000 vs 0.9615) and CONTRACT 6/6. The "REGRESSION **7/9**" in the table
+is the RETIRED grading: `A1`-`A6` are `report-only` since the ruling, so the
+regression tier is `A7r` alone and D passes it. **All 97 re-graded board cells
+fail `A7r` on that instrument — there is no alternative candidate.** Profile B
+still leads RANK (CID22 0.8821 vs D's 0.8634) while failing the dial on every
+codec. `D` is on the board only as `d_id100_negrich@did100lane` (bake sha
+verified byte-identical); promoting it under its own name is a registered
+follow-up. Record:
+[`../benchmarks/default_proposals_2026-09-05.md`](../benchmarks/default_proposals_2026-09-05.md).
+
+**`ZensimProfile::BHdr` — the HDR proposal is KEEP, with named caveats.** UPIQ
+pooled (n=380) **0.7536**, above ssim2-PU 0.7044, above the PU-SSIM literature
+bar 0.7395, and above every one of the 24 HDR944 cells and every arm seed-group
+mean (best single seed `HDR944_L1T1_s4004` 0.7254; frozen `CHdr` 0.6664, which
+loses by −0.0872 at paired p = 0.0000). **But: G-ADDR on HDR is NOT MEASURED and
+no instrument exists that could measure it** (an HDR ladder is the registered
+follow-up); `bhdr_…@cur372`'s G-ADDR verdict was cut on the SDR codec grid and
+must NEVER be quoted as BHdr's HDR dial; BHdr's own promotion was
+selection-adjusted **maxT p = 0.221, not significant**; and it overlaps its own
+HDR census instrument (7 of 9 scenes). Same record, §2.
+
 Bakes + `.spec.json`/`.metrics.json` sidecars: `/mnt/v/output/zensim/corr-lq/` +
 `/mnt/v/output/zensim/screen-retrain-2026-07-18/`; index: `BAKE_INDEX.md` (built by
 `build_bake_index.py`). Dashboard: `bandwise_dashboard_2026-07-18.html` under

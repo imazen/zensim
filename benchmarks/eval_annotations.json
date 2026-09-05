@@ -2276,6 +2276,20 @@
       "evidence": "benchmarks/dial_addressability_gate_2026-09-04.md section 16 (rewritten in place for the operative reading); benchmarks/d_peaks_372_postC_2026-09-05.md section 5 (the refusal that minted the ruling); benchmarks/d_peaks_lambda_sweep_2026-09-05.md sections 4-6 (the probe is distortion types, not codecs); as-run /mnt/v/output/zensim/gaddr-repin-2026-09-05/ and /mnt/v/output/zensim/gaddr-board-2026-09-05/",
       "fix_path": "Nothing to fix - the floor-representability rule IS the resolution, and it endorses the installed Profile D rather than blocking it. To read a pre-ruling number on its own terms, re-run with `--gaddr-tail-pins retired`; the retired pin set stays registered under negative_tail_bars.pin_sets[mentor-2026-09-04].",
       "date": "2026-09-05"
+    },
+    {
+      "id": "gaddr-a1a6-report-and-resolvable-window-2026-09-05",
+      "kind": "annotated",
+      "fields": [
+        "dial.addressability"
+      ],
+      "scope": {
+        "manual": "Every G-ADDR REGRESSION verdict published BEFORE 2026-09-05's second ruling - gate-doc sections 0-16, the 2026-09-04 and the first 2026-09-05 board gradings, and both re-graded candidate tables. Those were graded with the six dial-VALUE rows A1-A6 as hard REGRESSION bars and with A7r on the `distinct` window (literal bottom-3 positions). Since 2026-09-05 A1-A6 sit on tier `report-only` (measured and printed, gating nothing) and A7r grades the `resolvable` window (margin 0.5). A regression PASS/FAIL count from the earlier era is counting a DIFFERENT set of rows against a DIFFERENT window; the two are not comparable. CONTRACT rows C1-C6 are untouched by both changes, so the board's NOT SHIPPABLE badge is unaffected and its counts ARE comparable across the flip (measured: 63 before, 63 after)."
+      },
+      "reason": "USER RULING 2026-09-05 (second of the day). The user opened with \"ok\" in reply to two recommendations: grade the floor only across settings the mentor resolves by >= 0.5 points, and demote A1-A6 from bars to reporting. That \"ok\" is read as accepting both; the reading is an INFERENCE, recorded as such in benchmarks/dial_addressability_gate_2026-09-04.md section 17.1 and in the registry pin set, and both halves are reversible with no code change. A1-A6 bar against peer_ssim2's own max/p95/min/p5/reach/dynamic_range, which are incidental properties of where the mentor's distribution lands on one instrument rather than product requirements.",
+      "evidence": "benchmarks/dial_addressability_gate_2026-09-04.md section 17; benchmarks/default_proposals_2026-09-05.md; benchmarks/ladder_floor_resolution_2026-09-05.md sections 2-4 and 8.3 (the measurement that minted the window: jpeg/avif-rav1e per-step ssim2 motion is 0.43/1.03 median, and 78%/67% of the mentor's own bottom-triplet failures are genuine inversions). Reversibility PROVEN against a pristine main@origin (65267020) binary: `--floor-rule distinct --gaddr-value-pins hard` reproduces its grading row-for-row on 4 board cells spanning all four instrument classes (all 14 checks rows, both tier verdicts, every measured value; 0 differences).",
+      "fix_path": "Nothing to fix - the superseded numbers are correct FOR THEIR ERA and stay reachable. Reproduce them with `--floor-rule distinct --gaddr-value-pins hard`, or by pointing negative_tail_bars.active back at `floor-representability-2026-09-05`. Do not negate, rescale or compare across the flip.",
+      "date": "2026-09-05"
     }
   ]
 }

@@ -53,6 +53,39 @@ GRID_TRUTH = {
     "694e16c4520a5d41": f"{S2}/dialcells_ssim2_944grid.tsv",   # 944 POOLS
 }
 
+# ── The 2026-09-05 FLOOR-DENSE ladder instruments ────────────────────────────
+# Built by scripts/canonical_corpus/build_ladder_grid.sh; registered (grid row
+# AND per-codec floor row, under BOTH the `distinct` and the operative
+# `resolvable` rules) in benchmarks/dial_addressability_floor_2026-09-04.json.
+# Both widths hold the SAME 9,593 cells, so one mentor truth table serves both.
+LADDER = Path("/mnt/v/output/zensim/ladder-2026-09-05/instruments")
+LADDER_TRUTH = LADDER / "dialcells_ssim2_ladder.tsv"
+LADDER_GRID = {372: LADDER / "dial_grid_372col_ladder.parquet",
+               944: LADDER / "dial_grid_944col_ladder.parquet"}
+LADDER_SHA16 = {372: "4c3874a78c469e15", 944: "0e8e5fb789bd21b2"}
+GRID_TRUTH[LADDER_SHA16[372]] = str(LADDER_TRUTH)
+GRID_TRUTH[LADDER_SHA16[944]] = str(LADDER_TRUTH)
+
+# Which ladder width replaces a cell's ORIGINAL instrument. Keyed by the sha16
+# bake_verdict prints for the grid the 2026-09-04 run actually used, so the
+# mapping is a lookup rather than a guess about the bake. A grid that is not
+# listed has no ladder counterpart and the cell is REPORTED as unladdered, not
+# silently graded on a width its bake never accepted.
+# The four 372-class shas are the registry's own `grids` rows; the two
+# unregistered 944 grids were confirmed 949-column / 4,817-row on disk. Every
+# value here was READ, not transcribed -- a mistyped sha silently drops a cell
+# into the unladdered bucket, which looks like a coverage result rather than a
+# typo (one was caught that way while writing this).
+LADDER_FOR_GRID = {
+    "6546c43e6d9572dc": 372,   # canonical 372 (registry)
+    "506bdadfce7d2c4e": 372,   # postC 372     (registry)
+    "3caee8602c037fb0": 372,   # preC 372      (registry)
+    "b5d27f212fc6b00c": 372,   # un-quarantined 372 (registry)
+    "694e16c4520a5d41": 944,   # 944 POOLS     (registry)
+    "0d0044ed4e86ee2a": 944,   # 944 2026-08-01 (unregistered; 949 cols on disk)
+    "68dd036ac07f01bf": 944,   # 944 era2r4 foldapp2 (unregistered; 949 cols)
+}
+
 
 def parse_log(path: Path) -> dict | None:
     """Recover one cell's invocation from its 2026-09-04 as-run log."""
@@ -147,11 +180,28 @@ def grade(args) -> int:
                         else f"bake missing: {inv['bake']}"))
             continue
         for pins in ("product", "retired"):
+            grid, grid_sha16 = inv["grid"], inv["grid_sha16"]
+            if args.ladder:
+                w = LADDER_FOR_GRID.get(grid_sha16)
+                if w is None:
+                    if pins == "product":
+                        bad.append((name, f"no ladder counterpart for grid {grid_sha16}"))
+                    continue
+                grid, grid_sha16 = str(LADDER_GRID[w]), LADDER_SHA16[w]
             cmd = [args.bv, "--bake", inv["bake"], "--features-root", inv["root"],
-                   "--corpora", inv["corpora"], "--dial-grid", inv["grid"],
+                   "--corpora", inv["corpora"], "--dial-grid", grid,
                    "--gaddr-tail-pins", pins,
-                   "--floor-rule", args.floor_rule,
+                   "--gaddr-value-pins", args.value_pins,
                    "--gaddr-json", str(out / pins / f"{name}.json")]
+            # Omitting --floor-rule selects the OPERATIVE rule (the registry's
+            # active pin set). That is deliberate and NOT the same as naming it:
+            # an EXPLICIT mentor-windowed rule REFUSES a cell with no
+            # --gaddr-grid-truth (the caller asked for something unanswerable),
+            # while the DEFAULT degrades that cell's A7r to NOT MEASURED and
+            # grades everything else. Naming the rule here would drop the 85
+            # cells whose grid has no reference cell table.
+            if args.floor_rule is not None:
+                cmd += ["--floor-rule", args.floor_rule]
             if args.floor_margin is not None:
                 cmd += ["--floor-margin", str(args.floor_margin)]
             if inv["regime"]:
@@ -174,7 +224,7 @@ def grade(args) -> int:
             # cell table have one; bake_verdict refuses the two non-default
             # rules loudly when it is missing, rather than silently grading
             # `distinct` instead.
-            gt = GRID_TRUTH.get(inv["grid_sha16"])
+            gt = GRID_TRUTH.get(grid_sha16)
             if gt and Path(gt).is_file():
                 cmd += ["--gaddr-grid-truth", gt]
             with open(out / "logs" / f"{name}.{pins}.log", "w") as fh:
@@ -250,9 +300,31 @@ def main() -> int:
     # table for their grid — supplied automatically wherever GRID_TRUTH
     # already has one; bake_verdict refuses loudly on a cell that lacks it,
     # rather than silently falling back to `distinct`.
-    g.add_argument("--floor-rule", default="distinct",
-                    choices=["distinct", "resolvable", "spaced"])
+    g.add_argument("--floor-rule", default=None,
+                    choices=["distinct", "resolvable", "spaced"],
+                    help="omit (default) to grade under the OPERATIVE rule the "
+                         "registry's active pin set names — since the "
+                         "2026-09-05 ruling that is `resolvable` at margin 0.5. "
+                         "Naming a mentor-windowed rule explicitly makes a cell "
+                         "with no --gaddr-grid-truth a REFUSAL instead of a NOT "
+                         "MEASURED. `distinct` is the reversibility lever: it "
+                         "reproduces the pre-ruling window.")
     g.add_argument("--floor-margin", type=float, default=None)
+    g.add_argument("--value-pins", default="report", choices=["report", "hard"],
+                   help="which TIER the dial-VALUE rows A1-A6 sit on. `report` "
+                        "(default since the 2026-09-05 ruling) measures and "
+                        "prints them but lets them gate nothing; `hard` "
+                        "restores the pre-ruling grading. The CONTRACT tier is "
+                        "identical either way, so the board's NOT SHIPPABLE "
+                        "badge cannot move with this flag.")
+    g.add_argument("--ladder", action="store_true",
+                   help="re-point every cell at the 2026-09-05 FLOOR-DENSE "
+                        "ladder instrument of its own width (372 or 944, "
+                        "chosen by LADDER_FOR_GRID from the grid the cell was "
+                        "originally graded on) and supply that instrument's "
+                        "mentor truth table. A cell whose grid has no ladder "
+                        "counterpart is REPORTED and skipped, never graded on "
+                        "a width its bake never accepted.")
     g.set_defaults(fn=grade)
     p = sub.add_parser("graft")
     p.add_argument("--src", required=True)
