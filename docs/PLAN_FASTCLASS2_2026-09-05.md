@@ -261,10 +261,37 @@ script (repo rule against hardcoded per-lane paths).
 * **G3 — feature-set id.** Every arm's bake carries `zentrain.feature_set_id`,
   and every input set used is registered in
   `benchmarks/feature_sets_registry.json` (fundamental 3).
-* **G4 — era, closed.** The three leader bakes re-scored on the era2r4 root
-  with `bake_verdict --features-root`, so §1's comparison becomes
-  apples-to-apples. If a leader REFUSES to score there, it is reported as NOT
-  COMPARABLE, never silently dropped.
+* **G4 — era, closed. AMENDMENT (2026-09-05, written after G4 ran and before
+  any arm was read; the change is a CORRECTION of the method, not of a
+  result).** As registered, G4 said "re-score the leaders on the era2r4 root".
+  That would have been the registered wrong-regime silent-mis-score: the
+  leaders train on `ext944-canonical-2026-08-01`, whose registered set is
+  `basic+v2+append+append2@w944/ext944` — **pools ZEROED** — while the fast
+  class's root is the pools-LIVE
+  `basic+peaks+masked+iw+v2+append+append2@w944/era2r4`. Feeding a
+  pools-zeroed-trained model live `f156..371` is not an era A/B.
+
+  So each family is read on **its own COMPUTE at the SAME ERA**: the leaders on
+  `ext944-era2r4-2026-09-01/foldapp2_views`
+  (`basic+v2+append+append2@w944/era2r4` — same compute as their native set,
+  era2r4 era), the fast class on the pools root it trains on. Era is then the
+  only thing that changed for the leaders and regime purity holds for both.
+  Runner: `benchmarks/fastclass2_campaign_2026-09-05/g4_era_leaders.sh`.
+
+  **RESULT — the era moves the bar UP, so §1's target is raised, not lowered:**
+
+  | leader | k | composite | CID22 | KonJND | hfnlproxy |
+  |---|--:|--:|--:|--:|--:|
+  | `W10L9PH` @ era2r4 | 6 | **0.8636** | **0.8877** | **0.4783** | 0.6863 |
+  | `W11J` @ era2r4 | 7 | **0.8626** | **0.8908** | **0.4782** | 0.6696 |
+  | *(their native-era values, for contrast)* | | 0.8594 / 0.8593 | 0.8848 / 0.8874 | 0.4609 / 0.4621 | 0.7384 / 0.7014 |
+
+  **THE COMPETITIVE BAR, restated on the closed era** (the weaker leader per
+  axis): composite ≥ **0.8626**, CID22 ≥ **0.8877**, KonJND ≥ **0.4782**. The
+  incumbent `FC_D3` reads 0.8645 / 0.8863 / 0.4322 — **already past the
+  composite bar, within 0.0014 of the CID22 bar (inside the ~0.0069 per-model
+  CI half-width), and −0.046 on KonJND**, which is a LARGER gap than §1's
+  cross-era −0.029. hfnlproxy 0.4271 vs 0.67–0.69 is the second gap.
 * **G5 — W4 protocol.** `zensim-bench/benches/ssim2_speed_bar.rs` with the
   candidate loaded via `ZEN_HY_*`, **1T and 8T**, min over ≥10 process starts,
   `ZEN_S2_WALL_S` sized for the image size, plus `ZEN_S2_EXTRACT_ONLY=1` to
