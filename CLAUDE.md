@@ -53,6 +53,121 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
 
 ## Known Bugs
 
+- **⛔ 92 % OF THIS REPO'S BAKES CANNOT BE SERVED BY `Zensim::compute`, AND TWO
+  SHIPPED PROFILES ARE AMONG THEM (measured 2026-09-05, OPEN — the architecture
+  lane owns the fix).** Census through the production entry on the committed
+  golden pair: **400 of 433 board bakes, 3 of 11 `zensim/weights/*.bin`, 11 of
+  14 registered feature sets, and 2 of 10 selectable profiles are REFUSED**,
+  every one with the identical `ModelForwardFailed { "bake declares more input
+  features than the caller supplied" }`. ONE cause: `Zensim::compute` emits a
+  **372-layout** vector with `free_extras: Off`
+  (`compute_folded_v1_372_streaming_impl` builds toggles with
+  `..Default::default()`; `compute_fold_backed` truncates to ≤372;
+  `wide_bake_v2_read`, which would pick the wider read, is `allow(dead_code)`),
+  so the rule is exactly **`caller_input_width() <= 372` serves**. Declared
+  widths on the board: 4×156, 28×372 (the whole SERVED set), 1×504, 8×720,
+  2×924, **389×944**. **`ZensimProfile::C` and `CHdr` are the sharp end** —
+  `candidate-profiles` is **default-ON** and `c_sdr_mlp944_corrmix_2026-08-05.bin`
+  is in the crates.io `include` list, so a consumer writing
+  `Zensim::new(ZensimProfile::C)` gets a hard error on every image. **The
+  identity short-circuit hides it at exactly the input a smoke test uses**: both
+  refused profiles still return `IDENTITY (ref vs ref) score = 100.000000`,
+  because `mark_identical` fires before the model. Every SERVED case is also
+  **served-but-MISMATCHED**, with no new mechanism — the runtime is
+  self-consistent (bit-exact, measured) while the 372 roots are one extraction
+  era behind (see the §3.37 entry). **When the fix lands, wire the feature-set-id
+  match check into the SERVING path, not only the verdict path** — otherwise it
+  converts a loud refusal into a silent wrong number. Record:
+  `docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md` §4A; ledger §3.42; registry
+  `profile-c-chdr-unservable-2026-09-05`.
+
+- **⚠ THE 372 IDENTITY ALL-ZERO FEATURE VECTOR IS FABRICATED, NOT MEASURED
+  (2026-09-05, OPEN as a claim-scoping issue).** Both product-facing SDR
+  entries short-circuit `source == distorted` before any walk and synthesise
+  `(score = 100, raw_distance = 0, vec![0.0; width])` —
+  `metric.rs::identical_result` behind every `Zensim::compute*`, and the free
+  function `compute_zensim_with_config` behind **both** v1-372 extractors. So
+  `zensim-validate`'s `dial_addressability` constant — *"ref == dist yields
+  all-zero features for every image"* — is at 372 a property of the
+  short-circuit and is **unfalsifiable by construction at that width**.
+  COMPUTED on the same pixels, the v1 block populates **144 of 372** slots (max
+  |v| **1.12e-3**), and the 944 walk **286 of 944**, in exactly three classes:
+  **15 reference-only** (`GRAD_SRC_MEAN`, `LUMA_MEAN_REF` — correct,
+  `∂f/∂dist ≡ 0`), **12 `PJND_FRAGILITY`** (0.395 full-walk / exactly **1.0**
+  v1-only — a formula artifact both ways), **259 fp residue**. Consequence for
+  the dial: `Zensim::compute` returns exactly **100.000000000** at identity but
+  **96.2296** when ONE byte in ONE channel of ONE pixel out of 90,000 changes —
+  a **3.77-point step at zero distortion**, which IS the mechanism behind
+  G-ADDR's "shipped B ranks 266 of 4,424 cells above a perfect copy" and its
+  `C2 ⊻ C6` either/or. Gate:
+  `zensim/tests/feature_invariants.rs::identity_is_fabricated_by_the_short_circuit_and_differs_from_the_computed_vector`.
+  Registry: `identity-score-cliff-fabricated-2026-09-05`.
+
+- **⚠ `V1FreeExtras` IS SILENTLY INERT UNLESS `append_block` IS ALSO DECLARED
+  (2026-09-05, gated as a contract).** `append_block` does double duty: it
+  declares the LAYOUT (720 → 924, with `append2_block` → 944) **and** enables
+  the append COMPUTE. Every raw-moment slot lives at `f720+`. So a `v1_only`
+  walk requesting `V1FreeExtras::RawMoments` **without** `append_block` emits a
+  **720-wide** vector in which those slots do not exist, with a populated-slot
+  count **identical to `V1FreeExtras::Off` (228 vs 228)** — no error, no
+  warning. Same failure shape as the fixed `==`-vs-`!=` emission-gate defect,
+  reached by a different route; a training table full of structural zeros with
+  nothing failing. Class C is only PARTLY affected — its twelve v2-348 `MSE`
+  cells are inside the 720 layout and survive (228 → 240); its twelve
+  `LUM_*_ERR` append cells do not. The correct "156+free" shape is
+  `v1_only: true` **plus** `append_block: true, append2_block: true`. Gate:
+  `free_extras_are_silently_inert_without_the_append_block_declaration`.
+
+- **⚠ `docs/FEATURE_SET_IDS.md` §1 failure #9 IS AN ERA ARTIFACT, NOT A CODE
+  CLAIM (corrected 2026-09-05).** That row reads *"the v1-372 `f0..155` is NOT
+  the 944 fold's `f0..155` — 156 of 156 slots differ, max abs 1.0214"*, which
+  compared two **stored instruments built in different extractor eras**. In one
+  process at one commit on the same pixels they do not differ at all: **372 of
+  372 slots bit-identical at 11 geometries** (tight, non-tight, odd, sub-64,
+  past `H_TILE_WIDTH`) **and at both SIMD tiers**, through the public free
+  function both v1-372 extractors call. The row is still a true warning about
+  the INSTRUMENTS; read as a claim about the CODE it sends a reader hunting a
+  divergence option C (`56bbcda2`) already closed. Gate:
+  `extractor_entry_is_bit_exact_to_the_fold_v1_block`.
+
+- **⚠ ~95 FEATURE SLOTS ARE NON-MONOTONE UNDER A CONTROL-VALIDATED DISTORTION
+  LADDER, AND MOSTLY BY DESIGN (2026-09-05).** Over 944 slots × 12 images on
+  two ladders whose own MSE control is monotone 12/12 (additive noise 4..48,
+  quantization step 4..64), **40 and 55 slots respectively are persistently
+  (≥9/12 images) and amplitude-really non-monotone**, concentrated in the v2 and
+  append blocks. Most are correct: **62 of the violating series contain an exact
+  `0.0` beside non-zero values** — the signature of a rectified ONE-SIDED
+  feature (the `GLOBAL_CGAIN`/`GLOBAL_CLOSS` pair; heavy quantization with a
+  `+step/2` reconstruction offset *increases* contrast, so contrast-LOSS
+  correctly collapses to zero). **Anyone fitting a monotone head, a dial, or a
+  per-slot sign constraint must exclude the persistent set by NAME** (it is in
+  `/mnt/v/output/zensim/feature-audit-2026-09-05/ladder3.tsv`, with each slot's
+  raw series), not by guess; the already-registered per-slot findings (`f162`'s
+  local bump, `f161`'s sign disagreement, `f93`'s share of D's jpeg-floor
+  inversions) are individual instances of a property the whole set has.
+  **METHOD, load-bearing:** a THIRD ladder had to be discarded — repeated
+  radius-1 box blur is itself **non-monotone on 12 of 12 images**
+  (`29.13 → 26.02 → 29.11 → 31.62 → 34.53 → 37.66`) and produced **176 false
+  violations** before the control was added. **Never accept a monotonicity
+  result with no stimulus control.** Registry:
+  `nonmonotone-feature-slots-are-by-design-2026-09-05`.
+
+- **⚠ THE ONE LIVE ARITHMETIC DEFECT IN A SHIPPED FEATURE IS THE UNBOUNDED SSIM
+  `d` (F4; re-surfaced by the 2026-09-05 audit, OPEN BY DECISION).** v1's
+  per-pixel SSIM dissimilarity has a `.max(0)` floor and **no upper cap**, and
+  `num_m = 1 − (mu1−mu2)²` carries **no `C1`**, so on high-magnitude chroma `d`
+  reaches **5.8e6** — `f313` (`iw_ssim_4th` s0 ch2) = **5,814,302** across 2.3 M
+  scanned rows, against a photographic p99.9 of **0.48**. The shipped winsor
+  guard clamps the symptom, which is why B ships; the consequence to carry is
+  that **144 features hold a clamped-outlier value on the weakest content
+  class**, so any model fit WITHOUT that guard is mis-specified there. The
+  denominator-cancellation hypothesis was tested and FALSIFIED (worst effect
+  1.2×). Every OTHER audited engine property is clean at HEAD — determinism
+  (incl. 28 threads), engine parity (33/33 bit-exact), cross-tier (0 cells over
+  the golden tolerance policy), degenerate inputs (0 NaN / 0 Inf), width
+  independence. Full inventory of all 27 defects with status and gates:
+  `docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`.
+
 - **⛔ THE STORED 372-COL masked/IW BLOCK IS PRE-FIX AND THREAD-DEPENDENT — THE
   RUNTIME PROFILE B IS NOT THE EVALUATED PROFILE B (found + measured 2026-08-30,
   OPEN as a DATA issue; the extractor is correct and is NOT to be changed).**

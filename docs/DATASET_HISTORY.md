@@ -2004,3 +2004,131 @@ levers, not three.
 
 Record: `benchmarks/kernel_fastclass_2026-09-05.md` §"LANE 2"; registration
 `docs/PLAN_KERNEL_FASTCLASS_2026-09-05.md` §"LANE 2".
+
+### §3.42 — the feature-defect audit: the engines are clean, the servability is not (2026-09-05)
+
+**Thought-why.** The user asked, verbatim, *"do we have bugs in feature
+calculations?"*, and mid-lane added *"also make sure everything can be served"*.
+The implicit model behind the first question was that the answer lives in the
+committed record — read the campaign docs, collate the known defects, done.
+
+**Actual-why.** Collating was necessary and not sufficient. The record holds 27
+distinct defects, but it could not answer whether the CODE is correct **today**,
+because almost every entry was measured against a stored table, and a stored
+table cannot distinguish "the extractor is wrong" from "the extractor changed
+after this table was built". Nine invariant probes at HEAD separate them, and
+the separation is the finding: **the extraction engines are clean and the DATA
+is one era behind them.**
+
+**MEASURED at `3376baee`** (`zensim/examples/feature_invariant_probe.rs`, new;
+gates `zensim/tests/feature_invariants.rs`, 10 tests, all passing; full suite
+green 27/27 binaries):
+
+| invariant | result |
+|---|---|
+| determinism (5 repeats; rayon pools 1 and **28**, the rung `fold_engine_parity` stops short of) | BIT-IDENTICAL, 12/12 geometries |
+| engine parity (buffered v1-372 ↔ fold v1-only ↔ fold944-full ↔ both product engines) | **BIT-EXACT, 33 of 33** |
+| tier parity v4x vs v3 (`ZEN_FIP_CAP_V3`, 22,397 cells) | max abs **3.48e-8**, max rel 8.75e-6, **0 cells over the golden tolerance policy**; `f372..943` bit-exact |
+| degenerate inputs (5 pathological families × 4 geometries × 3 routes) | **0 NaN, 0 Inf**, 0 non-finite scores |
+| width independence (tight / non-tight / odd / sub-64 / past `H_TILE_WIDTH`) | no width-class effect |
+
+**Three data-side corrections that change what published numbers mean.**
+
+1. **The 372 identity all-zero vector is FABRICATED and has never been
+   measured.** Both product-facing entries — `metric.rs::identical_result`
+   (behind every `Zensim::compute*`) and the free function
+   `compute_zensim_with_config` (behind BOTH v1-372 extractors) — short-circuit
+   `source == distorted` and synthesise `(100, 0, zeros)`, flagged
+   `mark_identical()` so the model forward is skipped. So the property
+   `dial_addressability`'s constant states as measured is, at 372, a property of
+   the short-circuit. Computed on the same pixels the v1 block populates **144
+   of 372** slots (max |v| **1.12e-3**); at 944, **286 of 944**, independently
+   reproducing §3.36's count on a synthetic rather than real population and
+   resolving it into exactly three classes: **15 reference-only**
+   (`GRAD_SRC_MEAN` append-local-16, `LUMA_MEAN_REF` append2-local-2 — correct,
+   `∂f/∂dist ≡ 0`), **12 `PJND_FRAGILITY`** (v2-local-21: 0.395 on the full
+   walk, exactly **1.0** on a v1-only walk — a formula artifact both ways), and
+   **259 fp residue** ≤ 1.12e-3. Now a gate.
+
+2. **`FEATURE_SET_IDS.md` §1 failure #9 is an ERA artifact, not a code claim.**
+   It reads *"the v1-372 `f0..155` is NOT the 944 fold's `f0..155` — 156 of 156
+   slots differ, max abs 1.0214"*, measured across two STORED instruments of
+   different eras. In one process at one commit on the same pixels they are
+   **bit-exact on 372 of 372 slots at 11 geometries and both SIMD tiers**,
+   through the public free function both v1-372 extractors actually call. The
+   row remains a true warning about the instruments; read as a claim about the
+   code it sends a reader hunting a divergence option C already closed.
+
+3. **`V1FreeExtras` is silently inert unless `append_block` is also declared.**
+   `append_block` does double duty — it declares the LAYOUT (720 → 924, with
+   `append2_block` → 944) *and* enables the append COMPUTE — and every
+   raw-moment slot lives at `f720+`. A `v1_only` walk asking for
+   `V1FreeExtras::RawMoments` **without** it emits a 720-wide vector whose
+   populated-slot count is identical to `V1FreeExtras::Off` (**228 vs 228**),
+   with no error: the same failure shape as the fixed `==`-vs-`!=` emission-gate
+   defect, reached by a different route. Class C is only partly affected (its
+   twelve v2-348 `MSE` cells are inside the 720 layout and survive, 228 → 240;
+   its twelve `LUM_*_ERR` append cells are not). Now a gate.
+
+**THE SERVABILITY CENSUS (the mid-lane addition), measured through
+`Zensim::compute` on the committed golden real pair.** Bake probing used the
+fastclass2 campaign's `zensim/examples/serve_custom_bake.rs`; the profile-enum
+sweep needed this lane's probe because that one takes a bake path.
+
+| population | n | SERVED | REFUSED |
+|---|--:|--:|--:|
+| shipped bakes (`zensim/weights/*.bin`) | 11 | 8 | **3** |
+| board bakes (distinct files behind the 467 fullevals, all on disk) | 433 | 32 | **400** |
+| registered feature sets (`feature_sets_registry.json` → `sets`) | 14 | 3 | **11** |
+| selectable shipped profiles (`ZensimProfile`, default features) | 10 | 8 | **2** |
+
+Every refusal in all four populations is the identical
+`ModelForwardFailed { "bake declares more input features than the caller
+supplied" }`. One cause: `Zensim::compute` emits a **372-layout** vector with
+`free_extras: Off`, so the rule is exactly `caller_input_width() <= 372` serves.
+Declared widths across the 433 board bakes: 4 at 156, 28 at 372 (the SERVED
+set), 1 at 504, 8 at 720, 2 at 924, **389 at 944**.
+
+**The sharp end is `ZensimProfile::C` and `CHdr`.** Both are REFUSED on every
+image; `candidate-profiles` is **ON by default** and
+`c_sdr_mlp944_corrmix_2026-08-05.bin` is in the crates.io `include` list, so it
+ships. And the short-circuit hides it at exactly the input a smoke test would
+use: both still return **`IDENTITY (ref vs ref) score = 100.000000`**, because
+`mark_identical` fires before the model is consulted. A health check passes for
+a profile that cannot score anything else.
+
+**Every SERVED case is also served-but-MISMATCHED, with no new mechanism.** The
+runtime side is self-consistent (the bit-exact result above); the table side is
+one extraction era behind (§3.37 / F3b — the default 372 root was built at
+`ea16c7ee` 13:21, option C flipped at `56bbcda2` 15:43 the same day). So the
+mismatch is temporal, and closing it is the registered-not-run 372 re-extraction
+with no code change. **Consequence for the architecture lane:** when 944 bakes
+become servable they will be served CURRENT-extractor vectors against verdicts
+read on stored roots of a declared era — the servability fix must land with the
+feature-set-id match check wired into the SERVING path, not only the verdict
+path, or it converts a loud `ModelForwardFailed` into a silent wrong number.
+
+**A method lesson worth more than any single number.** A first monotonicity pass
+reported 176 / 127 / 109 amplitude-real non-monotone slots across three ladders.
+Adding a plain **MSE(ref, rung) stimulus control**, emitted through the same
+violation counter, killed one ladder outright: repeated radius-1 box blur is
+**non-monotone on 12 of 12 images** (`29.13 → 26.02 → 29.11 → 31.62 → 34.53 →
+37.66`), and every feature that "violated" on it dips at the same rung. The
+stimulus was the defect. On the two control-validated ladders (additive noise,
+quantization) **40 and 55 slots are persistently non-monotone**, and most are
+correct: 62 violating series contain an exact `0.0` beside non-zero values — the
+signature of a rectified one-sided feature, e.g. the `GLOBAL_CGAIN`/
+`GLOBAL_CLOSS` pair, where heavy quantization with a `+step/2` reconstruction
+offset increases contrast so contrast-LOSS properly collapses to zero. **Do not
+accept a monotonicity result that has no stimulus control**, and recipes
+imposing a monotonicity penalty should exclude the persistent set by name from
+`ladder3.tsv` rather than by guess.
+
+Registry: five entries in `benchmarks/eval_annotations.json`
+(`profile-c-chdr-unservable-2026-09-05`,
+`identity-score-cliff-fabricated-2026-09-05`,
+`feature-set-ids-row9-is-an-era-artifact-2026-09-05`,
+`free-extras-inert-without-append-declaration-2026-09-05`,
+`nonmonotone-feature-slots-are-by-design-2026-09-05`). Record:
+`docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`. Artifacts + `_MANIFEST.json`:
+`/mnt/v/output/zensim/feature-audit-2026-09-05/`.
