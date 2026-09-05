@@ -314,6 +314,32 @@ spline preserves rank by construction, so **no re-anchoring — on any anchor, w
 any knot placement — can turn D's jpeg floor into a pass.** ARM 5's spline-only
 levers can move A1 and A3 (range properties) but provably not A7r.
 
+### 9.4 The whole λ family, on the new instrument — an exhaustive negative
+
+All ten `Dsweep_lam*` arms re-graded here, sorted by codecs meeting their bar:
+
+| bake | `avif-rav1e` | `avif-svt` | `jpeg` | `jxl` | `webp` | codecs met |
+|---|--:|--:|--:|--:|--:|:--:|
+| **BAR (`peer_ssim2`)** | 0.5385 | 1.0000 | 0.5385 | 0.9231 | 1.0000 | — |
+| **Profile D — SHIPPED** | **0.5385** | **1.0000** | 0.5128 | **0.9615** | **1.0000** | **4** |
+| Profile D — previous | 0.5385 | 1.0000 | 0.5128 | 0.9615 | 1.0000 | 4 |
+| `lam5em4` | 0.2564 | 0.9744 | 0.4359 | 0.7308 | 1.0000 | 1 |
+| `lam1em3` (± `w2`) | 0.2564 | 1.0000 | 0.4615 | 0.7308 | 1.0000 | 2 |
+| `lam2em3` (± `w2`) | 0.2821 | 1.0000 | 0.3846 | 0.5769 | 1.0000 | 2 |
+| `lam1em3_w4` | 0.2564 | 0.6410 | 0.4615 | 0.7308 | 1.0000 | 1 |
+| `lam2em3_w4` | 0.2821 | 0.6923 | 0.3846 | 0.5769 | 1.0000 | 1 |
+| `lam4em3` | 0.2821 | 1.0000 | 0.3333 | 0.4615 | 0.9744 | 1 |
+| `lam8em3` | 0.2308 | 1.0000 | 0.3846 | 0.4615 | 0.9744 | 1 |
+| `lam16em3` | 0.2308 | 1.0000 | 0.3846 | 0.4231 | 0.9487 | 1 |
+| Profile A | 0.3333 | 0.8462 | 0.3846 | 0.8077 | 1.0000 | 1 |
+| Profile B | 0.2051 | 0.4359 | 0.3333 | 0.3846 | 0.9487 | 0 |
+
+**Every arm is worse than the incumbent, on every codec, at every λ.** The old grid
+localised the peaks family's failure to **jxl alone**; this instrument shows it also
+halves `avif-rav1e` (0.23–0.28 against D's 0.5385) and loses jpeg. **The λ axis is
+exhausted as a floor lever** — the sweep is not "not yet tuned", it is pointed the
+wrong way, and no member of the family is a ship candidate.
+
 ---
 
 ## 10. SHIP DECISION — nothing installs
