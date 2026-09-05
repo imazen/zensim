@@ -27,7 +27,7 @@ n_inputs           = 372
 arch               = "PURE LINEAR (basic-only): 372-declared-width single identity-activation layer, 28 nonzero coefficients over f0..156 (v1's basic block only — 0 of the 216 f156..372 peak/masked/IW pool coefficients are live), + a 19-knot PCHIP dial spline fit against an identity-pinned, unclamped (negative-tail-carrying) anchor. Forward = dot product (156 of 372 inputs actually read) + spline lookup."
 date               = "2026-09-05"
 supersedes         = "../d_sdr_add156_dense_dial_2026-08-31.bin"   # sha256 4481c2d4…, 3,671 B, era-1 dial
-feature_set_id     = "basic@w372"   # CONSUMER id, derived from the bytes by `bake_block_profile` (era not declared — see [known_gaps])
+feature_set_id     = "basic@w372/unknown#1008b687"   # the CONSUMER id `bake_block_profile` derives from THESE bytes (28 live caller lines, all in f0..155; era `unknown` because the bake declares no `zentrain.feature_set_id` — see [known_gaps]). Identical to the era-1 predecessor's, as it must be: same weights.
 
 # --- Lineage: two commands, both through the owner, both re-verified here ---
 #

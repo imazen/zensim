@@ -263,8 +263,8 @@ HEAD, then fit and gate on the current era.
 | `profile_c_tests` (incl. every `d_*`) | **PASS** 13/13 |
 | `default_build_profile_d_matches_feature_gated_off_buffered_walk` | **PASS**, unchanged — its expectations describe the SKIP behaviour, which this flip does not touch |
 | `shipped_bake_provenance` | **PASS** — the new manifest is parsed and its `[bake] sha256`/`file_bytes` verified against the committed file |
-| W4 (speed) | §8 |
-| public API delta | §9 |
+| W4 (speed) | **PASS** — §8 |
+| public API delta | **ZERO** — §9 |
 
 ---
 
@@ -303,3 +303,83 @@ bake_dial_refit fit-lasso --space raw --target human_score --lam 2e-3 --tau 0 \
 
 Artifacts: `/mnt/v/output/zensim/shipflip-2026-09-05/{gaddr,verdicts}/`,
 `~/tmp/shipflip_era/` (the era control's CSVs).
+
+---
+
+## 8. W4 (speed) — measured, with TWO bit-identical controls in the same runs
+
+The forward pass is byte-identical (§1) and the compute set is unchanged, so the
+only runtime difference is ONE PCHIP evaluation over 19 knots instead of 30, once
+per compare. The prediction is therefore "no measurable change" — which is a
+claim a measurement can only support if the instrument can *demonstrate* its own
+floor. It can here, for free: `ssim2_speed_bar` runs `fast_ssim2` and `zensim_B`
+in the same group, and `ZEN_HY_ADD` swaps only the `add156_156basic` arm's bake,
+so **both of those arms are bit-identical across the two eras by construction**
+and any era-to-era ratio they show is pure instrument noise.
+
+Protocol (era-2 §22.5): one binary, arms selected at runtime, **equal-byte-length
+env values** (`/home/lilith/tmp/shipflip_speed/arm_era1.bin` /
+`…/arm_era2.bin`, 44 chars each), arms **interleaved** era1/era2 per start,
+CCD-pinned (`taskset -c 0-7`), `nice -n19 ionice -c3`, `RAYON_NUM_THREADS=1`,
+`ZEN_S2_SIZES=0576`, `ZEN_S2_WALL_S=060`, **min over 15 process starts** with
+ASLR on.
+
+| arm | era-1 min (ms) | era-2 min (ms) | era2/era1 |
+|---|--:|--:|--:|
+| `zensim_B` — **bit-identical control** | 10.500 | 10.400 | **0.9905** |
+| `fast_ssim2` — **bit-identical control** | 20.000 | 20.100 | **1.0050** |
+| `add156_156basic` — **the arm under test** | 6.600 | 6.700 | **1.0152** |
+
+**Read the controls first.** Two arms that are the *same code and the same bytes*
+in both columns read 0.9905 and 1.0050, so this instrument's own era-to-era floor
+at this cell is about ±1 %. The arm reads 1.0152 — 1.0 % outside the top of that
+band, on a change that removes 11 spline knots and touches nothing else.
+**The honest statement is that no speed difference was resolved**, not that a
+1.5 % cost was measured; the brief's bar (≤ 1.25× the 156 walk) is met with two
+orders of magnitude of headroom either way.
+
+**The exam's own W4 clause passes for both eras**: `add156_156basic` is
+**3.03× (era-1) / 3.00× (era-2)** faster than `fast_ssim2` at 1T, consistent with
+the ADD156 column's published 2.93–3.31× and with the D+free lane's 3.25–3.26× at
+2304².
+
+**Disclosed:** starts 1–5 of 15 overlapped this lane's own `cargo clippy` /
+`public-api` / `semver-checks` runs, which were pinned to cores 16–31 — the SMT
+siblings of the sweep's 0–7 on this part's CCD0. That contamination is visible in
+the data (those starts hold the 30.2 ms `fast_ssim2` outlier and every
+`spread%` above 35) and it is exactly what `min()` over starts is for; starts
+6–15 ran on an otherwise idle box. The controls above are computed over all 15,
+so the quoted floor is the pessimistic one. Raw: `~/tmp/shipflip_speed/w4_raw.txt`,
+analysis `~/tmp/shipflip_speed/analyze.py`.
+
+**Note on the harness**, per `CLAUDE.md`'s registered warning: every run reported
+`⚠ only 2 rounds` at `ZEN_S2_WALL_S=060`. That is the tight-budget regime where a
+zenbench group can degenerate to a spuriously-low mean. It did **not** degenerate
+here, and the check is the same one the warning prescribes: `fast_ssim2` reads
+20.0–30.2 ms at 576²/1T across all 30 runs, a plausible band for its size (it
+reads 95.2 ms at 1152², ≈ 4× the pixels), never the ~0 ms signature of the defect.
+
+---
+
+## 9. Public API — ZERO delta, and no semver event
+
+`cargo public-api --manifest-path zensim/Cargo.toml --all-features` at the
+pre-flip base (`1abf9a5d`, built from a clean `git archive`) and at HEAD:
+**3,311 items each, `diff` reports no lines.** `ZensimProfile::D` already existed
+and the enum is unchanged; the bake bytes are not public surface.
+`cargo semver-checks --manifest-path zensim/Cargo.toml` → *"no semver update
+required"*, 0 failures.
+
+---
+
+## 10. `cargo fmt` — pre-existing dirt, none of it introduced here
+
+`cargo fmt --check` scoped to in-repo members reports **27 diffs across 12
+files**, `zensim/src/profile.rs` among them (2). Verified NOT introduced by this
+lane: extracting `profile.rs` at the base commit `1abf9a5d` and running the same
+`rustfmt --check` gives the **same two hunks, byte-identical**, at shifted line
+numbers (`d_bake_loads_caller_width_372_dense`'s `let model = …` and
+`d_ladder_is_monotone_and_bounded`'s `assert!(score <= 100.0 + 1e-9, …)`). The
+repo has been rustfmt-dirty since before this work; a whole-repo `cargo fmt`
+inside a ship flip would bury the flip in reflow, so it is reported rather than
+done.

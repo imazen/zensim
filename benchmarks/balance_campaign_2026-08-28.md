@@ -7799,3 +7799,31 @@ full-board row-count floor. Both boards regenerated and gated: fair 9,919,326 B 
 cap), all-rows 22,763,259 B. Drive-by: a paren defect had been passing the `curated+knobfail` button as the
 `curated` button's TITLE argument since it landed — it parsed, so no gate saw it, and the button simply was
 not on the bar.
+
+## ROUND 89 — 2026-09-05: the FIRST ship-default flip — D's dial, not D's weights; and the 372 roots are an era behind the runtime
+USER DECISION: "flip the dial default to D-peaks-id100-negrich." The DIAL half shipped (`d833f9c8`); the `-peaks-`
+half did NOT, with a measurement per blocker rather than an argument. `ZensimProfile::D` now loads
+`d_sdr_add156_id100_negrich_dial_2026-09-05.bin` (4,222 B, `921a8f67…`); the era-1 bake stays in `weights/` with its
+manifest. ONLY the spline changed — both bakes strip to weight-sha `330d8c09…`, so rank is BIT-IDENTICAL on 11 of 14
+corpora (CID22 0.863380 either way) and kadid/live/tid move −1.27e-7/+5.81e-7/+7.93e-6, a monotone remap's tie residue.
+Dial: CONTRACT 5/6→**6/6**, REGRESSION 2/9→**7/9**, identity 96.1157→**100.0000**, reach 108.25→156.55, negtail floor
+−100→−213.1, **0 of 4,424 cells above identity in BOTH eras**; mono/tied unchanged. ERA BREAK — re-read stored D dial
+values, never rescale (PCHIP, not affine). W4 measured with TWO bit-identical controls in the same runs (`zensim_B`
+0.9905, `fast_ssim2` 1.0050 era2/era1 min-of-15) against the arm's 1.0152 ⇒ **no speed difference resolved**; the bar
+itself passes 3.03×/3.00× vs fast_ssim2 @1T. Public API delta **ZERO** (3,311 items, identical); semver-checks clean;
+27 fmt diffs are pre-existing (profile.rs's 2 are byte-identical at the base commit). WHY PEAKS DIDN'T SHIP, both
+MEASURED: (1) it is 944-declared-width and installing it makes `Zensim::compute()` return `ModelForwardFailed` on every
+non-identical pair — the limitation `profile_c_tests::compute_on_non_identical_pair_fails_loud` already pins for C;
+closing it is a 944-emitting scoring path, not a default flip; (2) CID22 0.8465 on its own native root vs shipped D's
+0.8634 (kadid 0.673/0.808, tid 0.713/0.823, hfnlproxy 0.324/0.492) — its own lane's §9.2 says "Neither is proposed for
+a default". Its G-ADDR was re-verified through the owner FIRST and reproduces the lane's stored read BIT-EXACTLY.
+NEW FINDING (`fcaa35cd`): the shipped runtime is one extraction era AHEAD of BOTH v1-372 eval roots. Option C landed
+`56bbcda2` 2026-08-30 **15:43**; the default root was built `ea16c7ee` **13:21**. Re-extracting CSIQ at HEAD with the
+same tool on the same input the root was built from (row alignment proven first): basic **120,804/135,096 cells differ,
+max |Δ| 4.536785**; peaks 34,566/62,352. `ZENSIM_ERA2_DENSE=0` reproduces HEAD byte-for-byte and `v1_golden_bytes`
+passes 5/5 (every fixture is tight-class), so neither is the cause. CLAUDE.md's "Not flipped" was stale by six days —
+corrected in place. 944 roots unaffected. AND: the frozen 372 safesyn Gram — ADD156's OWN 196k leg — already carries
+peaks fully populated (72/72), so the peaks idea is a 372-width refit on the right leg, not a fleet wave. Registered
+with the exact command; not run (new model ⇒ own gate pass). Lessons: a bake's DECLARED WIDTH is a runtime contract,
+not a label — check it before proposing any default; and a bit-identical control arm inside the same measurement is
+what separates "no change" from "1.5 % slower".
