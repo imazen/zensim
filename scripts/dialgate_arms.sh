@@ -68,9 +68,20 @@ case "${ZL_ERA:-canonical}" in
     # but a denser q axis, saturated steps removed by encode hash, and TWO avif
     # ladders (`avif-svt` / `avif-rav1e`) where the older grids have one `avif`.
     # Its own peer_ssim2 bars are registered separately, keyed by grid sha256.
-    # 372 by default; ZL_GRID=$L/dial_grid_944col_ladder.parquet + regime 944 for
-    # the 944-class lineage. Both carry the SAME cells and therefore the same
-    # peer_ssim2 bars (verified: identical per-codec fractions on both widths).
+    # 372 by default. For the 944-class lineage BOTH overrides are required —
+    # ROOT_DEF below is a 372 features root, and a 944 bake against it is refused
+    # loudly (LayoutDiffers + 511 unpopulated slots), which is correct but is not
+    # something to rediscover:
+    #
+    #   ZL_ERA=ladder \
+    #   ZL_GRID=/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet \
+    #   ZL_ROOT=/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01 \
+    #     scripts/dialgate_arms.sh score <label> <bake.bin> 944
+    #
+    # (that root is `zensim_validate::eval_roots::FEATURES_ROOT_944`; eval_roots
+    # names feature ROOTS, not dial grids, so the grid path lives here.)
+    # Both widths carry the SAME cells and therefore the same peer_ssim2 bars —
+    # verified: identical per-codec fractions on both.
     GRID_DEF=$L/dial_grid_372col_ladder.parquet
     NEGTAIL_DEF=$I/negtail_probe_372_postC_2026-09-05.parquet
     IDENTITY_DEF=$I/identity_probe_372_postC_2026-09-05.parquet
