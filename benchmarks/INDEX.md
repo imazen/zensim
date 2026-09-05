@@ -257,6 +257,40 @@ These are the docs to read first for a given purpose:
 **Dial addressability — the D lineage (2026-09-04)**:
 [`d_id100_2026-09-04.md`](d_id100_2026-09-04.md) — `D-id100`: the registered-not-run §14.6(ii) build, executed. The shipped Profile D chain reproduced byte-exactly end to end (closing its manifest's stated provenance gap); the identity pin measured to be a **spline** property, not a fit one (eight real re-fits at 0.1–20 % identity data mass move the identity dial +0.0055 and cost −0.0125 CID22 — the identity Gram's `S`/`s`/`q` are exactly zero); 21 identity anchor rows give **CONTRACT 6/6 + REGRESSION 4/9** with byte-identical weights and zero pair-order flips, and the anchor's own unclamped `ssim2_gpu` column takes it to **7/9**. Includes a fixed owner defect (`fit_spline_knots`'s neg-tail dedup deleted genuinely-negative knots) and measured impossibility proofs for the two axes that remain. Artifacts: [`d_id100_bakes_2026-09-04.pointer.md`](d_id100_bakes_2026-09-04.pointer.md).
 
+**FASTCLASS2 — the fast class's blocker is the FLOOR, not the rank (2026-09-05)**:
+
+[`fastclass2_campaign_2026-09-05.md`](fastclass2_campaign_2026-09-05.md) +
+registration [`../docs/PLAN_FASTCLASS2_2026-09-05.md`](../docs/PLAN_FASTCLASS2_2026-09-05.md)
+— the SET x WIDTH x HEAD sweep on the 156-plus-cheap class, and the results it
+produced **before its own arms landed**. **Gate G4 closed the era and RAISED the
+bar**: the 944 leaders re-read on `ext944-era2r4-2026-09-01/foldapp2_views` (their
+own compute, the fast class's era — NOT the pools root, because their `f156..371`
+weights are untrained init on structurally-zero inputs, 13.5-15.8 %/12.2-12.9 %/
+8.1-8.3 % of L2 mass with **0.00 %** on append/append2) read composite
+**0.8636/0.8626**, CID22 **0.8877/0.8908**, KonJND **0.4783/0.4782**, against the
+incumbent `FC_D3`'s 0.8645 / 0.8863 / 0.4322 — **past the composite bar, inside the
+CI on CID22, −0.046 on KonJND alone.** So the rank problem is one axis wide and the
+SHIP problem is a different quantity: **A7r floor representability**, which the fast
+class fails 5/5 codecs, which survives SEVEN recipe variants (uniform pairing,
+either within-ref ladder, both, high-q-boost, KADIS, class-C — not one of 35 codec
+cells clears the mentor), whose failures are **100 % ordering inversions and 0 %
+clamps**, and which **no dial chain can touch**. Isolated at fixed class + layout +
+anchor chain: 156 -> 228 costs **three of five codecs** and 0.0315 of monotonicity.
+**Identity localised to FOUR slots** (`LUMA_MEAN_REF` f926/931/936/941 — max |v|
+0.688 vs <=4.8e-3 for everything else in the 265 set, 0.45-0.64 % of layer-0 mass;
+new 261-slice) and **closed** by the id100 anchor chain, contract 5/6 -> **6/6**
+with CID22 bit-unchanged. **Servability MEASURED** (`zensim/examples/serve_custom_bake.rs`,
+new): a 372-layout bake that reads the peaks block SERVES; every 944-declared bake
+is REFUSED — so only S156/S228 can ship, and only at the v1-372 layout, which is
+why a servable 372 lane was added and runs first. Side findings: `Zensim::compute`
+short-circuits byte-identical input to `(100,0,zeros)` **before the model**, so a C5
+failure is never a claim that `zensim(x,x) != 100`; and two silent-no-op defects
+fixed — **`--coarse-decay` was discarded on the per-sample-alpha head** (the other
+rider of the same `apply_post_adam_penalties` had been guarded since it landed) and
+the 372 lane's first draft named the **un-normalised** targets (two groups at ~100x
+the others' scale, nothing would have crashed; caught in pre-flight, 15 fits
+unspent). Five feature sets + one root registered, owner-hash-verified.
+
 **Push clobber + the push guard (2026-09-05)**:
 [`push_clobber_2026-09-05.md`](push_clobber_2026-09-05.md) — `origin/main` moved SIDEWAYS twice on 2026-09-04 (jj ops `db7c8ca86b69`, `0edf97e28a91`), dropping nine commits from six lanes with no error and no warning; the per-added-line audit separating the seven that were re-landed or superseded from the one that was genuinely lost (`d3a948ca`, the G-ADDR board coverage — 482 of 498 added lines absent, `cut_gaddr_negtail_probe.py` absent entirely, and the boards on `/mnt/v` already generated with it), the re-land (`2e5cdc8b`, diff byte-for-byte identical to the original), and the owner guard `scripts/safe_push.sh` (fetch → ancestor-assert → set → push → verify; refuses sideways with rc=3 and names every commit it would drop; 4-case self-test incl. the negative control, plus a retrospective control that replays the real clobber).
 

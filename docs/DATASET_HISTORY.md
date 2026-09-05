@@ -1871,3 +1871,84 @@ padded-width class option C removed.
   Replacing them with `zenresize`/`zenjpeg` per IMAZEN-ONLY is its own change.
 
 Record: `benchmarks/corruption_head_d_2026-09-05.md`; ledger ROUND 97.
+
+---
+
+## §3.30 — fastclass2: what the fast class's blocker turned out to be, and two defects found on the way to measuring it (2026-09-05)
+
+**Thought-why.** *"Find a 156-or-156+cheap model whose RANK is competitive with
+the 944-class MLPs."* The premise was that the fast class had a rank gap to
+close.
+
+**Actual-why, measured before the campaign's own arms landed.** At k = 3 and on
+a **closed era**, the fast class already clears two of the three bars: the 944
+leaders re-scored on the era2r4 era read composite 0.8636 / 0.8626, CID22
+0.8877 / 0.8908, KonJND 0.4783 / 0.4782, and the fast-class incumbent `FC_D3`
+reads **0.8645 / 0.8863 / 0.4322** — past the composite bar, within 0.0014 of
+the CID22 bar (inside the ~0.0069 per-model CI half-width), and −0.046 on
+KonJND. **The rank problem is one axis wide.** Meanwhile the SHIP problem is a
+different quantity entirely: A7r floor representability, which the fast class
+fails on 5 of 5 codecs and which no dial chain can touch.
+
+**Era note that matters for any future comparison.** The 944 leaders train on
+`ext944-canonical-2026-08-01`, whose registered set is
+`basic+v2+append+append2@w944/ext944` — **pools ZEROED**. Their `f156..371`
+weights are therefore untrained initialisation values sitting on structurally
+zero inputs (measured: 13.5–15.8 % of layer-0 L2 mass on peaks, 12.2–12.9 % on
+masked, 8.1–8.3 % on IW, and **0.00 % on append/append2**). Scoring such a bake
+on a pools-LIVE root multiplies those by real features. **Read a leader on
+`ext944-era2r4-2026-09-01/foldapp2_views`, never on the pools root.**
+
+**Data facts established, each reusable on its own:**
+
+* **The fast class's identity contamination is FOUR slots** —
+  `LUMA_MEAN_REF` at f926/931/936/941, the free set's only reference-absolute
+  statistic. On the 39-row 944-pools identity probe they carry max |v| 0.688 /
+  spread 0.261 while every other slot in the 265 set stays under 4.8e-3, all 33
+  other raw-moment slots are identity-ZERO, and so are all 24 class-C slots.
+  New reader slice `scripts/sota944/slice_basic156_free_nolumaref.txt` (261).
+  Their layer-0 weight mass is **0.45–0.64 %** (ranks 238–260 of 944), so the
+  fix is predicted to cost about half a percent of mass.
+* **The id100 anchor chain works unchanged on this class**: one
+  `bake_dial_refit pack --anchor <anchor ∪ 21 identity rows @ 100>` takes the
+  contract 5/6 → **6/6** with CID22 bit-unchanged at 0.8863.
+* **`Zensim::compute` short-circuits byte-identical input** to `(100, 0, zeros)`
+  before the model (`metric.rs:3509/5225`, `.mark_identical()`), so a C5 failure
+  is never a claim that `zensim(x, x) != 100` in production — C5 governs
+  NEAR-identity, which is the regime a near-lossless dial lives in.
+* **Servability, measured not inferred**: a 372-layout bake that READS THE PEAKS
+  BLOCK serves today; every 944-declared bake is refused with
+  `ModelForwardFailed`. So of the campaign's five sets only S156/S228 are
+  servable, and only at the v1-372 layout.
+* **The slice, isolated**: at fixed class (sparse additive), fixed layout (372),
+  fixed anchor chain and one instrument, going 156 → 228 costs **three of five
+  codecs** on A7r and 0.0315 of dial monotonicity.
+
+**Two defects found, both in the silent-no-op class, both fixed at their owner:**
+
+1. **`--coarse-decay` was silently discarded on the per-sample-α head.** It is
+   applied by `apply_post_adam_penalties`, called at seven sites all inside
+   `train_mlp_strategy`'s plain loop; `train_mlp_per_sample_alpha_head` never
+   calls it. `--group-l1`, which rides the SAME function, had been guarded
+   against exactly this since it landed, and says so in its own doc comment.
+   Now `coarse_decay_unsupported_flag` fails loud, with the default plain-path
+   case pinned as still allowed.
+2. **The 372 lane's first draft named the un-normalised targets.** The recipe
+   convention is `human_score ∈ [0,1]` with `--target-scale 100`, and the 372
+   directory carries both forms: `cid22_train` [3.0102, 94.1532] vs
+   `cid22_train_norm` [0.0301, 0.9415], `konjnd-dense` [−65.7108, 96.1549] vs
+   `konjnd-dense-norm` [0, 1]. Two groups at ~100× the others' scale, and
+   nothing would have crashed. Caught in pre-flight; 15 fits unspent.
+
+**Naming.** Five feature sets registered and owner-hash-verified:
+`basic+peaks@w944/era2r4` (228, `3fb78648`),
+`basic+peaks+moments@w944/era2r4#0b476506` (261, the identity-clean READER
+subset of its own producer — the designed "name is a handle, hash is the
+identity" case), `basic@w944/era2r4#3ffe8670` (156 at 944 layout),
+`basic+peaks@w372/v1pre` and `basic@w372/v1pre` (the servable forms), plus the
+root `canonical-2026-05-21/train`. **The hash is layout-independent by design**,
+so the 228 reader set carries `#3fb78648` at both 372 and 944 — and that
+distinction is precisely what decides servability.
+
+Record: `benchmarks/fastclass2_campaign_2026-09-05.md`, registration
+`docs/PLAN_FASTCLASS2_2026-09-05.md`; ledger ROUND 98.
