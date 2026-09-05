@@ -103,7 +103,16 @@ encode); measured loop targeting = residual 0.84 in 4 passes vs one-shot 4.33 in
 | **`Ebothg_scr0.5_dial`** | 156→128→1 MLP + winsor + spline | CID22 0.879 · nonphoto 0.906 · **HF-NL 0.712** (best ever) · LIVE 0.959 · dial 0.985 | KonJND 0.271 | best all-around candidate |
 | **`Ebothg_hfgain_winsor_dial`** ("winner_dial") | same, no bigcodec mass | **CID22 0.894** · LIVE 0.960 · CSIQ 0.958 · best jxl RD (+4.5% ssim2) | KonJND 0.335 · HF-NL 0.587 | best pure-CID22/photo rank |
 | **`ADD156_safesyn_only_raw_lasso`** | truly-additive basic-156, 3.6 KB | steer 0.849 (best) · exact fixed gradient · LIVE 0.960 | CID22 0.863 | exact-map / tiny-footprint |
+| **`d_sdr_add156_id100_negrich_dial`** (shipped **`ZensimProfile::D`** since 2026-09-05) | the SAME ADD156 weights (byte-identical, weight-sha `330d8c09…`) + the **id100+negrich** dial spline | rank unchanged (CID22 **0.863380**, bit-identical on 11 of 14 corpora) · dial CONTRACT **6/6** + REGRESSION **7/9** · identity **100.000** · reach 156.55 · negtail floor −213.1 · carries `zentrain.repro` | CID22 0.863 (a D-lineage property, not a dial one) · G-ADDR A7/A9 structurally unreachable | **the shipped fast SDR dial**; era break vs every pre-2026-09-05 D dial number |
 | **B** (shipped) | linear-372 + spline | KonJND 0.547 · HF-NL 0.614 (pre-scr0.5 best) | steering 0.24–0.66 · loses new FR holdouts | incumbent; near-lossless-conservative |
+
+**Dial-era note (2026-09-05).** `ZensimProfile::D`'s bake was flipped to the
+`id100+negrich` dial by user decision. The forward pass is byte-identical, so every
+RANK number in this table is unaffected; every stored **dial** value from `D` predates
+the flip and must be re-read, not rescaled (the remap is a PCHIP spline, not an affine).
+Recipe: [`../benchmarks/d_id100_2026-09-04.md`](../benchmarks/d_id100_2026-09-04.md);
+install + gates + the two blockers that stopped the `-peaks-` variant:
+[`../benchmarks/d_ship_flip_2026-09-05.md`](../benchmarks/d_ship_flip_2026-09-05.md).
 
 Bakes + `.spec.json`/`.metrics.json` sidecars: `/mnt/v/output/zensim/corr-lq/` +
 `/mnt/v/output/zensim/screen-retrain-2026-07-18/`; index: `BAKE_INDEX.md` (built by

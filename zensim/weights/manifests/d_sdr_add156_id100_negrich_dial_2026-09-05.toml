@@ -1,0 +1,105 @@
+# Manifest for the shipped `zensim-d` (SDR, FAST) bake —
+# `ZensimProfile::D`, dial-era v2, shipped 2026-09-05.
+# Schema: zensim/weights/manifests/README.md
+#
+# This bake SUPERSEDES `d_sdr_add156_dense_dial_2026-08-31.bin` as Profile D's
+# default. The predecessor is NOT deleted — it stays in `zensim/weights/` with
+# its own manifest as the era-1 dial artifact every pre-2026-09-05 D number was
+# read on.
+#
+# WHAT CHANGED, EXACTLY: the output-calibration spline, and nothing else.
+# The FORWARD PASS IS BYTE-IDENTICAL to the predecessor's — verified in this
+# repo, not asserted: stripping `zentrain.output_calibration_spline` (and, from
+# this bake, `zentrain.repro`) from BOTH files with `bake_dial_refit strip`
+# yields the same sha256 `330d8c095ce80791336a3c772712d90ee5fb497f3b17aed84bd693a35830beda`.
+# Same 372 declared inputs, same 28 nonzero coefficients over f0..156, same f16
+# dtype, same absent feature transforms, same `caller_input_width`. So rank,
+# speed and the compute set D skips are all unchanged BY CONSTRUCTION; only the
+# monotone remap from raw output to dial units moves.
+
+[bake]
+name               = "zensim-d"
+internal_version   = "d-sdr-add156-id100-negrich-dial"
+file               = "../d_sdr_add156_id100_negrich_dial_2026-09-05.bin"
+sha256             = "921a8f677a225b01dd1030f805f8429e6e6100325e50e87d2c56bfd32a1acad1"
+file_bytes         = 4222
+n_inputs           = 372
+arch               = "PURE LINEAR (basic-only): 372-declared-width single identity-activation layer, 28 nonzero coefficients over f0..156 (v1's basic block only — 0 of the 216 f156..372 peak/masked/IW pool coefficients are live), + a 19-knot PCHIP dial spline fit against an identity-pinned, unclamped (negative-tail-carrying) anchor. Forward = dot product (156 of 372 inputs actually read) + spline lookup."
+date               = "2026-09-05"
+supersedes         = "../d_sdr_add156_dense_dial_2026-08-31.bin"   # sha256 4481c2d4…, 3,671 B, era-1 dial
+feature_set_id     = "basic@w372"   # CONSUMER id, derived from the bytes by `bake_block_profile` (era not declared — see [known_gaps])
+
+# --- Lineage: two commands, both through the owner, both re-verified here ---
+#
+#   ADD156_safesyn_only_raw_lasso.bin (3,575 B, sha256 51437a34…)
+#     is byte-reproduced by:
+#   bake_dial_refit fit-lasso --space raw --target human_score --lam 2e-3 --tau 0 \
+#       --n-sweeps 400 --tol 1e-10 --slice-file <seq 0 155> \
+#       --gram  /mnt/v/output/zensim-multicodec-probe/linear-probe/grams/safesyn.npz --weight 1.0 \
+#       --anchor /mnt/v/output/zensim-multicodec-probe/linear-probe/val/anchor.npz
+#
+#   THIS BAKE = the same fit with the SPLINE step's anchor replaced:
+#   bake_dial_refit fit-lasso <the flags above> \
+#       --anchor-parquet multiband_anchor_dial100.parquet \
+#       --anchor-parquet identity_anchor_n21.parquet \
+#       --anchor-target ssim2_gpu   --embed-repro
+#   bake_dial_refit extend-top --anchor multiband_anchor_dial100.parquet \
+#       --target-col target_score        # appends 0 knots here — a byte no-op,
+#                                        # kept so the lineage is the same two
+#                                        # commands the predecessor's was
+#
+# `--anchor-target ssim2_gpu` is the UNCLAMPED form of the same column the
+# predecessor used (`target_score == max(ssim2_gpu, 0)` on all 2,000 anchor
+# rows, verified); its 147 genuinely-negative rows (to −64.16) are what give
+# this bake its negative tail. `identity_anchor_n21` is 21 all-zero feature
+# rows with `target_score = 100` — 1.03 % of the anchor, the smallest mass that
+# owns `fit_spline_knots`'s top (`>= p99`) bin, so it contributes exactly one
+# knot at `(raw(0-vector), 100)` and displaces no real knot.
+#
+# This bake carries an embedded `zentrain.repro` block (argv + input sha256s +
+# trainer commit); the predecessor did not. That closes the `freeze_check`
+# byte-repro row, which shipped D fails.
+
+[docs]
+recipe_and_gates  = "benchmarks/d_id100_2026-09-04.md"                  # the id100 + negrich chain, the mechanism, the FIT-side null
+ship_flip         = "benchmarks/d_ship_flip_2026-09-05.md"              # this install, its gates, and the two blockers that stopped the peaks arm
+addressability    = "benchmarks/dial_addressability_gate_2026-09-04.md" # G-ADDR: what CONTRACT/REGRESSION mean and where the bars come from
+artifacts         = "benchmarks/d_id100_bakes_2026-09-04.pointer.md"
+predecessor       = "zensim/weights/manifests/d_sdr_add156_dense_dial_2026-08-31.toml"
+
+# Re-measured in the ship-flip lane through the owner (`bake_verdict`), both
+# arms in one invocation each, same features root, same instruments.
+# NOT copied from the recipe doc.
+[eval]
+cid22_srocc  = 0.863380   # BIT-IDENTICAL to the predecessor's
+konjnd_srocc = 0.533186   # |signed| — JPEG-504 ruler; also bit-identical
+notes = "Rank is bit-identical to the predecessor on 11 of 14 corpora and within the tie-make/break residue of a monotone remap on the other three (kadid −1.27e-7, live +5.81e-7, tid +7.93e-6). CID22, KonJND, AIC-3, AIC-4, CSIQ, LIVE-pooled, PIPAL, imazen26, nonphoto, hf_nearlossless, hfnlproxy and SDR25 are exactly equal."
+
+[dial]
+# G-ADDR (`benchmarks/dial_addressability_gate_2026-09-04.md`), bars =
+# `peer_ssim2`, canonical 372 dial grid sha 6546c43e…, instruments
+# `dialgate-2026-09-04/{identity,negtail}_probe_372_2026-09-04.parquet`.
+contract               = "6/6"   # predecessor: 5/6 (fails C5, identity)
+regression_vs_ssim2    = "7/9"   # predecessor: 2/9; the two that remain are A7 and A9
+regression_failing     = ["A7", "A9"]
+identity_dial          = 100.0000   # predecessor 96.1157; C5 band is [97.5, 100]
+cells_above_identity   = 0          # unchanged — 0 of 4,424 grid cells, before and after
+grid_max               = 99.3797    # predecessor 96.0487
+grid_min               = -57.1718   # predecessor -12.2035
+p95                    = 95.5183    # predecessor 95.2842
+p5                     = 8.8331     # predecessor 9.5174
+reach                  = 156.5515   # predecessor 108.2522; ssim2's own reach is 153.7312
+dynamic_range          = 86.6852    # predecessor 85.7669
+mono_pct               = 0.9847     # unchanged
+tied_pct               = 0.0000     # unchanged
+negtail_min            = -213.149   # predecessor -100.000
+negtail_frac_below_0   = 0.9140     # predecessor 0.8580
+
+[known_gaps]
+# Carried forward from the predecessor unchanged — this is a DIAL change, so
+# none of these move. Stated here rather than left to be rediscovered.
+ood_guard = "No winsor feature-bounds guard. `bake_dial_refit gate` (G-RANGE) still fails on out-of-distribution corpora; adding the guard trades away real rank and is a user-gated decision (benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md)."
+corruption_head = "No companion corruption head — the corruption-ordering gate is ABSENT for this profile, not measured-and-passing."
+hdr = "SDR content only, structurally. Route HDR to ZensimProfile::BHdr."
+a7_a9 = "G-ADDR A7 (negtail min <= -770.62) and A9 (frac_below_zero >= 1.0) still fail, and neither is a tuning gap: A7 is bound by `output_calibration_spline::apply`'s OOD floor rule (ys[0] - (ys[n-1] - ys[0])), which would need ys[0] <= -335.3; A9 requires the dial's zero-crossing to sit at or above the negative probe's MAXIMUM raw prediction (+23.135, an OOD outlier on a grid whose whole raw span is [-0.062, 0.972]), which would map the entire dial grid below zero. Both are derived in benchmarks/d_id100_2026-09-04.md §7.1."
+feature_set_era = "The bake declares no `zentrain.feature_set_id`, so its derived consumer id reads era `unknown` (`basic@w372/unknown#1008b687`). `bake_dial_refit fit-lasso` does not stamp the field; only `zensim_mlp_train` does (docs/FEATURE_SET_IDS.md §6.1). Registered, not fabricated — a stamped era would have to be measured, and see the runtime-era finding in benchmarks/d_ship_flip_2026-09-05.md §3."

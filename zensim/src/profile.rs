@@ -175,8 +175,8 @@ pub enum ZensimProfile {
     /// **`D` — the FAST SDR profile (external name `zensim-d`).** A
     /// basic-only 372-declared-width linear (single identity-activation
     /// layer) bake — internal `ADD156` (`ens-safesyn-only-raw-lasso`, 28
-    /// nonzero coefficients over `f0..156`, spline-top-extended,
-    /// 3,671 B, sha256 `4481c2d4…`) — reads `f0..156` only (0 of the 216
+    /// nonzero coefficients over `f0..156`, id100+negrich dial,
+    /// 4,222 B, sha256 `921a8f67…`) — reads `f0..156` only (0 of the 216
     /// `f156..372` peak/masked/IW pool slots), so a build with
     /// `feature-regime-v2` can skip computing that block entirely: the
     /// `156` compute set measured **2.54×/4.43×/3.52× faster than the full
@@ -211,13 +211,12 @@ pub enum ZensimProfile {
     ///   trades away real rank (LIVE/KADID/TID) and is a **user-gated**
     ///   decision this profile deliberately does not make for you — see
     ///   `benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md`.
-    /// - **No embedded byte-repro block** (`zentrain.repro` is absent from
-    ///   this bake's metadata) — its 28 coefficients are a 400-sweep
-    ///   solver truncation, not the lasso optimum at convergence (26
-    ///   coefficients; `max|w_conv − w_400|` ≈ 55 % of the largest
-    ///   coefficient), and that provenance lives only in the campaign
-    ///   record, not in the bake. A future re-emit through the trainer
-    ///   would fix this without changing scores.
+    /// - **The 28 coefficients are a 400-sweep solver truncation**, not the
+    ///   lasso optimum at convergence (26 coefficients; `max|w_conv −
+    ///   w_400|` ≈ 55 % of the largest coefficient). *(The companion gap —
+    ///   no embedded `zentrain.repro` — was CLOSED by the 2026-09-05 dial
+    ///   flip: this bake carries one, and `benchmarks/d_id100_2026-09-04.md`
+    ///   §1 byte-reproduces both steps of the chain.)*
     /// - **No companion corruption head** — the corruption-ordering gate is
     ///   `ABSENT` for this profile, not measured-and-passing.
     /// - **SDR content only** — structurally, like [`Self::C`]; route HDR
@@ -239,10 +238,44 @@ pub enum ZensimProfile {
     /// `benchmarks/profile_d_and_published_speed_2026-09-01.md` and
     /// `benchmarks/profile_d_notax_2026-09-01.md`.
     ///
+    /// **DIAL ERA v2 — user-decided default flip, 2026-09-05.** `D`'s bake
+    /// changed from `d_sdr_add156_dense_dial_2026-08-31.bin` to
+    /// `d_sdr_add156_id100_negrich_dial_2026-09-05.bin`. **The forward pass
+    /// is byte-identical** (both strip to the same weight bytes, sha256
+    /// `330d8c09…`), so RANK and SPEED do not move: bit-identical pooled
+    /// SROCC on 11 of 14 canonical corpora and within a monotone remap's
+    /// tie-make/break residue on the other three (`kadid` −1.3e-7, `live`
+    /// +5.8e-7, `tid` +7.9e-6). Only the output-calibration spline differs,
+    /// and **absolute dial values shift at both ends**:
+    ///
+    /// | | era-1 | era-2 (this bake) |
+    /// |---|--:|--:|
+    /// | identity (a perfect copy) | 96.1157 | **100.0000** |
+    /// | dial-grid max / p95 | 96.049 / 95.284 | 99.380 / 95.518 |
+    /// | dial-grid min / p5 | −12.204 / 9.517 | −57.172 / 8.833 |
+    /// | reach (max − min) | 108.252 | 156.552 |
+    /// | deepest negative-probe row | −100.000 | −213.149 |
+    /// | grid cells above identity | 0 | 0 |
+    /// | monotonicity / tied | 0.9847 / 0.0000 | 0.9847 / 0.0000 |
+    ///
+    /// So **every stored `zensim-d` dial number predates this change and is
+    /// on the era-1 dial** — re-read, do not rescale (the remap is a PCHIP
+    /// spline, not an affine). Rankings and orderings computed from `D` are
+    /// unaffected. On the addressability gate
+    /// (`benchmarks/dial_addressability_gate_2026-09-04.md`) this takes `D`
+    /// from CONTRACT 5/6 (failing C5, identity) to **6/6**, and from
+    /// REGRESSION 2/9 to **7/9** against the `peer_ssim2` bars; `A7` and
+    /// `A9` still fail for structural reasons derived in
+    /// `benchmarks/d_id100_2026-09-04.md` §7.1, not for want of tuning.
+    /// This bake also carries an embedded `zentrain.repro` block, which the
+    /// era-1 one did not — closing the `freeze_check` byte-repro row.
+    ///
     /// Full audit, corrections, and reproduction:
     /// `benchmarks/add156_ship_audit_2026-08-31.md`,
-    /// `benchmarks/era2_fast_profile_subset_2026-08-31.md`, and the mapping
-    /// table in `docs/CODEC_TARGET_METRIC.md`.
+    /// `benchmarks/era2_fast_profile_subset_2026-08-31.md`,
+    /// `benchmarks/d_id100_2026-09-04.md`,
+    /// `benchmarks/d_ship_flip_2026-09-05.md`, and the mapping table in
+    /// `docs/CODEC_TARGET_METRIC.md`.
     #[cfg(feature = "candidate-profiles")]
     D,
     /// **Externally-defined profile** — an escape hatch for profiles
@@ -1291,20 +1324,26 @@ static PROFILE_C_HDR: ProfileParams = ProfileParams {
 };
 
 /// `ZensimProfile::D` bake bytes — internal `ADD156`
-/// (`ens-safesyn-only-raw-lasso`, spline-top-extended "arm A",
-/// `d_sdr_add156_dense_dial_2026-08-31.bin`, 3,671 B, sha256
-/// `4481c2d4a7c0d35e82f423587b9bc5ce8a52642375e778e5214af38b799ad504`).
-/// **Landed 2026-09-01** from the audit's registered fix
-/// (`benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md` arm A —
-/// "RANK-EXACT vs baseline on all 14 corpora... Land this."): the ORIGINAL
-/// campaign bake plus ONLY the free spline-top extension that closes the
-/// 100 %-above-knot HF-near-lossless failure; the costly winsor OOD guard
-/// (arms B/C) is deliberately NOT included — see the `D` variant doc for why.
-/// A 372-declared-width dense bake (NOT dead-column-pruned — packing this
-/// bake erases the spline-top fix, so it ships unpacked, exactly like `B`).
+/// (`ens-safesyn-only-raw-lasso`) carrying the **id100+negrich dial**:
+/// `d_sdr_add156_id100_negrich_dial_2026-09-05.bin`, 4,222 B, sha256
+/// `921a8f677a225b01dd1030f805f8429e6e6100325e50e87d2c56bfd32a1acad1`.
+/// **Landed 2026-09-05** (user decision) from
+/// `benchmarks/d_id100_2026-09-04.md`; install record + gates:
+/// `benchmarks/d_ship_flip_2026-09-05.md`.
+///
+/// **Only the output spline changed.** The forward pass is BYTE-IDENTICAL to
+/// the predecessor `d_sdr_add156_dense_dial_2026-08-31.bin` (3,671 B, sha256
+/// `4481c2d4…`, still in `zensim/weights/` as the era-1 dial artifact):
+/// stripping `zentrain.output_calibration_spline` — and, from this bake,
+/// `zentrain.repro` — from both yields the same sha256 `330d8c09…`. Same 372
+/// declared inputs, same 28 nonzero coefficients over `f0..156`, same f16
+/// dtype, same absent feature transforms. So rank, speed and the compute set
+/// `D` skips are unchanged by construction; only the monotone raw→dial remap
+/// moves. A 372-declared-width dense bake (NOT dead-column-pruned — packing
+/// erases the spline fix, so it ships unpacked, exactly like `B`).
 #[cfg(feature = "candidate-profiles")]
 pub(crate) fn mlp_bake_d_add156() -> &'static [u8] {
-    include_bytes!("../weights/d_sdr_add156_dense_dial_2026-08-31.bin")
+    include_bytes!("../weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin")
 }
 
 /// Generation-D fast profile params — the same runtime shape as `B`
@@ -2291,22 +2330,24 @@ mod profile_c_tests {
     // --- ZensimProfile::D ---
 
     /// The shipped `D` weight file is pinned by sha256 — a silent byte
-    /// swap of `d_sdr_add156_dense_dial_2026-08-31.bin` fails this test
-    /// loudly. Expected digest = the committed ADD156 "arm A" bytes
-    /// (spline-top-extended, rank-exact vs the campaign baseline; see
-    /// `benchmarks/add156_d7_ood_guard_2026-08-31.pointer.md`).
+    /// swap of `d_sdr_add156_id100_negrich_dial_2026-09-05.bin` fails this
+    /// test loudly. Expected digest = the committed ADD156 bytes carrying
+    /// the id100+negrich dial (identity pinned at 100, unclamped negative
+    /// tail; forward pass byte-identical to the era-1 predecessor — see
+    /// `benchmarks/d_id100_2026-09-04.md` and
+    /// `benchmarks/d_ship_flip_2026-09-05.md`).
     #[test]
     fn d_weight_sha256_pinned() {
         use sha2::{Digest, Sha256};
         let bytes = mlp_bake_d_add156();
-        assert_eq!(bytes.len(), 3_671, "D weight byte length changed");
+        assert_eq!(bytes.len(), 4_222, "D weight byte length changed");
         let mut hasher = Sha256::new();
         hasher.update(bytes);
         let digest = hasher.finalize();
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(
-            hex, "4481c2d4a7c0d35e82f423587b9bc5ce8a52642375e778e5214af38b799ad504",
-            "D weight bytes do not match the pinned ADD156 arm-A sha256"
+            hex, "921a8f677a225b01dd1030f805f8429e6e6100325e50e87d2c56bfd32a1acad1",
+            "D weight bytes do not match the pinned ADD156 id100+negrich-dial sha256"
         );
     }
 

@@ -2,6 +2,69 @@
 
 ## [Unreleased]
 
+### Changed — `ZensimProfile::D`'s default bake: the id100+negrich dial (2026-09-05, user decision)
+
+- **`D` now loads `weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin`**
+  (4,222 B, sha256 `921a8f67…`) in place of
+  `weights/d_sdr_add156_dense_dial_2026-08-31.bin` (3,671 B, sha256 `4481c2d4…`).
+  The predecessor is NOT deleted — it stays in `zensim/weights/` with its own
+  manifest as the era-1 dial artifact.
+- **Only the output-calibration spline changed. The forward pass is
+  byte-identical**, verified not asserted: stripping
+  `zentrain.output_calibration_spline` (and, from the new bake,
+  `zentrain.repro`) from both files yields the same sha256 `330d8c09…`. Same 372
+  declared inputs, same 28 nonzero coefficients over `f0..156`, same f16 dtype,
+  same absent transforms.
+- **Rank does not move.** Pooled SROCC is BIT-IDENTICAL on 11 of 14 canonical
+  corpora (CID22 **0.863380** before and after, KonJND |0.533186|, AIC-3, AIC-4,
+  CSIQ, PIPAL, imazen26, nonphoto, hfnlproxy, hf_nearlossless, SDR25) and within
+  a monotone remap's tie-make/break residue on the other three: `kadid`
+  −1.27e−7, `live` +5.81e−7, `tid` +7.93e−6.
+- **Speed does not move** — same weights, same compute set (`D` still resolves
+  to `V1PoolsMode::Peaks` with no v2-era block).
+- **⚠ ERA BREAK for the `zensim-d` DIAL.** Absolute dial values shift at both
+  ends: identity (a perfect copy) **96.1157 → 100.0000**; dial-grid max
+  96.049 → 99.380, p95 95.284 → 95.518; min −12.204 → −57.172, p5 9.517 → 8.833;
+  reach 108.252 → 156.552; deepest negative-probe row −100.000 → −213.149;
+  fraction of an all-negative probe scoring below zero 0.8580 → 0.9140.
+  Monotonicity (0.9847) and tied-rate (0.0000) are unchanged, and **0 of 4,424
+  grid cells out-score identity before or after**. Stored `zensim-d` dial
+  numbers must be **re-read, not rescaled** — the remap is a PCHIP spline, not
+  an affine. Rankings and orderings computed from `D` are unaffected.
+- On the addressability gate this takes `D` from CONTRACT 5/6 (failing C5,
+  identity) to **6/6**, and from REGRESSION 2/9 to **7/9** against the
+  `peer_ssim2` bars; `A7`/`A9` still fail for the structural reasons derived in
+  `benchmarks/d_id100_2026-09-04.md` §7.1. The new bake also carries an embedded
+  `zentrain.repro` block the old one lacked, closing the `freeze_check`
+  byte-repro row.
+- `zensim/Cargo.toml`'s crates.io `include` list now names the new bake; the
+  era-1 file is no longer `include_bytes!`d so it does not ride in the tarball.
+- Record: [`benchmarks/d_ship_flip_2026-09-05.md`](benchmarks/d_ship_flip_2026-09-05.md)
+  (which also documents the two measured blockers that stopped the `-peaks-`
+  half of the request from shipping), recipe:
+  [`benchmarks/d_id100_2026-09-04.md`](benchmarks/d_id100_2026-09-04.md),
+  manifest: `zensim/weights/manifests/d_sdr_add156_id100_negrich_dial_2026-09-05.toml`.
+
+### Fixed — the v1-372 eval roots are one extractor era behind the runtime (documentation, 2026-09-05)
+
+- `CLAUDE.md`'s EXTRACTION PERF section claimed option C (*"v1 stops pooling
+  phantom columns"*) was **"Not flipped — default untouched pending the era
+  rollout"**. It has been flipped since `56bbcda2` (2026-08-30 15:43), which
+  calls itself *"STAGE 1 of the C rollout"*. Corrected in place; no code change.
+- **Consequence, MEASURED:** the default 372 eval root
+  (`/mnt/v/zen/zensim-training/2026-08-30-full-features-372`, built at
+  `ea16c7ee`, 2026-08-30 **13:21** — two hours before the flip) is a different
+  era from the shipped runtime. Re-extracting CSIQ at HEAD with the same tool on
+  the same input the root was built from: basic `f0..155` **120,804 of 135,096
+  cells differ, max |Δ| 4.54**; peaks 34,566/62,352, max |Δ| 0.326. Row
+  alignment verified first (`human_score` bit-identical positionally, all 866
+  rows). `ZENSIM_ERA2_DENSE=0` reproduces HEAD byte-for-byte, so `515001dc` is
+  not the cause; `v1_golden_bytes` passes 5/5 because every fixture is in the
+  tight width class. A 372-root re-extraction at HEAD is the registered
+  follow-up. **The 944 roots are unaffected** — the fold never referenced the
+  padding owner.
+
+
 ### Fixed — the era-2 column tile could hand the H blurs a `radius + 1`-wide slab, and the right-edge mirror underflowed on it (2026-09-04)
 
 - **12 tests failed on `main` with `attempt to subtract with overflow` in
