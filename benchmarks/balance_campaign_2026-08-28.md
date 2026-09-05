@@ -8085,3 +8085,47 @@ The 97-cell LADDER re-grade is NOT on the board and cannot be: `--graft-gaddr` r
 (measured, not reasoned) because a cell's `dial.addressability` describes ITS OWN grid; nothing was forced. New board
 column `floors ok` (n_pass/n_gradeable) with the RULE in its hover. Both boards regenerated, all gates PASS, fair
 9.66 MB < 12 MB cap. Records: `benchmarks/default_proposals_2026-09-05.md`, gate doc §17.
+
+## ROUND 96 — 2026-09-05: D-vs-ssim2 inversion census on both instruments — mostly shared, not D-specific; a visual page of the ten worst (report-only)
+
+Report-only lane answering the user's read of the fair gauntlet's `d_id100_negrich@did100lane` cell
+("it says inversions and corruptions are a problem") for the INVERSIONS half. **The board cell's
+`dial.zones.grid` is the CANONICAL `dial_grid_372col_2026-05-29_quarantined_v2.parquet`** (4,424
+rows/106 ladders) — already-quarantined, so **none of D's 24 counted board-grid inversions can sit
+on one of the 9 dropped w11/GPU-odd-dim ladders (115→106) or the 33 dropped pre-fix JXL cells — they
+are structurally absent from the scored file.** Cross-validated a Python port of `bake_verdict`'s
+five-bucket ladder classifier against D's own `--full-json` (0 mismatches on every `(codec,zone)`
+counter, both the board grid and the NEW `ladder_instrument_2026-09-05.md` grid; 12/12 named
+worst-ladders reproduce to 1e-9) before trusting it to name **ssim2's own** inverted ladders, which
+`bake_verdict` cannot surface in peer mode today (JSON refused; no per-ladder markdown). **Census,
+per codec×zone, both grids:** on the board grid D inverts at-or-above ssim2's rate in 11/12
+codec×zone cells (D pooled worst zone q≥85, 1.93% inv / 16 of 106 ladders / **2 ending backwards**,
+vs ssim2's 1.04%/0 ending backwards) — D is the worse-inverting scorer nearly everywhere they
+differ. **On the new floor-dense instrument the picture flips at the floor**: D's worst zone becomes
+q<50 (1.19%/30 of 182 ladders, 0 ending backwards) while ssim2 itself inverts MORE than D there on
+avif-rav1e/avif-svt/jpeg/jxl/webp (mentor 2.19% vs D's 1.19% pooled at q<50) — exactly the zone
+`ladder_floor_resolution_2026-09-05.md` independently found the mentor's own RD curve is 67-78%
+genuinely non-monotonic. **Coincidence** (same `(image,codec,zone)` group inverted by both scorers):
+board grid 11/24 of D's groups (46%), new instrument **26/35 (74%)** — mostly shared encoder
+non-monotonicity, not a D-specific defect, on the denser instrument. One recurring exception:
+`090d19695a8b43c2_512sq` is D-only across BOTH grids and three codec families — the one genuinely
+D-specific weak reference found. **The two board-grid ladders D ends backwards on** are the SAME
+two images `failure_profiles_2026-08-31.md` already named for ADD156 — a lineage-wide avif
+near-lossless weakness, not new to D. **Top-10 worst material inversions by magnitude on the new
+instrument** (all `q<50`, 6 jpeg + 4 avif-rav1e, none end their ladder backwards): **9 of 10 are
+independently confirmed by ssim2 at the exact same step**, usually with a LARGER drop than D's, at
+flat-to-small byte deltas (−0.9% to +3.8%) — real encoder RD non-monotonicity on nearly-identical
+settings, the same signature the floor-resolution lane found for the mentor's own floor failures.
+Only 1 of 10 is D-specific (ssim2 flat, D drops 3.6 points). Visual page (full-frame + native 1:1
+crop per step, imazen-only `zenpng`/`zenresize` via `ladder_tile_gen`, centered crop sized to 40% of
+the short side — not hand-picked): `http://192.168.50.44:3300/zensim/ladder-2026-09-05/inversions/
+index.html`, curl `200` both LAN and localhost. **Side finding, worked around not fixed:** a clean
+`zensim-bench` build is currently broken for ANY target — `zenjxl`'s `^0.3.2` jxl-encoder pin
+predates that sibling's already-pushed `0.4.0` release (`4363a3d5`, unrelated to today's concurrent
+issue-101 session there), so the `[patch.crates-io]` path patch is silently skipped by Cargo's
+semver check and falls through to an equally-incompatible crates.io. Worked around by temporarily
+dropping the unused-here `zenjxl` dependency edge from `zensim-bench/Cargo.toml`, then fully
+reverted (`jj status` clean, diff against the pre-edit file empty) before this lane ended — flagged
+for whoever owns `zenjxl`'s version pin, not fixed here. Nothing installed;
+`ZensimProfile::D`/`zensim/weights/` untouched; no registry write. Full census tables, per-codec
+breakdowns, and reproduction: [`d_inversions_2026-09-05.md`](d_inversions_2026-09-05.md).
