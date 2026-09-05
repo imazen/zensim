@@ -3877,6 +3877,18 @@ fn main() {
             // Structured duplicates of the load-bearing knobs (greppable
             // without argv parsing):
             "seed": args.seed,
+            // The SPLIT streams (2026-09-04). `seed_identity` — the rule that
+            // decides how many DISTINCT draws a seed group holds — reads
+            // `init_seed`/`sample_seed` and falls back to `seed`
+            // (`gauntlet.seed_identity`, mirrored in `freeze_check`). Without
+            // these two lines every split-seed run records only `seed`, which
+            // defaults to 1, so an entire k-arm study collapses into ONE seed
+            // identity and its k is unmeasurable. The reader shipped before the
+            // writer; this closes it. Null on a legacy (`--seed`-only) run, so
+            // the fallback still governs there and nothing already embedded
+            // changes meaning. (2026-09-05, benchmarks/replication_wave_2026-09-05.md)
+            "init_seed": args.init_seed,
+            "sample_seed": args.sample_seed,
             "epochs": args.epochs,
             "pairs_per_epoch": args.pairs_per_epoch,
             "n_hidden_layers": args.n_hidden_layers,

@@ -1313,7 +1313,13 @@ fn rank_pool(rows: &mut [&SelectRow]) {
 /// Flags whose presence (and value) must not distinguish two runs of the
 /// SAME recipe. Mirrors `gauntlet.SEED_GROUP_DROP_FLAGS` exactly, plus the
 /// two seed-split flags this lane introduced.
-const SEED_GROUP_DROP_FLAGS: [&str; 8] = [
+/// Any flag whose value names a per-run OUTPUT location belongs here, not just the
+/// obvious ones: `--dump-checkpoints-dir` was missing, and because its value embeds
+/// the seed (`.../LSTAR2_s4031_ckpts` vs `.../LSTAR2_s4033_ckpts`) it split each
+/// seed of one recipe into a separate "recipe" — 8 of the 10 top-scoring
+/// combined-fair board cells reported k=1 with a true k of 3
+/// (2026-09-05, `benchmarks/replication_wave_2026-09-05.md`).
+const SEED_GROUP_DROP_FLAGS: [&str; 9] = [
     "--seed",
     "--init-seed",
     "--sample-seed",
@@ -1322,6 +1328,7 @@ const SEED_GROUP_DROP_FLAGS: [&str; 8] = [
     "-o",
     "--bake-out",
     "--manifest",
+    "--dump-checkpoints-dir",
 ];
 
 /// Drop every [`SEED_GROUP_DROP_FLAGS`] token and its value.
@@ -3455,6 +3462,63 @@ mod tests {
             assert_eq!(group_state(g), "UNGROUPABLE");
             assert_eq!(g.reps.len(), 1);
         }
+    }
+
+    /// REGRESSION (2026-09-05): an output-path flag whose value embeds the seed
+    /// silently split every seed of one recipe into its own "recipe". Measured on
+    /// the real board: `LSTAR2_s4031/4032/4033` are ONE recipe at three seeds, but
+    /// `--dump-checkpoints-dir .../LSTAR2_s403N_ckpts` gave each its own key, so all
+    /// three reported k=1 (UNREPLICATED) instead of k=3. Eight of the ten
+    /// top-scoring combined-fair cells were affected.
+    /// `benchmarks/replication_wave_2026-09-05.md`.
+    #[test]
+    fn seed_group_output_path_flag_carrying_the_seed_does_not_split_a_recipe() {
+        let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let run = |seed: &str, ckpt: &str| {
+            json!({
+                "name": format!("LSTAR2_s{seed}"),
+                "repro": {"seed": seed.parse::<u64>().unwrap(),
+                          "argv": ["zensim_mlp_train", "--epochs", "120",
+                                   "--seed", seed,
+                                   "--out", format!("/mnt/v/bakes/LSTAR2_s{seed}.bin"),
+                                   "--dump-checkpoints-dir", ckpt]}
+            })
+        };
+        let a = run("4031", "/mnt/v/bakes/LSTAR2_s4031_ckpts");
+        let b = run("4033", "/mnt/v/bakes/LSTAR2_s4033_ckpts");
+        assert_eq!(
+            seed_group_key(&a),
+            seed_group_key(&b),
+            "two seeds of ONE recipe must share a key; a per-run output directory \
+             is not part of the recipe even when its name embeds the seed"
+        );
+        assert_ne!(seed_group_key(&a), None, "both rows are groupable");
+
+        // The normalizer removes the flag AND its value, like every other
+        // output-path flag.
+        assert_eq!(
+            norm_argv_for_seed_group(&v(&[
+                "t",
+                "--dump-checkpoints-dir",
+                "/mnt/v/x_ckpts",
+                "--epochs",
+                "40"
+            ])),
+            v(&["t", "--epochs", "40"])
+        );
+
+        // NEGATIVE CONTROL: a genuine hyperparameter difference must still
+        // separate two recipes, or the fix would merge unrelated runs.
+        let mut c = run("4033", "/mnt/v/bakes/LSTAR2_s4033_ckpts");
+        c["repro"]["argv"] = json!(["zensim_mlp_train", "--epochs", "40",
+                                    "--seed", "4033",
+                                    "--out", "/mnt/v/bakes/LSTAR2_s4033.bin",
+                                    "--dump-checkpoints-dir", "/mnt/v/bakes/LSTAR2_s4033_ckpts"]);
+        assert_ne!(
+            seed_group_key(&a),
+            seed_group_key(&c),
+            "different --epochs is a different recipe"
+        );
     }
 
     /// The normalized argv — the thing the key is a hash OF, and the thing

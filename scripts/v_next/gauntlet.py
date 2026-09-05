@@ -635,8 +635,18 @@ SEED_COVERAGE_NOTE = ("seed spread partly reflects subset coverage; coverage is 
 # `--init-seed` / `--sample-seed` joined the set 2026-09-04, when the ownerfix lane split
 # the trainer's two RNG streams: a split run and an unsplit run of the same recipe must
 # still land in one group. Both owners changed in the same commit.
+# Flags whose VALUE is an output location or the seed itself: neither changes the
+# recipe, so both the flag and its value are removed before hashing. Any flag whose
+# value names a per-run output path MUST be listed here — `--dump-checkpoints-dir`
+# was not, and because its value embeds the seed
+# (`.../LSTAR2_s4031_ckpts` vs `.../LSTAR2_s4033_ckpts`) it split every seed of one
+# recipe into its own "recipe": 8 of the 10 top-scoring combined-fair cells read
+# k=1 when their true k is 3 (2026-09-05, benchmarks/replication_wave_2026-09-05.md).
+# Mirrored in freeze_check.rs::SEED_GROUP_DROP_FLAGS; gated by
+# scripts/verify_seed_group_parity.py.
 SEED_GROUP_DROP_FLAGS = {"--seed", "--init-seed", "--sample-seed",
-                         "--out", "--output", "-o", "--bake-out", "--manifest"}
+                         "--out", "--output", "-o", "--bake-out", "--manifest",
+                         "--dump-checkpoints-dir"}
 
 
 def _norm_argv_for_seed_group(argv):
