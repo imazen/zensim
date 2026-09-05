@@ -2315,7 +2315,7 @@
         "model"
       ],
       "scope": {
-        "note": "applies to ZensimProfile::C and ZensimProfile::CHdr and to any bake whose caller_input_width() exceeds 372"
+        "manual": "applies to ZensimProfile::C and ZensimProfile::CHdr and to any bake whose caller_input_width() exceeds 372"
       },
       "reason": "MEASURED 2026-09-05 through Zensim::compute on the committed golden real pair: ZensimProfile::C and ::CHdr are REFUSED (ModelForwardFailed 'bake declares more input features than the caller supplied') on every image, because the product entry emits a 372-layout vector while both declare caller_input_width 944. candidate-profiles is ON by default and c_sdr_mlp944_corrmix_2026-08-05.bin is in the crates.io include list, so this ships. The identity short-circuit fires before the model, so BOTH profiles still return score 100.000000 on a ref-vs-ref smoke test - a health check passes for a profile that cannot score anything else. Census: 400 of 433 board bakes, 3 of 11 shipped bakes, 11 of 14 registered feature sets, 2 of 10 selectable profiles REFUSED, all with the identical error. A published verdict for such a bake describes the eval path only; it does not describe what a consumer of this crate can obtain.",
       "evidence": "docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md SS4A; /mnt/v/output/zensim/feature-audit-2026-09-05/{serve_weights.txt,serve_board.txt,profiles.tsv}",
@@ -2330,7 +2330,7 @@
         "dial.max"
       ],
       "scope": {
-        "note": "applies to any C5/C6 identity reading and to the 266-cell above-identity finding for shipped B"
+        "manual": "applies to any C5/C6 identity reading and to the 266-cell above-identity finding for shipped B"
       },
       "reason": "MEASURED 2026-09-05: Zensim::compute returns exactly 100.000000000 for ref==dist because metric.rs::identical_result FABRICATES (score 100, raw_distance 0, all-zero features) and mark_identical() skips the model forward. Perturbing ONE byte in ONE channel of ONE pixel out of 90,000 gives 96.229616318 (200x150) and 96.186393137 (512x384) - a 3.77/3.81-point step at zero distortion, on a feature-vector move of <=2.6e-3. So the identity 100 is not the model's response to no distortion; the model's response is ~96.2, and the G-ADDR finding that shipped B ranks 266 of 4,424 dial cells ABOVE a perfect copy is that step, not an anomaly. The 372 all-zero identity vector is likewise a property of the short-circuit and has never been measured: computed on the same pixels, the v1 block populates 144 of 372 slots (max |v| 1.12e-3).",
       "evidence": "docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md SS4.2-4.3; /mnt/v/output/zensim/feature-audit-2026-09-05/{cliff.tsv,identity.tsv}; gate zensim/tests/feature_invariants.rs::identity_is_fabricated_by_the_short_circuit_and_differs_from_the_computed_vector",
@@ -2344,7 +2344,7 @@
         "model.block_profile"
       ],
       "scope": {
-        "note": "applies to docs/FEATURE_SET_IDS.md SS1 failure #9 read as a claim about CODE"
+        "manual": "applies to docs/FEATURE_SET_IDS.md SS1 failure #9 read as a claim about CODE"
       },
       "reason": "docs/FEATURE_SET_IDS.md SS1 failure #9 reads 'the v1-372 f0..155 is NOT the 944 fold's f0..155 - 156 of 156 slots differ, max abs 1.0214'. That compared two STORED instruments built in different extractor eras. MEASURED 2026-09-05 in one process at one commit on the same pixels: the v1-372 extractor entry (compute_zensim_with_config, which both v1-372 extractors call), the fold's v1 block, the full 944 walk's v1 block and both product engines agree BIT-EXACTLY on 372 of 372 slots at 11 geometries (tight, non-tight, odd, sub-64, past H_TILE_WIDTH) and at both SIMD tiers. The row is a true warning about the INSTRUMENTS and false as a claim about the code; option C (56bbcda2) closed the code divergence.",
       "evidence": "docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md SS4.4 and SS3 probe (c); gate zensim/tests/feature_invariants.rs::extractor_entry_is_bit_exact_to_the_fold_v1_block; /mnt/v/output/zensim/feature-audit-2026-09-05/engineparity.tsv",
@@ -2359,7 +2359,7 @@
         "model.feature_set_id"
       ],
       "scope": {
-        "note": "applies to any table or bake built from a v1_only walk that requested V1FreeExtras without setting append_block"
+        "manual": "applies to any table or bake built from a v1_only walk that requested V1FreeExtras without setting append_block"
       },
       "reason": "MEASURED 2026-09-05: append_block does double duty - it declares the LAYOUT (720 -> 924, with append2_block -> 944) and enables the append COMPUTE. Every raw-moment slot lives at f720+. So a v1_only walk requesting V1FreeExtras::RawMoments WITHOUT append_block emits a 720-wide vector in which those slots do not exist, with a populated-slot count identical to V1FreeExtras::Off (228 vs 228) - no error, no warning. Same failure shape as the fixed ==-vs-!= emission-gate defect, reached by a different route. Class C is only partly affected: its twelve v2-348 MSE cells are inside the 720 layout and survive (228 -> 240); its twelve LUM_*_ERR append cells do not.",
       "evidence": "docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md SS4.1; /mnt/v/output/zensim/feature-audit-2026-09-05/widths.tsv; gate zensim/tests/feature_invariants.rs::free_extras_are_silently_inert_without_the_append_block_declaration",
@@ -2374,7 +2374,7 @@
         "dial.addressability"
       ],
       "scope": {
-        "note": "applies to any recipe imposing a monotonicity penalty or a per-slot sign constraint on the 944 feature set"
+        "manual": "applies to any recipe imposing a monotonicity penalty or a per-slot sign constraint on the 944 feature set"
       },
       "reason": "MEASURED 2026-09-05 over 944 slots x 12 images on two control-validated distortion ladders (additive noise 4..48 and quantization step 4..64; a plain MSE(ref,rung) control is monotone 12/12 on both): 40 and 55 slots respectively are PERSISTENTLY (>=9 of 12 images) and amplitude-really non-monotone, concentrated in the v2 and append blocks. Most are correct behaviour, not defects: 62 of the violating series contain an exact 0.0 alongside non-zero values, the signature of a rectified one-sided feature - GLOBAL_CGAIN/GLOBAL_CLOSS are a gain/loss pair and heavy quantization with a +step/2 reconstruction offset increases contrast, so contrast-LOSS correctly collapses to zero. Roughly 5-6 % of live slots will fight a monotonicity penalty because they are not supposed to be monotone. METHOD WARNING: a third ladder (repeated radius-1 box blur, 1..6 passes) had to be DISCARDED - its own MSE control is non-monotone on 12 of 12 images (29.13 -> 26.02 -> 29.11 -> ...), and it produced 176 false violations. Do not accept a monotonicity result with no stimulus control.",
       "evidence": "docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md SS3.2; /mnt/v/output/zensim/feature-audit-2026-09-05/ladder3.tsv (per-slot raw series)",
