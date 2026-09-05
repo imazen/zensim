@@ -390,7 +390,7 @@ half 0.0069); KonJND −0.337323, spread 0.088567 (CI half 0.0790); AIC-3
 +0.804181, spread 0.013933. Same shape as the canonical three — an order-spread
 on CID22 that clears its CI, and a KonJND spread that does not.
 
-It has **no arm I** (registered that way) and is **not promoted to the board**:
+It has **no arm I** (registered that way) and WAS **not promoted to the board**:
 `bake_verdict` correctly REFUSES to score it on the canonical folded root (it
 structurally uses 72 caller lines in `f156-371` that the folded root feeds as
 structural zeros — the registered wrong-regime class), and `run_full_eval.sh`
@@ -398,6 +398,35 @@ has no `--features-root` passthrough, so a board cell for it cannot be produced
 without changing that owner. Named gap, not a silent omission. This also
 explains a first attempt that packed it against the CANONICAL anchor and read
 CID22 0.6424; with its native anchor the same bakes read 0.8808–0.8908.
+
+
+> **CLOSED 2026-09-05 (owner lane `claude-selectfix`).** `run_full_eval.sh` no
+> longer hard-codes a root: it takes the features root **FROM THE BAKE**
+> (`zensim_validate::feature_set::resolve_features_root`, reached through
+> `bake_verdict --print-features-root`, keyed on the feature-set registry).
+> All four A3b cells — the three replication arms plus the original
+> `A3b_s4004` — are now full board cells read on `ext944-era2r4-2026-09-01`,
+> **with M3a**, in discussion set `2026-09-05-a3b-native`:
+>
+> | cell | CID22 | KonJND | composite | M3a |
+> |---|---:|---:|---:|---:|
+> | `A3b_s4004` (original) | 0.8908 | 0.3540 | 0.8598 | 0.7489 |
+> | `A3b__D__i4004_p4004_packed` (diagonal re-run) | 0.8908 | 0.3540 | 0.8598 | 0.8618 |
+> | `A3b__S__i4004_p5001_packed` | 0.8808 | 0.3733 | 0.8553 | 0.8652 |
+> | `A3b__S__i4004_p5002_packed` | 0.8849 | 0.2847 | 0.8496 | 0.8776 |
+>
+> The original already had a verdict on the native root but **no M3a**, so it
+> was UNMEASURED and therefore not selectable — that is the half the missing
+> fulleval cost. Note the diagonal pair: `A3b_s4004` and `A3b__D__…` are the
+> same recipe on the same seeds (i4004/p4004) **packed twice** — identical
+> CID22 to 16 digits and composite differing at the 9th decimal, but M3a
+> **0.7489 vs 0.8618**. Attribution density is sensitive to the pack (the two
+> bakes have different sha256), which is worth knowing before reading any
+> single-cell M3a as a property of a RECIPE.
+>
+> A3b is still k=1 on distinct seeds and is now subject to the replication
+> floor registered the same day (campaign appendix **E.4 AMENDMENT**): its
+> cells are listed and ranked, never selected.
 
 ### 4c.4 `freeze_check --select --seed-group`
 

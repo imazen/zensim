@@ -216,7 +216,19 @@
     "W11J_s4013_packed",
     "W11J_s4014_packed"
    ],
-   "note": "Arm S = sample/ORDER varies at fixed init; arm I = init varies at fixed order; the legacy --seed draws on the board are the confounded DIAGONAL and belong to both arms. CTL_A/CTL_B are the equivalence controls (legacy --seed 4021 vs --init-seed 4021 --sample-seed 4021): 0 of 12 corpora differ and the composite matches to 16 digits, which is why the diagonal may be pooled. READ A GROUP DOWN \u2014 k-mean and spread, never best-of-k; best-of-k inflates the composite by a median +0.0061 on this board. These three recipes only became visible AS recipes after the 2026-09-05 grouping fixes (--dump-checkpoints-dir and argv[0] were part of the recipe key, so every seed looked like its own k=1 recipe). A3b \u2014 the one genuinely-k=1 fair-board recipe \u2014 is NOT here: it is era-2 x radius-4 and must be scored at its native root, which run_full_eval.sh cannot yet express; its arm is in benchmarks/replication_wave_2026-09-05.md."
+   "note": "Arm S = sample/ORDER varies at fixed init; arm I = init varies at fixed order; the legacy --seed draws on the board are the confounded DIAGONAL and belong to both arms. CTL_A/CTL_B are the equivalence controls (legacy --seed 4021 vs --init-seed 4021 --sample-seed 4021): 0 of 12 corpora differ and the composite matches to 16 digits, which is why the diagonal may be pooled. READ A GROUP DOWN \u2014 k-mean and spread, never best-of-k; best-of-k inflates the composite by a median +0.0061 on this board. These three recipes only became visible AS recipes after the 2026-09-05 grouping fixes (--dump-checkpoints-dir and argv[0] were part of the recipe key, so every seed looked like its own k=1 recipe). A3b \u2014 the one genuinely-k=1 fair-board recipe \u2014 is not in THIS set because it is era-2 x radius-4 and must be scored at its native root; that is no longer a blocker (run_full_eval.sh now takes the features root FROM THE BAKE, 2026-09-05) and its four cells are the 2026-09-05-a3b-native set. Read them DOWN, never against a canonical-root cell \u2014 different feature space. Its arm is in benchmarks/replication_wave_2026-09-05.md."
+  },
+  {
+   "id": "2026-09-05-a3b-native",
+   "date": "2026-09-05",
+   "label": "2026-09-05 \u00b7 A3b at its NATIVE root (era-2\u00d7radius-4): the four cells run_full_eval.sh could not produce before the features root came from the bake",
+   "bakes": [
+    "A3b_s4004",
+    "A3b__D__i4004_p4004_packed",
+    "A3b__S__i4004_p5001_packed",
+    "A3b__S__i4004_p5002_packed"
+   ],
+   "note": "A3b is the replication wave's one genuinely-k=1 recipe and it had NO complete board cell: bake_verdict correctly REFUSES it at the canonical folded root (it structurally uses 72 caller lines in f156-371, which that root feeds as structural zeros), and run_full_eval.sh hard-coded one features root per regime, so no fulleval \u2014 and therefore no M3a, and therefore no selectable cell \u2014 could be produced (replication_wave_2026-09-05.md \u00a74c.3). The features root now comes FROM THE BAKE (zensim_validate::feature_set::resolve_features_root, via `bake_verdict --print-features-root`), so all four cells are read on /mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01 and carry M3a. READ DOWN, NOT ACROSS: that root is a DIFFERENT feature space from the --regime 944 default, so an A3b number is not comparable with a canonical-root number. A3b_s4004 and A3b__D__i4004_p4004_packed are the same recipe on the same seeds (i4004/p4004) packed twice \u2014 identical CID22 to 16 digits, composite differing at the 9th decimal, but M3a 0.7489 vs 0.8618: attribution density is sensitive to the pack, and the two bakes have different sha256."
   }
  ]
 }
