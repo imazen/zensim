@@ -277,6 +277,19 @@
       "evidence": "scripts/sota944/slice_basic156_free_nolumaref.txt — the 265 set MINUS f926/931/936/941 (LUMA_MEAN_REF, one per scale). MEASURED (benchmarks/fastclass2_campaign_2026-09-05.md §0a, on the 39-row 944-pools identity probe): those four are the ONLY slots in the 265 set whose ref==dist value exceeds 4.8e-3, at max |v| 0.688 / spread 0.261 — LUMA_MEAN_REF is the free set's only reference-absolute statistic, so it cannot vanish at identity.",
       "note": "SAME handle as its producer and a DIFFERENT hash: this is a READER subset — the walk (V1PoolsMode::Peaks + V1FreeExtras::RawMoments) still emits all 37 moment slots, the model reads 33 of them, and dead-column pruning drops the four lines at pack time. That is the designed case for `the name is a handle and the hash is the identity` (docs/FEATURE_SET_IDS.md); the key carries the hash so the two entries cannot be confused. Registry lookups are by key, never by (compute,layout,era), so the shared triple is not a collision."
     },
+    "basic+peaks@w372/v1pre": {
+      "compute": "basic+peaks",
+      "layout": 372,
+      "era": "v1pre",
+      "slots": "0-227",
+      "slots_hash8": "3fb78648",
+      "n_slots": 228,
+      "role": "consumer",
+      "kind": "set",
+      "legacy_name": "156+peaks",
+      "evidence": "scripts/sota944/slice_basic156_peaks.txt read at 372 LAYOUT — the SERVABLE form of the 156+peaks set (benchmarks/fastclass2_campaign_2026-09-05.md §6: a 372-layout bake that reads the peaks block is served by Zensim::compute TODAY, measured, while every 944-declared bake is refused).",
+      "note": "Same slots_hash8 as basic+peaks@w944/era2r4 BY DESIGN: the hash is over the SLOT LIST, and layout is a separate component of the id. The two are the same reader set at two layouts, which is exactly the distinction that decides servability."
+    },
     "basic+peaks@w944/era2r4": {
       "compute": "basic+peaks",
       "layout": 944,
@@ -337,6 +350,18 @@
       "legacy_name": "156",
       "evidence": "Profile D / ADD156 class: 372-wide caller, basic-only reads (28 of 156 lines on ADD156). A bake's EXACT read-set id is derived from its bytes; this entry pins the class only."
     },
+    "basic@w372/v1pre": {
+      "compute": "basic",
+      "layout": 372,
+      "era": "v1pre",
+      "slots": "0-155",
+      "slots_hash8": "3ffe8670",
+      "n_slots": 156,
+      "role": "consumer",
+      "kind": "set",
+      "legacy_name": "156",
+      "evidence": "scripts/sota944/slice_basic156.txt read at 372 LAYOUT, v1pre-era training tables — the ADD156 compute set's servable form on the canonical-2026-05-21 root."
+    },
     "basic@w944/era2r4": {
       "compute": "basic",
       "layout": 944,
@@ -363,19 +388,20 @@
     }
   },
   "roots": {
-    "/mnt/v/zen/zensim-training/2026-08-30-full-features-372": "basic+peaks+masked+iw@w372/v1cur",
     "/mnt/v/zen/zensim-training/2026-05-15-full-features": "basic+peaks+masked+iw@w372/v1pre",
+    "/mnt/v/zen/zensim-training/2026-08-30-full-features-372": "basic+peaks+masked+iw@w372/v1cur",
+    "/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC": "basic+peaks+masked+iw@w372/v1postc",
+    "/mnt/v/zen/zensim-training/canonical-2026-05-21/train": "basic+peaks+masked+iw@w372/v1pre",
     "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22": "basic+peaks+masked+iw+v2@w720/ext720",
     "/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27": "basic+v2+append@w924/ext924",
     "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01": "basic+v2+append+append2@w944/ext944",
     "/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01": "basic+peaks+masked+iw+v2+append+append2@w944/era2r4",
     "/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01/foldapp2_views": "basic+v2+append+append2@w944/era2r4",
-    "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30": "basic+peaks+masked+iw+v2+append+append2@w944/pools",
-    "/mnt/v/zen/zensim-training/wlin7-pools944-2026-08-30": "basic+peaks+masked+iw+v2+append+append2@w944/pools",
-    "/mnt/v/zen/zensim-training/r1b-ctrl944-2026-08-30": "basic+v2+append+append2@w944/pools",
-    "/mnt/v/zen/zensim-training/wlin7-ctrl944-2026-08-30": "basic+v2+append+append2@w944/pools",
     "/mnt/v/zen/zensim-training/r1b-a3fused-2026-08-30": "basic+carriers+v2+append+append2@w944/pools",
-    "/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC": "basic+peaks+masked+iw@w372/v1postc"
+    "/mnt/v/zen/zensim-training/r1b-ctrl944-2026-08-30": "basic+v2+append+append2@w944/pools",
+    "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30": "basic+peaks+masked+iw+v2+append+append2@w944/pools",
+    "/mnt/v/zen/zensim-training/wlin7-ctrl944-2026-08-30": "basic+v2+append+append2@w944/pools",
+    "/mnt/v/zen/zensim-training/wlin7-pools944-2026-08-30": "basic+peaks+masked+iw+v2+append+append2@w944/pools"
   },
   "regime_strings": {
     "folded720append2pools": {

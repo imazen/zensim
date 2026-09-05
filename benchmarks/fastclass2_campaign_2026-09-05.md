@@ -492,3 +492,41 @@ available evidence that the two lanes are running the same recipe on two
 layouts. The two that differ are stated in the script's own header: no
 `tbig_hf` twin exists at 372, and the konjnd leg is the older 20,160-row
 `konjnd-dense-norm` rather than the 8,060-row BPG split.
+
+### 7.1 The 372 recipe SMOKE-TESTED, and the feature-set id works end to end
+
+One epoch, 2,000 pairs, `--keep-features slice_basic156_peaks.txt`,
+`--max-features 372`. Two things came out of it that no amount of reading could
+have given:
+
+**(a) The recipe loads and scores.** The trainer's own auto-eval hook produced a
+verdict at `--regime 372` on all 14 corpora. At *one epoch* it already reads
+CID22 **+0.8236**, KADID 0.840, TID 0.835, CSIQ 0.920, LIVE 0.938, KonJND
+0.356 — not a result, but proof the six legs, the target scales, the slice and
+the eval root all line up.
+
+**(b) The naming machinery identifies the bake correctly, unprompted:**
+
+```
+bake_verdict: feature-set — table basic+peaks+masked+iw@w372/v1cur#d16a1091 [... INFERRED]
+bake_verdict: feature-set — bake  basic+peaks@w372/unknown#3fb78648
+bake_verdict: feature-set note — EraUnknown: era not established (bake unknown,
+  table v1cur) — 'we do not know which extractor made this' has the same
+  consequence for a published number as 'a different one'
+```
+
+`3fb78648` is this campaign's own registered 228 hash, derived from the bake's
+bytes with no hint from the invocation — fundamental 3 working end to end. The
+`unknown` era was a real gap and is now closed: `canonical-2026-05-21/train` is
+registered as a root (`basic+peaks+masked+iw@w372/v1pre`), along with
+`basic+peaks@w372/v1pre#3fb78648` and `basic@w372/v1pre#3ffe8670`.
+
+**Note the hash is layout-independent by design.** `basic+peaks@w372/v1pre` and
+`basic+peaks@w944/era2r4` share `#3fb78648` because the hash is over the SLOT
+LIST; layout is a separate component of the id. They are the same reader set at
+two layouts — and that distinction is exactly what decides servability (§6.1),
+which is a good argument that the id grammar has the right shape.
+
+The 372 lane therefore trains on **v1pre** and evaluates on **v1cur**. That is
+stated rather than hidden; the flip lane's own 372 era A/B bounds the rank skew
+at **≤ 7e-4**.
