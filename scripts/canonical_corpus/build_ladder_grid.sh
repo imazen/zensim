@@ -65,11 +65,19 @@ run_leg () {                       # run_leg <label> <codec> <qgrid> [knob-json]
       | tee -a "$OUT/logs/progress.log"
 }
 
-run_leg jpeg        zenjpeg "$QG"
-run_leg webp        zenwebp "$QG"
-run_leg avif_svt    zenavif "$QG" '{"backend":["svt-rs"]}'
-run_leg avif_rav1e  zenavif "$QG" '{"backend":["zenravif"]}'
-run_leg jxl         zenjxl  50    "$JXL_KNOB"
+# LADDER_LEGS selects which families run (default: all five). The ANCHOR run uses
+# this to drop `avif_rav1e`: MEASURED 2026-09-05 at ~10 s/cell on the anchor's
+# 6.27-MP-mean sources (vs ~1.2 s/cell on the grid's 0.84 MP), i.e. 5.9 h for that
+# leg alone. The anchor shapes the output SPLINE; the INSTRUMENT — which does carry
+# avif_rav1e — is what grades. Re-including it is registered, not run.
+LEGS="${LADDER_LEGS:-jpeg,webp,avif_svt,avif_rav1e,jxl}"
+want () { [[ ",$LEGS," == *",$1,"* ]]; }
+
+want jpeg       && run_leg jpeg        zenjpeg "$QG"
+want webp       && run_leg webp        zenwebp "$QG"
+want avif_svt   && run_leg avif_svt    zenavif "$QG" '{"backend":["svt-rs"]}'
+want avif_rav1e && run_leg avif_rav1e  zenavif "$QG" '{"backend":["zenravif"]}'
+want jxl        && run_leg jxl         zenjxl  50    "$JXL_KNOB"
 
 echo "LADDER-GRID-ALL-DONE $(date -u +%H:%M:%SZ)" | tee -a "$OUT/logs/progress.log"
 touch "$OUT/COMPLETE"

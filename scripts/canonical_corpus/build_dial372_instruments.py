@@ -281,6 +281,39 @@ def build_negtail(args, work: str) -> dict:
 #     grid's schema. THE instrument. Emitting only distinct rows here is what lets
 #     `dial_addressability.rs` stay unchanged: its "bottom K steps" are then the
 #     bottom K *configurable* settings by construction.
+# The canonical grid's own (distance -> q) curve. JXL is parameterised by
+# butteraugli DISTANCE, but `q` must stay quality-ASCENDING on every codec so the
+# floor rule needs no per-codec direction switch (gate doc 16.2, pinned by a test).
+# The canonical grid already fixed that convention — q=0 <-> distance 25.0, up to
+# q=99.8 <-> distance 0.05 — so this instrument REUSES it rather than inventing a
+# second one, and interpolates linearly in q for the two distances this ladder adds
+# (24.0 and 22.0, which land at q 4.0 and 12.0 between their canonical neighbours).
+CANON_JXL_QD = [(0.0, 25.0), (8.0, 23.0), (16.0, 21.0), (24.0, 19.0), (32.0, 17.0),
+                (40.0, 15.0), (48.0, 13.0), (60.0, 10.0), (68.0, 8.0), (74.0, 6.5),
+                (80.0, 5.0), (84.0, 4.0)]
+
+
+def _jxl_q_for_distance(dist: float) -> float:
+    """Quality-ascending q for a butteraugli distance, on the canonical curve."""
+    t = pq.read_table(CANON_GRID, columns=["codec", "q", "codec_param"]).to_pydict()
+    pts = sorted({(float(q), float(cp)) for c, q, cp in
+                  zip(t["codec"], t["q"], t["codec_param"]) if c == "jxl"},
+                 key=lambda x: -x[1])            # distance DESCENDING == q ascending
+    if not pts:
+        raise SystemExit("canonical grid carries no jxl rows — cannot reuse its q curve")
+    for (q, d) in pts:
+        if abs(d - dist) < 1e-9:
+            return q
+    lo = [p for p in pts if p[1] > dist]
+    hi = [p for p in pts if p[1] < dist]
+    if not lo:                                    # below the curve's smallest distance
+        return pts[-1][0]
+    if not hi:                                    # above its largest (== deeper floor)
+        return pts[0][0]
+    (q0, d0), (q1, d1) = lo[-1], hi[0]
+    return q0 + (q1 - q0) * (d0 - dist) / (d0 - d1)
+
+
 LADDER_LEGS = {
     "jpeg":       ("jpeg",       "q"),
     "webp":       ("webp",       "q"),
@@ -288,6 +321,9 @@ LADDER_LEGS = {
     "avif_rav1e": ("avif-rav1e", "q"),
     "jxl":        ("jxl",        "distance"),
 }
+
+
+_JXLQ: dict[float, float] = {}
 
 
 def _ladder_rows(ladder_dir: str) -> list[dict]:
@@ -312,9 +348,11 @@ def _ladder_rows(ladder_dir: str) -> list[dict]:
             if not enc or not os.path.exists(enc):
                 raise SystemExit(f"{leg}: encoded bitstream missing for {key(r)} — the "
                                  f"whole point of this rebuild is that bytes are kept")
+            qcol = (_JXLQ.setdefault(param, _jxl_q_for_distance(param))
+                    if param_kind == "distance" else float(r["q"]))
             row = {"image_id": stem(os.path.basename(pr["ref_path"])),
                    "codec": codec_name, "param_kind": param_kind,
-                   "codec_param": param, "q": float(r["q"]),
+                   "codec_param": param, "q": qcol,
                    "ref_path": pr["ref_path"], "dist_path": pr["dist_path"],
                    "encode_sha": sha256(enc), "encoded_bytes": int(r["encoded_bytes"]),
                    "encode_ms": float(r["encode_ms"]), "decode_ms": float(r["decode_ms"])}
@@ -368,6 +406,15 @@ def build_ladder(args, work: str) -> dict:
     dst = os.path.join(args.out_dir, f"dial_grid_372col_{args.tag}.parquet")
     pq.write_table(pa.table(cols), dst, compression="zstd")
 
+    # The MENTOR's own per-cell scores on exactly these cells, in the format
+    # `--dial-peer-scores` / `--gaddr-grid-truth` read (image_id, codec, q, pred).
+    # Written for the DISTINCT rows only, because those are the instrument.
+    truth = os.path.join(args.out_dir, f"dialcells_ssim2_{args.tag}.tsv")
+    with open(truth, "w") as f:
+        f.write("image_id\tcodec\tq\tpred\n")
+        for r in distinct:
+            f.write(f"{r['image_id']}\t{r['codec']}\t{r['q']}\t{r['score_ssim2']:.6f}\n")
+
     per = {}
     for r in rows:
         d = per.setdefault(r["codec"], {"cells": 0, "saturated": 0, "ladders": set()})
@@ -376,6 +423,7 @@ def build_ladder(args, work: str) -> dict:
         d["ladders"].add(r["image_id"])
     return {"file": dst, "rows": len(distinct), "sha256": sha256(dst),
             "full_table": full, "full_rows": len(rows), "full_sha256": sha256(full),
+            "grid_truth_tsv": truth, "grid_truth_sha256": sha256(truth),
             "pairs_tsv": tsv,
             "per_codec": {c: {"cells": d["cells"], "saturated": d["saturated"],
                               "distinct": d["cells"] - d["saturated"],
