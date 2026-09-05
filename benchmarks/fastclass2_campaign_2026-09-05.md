@@ -285,3 +285,34 @@ sparse *linear* fit on the same slice, and the raw moments carry 8–9 % against
 2.3 %. The fast class's MLP leans considerably harder on the non-basic half
 than the additive class does — which is the same direction as its much worse
 A7r (§3.5) and is a hypothesis the `S156`/`S228` arms can falsify.
+
+### 3.7 A7r = 5 survives SEVEN recipe variants — it is not the base recipe's pairing
+
+Grading every fastclass-wave arm (seed 4004, the wave's own packed bakes) on the
+same instrument:
+
+| arm | mechanism | A7r | avif-rav1e | avif-svt | jpeg | jxl | webp |
+|---|---|--:|--:|--:|--:|--:|--:|
+| `C0` | uniform pairing (= A4b) | **5** | 0.2308 | 0.6923 | 0.3077 | 0.3077 | 0.9744 |
+| `D1` | kon within-ref | **5** | 0.2051 | 0.5897 | 0.3590 | 0.4615 | 0.8718 |
+| `D2` | hf within-ref | **5** | 0.1026 | 0.9231 | 0.5385 | 0.5000 | 0.9487 |
+| `D3` = this campaign's base (`CTLPROBE`) | both | **5** | 0.1538 | 0.5897 | 0.5385 | 0.3077 | 0.7949 |
+| `D4` | high-q-boost 3.0 | **5** | 0.1538 | 0.6154 | 0.3846 | 0.3462 | 0.8974 |
+| `F1` | KADIS w=0.15 | **5** | 0.1538 | 0.6667 | 0.4103 | 0.3846 | 0.9231 |
+| `G1` | class-C, 289 coords | **5** | 0.2564 | 0.6667 | 0.5128 | 0.3846 | 0.9487 |
+| *mentor `peer_ssim2`* | — | — | *0.6410* | *1.0000* | *0.6667* | *0.9615* | *1.0000* |
+
+**Seven recipe variants, five codecs each, and not one cell clears the mentor.**
+So the base-recipe choice this campaign registered (§4 of the plan, the
+within-ref pairing) is not what causes the A7r failure — the uniform-pairing
+control is equally bad, and on `avif-rav1e` slightly better while on `jpeg`
+slightly worse. Neither zone mass, nor a corpus addition, nor the 24 class-C
+slots moves it.
+
+**That empties the RECIPE axis on A7r and leaves exactly two untried levers,
+both already registered as arms**: the input SET (`S156`/`S228` — the 156-only
+slice is the one property the single passing scorer has, §3.3) and the
+per-sample-α head's `--monotonicity-reg`, which is the only mechanism in the
+trainer that penalises a *pair whose predicted ordering disagrees with the
+target's* — which is literally what A7r measures (§3.5: every failure is an
+ordering inversion, zero clamps).
