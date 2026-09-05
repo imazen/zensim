@@ -2008,10 +2008,21 @@ fn fused_blur_h_mu_inner_v4(
             };
             let mut s_arr = [0.0f32; 16];
             let mut d_arr = [0.0f32; 16];
-            for ro in 0..16 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 16 interior ones: `ro < 16` and
+                // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + idx;
+                let cs = &src[off..off + 15 * width + 1];
+                let cd = &dst[off..off + 15 * width + 1];
+                for ro in 0..16 {
+                    s_arr[ro] = cs[ro * width];
+                    d_arr[ro] = cd[ro * width];
+                }
             }
             sum_s = sum_s + f32x16::from_array(token, s_arr);
             sum_d = sum_d + f32x16::from_array(token, d_arr);
@@ -2038,10 +2049,21 @@ fn fused_blur_h_mu_inner_v4(
 
             let mut s_add = [0.0f32; 16];
             let mut d_add = [0.0f32; 16];
-            for ro in 0..16 {
-                let base = (row_base + ro) * width + add_idx;
-                s_add[ro] = src[base];
-                d_add[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 16 interior ones: `ro < 16` and
+                // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + add_idx;
+                let cs = &src[off..off + 15 * width + 1];
+                let cd = &dst[off..off + 15 * width + 1];
+                for ro in 0..16 {
+                    s_add[ro] = cs[ro * width];
+                    d_add[ro] = cd[ro * width];
+                }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -2054,10 +2076,21 @@ fn fused_blur_h_mu_inner_v4(
             } else {
                 let mut sa = [0.0f32; 16];
                 let mut da = [0.0f32; 16];
-                for ro in 0..16 {
-                    let base = (row_base + ro) * width + rem_idx;
-                    sa[ro] = src[base];
-                    da[ro] = dst[base];
+                {
+                    // The column's extent is hoisted to ONE range check per gather and
+                    // LLVM folds the 16 interior ones: `ro < 16` and
+                    // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                    // slice ends exactly one past the highest index the loop below
+                    // reads, so it is in bounds precisely when the old form was.
+                    // Same loads, same values, same order — BIT-EXACT; this moves
+                    // WHERE the bound is proven, not what is read.
+                    let off = row_base * width + rem_idx;
+                    let cs = &src[off..off + 15 * width + 1];
+                    let cd = &dst[off..off + 15 * width + 1];
+                    for ro in 0..16 {
+                        sa[ro] = cs[ro * width];
+                        da[ro] = cd[ro * width];
+                    }
                 }
                 (sa, da)
             };
@@ -2097,10 +2130,21 @@ fn fused_blur_h_mu_inner_v4(
             };
             let mut s_arr = [0.0f32; 8];
             let mut d_arr = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_arr[ro] = cs[ro * width];
+                    d_arr[ro] = cd[ro * width];
+                }
             }
             sum_s = sum_s + f32x8::from_array(v3, s_arr);
             sum_d = sum_d + f32x8::from_array(v3, d_arr);
@@ -2127,10 +2171,21 @@ fn fused_blur_h_mu_inner_v4(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + add_idx;
-                s_add[ro] = src[base];
-                d_add[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + add_idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_add[ro] = cs[ro * width];
+                    d_add[ro] = cd[ro * width];
+                }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -2143,10 +2198,21 @@ fn fused_blur_h_mu_inner_v4(
             } else {
                 let mut sa = [0.0f32; 8];
                 let mut da = [0.0f32; 8];
-                for ro in 0..8 {
-                    let base = (row_base + ro) * width + rem_idx;
-                    sa[ro] = src[base];
-                    da[ro] = dst[base];
+                {
+                    // The column's extent is hoisted to ONE range check per gather and
+                    // LLVM folds the 8 interior ones: `ro < 8` and
+                    // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                    // slice ends exactly one past the highest index the loop below
+                    // reads, so it is in bounds precisely when the old form was.
+                    // Same loads, same values, same order — BIT-EXACT; this moves
+                    // WHERE the bound is proven, not what is read.
+                    let off = row_base * width + rem_idx;
+                    let cs = &src[off..off + 7 * width + 1];
+                    let cd = &dst[off..off + 7 * width + 1];
+                    for ro in 0..8 {
+                        sa[ro] = cs[ro * width];
+                        da[ro] = cd[ro * width];
+                    }
                 }
                 (sa, da)
             };
@@ -2235,10 +2301,21 @@ fn fused_blur_h_mu_inner_v4x(
             };
             let mut s_arr = [0.0f32; 16];
             let mut d_arr = [0.0f32; 16];
-            for ro in 0..16 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 16 interior ones: `ro < 16` and
+                // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + idx;
+                let cs = &src[off..off + 15 * width + 1];
+                let cd = &dst[off..off + 15 * width + 1];
+                for ro in 0..16 {
+                    s_arr[ro] = cs[ro * width];
+                    d_arr[ro] = cd[ro * width];
+                }
             }
             sum_s = sum_s + f32x16::from_array(token, s_arr);
             sum_d = sum_d + f32x16::from_array(token, d_arr);
@@ -2265,10 +2342,21 @@ fn fused_blur_h_mu_inner_v4x(
 
             let mut s_add = [0.0f32; 16];
             let mut d_add = [0.0f32; 16];
-            for ro in 0..16 {
-                let base = (row_base + ro) * width + add_idx;
-                s_add[ro] = src[base];
-                d_add[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 16 interior ones: `ro < 16` and
+                // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + add_idx;
+                let cs = &src[off..off + 15 * width + 1];
+                let cd = &dst[off..off + 15 * width + 1];
+                for ro in 0..16 {
+                    s_add[ro] = cs[ro * width];
+                    d_add[ro] = cd[ro * width];
+                }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -2281,10 +2369,21 @@ fn fused_blur_h_mu_inner_v4x(
             } else {
                 let mut sa = [0.0f32; 16];
                 let mut da = [0.0f32; 16];
-                for ro in 0..16 {
-                    let base = (row_base + ro) * width + rem_idx;
-                    sa[ro] = src[base];
-                    da[ro] = dst[base];
+                {
+                    // The column's extent is hoisted to ONE range check per gather and
+                    // LLVM folds the 16 interior ones: `ro < 16` and
+                    // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                    // slice ends exactly one past the highest index the loop below
+                    // reads, so it is in bounds precisely when the old form was.
+                    // Same loads, same values, same order — BIT-EXACT; this moves
+                    // WHERE the bound is proven, not what is read.
+                    let off = row_base * width + rem_idx;
+                    let cs = &src[off..off + 15 * width + 1];
+                    let cd = &dst[off..off + 15 * width + 1];
+                    for ro in 0..16 {
+                        sa[ro] = cs[ro * width];
+                        da[ro] = cd[ro * width];
+                    }
                 }
                 (sa, da)
             };
@@ -2324,10 +2423,21 @@ fn fused_blur_h_mu_inner_v4x(
             };
             let mut s_arr = [0.0f32; 8];
             let mut d_arr = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_arr[ro] = cs[ro * width];
+                    d_arr[ro] = cd[ro * width];
+                }
             }
             sum_s = sum_s + f32x8::from_array(v3, s_arr);
             sum_d = sum_d + f32x8::from_array(v3, d_arr);
@@ -2354,10 +2464,21 @@ fn fused_blur_h_mu_inner_v4x(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + add_idx;
-                s_add[ro] = src[base];
-                d_add[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + add_idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_add[ro] = cs[ro * width];
+                    d_add[ro] = cd[ro * width];
+                }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -2370,10 +2491,21 @@ fn fused_blur_h_mu_inner_v4x(
             } else {
                 let mut sa = [0.0f32; 8];
                 let mut da = [0.0f32; 8];
-                for ro in 0..8 {
-                    let base = (row_base + ro) * width + rem_idx;
-                    sa[ro] = src[base];
-                    da[ro] = dst[base];
+                {
+                    // The column's extent is hoisted to ONE range check per gather and
+                    // LLVM folds the 8 interior ones: `ro < 8` and
+                    // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                    // slice ends exactly one past the highest index the loop below
+                    // reads, so it is in bounds precisely when the old form was.
+                    // Same loads, same values, same order — BIT-EXACT; this moves
+                    // WHERE the bound is proven, not what is read.
+                    let off = row_base * width + rem_idx;
+                    let cs = &src[off..off + 7 * width + 1];
+                    let cd = &dst[off..off + 7 * width + 1];
+                    for ro in 0..8 {
+                        sa[ro] = cs[ro * width];
+                        da[ro] = cd[ro * width];
+                    }
                 }
                 (sa, da)
             };
@@ -2463,10 +2595,21 @@ fn fused_blur_h_mu_inner_v3(
             };
             let mut s_arr = [0.0f32; 8];
             let mut d_arr = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_arr[ro] = cs[ro * width];
+                    d_arr[ro] = cd[ro * width];
+                }
             }
             sum_s = sum_s + f32x8::from_array(token, s_arr);
             sum_d = sum_d + f32x8::from_array(token, d_arr);
@@ -2493,10 +2636,21 @@ fn fused_blur_h_mu_inner_v3(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + add_idx;
-                s_add[ro] = src[base];
-                d_add[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + add_idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_add[ro] = cs[ro * width];
+                    d_add[ro] = cd[ro * width];
+                }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -2509,10 +2663,21 @@ fn fused_blur_h_mu_inner_v3(
             } else {
                 let mut sa = [0.0f32; 8];
                 let mut da = [0.0f32; 8];
-                for ro in 0..8 {
-                    let base = (row_base + ro) * width + rem_idx;
-                    sa[ro] = src[base];
-                    da[ro] = dst[base];
+                {
+                    // The column's extent is hoisted to ONE range check per gather and
+                    // LLVM folds the 8 interior ones: `ro < 8` and
+                    // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                    // slice ends exactly one past the highest index the loop below
+                    // reads, so it is in bounds precisely when the old form was.
+                    // Same loads, same values, same order — BIT-EXACT; this moves
+                    // WHERE the bound is proven, not what is read.
+                    let off = row_base * width + rem_idx;
+                    let cs = &src[off..off + 7 * width + 1];
+                    let cd = &dst[off..off + 7 * width + 1];
+                    for ro in 0..8 {
+                        sa[ro] = cs[ro * width];
+                        da[ro] = cd[ro * width];
+                    }
                 }
                 (sa, da)
             };
@@ -3138,10 +3303,21 @@ fn fused_blur_h_ssim_inner_v4(
             };
             let mut s_arr = [0.0f32; 16];
             let mut d_arr = [0.0f32; 16];
-            for ro in 0..16 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 16 interior ones: `ro < 16` and
+                // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + idx;
+                let cs = &src[off..off + 15 * width + 1];
+                let cd = &dst[off..off + 15 * width + 1];
+                for ro in 0..16 {
+                    s_arr[ro] = cs[ro * width];
+                    d_arr[ro] = cd[ro * width];
+                }
             }
             let sv = f32x16::from_array(token, s_arr);
             let dv = f32x16::from_array(token, d_arr);
@@ -3177,10 +3353,21 @@ fn fused_blur_h_ssim_inner_v4(
 
             let mut s_add = [0.0f32; 16];
             let mut d_add = [0.0f32; 16];
-            for ro in 0..16 {
-                let base = (row_base + ro) * width + add_idx;
-                s_add[ro] = src[base];
-                d_add[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 16 interior ones: `ro < 16` and
+                // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + add_idx;
+                let cs = &src[off..off + 15 * width + 1];
+                let cd = &dst[off..off + 15 * width + 1];
+                for ro in 0..16 {
+                    s_add[ro] = cs[ro * width];
+                    d_add[ro] = cd[ro * width];
+                }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -3193,10 +3380,21 @@ fn fused_blur_h_ssim_inner_v4(
             } else {
                 let mut sa = [0.0f32; 16];
                 let mut da = [0.0f32; 16];
-                for ro in 0..16 {
-                    let base = (row_base + ro) * width + rem_idx;
-                    sa[ro] = src[base];
-                    da[ro] = dst[base];
+                {
+                    // The column's extent is hoisted to ONE range check per gather and
+                    // LLVM folds the 16 interior ones: `ro < 16` and
+                    // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                    // slice ends exactly one past the highest index the loop below
+                    // reads, so it is in bounds precisely when the old form was.
+                    // Same loads, same values, same order — BIT-EXACT; this moves
+                    // WHERE the bound is proven, not what is read.
+                    let off = row_base * width + rem_idx;
+                    let cs = &src[off..off + 15 * width + 1];
+                    let cd = &dst[off..off + 15 * width + 1];
+                    for ro in 0..16 {
+                        sa[ro] = cs[ro * width];
+                        da[ro] = cd[ro * width];
+                    }
                 }
                 (sa, da)
             };
@@ -3247,10 +3445,21 @@ fn fused_blur_h_ssim_inner_v4(
             };
             let mut s_arr = [0.0f32; 8];
             let mut d_arr = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_arr[ro] = cs[ro * width];
+                    d_arr[ro] = cd[ro * width];
+                }
             }
             let sv = f32x8::from_array(v3, s_arr);
             let dv = f32x8::from_array(v3, d_arr);
@@ -3285,10 +3494,21 @@ fn fused_blur_h_ssim_inner_v4(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + add_idx;
-                s_add[ro] = src[base];
-                d_add[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + add_idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_add[ro] = cs[ro * width];
+                    d_add[ro] = cd[ro * width];
+                }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -3301,10 +3521,21 @@ fn fused_blur_h_ssim_inner_v4(
             } else {
                 let mut sa = [0.0f32; 8];
                 let mut da = [0.0f32; 8];
-                for ro in 0..8 {
-                    let base = (row_base + ro) * width + rem_idx;
-                    sa[ro] = src[base];
-                    da[ro] = dst[base];
+                {
+                    // The column's extent is hoisted to ONE range check per gather and
+                    // LLVM folds the 8 interior ones: `ro < 8` and
+                    // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                    // slice ends exactly one past the highest index the loop below
+                    // reads, so it is in bounds precisely when the old form was.
+                    // Same loads, same values, same order — BIT-EXACT; this moves
+                    // WHERE the bound is proven, not what is read.
+                    let off = row_base * width + rem_idx;
+                    let cs = &src[off..off + 7 * width + 1];
+                    let cd = &dst[off..off + 7 * width + 1];
+                    for ro in 0..8 {
+                        sa[ro] = cs[ro * width];
+                        da[ro] = cd[ro * width];
+                    }
                 }
                 (sa, da)
             };
@@ -3497,10 +3728,21 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             };
             let mut s_arr = [0.0f32; 16];
             let mut d_arr = [0.0f32; 16];
-            for ro in 0..16 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 16 interior ones: `ro < 16` and
+                // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + idx;
+                let cs = &src[off..off + 15 * width + 1];
+                let cd = &dst[off..off + 15 * width + 1];
+                for ro in 0..16 {
+                    s_arr[ro] = cs[ro * width];
+                    d_arr[ro] = cd[ro * width];
+                }
             }
             let sv = f32x16::from_array(token, s_arr);
             let dv = f32x16::from_array(token, d_arr);
@@ -3543,10 +3785,21 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
 
             let mut s_add = [0.0f32; 16];
             let mut d_add = [0.0f32; 16];
-            for ro in 0..16 {
-                let base = (row_base + ro) * width + add_idx;
-                s_add[ro] = src[base];
-                d_add[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 16 interior ones: `ro < 16` and
+                // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + add_idx;
+                let cs = &src[off..off + 15 * width + 1];
+                let cd = &dst[off..off + 15 * width + 1];
+                for ro in 0..16 {
+                    s_add[ro] = cs[ro * width];
+                    d_add[ro] = cd[ro * width];
+                }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -3559,10 +3812,21 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             } else {
                 let mut sa = [0.0f32; 16];
                 let mut da = [0.0f32; 16];
-                for ro in 0..16 {
-                    let base = (row_base + ro) * width + rem_idx;
-                    sa[ro] = src[base];
-                    da[ro] = dst[base];
+                {
+                    // The column's extent is hoisted to ONE range check per gather and
+                    // LLVM folds the 16 interior ones: `ro < 16` and
+                    // `col.len() == 15*width + 1` give `ro*width < col.len()`. The
+                    // slice ends exactly one past the highest index the loop below
+                    // reads, so it is in bounds precisely when the old form was.
+                    // Same loads, same values, same order — BIT-EXACT; this moves
+                    // WHERE the bound is proven, not what is read.
+                    let off = row_base * width + rem_idx;
+                    let cs = &src[off..off + 15 * width + 1];
+                    let cd = &dst[off..off + 15 * width + 1];
+                    for ro in 0..16 {
+                        sa[ro] = cs[ro * width];
+                        da[ro] = cd[ro * width];
+                    }
                 }
                 (sa, da)
             };
@@ -3615,10 +3879,21 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             };
             let mut s_arr = [0.0f32; 8];
             let mut d_arr = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_arr[ro] = cs[ro * width];
+                    d_arr[ro] = cd[ro * width];
+                }
             }
             let sv = f32x8::from_array(v3, s_arr);
             let dv = f32x8::from_array(v3, d_arr);
@@ -3660,10 +3935,21 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + add_idx;
-                s_add[ro] = src[base];
-                d_add[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + add_idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_add[ro] = cs[ro * width];
+                    d_add[ro] = cd[ro * width];
+                }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -3676,10 +3962,21 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             } else {
                 let mut sa = [0.0f32; 8];
                 let mut da = [0.0f32; 8];
-                for ro in 0..8 {
-                    let base = (row_base + ro) * width + rem_idx;
-                    sa[ro] = src[base];
-                    da[ro] = dst[base];
+                {
+                    // The column's extent is hoisted to ONE range check per gather and
+                    // LLVM folds the 8 interior ones: `ro < 8` and
+                    // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                    // slice ends exactly one past the highest index the loop below
+                    // reads, so it is in bounds precisely when the old form was.
+                    // Same loads, same values, same order — BIT-EXACT; this moves
+                    // WHERE the bound is proven, not what is read.
+                    let off = row_base * width + rem_idx;
+                    let cs = &src[off..off + 7 * width + 1];
+                    let cd = &dst[off..off + 7 * width + 1];
+                    for ro in 0..8 {
+                        sa[ro] = cs[ro * width];
+                        da[ro] = cd[ro * width];
+                    }
                 }
                 (sa, da)
             };
@@ -3808,10 +4105,21 @@ fn fused_blur_h_ssim_inner_v3(
             };
             let mut s_arr = [0.0f32; 8];
             let mut d_arr = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + idx;
-                s_arr[ro] = src[base];
-                d_arr[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_arr[ro] = cs[ro * width];
+                    d_arr[ro] = cd[ro * width];
+                }
             }
             let sv = f32x8::from_array(token, s_arr);
             let dv = f32x8::from_array(token, d_arr);
@@ -3846,10 +4154,21 @@ fn fused_blur_h_ssim_inner_v3(
 
             let mut s_add = [0.0f32; 8];
             let mut d_add = [0.0f32; 8];
-            for ro in 0..8 {
-                let base = (row_base + ro) * width + add_idx;
-                s_add[ro] = src[base];
-                d_add[ro] = dst[base];
+            {
+                // The column's extent is hoisted to ONE range check per gather and
+                // LLVM folds the 8 interior ones: `ro < 8` and
+                // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                // slice ends exactly one past the highest index the loop below
+                // reads, so it is in bounds precisely when the old form was.
+                // Same loads, same values, same order — BIT-EXACT; this moves
+                // WHERE the bound is proven, not what is read.
+                let off = row_base * width + add_idx;
+                let cs = &src[off..off + 7 * width + 1];
+                let cd = &dst[off..off + 7 * width + 1];
+                for ro in 0..8 {
+                    s_add[ro] = cs[ro * width];
+                    d_add[ro] = cd[ro * width];
+                }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -3862,10 +4181,21 @@ fn fused_blur_h_ssim_inner_v3(
             } else {
                 let mut sa = [0.0f32; 8];
                 let mut da = [0.0f32; 8];
-                for ro in 0..8 {
-                    let base = (row_base + ro) * width + rem_idx;
-                    sa[ro] = src[base];
-                    da[ro] = dst[base];
+                {
+                    // The column's extent is hoisted to ONE range check per gather and
+                    // LLVM folds the 8 interior ones: `ro < 8` and
+                    // `col.len() == 7*width + 1` give `ro*width < col.len()`. The
+                    // slice ends exactly one past the highest index the loop below
+                    // reads, so it is in bounds precisely when the old form was.
+                    // Same loads, same values, same order — BIT-EXACT; this moves
+                    // WHERE the bound is proven, not what is read.
+                    let off = row_base * width + rem_idx;
+                    let cs = &src[off..off + 7 * width + 1];
+                    let cd = &dst[off..off + 7 * width + 1];
+                    for ro in 0..8 {
+                        sa[ro] = cs[ro * width];
+                        da[ro] = cd[ro * width];
+                    }
                 }
                 (sa, da)
             };
@@ -5123,10 +5453,11 @@ mod tests {
     /// compares two of our own kernels and would stay green if BOTH were
     /// reordered together.
     ///
-    /// Contract: `dst[y][x] == (((src[2y][2x] + src[2y][2x+1])
-    /// + src[2y+1][2x]) + src[2y+1][2x+1]) * 0.25`, evaluated left to right in
-    /// f32. A SIMD rewrite that sums the two ROWS first (a natural shape) is a
-    /// different expression and moves bytes; this test is what says so.
+    /// Contract: `dst[y][x]` is
+    /// `(((src[2y][2x] + src[2y][2x+1]) + src[2y+1][2x]) + src[2y+1][2x+1]) * 0.25`,
+    /// evaluated left to right in f32. A SIMD rewrite that sums the two ROWS
+    /// first (a natural shape) is a different expression and moves bytes; this
+    /// test is what says so.
     ///
     /// Widths are chosen to cover every path: a whole number of 16-wide
     /// chunks with no tail, chunks plus a scalar tail, a width entirely below

@@ -57,6 +57,34 @@
   real gate). Record: `benchmarks/inversion_truth_2026-09-05.md`; gate doc §18.
 
 
+### Performance — the H blur's strided gathers: one range check instead of 16 (2026-09-05, kernel lane 2)
+
+`fused_blur_h_ssim_*` and `fused_blur_h_mu_*` assemble each SIMD vector from
+8 or 16 **strided** scalar loads (horizontal box blurs vectorise ACROSS rows),
+and each load indexed the `src`/`dst` slice directly — so the emitted code
+carried 16 or 32 bounds checks per gather. The column's extent is now hoisted
+to ONE range check per gather and LLVM folds the interior ones: `ro < N` and
+`col.len() == (N-1)*width + 1` give `ro*width < col.len()`. Applied uniformly
+to all **30** strided gathers across every tier body.
+
+**Bit-exact: this moves WHERE the bound is proven, not what is read.** Same
+addresses, same values, same order; the hoisted slice ends exactly one past the
+highest index the loop reads, so it is in bounds precisely when the old form
+was.
+
+MEASURED — `fused_blur_h_ssim_inner_v4x` **2,634 → 1,683 instructions
+(−36.1 %)** statically, `jae` 208 → 84; and dynamically (callgrind Ir, `156`
+arm, 576², 1T, v3 tier) `fused_blur_h_ssim_inner_v3` **128,206,476 →
+108,718,260 (−15.2 %)**, walk-side **−6.48 %**. It is the largest single lever
+of the lane, on the kernel that is the largest single phase of the walk.
+
+**Cumulative for kernel lane 2: walk-side Ir 332,705,880 → 281,335,268
+= −15.44 %,** across four bit-exact levers. Gates: the same 160-cell
+`to_bits()` A/B at **0 differing bits**, `cargo public-api` ZERO delta, clippy
+clean, `cargo test --workspace` 1,550 passed with one **pre-existing** failure
+(`zensim-validate/tests/features_root_from_bake.rs`) verified to fail
+identically with this change reverted.
+
 ### Performance — the fast-class FRONT END, three bit-exact levers (2026-09-05, kernel lane 2)
 
 MEASURED with callgrind Ir (deterministic, so valid on a loaded box), `156`
