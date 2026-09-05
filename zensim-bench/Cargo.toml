@@ -213,6 +213,10 @@ required-features = ["training", "zen-decode"]
 name = "m3_fixture_gen"
 required-features = ["m3-fixtures"]
 
+[[example]]
+name = "ladder_tile_gen"
+required-features = ["m3-fixtures"]
+
 # `aic3_one_pair_smoke` and `extended_iw_perf` likewise use zensim's
 # `training`-gated research API; guard them so a default `--all-targets`
 # build doesn't try (and fail) to compile them.

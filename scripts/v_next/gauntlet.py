@@ -310,6 +310,14 @@ def family_of(name: str) -> str:
         return "@cur372 (current extractor)"
     if name.startswith("peer_"):
         return "peers"
+    if name.startswith("Dpeaks"):
+        # The jxl-floor peaks-block investigation (benchmarks/d_peaks_jxl_floor_2026-09-05.md,
+        # benchmarks/d_peaks_slot_ablation_2026-09-05.md, benchmarks/d_peaks_jxl_ladders_2026-09-05.md):
+        # `Dpeaks_lam1em3` (the peaks-block lasso fit that inverts on 4 jxl ladders) and
+        # `Dpeaks_lam1em3_minus_f162` (the leave-one-out refit that cures them but trades in
+        # a new A4 floor regression) — neither ships; both are on the board so the compare
+        # view can show the inversion + its cure side by side with the mentor and shipped D.
+        return "D-peaks candidates"
     n = name[len("sota944_"):] if name.startswith("sota944_") else name
     if n.startswith(("ens_", "W5_", "W6_")):
         return "ensembles"
