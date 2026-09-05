@@ -371,3 +371,43 @@ path with `WR4_NO_COARSE_DECAY=1`, k = 3. Without it, `P1α − control` is not 
 head effect. The verifying build was done in a **separate cargo target dir** so
 the running sweep's pinned binary was not replaced mid-wave; this wave's fits
 therefore predate the guard, and the runner is what keeps them honest.
+
+## 5. THE W4 PLAN, REVISED ON THE KERNEL LANE'S DEFECT 2
+
+`kernel_fastclass_2026-09-05.md` §4 measured that the W4 **bar arm itself** is
+unproducible: `ssim2_speed_bar`'s `add156_156basic` builds
+`V1PoolsMode::Off`, and `fold_engine::pools_mode_for_need` (`fold_engine.rs:538`)
+**never returns `Off`** by documented policy (it hands the band no scratch,
+disabling the band-local self-blur shape). *"The bar is therefore set by a walk
+that only the bench can run."*
+
+**For this campaign's servable candidate that resolves the denominator
+question rather than complicating it.** A 228-slice bake is served through
+`V1PoolsMode::Peaks` — the mode `ZensimProfile::D` already resolves to — so its
+walk is **the production D walk**, not a bench-only one. The honest ≤1.25× base
+is therefore the **`15c` (Peaks) arm**, and the kernel lane's own 1152²/1T
+numbers put `156` / `15o` / `15c` at 26.73 / 25.56 / 25.76 ms, all inside that
+cell's control spread — so the two candidate denominators are not distinguished
+at 1T anyway.
+
+**Revised plan, in two halves:**
+
+1. **Walk cost** — `scripts/kernel_fastclass_sweep.sh --arms 156,15c,15f
+   --control 15c --sizes 576,1152,2304 --threads 1,8 --starts 15 --iters 7`.
+   That script *is* the protocol (3-char arm names so the env block is
+   byte-identical, arms interleaved inside the start loop, min-of-iters
+   in-process, min over ≥15 starts, ASLR on, a bit-identical control whose own
+   min-vs-median spread IS the cell's noise floor, and a **box-load self-check
+   that skips rather than emitting a contaminated number**). It refuses above
+   load 3.0, which is why W4 runs only after the fit queue drains.
+2. **Forward-pass cost** — `ssim2_speed_bar` with `ZEN_S2_EXTRACT_ONLY=1`, which
+   is the only thing that separates "the walk got wider" from "the head got
+   bigger". For a servable 228 candidate the walk delta is ~0 by construction,
+   so the entire W4 question is the forward pass: a `265→128→1`-class MLP
+   against Profile D's 28-coefficient additive head.
+
+**And the baseline is expected to move.** The kernel lane measures the fast
+walk at **6.5 ms @576²/1T** (944-full 16.2) with the **front end** — XYB
+convert + downscale — at a third of it, and a separate lane is optimising that
+now. So W4 is measured **last, on the same binary as its baseline**, and no
+number is carried forward from an earlier build.
