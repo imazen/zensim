@@ -203,6 +203,11 @@ fn main() {
     let wall_s = env_usize("ZEN_S2_WALL_S", 120) as u64;
 
     let zb: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::B)));
+    // The shipped FAST-CLASS profile. `candidate-profiles` is one of `zensim`'s
+    // DEFAULT features, so this needs no gate here — a dependency's features are
+    // not visible to this crate as `cfg(feature = ...)` anyway, which is the
+    // trap an earlier draft of this arm fell into.
+    let zd: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::D)));
     // Amended-W4 arms. `Box::leak` so the &'static the closures need is real;
     // both are parsed exactly once, outside every timed region.
     let mlp: Option<&'static Head> = Head::load("ZEN_HY_MLP").map(|h| &*Box::leak(Box::new(h)));
@@ -287,6 +292,39 @@ fn main() {
                         let s = RgbSlice::new(src_s, n, n);
                         let d = RgbSlice::new(dst_s, n, n);
                         zenbench::black_box(zb.compute(&s, &d).unwrap().score())
+                    })
+                });
+                // ---- the PRODUCT fast-class path, which this bench had no arm
+                // for (added by the kernel lane, 2026-09-05).
+                //
+                // Every other fast-class arm here reaches the walk by handing
+                // `compute_folded720_features_streaming` a hand-built
+                // `V2NewFeatureToggles`. That is the right shape for pricing an
+                // extraction regime, and the wrong shape for answering "how fast
+                // is the thing a user gets", because it bypasses the whole
+                // routing stack a real call goes through: `Zensim::new`'s
+                // per-profile `fold_engine` / `skip_unread_pools` defaults,
+                // `fold_engine::is_fold_backable`'s four-condition guard (which
+                // can DEGRADE to the buffered walk), `score_pool_mode`'s
+                // derivation of the pool mode from the bake's own layer-0 read
+                // pattern, the 372 truncation, and the bake forward + PCHIP
+                // spline. `ZensimProfile::D` is the shipped fast-class profile
+                // and `Zensim::compute` is the API; this arm is both, so a
+                // routing regression shows up as a speed regression here rather
+                // than passing unnoticed because every arm hand-built its way
+                // around the router.
+                //
+                // It is also the arm that makes the W4 comparison honest at the
+                // product level: `add156_156basic` prices a *regime*, this
+                // prices the *shipped path*, and the two should track. They are
+                // not redundant — `add156_156basic` requests
+                // `V1PoolsMode::Off`, which `fold_engine::pools_mode_for_need`
+                // never returns, so no production call can produce that walk.
+                group.bench("zensim_D", move |b| {
+                    b.iter(move || {
+                        let s = RgbSlice::new(src_s, n, n);
+                        let d = RgbSlice::new(dst_s, n, n);
+                        zenbench::black_box(zd.compute(&s, &d).unwrap().score())
                     })
                 });
                 // ---- amended-W4: candidate = its own regime + its own forwards

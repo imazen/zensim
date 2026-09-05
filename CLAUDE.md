@@ -656,14 +656,27 @@ design — `compute_pu_linear*`, the fused attribution compare,
 order, what must survive) is §9 of the fold-engine note; **nothing has been
 deleted and it awaits sign-off.**
 
-**Parallelism is the structural asymmetry.** Buffered parallelises band-per-strip,
-degree `layout_h.div_ceil(STRIP_INNER)` — it grows with image height. The fold
-parallelises per channel, **degree fixed at 3**, over a producer with no rayon.
-MEASURED 1T→8T: buffered **2–4×**, fold **1.1–1.5×**; 1T→28T buffered 4.6–6.5×,
-fold 1.8–2.0×. Consequence for the SAME 216 v1 pool features: the fold is
-**0.63–0.91×** buffered's cost serial, and **1.09–3.30×** at 8 threads. **Name a
-thread budget before trading one path for the other.** zenmetrics dodges this by
-running the fold `.with_parallel(false)` and parallelising across pairs.
+**Parallelism is the structural asymmetry** — but the numbers this paragraph
+carried until 2026-09-05 were a full era stale, in the fold's favour by ~2×.
+*(Corrected in place per DOCS: SEARCH + UPDATE, from `fold_mt_scaling_2026-08-31.md`
+§3/§5 and `fold_footprint_2026-08-31.md` §7/§9, both of which landed the day
+AFTER the paragraph was written.)* Buffered parallelises band-per-strip, degree
+`layout_h.div_ceil(STRIP_INNER)` — it grows with image height.
+
+**The fold's degree is NOT 3, and its producer is NOT rayon-free.** Read from
+source: `feature_v2_stream.rs:626` runs the two image sides as a `rayon::join`
+(SDR only — HDR keeps the serial loop, it shares one `hdr_row` scratch) and
+`:769` fans the downscale cascade 6 ways over (side, channel); the conversion
+chunks at `CONVERT_CHUNK_ROWS`, which is what `ADVANCE_ROWS` 128→256 exists to
+feed. The consuming degree is **3 channels × 4 bands = 12 tasks per strip**,
+nested, plus `mean_offset` row bands. MEASURED 1T→8T / 1T→16T:
+buffered 4.53×/5.42× (1152²) and 5.14×/6.51× (2304²); **fold 3.42×/3.49×** and
+**3.38×/3.71×** — not the 1.1–1.5× this said. Ratio fold ÷ buffered is now
+**1.37–1.46× @8T** and **1.61–1.69× @16T** (was 2.30–2.54× / 2.93–3.25×), and
+after the footprint lane **the fold is FASTER than buffered serially** —
+0.78× at 1152², 0.87× at 2304². **Name a thread budget before trading one path
+for the other** still holds; zenmetrics still dodges it by running the fold
+`.with_parallel(false)` and parallelising across pairs.
 
 **Per-pixel cost RISES with size in every arm** (buffered 25.6→31.3 ms/MP,
 zeroed fold 49.2→63.7 across 576²→2304²), so an `α + β·pixels` fit returns a
@@ -787,10 +800,37 @@ parallelism inside the channel (4 bands/strip) lifts it: 944-full best 7.75 →
 **vanishes** (9.4 vs 9.4 ms paired). Bit-exact ONLY because the merge is
 **sequential in band order** — `((0+b0)+b1)+…` reproduces the in-place loop;
 a tree/unordered reduction would not (f64 addition is not associative).
-Remaining cap: the serial `StripPlaneProducer`.
 
-**dense_block_kernel is the MT ceiling and it is ERA-LOCKED — do not
-restructure it without asking.** It is 23.2% of the 944-full walk and gets
+**The remaining cap is L3 CAPACITY, not the producer** *(corrected 2026-09-05;
+this line read "Remaining cap: the serial `StripPlaneProducer`", which the
+fold-MT and fold-footprint lanes superseded the next day)*. The MT lane's
+N-independent-process test read a 3.38–3.54× saturation ceiling and concluded
+the implementation sat at 94–108 % of the box's own bound; the footprint lane
+re-ran it **CCD-pinned** and got **5.85× (CCD0) / 4.54× (CCD1)** from a change
+that computes nothing differently — *"reading the fold's own footprint as the
+machine's"*. The tell is the signature: before, the fold was CCD-INsensitive
+(3.38 vs 3.33) at 52.7 MiB band scratch per process; after, it is CCD-SENSITIVE
+(5.85 vs 4.54, 22 % apart) at 11.1 MiB — 8 processes then fit CCD0's 96 MiB and
+not CCD1's 32 MiB. A DRAM-bandwidth ceiling cannot produce that pattern; an
+L3-capacity one produces exactly it. **Every fold band is FULL WIDTH, so the
+per-thread hot set is `2,016·W` bytes** (buffered's `1,512·W`) — linear in width
+with no bound, and at 2304²/8T that is 35.4 MiB against CCD1's 32 MiB L3 while
+buffered's 26.6 MiB fits. The registered lever is **column-tiling the bands**
+(`2,016·W → 2,016·(Tw+20)`, width-independent, 3.9 % redundant H-blur at
+`Tw=512`) — which changes the f64 accumulation ORDER inside a band and is
+therefore an **era-2-enabled** design, not a bit-exact one. Producer pipelining
+was analysed and DECLINED: it needs `unsafe` (the producer appends rows to a
+`RollingPlane` while consumers hold `&[f32]` into the same `Vec`) and the
+producer's work is inside the N-process bound anyway. ⚠ Note `feature_v2.rs:8425`
+still says "4.2x against buffered's 10.9x"; both docs say 3.5× — the source
+comment is the outlier.
+
+**dense_block_kernel is the MT ceiling of the 944-FULL EXTRACTION — and it is
+NOT on a scoring walk's critical path at all** *(scope corrected 2026-09-05:
+`stream_phase_b` gates the whole dense + gradient + append + blockiness block
+behind `v2_blocks`, and a fold-backed score asks for `v1_only`, so a scoring
+walk never dispatches it — `fold_mt_scaling_2026-08-31.md` §1.2)*. **ERA-LOCKED
+— do not restructure it without asking.** It is 23.2% of the 944-full walk and gets
 3-way parallelism only. Band/row-partial merging is bit-exact ONLY when each
 accumulator takes exactly one add per row, which needs `POOL_SIMD` (v4x-only)
 AND `width % 8 == 0` at every scale. Neither holds generally — the
@@ -801,6 +841,13 @@ boundaries. MEASURED on the kernel's accumulation shape: 0 ulps at
 Amdahl UPPER bound on fixing it (dense scaling perfectly, nothing else
 changing, restructure free): **1.17× @8T, 1.23× @16T** — against re-extracting
 every 944 table AND re-training every 944 model. Not a silent trade.
+⚠ **Both the 23.2 % and that Amdahl bound are `v3`-SCOPED** (callgrind cannot
+execute AVX-512, so every Ir profile in this repo is the AVX2 tier with
+`POOL_SIMD` — which is `v4x`-only — OFF). Measured by WALL CLOCK on the tier we
+actually ship, the kernel is **13.5 % of the v2 block and 7.3 % of the 944 walk
+at 2304²**; era-2 §28.5 independently uses 7.9 %. Discard the magnitudes on the
+shipping tier; the STRUCTURAL argument (it cannot be split bit-exactly) is
+unaffected.
 
 **Y-channel imbalance has no free fix.** The 3 channel accumulators are
 disjoint, so scheduling is already free and rayon work-steals; the imbalance is

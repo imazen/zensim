@@ -2,6 +2,52 @@
 
 ## [Unreleased]
 
+### Fixed — fast-class extraction kernel: two defects, both bit-exact (2026-09-05, kernel lane)
+
+- **`ComputeSet::self_blur_eligible` and the strip loop disagreed on
+  `V1PoolsMode::Peaks`.** The sizing predicate (which builds `plane_needs`)
+  required `Full`; the loop predicate (which decides whether phase A runs)
+  accepted `Full | Peaks`. On a `Peaks` + parallel walk the strip scratch
+  therefore reserved and first-touched phase A's four fused-H planes and the
+  loop then skipped phase A whole — on the one pool mode the fast class ships
+  (`fold_engine::pools_mode_for_need` returns `Peaks` for every bake that does
+  not read masked/IW). `self_blur_eligible` is now THE owner and the loop reads
+  it. Gate: `self_blur_sizing_predicate_matches_the_strip_loop_predicate`,
+  which fails against the pre-fix definition. Compute is untouched — no feature
+  byte moves; the RSS effect is mixed and small and is published as measured,
+  not claimed as a win (`benchmarks/kernel_fastclass_2026-09-05.md` §3.1).
+- **The fast walk allocated 232 times per compare** at 1152² against a reused
+  `V2Scratch`. `fold_v1_basic_bands` built its band-start list in a heap `Vec`
+  once per (strip, channel, scale); it is now a fixed
+  `[usize; V1_BANDS_PER_STRIP]` with the bound asserted. **232 → 175 per walk
+  (−24.6 %)**, bit-exact. The remaining 175 are per-strip and unlocated; new
+  test `zensim/tests/fastclass_alloc_steady_state.rs` holds them as a ratchet.
+
+### Added — fast-class instruments (2026-09-05, kernel lane)
+
+- `zensim-bench/benches/ssim2_speed_bar.rs` gains a **`zensim_D`** arm — the
+  bench had no arm for the shipped fast-class product path at all, so a routing
+  regression (`is_fold_backable` degrading to the buffered walk,
+  `score_pool_mode` deriving the wrong mode) was invisible to it.
+- `zensim/examples/foldapp_stream_bigpair.rs` gains **`15o`**, a
+  three-character alias for the `V1PoolsMode::Off` arm, so it can be
+  interleaved against `156` without changing the environment block's byte
+  length (the ASLR protocol treats that length as a layout input).
+- `scripts/kernel_fastclass_sweep.sh` — the ASLR + box-load protocol
+  mechanised: refuses a non-3-character arm name, rotates arm order per start,
+  min-of-iters then min-over-starts, carries a control arm whose spread is the
+  cell's noise floor, and self-checks load before every cell rather than
+  emitting a contaminated number.
+- **`candidate-profiles` added to `zensim-bench`'s `zensim` features.** That
+  feature gates `ZensimProfile::D`; the crate's `default-features = false` line
+  was hiding the shipped fast-class profile from the one bench that prices it.
+- `docs/PLAN_KERNEL_FASTCLASS_2026-09-05.md`,
+  `benchmarks/kernel_fastclass_2026-09-05.md` — the pre-registered plan and the
+  record, including the finding that **no `V1FreeExtras` slot is reachable from
+  `Zensim::compute`** (`feature_v2.rs:7532` hard-codes `free_extras: Off`;
+  `fold_engine.rs:158` truncates to 372), so a "156 + peaks" bake is servable
+  today and a "156 + peaks + moments/class-C" bake is not.
+
 ### Changed — `ZensimProfile::D`'s default bake: the id100+negrich dial (2026-09-05, user decision)
 
 - **`D` now loads `weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin`**

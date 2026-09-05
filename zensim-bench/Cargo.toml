@@ -94,7 +94,16 @@ png = { version = "0.18.1", optional = true }
 # It is purely additive (67 `#[cfg]` sites, all on new items), and the
 # bench's `zensim_B` anchor arm is the cross-build check that it moved
 # nothing.
-zensim = { path = "../zensim", default-features = false, features = ["threads", "avx512", "imgref", "deprecated-profiles", "feature-regime-v2"] }
+# `candidate-profiles` added 2026-09-05 (kernel lane): it gates
+# `ZensimProfile::D`, the SHIPPED fast-class profile, and without it this bench
+# had no arm for the product path at all — every fast-class arm hand-built a
+# `V2NewFeatureToggles` and so priced an extraction REGIME while bypassing the
+# router (`Zensim::new`'s per-profile engine defaults, `is_fold_backable`'s
+# degrade-to-buffered guard, `score_pool_mode`'s derivation from the bake, the
+# 372 truncation, the spline). It is one of `zensim`'s DEFAULT features, so
+# every real consumer already has it; only this crate's `default-features =
+# false` line was hiding it.
+zensim = { path = "../zensim", default-features = false, features = ["threads", "avx512", "imgref", "deprecated-profiles", "feature-regime-v2", "candidate-profiles"] }
 # Dedup-K (2026-05-26): profile_compat_report example routes
 # spearman/pearson/kendall_tau through canonical zenstats.
 zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }

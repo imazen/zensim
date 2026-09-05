@@ -1973,9 +1973,27 @@ impl ComputeSet {
     }
 
     /// True when the fold can own its H planes band-locally — the shape that
-    /// skips phase A entirely. Needs the band pool scratch, hence `Full`.
+    /// skips phase A entirely. Needs the band pool scratch, which
+    /// [`V1PoolsMode::Full`] and [`V1PoolsMode::Peaks`] both provide
+    /// (`Peaks` hands the band the scratch for the four H planes alone —
+    /// [`BandPoolWork::HOnly`]); [`V1PoolsMode::Off`] hands the band no
+    /// scratch at all, which is why `fold_engine::pools_mode_for_need` never
+    /// returns it.
+    ///
+    /// **THE owner of this predicate.** The strip loop's `fuse_channels` arm
+    /// reads it rather than re-deriving it — those were two separate
+    /// derivations until 2026-09-05 and they DISAGREED on `Peaks`: this one
+    /// said `Full` only, the loop said `Full | Peaks`. Since this one sizes
+    /// the strip scratch (via [`Self::plane_needs`]) and the loop decides
+    /// whether phase A runs, a `Peaks` walk reserved phase A's four fused-H
+    /// planes and then skipped phase A whole — allocating and first-touching
+    /// planes nothing ever wrote, on the one mode the fast class ships.
+    /// `self_blur_sizing_predicate_matches_the_strip_loop_predicate` pins
+    /// them together; it fails against the pre-fix definition.
     pub(crate) fn self_blur_eligible(&self) -> bool {
-        !self.v2_blocks && self.v1_basic && matches!(self.v1_pools, V1PoolsMode::Full)
+        !self.v2_blocks
+            && self.v1_basic
+            && matches!(self.v1_pools, V1PoolsMode::Full | V1PoolsMode::Peaks)
     }
 
     /// Derive the minimal compute set a bake structurally needs, from its own
@@ -5579,12 +5597,36 @@ fn fold_v1_basic_bands(
     // Band starts, in order. Bands are INDEPENDENT: each reads a clamped
     // window of the shared planes and produces its own sums, so the only
     // cross-band coupling is the accumulation itself.
-    let mut starts = Vec::new();
+    //
+    // Held in a FIXED array rather than a `Vec`. This function runs once per
+    // (strip, channel, scale), and a `Vec::new()` grown by `push` costs one
+    // allocation plus up to two reallocs every time — measured at **232
+    // allocations per 1152² fast-class compare** against a reused `V2Scratch`
+    // (`zensim/tests/fastclass_alloc_steady_state.rs`,
+    // `benchmarks/kernel_fastclass_2026-09-05.md` §3.2), i.e. ~4 per
+    // (strip, channel), which is exactly this. The bound is structural, not a
+    // guess: a strip is at most `STRIP_ROWS` rows and a band is
+    // `V1_BAND_ROWS`, so there are at most `V1_BANDS_PER_STRIP` starts. The
+    // assert states that rather than trusting it, so a future change to either
+    // constant fails loudly here instead of silently truncating a band — which
+    // would drop its rows from the sums and move feature bytes.
+    let mut starts_buf = [0usize; V1_BANDS_PER_STRIP];
+    let mut n_starts = 0usize;
     let mut b = rows.start;
     while b < rows.end {
-        starts.push(b);
+        assert!(
+            n_starts < V1_BANDS_PER_STRIP,
+            "band starts overflow: rows {}..{} span {} rows, more than \
+             V1_BANDS_PER_STRIP ({V1_BANDS_PER_STRIP}) bands of {V1_BAND_ROWS}",
+            rows.start,
+            rows.end,
+            rows.end - rows.start
+        );
+        starts_buf[n_starts] = b;
+        n_starts += 1;
         b = (b + V1_BAND_ROWS).min(rows.end);
     }
+    let starts: &[usize] = &starts_buf[..n_starts];
 
     // BIT-EXACTNESS OF THE PARALLEL PATH. Each band accumulates into its own
     // zero-initialised `V1BasicSums`, and the merge below runs SEQUENTIALLY IN
@@ -8432,11 +8474,13 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         // H buffer lives in the band's `FoldPoolScratch`, and one of those is
         // what every fold-backed SCORE asks for. (`Peaks` hands the band the
         // scratch for the H planes alone — see `BandPoolWork::HOnly`.)
+        // ONE owner: `ComputeSet::self_blur_eligible`, which is also what
+        // sized the strip scratch above. Re-deriving it here is what let the
+        // two drift apart on `Peaks` (see that function's doc); the local
+        // `fuse_channels` conjunct stays because it is a runtime parallelism
+        // fact the compute set does not model.
         #[cfg(feature = "threads")]
-        let self_blur = fuse_channels
-            && !v2_blocks
-            && fold_v1
-            && matches!(toggles.v1_pools, V1PoolsMode::Full | V1PoolsMode::Peaks);
+        let self_blur = fuse_channels && compute.self_blur_eligible();
         #[cfg(feature = "threads")]
         if fuse_channels {
             use rayon::prelude::*;
@@ -13309,7 +13353,23 @@ pub(crate) mod tests {
                 let v2_blocks = !t.v1_only;
                 let append_on = t.append_block && v2_blocks;
                 let append2_on = t.append2_block && v2_blocks;
-                let self_blur_core = !v2_blocks && true && matches!(t.v1_pools, V1PoolsMode::Full);
+                // ⚠ CORRECTED 2026-09-05, and this is an expected-VALUE change,
+                // so read it deliberately. This line said `V1PoolsMode::Full`
+                // alone, transcribed from `ComputeSet::self_blur_eligible` —
+                // but the STRIP LOOP, which is what actually decides whether
+                // phase A runs, has always accepted `Full | Peaks`. So the
+                // "legacy derivation" this test reproduces was itself a copy of
+                // the wrong one of the two, and pinning it kept a real
+                // footprint defect green: a `Peaks` walk sized in phase A's
+                // four fused-H planes and then skipped phase A whole.
+                // `self_blur_sizing_predicate_matches_the_strip_loop_predicate`
+                // is the independent pin against the LOOP's predicate, and it
+                // fails against the pre-fix definition. Widening this to match
+                // is a correction, not a relaxation — the constraint it now
+                // encodes (sizing == loop) is strictly stronger than the one it
+                // encoded before (sizing == a hand-copy of sizing).
+                let self_blur_core =
+                    !v2_blocks && matches!(t.v1_pools, V1PoolsMode::Full | V1PoolsMode::Peaks);
                 // --- /legacy ---
                 assert_eq!(cs.v2_blocks, v2_blocks, "v2_blocks bits={bits}");
                 assert_eq!(cs.append, append_on, "append bits={bits}");
@@ -13343,6 +13403,66 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(checked, 256 * 4);
+    }
+
+    /// **The two `self_blur` predicates must be the SAME predicate.**
+    ///
+    /// There are two, and until 2026-09-05 they disagreed on
+    /// [`V1PoolsMode::Peaks`]:
+    ///
+    /// * [`ComputeSet::self_blur_eligible`] — read at `stream_foldapp`'s
+    ///   `plane_needs` call, which is what SIZES the strip scratch.
+    /// * the `let self_blur = …` binding inside the strip loop's
+    ///   `fuse_channels` arm, which is what DECIDES whether phase A runs.
+    ///
+    /// When the sizing predicate says `false` and the loop predicate says
+    /// `true`, the scratch reserves phase A's four fused-H planes and the
+    /// loop then skips phase A whole, so those planes are allocated,
+    /// first-touched and never written. That is exactly the waste
+    /// `StripPlaneNeeds` was introduced to remove
+    /// (`benchmarks/fold_footprint_2026-08-31.md` §5), reappearing on the
+    /// one mode the fast class actually ships:
+    /// `fold_engine::pools_mode_for_need` returns `Peaks` for any bake that
+    /// does not read masked/IW, which is every basic+peaks model.
+    ///
+    /// This test pins them together so the next edit to either one cannot
+    /// silently re-open the gap. It asserts the LOOP's predicate, because
+    /// the loop is the one that determines what is actually written — a
+    /// sizing decision that disagrees with it is wrong by definition, in
+    /// whichever direction it disagrees (under-sizing would be a
+    /// correctness bug, over-sizing is the footprint bug found here).
+    #[test]
+    fn self_blur_sizing_predicate_matches_the_strip_loop_predicate() {
+        for &pm in &[
+            V1PoolsMode::Off,
+            V1PoolsMode::Carriers,
+            V1PoolsMode::Peaks,
+            V1PoolsMode::Full,
+        ] {
+            for &v1_only in &[true, false] {
+                let t = V2NewFeatureToggles {
+                    v1_only,
+                    v1_pools: pm,
+                    ..Default::default()
+                };
+                let cs = ComputeSet::from_toggles(t);
+                // Verbatim from the strip loop's `fuse_channels` arm, minus
+                // `fuse_channels` itself (a runtime parallelism fact, which
+                // both sites already AND in separately).
+                let loop_predicate = !cs.v2_blocks
+                    && cs.v1_basic
+                    && matches!(t.v1_pools, V1PoolsMode::Full | V1PoolsMode::Peaks);
+                assert_eq!(
+                    cs.self_blur_eligible(),
+                    loop_predicate,
+                    "self_blur sizing vs loop predicate disagree at \
+                     v1_pools={pm:?} v1_only={v1_only}: sizing says {}, loop says \
+                     {loop_predicate}. A disagreement in this direction reserves \
+                     phase A's four H planes and never writes them.",
+                    cs.self_blur_eligible(),
+                );
+            }
+        }
     }
 
     /// **The safety gate `era2_fast_profile_subset_2026-08-31.md` §5 item 2

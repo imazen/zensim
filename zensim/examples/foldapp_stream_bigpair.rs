@@ -133,7 +133,21 @@ fn main() {
         // localized a `ssim2_speed_bar --bench` hang (add-only, no free arm)
         // to the zenbench-harness/Predictor-3-arm-group context instead of
         // this crate. See `benchmarks/profile_d_notax_2026-09-01.md` §3.3.
-        "156off" => V2NewFeatureToggles {
+        // `15o` — the SAME toggles as `156off`, under a THREE-character name so
+        // it can be interleaved against `156` without changing the environment
+        // block's byte length (era-2 §22.5: the env block is a layout input, and
+        // `TOGGLES=156off` vs `TOGGLES=156` is a 3-byte difference measuring a
+        // different address space). `156off` is kept as a readable alias for
+        // one-off runs where no A/B is being read.
+        //
+        // What the A/B prices: `pools_mode_for_need` NEVER returns
+        // `V1PoolsMode::Off`, and the band-local self-blur shape
+        // (`FoldHSource::SelfBlur`) is gated on `Full | Peaks` — so `Off` falls
+        // back to phase A's four STRIP-wide H planes where `Peaks` blurs exactly
+        // the rows each band consumes. `Off` and `Peaks` compute the same sums
+        // and `Peaks` emits a superset; the only difference is footprint. This
+        // arm is how that difference gets a number instead of an argument.
+        "156off" | "15o" => V2NewFeatureToggles {
             v1_only: true,
             v1_pools: V1PoolsMode::Off,
             ..Default::default()
