@@ -331,6 +331,80 @@ rule; sibling lanes are live on this box).
 
 ---
 
+## 4b. AMENDMENT — THE SERVABLE LANE (registered 2026-09-05 20:30 UTC, on the kernel lane's finding)
+
+The kernel lane (`8817f379`, `perf(kernel): fast-class extraction — two
+bit-exact defects fixed, cost map, and the free-extras serving gap`) measured
+something that reorders this campaign's priorities:
+
+> **No `V1FreeExtras` slot is reachable from `Zensim::compute` today** —
+> `feature_v2.rs:7532` hard-codes `free_extras: Off` and `fold_engine.rs:158`
+> truncates the emitted vector to 372. `wide_bake_v2_read` exists, is tested,
+> and is **dead code**.
+
+**Consequence, stated bluntly: of this campaign's five sets, only two can be
+served, and only at a layout none of the 944 arms is trained on.**
+
+| set | trains? | **serves through `Zensim::compute`?** |
+|---|---|---|
+| S156 (`f0..155`) | yes | **only at the v1-372 layout** |
+| S228 (`f0..227`, `V1PoolsMode::Peaks` — the mode `D` already resolves to) | yes | **only at the v1-372 layout** |
+| S261 / S265 (`+f733..941`) | yes | **NO** — needs a 944-layout scoring path |
+| S289 (`+f377..696`) | yes | **NO** — same |
+
+So a **SERVABLE lane** is added, and it runs BEFORE the remaining 944 arms:
+
+**`{S228, S156} × {H128, H32} × k=3`, plus `SFULL372` (unrestricted 372,
+k=3) = 15 fits**, trained at the **v1-372 layout** by
+`benchmarks/fastclass2_campaign_2026-09-05/train_372_student.sh`.
+
+**It is NOT the same recipe, and the differences are stated, not buried.** The
+372 layout has no version of three of the 944 recipe's legs — `tbig_hf` (so
+the D2/D3 within-ref lever has nothing to act on), the two distillation
+teachers, and `konjnd_bpg_{train,val}` (replaced by the older 20,160-row
+`konjnd-dense`, train-only at the same 1.2 weight, with no val twin so no
+train==val). Everything else carries over verbatim: epochs, pairs/epoch, group
+weights, loss modes, the 34 `f0..155` transforms, `--coarse-decay`.
+
+**ERA, stated as instructed.** Training tables are the v1pre-era
+`canonical-2026-05-21` set; their masked/IW blocks are the known-drifted
+pre-fix ones and **a ≤228 slice never reads them** (`f0..227` is basic+peaks,
+and the basic block never drifted). Eval is on the current
+`2026-08-30-full-features-372` default; the flip lane's own 372 era A/B puts
+the rank skew at **≤ 7e-4**.
+
+### 4b.1 THE SERVING-PATH MARGIN — pre-registered before any set is compared
+
+The 944 arms become a *"would it be worth building the serving path"*
+measurement. Building it is internal-only work (the profile's bake declares its
+`feature_set_id`/block profile; `Zensim::compute` derives compute set + layout
+from it via `ComputeSet::from_block_profile`, emits the bake's caller width,
+and the linear-tail/`raw_distance` semantics are re-decided explicitly), **zero
+public-API delta**, gated by bit-exact tests against the stored pools-944
+tables on the same pixels. It is justified **only if**, at k = 3 seed-means and
+**within the 944 lane** (so era and recipe are held fixed), the best of
+{S261, S265, S289} beats **S228** by
+
+* **CID22 ≥ +0.0069** — the replication wave's own measured per-model
+  bootstrap CI half-width — **or** **product composite ≥ +0.0070**, the fair
+  board's median best-of-k inflation (i.e. larger than the selection noise the
+  board already carries),
+
+**AND** is no worse than S228 on **KonJND** or on **A7r**.
+
+If the margin is met, the design is REGISTERED with its gates; whether it is
+also implemented tonight depends on the gates finishing first. **The ship
+decision is made on a SERVABLE candidate either way.** If a public-API change
+turns out to be required, it is registered and this lane stops there.
+
+### 4b.2 W4 is measured LAST, and the baseline is expected to move
+
+The kernel lane measures the fast walk at **6.5 ms @576²/1T** (944-full 16.2
+ms) with the **front end** (XYB convert + downscale) at a third of it, and a
+separate lane is working that now. So the 156-walk denominator will move.
+W4 is therefore run at the END, with the two-control protocol, **on the same
+binary as its baseline** — never against a number quoted from an earlier build.
+
 ## 5. OWNER EXTENSIONS (all no-ops when unset)
 
 `benchmarks/wave_r4_2026-09-01/train_156_student.sh`, same additive pattern
