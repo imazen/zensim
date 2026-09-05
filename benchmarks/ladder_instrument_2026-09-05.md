@@ -332,3 +332,47 @@ fit that constrains adjacent-step ordering at the floor — the same lever
 `d_peaks_jxl_floor` §7(a) registered for jxl, now with jpeg and `avif-rav1e`
 evidence behind it and an instrument that can actually score it.
 
+
+---
+
+## 11. Registered, NOT run — with the measured reason in each case
+
+Stated so nobody reads absence as failure, or re-derives the reason.
+
+**(a) The fair-board re-grade on this instrument.** MEASURED census of the 467
+published fullevals: **409 are 944-class, 34 are 372, 8 are 720, 7 are 156, 4 are
+924, 1 is 504.** A 372 grid cannot score a 944-input bake (it fails loud rather
+than returning a wrong number), so re-grading the board here would move **41 of 467
+cells** and leave the 944 majority untouched. The board's NOT-SHIPPABLE badge is
+CONTRACT-driven and this instrument changes no contract rule, so no published badge
+is stale. **The prerequisite is a 944 ladder grid**, which this lane built the
+features for (§11b) but did not derive bars on.
+
+**(b) The 944 ladder instrument's BARS.** The 944 feature extraction over the same
+9,593 distinct cells is done (`ZENSIM_AB_MODE=foldapp2pools`, the runtime regime of
+`dial_grid_944col_POOLS_2026-08-30`). Deriving `peer_ssim2`'s bars on it and
+registering them is a separate append.
+**A trap that does NOT apply here, verified rather than assumed:**
+`extract_features_372col` sorts its output by `ref_basename` and silently scrambles
+positional key attachment; **`v2_ab_extract` does NOT** — tested on a deliberately
+non-alphabetical 6-row input, output order matched input exactly. The 944 path
+needs no `row_id` inversion.
+
+**(c) `zenavif backend=aom-rs` as a third AVIF ladder.** Deferred, with the reason
+recorded rather than the arm silently skipped: the `avif-aom` build byte-verifies
+**every cell** against a cmake-built C libaom oracle (`aom-sys-ref`), so it is both
+a build dependency on a C encoder and a per-cell oracle cost. That also puts a C
+encoder inside a loop whose output tunes imazen models, which is precisely what the
+imazen-only rule bars — port validation inside the port repo is the sanctioned use,
+a tuning instrument is not.
+
+**(d) The size-axis companion (256 / 512 long side).** Declared in the plan as a
+REPORT arm and not run. The measured blocker is honest and specific: there is **no
+imazen resize CLI** — `zenresize` ships no binary and `zenmetrics` exposes no
+resample subcommand (`JobKind::Resample` exists in the enum but is **not wired** in
+the executor) — and the imazen-only rule bars using PIL/ImageMagick for a corpus
+that feeds a tuning instrument. The `clean-picker-corpus-2026-06-26` renditions
+cover only **14 of 32** anchor origins, so they cannot substitute. Building the
+resize step is the prerequisite.
+
+**(e) An HDR ladder.** Out of scope by the plan; the instrument is SDR only.
