@@ -124,9 +124,21 @@ def emit_znpr(out_path, bake_bin, caller_width, feat_idx, mean, scale, coef,
         else:
             tf.append("drop")
             tp.append("")
-    # spline knots over the observed u = -z range, padded so real rows interpolate
+    # Spline knots. A linspace alone is NOT enough: isotonic regression is a STEP
+    # function, and PCHIP through evenly-spaced samples rounds its plateau edges
+    # (measured: 97.002 -> 97.122 on a re-bake of the 2026-07-24 head). So take
+    # the union of a dense linspace and the isotonic's OWN breakpoints, mapped
+    # back through u = -logit(p), bracketed +-eps so each step is represented by
+    # a point on each side. Ordering is monotone either way — this is for the
+    # OUTPUT value (and hence the deadband), not for the gate.
     span = max(u_hi - u_lo, 1e-6)
-    xs = np.linspace(u_lo - 0.05 * span, u_hi + 0.05 * span, 256)
+    lo, hi = u_lo - 0.05 * span, u_hi + 0.05 * span
+    xs = list(np.linspace(lo, hi, 512))
+    pt = np.clip(np.asarray(iso.X_thresholds_, dtype=np.float64), 1e-12, 1 - 1e-12)
+    for u in -np.log(pt / (1.0 - pt)):
+        if lo < u < hi:
+            xs += [u - 1e-4, u + 1e-4]
+    xs = np.unique(np.asarray(xs, dtype=np.float64))
     P = iso.predict(1.0 / (1.0 + np.exp(np.clip(xs, -60, 60))))   # sigmoid(-u) = sigmoid(z)
     ys = 100.0 * (1.0 - P)
     keep = [0]
