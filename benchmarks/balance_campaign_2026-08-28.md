@@ -7535,3 +7535,40 @@ and NOT-MEASURED reasons verbatim, and draws the badge; `cut_gaddr_negtail_probe
 `summer_gauntlet_fair.html` **8,205,798 B (7.8 MiB, under the 12 MB cap)**, 97 rows;
 `summer_gauntlet.html` **21,003,539 B (20.0 MiB, over cap — reported, not trimmed)**, 433 rows.
 `http://localhost:3300/zensim/reports/summer_gauntlet_fair.html`
+
+## ROUND 81 — the sideways-push clobber: nine commits dropped, one genuinely lost, and the guard (2026-09-04/05, lane `claude-recover`)
+
+`origin/main` moved **SIDEWAYS twice** on 2026-09-04 (16:58:53 and 17:08:29 MDT, jj ops
+`db7c8ca86b69` / `0edf97e28a91`): `jj bookmark set` + `jj git push` is a non-fast-forward push with
+no prompt and no warning whenever the target does not descend from the remote tip. The second move
+dropped **nine commits from six lanes**; nothing errored and the pushing lane's own `jj log` looked
+correct. **Audited per ADDED LINE, not per sha** (the subsets lane had already re-landed most of its
+own work under new shas, which a sha-level check would have scored as total loss): 3 fully re-landed
+(0 lines absent), 2 re-landed with only re-worded prose absent — and `af64c8d4`'s residual paragraph
+was **replaced on main by a stronger measured form**, so main is better than the original — 1
+superseded, 1 half superseded/half restored, **exactly one genuinely lost**. `d3a948ca` (G-ADDR board
+coverage) was that one: **482 of 498 added lines absent**, `scripts/cut_gaddr_negtail_probe.py`
+absent entirely, and the `/mnt/v` boards had already been generated WITH it — so the next regen from
+main would have silently produced boards with **no NOT-SHIPPABLE badges** and no `--graft-gaddr`:
+plausible output, wrong content. **Re-landed as `2e5cdc8b`** (`jj duplicate` onto `main@origin`, no
+conflict; diff vs main **byte-for-byte the original's**, 6 files +555/−23, same 22 deletion lines),
+verified 46 rows carrying `gaddr.cfail` (C3 39, C4 39, C2 23, C6 2, C5 1 — the commit's own
+fair-board figure), `gauntlet_gates.sh` rc=0, regenerated to a scratch path so no live board was
+overwritten. **NOT re-landed, deliberately:** `0d602d16`'s `--dry-run-sampling` (98 lines genuinely
+absent) — `5a42251e`'s `subset_sim` takes the same `--group` specs, replays the same
+`sampling::simulate`, and adds multi-seed + `--verify-digest`; restoring the flag would be a second
+implementation of one task. `c6ec0bcc`'s ROUND-77-afternoon block is superseded (main grew its own
+fuller 77/78/79; every number in it is in the gate doc), its G-ADDR block restored as **ROUND 80**
+with the sha corrected. **GUARD LANDED: `scripts/safe_push.sh`** — fetch → assert
+`<bookmark>@origin` is an ANCESTOR of the target → set → push → verify; a sideways target **exits 3,
+names every commit it would drop, and does not touch the bookmark**; no `--force`. Gate and
+diagnostic are one expression (`::<remote> ~ ::<target>`, empty iff ancestor); the first draft used
+`<remote> ~ ::<target>` — equally correct as a test but names only the tip, caught by the
+retrospective control listing 1 commit where 5 were at risk. `--self-test`: 4 cases, throwaway repo +
+bare remote, no network — ff ACCEPTED and landed / **sideways REFUSED rc=3 with the remote provably
+UNMOVED** / the refusal NAMES the dropped commit / after `jj rebase` both lanes land (cases 1+4 exist
+so a guard that refuses everything cannot pass). **It caught a live race on its own first push** and
+refused, correctly. `CLAUDE.md` now opens with PUSH ONLY THROUGH `scripts/safe_push.sh`; bare
+`jj bookmark set` + `jj git push` is banned in this repo. Honest limit recorded: no server-side hook,
+so a lane that calls `jj git push` directly still bypasses it. Record:
+`benchmarks/push_clobber_2026-09-05.md` (commit `be604c12`).
