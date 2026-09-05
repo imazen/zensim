@@ -662,8 +662,26 @@ to survive the moment when it would be more flattering to drop it.
   a bare `>>>>>>> conflict 1 of 1 ends` at line 59 as pushed, from an earlier
   lane's incomplete resolution. This lane's rebase kept **both** lanes' sections
   verbatim and dropped that one line.
+* **`cargo clippy -p zensim --all-targets` does not build on `main@origin`.**
+  `zensim/examples/serve_custom_bake.rs` (the fastclass2 lane's G7 instrument)
+  uses `ProfileParams::builder()` and `ZensimProfile::Custom`, both behind a
+  non-default cfg, and has **no `required-features` entry** in
+  `zensim/Cargo.toml` — so a default-feature `--all-targets` build fails
+  `E0599` twice. This lane gated on `--lib --tests` instead and did not touch
+  the example.
+* **`cargo test --workspace` has one failing test on `main@origin`.**
+  `zensim-validate/tests/features_root_from_bake.rs:138`
+  (`a_non_root_training_corpus_determines_the_regime_default`) asserts
+  `canonical-2026-05-21/train` and gets `ext944-canonical-2026-08-01`.
+  **Verified pre-existing**: it fails identically with this lane's blur change
+  reverted, which is the check that makes "not mine" a measurement rather than
+  an inference.
 
-## L2.7 The next lever, located and measured but NOT taken
+All three belong to lanes that are actively pushing the files in question, so
+they are reported rather than fixed — a `style:`/fix commit across another
+lane's in-flight files is how push conflicts and lost hunks start.
+
+## L2.7 The next lever — located, then TAKEN (L18)
 
 The same defect class L16 fixed in the downscale is present, larger, in the
 kernel that is **38.53 % of the fast walk's instructions**. Disassembly of
@@ -700,8 +718,68 @@ Two things must be said before anyone treats that 34 % as free money:
    the thing `H_TILE_WIDTH` boundaries already make delicate
    (`blur::h_mirror_add_idx`, the `width % tile == 1` bug).
 
-Not attempted in this lane: the box was carrying the campaign lane's trainer
-for its whole second half, and landing a change of that size in the walk's
-hottest kernel without a clean wall-clock window would be exactly the
-"unestablished number" this lane's protocol exists to refuse. Recorded with the
-disassembly so the next lane starts from evidence rather than from a hunch.
+### L18 — what actually landed, and the correction to point (2) above
+
+**Point (2) above is WRONG as written, and it is left standing with this
+correction under it because being wrong about tractability is exactly what
+stopped the previous version of this section from trying.** The fixed-array
+trick does not transfer — but a *different* hoist does, and it is smaller:
+
+```rust
+let off = row_base * width + add_idx;
+let cs = &src[off..off + 15 * width + 1];   // ONE range check
+let cd = &dst[off..off + 15 * width + 1];
+for ro in 0..16 { s_add[ro] = cs[ro * width]; d_add[ro] = cd[ro * width]; }
+```
+
+LLVM folds the interior checks because `ro < 16` and `col.len() == 15*width+1`
+give `ro*width < col.len()`. It is **bit-exact: it moves WHERE the bound is
+proven, not what is read** — same addresses, same values, same order — and the
+slice ends exactly one past the highest index the loop reads, so it is in
+bounds precisely when the old form was. Applied uniformly to all **30** strided
+`(src, dst)` gathers across every tier body of `fused_blur_h_ssim_*` and
+`fused_blur_h_mu_*`.
+
+**MEASURED:**
+
+| | before | after | Δ |
+|---|---:|---:|---:|
+| `fused_blur_h_ssim_inner_v4x`, static instrs | 2,634 | 1,683 | **−36.1 %** |
+| …its `jae` count | 208 | 84 | −59.6 % |
+| `fused_blur_h_ssim_inner_v3`, callgrind Ir (2 walks) | 128,206,476 | 108,718,260 | **−15.2 %** |
+| walk-side Ir | 300,821,380 | 281,335,268 | **−6.48 %** |
+
+**Cumulative for lane 2: walk-side Ir 332,705,880 → 281,335,268 = −15.44 %**
+over four bit-exact levers, all gated by the same 160-cell `to_bits()` A/B at
+**0 differing bits**, `cargo public-api` ZERO delta, and clippy clean.
+
+### The probe that read as a clean zero, and was measuring the wrong function
+
+The first attempt at this hoist reported **exactly no change** — 197
+instructions, 35 `cmp`, 32 `jae`, byte-identical histograms before and after,
+and identical whole-function totals (2,634 / 237 / 208). That read like a clean
+falsification, and a session in a hurry would have written it up as one.
+
+It was a **mis-aimed probe**. The gather's source text is character-identical
+at four sites (`_v4`, `_v4x`, `_v3`, `#[magetypes]`) and across two kernel
+families (`_ssim`, `_mu`), and a `replace(old, new, 1)` landed in
+`fused_blur_h_mu_inner_v4` — while the disassembly being read was
+`fused_blur_h_ssim_inner_v4x`. Re-aimed by **line range inside the intended
+function body**, the same edit removed 32 checks immediately.
+
+**The transferable tell: an edit that changes NOTHING at all in the emitted
+code — not one instruction, not one byte — is more often a mis-aimed edit than
+a real null result.** A genuine "LLVM already handled this" shows up as a
+*small* delta or a changed instruction mix, not as a byte-identical histogram.
+Check that the edit is inside the symbol you are disassembling before believing
+the zero.
+
+### Why this section's earlier characterisation still needs one fix
+
+The "34 % bounds checks / 2.5 % arithmetic" table above was taken from the
+1,053-byte loop at `0x10a1e0`. That is one of **three** large loops in the
+kernel; the other two are 533 and 374 instructions with **176 (33 %)** and
+**137 (37 %)** bounds-check instructions respectively. So the *proportion*
+generalises across the whole kernel — which is what made L18 worth the
+attempt — but the original table should be read as "one representative loop",
+not "the hot loop".
