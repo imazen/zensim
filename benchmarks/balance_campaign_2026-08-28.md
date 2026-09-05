@@ -7680,3 +7680,88 @@ substrate, aliases for every legacy count, bake_verdict warns/refuses on mismatc
 showed `--select --seed-group` still picks a k=1 cell (floor-count PRIMARY) → replication floor (k≥2) amendment +
 native-root board rows for era-2×radius-4 bakes (lane live). D+free arms building (the free set was never in a
 shipped profile — extraction was free, consumption never wired).
+
+## ledger row — D+free lane (`claude-dfree`), 2026-09-05
+
+**User question (2026-09-05):** *"did the +free get tried for D-id100-negrich or just the
+base 156?"* → **base 156 only.** `benchmarks/d_id100_2026-09-04.md` fits ADD156's own
+156-coordinate slice (`--slice-file <seq 0 155>`); neither the 109-slot free set nor the
+24-slot class-C tranche was ever in that model's candidate pool. It has now been built.
+
+**Commits on `main@origin`** (all pushed via `scripts/safe_push.sh`, each VERIFIED):
+- `2dc89b29` — pre-registration (arms, anchor rule, era controls, success criterion), written before the first fit
+- `12f56319` — the twelve arms, the measurements, three append-only G-ADDR registry rows, a new `peaks156_no_raw` bench arm, `scripts/dfree_arms.sh` + `dfree_report.py` + `slice_basic156_peaks.txt`
+- `d9a9ec64` — 12 board cells promoted, discussion set `2026-09-05-d-free-id100`, both boards regenerated (gates PASS), `DATASET_HISTORY` §3.36, INDEX, free-features hand-off cross-reference
+
+**Answer.** On the matched leg, the free set improves the D-id100-negrich recipe on the
+axes the product cares most about and costs three: CID22 **+0.0405** [+0.0357, +0.0456],
+KonJND **+0.0813**, hfnlproxy **+0.0707**, kadid **+0.0351**, CSIQ **+0.0297**, LIVE
+**+0.0143**, `hfnl_cid22band` **+0.053 pooled / +0.029 per-ref**; against SDR25
+**−0.0547**, AIC-4 **−0.0232**, imazen26 **−0.0169**, nonphoto **−0.0188**. Every
+`-id100-negrich` arm holds **CONTRACT 6/6 + REGRESSION 7/9**, failing only the D lane's
+structural A7/A9 pair. Class-C adds a second, mid-range-only lever (+0.0221 kadid,
++0.0089 csiq, +0.0085 tid, +0.0022 cid22; **0.000 on `hfnl_cid22band`**), all from ONE
+slot (`f739` `LUM_DARK_ERR` s0 Y, 11.29 % of the arm's contribution mass).
+
+**Headline the lane did not go looking for: the ZERO-marginal-compute half carries it.**
+A peaks-only slice (156 + 72, no raw-moment accumulators) gets **97 %** of the CID22 gain,
+**95 %** of KonJND, **99.5 %** of hfnlproxy, **96 %/98 %** of the `hfnl_cid22band`
+pooled/per-ref gain — and **beats the full free set on 8 of 12 corpora** (kadid +0.0080,
+csiq +0.0047, tid +0.0048, imazen26 +0.0017, nonphoto +0.0017, aic4 +0.0013, live +0.0005,
+aic3 +0.0004) while `Ffree` wins only cid22 (+0.0011) and konjnd (+0.0039). It also has
+**zero exposure** to the free-40 route-parity skew (which reaches 0.55 % of `Ffree`'s
+contribution mass, through `f820`/`f853`). New slice:
+`scripts/sota944/slice_basic156_peaks.txt`.
+
+**Three findings in passing, all measured:**
+1. **At 944 width the identity feature vector is NOT the zero vector** — 286 of 944 slots,
+   varying by image. The gate's own note constant asserts the opposite and is emitted into
+   every `--gaddr-json`. C5/C6 still measure correctly; fixing the constant is registered,
+   not done. (`DATASET_HISTORY` §3.36.)
+2. **The free-features lane's published λ=0.3 bakes carry a pre-`abfe13de` spline** whose
+   negative tail was deleted — bottom knot y = −9.55 vs −56.61 today, i.e. their dial
+   floors at −113.5 instead of −207.6. Rank untouched (monotone remap, verified by exact
+   order-identity on 4,292 CID22 pairs). Cross-referenced into their own hand-off.
+3. **A `ssim2_speed_bar` reading was REJECTED, and said so.** It made `15f` look 3.6 %
+   faster than `15c` (a strict superset — backwards). Re-measured with the OWNER's
+   instrument at 15 starts: **1.0020 min-of-min**. The inversion is a tight-budget zenbench
+   artifact of exactly the class `profile_d_notax_2026-09-01.md` §4 registered.
+
+**W4 PASSES for every arm** — 3.25–3.39× fast_ssim2 at 1T/2304² over 10 process starts.
+
+**NOT claimed:** no comparison to `D-id100-negrich`'s published numbers (different training
+leg; the matched control measures that gap at **−0.056 CID22**); no arm beats ssim2 on any
+axis measured, `hfnl_cid22band` included; W1/W2/W3 not re-graded; A7/A9 not addressed.
+
+**PROPOSAL ONLY — nothing flipped.** The recommendation, if the D lineage adopts anything,
+is the **peaks-only slice**, not the full free set. Record:
+`benchmarks/d_free_id100_2026-09-05.md` §9.2.
+
+**Registered, not executed:** make `IDENTITY_IS_ZERO_VECTOR_NOTE` conditional on the probe;
+the pools-944 re-extraction of ADD156's own 196k safesyn leg (the prerequisite for making
+any of this comparable to shipped Profile D — `free_features_2026-09-01.md` §3.3 already
+named it).
+
+**Coordinator items folded in (2026-09-05):**
+- `benchmarks/board_discussion_sets.json` gained an **append-only** `incumbent_notes` entry
+  (plus its own `_schema_incumbent_notes`) recording that `W10L9_s4003_packed` is superseded
+  as incumbent by the E.4 amendment (`41ee67fa`..`90c7dc1b`, replication floor `--min-k 2
+  --floor-basis all`, which makes that k=1 cell UNSELECTABLE) and naming **W11J (k=7)** as
+  the amended pick. The `incumbents` list itself is asserted **byte-unchanged** so every
+  board already generated against it stays readable against the list it was generated with.
+- **M3a is NOT MEASURED for any D+free arm** — explicit JSON `null` on all twelve cells, no
+  coherence run in this lane. Recorded in the doc (§9.0) with the pack-sensitivity finding
+  (same recipe + seed, packed twice: 0.7489 vs 0.8618): M3a is a property of a specific
+  packed artifact, so the E.4 tie-break contribution is pack-scoped, and any arm that is
+  later packed must have M3a **re-measured on the packed bytes**, never inherited. Every arm
+  here is an unpacked `fit-lasso` output.
+
+## ROUND 86 — 2026-09-05: naming landed, selection amended, D+free = the peaks proposal
+Feature-set ids landed (`<compute>@w<layout>/<era>#<hash8>`; "944" had SEVEN meanings, "372" two; bake_verdict refuses
+mismatches — the `--regime 944` bug is now mechanical). E.4 amended: replication floor (`--min-k 2`, `--floor-basis all`)
+→ amended pick W11J (k=7); W10L9_s4003 (k=1) unselectable; features root resolved FROM the bake (A3b gets rows, k=3).
+D+free: 12 arms; `-id100-negrich` = CONTRACT 6/6 + REG 7/9 on all four slices; free vs matched control CID22 +0.0405
+[+0.036,+0.046], KonJND +0.081; **peaks-only slice = the ship proposal** (97% of the gain at zero marginal compute,
+beats full-free on 8/12, no free-40 skew exposure); W4 passes. Registered: identity vector ≠ zero at w944 (gate note
+constant wrong); M3a pack-sensitive (never carried); 12 pre-existing blur.rs subtract-overflow test failures under
+zero-tolerance triage (release wraps silently).
