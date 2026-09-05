@@ -172,6 +172,19 @@ pinning to the mentor is exactly what keeps it honest.
   was re-run from a **frozen copy** of the script. The same hazard was correctly
   avoided for the chain script an hour earlier by killing and restarting it rather
   than editing in place — the lesson was available and not generalised.
+* **A sweep's memory scales with `jobs x megapixels`, and the anchor is 7.5x the
+  grid.** The anchor's 32 imazen-26 sources average **6.27 MP** (up to 12) against the
+  grid's **0.84 MP**. At the grid's settings — 3 metrics, 8 in-flight cells — the
+  anchor leg was **SIGKILLed four times**, twice as `rc=137` and twice as `rc=143`,
+  which sent two hours chasing the LAUNCH mechanism (`nohup` vs `setsid` vs
+  `run-heavy`'s systemd scope) instead of the cause. The tell was there the whole
+  time: available memory drifted 27 GiB -> 22 GiB across the failing runs and
+  returned to **46 GiB** once the run was killed. **The fix was per-cell cost, not
+  process supervision** — the anchor's target column IS ssim2, so butteraugli and
+  dssim were never needed for it; dropping them and halving `--jobs` **doubled**
+  throughput (55-64 -> **121 rows/min**) and the run stopped dying.
+  **Generalisable:** before reusing a sweep's settings on a different corpus, compare
+  the corpora's megapixels, not their file counts.
 * **Measure elapsed time; do not estimate it.** A misread clock turned 100 s of
   progress into an apparent 7 minutes and nearly triggered a full restart of the
   grid onto a reduced metric set. The check that resolved it — sampling the row
