@@ -4016,6 +4016,69 @@ fn main() {
                 eprintln!("FATAL: could not embed zentrain.repro into the bake: {e:?}");
                 std::process::exit(4);
             });
+    // FEATURE-SET ID (docs/FEATURE_SET_IDS.md §6.1): stamp the bake with the
+    // PRODUCER id of the tables it TRAINED on, so a later verdict can say
+    // which extractor era its coefficients were fit against instead of
+    // reading `unknown`. The bake's own CONSUMER id is always derivable from
+    // its bytes, so it is not stored.
+    //
+    // Resolved from the training groups' own parquet directories. Groups that
+    // resolve to DIFFERENT ids get NO stamp and a loud warning — a mixed-era
+    // training set is exactly the thing that must not be silently labelled
+    // with one of its eras.
+    let bake_bytes = {
+        use std::collections::BTreeSet;
+        let ids: BTreeSet<String> = loaded
+            .iter()
+            .filter(|g| g.train_w > 0.0)
+            .filter_map(|g| std::path::Path::new(&g.source_path).parent().map(|d| d.to_path_buf()))
+            .collect::<BTreeSet<_>>()
+            .iter()
+            .filter_map(|d| zensim_validate::feature_set::root_feature_set_ref(d))
+            .map(|r| r.id.to_string())
+            .collect();
+        match ids.len() {
+            1 => {
+                let id = ids.into_iter().next().expect("len 1");
+                match zenpredict_bake::append_metadata_utf8(
+                    &bake_bytes,
+                    "zentrain.feature_set_id",
+                    &id,
+                ) {
+                    Ok(b) => {
+                        println!("Embedded zentrain.feature_set_id = {id}");
+                        b
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "WARNING: could not embed zentrain.feature_set_id into the bake: {e:?} \
+                             — the bake is still valid; its training era will read `unknown`."
+                        );
+                        bake_bytes
+                    }
+                }
+            }
+            0 => {
+                eprintln!(
+                    "WARNING: no training group's directory resolves to a registered feature set \
+                     — no zentrain.feature_set_id embedded, so this bake's training era will read \
+                     `unknown` in every verdict. Register the root in \
+                     benchmarks/feature_sets_registry.json, or write a `feature_set_id` key into \
+                     its _MANIFEST.json."
+                );
+                bake_bytes
+            }
+            n => {
+                eprintln!(
+                    "WARNING: training groups span {n} DIFFERENT feature sets ({}) — refusing to \
+                     stamp one of them as the bake's zentrain.feature_set_id. A mixed-era training \
+                     set is a regime-purity question, not a labelling one.",
+                    ids.into_iter().collect::<Vec<_>>().join(" ; ")
+                );
+                bake_bytes
+            }
+        }
+    };
     // Coverage is a MEASUREMENT, not provenance: a run whose sampler could
     // not be described is still reproducible, so a failure here is loud but
     // NOT fatal — unlike the repro embed above. The bake then carries no

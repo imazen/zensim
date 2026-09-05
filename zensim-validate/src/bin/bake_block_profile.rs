@@ -58,9 +58,29 @@ fn main() {
             std::process::exit(2);
         }
     };
+    // The bake's CONSUMER feature-set id (docs/FEATURE_SET_IDS.md): the
+    // families it reads, at its CALLER width, hashed over the exact read set.
+    // The era is the one the bake declares it TRAINED on
+    // (`zentrain.feature_set_id`), or `unknown` — never guessed.
+    let era = zensim_validate::feature_set::bake_declared_training_set(&model)
+        .map(|id| id.era().to_string())
+        .unwrap_or_else(|| zensim::feature_set_id::ERA_UNKNOWN.to_string());
+    let fsid = zensim_validate::feature_set::bake_feature_set_ref(&model, &era);
     if json {
-        println!("{}", prof.to_json());
+        let id_json = match &fsid {
+            Ok(r) => format!(
+                ",\"feature_set_id\":\"{}\",\"feature_set_slots\":\"{}\"",
+                r.id, r.slots
+            ),
+            Err(_) => String::new(),
+        };
+        let body = prof.to_json();
+        println!("{}{id_json}}}", &body[..body.len() - 1]);
     } else {
         print!("{}", prof.render_text(&path.display().to_string()));
+        match &fsid {
+            Ok(r) => println!("feature-set id: {}\n  reads: {}", r.id, r.slots),
+            Err(e) => println!("feature-set id: NOT DERIVABLE ({e})"),
+        }
     }
 }

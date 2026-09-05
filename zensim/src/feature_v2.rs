@@ -1702,6 +1702,44 @@ pub(crate) fn class_c_slot_indices(n_scales: usize) -> Vec<usize> {
     }
     v
 }
+impl V2NewFeatureToggles {
+    /// The **feature-set id** an extraction with these toggles PRODUCES —
+    /// `<compute>@w<layout>/<era>#<slots-hash8>`, the string an extractor
+    /// stamps into its output table's `_MANIFEST.json`
+    /// (`docs/FEATURE_SET_IDS.md` §6.1).
+    ///
+    /// `era` is the caller's: only the caller knows which extractor build it
+    /// is, and an unregistered/unknown era must be passed as
+    /// [`crate::feature_set_id::ERA_UNKNOWN`] rather than guessed — a wrong
+    /// era label is worse than none.
+    ///
+    /// `None` only when `era` is not a valid token (`[a-z0-9_]+`).
+    ///
+    /// `#[doc(hidden)]`: an extractor-side provenance helper, not a product
+    /// knob — the same treatment `fold_engine::ScoringEngine` gets.
+    #[doc(hidden)]
+    pub fn feature_set_id(
+        &self,
+        n_scales: usize,
+        layout_width: usize,
+        era: &str,
+    ) -> Option<crate::feature_set_id::FeatureSetId> {
+        ComputeSet::from_toggles(*self).feature_set_id(n_scales, layout_width, era)
+    }
+
+    /// The slots an extraction with these toggles POPULATES at `n_scales`,
+    /// clipped to `layout_width` — the producer half of a feature-set id, for
+    /// a manifest that wants the explicit list beside the hash.
+    #[doc(hidden)]
+    pub fn populated_slots(
+        &self,
+        n_scales: usize,
+        layout_width: usize,
+    ) -> crate::feature_set_id::SlotSet {
+        ComputeSet::from_toggles(*self).populated_slots(n_scales, layout_width)
+    }
+}
+
 impl Default for V2NewFeatureToggles {
     fn default() -> Self {
         Self {
@@ -2057,6 +2095,128 @@ impl ComputeSet {
                 free_extras,
             },
         }
+    }
+
+    /// The COMPUTE half of this request's **feature-set id**
+    /// (`docs/FEATURE_SET_IDS.md` §2.1) — which registered slot families this
+    /// walk actually populates.
+    ///
+    /// Derived from the SAME predicates the walk itself dispatches on
+    /// ([`Self::raw_moments`] / [`Self::bounded_err`]), not from the raw
+    /// toggle fields, so a full 944 walk correctly names NO free tranche: the
+    /// append kernel owns `GLOBAL_*` there, and the free accumulators are not
+    /// run at all.
+    ///
+    /// Sub-toggles (`gradient` / `blockiness` / `transducer_bank` /
+    /// `append2_dst_activity`) are deliberately not tokens — they reshape a
+    /// family from the inside, which moves the populated slot set, which moves
+    /// the id's hash. The name is a handle; the hash is the identity.
+    pub(crate) fn compute_parts(&self) -> crate::feature_set_id::ComputeParts {
+        use crate::feature_set_id::{ComputeParts, ComputeToken as T};
+        let mut p = ComputeParts::EMPTY;
+        if self.v1_basic {
+            p = p.with(T::Basic);
+        }
+        match self.v1_pools {
+            V1PoolsMode::Off => {}
+            V1PoolsMode::Carriers => p = p.with(T::Carriers),
+            V1PoolsMode::Peaks => p = p.with(T::Peaks),
+            V1PoolsMode::Full => p = p.with(T::Peaks).with(T::Masked).with(T::Iw),
+        }
+        if self.v2_blocks {
+            p = p.with(T::V2);
+        }
+        if self.append {
+            p = p.with(T::Append);
+        }
+        if self.append2 {
+            p = p.with(T::Append2);
+        }
+        if self.csfw {
+            p = p.with(T::Csfw);
+        }
+        if self.raw_moments() {
+            p = p.with(T::Moments);
+        }
+        if self.bounded_err() {
+            p = p.with(T::ClassC);
+        }
+        p
+    }
+
+    /// The slot set this request POPULATES, clipped to `layout_width`.
+    ///
+    /// Clipping is the LAYOUT rule: a family that does not exist at this width
+    /// cannot be populated at it (a 372-wide request's free tranches vanish
+    /// entirely — their slots live at `f720+`).
+    ///
+    /// Block bounds are composed from the same named constants the emit sites
+    /// use, never re-typed as literals; the two scattered tranches come from
+    /// [`free_slot_indices`] / [`class_c_slot_indices`], the SAME derivations
+    /// `fold_engine::wide_bake_v2_read` checks a bake against.
+    pub(crate) fn populated_slots(
+        &self,
+        n_scales: usize,
+        layout_width: usize,
+    ) -> crate::feature_set_id::SlotSet {
+        use crate::feature_set_id::SlotSet;
+        let basic = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_BASIC;
+        let peaks_end = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_WITH_PEAKS;
+        let masked_end = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_EXTENDED;
+        let v1_total = masked_end + n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_IW;
+        let v2_end = v1_total + n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
+        let append_end = v2_end + n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
+        let append2_end = append_end + n_scales * APPEND2_PER_SCALE;
+        let csfw_end = append2_end + n_scales * CSFW_PER_SCALE;
+
+        let mut ranges: Vec<(usize, usize)> = Vec::new();
+        let mut scattered: Vec<usize> = Vec::new();
+        if self.v1_basic {
+            ranges.push((0, basic));
+        }
+        match self.v1_pools {
+            V1PoolsMode::Off => {}
+            V1PoolsMode::Carriers => scattered.extend(V1PoolsMode::CARRIER_SLOTS),
+            V1PoolsMode::Peaks => ranges.push((basic, peaks_end)),
+            V1PoolsMode::Full => ranges.push((basic, v1_total)),
+        }
+        if self.v2_blocks {
+            ranges.push((v1_total, v2_end));
+        }
+        if self.append {
+            ranges.push((v2_end, append_end));
+        }
+        if self.append2 {
+            ranges.push((append_end, append2_end));
+        }
+        if self.csfw {
+            ranges.push((append2_end, csfw_end));
+        }
+        if self.raw_moments() {
+            scattered.extend(free_slot_indices(n_scales));
+        }
+        if self.bounded_err() {
+            scattered.extend(class_c_slot_indices(n_scales));
+        }
+        SlotSet::from_ranges(ranges)
+            .union(&SlotSet::from_slots(scattered))
+            .clipped_to(layout_width)
+    }
+
+    /// This request's full feature-set id at `era` — the producer-side id an
+    /// extractor stamps into a table's `_MANIFEST.json`.
+    pub(crate) fn feature_set_id(
+        &self,
+        n_scales: usize,
+        layout_width: usize,
+        era: &str,
+    ) -> Option<crate::feature_set_id::FeatureSetId> {
+        crate::feature_set_id::FeatureSetId::from_slots(
+            self.compute_parts(),
+            layout_width,
+            era,
+            &self.populated_slots(n_scales, layout_width),
+        )
     }
 }
 
@@ -13239,6 +13399,134 @@ pub(crate) mod tests {
         assert!(cs.v2_blocks, "a wide, unanalysed bake must fall back to computing everything");
         assert_eq!(cs.v1_pools, V1PoolsMode::Full);
         assert!(cs.append && cs.append2 && cs.gradient && cs.blockiness && cs.csfw);
+    }
+
+    // ---------------------------------------------------------------- //
+    // Feature-set IDs (`docs/FEATURE_SET_IDS.md`) — the COMPUTE half.
+    // ---------------------------------------------------------------- //
+
+    /// A FULL 944 walk names every block and NO free tranche: the append
+    /// kernel owns `GLOBAL_*` there, so `raw_moments()` is false by
+    /// construction and the free accumulators never run.
+    #[test]
+    fn compute_parts_full_944_names_every_block_and_no_free_tranche() {
+        use crate::feature_set_id::{ComputeToken as T, SlotSet};
+        let cs = ComputeSet::from_toggles(V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
+            v1_pools: V1PoolsMode::Full,
+            ..Default::default()
+        });
+        let parts = cs.compute_parts();
+        assert_eq!(parts.to_string(), "basic+peaks+masked+iw+v2+append+append2");
+        assert!(!parts.contains(T::Moments), "append owns GLOBAL_* on a full walk");
+        assert!(!parts.contains(T::ClassC), "the v2 kernel owns MSE on a full walk");
+        assert_eq!(cs.populated_slots(4, 944), SlotSet::parse("0-943").unwrap());
+    }
+
+    /// The free-set arm — v1-only + `Peaks` + `RawMoments` at the 944 layout.
+    /// Named `basic+peaks+moments`, and the 37 raw-moment slots
+    /// (`benchmarks/free_features_2026-09-01.md` §1) are the ONLY thing
+    /// populated above `f227`.
+    #[test]
+    fn compute_parts_free_set_arm_is_basic_peaks_moments_with_37_scattered_slots() {
+        use crate::feature_set_id::SlotSet;
+        let cs = ComputeSet::from_toggles(V2NewFeatureToggles {
+            v1_only: true,
+            v1_pools: V1PoolsMode::Peaks,
+            free_extras: V1FreeExtras::RawMoments,
+            ..Default::default()
+        });
+        assert_eq!(cs.compute_parts().to_string(), "basic+peaks+moments");
+        let slots = cs.populated_slots(4, 944);
+        assert!(slots.covers(&SlotSet::parse("0-227").unwrap()), "basic+peaks live");
+        assert!(!slots.contains(300), "IW is a structural zero here");
+        assert_eq!(slots.len(), 228 + 37, "228 basic+peaks, plus the 37-slot tranche");
+    }
+
+    /// `+classC` adds **24** slots at EXISTING 944 positions — the width does
+    /// not move, which is exactly what a count cannot express
+    /// (`benchmarks/free_features_classC_2026-09-04.md` §1).
+    #[test]
+    fn compute_parts_class_c_adds_24_slots_at_the_same_width() {
+        let base = ComputeSet::from_toggles(V2NewFeatureToggles {
+            v1_only: true,
+            v1_pools: V1PoolsMode::Peaks,
+            free_extras: V1FreeExtras::RawMoments,
+            ..Default::default()
+        });
+        let with_c = ComputeSet::from_toggles(V2NewFeatureToggles {
+            v1_only: true,
+            v1_pools: V1PoolsMode::Peaks,
+            free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
+            ..Default::default()
+        });
+        assert_eq!(with_c.compute_parts().to_string(), "basic+peaks+moments+classc");
+        let (a, b) = (base.populated_slots(4, 944), with_c.populated_slots(4, 944));
+        assert!(b.covers(&a), "class C is a strict superset of the free set");
+        assert_eq!(b.len(), a.len() + 24);
+        // Same LAYOUT, different id — the "944" ambiguity, resolved.
+        let ida = base.feature_set_id(4, 944, "era2r4").unwrap();
+        let idb = with_c.feature_set_id(4, 944, "era2r4").unwrap();
+        assert_eq!(ida.layout_width(), idb.layout_width());
+        assert_ne!(ida, idb);
+    }
+
+    /// A 372-wide request clips the free tranches away entirely — their slots
+    /// live at `f720+`, which does not exist at this layout.
+    #[test]
+    fn compute_parts_372_layout_clips_the_free_tranches_away() {
+        use crate::feature_set_id::SlotSet;
+        let cs = ComputeSet::from_toggles(V2NewFeatureToggles {
+            v1_only: true,
+            v1_pools: V1PoolsMode::Full,
+            free_extras: V1FreeExtras::RawMomentsPlusBoundedErr,
+            ..Default::default()
+        });
+        assert_eq!(cs.populated_slots(4, 372), SlotSet::parse("0-371").unwrap());
+    }
+
+    /// `V1PoolsMode::Carriers` populates exactly the ten carrier slots — a
+    /// third distinct meaning of "944" at the same width as the other two.
+    #[test]
+    fn compute_parts_carriers_populates_exactly_the_ten_carrier_slots() {
+        use crate::feature_set_id::SlotSet;
+        let cs = ComputeSet::from_toggles(V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            v1_pools: V1PoolsMode::Carriers,
+            ..Default::default()
+        });
+        assert_eq!(
+            cs.compute_parts().to_string(),
+            "basic+carriers+v2+append+append2"
+        );
+        let slots = cs.populated_slots(4, 944);
+        let pool_block = SlotSet::parse("156-371").unwrap();
+        assert_eq!(
+            slots.intersect(&pool_block),
+            SlotSet::from_slots(V1PoolsMode::CARRIER_SLOTS)
+        );
+    }
+
+    /// The two eras of the SAME 944 compute set get different ids — the
+    /// `ext944` / `era2r4` pair, bit-identical everywhere except `f720..923`.
+    #[test]
+    fn feature_set_id_separates_the_two_native_944_eras() {
+        let cs = ComputeSet::from_toggles(V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            v1_pools: V1PoolsMode::Off,
+            ..Default::default()
+        });
+        let a = cs.feature_set_id(4, 944, "ext944").unwrap();
+        let b = cs.feature_set_id(4, 944, "era2r4").unwrap();
+        assert_eq!(a.compute(), b.compute());
+        assert_eq!(a.slots_hash(), b.slots_hash());
+        assert_ne!(a, b, "the era is part of the identity");
+        assert!(a.same_set_ignoring_era(&b));
+        assert_eq!(a.compute().to_string(), "basic+v2+append+append2");
     }
 
     /// **Profile D's whole reason to exist.** `ADD156` reads only `f0..156`

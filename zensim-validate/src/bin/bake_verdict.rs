@@ -883,6 +883,15 @@ struct Args {
     /// Passing this flag states the cross-regime read is intentional; the
     /// report banner records it.
     cross_regime: bool,
+    /// `--require-feature-set-match`: REFUSE (exit 2) when the bake's
+    /// feature-set id disagrees with the features root's on ANY axis — width,
+    /// populated slots, or extractor era (`docs/FEATURE_SET_IDS.md` §4).
+    /// Default OFF: today every legacy bake reads era `unknown` because it
+    /// carries no `zentrain.feature_set_id`, so the strict mode would refuse
+    /// the whole board. The mismatches are always REPORTED; this flag turns
+    /// the report into a gate, and becomes the default once new artifacts
+    /// carry ids (design §7 step 3).
+    require_feature_set_match: bool,
 }
 
 fn print_usage() {
@@ -921,7 +930,13 @@ REGIMES (--regime 372|720|944):\n\
     A bake that structurally USES f156-371 is REFUSED at `--regime 944`\n\
     (the folded root zeroes that block; the numbers would be garbage —\n\
     score it at `--regime 372` instead). `--cross-regime` overrides after\n\
-    stating the read is intentional.\n"
+    stating the read is intentional.\n\
+\n\
+FEATURE-SET IDS (docs/FEATURE_SET_IDS.md):\n\
+    Every run prints the bake's feature-set id and the root's, and reports\n\
+    every disagreement (width / populated slots / extractor era). Counts are\n\
+    aliases only: `944` alone has named seven different feature sets.\n\
+    --require-feature-set-match turns the report into a REFUSAL (exit 2).\n"
     );
 }
 
@@ -973,6 +988,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut regime_720 = false;
     let mut regime_944 = false;
     let mut cross_regime = false;
+    let mut require_feature_set_match = false;
     let mut features_root_set = false;
     let mut dial_grid_set = std::env::var("ZENSIM_DIAL_GRID").is_ok();
     let mut corruption_grid_set = std::env::var("ZENSIM_CORRUPTION_GRID").is_ok();
@@ -1120,6 +1136,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--identity-probe" => {
                 let v = args.next().ok_or("--identity-probe requires <parquet>")?;
                 identity_probe = Some(PathBuf::from(v));
+            }
+            "--require-feature-set-match" => {
+                require_feature_set_match = true;
             }
             "--cross-regime" => {
                 cross_regime = true;
@@ -1324,6 +1343,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         perpair_metrics,
         perpair_cap,
         cross_regime,
+        require_feature_set_match,
     })
 }
 
@@ -3520,6 +3540,66 @@ fn main() -> ExitCode {
         }
     } else if args.regime_944 && args.cross_regime && !root_block_live {
         eprintln!("bake_verdict: --cross-regime set — wrong-regime refusal disabled by caller");
+    }
+    // FEATURE-SET IDS (docs/FEATURE_SET_IDS.md). The guard above is the same
+    // check hand-specialised to ONE block (f156-371) at ONE regime (944);
+    // this generalises it to every block at every regime, and adds the era
+    // axis the width can never carry. It REPORTS by default and REFUSES under
+    // `--require-feature-set-match` — see the flag's doc for why the strict
+    // mode is not yet the default.
+    {
+        use zensim_validate::feature_set;
+        let root_ref = feature_set::root_feature_set_ref(&args.features_root);
+        match &root_ref {
+            Some(r) => eprintln!(
+                "bake_verdict: feature-set — table {} [{}{}]",
+                r.id,
+                r.source,
+                if r.inferred { ", INFERRED" } else { "" }
+            ),
+            None => eprintln!(
+                "bake_verdict: feature-set — table id NOT ESTABLISHED for {} \
+                 (no _MANIFEST.json feature_set_id, and the path/regime are not in \
+                 benchmarks/feature_sets_registry.json) — treat every id comparison below \
+                 as unavailable, never as a pass",
+                args.features_root.display()
+            ),
+        }
+        let mut refuse = false;
+        for (p, m) in members.iter().zip(models.iter()) {
+            let era = feature_set::bake_declared_training_set(m)
+                .map(|id| id.era().to_string())
+                .unwrap_or_else(|| zensim::feature_set_id::ERA_UNKNOWN.to_string());
+            match feature_set::bake_feature_set_ref(m, &era) {
+                Err(e) => {
+                    eprintln!("bake_verdict: feature-set — cannot derive id for {}: {e}", p.display());
+                    refuse |= args.require_feature_set_match;
+                }
+                Ok(b) => {
+                    eprintln!("bake_verdict: feature-set — bake  {} [{}]", b.id, p.display());
+                    if let Some(r) = &root_ref {
+                        for mm in feature_set::check(&b, r) {
+                            let loud = mm.kind != feature_set::MismatchKind::EraUnknown;
+                            eprintln!(
+                                "bake_verdict: feature-set {} — {mm}",
+                                if loud { "MISMATCH" } else { "note" }
+                            );
+                            refuse |= args.require_feature_set_match;
+                        }
+                    } else {
+                        refuse |= args.require_feature_set_match;
+                    }
+                }
+            }
+        }
+        if refuse {
+            eprintln!(
+                "bake_verdict: REFUSING — --require-feature-set-match is set and the bake's \
+                 feature-set id does not match the table's. Score at the matching root, or drop \
+                 the flag to get the report without the gate."
+            );
+            return ExitCode::from(2);
+        }
     }
     let ens = Ensemble {
         has_transforms: models

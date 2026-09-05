@@ -20,6 +20,7 @@ pub mod dial_content;
 pub mod dial_spline;
 pub mod eval_report;
 pub mod eval_roots;
+pub mod feature_set;
 pub mod gram_lasso;
 #[allow(clippy::all)]
 pub mod mlp_train;

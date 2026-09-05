@@ -1,0 +1,422 @@
+{
+ "_schema": {
+  "description": "Feature-set identifier registry. A feature set is identified by `<compute>@w<layout>/<era>#<slots-hash8>` \u2014 see docs/FEATURE_SET_IDS.md. Counts (156 / 372 / 720 / 924 / 944 / '156+free' / '+classC') are LEGACY ALIASES, kept here so historical artifacts resolve, never as identities: '944' alone has named seven different feature sets in this repo. APPEND-ONLY: supersede with a new entry + `superseded_by`, never edit or delete one. The grammar and the hash have ONE owner, `zensim::feature_set_id`; nothing here is re-derived off-Rust.",
+  "version": 1,
+  "created": "2026-09-05",
+  "sections": {
+   "compute_tokens": "The CLOSED vocabulary. token -> {slots (at 4 scales, in the widest layout), owner (the zensim symbol that decides it), note}. A token names a family whose PRESENCE changes which slots are populated. Sub-toggles (gradient / blockiness / transducer_bank / append2_dst_activity) are deliberately NOT tokens: they reshape a family from the inside, which moves the populated set, which moves the hash \u2014 so they cannot collide, and the short form stays readable.",
+   "eras": "token -> {build_commit, root, label, note}. The era is load-bearing: the shift between two eras of the SAME compute set is model-specific, not a constant offset (benchmarks/eval372_current_root_2026-08-30.md), so a number read on one era cannot be corrected into the other, only re-verdicted.",
+   "sets": "id -> the registered feature set. `kind`:'set' is fully pinned (has `slots` + `slots_hash8`, both checked against the owner by zensim-validate's registry test); `kind`:'class' pins compute+layout+era only, for a MODEL class whose exact read-set differs per bake (the name is the class, the hash is the instance). `role`:'producer' populates those slots; 'consumer' reads them.",
+   "roots": "absolute features-root path -> set id, for inferring a PRODUCER id from a root that predates the `feature_set_id` manifest key. An inferred id is evidence about the artifact's NAME, never about its BYTES, and consumers must badge it.",
+   "regime_strings": "the prose `regime` string a `_MANIFEST.json` already carries -> the compute+slots it implies, so a root with no `feature_set_id` key still resolves. A regime string that varies PER FILE inside one root (wlin7b-2026-08-30: 'mixed by file: *_pools944 = folded720append2pools, *_ctrl944 = folded720append2') resolves to null \u2014 mixed roots must be addressed per file.",
+   "aliases": "legacy name -> list of ids it has meant. A list of length > 1 is AMBIGUOUS BY CONSTRUCTION and a consumer must say so rather than pick one."
+  },
+  "entry_fields": {
+   "compute": "`+`-joined COMPUTE tokens in registry order (or 'none')",
+   "layout": "emitted vector width, integer",
+   "era": "era token",
+   "slots": "compact canonical slot ranges, e.g. '0-155,720-923' (kind='set' only)",
+   "slots_hash8": "8 lowercase hex of zensim::feature_set_id::slots_hash8 over `slots` (kind='set' only)",
+   "n_slots": "|slots| \u2014 redundant with `slots`, carried so a reader can sanity-check without parsing",
+   "role": "'producer' (populates) or 'consumer' (reads)",
+   "kind": "'set' (slots pinned) or 'class' (compute+layout+era only)",
+   "evidence": "the doc/record that establishes this set exists",
+   "superseded_by": "id of the entry that replaces this one, when applicable"
+  }
+ },
+ "compute_tokens": {
+  "basic": {
+   "slots": "0-155",
+   "owner": "feature_v2::ComputeSet::v1_basic",
+   "note": "v1 basic fold, n_scales*3*FEATURES_PER_CHANNEL_BASIC"
+  },
+  "carriers": {
+   "slots": "178,190,196,226,231,237,243,303,321,333",
+   "owner": "feature_v2::V1PoolsMode::Carriers (CARRIER_SLOTS)",
+   "note": "the ten fused944native carrier slots; every other pool slot stays 0"
+  },
+  "peaks": {
+   "slots": "156-227",
+   "owner": "feature_v2::V1PoolsMode::Peaks",
+   "note": "v1 soft-peak pool; costs the same as Off \u2014 the accumulators are unconditional"
+  },
+  "masked": {
+   "slots": "228-299",
+   "owner": "feature_v2::V1PoolsMode::Full",
+   "note": "v1 masked pool; separate token from `iw` because a bake can read one without the other"
+  },
+  "iw": {
+   "slots": "300-371",
+   "owner": "feature_v2::V1PoolsMode::Full",
+   "note": "v1 IW pool"
+  },
+  "v2": {
+   "slots": "372-719",
+   "owner": "feature_v2::ComputeSet::v2_blocks",
+   "note": "v2-348 dense block"
+  },
+  "append": {
+   "slots": "720-923",
+   "owner": "feature_v2::ComputeSet::append",
+   "note": "append-204; owns GLOBAL_* when it runs"
+  },
+  "append2": {
+   "slots": "924-943",
+   "owner": "feature_v2::ComputeSet::append2",
+   "note": "append2/BANDVIS; owns LUMA_MEAN_REF when it runs"
+  },
+  "csfw": {
+   "slots": "944-955",
+   "owner": "feature_v2::ComputeSet::csfw",
+   "note": "CSFW tier-1, Y-only; default-OFF, no canonical root yet"
+  },
+  "moments": {
+   "slots": "733-735,750-752,784-786,801-803,818-820,835-837,852-854,869-871,886-888,903-905,920-922,926,931,936,941",
+   "owner": "feature_v2::V1FreeExtras::RawMoments / free_slot_indices",
+   "note": "37 scattered slots a v1-only walk finalizes for free; named ONLY when the owning block is off (ComputeSet::raw_moments) \u2014 benchmarks/free_features_2026-09-01.md \u00a71"
+  },
+  "classc": {
+   "slots": "377,406,435,464,493,522,551,580,609,638,667,696,739-741,790-792,841-843,892-894",
+   "owner": "feature_v2::V1FreeExtras::RawMomentsPlusBoundedErr / class_c_slot_indices",
+   "note": "24 scattered slots at EXISTING 944 positions \u2014 12 v2 MSE + 12 Y-channel luminance-bin; ~1.3-2.3% of the 156 walk, NOT free \u2014 benchmarks/free_features_classC_2026-09-04.md"
+  },
+  "hdr": {
+   "slots": null,
+   "owner": "not yet emitted",
+   "note": "RESERVED. Append-only, above csfw."
+  }
+ },
+ "eras": {
+  "v1pre": {
+   "build_commit": null,
+   "root": "/mnt/v/zen/zensim-training/2026-05-15-full-features",
+   "label": "STORED-ERA 372 (2026-05-15 root \u2014 masked/IW f228..371 from the thread-dependent window)",
+   "note": "f228..371 was a function of RAYON_NUM_THREADS; does not reproduce at its own build commit. docs/DATASET_HISTORY.md \u00a73.27."
+  },
+  "v1cur": {
+   "build_commit": "ea16c7eef1befa38e8500f721dde2801084cd3fc",
+   "root": "/mnt/v/zen/zensim-training/2026-08-30-full-features-372",
+   "label": "current-extractor 372 (2026-08-30 root, build_commit ea16c7ee)",
+   "note": "the DEFAULT --features-root since 2026-08-30. Six of its fourteen corpora are byte-copies of the v1pre root (aic4 pre-fix, unrefreshable) \u2014 eval_annotations `eval372-current-root-copied-corpora-2026-08-30`."
+  },
+  "ext720": {
+   "build_commit": null,
+   "root": "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22",
+   "label": "720 folded+append (ext720-canonical-2026-07-22)",
+   "note": "both waves extracted PRE pool-SIMD (commits <= 9e7516d7)."
+  },
+  "ext924": {
+   "build_commit": "0b3d16b04b19",
+   "root": "/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27",
+   "label": "924 folded+append STREAMING (ext924-canonical-2026-07-27)",
+   "note": "C5 streaming-only rev, ZENSIM_AB_MODE=foldapp."
+  },
+  "ext944": {
+   "build_commit": "ec3bdd6acd489d3d7ba9122bd9f5d97c186c175f",
+   "root": "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01",
+   "label": "944 campaign root (ext944-canonical-2026-08-01)",
+   "note": "the SOTA-944 campaign root; the era 78 of the 97 fair board cells' dial grids belong to."
+  },
+  "era2r4": {
+   "build_commit": "75c09149e6c32fc84a07aa9bc144daa92fb3ac11",
+   "root": "/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01",
+   "label": "era-2 wave-r4 944 re-extraction (ext944-era2r4-2026-09-01)",
+   "note": "MEASURED vs ext944: bit-identical everywhere except f720..923, max abs 7.2e-9 (~/tmp/gaddrinst_RESUME.md finding 1). The root itself is POOLS (f156..371 live); its foldapp2_views/ subdir is the ZEROED derived view \u2014 two feature sets, one era, one directory tree."
+  },
+  "pools": {
+   "build_commit": null,
+   "root": "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30",
+   "label": "944 all-pools-live era (r1b/wlin7 pools944, 2026-08-30)",
+   "note": "944-wide with f156..371 LIVE \u2014 the reason bake_verdict has to ask the ROOT what regime it is instead of inferring from the width."
+  },
+  "unknown": {
+   "build_commit": null,
+   "root": null,
+   "label": "era UNKNOWN (not a registered root \u2014 check its _MANIFEST.json)",
+   "note": "NEVER silently treated as a match: 'we do not know which extractor made this' and 'we know it was a different one' have the same consequence for a published number."
+  }
+ },
+ "sets": {
+  "basic+peaks+masked+iw@w372/v1cur": {
+   "compute": "basic+peaks+masked+iw",
+   "layout": 372,
+   "era": "v1cur",
+   "slots": "0-371",
+   "slots_hash8": "d16a1091",
+   "n_slots": 372,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "372",
+   "evidence": "zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372"
+  },
+  "basic+peaks+masked+iw@w372/v1pre": {
+   "compute": "basic+peaks+masked+iw",
+   "layout": 372,
+   "era": "v1pre",
+   "slots": "0-371",
+   "slots_hash8": "d16a1091",
+   "n_slots": 372,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "372",
+   "evidence": "zensim_validate::eval_roots::STORED_FEATURES_ROOT_2026_05_15"
+  },
+  "basic+peaks+masked+iw+v2@w720/ext720": {
+   "compute": "basic+peaks+masked+iw+v2",
+   "layout": 720,
+   "era": "ext720",
+   "slots": "0-719",
+   "slots_hash8": "05208b00",
+   "n_slots": 720,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "720",
+   "evidence": "zensim_validate::eval_roots::FEATURES_ROOT_720"
+  },
+  "basic+v2+append@w924/ext924": {
+   "compute": "basic+v2+append",
+   "layout": 924,
+   "era": "ext924",
+   "slots": "0-155,372-923",
+   "slots_hash8": "4af59320",
+   "n_slots": 708,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "924",
+   "evidence": "CLAUDE.md '\u2605 THE 924-FEATURE PARQUETS'; f156..371 are STRUCTURAL ZEROS"
+  },
+  "basic+v2+append+append2@w944/ext944": {
+   "compute": "basic+v2+append+append2",
+   "layout": 944,
+   "era": "ext944",
+   "slots": "0-155,372-943",
+   "slots_hash8": "7ed470b4",
+   "n_slots": 728,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "944",
+   "evidence": "zensim_validate::eval_roots::FEATURES_ROOT_944; regime 'folded720append2'"
+  },
+  "basic+v2+append+append2@w944/era2r4": {
+   "compute": "basic+v2+append+append2",
+   "layout": 944,
+   "era": "era2r4",
+   "slots": "0-155,372-943",
+   "slots_hash8": "7ed470b4",
+   "n_slots": 728,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "944",
+   "evidence": "ext944-era2r4-2026-09-01/foldapp2_views/_MANIFEST.json regime 'folded720append2', rule 'f156..f371 := 0.0 on every row'"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/era2r4": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "era2r4",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "944",
+   "evidence": "ext944-era2r4-2026-09-01/_MANIFEST.json regime 'folded720append2pools'"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/pools": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "pools",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "944",
+   "evidence": "dial_grid_944col_POOLS_2026-08-30; r1b/wlin7 pools944 roots"
+  },
+  "basic+carriers+v2+append+append2@w944/pools": {
+   "compute": "basic+carriers+v2+append+append2",
+   "layout": 944,
+   "era": "pools",
+   "slots": "0-155,178,190,196,226,231,237,243,303,321,333,372-943",
+   "slots_hash8": "3a888f0f",
+   "n_slots": 738,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "944",
+   "evidence": "r1b-a3fused-2026-08-30/_MANIFEST.json regime 'fused944native-carriers'; feature_v2::V1PoolsMode::CARRIER_SLOTS"
+  },
+  "basic+peaks+moments@w944/era2r4": {
+   "compute": "basic+peaks+moments",
+   "layout": 944,
+   "era": "era2r4",
+   "slots": "0-227,733-735,750-752,784-786,801-803,818-820,835-837,852-854,869-871,886-888,903-905,920-922,926,931,936,941",
+   "slots_hash8": "4fcef1d6",
+   "n_slots": 265,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "156+free",
+   "evidence": "benchmarks/free_features_2026-09-01.md \u00a71 \u2014 109 free slots = 72 peaks + 37 raw-moment"
+  },
+  "basic+peaks+moments+classc@w944/era2r4": {
+   "compute": "basic+peaks+moments+classc",
+   "layout": 944,
+   "era": "era2r4",
+   "slots": "0-227,377,406,435,464,493,522,551,580,609,638,667,696,733-735,739-741,750-752,784-786,790-792,801-803,818-820,835-837,841-843,852-854,869-871,886-888,892-894,903-905,920-922,926,931,936,941",
+   "slots_hash8": "aa7e7dbd",
+   "n_slots": 289,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "+classC",
+   "evidence": "benchmarks/free_features_classC_2026-09-04.md \u00a71 \u2014 +24 slots at EXISTING 944 positions"
+  },
+  "basic+peaks+masked+iw+v2+append+append2+csfw@w956/unknown": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2+csfw",
+   "layout": 956,
+   "era": "unknown",
+   "slots": "0-955",
+   "slots_hash8": "6d52bfa7",
+   "n_slots": 956,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "956",
+   "evidence": "feature_v2::FeatureRegime::Folded720Csfw \u2014 default-OFF, no canonical root yet"
+  },
+  "basic@w372/v1cur": {
+   "compute": "basic",
+   "layout": 372,
+   "era": "v1cur",
+   "slots": null,
+   "slots_hash8": null,
+   "n_slots": null,
+   "role": "consumer",
+   "kind": "class",
+   "legacy_name": "156",
+   "evidence": "Profile D / ADD156 class: 372-wide caller, basic-only reads (28 of 156 lines on ADD156). A bake's EXACT read-set id is derived from its bytes; this entry pins the class only."
+  },
+  "basic@w944/era2r4": {
+   "compute": "basic",
+   "layout": 944,
+   "era": "era2r4",
+   "slots": null,
+   "slots_hash8": null,
+   "n_slots": null,
+   "role": "consumer",
+   "kind": "class",
+   "legacy_name": "156",
+   "evidence": "the 944-wide basic-only reader class \u2014 the free-set arms' base"
+  }
+ },
+ "roots": {
+  "/mnt/v/zen/zensim-training/2026-08-30-full-features-372": "basic+peaks+masked+iw@w372/v1cur",
+  "/mnt/v/zen/zensim-training/2026-05-15-full-features": "basic+peaks+masked+iw@w372/v1pre",
+  "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22": "basic+peaks+masked+iw+v2@w720/ext720",
+  "/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27": "basic+v2+append@w924/ext924",
+  "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01": "basic+v2+append+append2@w944/ext944",
+  "/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01": "basic+peaks+masked+iw+v2+append+append2@w944/era2r4",
+  "/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01/foldapp2_views": "basic+v2+append+append2@w944/era2r4",
+  "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30": "basic+peaks+masked+iw+v2+append+append2@w944/pools",
+  "/mnt/v/zen/zensim-training/wlin7-pools944-2026-08-30": "basic+peaks+masked+iw+v2+append+append2@w944/pools",
+  "/mnt/v/zen/zensim-training/r1b-ctrl944-2026-08-30": "basic+v2+append+append2@w944/pools",
+  "/mnt/v/zen/zensim-training/wlin7-ctrl944-2026-08-30": "basic+v2+append+append2@w944/pools",
+  "/mnt/v/zen/zensim-training/r1b-a3fused-2026-08-30": "basic+carriers+v2+append+append2@w944/pools"
+ },
+ "regime_strings": {
+  "folded720append2pools": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "slots": "0-943"
+  },
+  "folded720append2": {
+   "compute": "basic+v2+append+append2",
+   "layout": 944,
+   "slots": "0-155,372-943"
+  },
+  "fused944native-carriers": {
+   "compute": "basic+carriers+v2+append+append2",
+   "layout": 944,
+   "slots": "0-155,178,190,196,226,231,237,243,303,321,333,372-943"
+  },
+  "folded720append": {
+   "compute": "basic+v2+append",
+   "layout": 924,
+   "slots": "0-155,372-923"
+  },
+  "folded720": {
+   "compute": "basic+v2",
+   "layout": 720,
+   "slots": "0-155,372-719"
+  },
+  "v1": {
+   "compute": "basic+peaks+masked+iw",
+   "layout": 372,
+   "slots": "0-371"
+  },
+  "v1-372": {
+   "compute": "basic+peaks+masked+iw",
+   "layout": 372,
+   "slots": "0-371"
+  },
+  "v1-372-canon": {
+   "compute": "basic+peaks+masked+iw",
+   "layout": 372,
+   "slots": "0-371"
+  }
+ },
+ "aliases": {
+  "156": {
+   "ids": [
+    "basic@w372/v1cur"
+   ],
+   "note": "a MODEL class (Profile D / ADD156), not a table: nothing on disk populates only f0..155."
+  },
+  "156+free": {
+   "ids": [
+    "basic+peaks+moments@w944/era2r4"
+   ],
+   "note": "156 basic + 109 free (72 peaks + 37 raw-moment) \u2014 inside a 944-WIDE vector."
+  },
+  "+classC": {
+   "ids": [
+    "basic+peaks+moments+classc@w944/era2r4"
+   ],
+   "note": "+24 slots at EXISTING 944 positions; the width does not move."
+  },
+  "372": {
+   "ids": [
+    "basic+peaks+masked+iw@w372/v1cur",
+    "basic+peaks+masked+iw@w372/v1pre"
+   ],
+   "note": "AMBIGUOUS \u2014 two eras. Identical compute and identical slots; the masked/IW values differ on 100% of rows, up to |0.489| SROCC for a bake that leans on them."
+  },
+  "720": {
+   "ids": [
+    "basic+peaks+masked+iw+v2@w720/ext720"
+   ],
+   "note": null
+  },
+  "924": {
+   "ids": [
+    "basic+v2+append@w924/ext924"
+   ],
+   "note": "f156..371 are structural zeros \u2014 a 924 vector is 924 wide and 708 populated."
+  },
+  "944": {
+   "ids": [
+    "basic+v2+append+append2@w944/ext944",
+    "basic+v2+append+append2@w944/era2r4",
+    "basic+peaks+masked+iw+v2+append+append2@w944/era2r4",
+    "basic+peaks+masked+iw+v2+append+append2@w944/pools",
+    "basic+carriers+v2+append+append2@w944/pools",
+    "basic+peaks+moments@w944/era2r4",
+    "basic+peaks+moments+classc@w944/era2r4"
+   ],
+   "note": "AMBIGUOUS \u2014 SEVEN meanings. Two eras of one compute set; three pool states (zeroed / all-live / ten carriers) at the same width; two free-set arms sharing only f0..227 with any of them. Populated-slot counts across these: 728, 728, 944, 944, 738, 265, 289."
+  },
+  "956": {
+   "ids": [
+    "basic+peaks+masked+iw+v2+append+append2+csfw@w956/unknown"
+   ],
+   "note": "no canonical root yet."
+  }
+ }
+}

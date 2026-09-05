@@ -175,3 +175,4 @@ fn compute_parts_render_in_registry_order_regardless_of_insertion_order() {
     assert_eq!(ComputeParts::parse("none"), Some(ComputeParts::EMPTY));
     assert!(a.contains(T::Basic) && !a.contains(T::Iw));
 }
+

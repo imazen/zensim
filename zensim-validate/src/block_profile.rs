@@ -367,7 +367,15 @@ pub fn zerobias_line_kill_fraction(model: &Model, tau: f64) -> Result<(usize, us
 /// Errors (rather than mis-reporting) on a malformed bake whose declared
 /// transform arities do not tile layer 0 — every valid bake satisfies
 /// `Σ output_arity == layer0.in_dim` by construction.
-pub fn profile(model: &Model) -> Result<BlockProfile, String> {
+/// Per-CALLER-LINE L2 weight norms over layer 0, the number of `Drop`ped
+/// lines, and the layer-0 dtype — the shared kernel behind [`profile`] and
+/// [`used_caller_lines`].
+///
+/// Extracted so the feature-set-id derivation
+/// (`zensim_validate::feature_set`) reads the SAME norms the block profile
+/// tabulates, rather than a second copy of the fold. Errors identically on a
+/// malformed arity table.
+pub fn caller_line_norms(model: &Model) -> Result<(Vec<f64>, usize, &'static str), String> {
     let layer = model.layer(0);
     let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
     // Weights are row-major input-major: W[i * out_dim + o].
@@ -394,7 +402,6 @@ pub fn profile(model: &Model) -> Result<BlockProfile, String> {
     let col_sq: Vec<f64> = (0..in_dim)
         .map(|i| (0..out_dim).map(|o| wget(i, o).powi(2)).sum::<f64>())
         .collect();
-
     // Fold internal columns back to CALLER lines. The dense transforms vec
     // (one entry per caller line) defines the mapping: transform k consumes
     // `output_arity` internal columns, in caller order — the same walk
@@ -415,7 +422,33 @@ pub fn profile(model: &Model) -> Result<BlockProfile, String> {
             caller_sq.len()
         ));
     }
-    let norms: Vec<f64> = caller_sq.iter().map(|s| s.sqrt()).collect();
+    Ok((
+        caller_sq.iter().map(|s| s.sqrt()).collect(),
+        n_dropped,
+        dtype,
+    ))
+}
+
+/// The CALLER lines a bake structurally READS — its consumer slot set.
+///
+/// "Structurally used" is [`profile`]'s own definition: a caller line whose
+/// L2 norm over layer-0 output weights is neither exactly zero nor within
+/// [`NEAR_ZERO_REL`] of the max line norm. A `Drop`ped (pruned) line is
+/// exactly zero and therefore reads nothing — precisely pruning's contract —
+/// so a packed bake's read-set equals its unpruned parent's.
+pub fn used_caller_lines(model: &Model) -> Result<Vec<usize>, String> {
+    let (norms, _, _) = caller_line_norms(model)?;
+    let max_norm = norms.iter().cloned().fold(0.0f64, f64::max);
+    let near = NEAR_ZERO_REL * max_norm;
+    Ok((0..norms.len()).filter(|&i| norms[i] > near).collect())
+}
+
+pub fn profile(model: &Model) -> Result<BlockProfile, String> {
+    let layer = model.layer(0);
+    let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
+    // ONE derivation of the caller-line norms, shared with `used_caller_lines`.
+    let (norms, n_dropped, dtype) = caller_line_norms(model)?;
+    let caller_width = model.caller_input_width();
     let max_norm = norms.iter().cloned().fold(0.0f64, f64::max);
     let near = NEAR_ZERO_REL * max_norm;
 
