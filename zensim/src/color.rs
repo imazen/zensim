@@ -249,8 +249,16 @@ fn srgb_to_positive_xyb_planar_inner_v4(
         let mut r_arr = [0.0f32; 16];
         let mut g_arr = [0.0f32; 16];
         let mut b_arr = [0.0f32; 16];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Indexing the `pixels` SLICE inside the loop
+        // left 16 bounds checks per 16-pixel iteration in the
+        // emitted code. Same loads, same order — bit-exact.
+        let px: &[[u8; 3]; 16] = pixels[base..base + 16]
+            .try_into()
+            .expect("16 pixels per chunk");
         for i in 0..16 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = srgb_u8_to_linear(p[0]);
             g_arr[i] = srgb_u8_to_linear(p[1]);
             b_arr[i] = srgb_u8_to_linear(p[2]);
@@ -319,8 +327,16 @@ fn srgb_to_positive_xyb_planar_inner_v4(
         let mut r_arr = [0.0f32; 8];
         let mut g_arr = [0.0f32; 8];
         let mut b_arr = [0.0f32; 8];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Indexing the `pixels` SLICE inside the loop
+        // left 8 bounds checks per 8-pixel iteration in the
+        // emitted code. Same loads, same order — bit-exact.
+        let px: &[[u8; 3]; 8] = pixels[base..base + 8]
+            .try_into()
+            .expect("8 pixels per chunk");
         for i in 0..8 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = srgb_u8_to_linear(p[0]);
             g_arr[i] = srgb_u8_to_linear(p[1]);
             b_arr[i] = srgb_u8_to_linear(p[2]);
@@ -423,8 +439,16 @@ fn srgb_to_positive_xyb_planar_inner_v4x(
         let mut r_arr = [0.0f32; 16];
         let mut g_arr = [0.0f32; 16];
         let mut b_arr = [0.0f32; 16];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Indexing the `pixels` SLICE inside the loop
+        // left 16 bounds checks per 16-pixel iteration in the
+        // emitted code. Same loads, same order — bit-exact.
+        let px: &[[u8; 3]; 16] = pixels[base..base + 16]
+            .try_into()
+            .expect("16 pixels per chunk");
         for i in 0..16 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = srgb_u8_to_linear(p[0]);
             g_arr[i] = srgb_u8_to_linear(p[1]);
             b_arr[i] = srgb_u8_to_linear(p[2]);
@@ -493,8 +517,16 @@ fn srgb_to_positive_xyb_planar_inner_v4x(
         let mut r_arr = [0.0f32; 8];
         let mut g_arr = [0.0f32; 8];
         let mut b_arr = [0.0f32; 8];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Indexing the `pixels` SLICE inside the loop
+        // left 8 bounds checks per 8-pixel iteration in the
+        // emitted code. Same loads, same order — bit-exact.
+        let px: &[[u8; 3]; 8] = pixels[base..base + 8]
+            .try_into()
+            .expect("8 pixels per chunk");
         for i in 0..8 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = srgb_u8_to_linear(p[0]);
             g_arr[i] = srgb_u8_to_linear(p[1]);
             b_arr[i] = srgb_u8_to_linear(p[2]);
@@ -600,8 +632,16 @@ fn srgb_to_positive_xyb_planar_inner_v3(
         let mut r_arr = [0.0f32; 8];
         let mut g_arr = [0.0f32; 8];
         let mut b_arr = [0.0f32; 8];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Indexing the `pixels` SLICE inside the loop
+        // left 8 bounds checks per 8-pixel iteration in the
+        // emitted code. Same loads, same order — bit-exact.
+        let px: &[[u8; 3]; 8] = pixels[base..base + 8]
+            .try_into()
+            .expect("8 pixels per chunk");
         for i in 0..8 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = srgb_u8_to_linear(p[0]);
             g_arr[i] = srgb_u8_to_linear(p[1]);
             b_arr[i] = srgb_u8_to_linear(p[2]);
@@ -713,8 +753,16 @@ fn srgb_to_positive_xyb_planar_inner(
         let mut r_arr = [0.0f32; 8];
         let mut g_arr = [0.0f32; 8];
         let mut b_arr = [0.0f32; 8];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Indexing the `pixels` SLICE inside the loop
+        // left 8 bounds checks per 8-pixel iteration in the
+        // emitted code. Same loads, same order — bit-exact.
+        let px: &[[u8; 3]; 8] = pixels[base..base + 8]
+            .try_into()
+            .expect("8 pixels per chunk");
         for i in 0..8 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = srgb_u8_to_linear(p[0]);
             g_arr[i] = srgb_u8_to_linear(p[1]);
             b_arr[i] = srgb_u8_to_linear(p[2]);
@@ -819,8 +867,14 @@ fn srgb_to_xyb_planar_inner_v3(
         let mut r_arr = [0.0f32; 8];
         let mut g_arr = [0.0f32; 8];
         let mut b_arr = [0.0f32; 8];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Same loads in the same order — bit-exact.
+        let px: &[[u8; 3]; 8] = pixels[base..base + 8]
+            .try_into()
+            .expect("8 pixels per chunk");
         for i in 0..8 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = srgb_u8_to_linear(p[0]);
             g_arr[i] = srgb_u8_to_linear(p[1]);
             b_arr[i] = srgb_u8_to_linear(p[2]);
@@ -920,8 +974,14 @@ fn srgb_to_xyb_planar_inner(
         let mut r_arr = [0.0f32; 8];
         let mut g_arr = [0.0f32; 8];
         let mut b_arr = [0.0f32; 8];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Same loads in the same order — bit-exact.
+        let px: &[[u8; 3]; 8] = pixels[base..base + 8]
+            .try_into()
+            .expect("8 pixels per chunk");
         for i in 0..8 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = srgb_u8_to_linear(p[0]);
             g_arr[i] = srgb_u8_to_linear(p[1]);
             b_arr[i] = srgb_u8_to_linear(p[2]);
@@ -1044,8 +1104,14 @@ fn linear_to_positive_xyb_planar_inner_v4(
         let mut r_arr = [0.0f32; 16];
         let mut g_arr = [0.0f32; 16];
         let mut b_arr = [0.0f32; 16];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Same loads in the same order — bit-exact.
+        let px: &[[f32; 3]; 16] = pixels[base..base + 16]
+            .try_into()
+            .expect("16 pixels per chunk");
         for i in 0..16 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = p[0];
             g_arr[i] = p[1];
             b_arr[i] = p[2];
@@ -1114,8 +1180,14 @@ fn linear_to_positive_xyb_planar_inner_v4(
         let mut r_arr = [0.0f32; 8];
         let mut g_arr = [0.0f32; 8];
         let mut b_arr = [0.0f32; 8];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Same loads in the same order — bit-exact.
+        let px: &[[f32; 3]; 8] = pixels[base..base + 8]
+            .try_into()
+            .expect("8 pixels per chunk");
         for i in 0..8 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = p[0];
             g_arr[i] = p[1];
             b_arr[i] = p[2];
@@ -1222,8 +1294,14 @@ fn linear_to_positive_xyb_planar_inner_v4x(
         let mut r_arr = [0.0f32; 16];
         let mut g_arr = [0.0f32; 16];
         let mut b_arr = [0.0f32; 16];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Same loads in the same order — bit-exact.
+        let px: &[[f32; 3]; 16] = pixels[base..base + 16]
+            .try_into()
+            .expect("16 pixels per chunk");
         for i in 0..16 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = p[0];
             g_arr[i] = p[1];
             b_arr[i] = p[2];
@@ -1292,8 +1370,14 @@ fn linear_to_positive_xyb_planar_inner_v4x(
         let mut r_arr = [0.0f32; 8];
         let mut g_arr = [0.0f32; 8];
         let mut b_arr = [0.0f32; 8];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Same loads in the same order — bit-exact.
+        let px: &[[f32; 3]; 8] = pixels[base..base + 8]
+            .try_into()
+            .expect("8 pixels per chunk");
         for i in 0..8 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = p[0];
             g_arr[i] = p[1];
             b_arr[i] = p[2];
@@ -1401,8 +1485,14 @@ fn linear_to_positive_xyb_planar_inner_v3(
         let mut r_arr = [0.0f32; 8];
         let mut g_arr = [0.0f32; 8];
         let mut b_arr = [0.0f32; 8];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Same loads in the same order — bit-exact.
+        let px: &[[f32; 3]; 8] = pixels[base..base + 8]
+            .try_into()
+            .expect("8 pixels per chunk");
         for i in 0..8 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = p[0];
             g_arr[i] = p[1];
             b_arr[i] = p[2];
@@ -1516,8 +1606,14 @@ fn linear_to_positive_xyb_planar_inner(
         let mut r_arr = [0.0f32; 8];
         let mut g_arr = [0.0f32; 8];
         let mut b_arr = [0.0f32; 8];
+        // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance
+        // Optimization"): ONE range check at the boundary, zero
+        // interior. Same loads in the same order — bit-exact.
+        let px: &[[f32; 3]; 8] = pixels[base..base + 8]
+            .try_into()
+            .expect("8 pixels per chunk");
         for i in 0..8 {
-            let p = pixels[base + i];
+            let p = px[i];
             r_arr[i] = p[0];
             g_arr[i] = p[1];
             b_arr[i] = p[2];

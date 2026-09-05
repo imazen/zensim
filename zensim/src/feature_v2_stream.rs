@@ -175,17 +175,32 @@ impl RollingPlane {
     /// irrelevant (every row is fully written before it is read).
     fn from_pooled(mut buf: Vec<f32>, width: usize, cap_rows: usize) -> Self {
         let need = width * cap_rows;
-        if buf.is_empty() {
-            // FRESH buffer (empty pool — the first walk on a new scratch).
-            // `vec![0.0; n]` lowers to `calloc`, which hands back
-            // demand-zeroed pages; `Vec::resize` from empty does an explicit
-            // reserve + fill, i.e. a real ~32 MB memset per walk at 2304².
-            // Every element is written before it is read either way, so the
-            // zeroing was never load-bearing — this is the same allocation,
-            // asked for in the form the allocator can satisfy lazily.
+        if buf.len() < need {
+            // FRESH (empty pool) **or TOO SMALL** — one branch, because the
+            // right move is the same: `vec![0.0; n]` lowers to `calloc`,
+            // which hands back demand-zeroed pages the allocator can satisfy
+            // lazily.
+            //
+            // `Vec::resize` cannot: it writes the fill value with a real
+            // memset, and on a too-small NON-empty pooled buffer it also
+            // reallocs (copying forward contents this type's own contract
+            // says are irrelevant — `lo == hi == 0`, and every row is fully
+            // written by `append_rows` before any reader can name it).
+            //
+            // MEASURED (callgrind, 576², `156` arm, 2 walks, v3 tier), the
+            // grow path's cost split — the FILL dominates, the copy does not:
+            //   __memset_avx2_unaligned_erms   4,112,820 Ir (12 calls)
+            //   RawVecInner::…do_reserve…        733,763 Ir (12 calls)
+            // i.e. 1.17 % of the whole program spent zeroing bytes that are
+            // about to be overwritten, plus 0.21 % moving them first. The
+            // pool is LIFO and holds planes of every scale, so a scale-3
+            // buffer being popped for a scale-0 plane is the COMMON case,
+            // not a corner. After this change `__memset_avx2_unaligned_erms`
+            // across the whole run falls 4,695,365 → 582,545 (−87.6 %).
+            //
+            // Strictly more deterministic, too: this always yields zeros,
+            // where `resize` left a prefix of the previous walk's pixels.
             buf = vec![0.0; need];
-        } else if buf.len() < need {
-            buf.resize(need, 0.0);
         }
         Self {
             buf,
@@ -638,15 +653,15 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             // converting. Bytes are identical by construction (see the
             // `ref_planes` field doc); the distorted side never takes this
             // branch.
-            if si == 0 && let Some(rp) = self.ref_planes {
+            if si == 0
+                && let Some(rp) = self.ref_planes
+            {
                 let (planes, cw, _) = &rp[0];
                 debug_assert_eq!(*cw, width, "cached ref stride must equal the plane width");
                 let [c0, c1, c2] = &mut self.planes[0];
                 for (ch, plane) in [c0, c1, c2].into_iter().enumerate() {
                     let dst = plane[0].append_rows(n_new);
-                    dst.copy_from_slice(
-                        &planes[ch][hi0 * width..(hi0 + n_new) * width],
-                    );
+                    dst.copy_from_slice(&planes[ch][hi0 * width..(hi0 + n_new) * width]);
                 }
                 continue;
             }
@@ -746,7 +761,9 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 // REF-CACHED FEED: the cache holds every level, built by
                 // the same `downscale_2x_into` this cascade runs, so the
                 // source side copies instead of downscaling.
-                if *si == 0 && let Some(rp) = ref_planes {
+                if *si == 0
+                    && let Some(rp) = ref_planes
+                {
                     let (cached, cw, _) = &rp[scale];
                     debug_assert_eq!(*cw, plane_w, "cached ref stride at scale {scale}");
                     let dst = planes[scale].append_rows(n_out);

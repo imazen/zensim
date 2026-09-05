@@ -4367,10 +4367,26 @@ fn downscale_2x_into_inner(
         for chunk in 0..chunks16 {
             let ox = chunk * 16;
             let sx = ox * 2;
+            // FIXED-SIZE ARRAY PATTERN (CLAUDE.md "Performance Optimization"):
+            // two range checks at the boundary, ZERO interior. The previous
+            // form indexed the `src` SLICE four times per output lane, so
+            // LLVM emitted 64 bounds-checked scalar loads per 16 outputs and
+            // could not see the strided pattern; against fixed-size arrays it
+            // can, and emits the even/odd de-interleave shuffles.
+            //
+            // BIT-EXACT BY CONSTRUCTION: the per-lane add order is unchanged
+            // — `((row0[s] + row0[s+1]) + row1[s]) + row1[s+1]`, then the
+            // same `* 0.25`. Nothing is summed across lanes, so f32
+            // non-associativity has nothing to bite.
+            let r0: &[f32; 32] = src[row0 + sx..row0 + sx + 32]
+                .try_into()
+                .expect("32 source columns per 16 outputs");
+            let r1: &[f32; 32] = src[row1 + sx..row1 + sx + 32]
+                .try_into()
+                .expect("32 source columns per 16 outputs");
             let mut arr = [0.0f32; 16];
             for i in 0..16 {
-                let s = sx + i * 2;
-                arr[i] = src[row0 + s] + src[row0 + s + 1] + src[row1 + s] + src[row1 + s + 1];
+                arr[i] = r0[2 * i] + r0[2 * i + 1] + r1[2 * i] + r1[2 * i + 1];
             }
             let result = f32x16::from_array(token, arr) * quarter;
             dst[out_row + ox..][..16].copy_from_slice(&result.to_array());
@@ -4404,10 +4420,18 @@ fn downscale_2x_into_inner(
         for chunk in 0..chunks8 {
             let ox = chunk * 8;
             let sx = ox * 2;
+            // Same fixed-size-array de-interleave as the f32x16 block above,
+            // at this tier's natural width. Bit-exact for the same reason:
+            // the per-lane add order and the `* 0.25` are unchanged.
+            let r0: &[f32; 16] = src[row0 + sx..row0 + sx + 16]
+                .try_into()
+                .expect("16 source columns per 8 outputs");
+            let r1: &[f32; 16] = src[row1 + sx..row1 + sx + 16]
+                .try_into()
+                .expect("16 source columns per 8 outputs");
             let mut arr = [0.0f32; 8];
             for i in 0..8 {
-                let s = sx + i * 2;
-                arr[i] = src[row0 + s] + src[row0 + s + 1] + src[row1 + s] + src[row1 + s + 1];
+                arr[i] = r0[2 * i] + r0[2 * i + 1] + r1[2 * i] + r1[2 * i + 1];
             }
             let result = f32x8::from_array(token, arr) * quarter;
             dst[out_row + ox..][..8].copy_from_slice(&result.to_array());
@@ -5090,6 +5114,83 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The 2x2 downscale's per-lane ADD ORDER is the whole reason the
+    /// fixed-size-array de-interleave (2026-09-05, lane 2) could be landed
+    /// bit-exactly, so pin it against a literal reference rather than against
+    /// another implementation — `downscale_into_bit_identical_to_inplace`
+    /// compares two of our own kernels and would stay green if BOTH were
+    /// reordered together.
+    ///
+    /// Contract: `dst[y][x] == (((src[2y][2x] + src[2y][2x+1])
+    /// + src[2y+1][2x]) + src[2y+1][2x+1]) * 0.25`, evaluated left to right in
+    /// f32. A SIMD rewrite that sums the two ROWS first (a natural shape) is a
+    /// different expression and moves bytes; this test is what says so.
+    ///
+    /// Widths are chosen to cover every path: a whole number of 16-wide
+    /// chunks with no tail, chunks plus a scalar tail, a width entirely below
+    /// one chunk, and odd source widths (where `new_w = src_w / 2` truncates
+    /// and the chunk's 32-column fixed-array read must still stay in bounds).
+    #[test]
+    fn downscale_add_order_is_pinned_left_to_right() {
+        // Values with mismatched exponents, so f32 addition is genuinely
+        // non-associative here and the negative control below can fire.
+        let mk = |w: usize, h: usize| -> Vec<f32> {
+            let mut state = 0x9E37_79B9u32;
+            (0..w * h)
+                .map(|i| {
+                    state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                    let m = (state >> 8) as f32 / (1u32 << 24) as f32;
+                    // Spread across ~7 binades so (a+b)+c != a+(b+c) often.
+                    let scale = [1.0f32, 64.0, 1.0 / 128.0, 4096.0][i % 4];
+                    (m - 0.5) * scale
+                })
+                .collect()
+        };
+
+        let mut order_sensitive_cells = 0usize;
+        for &(w, h) in &[
+            (64usize, 64usize), // new_w 32 = 2 chunks of 16, no tail
+            (70, 10),           // new_w 35 = 2 chunks + 3 scalar tail
+            (20, 8),            // new_w 10 = below one chunk, all tail
+            (65, 9),            // odd source width, new_w 32
+            (33, 7),            // odd, new_w 16 = exactly one chunk
+            (1153, 4),          // odd and above H_TILE_WIDTH
+        ] {
+            let src = mk(w, h);
+            let (new_w, new_h) = (w / 2, h / 2);
+            let mut got = vec![0.0f32; new_w * new_h];
+            downscale_2x_into(&src, w, &mut got, new_w, new_h);
+
+            for y in 0..new_h {
+                for x in 0..new_w {
+                    let r0 = y * 2 * w;
+                    let r1 = r0 + w;
+                    let (a, b) = (src[r0 + 2 * x], src[r0 + 2 * x + 1]);
+                    let (c, d) = (src[r1 + 2 * x], src[r1 + 2 * x + 1]);
+                    let want = (((a + b) + c) + d) * 0.25;
+                    let got_v = got[y * new_w + x];
+                    assert!(
+                        got_v.to_bits() == want.to_bits(),
+                        "{w}x{h} out ({x},{y}): got {got_v:e} ({:08x}) want {want:e} ({:08x})",
+                        got_v.to_bits(),
+                        want.to_bits()
+                    );
+                    // NEGATIVE CONTROL: a row-first sum is a real, different
+                    // number on this data, so the assertion above has
+                    // discriminating power rather than passing vacuously.
+                    if (((a + c) + b) + d) * 0.25 != want {
+                        order_sensitive_cells += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            order_sensitive_cells > 0,
+            "negative control never fired: the fixture is order-INSENSITIVE, so \
+             this test would pass against a reordered kernel — fix the fixture"
+        );
     }
 
     /// Blur of a uniform plane must return the same uniform value everywhere,

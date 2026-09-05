@@ -56,7 +56,52 @@
   with boundary cases, tag round-trip, and the C1 direction property through the
   real gate). Record: `benchmarks/inversion_truth_2026-09-05.md`; gate doc §18.
 
->>>>>>> conflict 1 of 1 ends
+
+### Performance — the fast-class FRONT END, three bit-exact levers (2026-09-05, kernel lane 2)
+
+MEASURED with callgrind Ir (deterministic, so valid on a loaded box), `156`
+arm, 576², 1T, **v3/AVX2 tier**, 2 walks. Walk-side instructions (program
+total minus the example's own pair generation, which is identical in both
+arms) **332,705,880 → 300,821,400 = −9.58 %**. Bit-exactness proven by a
+`to_bits()` A/B of the full feature vector over **160 cells** (20 geometries ×
+4 arms × {serial, 3-thread}): **0 differing bits**. `cargo public-api`: ZERO
+delta on 1,280 items.
+
+- **`blur::downscale_2x_into` was a scalar gather loop wearing a SIMD hat**
+  — 64 bounds-checked scalar loads + 48 scalar adds + a stack array per 16
+  output pixels, because it indexed the `src` SLICE four times per output
+  lane. Rewritten with the fixed-size-array pattern (two range checks at the
+  chunk boundary, zero interior) at both `#[magetypes]` widths; LLVM now emits
+  the `vpermt2ps` even/odd de-interleave and the 16-output loop is **39
+  instructions instead of 168**. Kernel Ir **30,993,408 → 6,937,596 (−77.6 %)**
+  = **−7.23 % of the whole program**. Bit-exact by construction: the per-lane
+  add order `(((a+b)+c)+d) * 0.25` is unchanged, and nothing sums across lanes.
+  New gate `downscale_add_order_is_pinned_left_to_right` pins that order
+  against a literal reference (the pre-existing
+  `downscale_into_bit_identical_to_inplace` compares two of our own kernels and
+  would stay green if both were reordered); it carries a negative control
+  asserting the fixture is order-SENSITIVE, and a row-first reorder was
+  verified to fail it (1 ULP, `c36d30ae` vs `c36d30af`).
+- **`RollingPlane::from_pooled` re-zeroed and re-copied buffers whose contents
+  it documents as irrelevant.** The empty-pool branch already used
+  `vec![0.0; n]` (calloc, lazily zeroed); the *too-small* branch still called
+  `Vec::resize`, which memsets the fill explicitly and reallocs first. Both
+  branches are now one `vec![0.0; need]`. MEASURED split of the grow path:
+  memset 4,112,820 Ir over 12 calls, realloc 733,763 Ir. Run-wide
+  `__memset_avx2_unaligned_erms` **4,695,365 → 582,545 (−87.6 %)**; program
+  **−1.45 %**. Also strictly more deterministic — `resize` left a prefix of the
+  previous walk's pixels, this always yields zeros. The pool is LIFO across
+  scales, so a scale-3 buffer popped for a scale-0 plane is the common case.
+- **The sRGB→XYB de-interleave took a bounds check per pixel**, at 14
+  hand-copied sites across 8 kernels (`for i in 0..N { let p = pixels[base+i] }`).
+  All 14 now take one range check per chunk via a fixed-size array reference.
+  Convert kernel Ir **34,009,992 → 31,022,748 (−8.78 %)**, program −0.93 %.
+  **This is BELOW the lane's pre-registered 2 %-of-walk G-PERF bar** and is not
+  claimed under it: it lands on being a deterministic, zero-risk, bit-exact
+  simplification that this repo's own performance guidance prescribes, and its
+  wall-clock effect is expected small because the loop it sits in is
+  divide-bound (6 `vdivps` per 16 pixels). Recorded that way in
+  `benchmarks/kernel_fastclass_2026-09-05.md` §"lane 2".
 
 ### Fixed — fast-class extraction kernel: two defects, both bit-exact (2026-09-05, kernel lane)
 
