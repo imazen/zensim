@@ -21,10 +21,16 @@ SRC="${ZL_SRC:-/mnt/v/output/zensim/gaddr-board-2026-09-04}"   # the 2026-09-04 
 OUT="${ZL_OUT:-/mnt/v/output/zensim/gaddr-board-2026-09-05}"   # this re-grade
 BOARD="${ZL_BOARD:-/mnt/v/output/zensim/reports/fulleval}"
 GRIDTRUTH="${ZL_GRIDTRUTH:-/mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_qv2grid.tsv}"
+# OWNER-EXTENSION, opt-in (2026-09-06): which A7r window to grade the board
+# under. Default `distinct` is byte-identical to every prior board grade.
+FLOORRULE="${ZL_FLOORRULE:-distinct}"
+FLOORMARGIN_ARGS=()
+[ -n "${ZL_FLOORMARGIN:-}" ] && FLOORMARGIN_ARGS=(--floor-margin "$ZL_FLOORMARGIN")
 
 case "${1:-}" in
   grade) python3 "$REPO/scripts/gaddr_board_regrade.py" grade \
-            --bv "$BV" --src "$SRC" --out "$OUT" --grid-truth "$GRIDTRUTH" ;;
+            --bv "$BV" --src "$SRC" --out "$OUT" --grid-truth "$GRIDTRUTH" \
+            --floor-rule "$FLOORRULE" "${FLOORMARGIN_ARGS[@]}" ;;
   graft) python3 "$REPO/scripts/gaddr_board_regrade.py" graft \
             --src "$SRC" --out "$OUT" --board "$BOARD" ;;
   *) echo "usage: $0 {grade|graft}" >&2; exit 2 ;;

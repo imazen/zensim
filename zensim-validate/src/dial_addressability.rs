@@ -243,6 +243,117 @@ impl TailPins {
     }
 }
 
+/// Which STEPS of a ladder `A7r` tests — an OWNER-EXTENSION, opt-in variant of
+/// the pinned FLOOR-REPRESENTABILITY rule, added 2026-09-06 to let a pending
+/// user ruling be graded without moving the default.
+///
+/// **`Distinct` is the default and reproduces the pinned rule byte-for-byte**
+/// (`FloorMeasure::from_grid` still delegates to it): the literal `K` lowest
+/// DISTINCT settings by `q`, plus the next one up. `benchmarks/
+/// ladder_floor_resolution_2026-09-05.md` asked whether that literal-position
+/// window is itself sound, or an artifact of grading three positions that
+/// happen to sit on a near-flat part of a codec's RD curve — and found BOTH:
+/// jpeg's one-ladder miss under `Distinct` is a boundary artifact (dissolves
+/// under either alternative window), while `avif-rav1e`'s is not (a genuine
+/// ordering defect the shared noise floor between candidate and mentor was
+/// hiding). `Resolvable` and `Spaced` are that report's two windows, promoted
+/// to a reusable rule so the comparison is a flag, not a one-off Python port.
+///
+/// **Neither variant changes what "represented" MEANS** — a ladder is still
+/// REPRESENTED when the dial strictly increases across the window AND no
+/// bottom step sits on the instrument's clamp (unless it is the sole holder).
+/// They change WHICH steps of the ladder are asked to clear that bar, using
+/// the REFERENCE metric's (the mentor's) own per-cell values to choose —
+/// never the candidate's own values, so the same window applies to every
+/// scorer graded on it.
+///
+/// **The bar changes shape too.** `Distinct`'s bar is the mentor's fraction
+/// PINNED in the registry (`benchmarks/dial_addressability_floor_2026-09-04.json`)
+/// — a measurement made once and reused. `Resolvable`/`Spaced` have no
+/// registry entry (they are report-derived, not pinned) — see
+/// [`per_codec_floor_rows_live`] — so their bar is ALWAYS computed live, by
+/// grading the mentor's own per-cell truth through the identical
+/// [`FloorMeasure::from_grid_with_rule`] call the candidate went through.
+/// Every row and note this produces is stamped `rule=<tag>` (via
+/// [`FloorRule::tag`]) so a `resolvable` fraction can never be silently
+/// compared against a `distinct` or `spaced` one.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum FloorRule {
+    /// The pinned rule. Positions `0..=K` literally, by `q`. Default.
+    #[default]
+    Distinct,
+    /// Variant (a): walk forward from the lowest setting, skipping any step
+    /// whose `|Δ mentor|` from the last SELECTED step is below `margin`,
+    /// until `K + 1` mentor-resolvable steps are collected. A ladder that
+    /// cannot produce `K + 1` such steps (too short, or every remaining step
+    /// ties the mentor) is "too short" — the same accounting `Distinct` uses
+    /// for a ladder shorter than `K + 1` steps.
+    Resolvable { margin: f64 },
+    /// Variant (b): the lowest setting, plus the step whose MENTOR value is
+    /// nearest `mentor[0] + near_lo`, plus the step nearest
+    /// `mentor[0] + near_hi` — both drawn from settings above the floor, the
+    /// three then re-sorted by position (the ladder is already sorted by
+    /// `q`, so sorting indices sorts by `q`).
+    Spaced { near_lo: f64, near_hi: f64 },
+}
+
+impl FloorRule {
+    /// `--floor-margin`'s default, in the reference metric's own units
+    /// (ssim2 points on the registered instruments). Matches
+    /// `benchmarks/ladder_floor_resolution_2026-09-05.md` §4's variant (a).
+    pub const RESOLVABLE_MARGIN_DEFAULT: f64 = 0.5;
+    /// `Spaced`'s two fixed offsets — variant (b), ssim2 points above the
+    /// ladder's lowest setting. Not exposed as flags: the task that minted
+    /// this rule named exactly these two numbers.
+    pub const SPACED_NEAR_LO_DEFAULT: f64 = 2.0;
+    pub const SPACED_NEAR_HI_DEFAULT: f64 = 5.0;
+
+    pub fn tag(self) -> &'static str {
+        match self {
+            FloorRule::Distinct => "distinct",
+            FloorRule::Resolvable { .. } => "resolvable",
+            FloorRule::Spaced { .. } => "spaced",
+        }
+    }
+
+    /// `true` for the two rules whose window is chosen from the MENTOR's own
+    /// per-cell truth (`--gaddr-grid-truth`) rather than literal positions —
+    /// and whose bar is therefore always LIVE-computed, never registry-read.
+    pub fn needs_mentor_truth(self) -> bool {
+        !matches!(self, FloorRule::Distinct)
+    }
+
+    /// Parse `--floor-rule`. `margin` only matters for `resolvable`; `spaced`
+    /// uses its own fixed offsets. Unknown values are an error, never a
+    /// silent fallback — same discipline as [`TailPins::parse`].
+    pub fn parse(s: &str, margin: f64) -> Result<Self, String> {
+        match s {
+            "distinct" => Ok(FloorRule::Distinct),
+            "resolvable" => Ok(FloorRule::Resolvable { margin }),
+            "spaced" => Ok(FloorRule::Spaced {
+                near_lo: Self::SPACED_NEAR_LO_DEFAULT,
+                near_hi: Self::SPACED_NEAR_HI_DEFAULT,
+            }),
+            other => Err(format!(
+                "unknown --floor-rule `{other}` (expected `distinct`, `resolvable`, or `spaced`)"
+            )),
+        }
+    }
+}
+
+/// The context [`evaluate_full`] needs to grade `A7r` under a [`FloorRule`]
+/// other than the default. `Default` reproduces today's behaviour exactly:
+/// `Distinct` + no mentor measurement (unused by that arm anyway).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FloorRuleContext<'a> {
+    pub rule: FloorRule,
+    /// The mentor scored AGAINST ITSELF under the SAME rule, on the SAME
+    /// instrument — required (else every codec reads NOT MEASURED) when
+    /// `rule.needs_mentor_truth()`; ignored for `Distinct`, which reads the
+    /// registry instead.
+    pub mentor: Option<&'a FloorMeasure>,
+}
+
 /// The registered parameters of the FLOOR-REPRESENTABILITY rule.
 ///
 /// **There is no numeric dial bar here, by USER RULING** (2026-09-05, final,
@@ -640,6 +751,13 @@ pub struct FloorMeasure {
     pub codecs: Vec<CodecFloor>,
 }
 
+/// One ladder cell: `(q, candidate dial value, mentor truth if supplied)`.
+/// `Distinct` never reads the third field; `Resolvable`/`Spaced` use it to
+/// choose the window (see [`FloorMeasure::from_grid_with_rule`]).
+type LadderCell = (f64, f64, Option<f64>);
+/// `(image_id, codec) -> its cells, sorted by quality`.
+type Ladders = std::collections::BTreeMap<(String, String), Vec<LadderCell>>;
+
 impl FloorMeasure {
     /// Measure floor representability from row-aligned
     /// `(image_id, codec, q, dial)`, where `q` is QUALITY-ORIENTED on every
@@ -671,22 +789,64 @@ impl FloorMeasure {
         report_truth: Option<&[f64]>,
         report_threshold: f64,
     ) -> Self {
-        let rule = floor_rule();
-        let k = rule.bottom_k;
+        Self::from_grid_with_rule(
+            instrument,
+            image_id,
+            codec,
+            q,
+            dial,
+            report_truth,
+            report_threshold,
+            FloorRule::Distinct,
+        )
+    }
+
+    /// [`from_grid`] under an explicit [`FloorRule`]. `from_grid` delegates to
+    /// this with `FloorRule::Distinct` — so this is the ONE implementation,
+    /// never a fork: `Distinct`'s branch below reduces algebraically to
+    /// exactly the pre-2026-09-06 body (window = literal positions `0..=K`,
+    /// same `ordered`/`clamped` arithmetic), which is what makes the default
+    /// path byte-identical rather than merely intended to be — see
+    /// `dial_addressability::tests::distinct_rule_matches_legacy_from_grid`.
+    ///
+    /// `report_truth` serves TWO roles depending on `rule`: for every rule it
+    /// still feeds the report-only column folded in from the dropped `A9r`;
+    /// for `Resolvable`/`Spaced` it is ALSO the MENTOR's own per-cell value
+    /// used to choose which steps of each ladder the window tests — never the
+    /// candidate's (`dial`'s) own values, so the identical window applies
+    /// whichever scorer is graded. A ladder whose mentor truth is missing (or
+    /// entirely absent) cannot have a window computed under those two rules
+    /// and is counted "too short", the same accounting a too-short ladder
+    /// gets under `Distinct`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_grid_with_rule(
+        instrument: &str,
+        image_id: &[String],
+        codec: &[String],
+        q: &[f64],
+        dial: &[f64],
+        report_truth: Option<&[f64]>,
+        report_threshold: f64,
+        rule: FloorRule,
+    ) -> Self {
+        let frule = floor_rule();
+        let k = frule.bottom_k;
         let n = dial.len().min(image_id.len()).min(codec.len()).min(q.len());
         let report_truth = report_truth.filter(|t| t.len() == dial.len());
 
-        // Build the ladders, then sort each by QUALITY.
-        let mut ladders: std::collections::BTreeMap<(String, String), Vec<(f64, f64)>> =
-            std::collections::BTreeMap::new();
+        // Build the ladders, then sort each by QUALITY. Each cell carries the
+        // candidate's dial value AND (optionally) the mentor's own truth at
+        // that same cell — `Distinct` never reads the third field.
+        let mut ladders: Ladders = std::collections::BTreeMap::new();
         for i in 0..n {
             if !dial[i].is_finite() {
                 continue;
             }
+            let mentor = report_truth.map(|t| t[i]);
             ladders
                 .entry((image_id[i].clone(), codec[i].clone()))
                 .or_default()
-                .push((q[i], dial[i]));
+                .push((q[i], dial[i], mentor));
         }
         for v in ladders.values_mut() {
             v.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -694,13 +854,13 @@ impl FloorMeasure {
 
         let grid_min = ladders
             .values()
-            .flat_map(|v| v.iter().map(|(_, d)| *d))
+            .flat_map(|v| v.iter().map(|(_, d, _)| *d))
             .fold(f64::INFINITY, f64::min);
         let n_ladders_at_min = ladders
             .values()
             .filter(|v| {
                 v.iter()
-                    .any(|(_, d)| (*d - grid_min).abs() <= rule.clamp_eps)
+                    .any(|(_, d, _)| (*d - grid_min).abs() <= frule.clamp_eps)
             })
             .count();
 
@@ -726,29 +886,47 @@ impl FloorMeasure {
                     ..Default::default()
                 }
             });
-            for (_, d) in cells {
+            for (_, d, _) in cells {
                 if *d < e.dial_min {
                     e.dial_min = *d;
                 }
             }
-            if cells.len() < k + 1 {
+            // Choose which STEPS of this ladder get tested. `Distinct`
+            // reproduces the pre-2026-09-06 literal window exactly; the other
+            // two are chosen from the MENTOR's own values (see the fn doc).
+            let window: Option<Vec<usize>> = match rule {
+                FloorRule::Distinct => (cells.len() > k).then(|| (0..=k).collect::<Vec<usize>>()),
+                FloorRule::Resolvable { margin } => resolvable_window(cells, k, margin),
+                FloorRule::Spaced { near_lo, near_hi } => spaced_window(cells, near_lo, near_hi),
+            };
+            let Some(win) = window else {
                 e.short += 1;
                 continue;
-            }
+            };
             e.n += 1;
-            for (j, slot) in e.steps.iter_mut().enumerate() {
-                slot.push(cells[j].1);
+            for (j, &idx) in win.iter().take(k).enumerate() {
+                e.steps[j].push(cells[idx].1);
             }
-            // (1) strictly increasing across the bottom K and into step K.
-            let ordered = (0..k).all(|j| cells[j].1 < cells[j + 1].1);
+            let vals: Vec<f64> = win.iter().map(|&idx| cells[idx].1).collect();
+            // (1) strictly increasing across the WHOLE selected window.
+            //     `Distinct`'s window is `[0, 1, .., K]` (K+1 points), so this
+            //     is exactly "the bottom K steps and into step K".
+            let ordered = vals.windows(2).all(|w| w[0] < w[1]);
             // (2) off the clamp — the single lowest ladder is allowed to BE
             //     the minimum; two or more sharing it is a collapsed floor.
+            //     Checked over the WHOLE ladder (not just the window): a
+            //     ladder that touches the clamp anywhere still collapses the
+            //     floor for `n_ladders_at_min`'s purposes.
             let sole_min_holder = n_ladders_at_min == 1
                 && cells
                     .iter()
-                    .any(|(_, d)| (*d - grid_min).abs() <= rule.clamp_eps);
-            let clamped =
-                !sole_min_holder && (0..k).any(|j| (cells[j].1 - grid_min).abs() <= rule.clamp_eps);
+                    .any(|(_, d, _)| (*d - grid_min).abs() <= frule.clamp_eps);
+            // Clamp-check the window's bottom `K` values (or all of them, for
+            // a window shorter than `K`, e.g. `Spaced`'s 3-point window at the
+            // registered `K = 3`).
+            let clamp_upper = k.min(vals.len());
+            let clamped = !sole_min_holder
+                && (0..clamp_upper).any(|j| (vals[j] - grid_min).abs() <= frule.clamp_eps);
             if ordered && !clamped {
                 e.rep += 1;
             } else {
@@ -761,7 +939,8 @@ impl FloorMeasure {
             }
         }
 
-        // Report-only column (folded in from the dropped A9r).
+        // Report-only column (folded in from the dropped A9r). Rule-
+        // independent: every row's own truth vs its own dial, pooled.
         let mut rep_hit: std::collections::HashMap<String, (usize, usize)> =
             std::collections::HashMap::new();
         if let Some(t) = report_truth {
@@ -823,6 +1002,63 @@ impl FloorMeasure {
             codecs,
         }
     }
+}
+
+/// `FloorRule::Resolvable` window: walk forward from position 0 (the ladder's
+/// lowest setting, always selected), skipping any step whose `|Δ mentor|`
+/// from the last SELECTED step's mentor value is below `margin`, until
+/// `k + 1` mentor-resolvable steps are collected. `None` ("too short") when
+/// fewer than `k + 1` such steps exist before the ladder runs out, or any
+/// cell in this ladder carries no mentor truth.
+fn resolvable_window(cells: &[LadderCell], k: usize, margin: f64) -> Option<Vec<usize>> {
+    if cells.is_empty() {
+        return None;
+    }
+    let mentor: Vec<f64> = cells.iter().map(|c| c.2).collect::<Option<Vec<f64>>>()?;
+    let want = k + 1;
+    let mut sel: Vec<usize> = vec![0];
+    let mut i = 1;
+    while sel.len() < want && i < cells.len() {
+        let last = *sel.last().expect("sel always holds position 0");
+        if (mentor[i] - mentor[last]).abs() >= margin {
+            sel.push(i);
+        }
+        i += 1;
+    }
+    (sel.len() == want).then_some(sel)
+}
+
+/// `FloorRule::Spaced` window: the lowest setting (position 0, always
+/// selected), plus the step whose MENTOR value is nearest `mentor[0] +
+/// near_lo`, plus the step nearest `mentor[0] + near_hi` — both drawn from
+/// the remaining steps, then all three re-sorted by position (equivalent to
+/// re-sorting by `q`, since `cells` is already `q`-sorted). `None` ("too
+/// short") when the ladder has fewer than 3 distinct settings, or any cell
+/// carries no mentor truth. Ties in "nearest" resolve to the first candidate
+/// in `q` order, matching Python's `min()`.
+fn spaced_window(cells: &[LadderCell], near_lo: f64, near_hi: f64) -> Option<Vec<usize>> {
+    if cells.len() < 3 {
+        return None;
+    }
+    let mentor: Vec<f64> = cells.iter().map(|c| c.2).collect::<Option<Vec<f64>>>()?;
+    let base = mentor[0];
+    let cand: Vec<usize> = (1..cells.len()).collect();
+    let nearest = |target: f64, pool: &[usize]| -> usize {
+        *pool
+            .iter()
+            .min_by(|&&a, &&b| {
+                (mentor[a] - target)
+                    .abs()
+                    .total_cmp(&(mentor[b] - target).abs())
+            })
+            .expect("pool is non-empty, checked by callers")
+    };
+    let p_lo = nearest(base + near_lo, &cand);
+    let cand2: Vec<usize> = cand.into_iter().filter(|&i| i != p_lo).collect();
+    let p_hi = nearest(base + near_hi, &cand2);
+    let mut triple = [0usize, p_lo, p_hi];
+    triple.sort_unstable();
+    Some(triple.to_vec())
 }
 
 /// Identity behaviour: the dial on `ref == dist` pairs, and whether any real
@@ -1000,6 +1236,11 @@ pub struct Verdict {
     /// floors. Printed as its own table — the ruling's "codecs are all
     /// different" is not a footnote, it is the shape of the measurement.
     pub codec_floor_rows: Vec<CodecFloorReport>,
+    /// Which [`FloorRule`] windowed `A7r` — `"distinct"` (the pinned rule,
+    /// registry-backed bar) or `"resolvable"` / `"spaced"` (report-derived,
+    /// LIVE-computed bar). Stamped on every rendering and in the JSON so a
+    /// fraction from one rule can never be silently read beside another's.
+    pub floor_rule: String,
 }
 
 /// One rendered per-codec floor row: the candidate's representability beside
@@ -1192,6 +1433,7 @@ pub fn evaluate_with_reference(
         negtail,
         identity,
         None,
+        FloorRuleContext::default(),
     )
 }
 
@@ -1216,6 +1458,7 @@ pub fn evaluate_full(
     negtail: Option<(&NegTailMeasure, &str)>,
     identity: Option<(&IdentityMeasure, &str)>,
     floors: Option<&FloorMeasure>,
+    floor_ctx: FloorRuleContext,
 ) -> Verdict {
     let bars = fixed_bars();
     let floor = floor_for_grid(grid_sha256, reference);
@@ -1372,7 +1615,14 @@ pub fn evaluate_full(
         // being supplied. A8r is the one pooled, probe-derived row.
         TailPins::Product => {
             // A7r — FLOOR REPRESENTABILITY, per codec, on the dial grid.
-            let (a7r, rows_out) = per_codec_floor_rows(grid_sha256, reference, floors);
+            // `Distinct` reads the registry (byte-identical to pre-2026-09-06
+            // behaviour); `Resolvable`/`Spaced` have no registry entry — they
+            // are report-derived windows, not pinned — so their bar is
+            // ALWAYS the mentor's own LIVE fraction under the same rule.
+            let (a7r, rows_out) = match floor_ctx.rule {
+                FloorRule::Distinct => per_codec_floor_rows(grid_sha256, reference, floors),
+                _ => per_codec_floor_rows_live(floor_ctx.rule, floors, floor_ctx.mentor),
+            };
             codec_floor_rows = rows_out;
             rows.push(a7r);
             // A8r — the negative-tail probe, REPORT-ONLY. No bar: it carries no
@@ -1599,6 +1849,7 @@ pub fn evaluate_full(
             .unwrap_or_else(|| format!("{INCUMBENT_REFERENCE} (no registry row)")),
         tail_pins,
         codec_floor_rows,
+        floor_rule: floor_ctx.rule.tag().to_string(),
     }
 }
 
@@ -1762,6 +2013,153 @@ fn per_codec_floor_rows(
     (a7, table)
 }
 
+/// [`per_codec_floor_rows`]'s counterpart for `Resolvable`/`Spaced`. There is
+/// no registry entry for those windows — they are report-derived, not pinned
+/// — so the bar is NEVER read from `benchmarks/
+/// dial_addressability_floor_2026-09-04.json`'s `distinct` pins. It is
+/// instead the MENTOR's own representability, computed by grading the
+/// mentor's own per-cell truth through the identical
+/// [`FloorMeasure::from_grid_with_rule`] call the candidate went through
+/// (`mentor`, supplied by the caller — see [`FloorRuleContext`]).
+///
+/// Every row and the summary note are stamped `rule=<tag>` so a `resolvable`
+/// fraction can never be silently compared against a `distinct` or `spaced`
+/// one — the whole point of keeping this a SEPARATE function from
+/// `per_codec_floor_rows` rather than a registry-lookup branch inside it.
+fn per_codec_floor_rows_live(
+    rule: FloorRule,
+    floors: Option<&FloorMeasure>,
+    mentor: Option<&FloorMeasure>,
+) -> (CheckRow, Vec<CodecFloorReport>) {
+    let frule = floor_rule();
+    let tag = rule.tag();
+    let fm = match floors {
+        Some(m) => m,
+        None => {
+            return (
+                row(
+                    "A7r",
+                    Tier::Regression,
+                    "floor representability — lowest configurable settings resolve, per codec",
+                    None,
+                    None,
+                    "≤",
+                    None,
+                    format!(
+                        "rule=`{tag}` — the caller supplied no per-codec ladder measurement \
+                         (this instrument carries no codec / quality-ladder columns)"
+                    ),
+                ),
+                Vec::new(),
+            );
+        }
+    };
+    let no_mentor_note = mentor.is_none().then(|| {
+        format!(
+            "rule=`{tag}` — no LIVE mentor floor measurement supplied. `resolvable`/`spaced` \
+             have no registry entry (they are report-derived windows, never pinned like \
+             `distinct`), so their bar REQUIRES scoring the mentor's own per-cell truth \
+             (`--gaddr-grid-truth`) through this same rule — without it every codec below is \
+             NOT MEASURED, never defaulted to `distinct`'s pins."
+        )
+    });
+    let mut table: Vec<CodecFloorReport> = Vec::new();
+    for cf in &fm.codecs {
+        let bar = mentor
+            .and_then(|m| m.codecs.iter().find(|c| c.codec == cf.codec))
+            .map(|c| c.represented_frac)
+            .filter(|b| b.is_finite());
+        let state = match (bar, cf.represented_frac.is_finite()) {
+            (Some(b), true) if cf.represented_frac >= b => State::Pass,
+            (Some(_), true) => State::Fail,
+            _ => State::NotMeasured,
+        };
+        let note = match bar {
+            None => format!(
+                "rule=`{tag}` — no LIVE mentor fraction for `{}` (mentor measurement absent, or \
+                 that codec had zero gradeable ladders under this rule) — NOT MEASURED",
+                cf.codec
+            ),
+            Some(b) => format!(
+                "rule=`{tag}` — {}/{} ladders represented ({:.4} vs LIVE mentor {:.4}, \
+                 owner-computed on THIS instrument under THIS rule — never the `distinct` \
+                 registry pins); failures: {} unordered, {} on the clamp{}",
+                cf.n_represented,
+                cf.n_ladders,
+                cf.represented_frac,
+                b,
+                cf.n_fail_order,
+                cf.n_fail_clamp,
+                if cf.n_too_short > 0 {
+                    format!(
+                        "; {} ladder(s) had no valid `{tag}` window (too short, or ran out of \
+                         mentor-resolvable steps), not tested",
+                        cf.n_too_short
+                    )
+                } else {
+                    String::new()
+                }
+            ),
+        };
+        table.push(CodecFloorReport {
+            codec: cf.codec.clone(),
+            n_ladders: cf.n_ladders,
+            n_too_short: cf.n_too_short,
+            frac: cf.represented_frac,
+            frac_reference: bar,
+            // No registered incumbent concept for a report-derived rule.
+            frac_incumbent: None,
+            n_fail_order: cf.n_fail_order,
+            n_fail_clamp: cf.n_fail_clamp,
+            dial_min: cf.dial_min,
+            reference_min: None,
+            bottom_medians: cf.bottom_medians.clone(),
+            reference_bottom_medians: None,
+            report_frac_at_floor: cf.report_frac_at_floor,
+            report_n_at_floor: cf.report_n_at_floor,
+            state,
+            note,
+        });
+    }
+    let n_gradeable = table
+        .iter()
+        .filter(|r| r.state != State::NotMeasured)
+        .count();
+    let n_fail = table.iter().filter(|r| r.state == State::Fail).count();
+    let a7 = CheckRow {
+        id: "A7r",
+        tier: Tier::Regression,
+        what: "floor representability — lowest configurable settings resolve, per codec",
+        measured: if n_gradeable > 0 {
+            Some(n_fail as f64)
+        } else {
+            None
+        },
+        bar: Some(0.0),
+        cmp: "≤",
+        state: if n_gradeable == 0 {
+            State::NotMeasured
+        } else if n_fail == 0 {
+            State::Pass
+        } else {
+            State::Fail
+        },
+        incumbent: None,
+        note: no_mentor_note.unwrap_or_else(|| {
+            format!(
+                "rule=`{tag}` (K={} window on `{}`; bar is the LIVE mentor fraction, computed \
+                 on this instrument under this rule — never read from the `distinct` registry \
+                 pins). {} of {} codecs graded.",
+                frule.bottom_k,
+                fm.instrument,
+                n_gradeable,
+                table.len()
+            )
+        }),
+    };
+    (a7, table)
+}
+
 /// Markdown section for the verdict report.
 pub fn render_markdown(v: &Verdict) -> String {
     let mut s = String::new();
@@ -1779,7 +2177,8 @@ pub fn render_markdown(v: &Verdict) -> String {
          biased. CONTRACT bars are absolute product requirements the shipped dial can itself \
          fail, so a standing contract failure is never misread as a regression this candidate \
          introduced.\n\
-         - **negative-tail pin set: `{}`** — {}\n\n",
+         - **negative-tail pin set: `{}`** — {}\n\
+         - **floor-rule: `{}`** — {}\n\n",
         v.headline(),
         v.n_pass(),
         v.n_fail(),
@@ -1808,7 +2207,26 @@ pub fn render_markdown(v: &Verdict) -> String {
                  probe). Retired 2026-09-05 by user ruling; kept reachable because every \
                  G-ADDR number published before that date is graded on them."
                     .to_string(),
-        }
+        },
+        v.floor_rule,
+        match v.floor_rule.as_str() {
+            "resolvable" => "**owner-extension, opt-in (2026-09-06)** — variant (a) of \
+                 `benchmarks/ladder_floor_resolution_2026-09-05.md`: `A7r`'s window skips \
+                 forward past any step the MENTOR itself cannot resolve (`|Δ mentor| < \
+                 margin`), then tests the next K+1 resolvable steps. Bar is LIVE-computed on \
+                 this instrument, never read from the `distinct` registry pins."
+                .to_string(),
+            "spaced" => "**owner-extension, opt-in (2026-09-06)** — variant (b): `A7r`'s \
+                 window is the lowest setting plus the steps nearest +2 and +5 mentor points \
+                 above it, re-sorted by quality. Bar is LIVE-computed on this instrument, \
+                 never read from the `distinct` registry pins."
+                .to_string(),
+            _ => format!(
+                "the pinned rule — literal positions `0..=K` by quality (K={}); bar is the \
+                 REGISTRY-pinned mentor fraction, as in every prior G-ADDR report.",
+                floor_rule().bottom_k
+            ),
+        },
     ));
     if v.regression == Overall::NotMeasurable {
         s.push_str(
@@ -1946,6 +2364,11 @@ pub fn to_json(v: &Verdict) -> serde_json::Value {
             TailPins::Product => active_tail_pin_set(),
             TailPins::Retired => "mentor-2026-09-04".to_string(),
         },
+        // Which FloorRule windowed A7r — "distinct" (registry-pinned bar) or
+        // "resolvable"/"spaced" (report-derived, LIVE-computed bar). A
+        // fraction under one rule is never comparable to another's; this
+        // field is what lets a reader of the raw JSON enforce that.
+        "floor_rule": v.floor_rule,
         "measured": {
             "grid": {
                 "min": v.grid.min, "max": v.grid.max,
@@ -2263,6 +2686,29 @@ mod tests {
             nm,
             None,
             fl,
+            FloorRuleContext::default(),
+        )
+    }
+
+    /// `ev`, but with an explicit [`FloorRuleContext`] — for tests that grade
+    /// `A7r` under `Resolvable`/`Spaced` rather than the pinned `Distinct`.
+    fn ev_rule(
+        tp: TailPins,
+        f: &GridFloor,
+        nm: Option<(&NegTailMeasure, &str)>,
+        fl: Option<&FloorMeasure>,
+        ctx: FloorRuleContext,
+    ) -> Verdict {
+        evaluate_full(
+            ACTIVE_REFERENCE,
+            tp,
+            &f.dial_grid_sha256,
+            &f.label,
+            &tie(f),
+            nm,
+            None,
+            fl,
+            ctx,
         )
     }
 
@@ -2671,6 +3117,7 @@ mod tests {
             Some((&nm, &nf.probe_sha256)),
             None,
             None,
+            FloorRuleContext::default(),
         );
         for id in ["A7", "A8", "A9"] {
             assert_eq!(row_by_id(&vb, id).state, State::Pass, "{id}");
@@ -3108,6 +3555,7 @@ mod tests {
             None,
             None,
             Some(&fm),
+            FloorRuleContext::default(),
         );
         assert_eq!(row_by_id(&v, "A7r").state, State::NotMeasured);
         assert!(row_by_id(&v, "A7r").note.contains("MENTOR"));
@@ -3241,6 +3689,7 @@ mod tests {
                     Some((&nm, &nf.probe_sha256)),
                     Some((&im, &idr.probe_sha256)),
                     Some(&fm),
+                    FloorRuleContext::default(),
                 )
             };
             let a = go(TailPins::Product);
@@ -3366,5 +3815,526 @@ mod tests {
         assert_eq!(state_for(0.0, 0.0, "≥"), State::Pass);
         assert_eq!(state_for(0.0, 0.0, "<"), State::Fail);
         assert_eq!(state_for(-1e-9, 0.0, "<"), State::Pass);
+    }
+
+    // ─────────────────── FloorRule: distinct / resolvable / spaced ───────────────────
+    //
+    // OWNER-EXTENSION, opt-in (2026-09-06): `benchmarks/
+    // ladder_floor_resolution_2026-09-05.md` asked whether the pinned rule's
+    // literal-position window is sound, or an artifact. `Resolvable` and
+    // `Spaced` are that report's two variants (a)/(b), promoted to a
+    // reusable, tested rule so the comparison is a flag, not a one-off Python
+    // port. `Distinct` (the default) must stay byte-identical — proven below
+    // both by construction (`from_grid` delegates to
+    // `from_grid_with_rule(..., Distinct)`, the same code, not a fork kept in
+    // sync by hand) and by reproducing five scenarios already exercised
+    // elsewhere in this suite.
+
+    /// A synthetic grid with an EXPLICIT mentor-truth column, distinct from
+    /// the candidate's dial — proves a window is chosen from `mentor_f`,
+    /// never `dial_f`.
+    fn synth_grid_with_mentor(
+        codecs: &[&str],
+        n_lad: usize,
+        steps: usize,
+        dial_f: impl Fn(&str, usize, usize) -> f64,
+        mentor_f: impl Fn(&str, usize, usize) -> f64,
+    ) -> (Vec<String>, Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let (img, cod, q, dial) = synth_grid(codecs, n_lad, steps, dial_f);
+        let (_, _, _, mentor) = synth_grid(codecs, n_lad, steps, mentor_f);
+        (img, cod, q, dial, mentor)
+    }
+
+    /// A `FloorMeasure` where dial AND mentor truth are the SAME `f` — the
+    /// "mentor scored against itself" shape `per_codec_floor_rows_live` uses
+    /// to derive a LIVE bar.
+    fn fm_self_mentor(
+        codecs: &[&str],
+        n_lad: usize,
+        steps: usize,
+        rule: FloorRule,
+        f: impl Fn(&str, usize, usize) -> f64,
+    ) -> FloorMeasure {
+        let (img, cod, q, d) = synth_grid(codecs, n_lad, steps, f);
+        FloorMeasure::from_grid_with_rule("test-grid", &img, &cod, &q, &d, Some(&d), -50.0, rule)
+    }
+
+    #[test]
+    fn floor_rule_parse_rejects_unknown_and_defaults_to_distinct() {
+        assert_eq!(
+            FloorRule::parse("distinct", 0.5).unwrap(),
+            FloorRule::Distinct
+        );
+        assert_eq!(
+            FloorRule::parse("resolvable", 0.7).unwrap(),
+            FloorRule::Resolvable { margin: 0.7 }
+        );
+        assert_eq!(
+            FloorRule::parse("spaced", 0.5).unwrap(),
+            FloorRule::Spaced {
+                near_lo: FloorRule::SPACED_NEAR_LO_DEFAULT,
+                near_hi: FloorRule::SPACED_NEAR_HI_DEFAULT,
+            }
+        );
+        assert!(FloorRule::parse("bogus", 0.5).is_err());
+        assert_eq!(FloorRule::default(), FloorRule::Distinct);
+        assert!(!FloorRule::Distinct.needs_mentor_truth());
+        assert!(FloorRule::Resolvable { margin: 0.5 }.needs_mentor_truth());
+        assert!(
+            FloorRule::Spaced {
+                near_lo: 2.0,
+                near_hi: 5.0
+            }
+            .needs_mentor_truth()
+        );
+    }
+
+    /// FAILING-FIRST GOLDEN TEST (written against the new API before it
+    /// existed): `from_grid` — the legacy, unparameterized entry point every
+    /// pre-2026-09-06 caller uses — and `from_grid_with_rule(...,
+    /// FloorRule::Distinct)` must be FIELD-IDENTICAL on every scenario this
+    /// suite already exercises elsewhere: clean, tied, inverted,
+    /// collapsed-floor, sole-holder, and too-short. This is the proof that
+    /// `--floor-rule distinct` (the default) reproduces every `bake_verdict`
+    /// invocation before 2026-09-06 byte-for-byte.
+    #[test]
+    fn distinct_rule_matches_legacy_from_grid_on_every_existing_fixture() {
+        fn check(label: &str, img: &[String], cod: &[String], q: &[f64], d: &[f64]) {
+            let a = FloorMeasure::from_grid("g", img, cod, q, d, None, -50.0);
+            let b = FloorMeasure::from_grid_with_rule(
+                "g",
+                img,
+                cod,
+                q,
+                d,
+                None,
+                -50.0,
+                FloorRule::Distinct,
+            );
+            assert_eq!(
+                a.grid_min.to_bits(),
+                b.grid_min.to_bits(),
+                "{label}: grid_min"
+            );
+            assert_eq!(
+                a.n_ladders_at_min, b.n_ladders_at_min,
+                "{label}: n_ladders_at_min"
+            );
+            assert_eq!(a.codecs.len(), b.codecs.len(), "{label}: codec count");
+            for (ca, cb) in a.codecs.iter().zip(b.codecs.iter()) {
+                assert_eq!(ca.codec, cb.codec, "{label}");
+                assert_eq!(
+                    ca.n_ladders, cb.n_ladders,
+                    "{label}/{}: n_ladders",
+                    ca.codec
+                );
+                assert_eq!(
+                    ca.n_represented, cb.n_represented,
+                    "{label}/{}: n_represented",
+                    ca.codec
+                );
+                assert_eq!(
+                    ca.n_too_short, cb.n_too_short,
+                    "{label}/{}: n_too_short",
+                    ca.codec
+                );
+                assert_eq!(
+                    ca.n_fail_order, cb.n_fail_order,
+                    "{label}/{}: n_fail_order",
+                    ca.codec
+                );
+                assert_eq!(
+                    ca.n_fail_clamp, cb.n_fail_clamp,
+                    "{label}/{}: n_fail_clamp",
+                    ca.codec
+                );
+                assert_eq!(
+                    ca.dial_min.to_bits(),
+                    cb.dial_min.to_bits(),
+                    "{label}/{}: dial_min",
+                    ca.codec
+                );
+                assert_eq!(ca.bottom_medians.len(), cb.bottom_medians.len());
+                for (ma, mb) in ca.bottom_medians.iter().zip(cb.bottom_medians.iter()) {
+                    assert_eq!(
+                        ma.to_bits(),
+                        mb.to_bits(),
+                        "{label}/{}: bottom_medians",
+                        ca.codec
+                    );
+                }
+                assert_eq!(
+                    ca.represented_frac.is_nan(),
+                    cb.represented_frac.is_nan(),
+                    "{label}/{}: represented_frac nan-ness",
+                    ca.codec
+                );
+                if !ca.represented_frac.is_nan() {
+                    assert_eq!(
+                        ca.represented_frac.to_bits(),
+                        cb.represented_frac.to_bits(),
+                        "{label}/{}: represented_frac",
+                        ca.codec
+                    );
+                }
+            }
+        }
+
+        // (a) clean: every ladder resolves (the `fm_clean()` fixture, inline).
+        let (img, cod, q, d) = synth_grid(&["avif", "jpeg", "jxl", "webp"], 8, 6, |c, l, j| {
+            let off = match c {
+                "avif" => 0.0,
+                "jpeg" => 0.5,
+                "jxl" => 1.5,
+                _ => 2.5,
+            };
+            10.0 + off + l as f64 * 3.0 + j as f64 * 7.0
+        });
+        check("clean", &img, &cod, &q, &d);
+
+        // (b) a tie inside the bottom K.
+        let (img, cod, q, d) = synth_grid(&["avif"], 4, 6, |_, l, j| {
+            if l == 0 && j == 1 {
+                10.0
+            } else {
+                10.0 + j as f64 * 7.0 + l as f64
+            }
+        });
+        check("tie", &img, &cod, &q, &d);
+
+        // (c) an inversion against the next step up.
+        let (img, cod, q, d) = synth_grid(&["avif"], 4, 6, |_, l, j| {
+            let base = 10.0 + j as f64 * 7.0 + l as f64;
+            if l == 0 && j == 3 { -100.0 } else { base }
+        });
+        check("inversion", &img, &cod, &q, &d);
+
+        // (d) a collapsed floor (two ladders share the minimum).
+        let (img, cod, q, d) = synth_grid(&["avif"], 4, 6, |_, l, j| {
+            if l < 2 && j == 0 {
+                -213.0
+            } else {
+                10.0 + j as f64 * 7.0 + l as f64
+            }
+        });
+        check("collapsed", &img, &cod, &q, &d);
+
+        // (e) a sole holder of the minimum.
+        let (img, cod, q, d) = synth_grid(&["avif"], 4, 6, |_, l, j| {
+            if l == 0 && j == 0 {
+                -213.0
+            } else {
+                10.0 + j as f64 * 7.0 + l as f64
+            }
+        });
+        check("sole-holder", &img, &cod, &q, &d);
+
+        // (f) too short.
+        let k = floor_rule().bottom_k;
+        let (img, cod, q, d) = synth_grid(&["avif"], 3, k, |_, l, j| 10.0 + j as f64 + l as f64);
+        check("too-short", &img, &cod, &q, &d);
+    }
+
+    /// The scenario the task that minted this rule named explicitly: a
+    /// ladder where the mentor inverts by 0.2 at the bottom (a near-tie, well
+    /// under the 0.5-point margin). `Distinct` fails it on ORDER alone;
+    /// `Resolvable` skips the unresolvable step and passes it.
+    #[test]
+    fn resolvable_skips_a_mentor_near_tie_that_distinct_fails_on() {
+        // codec "x": ladder 0 = the test ladder (a genuine 0.2 inversion at
+        // the bottom, then well-separated steps); ladder 1 = a baseline that
+        // holds the SOLE grid minimum far below, so the test ladder's clamp
+        // check never fires and any failure is isolated to ordering.
+        let f = |_c: &str, l: usize, j: usize| -> f64 {
+            if l == 0 {
+                [10.0, 9.8, 12.0, 15.0, 20.0][j]
+            } else {
+                [-100.0, -90.0, -80.0, -70.0, -60.0][j]
+            }
+        };
+        let distinct = fm_self_mentor(&["x"], 2, 5, FloorRule::Distinct, f);
+        let resolvable = fm_self_mentor(&["x"], 2, 5, FloorRule::Resolvable { margin: 0.5 }, f);
+        assert_eq!(
+            distinct.n_ladders_at_min, 1,
+            "ladder 1 is the sole holder of -100.0"
+        );
+        assert_eq!(resolvable.n_ladders_at_min, 1);
+
+        let cd = &distinct.codecs[0];
+        assert_eq!(cd.n_ladders, 2);
+        assert_eq!(
+            cd.n_represented, 1,
+            "only the baseline ladder passes distinct"
+        );
+        assert_eq!(
+            cd.n_fail_order, 1,
+            "the test ladder fails on the 0.2 inversion"
+        );
+        assert_eq!(cd.n_fail_clamp, 0);
+        assert!((cd.represented_frac - 0.5).abs() < 1e-12);
+
+        let cr = &resolvable.codecs[0];
+        assert_eq!(cr.n_ladders, 2);
+        assert_eq!(
+            cr.n_represented, 2,
+            "resolvable skips the near-tie and BOTH ladders pass"
+        );
+        assert_eq!(cr.n_fail_order, 0);
+        assert_eq!(cr.n_fail_clamp, 0);
+        assert_eq!(cr.represented_frac, 1.0);
+    }
+
+    /// The window is chosen from the MENTOR's own values, never the
+    /// candidate's — even when the candidate ALSO happens to dip at the same
+    /// position the mentor near-ties on.
+    #[test]
+    fn resolvable_window_is_chosen_from_mentor_not_candidate() {
+        let mentor_f = |_c: &str, _l: usize, j: usize| -> f64 { [0.0, 0.1, 5.0, 10.0, 15.0][j] };
+        let dial_f = |_c: &str, _l: usize, j: usize| -> f64 { [1.0, 0.5, 2.0, 3.0, 4.0][j] };
+        let (img, cod, q, dial, mentor) = synth_grid_with_mentor(&["x"], 1, 5, dial_f, mentor_f);
+
+        // Under Distinct (literal positions 0..=3), the candidate's own
+        // 1.0 -> 0.5 dip fails ordering.
+        let d = FloorMeasure::from_grid_with_rule(
+            "g",
+            &img,
+            &cod,
+            &q,
+            &dial,
+            Some(&mentor),
+            -50.0,
+            FloorRule::Distinct,
+        );
+        assert_eq!(d.codecs[0].n_fail_order, 1);
+        assert_eq!(d.codecs[0].represented_frac, 0.0);
+
+        // Under Resolvable, the mentor's own 0.0 -> 0.1 near-tie (0.1 < 0.5)
+        // is skipped, so the window becomes positions [0, 2, 3, 4] — and the
+        // CANDIDATE's values there (1.0, 2.0, 3.0, 4.0) ARE strictly
+        // increasing, even though its position-1 value (0.5) never appears
+        // in the window at all.
+        let r = FloorMeasure::from_grid_with_rule(
+            "g",
+            &img,
+            &cod,
+            &q,
+            &dial,
+            Some(&mentor),
+            -50.0,
+            FloorRule::Resolvable { margin: 0.5 },
+        );
+        assert_eq!(r.codecs[0].n_fail_order, 0);
+        assert_eq!(r.codecs[0].represented_frac, 1.0);
+    }
+
+    #[test]
+    fn spaced_window_selects_nearest_to_plus2_plus5() {
+        // mentor ladder: 0.0, 4.0, 8.0, 12.0, 16.0 (evenly spaced by +4).
+        // nearest to +2.0 above 0.0 is position 1 (4.0, diff 2.0); nearest to
+        // +5.0 above 0.0, EXCLUDING position 1, is position 2 (8.0, diff 3.0
+        // vs position 3's 12.0, diff 7.0). Window = [0, 1, 2].
+        let f = |_c: &str, _l: usize, j: usize| -> f64 { j as f64 * 4.0 };
+        let m = fm_self_mentor(
+            &["x"],
+            1,
+            5,
+            FloorRule::Spaced {
+                near_lo: 2.0,
+                near_hi: 5.0,
+            },
+            f,
+        );
+        let c = &m.codecs[0];
+        assert_eq!(c.n_ladders, 1);
+        assert_eq!(c.n_represented, 1);
+        assert_eq!(c.bottom_medians[0], 0.0);
+        assert_eq!(c.bottom_medians[1], 4.0);
+        assert_eq!(c.bottom_medians[2], 8.0);
+    }
+
+    /// A ladder too short for `Spaced`'s 3-point window (fewer than 3
+    /// distinct settings) is "too short" — never a silent pass.
+    #[test]
+    fn spaced_window_too_short_below_three_settings() {
+        let f = |_c: &str, _l: usize, j: usize| -> f64 { j as f64 };
+        let m = fm_self_mentor(
+            &["x"],
+            1,
+            2,
+            FloorRule::Spaced {
+                near_lo: 2.0,
+                near_hi: 5.0,
+            },
+            f,
+        );
+        let c = &m.codecs[0];
+        assert_eq!(c.n_ladders, 0);
+        assert_eq!(c.n_too_short, 1);
+        assert!(c.represented_frac.is_nan());
+    }
+
+    /// The task's second required scenario: a collapsed floor (two ladders
+    /// sharing the instrument minimum) fails under EVERY rule, regardless of
+    /// how the window is chosen — because position 0 is always in the
+    /// window under all three rules, and position 0 is where both ladders
+    /// touch the minimum.
+    #[test]
+    fn collapsed_floor_fails_under_every_rule() {
+        let f = |_c: &str, l: usize, j: usize| -> f64 {
+            // Both ladders start at the shared minimum 1.0; otherwise
+            // strictly increasing (so ordering ALONE would pass).
+            let step = if l == 0 { 4.0 } else { 5.0 };
+            1.0 + j as f64 * step
+        };
+        for (label, rule) in [
+            ("distinct", FloorRule::Distinct),
+            ("resolvable", FloorRule::Resolvable { margin: 0.5 }),
+            (
+                "spaced",
+                FloorRule::Spaced {
+                    near_lo: 2.0,
+                    near_hi: 5.0,
+                },
+            ),
+        ] {
+            let m = fm_self_mentor(&["x"], 2, 5, rule, f);
+            assert_eq!(m.n_ladders_at_min, 2, "{label}: a COLLAPSED floor");
+            let c = &m.codecs[0];
+            assert_eq!(c.n_represented, 0, "{label}: nobody is a sole holder");
+            assert_eq!(c.n_fail_clamp, 2, "{label}: both ladders sit on the clamp");
+            assert_eq!(c.represented_frac, 0.0, "{label}");
+        }
+    }
+
+    /// Without mentor truth, `Resolvable`/`Spaced` cannot compute a window at
+    /// all — every ladder reads "too short", giving a NaN fraction, which the
+    /// caller (`per_codec_floor_rows_live`) turns into NOT MEASURED. NEVER a
+    /// silent pass, and NEVER a silent fall-back to `Distinct`'s literal
+    /// window.
+    #[test]
+    fn resolvable_and_spaced_without_mentor_truth_are_never_a_silent_pass() {
+        let (img, cod, q, d) = synth_grid(&["x"], 3, 6, |_, l, j| 10.0 + j as f64 + l as f64);
+        for rule in [
+            FloorRule::Resolvable { margin: 0.5 },
+            FloorRule::Spaced {
+                near_lo: 2.0,
+                near_hi: 5.0,
+            },
+        ] {
+            let m = FloorMeasure::from_grid_with_rule("g", &img, &cod, &q, &d, None, -50.0, rule);
+            let c = &m.codecs[0];
+            assert_eq!(
+                c.n_ladders, 0,
+                "{:?}: no window can be computed without mentor truth",
+                rule
+            );
+            assert_eq!(c.n_too_short, 3);
+            assert!(c.represented_frac.is_nan());
+        }
+    }
+
+    /// `per_codec_floor_rows_live` NEVER reads the `distinct` registry — the
+    /// bar is whatever the supplied mentor `FloorMeasure` says, computed on
+    /// an instrument with NO registry entry at all (a fabricated codec name
+    /// that appears in zero registry rows, on a grid sha that appears in
+    /// zero registry rows).
+    #[test]
+    fn live_bar_never_reads_the_distinct_registry() {
+        let f = |_c: &str, l: usize, j: usize| -> f64 {
+            if l == 0 {
+                [10.0, 9.8, 12.0, 15.0, 20.0, 25.0][j]
+            } else {
+                10.0 + l as f64 * 3.0 + j as f64 * 7.0
+            }
+        };
+        let rule = FloorRule::Resolvable { margin: 0.5 };
+        let candidate = fm_self_mentor(&["madeupcodec123"], 4, 6, rule, f);
+        let mentor = fm_self_mentor(&["madeupcodec123"], 4, 6, rule, f);
+
+        // The REGISTRY-backed path can never grade this codec — it exists in
+        // no registry row on any grid sha.
+        let (registry_row, registry_table) = per_codec_floor_rows(
+            "no-such-sha-in-any-registry-row",
+            ACTIVE_REFERENCE,
+            Some(&candidate),
+        );
+        assert!(registry_table.iter().all(|r| r.state == State::NotMeasured));
+        assert_eq!(registry_row.state, State::NotMeasured);
+
+        // The LIVE path grades it anyway, using ONLY the supplied mentor
+        // measurement — no registry lookup at all.
+        let (live_row, live_table) =
+            per_codec_floor_rows_live(rule, Some(&candidate), Some(&mentor));
+        assert_eq!(live_table.len(), 1);
+        assert_eq!(
+            live_table[0].frac_reference,
+            Some(mentor.codecs[0].represented_frac)
+        );
+        assert_eq!(
+            live_row.state,
+            State::Pass,
+            "candidate == mentor here, so it must clear its own live bar"
+        );
+        assert!(live_row.note.contains("rule=`resolvable`"));
+        assert!(live_table[0].note.contains("LIVE mentor"));
+    }
+
+    /// The rule tag is stamped in `Verdict`, the JSON, and the markdown for
+    /// the default `distinct` path.
+    #[test]
+    fn floor_rule_tag_is_stamped_for_distinct() {
+        let f = canonical();
+        let fm = fm_clean();
+        let v = ev(TailPins::Product, &f, None, Some(&fm));
+        assert_eq!(v.floor_rule, "distinct");
+        let j = to_json(&v);
+        assert_eq!(j["floor_rule"], "distinct");
+        let md = render_markdown(&v);
+        assert!(md.contains("floor-rule: `distinct`"));
+    }
+
+    /// Same, for `resolvable` and `spaced` — and every per-codec note is
+    /// stamped `rule=<tag>` too, so a fraction from one rule can never be
+    /// silently read beside another's.
+    #[test]
+    fn floor_rule_tag_is_stamped_for_resolvable_and_spaced() {
+        let f = canonical();
+        let clean_f =
+            |_c: &str, l: usize, j: usize| -> f64 { 10.0 + l as f64 * 3.0 + j as f64 * 7.0 };
+        for (tag, rule) in [
+            ("resolvable", FloorRule::Resolvable { margin: 0.5 }),
+            (
+                "spaced",
+                FloorRule::Spaced {
+                    near_lo: 2.0,
+                    near_hi: 5.0,
+                },
+            ),
+        ] {
+            let fm = fm_self_mentor(&["avif", "jpeg", "jxl", "webp"], 4, 6, rule, clean_f);
+            let mentor = fm_self_mentor(&["avif", "jpeg", "jxl", "webp"], 4, 6, rule, clean_f);
+            let ctx = FloorRuleContext {
+                rule,
+                mentor: Some(&mentor),
+            };
+            let v = ev_rule(TailPins::Product, &f, None, Some(&fm), ctx);
+            assert_eq!(v.floor_rule, tag);
+            let j = to_json(&v);
+            assert_eq!(j["floor_rule"], tag);
+            let md = render_markdown(&v);
+            assert!(md.contains(&format!("floor-rule: `{tag}`")), "{tag}");
+            assert!(md.contains("LIVE-computed"), "{tag}");
+            for r in &v.codec_floor_rows {
+                assert!(
+                    r.note.contains(&format!("rule=`{tag}`")),
+                    "{tag}/{}: {}",
+                    r.codec,
+                    r.note
+                );
+            }
+            // Every codec is fully clean here, so this must actually PASS —
+            // proving the live bar isn't vacuously NotMeasured throughout.
+            assert_eq!(row_by_id(&v, "A7r").state, State::Pass, "{tag}");
+        }
     }
 }

@@ -846,11 +846,28 @@ struct Args {
     gaddr_tail_pins: Option<String>,
     /// `--gaddr-grid-truth <tsv>`: the REFERENCE metric's own per-cell scores
     /// on the dial grid (`image_id\tcodec\tq\tpred` — the same table
-    /// `--dial-peer-scores` reads). Used ONLY to fill the per-codec-family
-    /// `A9r` columns, which need per-ROW reference truth; `A7r`'s exemptions
-    /// come from the registry and need no flag. Absent ⇒ the `A9r` columns
-    /// read `—`.
+    /// `--dial-peer-scores` reads). Fills the per-codec-family `A9r` columns,
+    /// which need per-ROW reference truth. Under `--floor-rule distinct`
+    /// (the default) `A7r`'s bar comes from the registry and needs no flag;
+    /// under `resolvable`/`spaced` this is REQUIRED — those windows are
+    /// chosen from the mentor's own per-cell values, and their bar is the
+    /// mentor's LIVE fraction on this same instrument (never a registry
+    /// read) — so `A7r`, not only `A9r`, depends on it there.
     gaddr_grid_truth: Option<PathBuf>,
+    /// `--floor-rule <distinct|resolvable|spaced>`: which window `A7r` tests
+    /// per ladder. OWNER-EXTENSION, opt-in (2026-09-06) — see
+    /// `zensim_validate::dial_addressability::FloorRule` and
+    /// `benchmarks/ladder_floor_resolution_2026-09-05.md`. Default
+    /// `distinct` is the pinned rule and is BYTE-IDENTICAL to every prior
+    /// `bake_verdict` invocation. `resolvable` and `spaced` require
+    /// `--gaddr-grid-truth` (their window AND their bar both come from the
+    /// mentor's own per-cell scores) and are refused without it.
+    floor_rule: Option<String>,
+    /// `--floor-margin <f64>`: the `resolvable` rule's minimum `|Δ mentor|`
+    /// between two SELECTED steps (ssim2 points on the registered
+    /// instruments). Default 0.5, matching
+    /// `FloorRule::RESOLVABLE_MARGIN_DEFAULT`. Ignored by `distinct`/`spaced`.
+    floor_margin: Option<f64>,
     /// `--corruption-head <bake.bin>`: companion corruption-head bake — the
     /// shipping design's corruption owner (at 924 the dial's own ordering is
     /// broken by design, distributional; the head trained on negrich carries
@@ -963,7 +980,21 @@ FEATURE-SET IDS (docs/FEATURE_SET_IDS.md):\n\
     Every run prints the bake's feature-set id and the root's, and reports\n\
     every disagreement (width / populated slots / extractor era). Counts are\n\
     aliases only: `944` alone has named seven different feature sets.\n\
-    --require-feature-set-match turns the report into a REFUSAL (exit 2).\n"
+    --require-feature-set-match turns the report into a REFUSAL (exit 2).\n\
+\n\
+G-ADDR FLOOR RULE (--floor-rule distinct|resolvable|spaced, owner-extension):\n\
+    distinct    (default) the pinned A7r rule — literal positions 0..=K by\n\
+                quality; bar is the registry-pinned mentor fraction. Every\n\
+                prior invocation is `distinct` and stays byte-identical.\n\
+    resolvable  skip forward past any step the mentor cannot itself resolve\n\
+                (|Δ mentor| < --floor-margin, default 0.5) until K+1\n\
+                mentor-resolvable steps are collected. REQUIRES\n\
+                --gaddr-grid-truth (window AND bar are both LIVE-computed\n\
+                from the mentor's own per-cell scores — never the registry).\n\
+    spaced      the lowest setting plus the steps nearest +2 and +5 mentor\n\
+                points above it. Also REQUIRES --gaddr-grid-truth.\n\
+    See benchmarks/ladder_floor_resolution_2026-09-05.md for the report this\n\
+    generalizes.\n"
     );
 }
 
@@ -1007,6 +1038,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut gaddr_reference: Option<String> = None;
     let mut gaddr_tail_pins: Option<String> = None;
     let mut gaddr_grid_truth: Option<PathBuf> = None;
+    let mut floor_rule: Option<String> = None;
+    let mut floor_margin: Option<f64> = None;
     let mut features_root: PathBuf = PathBuf::from(DEFAULT_FEATURES_ROOT_372);
     let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
         .map(PathBuf::from)
@@ -1095,6 +1128,28 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--gaddr-grid-truth" => {
                 let v = args.next().ok_or("--gaddr-grid-truth requires <tsv>")?;
                 gaddr_grid_truth = Some(PathBuf::from(v));
+            }
+            "--floor-rule" => {
+                let v = args
+                    .next()
+                    .ok_or("--floor-rule requires <distinct|resolvable|spaced>")?;
+                // Validate at PARSE time (margin doesn't matter for the tag
+                // check — the real margin, if any, is resolved after the
+                // whole command line is read). An unknown value must never
+                // fall through to `distinct`, which would silently grade
+                // against a rule nobody selected.
+                zensim_validate::dial_addressability::FloorRule::parse(
+                    &v,
+                    zensim_validate::dial_addressability::FloorRule::RESOLVABLE_MARGIN_DEFAULT,
+                )?;
+                floor_rule = Some(v);
+            }
+            "--floor-margin" => {
+                let v = args.next().ok_or("--floor-margin requires <f64>")?;
+                let m: f64 = v
+                    .parse()
+                    .map_err(|_| format!("--floor-margin: not a number: {v:?}"))?;
+                floor_margin = Some(m);
             }
             "--gaddr-json" => {
                 let v = args.next().ok_or("--gaddr-json requires <path>")?;
@@ -1359,6 +1414,27 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 .into(),
         );
     }
+    // `resolvable`/`spaced` choose their window from the MENTOR's own
+    // per-cell values and their bar is the mentor's LIVE fraction — both
+    // need --gaddr-grid-truth. Refuse rather than silently reading every
+    // codec as NOT MEASURED, which would look like a quiet pass at a glance.
+    if let Some(fr) = floor_rule.as_deref() {
+        let needs_mentor = zensim_validate::dial_addressability::FloorRule::parse(
+            fr,
+            floor_margin.unwrap_or(
+                zensim_validate::dial_addressability::FloorRule::RESOLVABLE_MARGIN_DEFAULT,
+            ),
+        )
+        .expect("validated at argument-parse time")
+        .needs_mentor_truth();
+        if needs_mentor && gaddr_grid_truth.is_none() {
+            return Err(format!(
+                "--floor-rule {fr} requires --gaddr-grid-truth: its window AND its bar are \
+                 both computed from the mentor's own per-cell scores on this instrument — \
+                 unlike `distinct`, there is no registry pin to fall back on."
+            ));
+        }
+    }
     Ok(Args {
         bake,
         ensemble,
@@ -1387,6 +1463,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         gaddr_reference,
         gaddr_tail_pins,
         gaddr_grid_truth,
+        floor_rule,
+        floor_margin,
         full_json,
         fulleval,
         name,
@@ -2150,6 +2228,7 @@ fn dial_panel(
     gaddr_reference: &str,
     gaddr_tail_pins: zensim_validate::dial_addressability::TailPins,
     gaddr_grid_truth: Option<&PathBuf>,
+    floor_rule: zensim_validate::dial_addressability::FloorRule,
 ) -> (String, DialMetrics) {
     if !grid_path.exists() {
         return (
@@ -2937,18 +3016,42 @@ fn dial_panel(
                 None
             }
         });
-    let floor_measure = gaddr::FloorMeasure::from_grid(
-        &grid_path
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_else(|| grid_path.display().to_string()),
+    let instrument_name = grid_path
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| grid_path.display().to_string());
+    let floor_measure = gaddr::FloorMeasure::from_grid_with_rule(
+        &instrument_name,
         &grid.image_id,
         &grid.codec,
         &grid.q,
         &scores,
         grid_truth.as_deref(),
         gaddr::report_floor_threshold(),
+        floor_rule,
     );
+    // `resolvable`/`spaced` have no registry entry for A7r — they are
+    // report-derived windows, never pinned — so their bar is the MENTOR
+    // scored AGAINST ITS OWN per-cell truth, through the IDENTICAL
+    // `from_grid_with_rule` call the candidate went through. This is what
+    // makes the bar "computed through the owner", never a re-implementation
+    // beside it. `distinct` needs none of this — its bar is the registry.
+    let mentor_floor_measure: Option<gaddr::FloorMeasure> = if floor_rule.needs_mentor_truth() {
+        grid_truth.as_deref().map(|gt| {
+            gaddr::FloorMeasure::from_grid_with_rule(
+                &instrument_name,
+                &grid.image_id,
+                &grid.codec,
+                &grid.q,
+                gt,
+                Some(gt),
+                gaddr::report_floor_threshold(),
+                floor_rule,
+            )
+        })
+    } else {
+        None
+    };
     let addr_verdict = gaddr::evaluate_full(
         gaddr_reference,
         gaddr_tail_pins,
@@ -2958,6 +3061,10 @@ fn dial_panel(
         probes.negtail.as_ref().map(|(m, sha)| (m, sha.as_str())),
         identity_measure.as_ref().map(|(m, sha)| (m, sha.as_str())),
         Some(&floor_measure),
+        gaddr::FloorRuleContext {
+            rule: floor_rule,
+            mentor: mentor_floor_measure.as_ref(),
+        },
     );
     s.push_str(&gaddr::render_markdown(&addr_verdict));
 
@@ -4436,6 +4543,18 @@ Run the dedicated q-sweep harness for those._\n",
             })
             .unwrap_or_default(),
         args.gaddr_grid_truth.as_ref(),
+        args.floor_rule
+            .as_deref()
+            .map(|v| {
+                zensim_validate::dial_addressability::FloorRule::parse(
+                    v,
+                    args.floor_margin.unwrap_or(
+                        zensim_validate::dial_addressability::FloorRule::RESOLVABLE_MARGIN_DEFAULT,
+                    ),
+                )
+                .expect("validated at argument-parse time")
+            })
+            .unwrap_or_default(),
     );
     buf.push_str(&dial_md);
     pt.mark("DIAL panel (grid load + score + mono/tied)");
@@ -4448,6 +4567,20 @@ Run the dedicated q-sweep harness for those._\n",
                 // peer, not `--bake`, and a file that does not say so is a
                 // mislabelled measurement waiting to be quoted.
                 if let Some(obj) = j.as_object_mut() {
+                    // `to_json` already carries `"floor_rule"` (the tag); add
+                    // the numeric params actually used, so a `resolvable`/
+                    // `spaced` bar is fully reproducible from the JSON alone
+                    // without re-deriving them from the CLI invocation.
+                    obj.insert(
+                        "floor_rule_params".into(),
+                        serde_json::json!({
+                            "margin": args.floor_margin.unwrap_or(
+                                zensim_validate::dial_addressability::FloorRule::RESOLVABLE_MARGIN_DEFAULT,
+                            ),
+                            "near_lo": zensim_validate::dial_addressability::FloorRule::SPACED_NEAR_LO_DEFAULT,
+                            "near_hi": zensim_validate::dial_addressability::FloorRule::SPACED_NEAR_HI_DEFAULT,
+                        }),
+                    );
                     obj.insert(
                         "scorer".into(),
                         serde_json::json!(match args.dial_peer_scores.as_ref() {

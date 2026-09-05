@@ -150,7 +150,10 @@ def grade(args) -> int:
             cmd = [args.bv, "--bake", inv["bake"], "--features-root", inv["root"],
                    "--corpora", inv["corpora"], "--dial-grid", inv["grid"],
                    "--gaddr-tail-pins", pins,
+                   "--floor-rule", args.floor_rule,
                    "--gaddr-json", str(out / pins / f"{name}.json")]
+            if args.floor_margin is not None:
+                cmd += ["--floor-margin", str(args.floor_margin)]
             if inv["regime"]:
                 cmd += ["--regime", inv["regime"]]
             if inv["members"]:
@@ -163,8 +166,14 @@ def grade(args) -> int:
                 cmd += ["--negtail-probe", inv["probe"]]
             if inv["identity"]:
                 cmd += ["--identity-probe", inv["identity"]]
-            # A9r is report-only; the grid truth only fills its per-codec
-            # columns, and only grids with a reference cell table have one.
+            # Under `--floor-rule distinct` (default) this only fills A9r's
+            # report-only per-codec column; under `resolvable`/`spaced` it is
+            # ALSO A7r's window-selection AND bar source (both are computed
+            # from the mentor's own per-cell truth on those rules — see
+            # dial_addressability::FloorRule). Only grids with a reference
+            # cell table have one; bake_verdict refuses the two non-default
+            # rules loudly when it is missing, rather than silently grading
+            # `distinct` instead.
             gt = GRID_TRUTH.get(inv["grid_sha16"])
             if gt and Path(gt).is_file():
                 cmd += ["--gaddr-grid-truth", gt]
@@ -233,6 +242,17 @@ def main() -> int:
     g.add_argument("--src", required=True)
     g.add_argument("--out", required=True)
     g.add_argument("--grid-truth", required=True)
+    # OWNER-EXTENSION, opt-in (2026-09-06): which A7r window bake_verdict
+    # tests. `distinct` (default) is the pinned rule and reproduces every
+    # prior board grade byte-for-byte (proven in
+    # benchmarks/ladder_floor_resolution_2026-09-05.md's owner-computed
+    # section). `resolvable`/`spaced` need a per-cell --gaddr-grid-truth
+    # table for their grid — supplied automatically wherever GRID_TRUTH
+    # already has one; bake_verdict refuses loudly on a cell that lacks it,
+    # rather than silently falling back to `distinct`.
+    g.add_argument("--floor-rule", default="distinct",
+                    choices=["distinct", "resolvable", "spaced"])
+    g.add_argument("--floor-margin", type=float, default=None)
     g.set_defaults(fn=grade)
     p = sub.add_parser("graft")
     p.add_argument("--src", required=True)

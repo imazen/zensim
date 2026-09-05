@@ -99,6 +99,14 @@ GRIDTRUTH="${ZL_GRIDTRUTH:-${GRIDTRUTH_DEF:-/mnt/v/output/zensim/ssim2-bar-2026-
 # FLOOR REPRESENTABILITY rule, the default) or `retired` (the pre-ruling mentor
 # probe-depth pins).
 TAILPINS="${ZL_TAILPINS:-product}"
+# Which A7r WINDOW `bake_verdict` tests — `distinct` (the pinned rule, the
+# default, byte-identical to every prior grade) or `resolvable`/`spaced`
+# (owner-extension, 2026-09-06 — see zensim_validate::dial_addressability::
+# FloorRule + benchmarks/ladder_floor_resolution_2026-09-05.md). The latter two
+# REQUIRE $GRIDTRUTH to resolve to a real file (already true for every era
+# above); `bake_verdict` refuses loudly otherwise.
+FLOORRULE="${ZL_FLOORRULE:-distinct}"
+FLOORMARGIN="${ZL_FLOORMARGIN:-}"
 GRID="${ZL_GRID:-$GRID_DEF}"
 NEGTAIL="${ZL_NEGTAIL:-$NEGTAIL_DEF}"
 IDENTITY="${ZL_IDENTITY:-$IDENTITY_DEF}"
@@ -114,6 +122,11 @@ grade() {  # <label> <bake.bin> [regime]
     # --gaddr-json carries the G-ADDR block at FULL f64 precision; the markdown
     # rounds to 4dp, which is not enough to append a registry pin from.
     [ -n "$GRIDTRUTH" ] && [ -f "$GRIDTRUTH" ] && EXTRA+=(--gaddr-grid-truth "$GRIDTRUTH")
+    # Always pass --floor-rule explicitly (same discipline as --gaddr-tail-pins
+    # above) so a grade's argv states its rule rather than relying on the
+    # binary's default staying `distinct` forever.
+    EXTRA+=(--floor-rule "$FLOORRULE")
+    [ -n "$FLOORMARGIN" ] && EXTRA+=(--floor-margin "$FLOORMARGIN")
     # --dial-grid is passed for 372 (whose GRID_DEF is a 372 grid) and, for any
     # other regime, ONLY when the caller set ZL_GRID explicitly. Without the second
     # case a `score <bake> 944` silently fell back to bake_verdict's built-in 944
@@ -144,7 +157,8 @@ if m.get('negtail') and m.get('identity'):
     print('   negtail min %.3f p1 %.3f frac<0 %.4f | identity %.4f | above-identity %d'%(
         m['negtail']['min'],m['negtail']['p1'],m['negtail']['frac_below_zero'],
         m['identity']['dial_max'],m['identity']['n_above_identity']))
-print('   bar set:', a.get('reference'), '| tail pins:', a.get('tail_pins'))
+print('   bar set:', a.get('reference'), '| tail pins:', a.get('tail_pins'),
+      '| floor-rule:', a.get('floor_rule'))
 for c in (m.get('codec_floor') or []):
     print('   %-5s repr %.4f (bar %s, incumbent %s) %-13s order_fail=%3d clamp_fail=%3d dial_min %9.4f med %s'%(
         c['codec'], c['represented_frac'],

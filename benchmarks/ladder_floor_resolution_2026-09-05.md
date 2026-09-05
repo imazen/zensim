@@ -265,3 +265,205 @@ Artifacts: `/mnt/v/output/zensim/ladder-2026-09-05/floorres/` (`dumps/`, `tables
 `verdicts/`, `verdicts_repeat/`, `logs/`). Nothing installed; `zensim/weights/` untouched;
 `benchmarks/eval_annotations.json` and `benchmarks/dial_addressability_floor_2026-09-04.json`
 untouched (no registry write — this is a report, not a bar change).
+
+## 8. Floor-rule variants, owner-computed (2026-09-06)
+
+**Owner-extension, opt-in.** The two windows this report derived by porting
+`FloorMeasure::from_grid` into Python (§4) are now a `--floor-rule` flag on
+`bake_verdict` itself — `zensim_validate::dial_addressability::FloorRule` —
+so the comparison is a measurement through the owner, not a one-off script
+kept in sync by hand. **Nothing installed changes**: the registry
+(`benchmarks/dial_addressability_floor_2026-09-04.json`), `zensim/weights/`,
+and every existing board row are byte-untouched.
+
+### 8.1 The flag
+
+```
+--floor-rule {distinct|resolvable|spaced}   default: distinct
+--floor-margin <f64>                        default: 0.5 (resolvable only)
+```
+
+- **`distinct`** (default) — the PINNED rule: literal positions `0..=K` by
+  quality. Bar = the registry-pinned mentor fraction, exactly as every prior
+  `bake_verdict` invocation reads it.
+- **`resolvable`** — variant (a): walk forward from the lowest setting,
+  skipping any step whose `|Δ mentor|` from the last SELECTED step is below
+  `--floor-margin`, until `K+1` mentor-resolvable steps are collected.
+  REQUIRES `--gaddr-grid-truth` — the window AND the bar are both computed
+  from the mentor's own per-cell scores on the SAME instrument.
+- **`spaced`** — variant (b): the lowest setting, plus the steps nearest
+  `+2.0` and `+5.0` mentor points above it, re-sorted by quality. Also
+  REQUIRES `--gaddr-grid-truth`.
+
+`resolvable`/`spaced` have no registry entry — they are report-derived
+windows, never pinned like `distinct` — so their bar is **ALWAYS
+LIVE-computed**: the mentor is graded against its own per-cell truth through
+the identical `FloorMeasure::from_grid_with_rule` call the candidate went
+through (`per_codec_floor_rows_live`, never `per_codec_floor_rows`'s registry
+lookup). Every row and note is stamped `rule=<tag>` in both the markdown and
+the JSON (`"floor_rule"` / `"floor_rule_params"` fields) so a `resolvable`
+fraction can never be silently compared against a `distinct` or `spaced` one.
+Omitting `--gaddr-grid-truth` under `resolvable`/`spaced` is a REFUSAL at
+argument-parse time (`bake_verdict: --floor-rule resolvable requires
+--gaddr-grid-truth: …`), never a silent fall-back to `distinct`'s window.
+
+### 8.2 Golden-identity proof for `distinct` (the default)
+
+Three independent checks, all clean:
+
+1. **By construction.** `FloorMeasure::from_grid` (the legacy,
+   unparameterized entry point every pre-2026-09-06 caller uses) now
+   DELEGATES to `from_grid_with_rule(..., FloorRule::Distinct)` — it is the
+   same code, not a fork kept in sync by hand. `Distinct`'s branch reduces
+   algebraically to the pre-existing body: window = `[0, 1, .., K]`, `ordered`
+   = strictly increasing across all `K+1` points (the same `K` pairs the old
+   code checked), `clamped` = the bottom `K` of that same window against the
+   same `grid_min`/`n_ladders_at_min` (computed identically, over the whole
+   ladder, unchanged).
+2. **In-suite regression test.** `dial_addressability::tests::
+   distinct_rule_matches_legacy_from_grid_on_every_existing_fixture` calls
+   both entry points on six scenarios already exercised elsewhere in the
+   suite (clean, tied, inverted-into-next-step, collapsed floor, sole holder,
+   too-short) and asserts FIELD-IDENTICAL `FloorMeasure`s (`to_bits()`
+   equality on every float). All 40 `dial_addressability` tests pass,
+   including 12 new ones; the FULL `zensim-validate` suite (234 lib tests +
+   every integration test file) passes unchanged — `cargo test -p
+   zensim-validate` reports 0 failures anywhere in the crate.
+3. **CLI-level, against a PRISTINE pre-change binary.** A throwaway sibling
+   workspace was built at the unmodified base commit (`29c198af`, this
+   report's own commit, BEFORE any of §8's code existed) and run with the
+   identical invocation used below (shipped D, the registered CANONICAL
+   372 grid, `--corpora cid22`, `--gaddr-json`). Diffing the JSON
+   programmatically (key-by-key, not textually):
+
+   ```
+   keys only in the post-change run (additive):  ['floor_rule', 'floor_rule_params']
+   keys only in the pre-change run (a removal):  []
+   keys in both whose VALUE differs:             []
+   ```
+
+   Every existing field — every `A1`-`A7r` value, every note, every SROCC,
+   the whole rank panel — is **byte-identical** to the pristine baseline.
+   The only difference is the two new, purely informational fields this
+   flag adds. The markdown report differs only in the wall-time line (the
+   same non-determinism this repo's other "byte-identical" claims already
+   carry — e.g. the 2026-08-30 default-root flip verification). The
+   throwaway workspace was `jj workspace forget`-ten and deleted immediately
+   after use.
+
+### 8.3 The owner-computed per-codec table
+
+Run on the `ladder` instrument (`dial_grid_372col_ladder.parquet`, sha256
+`4c3874a78…` — the SAME instrument and cells §1-§7 measured), via
+`scripts/dialgate_arms.sh score <label> <bake> 372` under `ZL_ERA=ladder
+ZL_FLOORRULE=<rule>` for the six bakes, and `bake_verdict --dial-peer-scores
+peer_ssim2=… --floor-rule <rule>` (peer mode, THROUGH THE OWNER) for the
+mentor itself. `--floor-margin`/the `spaced` offsets are the flag's own
+defaults (0.5 / +2.0 / +5.0), matching §4 exactly.
+
+| scorer | rule | avif-rav1e | avif-svt | jpeg | jxl | webp | pass/5 |
+|---|---|--:|--:|--:|--:|--:|--:|
+| **peer\_ssim2 (bar)** | distinct | 0.5385 | 1.0000 | 0.5385 | 0.9231 | 1.0000 | 5/5 |
+| **peer\_ssim2 (bar)** | resolvable | 0.6410 | 1.0000 | 0.6667 | 0.9615 | 1.0000 | 5/5 |
+| **peer\_ssim2 (bar)** | spaced | 0.9744 | 1.0000 | 0.8974 | 0.9615 | 1.0000 | 5/5 |
+| **Profile D (shipped)** | distinct | **0.5385** ✓ | **1.0000** ✓ | 0.5128 ✗ | **0.9615** ✓ | **1.0000** ✓ | 4/5 |
+| **Profile D (shipped)** | resolvable | **0.6667** ✓ | **1.0000** ✓ | **0.6667** ✓ | **1.0000** ✓ | **1.0000** ✓ | 5/5 |
+| **Profile D (shipped)** | spaced | 0.9487 ✗ | **1.0000** ✓ | **0.9231** ✓ | **1.0000** ✓ | **1.0000** ✓ | 4/5 |
+| Profile D (previous) | distinct | **0.5385** ✓ | **1.0000** ✓ | 0.5128 ✗ | **0.9615** ✓ | **1.0000** ✓ | 4/5 |
+| Profile D (previous) | resolvable | **0.6667** ✓ | **1.0000** ✓ | **0.6667** ✓ | **1.0000** ✓ | **1.0000** ✓ | 5/5 |
+| Profile D (previous) | spaced | 0.9487 ✗ | **1.0000** ✓ | **0.9231** ✓ | **1.0000** ✓ | **1.0000** ✓ | 4/5 |
+| Profile A | distinct | 0.3333 ✗ | 0.8462 ✗ | 0.3846 ✗ | 0.8077 ✗ | **1.0000** ✓ | 1/5 |
+| Profile A | resolvable | 0.3590 ✗ | 0.8462 ✗ | 0.5128 ✗ | 0.8462 ✗ | **1.0000** ✓ | 1/5 |
+| Profile A | spaced | 0.7179 ✗ | 0.9487 ✗ | 0.8462 ✗ | **0.9615** ✓ | **1.0000** ✓ | 2/5 |
+| Profile B | distinct | 0.2051 ✗ | 0.4359 ✗ | 0.3333 ✗ | 0.3846 ✗ | 0.9487 ✗ | 0/5 |
+| Profile B | resolvable | 0.1795 ✗ | 0.4359 ✗ | 0.5641 ✗ | 0.4231 ✗ | 0.9487 ✗ | 0/5 |
+| Profile B | spaced | 0.4359 ✗ | 0.5897 ✗ | 0.8205 ✗ | 0.6923 ✗ | **1.0000** ✓ | 1/5 |
+| lam1em3 | distinct | 0.2564 ✗ | **1.0000** ✓ | 0.4615 ✗ | 0.7308 ✗ | **1.0000** ✓ | 2/5 |
+| lam1em3 | resolvable | 0.2564 ✗ | **1.0000** ✓ | 0.5641 ✗ | 0.8077 ✗ | **1.0000** ✓ | 2/5 |
+| lam1em3 | spaced | 0.7692 ✗ | **1.0000** ✓ | **0.9231** ✓ | **1.0000** ✓ | **1.0000** ✓ | 4/5 |
+| **minus\_f162** | distinct | 0.4615 ✗ | 0.9744 ✗ | 0.4615 ✗ | 0.8462 ✗ | **1.0000** ✓ | 1/5 |
+| **minus\_f162** | resolvable | 0.5385 ✗ | 0.9744 ✗ | **0.6667** ✓ | 0.8462 ✗ | **1.0000** ✓ | 2/5 |
+| **minus\_f162** | spaced | 0.8718 ✗ | **1.0000** ✓ | 0.8718 ✗ | **1.0000** ✓ | **1.0000** ✓ | 3/5 |
+
+*(✓/✗ mark PASS/FAIL against the mentor's own LIVE fraction on that rule;
+peer\_ssim2 is the bar itself, trivially 5/5 on every rule; bold = the row the
+task asked to highlight — mentor bar, shipped D, `minus_f162`.)*
+
+**Reproduces the report's own §4 numbers exactly.** The analysis lane's raw
+TSV (`tables/a7r_all_variants.tsv`, still on disk) carries all 105 cells
+(7 scorers × 3 rules × 5 codecs) at full `f64` precision. Diffed
+programmatically against this run's owner-computed values:
+
+```
+compared 105 cells, 0 mismatches, max|diff| = 0.000e+00
+```
+
+Every digit of §4's peer\_ssim2 and shipped-D rows, and every "codecs
+passing" count for all seven scorers (including Profile A/B, `lam1em3`,
+`minus_f162`, which §4's inline markdown only reported as pass-counts) —
+BIT-IDENTICAL. This is independent confirmation, through the compiled owner
+tool rather than the hand-rolled Python port, of §4's finding: `resolvable`
+clears shipped D's jpeg miss (4/5 → 5/5) at the cost of nothing, `spaced`
+clears jpeg but opens a NEW `avif-rav1e` miss (4/5, but a DIFFERENT failing
+codec than `distinct`'s), and `minus_f162` — built to cure a JXL inversion
+on a DIFFERENT, older grid — does not generalize here (1/5 → 2/5 → 3/5,
+improving under both alternatives but never catching up to shipped D).
+
+### 8.4 Reproduction
+
+```sh
+cargo build --release -p zensim-validate --bin bake_verdict
+
+L=/mnt/v/output/zensim/ladder-2026-09-05/instruments
+export ZL_BV=$PWD/target/release/bake_verdict ZL_ERA=ladder
+
+# the mentor itself, through the owner (peer mode) — --bake is a required
+# but UNUSED placeholder in peer mode; the DIAL/G-ADDR block is entirely
+# overridden by --dial-peer-scores
+for RULE in distinct resolvable spaced; do
+  "$ZL_BV" --bake zensim/weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin \
+    --dial-peer-scores "peer_ssim2=$L/dialcells_ssim2_ladder.tsv" \
+    --dial-grid "$L/dial_grid_372col_ladder.parquet" \
+    --gaddr-grid-truth "$L/dialcells_ssim2_ladder.tsv" \
+    --floor-rule "$RULE" --corpora cid22 \
+    --gaddr-json /tmp/gaddr_peer_ssim2_$RULE.json
+done
+
+# the six bakes, through dialgate_arms.sh (now threads --floor-rule)
+for RULE in distinct resolvable spaced; do
+  ZL_FLOORRULE=$RULE scripts/dialgate_arms.sh score D_shipped \
+    zensim/weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin 372
+done
+
+# the fair board, under a non-default rule (opt-in; default stays `distinct`)
+scripts/gaddr_board_regrade.sh grade   # honors ZL_FLOORRULE / ZL_FLOORMARGIN
+```
+
+### 8.5 What landed
+
+- `zensim-validate/src/dial_addressability.rs` — `FloorRule` (`Distinct` /
+  `Resolvable { margin }` / `Spaced { near_lo, near_hi }`, `Default =
+  Distinct`), `FloorRuleContext`, `FloorMeasure::from_grid_with_rule` (the one
+  implementation; `from_grid` delegates), `resolvable_window` /
+  `spaced_window`, `per_codec_floor_rows_live` (the LIVE-bar sibling of
+  `per_codec_floor_rows`, never registry-backed), `Verdict.floor_rule` +
+  `to_json`/`render_markdown` stamping. 12 new tests, including the two the
+  task named explicitly:
+  `resolvable_skips_a_mentor_near_tie_that_distinct_fails_on` (a synthetic
+  ladder where the mentor inverts by 0.2 at the bottom — `distinct` fails the
+  ordered dial, `resolvable` skips the unresolvable step and passes) and
+  `collapsed_floor_fails_under_every_rule` (two ladders sharing the
+  instrument minimum fail under all three rules, because position 0 — where
+  both touch the floor — is in every rule's window).
+- `zensim-validate/src/bin/bake_verdict.rs` — `--floor-rule` / `--floor-margin`
+  CLI flags (validated at parse time, refused without `--gaddr-grid-truth`
+  when the rule needs it), wired through `dial_panel`, `floor_rule_params`
+  stamped into `--gaddr-json`.
+- `scripts/dialgate_arms.sh` — `ZL_FLOORRULE` / `ZL_FLOORMARGIN` (always
+  passed explicitly to `bake_verdict`, same discipline as `ZL_TAILPINS`).
+- `scripts/gaddr_board_regrade.{sh,py}` — `--floor-rule`/`--floor-margin` on
+  the `grade` subcommand (default `distinct`; the board's existing `product`/
+  `retired` tail-pin re-grade is unaffected).
+
+No registry write, no board graft, no default change. `zensim/weights/` and
+`benchmarks/dial_addressability_floor_2026-09-04.json` remain untouched.
