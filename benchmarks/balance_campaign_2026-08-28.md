@@ -7979,3 +7979,31 @@ rows in the training GRAM itself (not the existing anchor-weight, which only fee
 a gram-rebuild data-pipeline change, unbuilt. Nothing installed; `ZensimProfile::D`/
 `zensim/weights/` untouched. Full tables + reproduction:
 [`d_peaks_jxl_floor_2026-09-05.md`](d_peaks_jxl_floor_2026-09-05.md).
+
+## ROUND 94 — 2026-09-05: the jxl inversion is ONE feature (f162) — fixing it trades A7r for a NEW A4 floor regression, zero of 9 arms ship
+
+Follow-up to ROUND 93: per-feature decomposition (pure linear algebra on the bake's own
+`zenpredict inspect --weights` dump and the grid's own raw `f*` columns — `raw_pred(hi) −
+raw_pred(lo) = Σ coef_k·(x_k(hi)−x_k(lo))`, exact for a single identity-activation layer, and
+cross-checked to reproduce ROUND 93's published raw deltas on all 8 failing cases) finds
+**`f162` alone drives the inversion**: its own summed contribution across the 4 failing ladders
+(−0.054/lam1em3, −0.062/Dpeaks) is 2× the ENTIRE net inversion, every other active feature
+(basic or peaks) nets in the CORRECT direction, and analytically subtracting f162's delta alone
+flips the sign to correctly-ordered on **8 of 8** cases before any refit. The mechanism is not a
+sign error — f162's coefficient sign agrees with its own 33-ladder majority trend (DECREASES
+with quality) in both arms; it has a LOCAL non-monotonic bump exactly at the failing step on
+these 4 images, riding on top of a correct global trend. 8 single-slot leave-one-out refits (one
+per lam1em3's active peaks slot) plus one leave-all-suspects refit (dropping the 4
+negative-aggregate peaks slots together), all at λ=1e-3 with the id100+negrich chain
+byte-identical to lam1em3 (control-verified: stripped bytes match `Dsweep_lam1em3_dial.bin`
+exactly) except `--slice-file`: **only the two arms that drop f162 (`minus_f162` alone, and
+`minus_all_suspects`) reach jxl `A7r` 1.0000** (order_fail 4→0); the other 7 leave the inversion
+completely unchanged. **Neither ships**: both trade A7r for a brand-new failure on `A4` (robust
+floor — dial p5, bar ≤10.263) that shipped D and the unmodified peaks arm both pass
+(D 8.772, lam1em3 9.058, `minus_f162` **10.445 fail**, `minus_all_suspects` **10.330 fail**) —
+a clean either/or, never both axes failing on the same arm. CID22 gains cleanly for every
+ablation arm by paired bootstrap (+0.0085 to +0.0098 vs D, CI excludes zero, P≈1.000 on all 9),
+and KonJND/hfnl_cid22band gain further for the two A7r-passing arms — but the ship rule requires
+A7r AND no regression lost vs D, and no arm clears both. Nothing installed;
+`ZensimProfile::D`/`zensim/weights/` untouched. Full tables + reproduction:
+[`d_peaks_slot_ablation_2026-09-05.md`](d_peaks_slot_ablation_2026-09-05.md).
