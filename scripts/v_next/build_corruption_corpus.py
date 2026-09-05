@@ -13,9 +13,33 @@ Label per row: is_corruption (1/0), family, region, severity, kind, content_clas
 ref_id. The honest matched anchors (q20/q10 of the SAME source) are the hard
 negatives; broad honest range comes from the existing 720 corpora at train time.
 
+## Feature width (2026-09-05)
+
+`--nfeat 372` (default) runs the CANONICAL 372 extractor
+`extract_features_372col` (imazen-only decoders, `--features training,zen-decode`),
+whose v1 layout is basic `f0..155` | peaks `f156..227` | masked `f228..299` |
+IW `f300..371`. `--nfeat 720` keeps the historical `v2_ab_extract` call for
+reproducing the 2026-07-24 corpus. The two extractors take DIFFERENT argv, so
+the width also selects the invocation — see `run_extract`.
+
+⚠ ERA: a 372 corpus built after `56bbcda2` (option C — v1 stops pooling phantom
+columns) is NOT comparable cell-for-cell with the 2026-07-24 720 corpus. MEASURED
+on `im26/lilith/gen-line-concentric__00266…` (1024x1024, exactly the padded-width
+class option C removed): 51.8% of basic cells and 66.9%/68.9% of masked/IW cells
+move past `max(1e-6, 1e-5·|stored|)`, max |Δ| 0.336, on 664 of 674 rows.
+
+⚠ NON-IMAZEN DEPENDENCY, inherited and deliberately NOT changed here: the
+reference downscale below is PIL Lanczos, and the codec-corpus generator loads
+images + writes its q10/q20 JPEG anchors through the `image` crate. Swapping
+either for the imazen owner (zenresize / zenjpeg) changes the PIXELS, which would
+confound an extractor-era A/B with a resampler/encoder change. Keep it identical
+while comparing eras; replacing it is its own registered change with its own
+before/after.
+
 Usage:
   build_corruption_corpus.py --sources sources.tsv --out corpus.parquet \
-      [--gen <corruption_corpus bin>] [--extract <v2_ab_extract bin>] [--limit N]
+      [--gen <corruption_corpus bin>] [--extract <extractor bin>] [--limit N] \
+      [--nfeat 372|720] [--resume]
 """
 import argparse, os, glob, subprocess, shutil, sys, tempfile
 import numpy as np, pyarrow as pa, pyarrow.parquet as pq
@@ -24,7 +48,8 @@ Image.MAX_IMAGE_PIXELS = None  # sources include legit 100+ MP scans, not attack
 
 GEN = os.path.expanduser("~/work/codec-corpus/crate/target/release/examples/corruption_corpus")
 EXTRACT = "./target/release/examples/v2_ab_extract"
-FEATCOLS = [f"f{i}" for i in range(720)]
+NFEAT = 720
+FEATCOLS = [f"f{i}" for i in range(NFEAT)]
 MAX_DIM = 1024  # cap source max-dimension (~1MP) — corruption signatures are
                 # scale-invariant, and this aligns resolution with the KADIS/safesyn
                 # negatives (~0.25-1MP) AND makes 720-feat extraction tractable
@@ -48,6 +73,22 @@ def maybe_downsize(ref_path, tmpdir):
     except Exception as e:
         print(f"  downsize failed for {ref_path}: {e}", flush=True)
         return ref_path
+
+
+def run_extract(pairs_tsv, out_csv):
+    """Invoke the width's extractor. THE one place that knows each binary's argv.
+
+    `extract_features_372col` (the canonical 372 owner, 2026-09-04) takes named
+    args and a `pairs` corpus mode; the legacy 720 `v2_ab_extract` took two
+    positionals. Getting this wrong produces a truncated CSV that only surfaces
+    later as `ValueError: 'fNNN' is not in list` — which is exactly how the
+    2026-07-24 build died at rc=1 after 5,420 s with 141 of 174 refs written.
+    """
+    if NFEAT == 372:
+        argv = [EXTRACT, "--corpus", "pairs", "--path", pairs_tsv, "--out", out_csv]
+    else:
+        argv = [EXTRACT, pairs_tsv, out_csv]
+    return subprocess.run(argv, capture_output=True, text=True)
 
 
 def parse_name(stem):
@@ -84,7 +125,7 @@ def process_ref(ref_path, ref_id, cclass, tmpdir):
             lab = parse_name(os.path.splitext(os.path.basename(p))[0]) or {}
             labels.append(lab)
     fcsv = os.path.join(tmpdir, "feats.csv")
-    r = subprocess.run([EXTRACT, pairs, fcsv], capture_output=True, text=True)
+    r = run_extract(pairs, fcsv)
     shutil.rmtree(outdir)
     if r.returncode != 0 or not os.path.exists(fcsv):
         print(f"  SKIP {ref_id}: extract failed ({r.stderr.strip()[:120]})", flush=True)
@@ -135,8 +176,15 @@ def main():
     ap.add_argument("--extract", default=EXTRACT)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--max-dim", type=int, default=MAX_DIM)
+    ap.add_argument("--nfeat", type=int, default=372, choices=(372, 720),
+                    help="372 = extract_features_372col (canonical, imazen-only "
+                         "decoders); 720 = the legacy v2_ab_extract corpus")
     a = ap.parse_args()
+    global NFEAT, FEATCOLS
+    NFEAT = a.nfeat
+    FEATCOLS = [f"f{i}" for i in range(NFEAT)]
     GEN, EXTRACT, MAX_DIM = a.gen, a.extract, a.max_dim
+    print(f"nfeat={NFEAT} extractor={EXTRACT}", flush=True)
     srcs = [l.rstrip("\n").split("\t") for l in open(a.sources) if l.strip()]
     if a.limit:
         srcs = srcs[:a.limit]

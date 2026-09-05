@@ -252,7 +252,15 @@ check-cfg = ['cfg(feature, values("training"))', 'cfg(has_cpp_ssimulacra2)', 'cf
 # lower). A dependency's own patch table is ignored — only a workspace
 # ROOT's applies, and this crate is now its own root, so declare them here.
 [patch.crates-io]
-jxl-encoder = { path = "../../jxl-encoder/jxl-encoder" }
+# ⚠ NOT a plain path patch: `~/work/zen/jxl-encoder` bumped 0.3.2 -> 0.4.0 in
+# `4363a3d5` (2026-08-29) while `~/work/zen/zenjxl` still requires `^0.3.2`, and
+# 0.3.2 was NEVER published (crates.io tops out at 0.3.1). Since then EVERY fresh
+# resolve of this standalone workspace failed with "failed to select a version for
+# the requirement `jxl-encoder = ^0.3.2`" — only checkouts carrying a warm
+# pre-Aug-29 `Cargo.lock` (gitignored) still built. Pin the local repo's git rev
+# that IS 0.3.2 (`bfb880f9`, the parent of the bump); reads the sibling's object
+# DB only, never its working tree. Retire this the moment zenjxl accepts ^0.4.
+jxl-encoder = { git = "file:///home/lilith/work/zen/jxl-encoder", rev = "bfb880f9", package = "jxl-encoder" }
 zenjpeg = { path = "../../zenjpeg/zenjpeg" }
 # use local sibling codecs so the whole graph resolves to one version (2026-07-18):
 # transitive crates.io zenavif/zenpixels were skewing against the local siblings.

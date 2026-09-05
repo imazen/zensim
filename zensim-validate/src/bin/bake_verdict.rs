@@ -881,6 +881,12 @@ struct Args {
     /// the gate). Scored on the same corruption grid; the dial-alone numbers
     /// stay in the report for honesty. Absent → dial-only, unchanged.
     corruption_head: Option<PathBuf>,
+    /// `--corruption-head-threshold <score>`: the DEPLOY deadband, in the
+    /// head bake's own OUTPUT units. The registered composition is
+    /// `final = min(perceptual, gate)` with `gate = 100` unless
+    /// `P(corruption) > T`; a head baked to emit `100*(1-P)` turns that
+    /// into `head_score < 100*(1-T)`, so `T = 0.9` is `10.0` here.
+    corruption_head_threshold: f64,
     /// `--negtail-probe <parquet>`: pinned negative-tail probe (`entry, f0..`)
     /// for the G-ADDR floor axis — rows whose reference metric is genuinely
     /// negative, so "does the dial still go below zero, and as deep as the
@@ -965,6 +971,7 @@ DEFAULTS:\n\
     --compare       none (per-zone dial-agreement vs a reference bake)\n\
     --corruption-grid canonical grid (negative-tail gate; auto if present)\n\
     --corruption-head none (companion head bake scored on the corruption grid)\n\
+    --corruption-head-threshold 10.0 (deploy deadband in the head bake's output units)\n\
     --features-root /mnt/v/zen/zensim-training/2026-08-30-full-features-372\n\
                     (the CURRENT-extractor 372 root, default since 2026-08-30; the\n\
                     2026-05-15 root stays on disk as a valid STORED-ERA read)\n\
@@ -1036,6 +1043,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             )
         });
     let mut corruption_head: Option<PathBuf> = None;
+    let mut corruption_head_threshold: f64 = 10.0;
     let mut negtail_probe: Option<PathBuf> = None;
     let mut identity_probe: Option<PathBuf> = None;
     let mut dial_peer_scores: Option<(String, PathBuf)> = None;
@@ -1239,6 +1247,14 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 let v = args.next().ok_or("--corruption-grid requires <path>")?;
                 corruption_grid = PathBuf::from(v);
                 corruption_grid_set = true;
+            }
+            "--corruption-head-threshold" => {
+                let v = args
+                    .next()
+                    .ok_or("--corruption-head-threshold requires <score>")?;
+                corruption_head_threshold = v
+                    .parse()
+                    .map_err(|_| "--corruption-head-threshold must be a number")?;
             }
             "--corruption-head" => {
                 let v = args.next().ok_or("--corruption-head requires <bake.bin>")?;
@@ -1470,6 +1486,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         compare,
         corruption_grid,
         corruption_head,
+        corruption_head_threshold,
         negtail_probe,
         identity_probe,
         dial_peer_scores,
@@ -4724,12 +4741,18 @@ Run the dedicated q-sweep harness for those._\n",
     // Hoisted out of the block so `--full-json` can carry the gate result.
     let mut corruption_stats: Option<eval_report::CorruptionStats> = None;
     let mut corruption_head_stats: Option<eval_report::CorruptionStats> = None;
+    let mut corruption_deploy_stats: Option<eval_report::CorruptionStats> = None;
     if args.corruption_grid.exists() {
         match parquet_loader::load_labeled_grid(&args.corruption_grid) {
             Ok(grid) => {
+                // Hoisted so the DEPLOY composition below can reuse the dial
+                // scores; `None` when the dial could not read this grid, which
+                // is exactly when the composition is undefined.
+                let mut dial_scores: Option<Vec<f64>> = None;
                 if grid.n_features == n_inputs {
                     let dial = ens.score_rows(&grid.feature_rows);
                     let stats = eval_report::corruption_gate(&grid.label, &dial);
+                    dial_scores = Some(dial);
                     buf.push_str(&eval_report::corruption_gate_section(
                         &stats,
                         &args.corruption_grid.display().to_string(),
@@ -4769,6 +4792,36 @@ Run the dedicated q-sweep harness for those._\n",
                                 ),
                             ));
                             corruption_head_stats = Some(stats);
+                            // DEPLOY composition. The head is not a second
+                            // ranker - the registered design is
+                            // `final = min(perceptual, gate)`, so a row the
+                            // head flags is forced to 0 and can no longer
+                            // out-rank its own honest anchor. This is the
+                            // number the product sees; the two sections above
+                            // are each half of it.
+                            let thr = args.corruption_head_threshold;
+                            if let Some(dial) = dial_scores.as_ref() {
+                                let composed: Vec<f64> = dial
+                                    .iter()
+                                    .zip(scores.iter())
+                                    .map(|(&d, &h)| if h < thr { d.min(0.0) } else { d })
+                                    .collect();
+                                let cstats = eval_report::corruption_gate(&grid.label, &composed);
+                                let title = format!(
+                                    "Corruption gate - DEPLOY composition `min(dial, gate)` (head `{}`, deadband head_score < {thr})",
+                                    basename(head_path)
+                                );
+                                buf.push_str(&eval_report::corruption_gate_section(
+                                    &cstats,
+                                    &args.corruption_grid.display().to_string(),
+                                    &title,
+                                ));
+                                corruption_deploy_stats = Some(cstats);
+                            } else {
+                                buf.push_str(
+                                    "\n## Corruption gate (deploy) - SKIPPED\n\nThe dial could not read this grid, so `min(dial, gate)` is undefined.\n",
+                                );
+                            }
                         }
                         Ok(head) => buf.push_str(&format!(
                             "\n## Corruption gate (head) — ⚠ SKIPPED (feature-count mismatch)\n\n\
@@ -5228,6 +5281,19 @@ Run the dedicated q-sweep harness for those._\n",
             None => Value::Null,
         };
 
+        // corruption_deploy: the registered `final = min(perceptual, gate)`
+        // composition — the product-visible gate, distinct from either half.
+        let corruption_deploy = match &corruption_deploy_stats {
+            Some(cs) => json!({
+                "head": args.corruption_head.as_ref().map(|p| basename(p)),
+                "threshold": args.corruption_head_threshold,
+                "n_triples": cs.n_triples,
+                "pass_q20": cs.pass_q20,
+                "pass_q10": cs.pass_q10,
+            }),
+            None => Value::Null,
+        };
+
         // per_pair: {corpus: {pred, <mos|jnd>}} for the rank corpora + a
         // {kadis: {pred, ssim2, butter, cvvdp}} block from the metric parquet.
         // `sdr25` added 2026-08-04 (campaign Appendix I): its target is `q_jnd`,
@@ -5407,6 +5473,7 @@ Run the dedicated q-sweep harness for those._\n",
             "dial": dial,
             "corruption": corruption,
             "corruption_head": corruption_head,
+            "corruption_deploy": corruption_deploy,
             "per_pair": per_pair,
         });
         let write_json = |path: &Path, value: &Value, label: &str| -> bool {
