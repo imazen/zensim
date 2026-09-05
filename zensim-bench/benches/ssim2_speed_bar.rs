@@ -43,9 +43,11 @@
 //! | `q7b_944pools`     | `V1PoolsMode::Full` (all 944 live)                | the linear |
 //! | `hybrid_944pools`  | `V1PoolsMode::Full`                               | MLP **and** linear |
 //! | `free156_peaks_raw` | `V1PoolsMode::Peaks` + `V1FreeExtras::RawMoments`, v1-only, 944 layout | the 156+free MLP (A3b/A4b class) |
+//! | `peaks156_no_raw`  | `V1PoolsMode::Peaks`, `V1FreeExtras::Off`, v1-only, 944 layout | the 156+peaks head — the ZERO-marginal-compute half of the free set |
 //!
 //! Bake bytes come from the environment so none enter git:
 //! `ZEN_HY_MLP` (the 944 MLP flagship), `ZEN_HY_LIN` (the 944 pools linear),
+//! `ZEN_HY_PEAKS` (a 156+peaks head — omit it and the arm is simply absent),
 //! `ZEN_HY_ADD` (the basic-only additive head — `bake_block_profile` says it
 //! uses 28 of f0..155 and NONE of f156-371, so its true walk is the cheapest
 //! v1-only fold, not the peaks fold the exam credited it with) and
@@ -207,6 +209,13 @@ fn main() {
     let lin: Option<&'static Head> = Head::load("ZEN_HY_LIN").map(|h| &*Box::leak(Box::new(h)));
     let add: Option<&'static Head> = Head::load("ZEN_HY_ADD").map(|h| &*Box::leak(Box::new(h)));
     let free: Option<&'static Head> = Head::load("ZEN_HY_FREE").map(|h| &*Box::leak(Box::new(h)));
+    // PEAKS-ONLY arm (`ZEN_HY_PEAKS`): the ZERO-marginal-compute half of the free
+    // set. `benchmarks/free_features_2026-09-01.md` §2.1 measured the 944 LAYOUT
+    // alone (peaks emitted, accumulators off) at ratio CIs that all straddle 1.0,
+    // and its §2.2 priced the raw-moment accumulators separately at ~1 %/1T. This
+    // arm is the first half without the second, so the two halves can be read
+    // apart in ONE binary instead of across two runs.
+    let peaks: Option<&'static Head> = Head::load("ZEN_HY_PEAKS").map(|h| &*Box::leak(Box::new(h)));
     // The fold engine + the two pool modes the two regimes correspond to.
     let zf: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::B)));
     // Byte-identical to `zensim/benches/extract_paths_bench.rs`'s `toggles_off`
@@ -240,6 +249,13 @@ fn main() {
         append2_block: true,
         free_extras: zensim::feature_v2::V1FreeExtras::RawMoments,
         ..Default::default()
+    };
+    // The peaks-only walk: byte-identical to `v1_basic_free` except the free
+    // accumulators are OFF, so the two arms differ in exactly the one thing
+    // whose cost is being priced.
+    let v1_basic_peaks = zensim::feature_v2::V2NewFeatureToggles {
+        free_extras: zensim::feature_v2::V1FreeExtras::Off,
+        ..v1_basic_free
     };
 
     println!(
@@ -294,6 +310,26 @@ fn main() {
                         })
                     });
                 }
+                if let Some(pk) = peaks {
+                    group.bench("peaks156_no_raw", move |b| {
+                        let mut scratch = zensim::feature_v2::V2Scratch::new();
+                        let mut pred = Predictor::new(&pk.model);
+                        let mut x: Vec<f32> = Vec::new();
+                        b.iter(move || {
+                            let rs = RgbSlice::new(src_s, n, n);
+                            let ds = RgbSlice::new(dst_s, n, n);
+                            let v2 = zf
+                                .compute_folded720_features_streaming(
+                                    &rs,
+                                    &ds,
+                                    v1_basic_peaks,
+                                    &mut scratch,
+                                )
+                                .unwrap();
+                            zenbench::black_box(pk.forward(&mut pred, &mut x, v2.features()))
+                        })
+                    });
+                }
                 if let Some(f) = free {
                     group.bench("free156_peaks_raw", move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();
@@ -332,6 +368,26 @@ fn main() {
                                         &rs,
                                         &ds,
                                         v1_basic,
+                                        &mut scratch,
+                                    )
+                                    .unwrap();
+                                zenbench::black_box(
+                                    v2.features().iter().fold(0.0f64, |a, &b| a + b),
+                                )
+                            })
+                        });
+                    }
+                    if peaks.is_some() {
+                        group.bench("peaks156_extract_only", move |b| {
+                            let mut scratch = zensim::feature_v2::V2Scratch::new();
+                            b.iter(move || {
+                                let rs = RgbSlice::new(src_s, n, n);
+                                let ds = RgbSlice::new(dst_s, n, n);
+                                let v2 = zf
+                                    .compute_folded720_features_streaming(
+                                        &rs,
+                                        &ds,
+                                        v1_basic_peaks,
                                         &mut scratch,
                                     )
                                     .unwrap();
