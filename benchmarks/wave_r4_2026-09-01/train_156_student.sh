@@ -185,6 +185,16 @@ WIDTH_ARGS=(--max-features 156 --allow-narrow-features)
 if [ -n "$WR4_KEEP" ]; then
   [ -f "$WR4_KEEP" ] || { echo "ABORT: WR4_KEEP set but missing: $WR4_KEEP"; exit 1; }
   WIDTH_ARGS=(--max-features 944 --keep-features "$WR4_KEEP")
+elif [ -n "${WR4_FULL944:-}" ]; then
+  # WR4_FULL944=1 (fastclass2 lane, 2026-09-05): the FULL-944 arm -- no
+  # --keep-features, so the model may read every coordinate. It is the compute
+  # CEILING of this recipe (plan Phase A-ORACLE), never a ship candidate: it
+  # prices at the full 944 walk by construction. A no-op unless set, and
+  # mutually exclusive with WR4_KEEP by the elif (WR4_KEEP wins, loudly below).
+  WIDTH_ARGS=(--max-features 944)
+fi
+if [ -n "$WR4_KEEP" ] && [ -n "${WR4_FULL944:-}" ]; then
+  echo "== NOTE: WR4_KEEP and WR4_FULL944 both set -- WR4_KEEP wins (slice: $WR4_KEEP)"
 fi
 
 EXTRA=()
@@ -196,7 +206,7 @@ if [ -n "$HIDDEN" ];     then EXTRA+=( --hidden "$HIDDEN" ); fi
 if [ -n "$ALPHA_HEAD" ]; then EXTRA+=( --per-sample-alpha-head ); fi
 if [ -n "$SKIPC" ];      then EXTRA+=( --skip-connection ); fi
 
-echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) konjnd_train_w=$KONW kon_flags=$KONFLAGS hf_flags=$HFFLAGS n_hidden_layers=$NHL hidden=${HIDDEN:-default128} alpha_head=${ALPHA_HEAD:-0} skip=${SKIPC:-0} extra=(${EXTRA[*]+"${EXTRA[*]}"}) $(date -u +%H:%M:%SZ)"
+echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) konjnd_train_w=$KONW kon_flags=$KONFLAGS hf_flags=$HFFLAGS n_hidden_layers=$NHL hidden=${HIDDEN:-default128} alpha_head=${ALPHA_HEAD:-0} skip=${SKIPC:-0} full944=${WR4_FULL944:-0} extra=(${EXTRA[*]+"${EXTRA[*]}"}) $(date -u +%H:%M:%SZ)"
 exec "$TRAIN" "${TRAIN_GROUPS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} \
   --n-hidden-layers "$NHL" --target-column human_score --target-scale 100 \
   --epochs 120 --pairs-per-epoch 50000 "${WIDTH_ARGS[@]}" \

@@ -201,6 +201,38 @@ widths **H32**, **H128** (`--hidden` default = the control) → 5 × 2 × 3 = **
 | **P2α** | `WR4_ALPHA_HEAD=1 WR4_N_HIDDEN_LAYERS=2` | depth 2 (`n→H→H/2→heads`), the arm the fastclass wave could not build |
 | **SKIP** | `WR4_SKIP=1` | input→output linear skip; a shape lever with *zero* walk cost |
 
+### Phase A-ORACLE — the COMPUTE ceiling of this recipe (3 fits)
+
+**AMENDMENT, registered 2026-09-05 20:10 UTC, while Phase A was on its first
+cell and before ANY arm number existed.** Reason: G4's result changed what the
+KonJND gap can be attributed to, and this arm is the cheapest thing that turns
+the attribution from an argument into a measurement.
+
+G4 established that the leaders train on a **pools-ZEROED** compute set — their
+`f156..371` are structural zeros — so whatever KonJND skill they carry above
+the fast class comes from **v2 (f372..719) + append (f720..923)**, blocks the
+fast walk does not compute at all. The fast class's own cheap slice of that
+territory is the 24 class-C slots, and the fastclass wave already measured them
+at KonJND +0.0239 (t = 0.40, not significant). So the standing hypothesis is
+that the KonJND deficit is a **COMPUTE gap, not a shape gap** — and Phase A as
+registered cannot separate the two, because every one of its cells is
+compute-restricted.
+
+**The arm:** the base recipe VERBATIM with `WR4_KEEP` unset — i.e.
+`--max-features 944` with **no** `--keep-features`, on the same pools root, same
+seeds. Same recipe, same data, same era, same build; the ONLY difference is
+that the model may read all 944 coordinates.
+
+`ORACLE − S265` is then exactly "what the missing compute is worth under this
+recipe", with none of the recipe/root/era confounds that comparing against
+`W10L9PH`/`W11J` carries. If ORACLE's KonJND lands near the leaders' 0.478, the
+deficit is compute and no shape in Phase A/B/C can close it; if ORACLE lands
+near the fast class's 0.432, the deficit is the recipe and the leaders' margin
+comes from somewhere this campaign has not looked. Either answer is a result.
+
+It is NOT a ship candidate — it prices at the full 944 walk and fails W4 by
+construction. It is an instrument.
+
 ### Phase D — the DIAL chain on the selected candidate (0 fits)
 
 `bake_dial_refit pack --neg-tail --anchor <anchor944_pools_dial ∪ n_id identity
@@ -292,6 +324,14 @@ script (repo rule against hardcoded per-lane paths).
   composite bar, within 0.0014 of the CID22 bar (inside the ~0.0069 per-model
   CI half-width), and −0.046 on KonJND**, which is a LARGER gap than §1's
   cross-era −0.029. hfnlproxy 0.4271 vs 0.67–0.69 is the second gap.
+* **G5a — the W4 instrument has no class-C arm, stated before it matters.**
+  `ssim2_speed_bar.rs` carries `add156_156basic` / `peaks156_no_raw` /
+  `free156_peaks_raw` and no 289 arm. If S289 wins selection, an additive
+  `ZEN_HY_CLASSC` arm is added to the instrument and MEASURED; if it does not,
+  S289's W4 is reported as a COMPOSITION of the two published marginals
+  (free set +0.8–1.6 %/1T, class-C +1.3–1.5 % native over it) and labelled as
+  composed, never as measured. Neither path is at risk of the 1.25× bar:
+  the largest published composition is ~+4 %.
 * **G5 — W4 protocol.** `zensim-bench/benches/ssim2_speed_bar.rs` with the
   candidate loaded via `ZEN_HY_*`, **1T and 8T**, min over ≥10 process starts,
   `ZEN_S2_WALL_S` sized for the image size, plus `ZEN_S2_EXTRACT_ONLY=1` to

@@ -37,3 +37,55 @@ and misses only KonJND (0.4322 vs 0.4609, −0.029) — but the within-ref base
 recipe pays −0.330 on `hfnlproxy` (0.4271 vs the control's 0.7572 and the
 leaders' 0.70–0.74), an axis `product_composite` cannot see. Both are carried
 as reported axes throughout.
+
+---
+
+## 1. GATE G1 — PASS, and it localises a pack-owner effect worth flagging
+
+`F2_S265_H128_p_s4004` is the base recipe with every new lever unset, fit on
+THIS lane's build. Against the incumbent `FC_D3_s4004` (wave-r4 pin,
+2026-09-01), scored on the same root by the same binary:
+
+| comparison | mismatching axes | composite |
+|---|---|---|
+| **RAW bakes** (trainer output, no pack) | **0 of 12** | `0.8634940859693885` on both, all 16 digits |
+| PACKED bakes (`score_arm.sh`'s `bake_dial_refit pack`) | 4 of 12 | `0.8634920042634943` on both, all 16 digits |
+
+**The trainer is bit-equivalent; the difference is entirely in the PACK.** The
+packed deltas are csiq 7.2e-9, tid 1.0e-7, kadid 6.3e-7, **live 2.0e-5**, and
+the packed files differ in SIZE (32,924 B vs 29,097 B), so different weights
+survived — expected, because `pack` is zerobias + f16 + dead-column pruning
+*before* the spline refit, and only the spline half is rank-invariant. The
+`bake_dial_refit` owner changed between 2026-09-01 and 2026-09-05 (the ladder
+lane's negative-tail work). **Flagged, not fixed**: it is another lane's owner,
+the effect is ≤2e-5 on one axis, and the composite is bit-identical.
+
+**Consequence adopted for this campaign:** the G1 gate is read on the RAW
+bakes, which is the trainer-equivalence question it exists to answer. Every
+arm is still reported from its PACKED verdict, as every prior fast-class cell
+was, so arm-to-arm comparisons stay internally consistent.
+
+## 2. A NAMING RESULT THAT FELL OUT OF THE FIRST FIT
+
+The trainer refuses to stamp `zentrain.feature_set_id` on any cell of this
+campaign, and it is right to:
+
+```
+WARNING: training groups span 2 DIFFERENT feature sets
+(basic+peaks+masked+iw+v2+append+append2@w944/era2r4#b782e349 ;
+ basic+v2+append+append2@w944/era2r4#7ed470b4)
+— refusing to stamp one of them as the bake's zentrain.feature_set_id.
+```
+
+That is the fastclass wave's **free-40 train/serve skew** (its AMENDMENT A3.1),
+surfacing in the naming layer instead of in a footnote: the base recipe's
+`tsafesyn` leg is the only group taken from `foldapp2_views/`, where
+`f156..371` are structural zeros, while every other leg is the pools-LIVE root.
+So the recipe genuinely trains the 72 peaks on one distribution and serves them
+on another, for 1 of its 9 legs.
+
+**The id machinery caught a real defect that prose had already priced as
+"bounded and sub-noise" and then moved on.** Not fixed here — swapping the leg
+would change the teacher and confound every arm against the incumbent — but it
+is now a machine-checkable fact attached to every bake this campaign produces,
+which is what fundamental 3 was for.

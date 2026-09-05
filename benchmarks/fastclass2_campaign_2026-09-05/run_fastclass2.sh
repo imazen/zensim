@@ -31,8 +31,13 @@ HB="${FC2_HB:-$HOME/tmp/fastclass2/run}"
 mkdir -p "$(dirname "$HB")"
 S="$REPO/scripts/sota944"
 
+# SORACLE is the COMPUTE-CEILING instrument (plan Phase A-ORACLE): WR4_KEEP is
+# left UNSET, so the trainer runs --max-features 944 with no --keep-features and
+# the model may read all 944 coordinates. Not a ship candidate -- it prices at
+# the full 944 walk by construction.
 slice_of() {
   case "$1" in
+    SORACLE) echo "" ;;
     S156) echo "$S/slice_basic156.txt" ;;
     S228) echo "$S/slice_basic156_peaks.txt" ;;
     S261) echo "$S/slice_basic156_free_nolumaref.txt" ;;
@@ -55,7 +60,7 @@ say "START cells=[$CELLS] seeds=[$SEEDS] bin=$BIN"
 for CELL in $CELLS; do
   SET="${CELL%%:*}"; REST="${CELL#*:}"; W="${REST%%:*}"; HEAD="${REST#*:}"
   KEEP=$(slice_of "$SET")
-  [ -f "$KEEP" ] || { say "ABORT: missing slice $KEEP"; exit 2; }
+  if [ -n "$KEEP" ]; then [ -f "$KEEP" ] || { say "ABORT: missing slice $KEEP"; exit 2; }; fi
   for SEED in $SEEDS; do
     NAME="F2_${SET}_H${W}_${HEAD}_s${SEED}"
     OUT="$WR4_OUT/${NAME}.bin"
@@ -63,8 +68,9 @@ for CELL in $CELLS; do
     if [ ! -f "$OUT" ]; then
       say "TRAIN $NAME"
       (
-        export WR4_KEEP="$KEEP"
-        unset WR4_HIDDEN WR4_ALPHA_HEAD WR4_N_HIDDEN_LAYERS WR4_SKIP || true
+        unset WR4_HIDDEN WR4_ALPHA_HEAD WR4_N_HIDDEN_LAYERS WR4_SKIP WR4_FULL944 || true
+        if [ -n "$KEEP" ]; then export WR4_KEEP="$KEEP"
+        else unset WR4_KEEP || true; export WR4_FULL944=1; fi
         # H128 is the trainer's own default: the flag stays OMITTED so the cell's
         # argv is byte-identical to a pre-2026-09-05 run (gate G1).
         [ "$W" = 128 ] || export WR4_HIDDEN="$W"
