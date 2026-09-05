@@ -1360,6 +1360,54 @@ fn group_l1_unsupported_flag(
     None
 }
 
+/// Same shape as [`group_l1_unsupported_flag`], for `--coarse-decay` /
+/// `--coarse-l2-mult`.
+///
+/// The decoupled coarse-scale decay is applied by the SAME function as
+/// `--group-l1`'s prox — `zensim_validate::mlp_train::apply_post_adam_penalties`
+/// — and that function is called at seven sites, every one of them inside
+/// `train_mlp_strategy`'s plain loop. `train_mlp_per_sample_alpha_head`
+/// (`mlp_train/mod.rs` 6355..10240) contains ZERO occurrences of it, of
+/// `apply_coarse_decay`, or of `coarse_decay`.
+///
+/// `--group-l1` has been guarded against exactly this since it landed, and
+/// its own doc comment above states the mechanism ("`train_mlp_per_sample_
+/// alpha_head` never calls it"). `--coarse-decay` rides the same function and
+/// was left unguarded — so a run that set it WITH `--per-sample-alpha-head`
+/// produced a bake byte-identical to one that never set it, while its embedded
+/// `zentrain.repro` argv claimed the regularizer. That is the same silent-no-op
+/// class the 2026-09-04 pass fixed for `--ema-decay` / `--hard-pair-frac` /
+/// `--dro-eta` / `--listwise-weight` in the OTHER direction, and it matters
+/// because `--coarse-decay 1e-5` is a load-bearing part of the current
+/// fast-class recipe (this repo's CLAUDE.md records it as "KonJND +0.15,
+/// CSIQ +0.07, ~free").
+///
+/// Found 2026-09-05 by `benchmarks/fastclass2_campaign_2026-09-05.md` while
+/// scoping its alpha-head arms; fixed here by failing loud, which is this
+/// file's established response to the class. Wiring the decay into the alpha
+/// loop is a real optimizer change and is deliberately NOT done under a guard
+/// commit.
+fn coarse_decay_unsupported_flag(
+    pool_head: bool,
+    hybrid_head: bool,
+    per_sample_alpha_head: bool,
+    want_gpu: bool,
+) -> Option<&'static str> {
+    if pool_head {
+        return Some("--pool-head");
+    }
+    if hybrid_head {
+        return Some("--hybrid-head");
+    }
+    if per_sample_alpha_head {
+        return Some("--per-sample-alpha-head");
+    }
+    if want_gpu {
+        return Some("--gpu-runtime");
+    }
+    None
+}
+
 #[cfg(test)]
 mod feature_subset_guard_tests {
     //! Failing-first coverage for the 2026-09-04 fix (owner-fix lane,
@@ -1372,7 +1420,9 @@ mod feature_subset_guard_tests {
     //! --keep-features ...` — FATAL-refused. These assert the post-fix
     //! table; flipping any of the three `per_sample_alpha_head` cases below
     //! back to `Some(...)` reproduces that pre-fix behavior exactly.
-    use super::{group_l1_unsupported_flag, keep_features_unsupported_flag};
+    use super::{
+        coarse_decay_unsupported_flag, group_l1_unsupported_flag, keep_features_unsupported_flag,
+    };
 
     #[test]
     fn keep_features_default_case_unchanged() {
@@ -1479,6 +1529,56 @@ mod feature_subset_guard_tests {
             group_l1_unsupported_flag(false, false, true, 2, false),
             Some("--per-sample-alpha-head")
         );
+    }
+
+    #[test]
+    fn coarse_decay_is_refused_on_the_alpha_head_and_allowed_on_the_plain_path() {
+        // The defect: apply_post_adam_penalties (which applies --coarse-decay)
+        // is called only from train_mlp_strategy's plain loop, so an alpha-head
+        // run silently discarded it. --group-l1, which rides the SAME function,
+        // was already guarded; this is the missing half.
+        assert_eq!(
+            coarse_decay_unsupported_flag(false, false, true, false),
+            Some("--per-sample-alpha-head")
+        );
+        assert_eq!(
+            coarse_decay_unsupported_flag(true, false, false, false),
+            Some("--pool-head")
+        );
+        assert_eq!(
+            coarse_decay_unsupported_flag(false, true, false, false),
+            Some("--hybrid-head")
+        );
+        assert_eq!(
+            coarse_decay_unsupported_flag(false, false, false, true),
+            Some("--gpu-runtime")
+        );
+        // The DEFAULT case must stay allowed: every fast-class and 944-class
+        // recipe in this repo passes --coarse-decay 1e-5 on the plain path, and
+        // a guard that refused it there would break all of them. n_hidden_layers
+        // is deliberately NOT a parameter -- the plain path applies the decay at
+        // any depth, unlike --group-l1.
+        assert_eq!(coarse_decay_unsupported_flag(false, false, false, false), None);
+    }
+
+    #[test]
+    fn coarse_decay_and_group_l1_agree_wherever_group_l1_is_the_stricter_rule() {
+        // Both are applied by apply_post_adam_penalties, so anything --group-l1
+        // refuses for a HEAD reason --coarse-decay must refuse too. (--group-l1
+        // is additionally refused at n_hidden_layers >= 2 for a reason of its
+        // own -- layer-1 weights routed through another owner -- which is why
+        // the two are not the same function.)
+        for (pool, hybrid, alpha, gpu) in [
+            (true, false, false, false),
+            (false, true, false, false),
+            (false, false, true, false),
+            (false, false, false, true),
+            (false, false, false, false),
+        ] {
+            let g = group_l1_unsupported_flag(pool, hybrid, alpha, 1, gpu);
+            let c = coarse_decay_unsupported_flag(pool, hybrid, alpha, gpu);
+            assert_eq!(g, c, "head-reason disagreement at {pool}/{hybrid}/{alpha}/{gpu}");
+        }
     }
 
     #[test]
@@ -3516,6 +3616,24 @@ fn main() {
              and on --per-sample-alpha-head (1-layer and --n-hidden-layers >= 2) only; {name} \
              does not train through either of those, so the emitted bake would not actually \
              honor the kept-feature subset it claims."
+        );
+        std::process::exit(1);
+    }
+    if (args.coarse_decay > 0.0 || args.coarse_l2_mult != 1.0)
+        && let Some(name) = coarse_decay_unsupported_flag(
+            args.pool_head,
+            args.hybrid_head,
+            args.per_sample_alpha_head,
+            want_gpu,
+        )
+    {
+        eprintln!(
+            "FATAL: --coarse-decay / --coarse-l2-mult are applied by \
+             apply_post_adam_penalties, which is called ONLY from the plain \
+             n_features\u{2192}n_hidden\u{2192}1 training loop; {name} routes through a path that \
+             never calls it, so the flag would be silently ignored and the bake would be \
+             byte-identical to a run that never set it \u{2014} while its embedded repro argv \
+             claimed the regularizer. Drop the flag, or drop {name}."
         );
         std::process::exit(1);
     }

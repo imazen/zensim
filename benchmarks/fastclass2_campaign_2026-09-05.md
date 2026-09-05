@@ -316,3 +316,58 @@ per-sample-α head's `--monotonicity-reg`, which is the only mechanism in the
 trainer that penalises a *pair whose predicted ordering disagrees with the
 target's* — which is literally what A7r measures (§3.5: every failure is an
 ordering inversion, zero clamps).
+
+## 4. A SILENT NO-OP FOUND WHILE SCOPING PHASE C — `--coarse-decay` on the alpha head
+
+**MEASURED by reading the owner, 2026-09-05, before any alpha-head fit.**
+`--coarse-decay` is applied by `zensim_validate::mlp_train::
+apply_post_adam_penalties`. That function is called at **seven sites, every one
+inside `train_mlp_strategy`'s plain loop**;
+`train_mlp_per_sample_alpha_head` (`mlp_train/mod.rs` 6355..10240) contains
+**zero** occurrences of it, of `apply_coarse_decay`, or of `coarse_decay`:
+
+```sh
+grep -n 'apply_post_adam_penalties' zensim-validate/src/mlp_train/mod.rs   # 7 sites, all in train_mlp_strategy
+awk 'NR>=6355 && NR<=10240 && (/apply_post_adam_penalties/ || /coarse_decay/ || /apply_coarse/)' \
+    zensim-validate/src/mlp_train/mod.rs                                    # no output
+```
+
+**The repo already knew this and had guarded the other rider.**
+`group_l1_unsupported_flag`'s own doc comment says it plainly — *"`--group-l1`'s
+per-step group-lasso prox (`apply_post_adam_penalties`) is invoked ONLY inside
+the plain path's training loop — `train_mlp_per_sample_alpha_head` never calls
+it"* — and `--group-l1` has refused `--per-sample-alpha-head` since it landed.
+`--coarse-decay` rides the *same function* and was never guarded.
+
+**Why it matters here specifically:** `--coarse-decay 1e-5` is in the fast-class
+base recipe, and this repo's CLAUDE.md records it as *"KonJND +0.15, CSIQ +0.07,
+~free"*. So a Phase C alpha-head arm run verbatim would have differed from its
+control by **two** things — the head *and* a silently-dropped regularizer — while
+its embedded `zentrain.repro` argv claimed the regularizer had been applied.
+That is the same silent-no-op class the 2026-09-04 pass fixed for `--ema-decay`
+/ `--hard-pair-frac` / `--dro-eta` / `--listwise-weight`, in the other
+direction.
+
+**Fixed two ways, both landed:**
+
+1. **The trainer fails loud** — `coarse_decay_unsupported_flag`, written to the
+   exact shape of `group_l1_unsupported_flag`, refusing `--coarse-decay` /
+   `--coarse-l2-mult` on `--pool-head`, `--hybrid-head`,
+   `--per-sample-alpha-head` and `--gpu-runtime`. Two tests, one of which pins
+   the **default case as still allowed** (every fast-class and 944-class recipe
+   in this repo passes `--coarse-decay 1e-5` on the plain path, so a guard that
+   refused it there would break all of them) and one asserting the two riders
+   agree on every head reason. Wiring the decay INTO the alpha loop is a real
+   optimizer change and is deliberately not done under a guard commit.
+2. **The arm design absorbs it.** `train_156_student.sh` DROPS the flag on an
+   alpha-head cell with a printed note, and gains `WR4_NO_COARSE_DECAY=1` so the
+   plain-path **no-decay control** the alpha arms must be read against can be
+   built. Plain-path cells are byte-identical to before (`${CDECAY:+--coarse-decay
+   "$CDECAY"}` with `CDECAY=1e-5` expands to exactly `--coarse-decay 1e-5`), so
+   gate G1 is unaffected.
+
+**Registered as an ADDITION to Phase C: `P0nd`** — the base recipe on the plain
+path with `WR4_NO_COARSE_DECAY=1`, k = 3. Without it, `P1α − control` is not a
+head effect. The verifying build was done in a **separate cargo target dir** so
+the running sweep's pinned binary was not replaced mid-wave; this wave's fits
+therefore predate the guard, and the runner is what keeps them honest.

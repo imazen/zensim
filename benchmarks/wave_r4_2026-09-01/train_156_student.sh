@@ -122,6 +122,24 @@ NHL="${WR4_N_HIDDEN_LAYERS:-0}"
 HIDDEN="${WR4_HIDDEN:-}"
 ALPHA_HEAD="${WR4_ALPHA_HEAD:-}"
 SKIPC="${WR4_SKIP:-}"
+# --coarse-decay is a SILENT NO-OP on the per-sample-alpha head (MEASURED 2026-09-05
+# by reading the owner: apply_post_adam_penalties -- which is what applies it -- is
+# called at 7 sites, ALL inside train_mlp_strategy; train_mlp_per_sample_alpha_head
+# (mlp_train/mod.rs 6355..10240) contains ZERO occurrences of it or of
+# coarse_decay). That is the exact mirror of the --ema-decay / --hard-pair-frac /
+# --dro-eta / --listwise-weight family, which is read ONLY on the alpha path and
+# was silently discarded on the standard one until it was made to fail loud on
+# 2026-09-04. So on an alpha-head cell this script DROPS the flag and says so,
+# rather than emitting an argv whose repro block claims a regularizer the run
+# never applied. WR4_NO_COARSE_DECAY=1 drops it on the plain path too -- that is
+# the CONTROL an alpha-head arm has to be read against, because otherwise P1a
+# differs from the base by TWO things.
+CDECAY="${WR4_COARSE_DECAY:-1e-5}"
+if [ -n "$ALPHA_HEAD" ] || [ -n "${WR4_NO_COARSE_DECAY:-}" ]; then
+  [ -n "$ALPHA_HEAD" ] && echo "== NOTE: --coarse-decay DROPPED (silent no-op on --per-sample-alpha-head; see header)"
+  [ -n "${WR4_NO_COARSE_DECAY:-}" ] && echo "== NOTE: --coarse-decay DROPPED by WR4_NO_COARSE_DECAY (the alpha-head arms' plain-path control)"
+  CDECAY=""
+fi
 mkdir -p "$OUTDIR"
 
 TTBIG=""
@@ -206,8 +224,8 @@ if [ -n "$HIDDEN" ];     then EXTRA+=( --hidden "$HIDDEN" ); fi
 if [ -n "$ALPHA_HEAD" ]; then EXTRA+=( --per-sample-alpha-head ); fi
 if [ -n "$SKIPC" ];      then EXTRA+=( --skip-connection ); fi
 
-echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) konjnd_train_w=$KONW kon_flags=$KONFLAGS hf_flags=$HFFLAGS n_hidden_layers=$NHL hidden=${HIDDEN:-default128} alpha_head=${ALPHA_HEAD:-0} skip=${SKIPC:-0} full944=${WR4_FULL944:-0} extra=(${EXTRA[*]+"${EXTRA[*]}"}) $(date -u +%H:%M:%SZ)"
+echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) konjnd_train_w=$KONW kon_flags=$KONFLAGS hf_flags=$HFFLAGS n_hidden_layers=$NHL hidden=${HIDDEN:-default128} alpha_head=${ALPHA_HEAD:-0} skip=${SKIPC:-0} full944=${WR4_FULL944:-0} coarse_decay=${CDECAY:-DROPPED} extra=(${EXTRA[*]+"${EXTRA[*]}"}) $(date -u +%H:%M:%SZ)"
 exec "$TRAIN" "${TRAIN_GROUPS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} \
   --n-hidden-layers "$NHL" --target-column human_score --target-scale 100 \
   --epochs 120 --pairs-per-epoch 50000 "${WIDTH_ARGS[@]}" \
-  --coarse-decay 1e-5 "${TFARGS[@]}" --seed "$SEED" --out "$OUT"
+  ${CDECAY:+--coarse-decay "$CDECAY"} "${TFARGS[@]}" --seed "$SEED" --out "$OUT"
