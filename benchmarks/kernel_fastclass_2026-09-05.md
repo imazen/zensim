@@ -608,15 +608,27 @@ Raw rows (every start, including the `SKIPPED_BOX_BUSY` gate decisions):
 
 ### ⚠ THE TABLE ABOVE IS THE UNGATED RUN — read it with that in front of you
 
-**Status as written: the table above was measured beside a live
-`zensim_mlp_train`, and the re-gated re-run is QUEUED, not done.** It is left
-in place rather than deleted because it is the only wall reading this lane has,
-and deleting it would leave the section claiming an Ir result with no wall
-corroboration at all — but it is labelled here, in the section, so no reader
-can pick the table up without the label. If a later commit does not replace
-this paragraph with a clean-run table, **these numbers stand as
-CONTAMINATED**: directionally supported by the 1T control and by the Ir map,
-never quotable as a measured speedup.
+**FINAL STATUS: the table above was measured beside a live
+`zensim_mlp_train`, the re-gated re-run never got a window, and these numbers
+therefore stand as CONTAMINATED.** They are directionally supported by the 1T
+control and by the Ir map; they are **not quotable as a measured speedup**.
+They are left in place, labelled, rather than deleted — deleting them would
+leave the section claiming an Ir result with no wall reading at all, and the
+label is what keeps a future reader from picking the table up clean.
+
+The re-gated driver waited **17 minutes** and refused every cell
+(`SKIPPED_BOX_BUSY`) while the neighbouring lane ran a 60-fit training queue —
+roughly two hours of box occupancy. Per this lane's own pre-registered rule, an
+unestablished number is worse than an honest gap, so the run was **stopped
+rather than forced**. One command on a quiet box replaces the table (and note
+the table above predates **L18**, so a clean re-run should read *better*, not
+merely cleaner):
+
+```sh
+scripts/kernel_two_build_ab.sh --old <pre-lane bigpair> --new <post-lane bigpair> \
+    --arms 156,944full --sizes 576,1152,2304 --threads 1,8 --starts 15 --iters 7 \
+    --out /mnt/v/output/zensim/kernel-2026-09-05/lane2/ab_2026-XX-XX.tsv
+```
 
 The driver's own load gate never fired, because it called
 `pgrep -x zensim_mlp_train`, and **`/proc/<pid>/comm` is truncated to 15
@@ -637,6 +649,39 @@ lands, writes `ab_downscale_2026-09-05.tsv` beside it; both are kept.
 number and a gated one are indistinguishable on the page. The only thing that
 makes the difference visible to a future reader is the label, and the label has
 to survive the moment when it would be more flattering to drop it.
+
+## L2.4b Lane 1's two unfinished cells: still NOT MEASURED, and why
+
+Both were queued behind the same self-gating driver and both hit the same wall.
+Neither is estimated.
+
+| cell | status | reason |
+|---|---|---|
+| **L1's 8T half** — `V1PoolsMode::Off` vs `Peaks` at 1152²/2304², 8T | **NOT MEASURED** | The committed sweep refused every cell for 17 minutes (`busy: zensim_mlp_trai running`) and was stopped rather than `--force`d. Header + refusals: `/mnt/v/output/zensim/kernel-2026-09-05/lane2/L1_off_vs_peaks_8T_2026-09-05.tsv`. |
+| **`ZensimProfile::D`'s W4, both tiers, 2304²/8T** | **NOT MEASURED** | Same window. Both bench binaries were BUILT and staged (`~/tmp/kernel2/bench_{OLD,NEW}`) so the run is now interleaved-before/after rather than after-only, but neither was executed. |
+
+Exact commands, both runnable from a clean checkout:
+
+```sh
+# L1's 8T half
+scripts/kernel_fastclass_sweep.sh --arms 156,15o --sizes 1152,2304 --threads 8 \
+    --starts 15 --iters 7 --control 15c --out <out>.tsv
+
+# D's W4, per tier and thread count (ZEN_S2_WALL_S >= 60 at 2304^2 — a tight
+# wall budget makes zenbench report a spuriously LOW mean, which min() does
+# NOT protect against; validate `fast_ssim2` against a plausible floor)
+for TIER in 0 1; do for T in 8 1; do
+  ZEN_S2_CAP_V3=$TIER ZEN_S2_SIZES=2304 ZEN_S2_WALL_S=60 RAYON_NUM_THREADS=$T \
+    cargo bench --manifest-path zensim-bench/Cargo.toml --bench ssim2_speed_bar
+done; done
+```
+
+**What this lane can say about W4 without measuring it:** `zensim_D` and
+`add156_156basic` are both fast-class walks, so all four levers move the
+numerator and the denominator together and the *ratio* should be roughly
+preserved — but "should be" is not a measurement, and the whole point of the
+`zensim_D` arm (added by lane 1) is that the product path can diverge from the
+hand-built toggles. It is left open.
 
 ## L2.5 Registered, measured, NOT implemented
 
