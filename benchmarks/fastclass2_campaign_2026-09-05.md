@@ -225,3 +225,63 @@ is a `ZensimProfile` wired to that walk — the W7 clause the fastclass wave's
 
 **Recorded, not attempted.** Both are named here with their prerequisites so
 the ship decision is a choice rather than a discovery.
+
+### 3.5 Every A7r failure in this population is an ORDERING inversion — zero are clamps
+
+Per-codec detail, read from the same gradings (`repr` = fraction of
+`(image, codec)` ladders represented; `mentor` = ssim2's own on the same cells;
+`unord` = ladders failing on ordering; `clamp` = ladders failing by sitting on
+the instrument minimum):
+
+| bake | avif-rav1e | avif-svt | jpeg | jxl | webp | unord total | clamp total |
+|---|---|---|---|---|---|--:|--:|
+| **shipped D** | 0.6667 ✓ | 1.0000 ✓ | 0.6667 ✓ | 1.0000 ✓ | 1.0000 ✓ | 26 | **0** |
+| `Fctl_id100negrich` (156, additive) | 0.4103 ✗ | 1.0000 ✓ | 0.6667 ✓ | 0.9615 ✓ | 0.9744 ✗ | 25 | **0** |
+| `Fpeaks_id100negrich` (228, additive) | 0.1282 ✗ | 1.0000 ✓ | 0.5641 ✗ | 0.6923 ✗ | 0.9231 ✗ | 62 | **0** |
+| `W11J_s4013` (944 MLP) | 0.5128 ✗ | 0.9487 ✗ | 0.5385 ✗ | 0.9615 ✓ | 0.9744 ✗ | 41 | **0** |
+| `v47_strict_qat_native` (372 MLP) | 0.3590 ✗ | 0.8462 ✗ | 0.5128 ✗ | 0.8462 ✗ | 1.0000 ✓ | 54 | **0** |
+| **`CTL_ID100`** (the fast-class control) | 0.1538 ✗ | 0.5897 ✗ | 0.5385 ✗ | **0.3077** ✗ | 0.7949 ✗ | **93** | **0** |
+| *mentor `peer_ssim2`* | *0.6410* | *1.0000* | *0.6667* | *0.9615* | *1.0000* | — | — |
+
+Three things follow, none of them previously on the record:
+
+1. **`n_fail_clamp` is 0 for every bake and every codec.** A7r in this
+   population is exclusively about *ordering the bottom of a ladder*, never
+   about a dial pinned to its floor. So the levers are the ones that act on
+   ordering — the fit, `--monotonicity-reg`, `--monotone-cbc` — and not
+   anything that changes the dial's range.
+2. **The bar is relative and the mentor is itself weak in two places**: ssim2
+   represents only 0.6410 of `avif-rav1e` and 0.6667 of `jpeg` ladders. Shipped
+   D passes `jpeg` by matching the mentor *exactly* (0.6667 vs 0.6667). The
+   task is "no worse than ssim2", not "perfect".
+3. **The fast class's worst codec is `jxl` (0.3077 against a 0.9615 mentor, 18
+   of 26 ladders unordered)** — a much deeper failure than the additive
+   peaks-slice fits the d_peaks lane studied (0.6923, 8 of 26). So the MLP does
+   not merely inherit the linear class's jxl inversion; it is markedly worse on
+   the same codec, which is a new fact about the model class rather than about
+   the slice.
+
+### 3.6 What the four LUMA_MEAN_REF slots are worth, measured BEFORE the S261 arm lands
+
+`inspect_l0_input_norms --top 944` on the two control bakes that exist (L2 norm
+of each layer-0 input column; the two printed tables deduplicated by index):
+
+| block | slots | s4004 mass | s4005 mass |
+|---|--:|--:|--:|
+| basic `f0..155` | 156 | 56.32 % | 57.20 % |
+| peaks `f156..227` | 72 | 33.86 % | 34.25 % |
+| raw moments `f733..922` | 33 | 9.18 % | 8.10 % |
+| **`LUMA_MEAN_REF` f926/931/936/941** | **4** | **0.64 %** | **0.45 %** |
+
+Their per-slot L2 ranks are **238–260 of 944** (norms 0.90–0.93 and 0.61–0.62
+against a max of 9.04 / 8.83). **So the identity fix of §0(a) is predicted to
+cost about half a percent of layer-0 weight mass** — a prediction the `S261`
+arm tests directly against `S265` at k = 3, rather than an assumption the slice
+file was written on.
+
+Second reading, worth recording on its own: in this MLP the **peaks block
+carries 34 % of the mass** against the 19.6 % the D+free lane measured in the
+sparse *linear* fit on the same slice, and the raw moments carry 8–9 % against
+2.3 %. The fast class's MLP leans considerably harder on the non-basic half
+than the additive class does — which is the same direction as its much worse
+A7r (§3.5) and is a hypothesis the `S156`/`S228` arms can falsify.
