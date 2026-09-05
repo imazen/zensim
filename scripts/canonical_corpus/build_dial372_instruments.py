@@ -679,6 +679,24 @@ def main():
         man["ladder_dir"] = args.ladder_dir
         man["instruments"]["ladder_anchor"] = build_anchor(args, work)
     mp = os.path.join(args.out_dir, f"_MANIFEST_{args.tag}.json")
+    # MERGE, never overwrite. A second `--what` run at the same tag used to write a
+    # fresh manifest and silently ERASE the earlier run's entries — the 944 pass
+    # dropped the 372 grid's row, leaving a 612-byte manifest describing one of two
+    # instruments that were both on disk. A manifest that loses provenance is worse
+    # than none, because it still looks authoritative.
+    if os.path.exists(mp):
+        try:
+            prev = json.load(open(mp))
+        except Exception:
+            prev = {}
+        merged = dict(prev.get("instruments") or {})
+        merged.update(man["instruments"])
+        man["instruments"] = merged
+        hist = list(prev.get("runs") or [])
+        if "built_utc" in prev:
+            hist.append({k: prev.get(k) for k in
+                         ("built_utc", "extractor", "build_commit", "ladder_dir")})
+        man["runs"] = hist
     with open(mp, "w") as f:
         json.dump(man, f, indent=1)
     for k, v in man["instruments"].items():
