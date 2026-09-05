@@ -347,3 +347,11 @@ required-features = ["training", "feature-regime-v2"]
 [[example]]
 name = "profile_api_audit"
 required-features = ["custom-profiles"]
+
+# Serves an arbitrary ZNPR bake through the PRODUCTION scoring path
+# (`Zensim::compute` via `ZensimProfile::Custom`), so "is this candidate
+# servable?" is a measurement rather than an inference. See the file's own
+# doc comment for the exact invocation.
+[[example]]
+name = "serve_custom_bake"
+required-features = ["custom-profiles", "candidate-profiles"]

@@ -124,14 +124,22 @@ fn a_canonical_bake_resolves_to_the_regime_default_path() {
     assert_eq!(r.root, PathBuf::from(REGIME_944_DEFAULT));
 }
 
-/// A bake trained on a corpus that is NOT a registered features root (every
-/// 372/720-era bake: `canonical-2026-05-21` is a training store, not an eval
-/// root) resolves to the regime default — as a DETERMINATION carrying its
-/// reason, never as an unexplained fallback.
+/// A bake trained on a corpus that is NOT a registered features root resolves
+/// to the regime default — as a DETERMINATION carrying its reason, never as
+/// an unexplained fallback.
+///
+/// (This test previously used `canonical-2026-05-21/train` as its "not a
+/// root" example. `benchmarks/feature_sets_registry.json` now registers that
+/// exact path — `basic+peaks+masked+iw@w372/v1pre`, a real 372-wide v1pre
+/// feature table — so it is no longer a valid negative example; the fixture
+/// moved out from under this test when the feature-set registry grew that
+/// entry. Swapped 2026-09-05 for a raw pairs manifest that is a training
+/// SOURCE, not an extracted-features directory, so it can never collide with
+/// a features-root registration.)
 #[test]
 fn a_non_root_training_corpus_determines_the_regime_default() {
     let repro = r#"{"argv":["zensim_mlp_train","--group",
-        "safesyn:/mnt/v/zen/zensim-training/canonical-2026-05-21/train/safesyn.parquet:1.0:0.5"],
+        "kadid:/mnt/v/dataset/kadid10k/kadid_pairs_ab.tsv:1.0:0.5"],
         "seed":7}"#;
     let m = model_with(&[repro_meta(repro)]);
     let r = feature_set::resolve_features_root(&m, Path::new(REGIME_944_DEFAULT), None).unwrap();

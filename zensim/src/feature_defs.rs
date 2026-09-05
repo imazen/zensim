@@ -190,6 +190,11 @@ pub(crate) enum Form {
     /// Computed from the reference alone; an identity pair does not zero it.
     ReferenceOnly,
     /// Not yet established. Never treated as any of the above.
+    ///
+    /// Reserved for the Phase-2 research engine's provenance output
+    /// (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`); no signal in the committed
+    /// registry currently declares it, so nothing constructs it yet.
+    #[allow(dead_code)]
     Undeclared,
 }
 
@@ -203,6 +208,11 @@ pub(crate) enum Direction {
     /// No signed expectation (reference-only conditioners, raw statistics).
     Unsigned,
     /// Not yet established.
+    ///
+    /// Reserved for the Phase-2 research engine's provenance output
+    /// (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`); no signal in the committed
+    /// registry currently declares it, so nothing constructs it yet.
+    #[allow(dead_code)]
     Undeclared,
 }
 
@@ -290,6 +300,12 @@ pub(crate) struct SignalDef {
     pub block_local: u16,
     /// Name stem, `[a-z0-9_]+`, unique within the family.
     pub name: &'static str,
+    // `statistic`, `form`, `direction`, `kernel`, and `deprecated` are all
+    // constructed (every signal declaration sets them) but not yet read back
+    // anywhere — they are Phase 1a's declarative data, awaiting the Phase-2
+    // research engine's provenance consumer
+    // (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`). Not dead: reserved.
+    #[allow(dead_code)]
     pub statistic: Statistic,
     /// Cost when the signal's OWNING BLOCK runs. See [`cost_of`] for the
     /// per-slot answer, which also accounts for [`SignalDef::tranche`].
@@ -298,10 +314,14 @@ pub(crate) struct SignalDef {
     pub tranche: Tranche,
     /// Which placements the tranche can serve.
     pub placement: Placement,
+    #[allow(dead_code)]
     pub form: Form,
+    #[allow(dead_code)]
     pub direction: Direction,
+    #[allow(dead_code)]
     pub kernel: KernelId,
     /// Retired: the slot keeps its id and its structural zero forever.
+    #[allow(dead_code)]
     pub deprecated: bool,
     /// A live defect in the current definition, from the defect audit.
     pub defect: Option<Defect>,
@@ -312,6 +332,11 @@ pub(crate) struct SignalDef {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FeatureDef {
     /// The stable slot id. Append-only, never renumbered.
+    ///
+    /// Constructed by every layout expansion but not yet read back anywhere
+    /// — reserved for the Phase-2 provenance consumer
+    /// (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`).
+    #[allow(dead_code)]
     pub id: u16,
     pub signal: &'static SignalDef,
     pub scale: u8,
@@ -1505,6 +1530,11 @@ pub(crate) fn cost_of(id: usize, n_scales: usize) -> Option<CostClass> {
 }
 
 /// Every registered signal, in layout order — the registry's iteration entry.
+///
+/// Not yet called (reserved for the Phase-2 research engine's iteration over
+/// the registry, `docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`); kept because it is
+/// the documented entry point for that consumer, not because it runs today.
+#[allow(dead_code)]
 pub(crate) fn signals() -> impl Iterator<Item = &'static SignalDef> {
     BLOCKS.iter().flat_map(|b| b.signals.iter())
 }

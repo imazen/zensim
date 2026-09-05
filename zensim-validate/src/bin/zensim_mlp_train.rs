@@ -1558,7 +1558,10 @@ mod feature_subset_guard_tests {
         // a guard that refused it there would break all of them. n_hidden_layers
         // is deliberately NOT a parameter -- the plain path applies the decay at
         // any depth, unlike --group-l1.
-        assert_eq!(coarse_decay_unsupported_flag(false, false, false, false), None);
+        assert_eq!(
+            coarse_decay_unsupported_flag(false, false, false, false),
+            None
+        );
     }
 
     #[test]
@@ -1577,7 +1580,10 @@ mod feature_subset_guard_tests {
         ] {
             let g = group_l1_unsupported_flag(pool, hybrid, alpha, 1, gpu);
             let c = coarse_decay_unsupported_flag(pool, hybrid, alpha, gpu);
-            assert_eq!(g, c, "head-reason disagreement at {pool}/{hybrid}/{alpha}/{gpu}");
+            assert_eq!(
+                g, c,
+                "head-reason disagreement at {pool}/{hybrid}/{alpha}/{gpu}"
+            );
         }
     }
 
