@@ -1869,6 +1869,44 @@ pub fn train_mlp_strategy(
              --per-sample-alpha-head)."
         );
     }
+    // The rest of the STRATEGY family is in the SAME silent-no-op class, and
+    // was unguarded until 2026-09-04: `ema`, `hard_pair`, `dro` and
+    // `listwise` are read ONLY inside `train_mlp_per_sample_alpha_head`, so
+    // setting one on any other head threw it away without a word.
+    //
+    // Found while scoping the subset-quality study: `--ema-decay` looked like
+    // the natural lever for reducing seed variance — its own CLI doc says
+    // "seed-variance reduction" — and it would have silently done nothing on
+    // the path every board bake trains through. That failure mode reads as
+    // "EMA does not help" when the truth is "EMA never ran".
+    //
+    // Wiring them through means threading a weight-EMA / DRO / listwise step
+    // into three more training loops, a real change to the optimizer and the
+    // bake path. Failing loud is this file's established response to the class
+    // (see the guards above) and is the honest interim state.
+    for (name, on, flag) in [
+        ("--ema-decay", hyperparams.ema_decay > 0.0, "ema_decay"),
+        (
+            "--hard-pair-frac",
+            hyperparams.hard_pair_frac > 0.0,
+            "hard_pair_frac",
+        ),
+        ("--dro-eta", hyperparams.dro_eta > 0.0, "dro_eta"),
+        (
+            "--listwise-weight",
+            hyperparams.listwise_weight > 0.0,
+            "listwise_weight",
+        ),
+    ] {
+        if on && !hyperparams.per_sample_alpha_head {
+            panic!(
+                "{name} ({flag}) is only wired on the per_sample_alpha_head path; this run \
+                 has per_sample_alpha_head=false, so the flag would be silently ignored and \
+                 the bake would be byte-identical to a run that never set it. Add \
+                 --per-sample-alpha-head, or drop the flag."
+            );
+        }
+    }
     // Same silent-no-op class as the two guards above: the triplet step lives
     // ONLY inside `train_mlp_per_sample_alpha_head`, so a run that loads a
     // triplet pool but does NOT set --per-sample-alpha-head silently ignores it
@@ -10935,6 +10973,115 @@ mod tests {
     /// produced a bit-identical draw sequence and a bit-identical bake.
     /// MEASURED before the fix, `--stratified-bands 0` vs `8` on the default
     /// path: sample-sequence digest `127b831bed8a3873` both times.
+    /// The unguarded half of the STRATEGY family must FAIL LOUD rather than
+    /// throw the flag away.
+    ///
+    /// `ema_decay` / `hard_pair_frac` / `dro_eta` / `listwise_weight` are read
+    /// only inside `train_mlp_per_sample_alpha_head`. Before 2026-09-04 setting
+    /// any of them on another head produced a bake byte-identical to a run that
+    /// never set it — the same defect the mse/monotonicity/triplet guards above
+    /// already covered. `--ema-decay` mattered most: its own doc advertises
+    /// "seed-variance reduction", so a variance study would have concluded it
+    /// does not work when in fact it never ran.
+    #[test]
+    fn strategy_knobs_fail_loud_when_unreachable() {
+        let n_features = 4usize;
+        let targets: Vec<f64> = (0..40).map(|i| i as f64 * 2.5).collect();
+        let mut rng = SplitMix64::new(5);
+        let owned: Vec<Vec<f64>> = (0..40)
+            .map(|i| {
+                let mut x: Vec<f64> = (0..n_features).map(|_| rng.next_normal()).collect();
+                x[0] = i as f64 / 40.0;
+                x
+            })
+            .collect();
+        let fr: Vec<&[f64]> = owned.iter().map(|v| v.as_slice()).collect();
+        let group = || TrainingGroup {
+            name: "g".into(),
+            human_scores: &targets,
+            features: FeatureRows::Borrowed(&fr),
+            metric_sigmas: None,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+            ref_ids: None,
+            loss_mode: GroupLossMode::default(),
+        };
+        let base = MlpHyperparams {
+            n_hidden: 4,
+            n_epochs: 2,
+            pairs_per_epoch: 50,
+            seed: 3,
+            log_every: 100,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        for (label, h) in [
+            (
+                "ema",
+                MlpHyperparams {
+                    ema_decay: 0.999,
+                    ..base.clone()
+                },
+            ),
+            (
+                "hardpair",
+                MlpHyperparams {
+                    hard_pair_frac: 0.5,
+                    ..base.clone()
+                },
+            ),
+            (
+                "dro",
+                MlpHyperparams {
+                    dro_eta: 0.1,
+                    ..base.clone()
+                },
+            ),
+            (
+                "listwise",
+                MlpHyperparams {
+                    listwise_weight: 0.5,
+                    ..base.clone()
+                },
+            ),
+        ] {
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut log = Vec::new();
+                train_mlp_strategy(
+                    &mut [group()],
+                    n_features,
+                    &h,
+                    &mut log,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }));
+            assert!(
+                r.is_err(),
+                "{label} was accepted on a non-alpha head and silently ignored"
+            );
+        }
+        // Negative control: the same recipe with none of them set must train.
+        let mut log = Vec::new();
+        let bytes = train_mlp_strategy(
+            &mut [group()],
+            n_features,
+            &base,
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(!bytes.is_empty(), "the unflagged control must still train");
+    }
+
     #[test]
     fn stratified_bands_is_not_a_silent_no_op_on_the_default_path() {
         let n_features = 8usize;

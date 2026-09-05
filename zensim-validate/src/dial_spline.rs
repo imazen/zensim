@@ -197,8 +197,14 @@ mod neg_tail_dedup_tests {
                     let drop: std::collections::HashSet<usize> =
                         zeros[..zeros.len() - 1].iter().copied().collect();
                     (
-                        (0..cx.len()).filter(|i| !drop.contains(i)).map(|i| cx[i]).collect(),
-                        (0..cy.len()).filter(|i| !drop.contains(i)).map(|i| cy[i]).collect(),
+                        (0..cx.len())
+                            .filter(|i| !drop.contains(i))
+                            .map(|i| cx[i])
+                            .collect(),
+                        (0..cy.len())
+                            .filter(|i| !drop.contains(i))
+                            .map(|i| cy[i])
+                            .collect(),
                     )
                 } else {
                     (cx, cy)
