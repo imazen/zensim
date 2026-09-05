@@ -8007,3 +8007,37 @@ and KonJND/hfnl_cid22band gain further for the two A7r-passing arms — but the 
 A7r AND no regression lost vs D, and no arm clears both. Nothing installed;
 `ZensimProfile::D`/`zensim/weights/` untouched. Full tables + reproduction:
 [`d_peaks_slot_ablation_2026-09-05.md`](d_peaks_slot_ablation_2026-09-05.md).
+
+## ROUND 95 — 2026-09-05: is the ladder floor real or noise? mostly real; D's jpeg gap is a boundary artifact, `avif-rav1e`'s is not (report-only)
+
+Report-only lane on the NEW `ladder_instrument_2026-09-05.md` grid (9,593 distinct-setting
+cells; separate from ROUND 92-94's canonical/preC/postC instrument). Question: jpeg and
+`avif-rav1e` carry the two lowest mentor bars (0.5385 each) and shipped D misses jpeg by
+exactly one ladder (0.5128) — is the bar measuring a real floor defect or noise between
+near-identical settings? **Classified every one of the mentor's own bottom-triplet failures**
+(worst of the 3 floor-window deltas, `|Δ|<0.5`=tie-within-noise vs `Δ≤−0.5`=genuine
+inversion): jpeg **14/18 (78%) genuine**, median 1.29 ssim2 points at +0.6% bytes;
+`avif-rav1e` **12/18 (67%) genuine**, median 1.43 points at +0.8% bytes — mostly real,
+non-trivial RD-curve non-monotonicity at near-flat bitrate, not measurement noise (the
+instrument's own repro gate is bit-exact: 2,574/2,574 ssim2 strings, 300/300 sha256 on an
+independent re-run; A1/A3 below reproduce to every digit on a repeat run too). **Then
+re-graded `A7r` under two windows the pinned `bottom_k=3` rule doesn't test** (ported
+`FloorMeasure::from_grid` line-for-line from source in Python, validated against every
+published bar/fraction before use): **(a) skip forward to the 4 lowest steps the mentor can
+itself resolve (≥0.5 pt) — D reaches 5/5 codecs, jpeg exact parity with the mentor (0.6667
+vs 0.6667). D's one-ladder jpeg miss under the pinned rule is provably a boundary artifact
+of grading 3 literal-lowest positions rather than 3 resolvable ones.** **(b) lowest setting
++ closest-to-(+2,+5) ssim2 points — jpeg still cures (D 0.9231 > mentor 0.8974) but
+`avif-rav1e` newly FAILS (D 0.9487 < mentor 0.9744)**, a gap the pinned rule hides because D
+and the mentor land on the same represented-COUNT there while failing different ladders
+(mentor's own `avif-rav1e` floor being 67% genuine noise, not D tracking it). **A1**
+(pooled max 99.99996372 vs bar 100.0): traced to the exact 9 cells with `ssim2=100.0` —
+all `avif-rav1e` @ q=99.9, verified **pixel-identical to reference** (`numpy.array_equal`,
+0/835,996 differing pixels) with an **exactly all-zero 372-feature vector** on all 9 —
+D's gap is a scalar spline-at-identity property (99.999964 constant across 9 different
+images), not an extraction event. **`minus_f162`** (ROUND 94's jxl fix on the OLDER
+instrument) does **not** generalize here: jxl 0.846/0.846/1.000 (current/a/b) vs the
+mentor's 0.923/0.962/0.962 on THIS denser grid — the fix closed 4 specific ladders on a
+coarser floor and the fix does not reach this instrument's failures. Nothing installed; no
+registry write (this is a report, not a bar change); `ZensimProfile::D`/`zensim/weights/`
+untouched. Full tables + reproduction: [`ladder_floor_resolution_2026-09-05.md`](ladder_floor_resolution_2026-09-05.md).
