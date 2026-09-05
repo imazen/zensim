@@ -201,6 +201,31 @@ widths **H32**, **H128** (`--hidden` default = the control) → 5 × 2 × 3 = **
 | **P2α** | `WR4_ALPHA_HEAD=1 WR4_N_HIDDEN_LAYERS=2` | depth 2 (`n→H→H/2→heads`), the arm the fastclass wave could not build |
 | **SKIP** | `WR4_SKIP=1` | input→output linear skip; a shape lever with *zero* walk cost |
 
+### Phase C2 — the KonJND mechanisms the alpha head UNLOCKS (conditional, ≤6 fits)
+
+**AMENDMENT, registered 2026-09-05 20:15 UTC.** At registration time the only
+arm cell read was `S265/H128/p` seed 4004, and it is the CONTROL — it exists to
+reproduce the incumbent (gate G1) and carries no information about any arm. The
+motivation below is the trainer's own documentation and the fastclass wave's
+§7.6, not a Phase A number.
+
+`--konjnd-aggregation-*` and `--pjnd-passthrough-*` are, per this repo's own
+CLAUDE.md, *"only wired on the per-sample-α head"* — the head Phase C is the
+first thing in this model class ever to build. The α head's own doc says it was
+designed for exactly this axis: *"Lets the model assign α per-pair so photo-like
+inputs (CID22-shaped) pull α toward rank-dominant while JND-step-grid inputs
+(KonJND-shaped) pull α toward pool-dominant."* And the gap this campaign is
+chasing is KonJND alone.
+
+**CONDITION (frozen):** run C2 only if Phase C's `P1α` reaches a k=3 mean KonJND
+within 0.02 of the plain control's — i.e. only if the head is not itself a
+regression. Otherwise C2 is NOT RUN and is reported as blocked by its
+precondition, never as a null.
+
+**ARMS:** `KA` = `P1α` + `--konjnd-aggregation-*` at the trainer's own default;
+`PP` = `P1α` + `--pjnd-passthrough-*` at its default. k = 3 each. Neither is
+tuned; a swept version is out of scope for this campaign.
+
 ### Phase A-ORACLE — the COMPUTE ceiling of this recipe (3 fits)
 
 **AMENDMENT, registered 2026-09-05 20:10 UTC, while Phase A was on its first
@@ -324,6 +349,35 @@ script (repo rule against hardcoded per-lane paths).
   composite bar, within 0.0014 of the CID22 bar (inside the ~0.0069 per-model
   CI half-width), and −0.046 on KonJND**, which is a LARGER gap than §1's
   cross-era −0.029. hfnlproxy 0.4271 vs 0.67–0.69 is the second gap.
+* **G6 — A7r is a REPORTED AXIS on every arm. AMENDMENT registered 2026-09-05
+  20:35 UTC**, when Phase A had scored 4 of 30 cells and no arm number beyond
+  the CONTROL had been read. Reason: the ship rule's second clause turned out
+  to be the binding one, and it is measurable per arm for ~5 s of CPU, so it
+  becomes data instead of a single end-of-campaign verdict.
+
+  MEASURED at registration time, on the 944 ladder instrument
+  (`dial_grid_944col_ladder.parquet` + `dialcells_ssim2_ladder.tsv`,
+  `--floor-rule resolvable`), A7r = the number of the 5 codecs whose
+  floor-representability fraction is below the mentor's own:
+
+  | bake | class | A7r (codecs failing, 0 = pass) | contract | C1 mono |
+  |---|---|--:|---|--:|
+  | **shipped Profile D** (372, ADD156 linear) | 372 additive | **0** | PASS | 0.9931 |
+  | `Fctl_id100negrich` (156 slice, 944 linear) | 944 additive | 2 | PASS | 0.9879 |
+  | `Fpeaks_id100negrich` (228 slice, 944 linear) | 944 additive | 4 | PASS | 0.9628 |
+  | `Ffree_id100negrich` (265 slice, 944 linear) | 944 additive | 4 | PASS | 0.9615 |
+  | `W11J_s4013` (944-full MLP leader) | 944 MLP | 4 | PASS | 0.9902 |
+  | `FC_D3_s4004` (the fast-class incumbent) | 944 MLP | **5** | FAIL (C5) | 0.9398 |
+
+  **Only the shipped 372 additive passes anywhere, and no 944-width model of
+  any class does.** A7r is a *weights* property — a monotone output spline
+  cannot reorder a ladder — so it cannot be repaired by the dial chain, which
+  is exactly what the d_peaks lane measured at 372 (*"the raw pre-spline model
+  is already inverted at the same step — lever is in the fit, not the
+  spline"*). The ship rule stands unrelaxed; A7r is now reported per arm so the
+  campaign can say whether any SET or SHAPE moves it, rather than only that the
+  incumbent fails it.
+
 * **G5a — the W4 instrument has no class-C arm, stated before it matters.**
   `ssim2_speed_bar.rs` carries `add156_156basic` / `peaks156_no_raw` /
   `free156_peaks_raw` and no 289 arm. If S289 wins selection, an additive
