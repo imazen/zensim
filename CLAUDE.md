@@ -2426,10 +2426,19 @@ dial-alone numbers kept for honesty; `corruption_head` block in
 * **A head must match its profile's read-set or it is not free.** `Off` and
   `Peaks` cost the SAME (`fold_engine.rs`), so `f0..227` is free for shipped D
   and `f228..371` would force `V1PoolsMode::Full`. The 2026-07-24 head reads all
-  372, so attaching it to D would silently change extraction cost. D's own free
-  `f0..227` head (`d228`) reads **89.5 %** detection to that head's 84.6 %, so
-  the 2026-07-24 ablation's "the signal needs mask/iw/peak" does NOT hold once
-  the head is fit on the smaller slice.
+  372, so attaching it to D would silently change extraction cost. Within D's
+  free set, peaks are worth +1.0 point of detection and cut severe-honest FP
+  0.41 % -> 0.31 % for nothing — always take `f0..227` over `f0..155`. But
+  masked/IW is worth **+4.8 points** on top (bake-vs-bake on identical held-out
+  rows: 2026-07-24 **90.7 %** vs `d228` **85.9 %**, same 0.31 % severe FP), so
+  the 2026-07-24 ablation's "the signal needs mask/iw/peak" is **SUPPORTED**.
+  D's companion is a trade — 85.9 % free, or 90.7 % by forcing `Full`.
+* **`train_corruption_head.py` reports a model it does not ship.** The threshold
+  curve comes from a `CalibratedClassifierCV`; the persisted head is a plain
+  `LogisticRegression` refit on train with an isotonic fit on val. True since
+  2026-07-24. The gap is material (`d228` held-out ladder FP 15.83 % reported vs
+  **11.22 %** as baked). **Quote the bake**, and measure it with
+  `predict_features_with_bake`, not the training log.
 * **The gate cannot select a head.** Its only honest rows are two anchors from
   ONE reference (`gb82_dog`, 672 triples). The `--no-broad-honest` ablation WINS
   the deploy gate (99.1 % vs 91.4 %) by being trigger-happy and is the worst arm

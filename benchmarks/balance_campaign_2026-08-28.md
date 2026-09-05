@@ -8150,10 +8150,15 @@ features in `mask/iw/peak f255-334`. **`Off` and `Peaks` cost the SAME** (`fold_
 `f0..227` is FREE for D and masked/IW is not. Rebuilt at HEAD: 116,928 corruption rows over 173
 refs / 44 families / **0 skips**, 60,000 negrich rows re-extracted from the R2-persisted PNGs
 (100 % moved; LAN store has no `distorted/` prefix), and the **2026-09-05 ladder** (9,593
-honest current-era imazen codec cells) as broad-honest. **Peaks are free and strictly better:**
-`d228` reads detection **89.5 %** / severe-honest FP **0.22 %** / anchor FP **0.00 %** against
-`d156`'s 88.1 / 0.36 / 1.72 — and beats the 2026-07-24 head's 84.6 % detection without touching
-masked/IW at all. Wired: `bake_verdict` gained `--corruption-head-threshold` and a third
+honest current-era imazen codec cells) as broad-honest. **Peaks are free and better; masked/IW is
+better still and NOT free.** As BAKED on identical held-out rows, `d228` reads detection
+**85.9 %** / severe FP **0.31 %** / anchor FP **0.00 %** against `d156`'s 84.9 / 0.41 / 0.00 —
+but the 2026-07-24 head, which reads `f228..371`, reads **90.7 %** at the same 0.31 %, so its
+ablation's "the signal needs mask/iw/peak" is **SUPPORTED** and D's companion is a trade
+(85.9 % free, or 90.7 % by forcing `V1PoolsMode::Full`). **A defect surfaced on the way:**
+`train_corruption_head.py` has always reported a `CalibratedClassifierCV` while PERSISTING a
+different `LogisticRegression`+isotonic model — `d228`'s held-out ladder FP is 15.83 % reported
+vs **11.22 %** as baked, so every number here is quoted from the BAKE. Wired: `bake_verdict` gained `--corruption-head-threshold` and a third
 section + `corruption_deploy` JSON for the registered `final = min(perceptual, gate)`. **D goes
 26.8 % → 91.4 % `pass_q20`** (head alone 99.9 %). **But the gate must NOT select the head:** the
 `--no-broad-honest` ablation WINS the deploy gate (**99.1 %**) by being trigger-happy and is the

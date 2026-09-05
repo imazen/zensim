@@ -131,24 +131,53 @@ alignment gated on `source_id` equality across all 60,000.
 
 ## 4. Results
 
-### 4.1 The head, on held-out sources (T = 0.9)
+### 4.1 The head, on held-out sources
 
-| arm | slice | free for D? | detection | FP severe-honest | FP broad-honest (ladder) | FP matched anchor |
+**⚠ Read the model form before reading the number.** `train_corruption_head.py`
+reports its threshold curve from a `CalibratedClassifierCV` (isotonic, `cv=3`),
+then persists a **different** model — a plain `LogisticRegression` refit on train
+with an isotonic calibration fit on val. That has been true since 2026-07-24 and
+means the published table has never described the artifact. Both are given below;
+**the bake row is the one the product runs and the one every other number in this
+document uses.**
+
+As SHIPPED (the ZNPR bake, held-out fold, T = 0.9):
+
+| arm | slice | free for D? | detection | FP severe-honest | FP ladder | FP matched anchor |
 |---|---|---|--:|--:|--:|--:|
-| `d156` | `f0..155` | yes | 88.1 % | 0.36 % | 15.22 % | 1.72 % |
-| **`d228`** | `f0..227` | **yes** | **89.5 %** | **0.22 %** | 15.83 % | **0.00 %** |
-| `d228nb` | `f0..227`, no codec negatives | yes | 94.5 % | 0.58 % | — | 18.60 % |
-| 2026-07-24 | `f0..371` | **no** | 84.6 % | 0.06 % | 0.34 %\* | 0.00 % |
+| `d156` | `f0..155` | yes | 84.9 % | 0.41 % | 11.94 % | 0.00 % |
+| **`d228`** | `f0..227` | **yes** | **85.9 %** | **0.31 %** | **11.22 %** | 0.00 % |
+| `d228nb` | `f0..227`, no codec negatives | yes | 95.6 % | 0.74 % | — | 20.93 % |
+| `2026-07-24` | `f0..371` | **NO** | **90.7 %** | 0.31 % | 10.25 % | 0.00 % |
 
-\*a different broad-honest set (five legacy 720 corpora), not comparable — see §4.3.
+At T = 0.95: `d156` 75.8 / 0.22 / 6.92 / 0.00; `d228` 77.1 / 0.19 / 6.71 / 0.00;
+`d228nb` 93.0 / 0.38 / — / 10.47; `2026-07-24` 85.2 / 0.22 / 2.87 / 0.00.
 
-**Peaks are free and strictly better.** `f156..227` buys +1.4 points of detection,
-*halves* severe-honest FP and takes the matched-anchor FP to zero, at literally
-zero extraction cost (`Off` and `Peaks` are the same walk). Any D companion should
-be the 228 slice. And D's own free set beats the 2026-07-24 head's detection
-(89.5 % vs 84.6 %) without touching masked/IW at all — so the 2026-07-24 ablation's
-conclusion that the signal *needs* the mask/iw/peak block does not hold once the
-head is fit on the smaller slice directly.
+As REPORTED by the trainer (the `CalibratedClassifierCV`, same folds, T = 0.9) —
+kept because it is what the 2026-07-24 record published: `d156` 88.1 / 0.36 /
+15.22 / 1.72; `d228` 89.5 / 0.22 / 15.83 / 0.00; `d228nb` 94.5 / 0.58 / — / 18.60;
+`2026-07-24` (its own record, different corpus) 84.6 / 0.06 / 0.34.
+
+**Two conclusions, and the second corrects a claim this document made earlier.**
+
+1. **Peaks are free and strictly better.** `f156..227` buys +1.0 point of
+   detection and cuts severe-honest FP from 0.41 % to 0.31 % at literally zero
+   extraction cost (`Off` and `Peaks` are the same walk). Any D companion should
+   be the 228 slice, not the 156 one.
+
+2. **Masked/IW is worth +4.8 points of detection — and is NOT free for D.**
+   Bake-vs-bake on the identical held-out rows, the 2026-07-24 head reads
+   **90.7 %** to `d228`'s 85.9 % at the same severe-honest FP (0.31 %). So the
+   2026-07-24 ablation's conclusion — that the signal needs the mask/iw/peak
+   block — is **SUPPORTED**, not refuted. An earlier draft of this document
+   claimed the opposite by comparing that head's *reported* `clf` number (84.6 %)
+   against `d228`'s *reported* `clf` number (89.5 %) across different corpora;
+   that comparison was invalid in both respects and the corrected reading is the
+   bake-vs-bake row above.
+
+   So D's companion is a genuine trade, not a free lunch: **85.9 % at zero
+   marginal extraction, or 90.7 % by forcing D's walk from `V1PoolsMode::Peaks`
+   to `Full`.** Pricing that walk change is registered, not run.
 
 ### 4.2 The gate, wired (`bake_verdict --corruption-head`, postC grid, 672 triples)
 
@@ -310,6 +339,12 @@ Four constraints that are NOT negotiable, each for a measured reason:
 
 ## 6. Verdict, and what is NOT done
 
+One bookkeeping note for anyone reading D's board cell: the grafted
+`corruption_head` block was measured on the **postC** grid while the cell's
+`corruption` (dial) block is the board's original **stored-era** read. Both are
+measured here and they differ by 0.1 point (26.9 % vs 26.8 %); the graft leaves
+every other key byte-identical by design.
+
 **The companion-head design is validated for D and the head is built, baked and
 wired** — `bake_verdict --corruption-head` now reports three sections (dial alone,
 head alone, and the registered `min(perceptual, gate)` composition) and D's board
@@ -336,7 +371,17 @@ composition rule.
 4. Region-localized corruption features. §4.3 is a separability limit, not a data
    gap — more negatives will not fix it, and the head's own confusion (tiny local
    break vs near-lossless) names exactly the feature that is missing.
-5. The `dial < G` guard as a first-class composition, if the user wants it. It is
+5. Price the `Peaks -> Full` walk change. §4.1 shows masked/IW is worth +4.8
+   points of detection; `fold_engine.rs` says it costs a mode change, and nobody
+   has measured that delta for D's walk specifically. That measurement decides
+   whether D should carry a 372 head after all.
+6. Make `train_corruption_head.py` report the model it ships. It has published a
+   `CalibratedClassifierCV`'s numbers while persisting a `LogisticRegression` +
+   isotonic since 2026-07-24; the gap is 4.6 points of ladder FP on `d228`. Left
+   as-is here (both forms are reported in §4.1 and every other number in this
+   document comes from the bake) because changing it re-dates every published
+   head number.
+7. The `dial < G` guard as a first-class composition, if the user wants it. It is
    measured here and implemented nowhere.
 
 **Nothing was installed in `zensim/weights/`** and no public API changed.
