@@ -2135,6 +2135,19 @@ struct FitLassoArgs {
     /// Omit entirely for all-1.
     #[arg(long)]
     anchor_stride: Vec<usize>,
+    /// Repeat count per `--anchor-parquet`, same order: each stride-sampled
+    /// row from that parquet is duplicated `weight` times in the assembled
+    /// anchor set BEFORE `fit_spline_knots` bins it. `fit_spline_knots` cuts
+    /// percentile-edge bins of the assembled set and takes bin MEDIANS, so a
+    /// continuous accumulation weight has no meaning there — physical row
+    /// duplication is what actually shifts which bin a row's neighborhood
+    /// falls into and where a bin median lands. This is the same
+    /// mass-via-row-count mechanism the identity-anchor sweep already
+    /// established (`identity_anchor_sg_n21`, `d_id100_2026-09-04.md` §5),
+    /// generalized to any anchor file instead of one purpose-built parquet.
+    /// Omit entirely for all-1 (byte-identical to today's behavior).
+    #[arg(long)]
+    anchor_weight: Vec<usize>,
     /// Clamp anchor targets to at least this value (post-scale).
     #[arg(long, allow_negative_numbers = true)]
     anchor_clip_min: Option<f64>,
@@ -2204,6 +2217,57 @@ struct FitLassoArgs {
     /// coordinates (SOTA-944 §3a spatializable slices). Omit for all.
     #[arg(long)]
     slice_file: Option<PathBuf>,
+}
+
+/// Resolve a per-`--anchor-parquet` repeat/stride count vector: empty means
+/// all-1 (today's behavior, unchanged), one-per-parquet is taken verbatim,
+/// any other length is a loud count-mismatch error. Shared by
+/// `--anchor-stride` and `--anchor-weight` — both are "one small integer per
+/// anchor file", just consumed differently downstream (stride subsamples,
+/// weight duplicates).
+fn resolve_per_anchor_counts(
+    raw: &[usize],
+    n_parquets: usize,
+    flag_name: &str,
+) -> Result<Vec<usize>, String> {
+    let counts: Vec<usize> = if raw.is_empty() {
+        vec![1; n_parquets]
+    } else if raw.len() == n_parquets {
+        raw.to_vec()
+    } else {
+        return Err(format!(
+            "{flag_name} count {} != --anchor-parquet count {n_parquets}",
+            raw.len()
+        ));
+    };
+    if counts.contains(&0) {
+        return Err(format!(
+            "{flag_name} must be >= 1 (0 would silently drop an anchor)"
+        ));
+    }
+    Ok(counts)
+}
+
+/// Append one anchor row to the assembled `(features, target)` set, repeated
+/// `weight` times in order. `fit_spline_knots` (the sole consumer of the
+/// assembled set) cuts percentile-edge bins and takes bin MEDIANS over
+/// whatever rows are physically present — it has no notion of a per-row
+/// scalar weight — so "up-weighting" a row here means literal duplication:
+/// `weight` copies shift which bin the row's neighborhood falls into and
+/// where that bin's median lands. `weight == 1` reproduces the pre-flag
+/// behavior byte-for-byte (one push, same as the unconditional
+/// `xaf.extend`/`ya.push` this replaced).
+fn push_anchor_row_repeated(
+    xaf: &mut Vec<f32>,
+    ya: &mut Vec<f64>,
+    feat_row: &[f32],
+    y: f64,
+    weight: usize,
+) {
+    for _ in 0..weight {
+        xaf.extend_from_slice(feat_row);
+        ya.push(y);
+    }
 }
 
 /// Parse a newline-separated feature-index slice file (comments `#` ok).
@@ -2680,19 +2744,8 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
             let target = a.anchor_target.as_ref().ok_or(
                 "--anchor-target is required with --anchor-parquet (the dial target column)",
             )?;
-            let strides: Vec<usize> = if a.anchor_stride.is_empty() {
-                vec![1; np]
-            } else if a.anchor_stride.len() == np {
-                a.anchor_stride.clone()
-            } else {
-                return Err(format!(
-                    "--anchor-stride count {} != --anchor-parquet count {np}",
-                    a.anchor_stride.len()
-                ));
-            };
-            if strides.contains(&0) {
-                return Err("--anchor-stride must be >= 1".into());
-            }
+            let strides = resolve_per_anchor_counts(&a.anchor_stride, np, "--anchor-stride")?;
+            let weights = resolve_per_anchor_counts(&a.anchor_weight, np, "--anchor-weight")?;
             // SHAPED space + raw parquet rows: the gram (and therefore the
             // weights) live in transform space, so the anchor forward MUST
             // apply the same per-feature transforms the runtime will (the
@@ -2711,7 +2764,7 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
                 };
             let mut xaf: Vec<f32> = Vec::new();
             let mut ya: Vec<f64> = Vec::new();
-            for (path, &stride) in a.anchor_parquet.iter().zip(&strides) {
+            for ((path, &stride), &weight) in a.anchor_parquet.iter().zip(&strides).zip(&weights) {
                 let g = zensim_validate::parquet_loader::load_parquet(
                     path,
                     "anchor",
@@ -2748,27 +2801,33 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
                 while ri < g.feature_rows.len() {
                     // f32-round the features so the packed forward matches
                     // the npz-anchor numeric path (and the f32 runtime).
-                    match &anchor_appliers {
-                        Some(ap) => xaf.extend(
-                            g.feature_rows[ri][..n_feat]
-                                .iter()
-                                .zip(ap.iter())
-                                .map(|(v, (t, ps))| t.apply_with_params(*v as f32, ps)),
-                        ),
-                        None => xaf.extend(g.feature_rows[ri][..n_feat].iter().map(|v| *v as f32)),
-                    }
+                    let feat_row: Vec<f32> = match &anchor_appliers {
+                        Some(ap) => g.feature_rows[ri][..n_feat]
+                            .iter()
+                            .zip(ap.iter())
+                            .map(|(v, (t, ps))| t.apply_with_params(*v as f32, ps))
+                            .collect(),
+                        None => g.feature_rows[ri][..n_feat]
+                            .iter()
+                            .map(|v| *v as f32)
+                            .collect(),
+                    };
                     let mut y = g.human_scores[ri];
                     if let Some(clip) = a.anchor_clip_min
                         && y < clip
                     {
                         y = clip;
                     }
-                    ya.push(y);
-                    taken += 1;
+                    // `weight` REPEATS this row (default 1 = current
+                    // behavior, byte-identical) — see the flag's doc comment
+                    // for why duplication, not a numeric weight, is correct
+                    // here.
+                    push_anchor_row_repeated(&mut xaf, &mut ya, &feat_row, y, weight);
+                    taken += weight;
                     ri += stride;
                 }
                 eprintln!(
-                    "  anchor: {taken} rows (stride {stride}) from {path:?} [target {target} x{}]",
+                    "  anchor: {taken} rows (stride {stride}, weight {weight}) from {path:?} [target {target} x{}]",
                     a.anchor_scale
                 );
             }
@@ -4325,6 +4384,72 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `--anchor-weight` count resolution: empty -> all-1 (today's
+    /// behavior), exact-length taken verbatim, any other length or a zero
+    /// entry refused loudly. Shared with `--anchor-stride`, tested on both
+    /// flag names so the shared error message stays accurate for each.
+    #[test]
+    fn resolve_per_anchor_counts_defaults_and_validates() {
+        assert_eq!(
+            resolve_per_anchor_counts(&[], 3, "--anchor-weight").unwrap(),
+            vec![1, 1, 1]
+        );
+        assert_eq!(
+            resolve_per_anchor_counts(&[1, 2, 4], 3, "--anchor-weight").unwrap(),
+            vec![1, 2, 4]
+        );
+        let err = resolve_per_anchor_counts(&[1, 2], 3, "--anchor-weight").unwrap_err();
+        assert!(
+            err.contains("--anchor-weight count 2 != --anchor-parquet count 3"),
+            "{err}"
+        );
+        let err = resolve_per_anchor_counts(&[1, 0, 2], 3, "--anchor-weight").unwrap_err();
+        assert!(err.contains("--anchor-weight must be >= 1"), "{err}");
+        // same helper, the OTHER flag name, so the message stays
+        // flag-accurate rather than hardcoding "--anchor-weight" internally.
+        let err = resolve_per_anchor_counts(&[1, 0], 2, "--anchor-stride").unwrap_err();
+        assert!(err.contains("--anchor-stride must be >= 1"), "{err}");
+    }
+
+    /// The `--anchor-weight` mechanism itself: `weight == 1` is byte-for-byte
+    /// what the loop did before the flag existed (one push per row) — the
+    /// control this task's ship rule requires. `weight > 1` duplicates the
+    /// SAME row bit-for-bit (via `to_bits()`, not `==`, so a NaN target would
+    /// still be caught) `weight` times, in order, and touches nothing else in
+    /// the assembled set.
+    #[test]
+    fn push_anchor_row_repeated_weight_one_is_a_single_push() {
+        let mut xaf = vec![9.0f32, 9.0]; // pre-existing rows from an earlier anchor file
+        let mut ya = vec![-1.0f64];
+        push_anchor_row_repeated(&mut xaf, &mut ya, &[1.0, 2.0, 3.0], 0.25, 1);
+        assert_eq!(xaf, vec![9.0, 9.0, 1.0, 2.0, 3.0]);
+        assert_eq!(ya, vec![-1.0, 0.25]);
+    }
+
+    #[test]
+    fn push_anchor_row_repeated_weight_n_duplicates_bit_exactly() {
+        let mut xaf: Vec<f32> = Vec::new();
+        let mut ya: Vec<f64> = Vec::new();
+        let feat = [1.0f32, f32::NAN, -0.0];
+        push_anchor_row_repeated(&mut xaf, &mut ya, &feat, -64.1603, 4);
+        assert_eq!(ya, vec![-64.1603; 4]);
+        assert_eq!(xaf.len(), 12);
+        for chunk in xaf.chunks_exact(3) {
+            for (a, b) in chunk.iter().zip(feat.iter()) {
+                assert_eq!(a.to_bits(), b.to_bits(), "row copy diverged: {a} vs {b}");
+            }
+        }
+    }
+
+    #[test]
+    fn push_anchor_row_repeated_weight_zero_appends_nothing() {
+        let mut xaf: Vec<f32> = vec![7.0];
+        let mut ya: Vec<f64> = vec![7.0];
+        push_anchor_row_repeated(&mut xaf, &mut ya, &[1.0, 2.0], 5.0, 0);
+        assert_eq!(xaf, vec![7.0]);
+        assert_eq!(ya, vec![7.0]);
+    }
 
     /// C8 (appendix W): explicit tau always wins; auto-default is 0.005 for
     /// dense bakes and 0 for the sparse class (kill fraction > 10%). The
