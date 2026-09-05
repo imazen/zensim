@@ -197,29 +197,60 @@ each arm reaches **k=3** with 2 new fits.
 best-composite seed would re-introduce exactly the best-of-k selection this wave exists
 to measure. Pre-registered anchors: `LSTAR` → 4021, `LSTAR3` → 4041, `A5_r4` → 4004.
 
-### Fits
+### Fits — and the two recipes that had to be substituted, with the measurement that decided it
 
-| # | recipe (group) | fits | arms |
-|---|---|--:|---|
-| 1 | `LSTAR` `75b7da973ad4`, S₀=4021 | 4 | S×2, I×2 |
-| 2 | `LSTAR3` `797d8ce9e932`, S₀=4041 | 4 | S×2, I×2 |
-| 3 | `A5_r4` `c79f89d9be92`, S₀=4004 | 4 | S×2, I×2 |
-| 4 | `A3b_s4004` (the one true k=1), S₀=4004 | 2 | S×2 |
-| — | **CTL-A** legacy `--seed 4021` replay | 1 | equivalence control |
-| — | **CTL-B** `--init-seed 4021 --sample-seed 4021` | 1 | equivalence control |
+**Every arm member must share ONE data era, ONE trainer build, and ONE pack recipe**, or
+an S-vs-I difference cannot be told from a pipeline difference. Two checks were run
+before committing the budget.
 
-**16 fits total.** Top-3 by corrected k-mean take the init arm, per the brief's design.
+**Pack-recipe byte-verification.** The board's cells are `_packed` bakes, so a new cell
+is only comparable if it is packed identically. The family script's invocation
+(`bake_dial_refit pack --neg-tail --anchor <ROOT>/anchor944_dial.parquet --target-col
+target_score --verify <ROOT>/ext_cid22val.parquet --verify-col human_score
+--verify-scale 100`, `scripts/w12u_lodestar_wave.sh`) was replayed against each
+recipe's stored raw bake and the result compared to the stored packed bake:
 
-### CTL-A / CTL-B is the load-bearing gate
+| recipe | repro sha256[:16] | stored sha256[:16] | verdict |
+|---|---|---|---|
+| `LSTAR_s4021` | `2fc927829b932dc0` | `2fc927829b932dc0` | **BYTE-IDENTICAL** |
+| `LSTAR3_s4041` | `fc74a0ba8f81641c` | `fc74a0ba8f81641c` | **BYTE-IDENTICAL** |
+| `W11J_s4013` | `0b130233e811012b` | `0b130233e811012b` | **BYTE-IDENTICAL** |
+| `A5_r4_s4004` | `0c99cf0ea949913d` | `8c9cb5fb86cc0c0d` | DIFFERS |
+| `A3b_156_s4004` | `d194675e41b4d6ac` | `5f1d7a2512c02b32` | DIFFERS |
 
-Mixing split-seed draws with legacy-diagonal draws is only valid if
-`--seed X` ≡ `--init-seed X --sample-seed X` **on a real recipe at the current trainer
-build**. CTL-B must equal CTL-A. CTL-A must also reproduce the stored
-`LSTAR_s4021.bin` as a *function* — byte-identity is NOT expected (the coverage sidecar
-`5a42251e` adds a metadata section since that bake was made), so the comparison is on
-the model: identical rank block from `bake_verdict --full-json`. **If CTL-A does not
-reproduce the stored model, the new arms are a different population from the existing
-diagonal and MUST NOT be pooled with it — the wave then reports arms S and I alone.**
+**Data-era check.** The two that differ are from the wave-r4 lane: their repro argv names
+a different trainer binary (`/mnt/v/zen/cargo-targets/waver4/release/zensim_mlp_train` —
+another workspace's target dir, pinned to no commit this lane can verify) and their
+`--group` roots are **`ext944-era2r4-2026-09-01`**, the era-2 × radius-4 extractor tables,
+not the canonical `ext944-canonical-2026-08-01` + `sdr-pure-2026-08-28` roots every other
+candidate uses. Their pack recipe is not committed anywhere and could not be recovered.
+
+**Decision.** `A5_r4` (corrected rank 3) is replaced by **`W11J`** (corrected rank 7,
+k=3) — same canonical roots, same trainer path, committed wave script, pack byte-verified.
+`A3b` is KEPT, because it is the one genuinely-k=1 recipe on the fair board, but its
+stored diagonal cell is **NOT pooled**: its arm gets a diagonal re-run on this build so
+all three members share a pipeline. Its results are reported separately from the
+canonical-root recipes and are never mixed with them.
+
+| # | recipe | root | fits | arms |
+|---|---|---|--:|---|
+| 0–1 | `LSTAR` — **CTL-A** legacy `--seed 4021`, **CTL-B** `--init-seed 4021 --sample-seed 4021` | canonical | 2 | equivalence controls |
+| 2–5 | `LSTAR` `75b7da973ad4` (corrected rank 1), S₀=4021 | canonical | 4 | S×2, I×2 |
+| 6–9 | `LSTAR3` `797d8ce9e932` (rank 2), S₀=4041 | canonical | 4 | S×2, I×2 |
+| 10–13 | `W11J` `ecb3b9b18a42` (rank 7), S₀=4013 | canonical | 4 | S×2, I×2 |
+| 14–16 | `A3b` — the one true k=1, S₀=4004 | **era-2 r4** | 3 | D-rerun + S×2 |
+
+**17 fits.** New seeds are pre-registered: sample arm 5001/5002, init arm 5011/5012.
+
+**Budget.** ~120 epochs/fit; measured ~7.5 s/epoch on an idle box (~15 min/fit) and up to
+~21 s/epoch under self-inflicted CPU contention. Serial, local, under `run-heavy`
+(`--jobs 12`, peak RSS 6.8 GiB/fit) — **never two fits at once** (machine-safety rule).
+Expected 4–11 h; it runs overnight. The home fleet was considered and rejected: the
+944 feature tables live on this box's `/mnt/v`, which tower cannot see, so staging would
+cost more than it saves. Progress streams to
+`/mnt/v/output/zensim/replication-2026-09-05/logs/PROGRESS.txt`, one line per fit start
+and end with `rc` and elapsed seconds; every fit writes a `.done` marker on every exit
+path, so the runner is resumable and a late wake-up costs nothing.
 
 ### Replay fidelity
 
@@ -276,3 +307,14 @@ regenerable; no source or verdict was touched, and `fairness_tiers_2026-09-04.ts
 left intact (the new run wrote a separate `…2026-09-05.tsv`). **Both boards must be
 regenerated once `~/tmp/recover_d3a948ca_READY.md` appears**, after
 `jj git fetch` + rebase. Recorded here rather than quietly re-run.
+
+**No further push until the wave completes.** The trainer resolves
+`trainer_head_at_train` at RUNTIME (`jj log -r @-` in the crate dir), so advancing `main`
+mid-wave would stamp later fits with a different head than earlier ones. **The authoritative pin is the BINARY, not the commit**: every one of the 17 fits is run
+by one `zensim_mlp_train` whose sha256 is
+`9eff0caf83853f2f3298cbc4559c599bc9a5186ff87cc07e5eef06d49e311913`
+(built from `34b4899f`), recorded at
+`/mnt/v/output/zensim/replication-2026-09-05/TRAINER_PIN.sha256` with a copy of the
+binary beside it, and re-checked at harvest. A `trainer_head_at_train` stamp on a fit
+records whatever `@-` was when that fit started, which is NOT the same thing once `main`
+advances — read the binary hash, not the stamp.
