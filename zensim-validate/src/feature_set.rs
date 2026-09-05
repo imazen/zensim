@@ -608,3 +608,218 @@ fn parse_registry(txt: &str) -> Result<Registry, String> {
         token_slots,
     })
 }
+
+// ── Resolving a bake's EVAL features root FROM THE BAKE (2026-09-05) ───────
+//
+// `scripts/run_full_eval.sh` used to hard-code one features root per regime,
+// so a bake trained at a NON-default root had two possible outcomes and no
+// third: a wrong-regime read (which `bake_verdict` correctly refuses) or no
+// board cell at all. The concrete casualty was **A3b** — the replication
+// wave's one genuinely-k=1 recipe, trained on
+// `/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01`, which scores fine at
+// its native root (CID22 0.88-0.89) and has no board row
+// (`benchmarks/replication_wave_2026-09-05.md` §4c.3, "named gap, not a silent
+// omission").
+//
+// The root is therefore DERIVED FROM THE BAKE, in this one owner:
+//
+//   1. an explicit caller override — always wins, always reported;
+//   2. the bake's declared `zentrain.feature_set_id`, matched against the
+//      registry's `roots` table (the id-first path, live for every bake
+//      trained after the feature-set-id lane);
+//   3. the bake's embedded `zentrain.repro` training-input paths, matched
+//      against that same `roots` table (the path-first path, which is what a
+//      pre-id bake like A3b has);
+//   4. the regime default — but only as a DETERMINATION: the bake carries a
+//      repro and its training inputs name no registered features root, i.e.
+//      it trained on a training corpus that is not an eval root (every 372/720
+//      bake). Reported with that reason.
+//
+// A bake with NO repro at all is `Err`: its root genuinely cannot be
+// determined, and the caller must refuse rather than default silently.
+// Ambiguity (two different registered roots in one repro) is also `Err` —
+// picking one would be a guess.
+
+/// Where a resolved features root came from. A caller that cannot say WHERE
+/// the root came from cannot say whether it is right, so this is never a bare
+/// path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RootSource {
+    /// The caller passed it.
+    Explicit,
+    /// The bake's `zentrain.feature_set_id` names a registered set, and
+    /// exactly one registered root produces that set.
+    DeclaredFeatureSetId(String),
+    /// The bake's `zentrain.repro` training inputs live under exactly one
+    /// registered features root.
+    ReproTrainingPaths(String),
+    /// The bake HAS a repro and its training inputs name no registered
+    /// features root — so it trained on a corpus that is not an eval root and
+    /// the regime default applies. Carries the reason.
+    RegimeDefault(String),
+}
+
+impl RootSource {
+    /// One line for a log, so every run says which rule fired.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        match self {
+            RootSource::Explicit => "explicit --features-root (caller override)".into(),
+            RootSource::DeclaredFeatureSetId(id) => {
+                format!("bake's zentrain.feature_set_id {id} -> registry roots")
+            }
+            RootSource::ReproTrainingPaths(p) => {
+                format!("bake's zentrain.repro training inputs under {p}")
+            }
+            RootSource::RegimeDefault(why) => format!("regime default ({why})"),
+        }
+    }
+}
+
+/// A features root plus the rule that produced it.
+#[derive(Debug, Clone)]
+pub struct ResolvedRoot {
+    pub root: std::path::PathBuf,
+    pub source: RootSource,
+}
+
+/// Every path-shaped string in a bake's `zentrain.repro` that could name a
+/// training input: the `--group`/`--val-group` argv values (`name:path:...`)
+/// and the `inputs[].path` entries. Deliberately over-collects — matching is
+/// done against the registry, so a non-root string simply never matches.
+fn repro_candidate_paths(repro: &serde_json::Value) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if let Some(a) = repro.get("argv").and_then(|x| x.as_array()) {
+        for t in a.iter().filter_map(serde_json::Value::as_str) {
+            // A `--group` value is `name:path[:w:w:mode]`; a bare path is also
+            // accepted. Split on ':' and keep every absolute-looking piece.
+            for piece in t.split(':') {
+                if piece.starts_with('/') {
+                    out.push(piece.to_string());
+                }
+            }
+        }
+    }
+    for key in ["inputs", "files"] {
+        if let Some(a) = repro.get(key).and_then(|x| x.as_array()) {
+            for it in a {
+                for k in ["path", "file", "input"] {
+                    if let Some(sv) = it.get(k).and_then(serde_json::Value::as_str) {
+                        out.push(sv.to_string());
+                    }
+                }
+                if let Some(sv) = it.as_str() {
+                    out.push(sv.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The registered features roots any of `paths` lives under, longest-prefix
+/// first so a nested registered root (`.../era2r4/foldapp2_views`) wins over
+/// its parent.
+fn registered_roots_covering(paths: &[String]) -> Vec<String> {
+    let reg = registry();
+    let mut keys: Vec<&String> = reg.roots.keys().collect();
+    keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
+    let mut hits: Vec<String> = Vec::new();
+    for p in paths {
+        if let Some(k) = keys
+            .iter()
+            .find(|k| p.as_str() == k.as_str() || p.starts_with(&format!("{k}/")))
+            && !hits.contains(k)
+        {
+            hits.push((*k).clone());
+        }
+    }
+    hits
+}
+
+/// Resolve the EVAL features root for `model` — see the module note above for
+/// the four-step rule and why a missing repro is an error rather than a
+/// default.
+///
+/// `regime_default` is the root the caller's regime would have used; it is
+/// returned only under [`RootSource::RegimeDefault`].
+pub fn resolve_features_root(
+    model: &Model,
+    regime_default: &Path,
+    explicit: Option<&Path>,
+) -> Result<ResolvedRoot, String> {
+    if let Some(p) = explicit {
+        return Ok(ResolvedRoot {
+            root: p.to_path_buf(),
+            source: RootSource::Explicit,
+        });
+    }
+    let reg = registry();
+    // 2. the declared training set id.
+    if let Some(id) = bake_declared_training_set(model) {
+        let want = id.to_string();
+        let mut hits: Vec<&String> = reg
+            .roots
+            .iter()
+            .filter(|(_, v)| **v == want)
+            .map(|(k, _)| k)
+            .collect();
+        hits.sort();
+        hits.dedup();
+        match hits.len() {
+            1 => {
+                return Ok(ResolvedRoot {
+                    root: std::path::PathBuf::from(hits[0]),
+                    source: RootSource::DeclaredFeatureSetId(want),
+                });
+            }
+            0 => {} // declared but not a registered ROOT — fall through to repro
+            _ => {
+                return Err(format!(
+                    "the bake declares training set {want}, and {} registered roots produce it \
+                     ({}). Pass --features-root explicitly; picking one would be a guess.",
+                    hits.len(),
+                    hits.iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+        }
+    }
+    // 3./4. the embedded repro.
+    let md = model.metadata();
+    let Some(entry) = md.get("zentrain.repro") else {
+        return Err(
+            "the bake carries no zentrain.repro, so its features root cannot be determined. \
+             Pass --features-root explicitly (never let it silently default)."
+                .into(),
+        );
+    };
+    let txt = core::str::from_utf8(entry.value)
+        .map_err(|e| format!("zentrain.repro is not UTF-8: {e}"))?;
+    let repro: serde_json::Value =
+        serde_json::from_str(txt).map_err(|e| format!("zentrain.repro is not JSON: {e}"))?;
+    let cands = repro_candidate_paths(&repro);
+    let hits = registered_roots_covering(&cands);
+    match hits.len() {
+        1 => Ok(ResolvedRoot {
+            root: std::path::PathBuf::from(&hits[0]),
+            source: RootSource::ReproTrainingPaths(hits[0].clone()),
+        }),
+        0 => Ok(ResolvedRoot {
+            root: regime_default.to_path_buf(),
+            source: RootSource::RegimeDefault(
+                "the bake's training inputs name no registered features root — it trained on a \
+                 corpus that is not an eval root"
+                    .into(),
+            ),
+        }),
+        _ => Err(format!(
+            "the bake's training inputs span {} registered features roots ({}). Pass \
+             --features-root explicitly; picking one would be a guess.",
+            hits.len(),
+            hits.join(", ")
+        )),
+    }
+}

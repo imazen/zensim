@@ -50,6 +50,15 @@ pub const FEATURES_ROOT_720: &str = "/mnt/v/zen/zensim-training/ext720-canonical
 /// `--regime 944` feature root (the SOTA-944 campaign root).
 pub const FEATURES_ROOT_944: &str = "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01";
 
+/// The era-2 x radius-4 944 root. NOT a default for any regime — it is named
+/// here so [`era_of`] can label it, because bakes trained on it (the
+/// replication wave's A3b arm) now resolve to it automatically through
+/// `feature_set::resolve_features_root`, and a verdict whose ruler line reads
+/// "era UNKNOWN" for a root the registry knows is a worse report than one that
+/// names it. `benchmarks/feature_sets_registry.json` remains the owner of the
+/// path -> feature-set mapping; this is only the human label.
+pub const FEATURES_ROOT_944_ERA2R4: &str = "/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01";
+
 /// One-line era label for a features root, for the note a report prints so every verdict
 /// says which ruler produced it. Unrecognized roots are reported as unknown rather than
 /// guessed — a wrong era label is worse than none.
@@ -67,6 +76,12 @@ pub fn era_of(root: &Path) -> &'static str {
         }
         _ if s == FEATURES_ROOT_720 => "720 folded+append (ext720-canonical-2026-07-22)",
         _ if s == FEATURES_ROOT_944 => "944 campaign root (ext944-canonical-2026-08-01)",
+        _ if s == FEATURES_ROOT_944_ERA2R4 => {
+            "944 era-2 x radius-4 (ext944-era2r4-2026-09-01 — NOT the --regime 944 default)"
+        }
+        _ if s == format!("{FEATURES_ROOT_944_ERA2R4}/foldapp2_views") => {
+            "944 era-2 x radius-4, foldapp2 views (ext944-era2r4-2026-09-01/foldapp2_views)"
+        }
         _ => "era UNKNOWN (not a registered root — check its _MANIFEST.json)",
     }
 }

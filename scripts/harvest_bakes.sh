@@ -25,6 +25,13 @@
 # USAGE
 #   # one bake
 #   scripts/harvest_bakes.sh --bake <bake.bin> [--stem NAME] [--regime 944]
+#                            [--features-root <path>]
+#
+# The FEATURES ROOT normally comes FROM THE BAKE (run_full_eval.sh resolves it
+# via `bake_verdict --print-features-root`; see that script's header). Pass
+# --features-root only to OVERRIDE that — e.g. to score a bake that carries no
+# `zentrain.repro` at all, which is otherwise a loud refusal rather than a
+# silent default. It is forwarded to run_full_eval.sh AND to the verdict.
 #
 #   # daemon: harvest everything matching a glob, until --count are done
 #   scripts/harvest_bakes.sh --glob '/mnt/v/.../C_w8_s*.bin' --count 12 \
@@ -47,7 +54,7 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VD=${ZENSIM_VERDICT_DIR:-/mnt/v/output/zensim/bakes/sota944/verdicts}
 FE=${ZENSIM_FULLEVAL_OUT:-/mnt/v/output/zensim/reports/fulleval}
 
-BAKE=""; STEM=""; GLOB=""; COUNT=""; REGIME=944
+BAKE=""; STEM=""; GLOB=""; COUNT=""; REGIME=944; FEATURES_ROOT=""
 HEARTBEAT=""; TIMEOUT=21600; INTERVAL=60; SKIP_FULLEVAL=0
 
 die() { echo "harvest_bakes: $*" >&2; exit 2; }
@@ -59,6 +66,7 @@ while [ $# -gt 0 ]; do
         --glob)          GLOB=${2:?};      shift 2 ;;
         --count)         COUNT=${2:?};     shift 2 ;;
         --regime)        REGIME=${2:?};    shift 2 ;;
+        --features-root) FEATURES_ROOT=${2:?}; shift 2 ;;
         --heartbeat)     HEARTBEAT=${2:?}; shift 2 ;;
         --timeout)       TIMEOUT=${2:?};   shift 2 ;;
         --interval)      INTERVAL=${2:?};  shift 2 ;;
@@ -93,8 +101,25 @@ trap 'finish' EXIT
 # --- harvest one bake -----------------------------------------------------
 # Returns 0 on success (or already-done), 1 on failure. NEVER swallows an
 # error: that is failure (B) above.
+# The bake_verdict binary, resolved the same way sota944_verdict.sh does, so
+# the two never disagree about which build is being driven.
+BV=${ZL_BV:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}/release/bake_verdict}
+
+# The features root for ONE bake: the caller's override, else derived FROM THE
+# BAKE by its owner. Derived ONCE here and forwarded to BOTH the verdict and
+# the fulleval, so a harvest can never produce a verdict and a fulleval read on
+# different rulers. Empty output ⇒ undeterminable; the callee refuses loudly.
+root_for_bake() {
+    local bake=$1
+    if [ -n "$FEATURES_ROOT" ]; then printf '%s' "$FEATURES_ROOT"; return 0; fi
+    [ -x "$BV" ] || return 0   # not built: let run_full_eval.sh build + resolve
+    "$BV" --bake "$bake" --regime "$REGIME" --print-features-root 2>>"$LOG" || true
+}
+
 harvest_one() {
     local bake=$1 stem=$2 rc=0
+    local root
+    root=$(root_for_bake "$bake")
     if [ -f "$FE/$stem.fulleval.json" ] || { [ "$SKIP_FULLEVAL" = 1 ] && [ -f "$VD/$stem.full.json" ]; }; then
         return 0
     fi
@@ -110,14 +135,15 @@ harvest_one() {
 
     if [ "$rc" = 0 ] && [ ! -f "$VD/$stem.full.json" ]; then
         say "verdict $stem"
-        if ! "$REPO_ROOT/scripts/sota944_verdict.sh" "$bake" "$stem" >>"$LOG" 2>&1; then
+        if ! "$REPO_ROOT/scripts/sota944_verdict.sh" "$bake" "$stem" \
+                ${root:+--features-root "$root"} >>"$LOG" 2>&1; then
             rc=1; say "VERDICT FAILED $stem"
         fi
     fi
     if [ "$rc" = 0 ] && [ "$SKIP_FULLEVAL" = 0 ] && [ ! -f "$FE/$stem.fulleval.json" ]; then
         say "fulleval $stem (regime $REGIME)"
         if ! nice -n 19 ionice -c 3 "$REPO_ROOT/scripts/run_full_eval.sh" \
-                "$bake" "$stem" "$REGIME" >>"$LOG" 2>&1; then
+                "$bake" "$stem" "$REGIME" "$root" >>"$LOG" 2>&1; then
             rc=1; say "FULLEVAL FAILED $stem"
         fi
     fi

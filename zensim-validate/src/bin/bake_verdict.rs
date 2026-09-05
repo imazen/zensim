@@ -892,6 +892,17 @@ struct Args {
     /// the report into a gate, and becomes the default once new artifacts
     /// carry ids (design §7 step 3).
     require_feature_set_match: bool,
+    /// `--print-features-root`: resolve the EVAL features root FROM THE BAKE
+    /// (`zensim_validate::feature_set::resolve_features_root`), print it on
+    /// stdout with the rule that produced it on stderr, and exit. Scores
+    /// nothing and reads no corpus.
+    ///
+    /// This exists because `scripts/run_full_eval.sh` hard-coded one root per
+    /// regime, so a bake trained at a non-default root (A3b, era-2xradius-4)
+    /// could only be mis-read or skipped — see the module note on
+    /// `resolve_features_root`. The derivation lives in the feature-set owner;
+    /// this flag is only the shell's way in, so there is still ONE rule.
+    print_features_root: bool,
 }
 
 fn print_usage() {
@@ -987,6 +998,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     // here) — explicit flags always win over the preset.
     let mut regime_720 = false;
     let mut regime_944 = false;
+    let mut print_features_root = false;
     let mut cross_regime = false;
     let mut require_feature_set_match = false;
     let mut features_root_set = false;
@@ -1136,6 +1148,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--identity-probe" => {
                 let v = args.next().ok_or("--identity-probe requires <parquet>")?;
                 identity_probe = Some(PathBuf::from(v));
+            }
+            "--print-features-root" => {
+                print_features_root = true;
             }
             "--require-feature-set-match" => {
                 require_feature_set_match = true;
@@ -1321,6 +1336,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         features_root,
         regime_720,
         regime_944,
+        print_features_root,
         per_pair_output,
         per_pair_refs,
         dial_grid,
@@ -3445,6 +3461,65 @@ fn provenance_block(bake: &Path, corpora: &[(String, PathBuf, String, u64)]) -> 
     s
 }
 
+/// `--print-features-root`: the EVAL features root DERIVED FROM THE BAKE, on
+/// stdout, with the rule that produced it on stderr.
+///
+/// The regime default is passed in as `args.features_root` — `parse_args`
+/// already resolved it (and an explicit `--features-root` already overrode
+/// it), so this mode reports the same value a scoring run would have used
+/// whenever the bake itself names nothing better. Exit 3 when the root cannot
+/// be determined: a caller must refuse rather than default silently.
+fn print_features_root(args: &Args) -> ExitCode {
+    let bytes = match std::fs::read(&args.bake) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!(
+                "bake_verdict --print-features-root: read {}: {e}",
+                args.bake.display()
+            );
+            return ExitCode::from(3);
+        }
+    };
+    let model = match Model::from_bytes(&bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!(
+                "bake_verdict --print-features-root: parse {}: {e:?}",
+                args.bake.display()
+            );
+            return ExitCode::from(3);
+        }
+    };
+    // `explicit` is deliberately None here: in this mode `--features-root` is
+    // the FALLBACK to report when the bake names nothing better, not an
+    // override. That matters for `--regime 924`, where the wrapper supplies
+    // the ext924 root as a script default — treating it as an override would
+    // make a 924-regime bake trained at some other registered root
+    // un-rerootable. A genuine caller override belongs to the caller
+    // (run_full_eval.sh's 4th argument / $ZENSIM_FEATURES_ROOT), which simply
+    // does not run this probe.
+    match zensim_validate::feature_set::resolve_features_root(&model, &args.features_root, None) {
+        Ok(r) => {
+            eprintln!(
+                "bake_verdict --print-features-root: {} :: era {} :: {}",
+                r.source.describe(),
+                era_of(&r.root),
+                r.root.display()
+            );
+            println!("{}", r.root.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!(
+                "bake_verdict --print-features-root: REFUSING — {e}\n  \
+                 (never silently defaults: an undeterminable root is an error, \
+                 not the regime default)"
+            );
+            ExitCode::from(3)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let t0 = Instant::now();
     // Phase timing, printed only under ZENSIM_PERF_TRACE=1 (see
@@ -3458,6 +3533,12 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // `--print-features-root`: resolve the root FROM THE BAKE and exit. Runs
+    // BEFORE the era note below on purpose — that note describes the root the
+    // run will SCORE on, and this mode scores nothing.
+    if args.print_features_root {
+        return print_features_root(&args);
+    }
     // Every verdict states the ruler it was produced on (2026-08-30): the 372 default
     // moved to the current-extractor root, and a number read on one era cannot be
     // corrected into the other (the shift is model-specific — see zensim_validate::eval_roots).

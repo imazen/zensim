@@ -5,7 +5,27 @@
 # "924-era eval slices" (user directive; fingerprint matching cannot cross regimes).
 # run_full_eval.sh — ONE comprehensive Rust "full-eval" per bake → unified JSON.
 #
-#   scripts/run_full_eval.sh <bake.bin> <name> [regime=720]
+#   scripts/run_full_eval.sh <bake.bin> <name> [regime=720] [features-root]
+#
+# The FEATURES ROOT COMES FROM THE BAKE (2026-09-05). This script used to
+# hard-code one root per regime, so a bake trained at a non-default root had
+# two outcomes and no third: a wrong-regime read (which bake_verdict correctly
+# REFUSES) or no board cell at all. The casualty of record is A3b — the
+# replication wave's one genuinely-k=1 recipe, trained on
+# ext944-era2r4-2026-09-01, which scores 0.88-0.89 CID22 at its native root and
+# had no board row (replication_wave_2026-09-05.md §4c.3).
+#
+# Resolution, in the ONE owner (zensim_validate::feature_set::
+# resolve_features_root, reached via `bake_verdict --print-features-root`):
+#   1. an explicit 4th argument / $ZENSIM_FEATURES_ROOT — always wins;
+#   2. the bake's declared zentrain.feature_set_id -> registry roots table;
+#   3. the bake's embedded zentrain.repro training-input paths -> that same
+#      roots table (the path A3b takes: it predates feature-set ids);
+#   4. the regime default, but only as a DETERMINATION — the bake has a repro
+#      and its training inputs name no registered features root, i.e. it
+#      trained on a corpus that is not an eval root (every 372/720 bake).
+# A bake with NO repro and NO override is an ERROR (exit 3), never a silent
+# default. Pass the root explicitly to score such a bake.
 #
 # Chains the canonical Rust owners (NO Python for any statistic):
 #   1. bake_verdict --fulleval  → the schema-complete fulleval JSON: rank
@@ -41,12 +61,14 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-    echo "usage: run_full_eval.sh <bake.bin> <name> [regime=720|372|924|944]" >&2
+    echo "usage: run_full_eval.sh <bake.bin> <name> [regime=720|372|924|944] [features-root]" >&2
     exit 2
 fi
 BAKE=$1
 NAME=$2
 REGIME=${3:-720}
+# 4th positional, else $ZENSIM_FEATURES_ROOT, else derived from the bake below.
+FEATURES_ROOT_OVERRIDE=${4:-${ZENSIM_FEATURES_ROOT:-}}
 
 # Repo-relative — NEVER a hardcoded worktree path (CLAUDE.md). Works from the
 # main checkout or any jj workspace: binaries build into that tree's target/.
@@ -108,6 +130,42 @@ if [[ "$REGIME" == "944" ]]; then
     BV_REGIME=944
     BV_EXTRA=()
 fi
+
+# ── THE FEATURES ROOT COMES FROM THE BAKE ─────────────────────────────────
+# `bake_verdict --print-features-root` runs the ONE derivation (see the header
+# note) with the regime's own root as the FALLBACK, so this script never has a
+# second opinion about which root a bake belongs to. It is a read-only mode:
+# it loads the bake, resolves, prints, exits — no corpus is touched.
+#
+# ZENSIM_M3_ONLY=1 skips bake_verdict entirely, so the root is irrelevant then
+# and the resolution is skipped with it (a bake with no repro must not fail an
+# M3-only re-measure that never reads a corpus).
+if [[ "${ZENSIM_M3_ONLY:-0}" != "1" ]]; then
+    if [[ -n "$FEATURES_ROOT_OVERRIDE" ]]; then
+        RESOLVED_ROOT=$FEATURES_ROOT_OVERRIDE
+        echo "== features-root: $RESOLVED_ROOT (explicit caller override) ==" >&2
+    elif ! RESOLVED_ROOT=$("$BV" --bake "$BAKE" --regime "$BV_REGIME" "${BV_EXTRA[@]}" \
+            --print-features-root); then
+        echo "run_full_eval: FATAL — could not determine the features root for $BAKE." >&2
+        echo "  The message above says why. Pass it explicitly:" >&2
+        echo "    scripts/run_full_eval.sh <bake> <name> $REGIME <features-root>" >&2
+        echo "  (or ZENSIM_FEATURES_ROOT=...). Never let it silently default —" >&2
+        echo "  a wrong-root read returns plausible-looking numbers with no error." >&2
+        exit 3
+    fi
+    # Re-emit BV_EXTRA with exactly one --features-root, the resolved one.
+    # When it equals what the regime would have used this is a no-op by
+    # construction (same path, same behavior); when it differs it is the whole
+    # point of this block.
+    BV_REBUILT=(); skip_next=0
+    for a in "${BV_EXTRA[@]}"; do
+        if [[ "$skip_next" == 1 ]]; then skip_next=0; continue; fi
+        if [[ "$a" == "--features-root" ]]; then skip_next=1; continue; fi
+        BV_REBUILT+=("$a")
+    done
+    BV_EXTRA=("${BV_REBUILT[@]}" --features-root "$RESOLVED_ROOT")
+fi
+
 if [[ "${ZENSIM_M3_ONLY:-0}" == "1" ]]; then
     # Instrument-changed re-measure: leave every rank/dial/corruption number
     # exactly as the owning tool produced it, and refresh only M3/M3a.
