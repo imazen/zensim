@@ -7765,3 +7765,14 @@ D+free: 12 arms; `-id100-negrich` = CONTRACT 6/6 + REG 7/9 on all four slices; f
 beats full-free on 8/12, no free-40 skew exposure); W4 passes. Registered: identity vector ≠ zero at w944 (gate note
 constant wrong); M3a pack-sensitive (never carried); 12 pre-existing blur.rs subtract-overflow test failures under
 zero-tolerance triage (release wraps silently).
+
+## ROUND 87 — 2026-09-05: the blur.rs subtract-overflow — production code, NOT a shipping bug (measured), fixed at one owner
+12 red tests since the era-2 flip (2026-08-31): `2*(width-1) - add_raw` hand-copied into 38 H-blur kernel bodies
+overflowed when the column tile's last slab is exactly radius+1 wide (width % 1024 == 1 — the (2049,40) cell) or
+width ≤ radius. Release wraps silently — but the wrapped index is the last column's running-sum update, which no
+iteration reads: release `to_bits` dumps at 1025/2049/3073-wide geometries BYTE-IDENTICAL pre/post fix (12/12
+files), fold parity + golden bytes green on both builds → no score, verdict or board row moved; no registry entry.
+Fix `f22ade56`: one owner `blur::h_mirror_add_idx` (saturating_sub, matching the V kernels) replacing all 40 sites;
+failing-first gate drives all five public H entries at tile-derived widths against a true reflect-101 scalar
+reference. Lesson: 38 hand-copies of one expression = 38 places for one bug; the width%tile==1 cell is now the
+named test whenever H_TILE_WIDTH changes.
