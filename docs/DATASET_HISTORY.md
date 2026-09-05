@@ -1656,3 +1656,86 @@ never references the padding owner, so the 944 regimes are unchanged by construc
 corpus pass, no code change) and re-verdict the D/B lineages on it. Registry:
 `benchmarks/eval_annotations.json` → `v1-372-eval-roots-predate-option-c-2026-09-05`.
 Record: `benchmarks/d_ship_flip_2026-09-05.md` §3.
+
+---
+
+### §3.38 — the RUNTIME-era 372 root exists; the canonical DIAL GRID's pixels do not (2026-09-05)
+
+**Thought-why.** §3.37 registered "re-extract the 372 root at HEAD" as a decode-bound corpus
+pass with no code change, and `benchmarks/d_ship_flip_2026-09-05.md` §5 registered the peaks
+refit that would be gated on it. Both assumed the three G-ADDR instruments could be rebuilt
+the same way.
+
+**Actual-why.** The ROOT rebuilt cleanly. Two of the three instruments did too. The dial
+grid could not, and the reason is a data loss nobody had connected to it.
+
+**The root.** `/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC`, era token
+`v1postc`, `build_commit 4fbd8ff8`, `feature_set_id basic+peaks+masked+iw@w372/v1postc#d16a1091`,
+named once in `zensim_validate::eval_roots::POSTC_FEATURES_ROOT_372`. Eight corpora
+re-extracted at HEAD (cid22 4,292 · kadid 10,125 · tid 3,000 · csiq 866 · live 779 · pipal
+21,800 · konjnd 1,008 · aic3 600), six byte-copied from the `v1cur` root and era-stamped per
+file (aic4, nonphoto, imazen26, sdr25, hfnlproxy, hf_nearlossless), `kon504` derived plus its
+side root. **`pack_eval372_root.py` now REFUSES** a fresh table whose `human_score` is not
+BIT-identical positionally to the superseded root's — the assumption every era comparison
+rests on, previously unchecked. It passed 8/8. It is **NOT the default**; which root a
+flagless `bake_verdict` reads stays a user decision.
+
+**And the era it exposes is mild on RANK.** MEASURED across five shipped 372-class bakes,
+`v1cur` → `v1postc` moves CID22 SROCC by **≤ 6.8e-4** (shipped D −5e-5, previous D −5e-5,
+Profile A −5.9e-4, shipped B +2e-5, the new peaks arm −6.8e-4). That is two orders below the
+`v1pre` → `v1cur` step's |0.489| worst case (§3.28), and the reason is structural: that flip
+moved `f228..371`, which only some models read, while this one moves `f0..227`, which every
+372 model reads — but smoothly, so a rank statistic absorbs most of it. **The DIAL moves
+much more**, so this is not licence to read a stored 372 dial number as current.
+
+**⛔ The canonical dial grid is UNREBUILDABLE.** `dial_grid_372col_2026-05-29_quarantined_v2`'s
+own build list (`eval_panels_2026-05-29/qsweep_372_grid.tsv`) points every distorted cell at
+`/mnt/v/input/zensim/images/<ref>/<codec>/q<N>.png` — the decode cache deleted 2026-06-22 —
+and **0 of its 2,560 rows' paths exist**. Its jpeg leg was `mozjpeg-rs-420-e4`; the surviving
+`dial-grid-pixels-2026-07-27/` set is a `zenjpeg` re-encode of the same (image, codec, q)
+lattice. Confirmed numerically before it was confirmed from the build list: a PRE-option-C
+binary (`27cfde15`) does not reproduce the stored grid from those pixels either — basic
+max |Δ| **0.703** on 2,168 of 2,340 control cells, against **0.055** for the entire
+preC→HEAD era step.
+
+**The surviving pixels are the right instrument anyway, and this is the sharp part.** The
+registered `peer_ssim2` G-ADDR grid pins were measured ON the 2026-07-27 pixels:
+`ssim2-bar-2026-08-31/dialcells_ssim2_qv2grid.tsv` **is**
+`dialcells_ssim2_944grid.tsv` restricted to these 4,424 keys (4,424 of 4,424 exactly equal),
+and the 944 grids were built from them. Spot-check through `zenmetrics batch --metric ssim2`
+on the new pixels: `(00b13be94a4867dd_1022x818, jpeg, q0)` reads **−8.0345** against the pin
+table's **−8.0450**. So the canonical instrument has ALWAYS paired ssim2 truth from one pixel
+set with features from another; the rebuild removes that, it does not introduce it. Derived
+through the owner, `peer_ssim2` on the new grids reproduces its canonical registry row on all
+eight scalars (min −55.354544 · max 98.376644 · p5 10.26332105 · p95 95.45929934999998 ·
+reach 153.731188 · DR 85.19597829999998 · mono 0.99235757295044 · tied 0.0000).
+
+**The identity probe is ERA-INVARIANT**: a HEAD rebuild of the same 38 `ref == dist` pairs is
+**byte-identical** to the registered 2026-09-04 probe (sha `e6f9096b8e0ebd97…`, 0 nonzero
+cells of 14,136). At w372 the identity feature vector is the zero vector in both eras — which
+does NOT extend to w944 (§3.36 measured 190 of 944 slots non-zero there).
+
+**The negative-tail probe IS recoverable, and its provenance is now pinned.** All 2,000 rows
+join UNIQUELY (0 ambiguous) to `kadis700k_canonical_gpu_2026-07-01.parquet` on
+`(feat_0, feat_1, feat_2, score_ssim2_gpu)` → `distorted_url` (R2) + `source_filename` (local,
+2,000/2,000). Control: a PRE-C extraction of the recovered pixels reproduces the stored probe
+to ≤ 7.66 absolute on a ~1.2e5-scale slot (6.2e-5 relative), while the preC→HEAD era step on
+the same rows is 18,953 on that slot.
+
+**The frozen safesyn Gram is `v1pre`, measured not assumed.**
+`linear-probe/grams/safesyn.npz`'s first and second moments match
+`canonical-2026-05-21/train/safesyn.parquet` exactly on every column checked (f0
+`s=3688.568709 S=272.523676`; f1, f155, f156, f200 likewise, n = 196,086 both sides). Every
+bake in the ADD156 / D lineage is therefore trained two extraction eras behind what the
+runtime serves it.
+
+**A silent-corruption class worth its own line:** `extract_features_372col` sorts its output
+by `ref_basename` before writing (`:216`), so positional re-attachment of key columns is
+UNSOUND for any input not already in that order — and it fails with the right row count and
+every key present exactly once. It scrambled the first build of this grid across its 38
+references (shipped D's ladder monotonicity 0.9847 → 0.5611). Carry a numeric `row_id` and
+invert the permutation; do not change the sort, because the root build's positional
+`human_score` gate depends on both sides having it.
+
+Artifacts: `/mnt/v/output/zensim/dpeaks372-2026-09-05/`. Record:
+`benchmarks/d_peaks_372_postC_2026-09-05.md`.

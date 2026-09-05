@@ -341,8 +341,28 @@ pub fn root_feature_set_ref(root: &Path) -> Option<FeatureSetRef> {
         // The slot set comes from the registry when the id is registered; an
         // unregistered id still identifies itself, with an empty slot set that
         // makes every coverage check report rather than silently pass.
+        //
+        // Look the id up BOTH ways. Registry keys are the CLASS form
+        // (`<compute>@w<layout>/<era>`, hash in the value's `slots_hash8`), so
+        // an exact-key lookup on the full id -- which is what a manifest
+        // declares -- matched NOTHING, and every manifest-declared root
+        // resolved to an EMPTY slot set. That is not a cosmetic miss: an empty
+        // producer set makes `check` report `SlotsNotPopulated` for every slot
+        // the consumer reads, so the FIRST root to carry the key the design
+        // calls most authoritative got 28 spurious "not populated" slots
+        // (2026-09-05, the postC 372 root). Fall back to the class form, and
+        // only accept it when the registered `slots_hash8` AGREES with the
+        // declared one -- a disagreement means the name and the bytes have
+        // come apart, which must not resolve silently.
+        let class = format!("{}@w{}/{}", id.compute(), id.layout_width(), id.era());
         let slots = reg
             .set(&id.to_string())
+            .or_else(|| {
+                reg.set(&class).filter(|s| {
+                    s.as_ref()
+                        .is_some_and(|r| r.id.slots_hash() == id.slots_hash())
+                })
+            })
             .and_then(|s| s.as_ref().map(|r| r.slots.clone()))
             .unwrap_or_default();
         return Some(FeatureSetRef {

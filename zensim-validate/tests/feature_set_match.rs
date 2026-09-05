@@ -245,3 +245,64 @@ fn a_registered_root_path_resolves_and_is_marked_inferred() {
     );
     assert!(r.slots.covers(&SlotSet::parse("0-155").unwrap()));
 }
+
+/// A root whose `_MANIFEST.json` DECLARES a `feature_set_id` resolves to the
+/// registry's slot set — not to an empty one.
+///
+/// FAILS BEFORE the 2026-09-05 fix. `root_feature_set_ref` looked the declared
+/// id up with `reg.set(&id.to_string())`, i.e. the FULL id including `#hash8`,
+/// while every registry key is the CLASS form with the hash in the value. So
+/// the branch the design calls "most authoritative" always fell through to an
+/// EMPTY slot set, and `check` then reported every slot the consumer reads as
+/// `SlotsNotPopulated`. Measured on the first root to carry the key: 28
+/// spurious "not populated" slots for a 372-input bake against a 372-wide root
+/// that populates all 372.
+///
+/// Written against a manifest this test WRITES, so it exercises the resolution
+/// path itself and needs nothing from block storage.
+#[test]
+fn a_manifest_declared_feature_set_id_resolves_to_the_registered_slots() {
+    // CARGO_TARGET_TMPDIR, not `std::env::temp_dir()` — `/tmp` is banned as
+    // scratch in this workspace (CLAUDE.md), and this keeps the fixture under
+    // the build directory where it is cleaned with everything else.
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("zv_fsid_declared_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("_MANIFEST.json"),
+        r#"{"regime": "not a registered regime string",
+            "feature_set_id": "basic+peaks+masked+iw@w372/v1cur#d16a1091"}"#,
+    )
+    .unwrap();
+    let r = feature_set::root_feature_set_ref(&dir).expect("declared id must resolve");
+    assert!(
+        !r.inferred,
+        "a root that DECLARES its id is asserted, never inferred"
+    );
+    assert_eq!(
+        r.id.to_string(),
+        "basic+peaks+masked+iw@w372/v1cur#d16a1091"
+    );
+    assert_eq!(
+        r.slots,
+        SlotSet::parse("0-371").unwrap(),
+        "the declared id must carry the REGISTERED slot set, not an empty one"
+    );
+    // The concrete regression: a 372-wide basic-only consumer must be covered.
+    assert!(r.slots.covers(&SlotSet::parse("0-155").unwrap()));
+
+    // NEGATIVE CONTROL: a declared id whose hash disagrees with the registry
+    // must NOT borrow the class entry's slots — the name and the bytes have
+    // come apart and that has to stay visible.
+    std::fs::write(
+        dir.join("_MANIFEST.json"),
+        r#"{"feature_set_id": "basic+peaks+masked+iw@w372/v1cur#deadbeef"}"#,
+    )
+    .unwrap();
+    let bad = feature_set::root_feature_set_ref(&dir).expect("still identifies itself");
+    assert!(
+        bad.slots.is_empty(),
+        "a hash that disagrees with the registry must resolve to NO slots"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}

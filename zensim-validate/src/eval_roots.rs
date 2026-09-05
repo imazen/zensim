@@ -26,6 +26,11 @@
 //!   flagless invocation means going forward. Probes and trainers that must keep reading the
 //!   old tables name this constant, so their era choice is visible rather than accidental.
 //!
+//! * [`POSTC_FEATURES_ROOT_372`] — re-extracted 2026-09-05, AFTER option C (`56bbcda2`,
+//!   2026-08-30 15:43) removed v1's phantom pooled columns. **This is the era the shipped
+//!   runtime extracts**, and it is one step ahead of both roots above, which is a `basic`
+//!   difference, not a masked/IW one. Not the default — that is a user decision.
+//!
 //! Measured on this pair (`benchmarks/eval372_current_root_2026-08-30.md`): the era shift is
 //! **model-specific, not a constant offset** — exactly 0.00000 on all 15 corpora for a bake
 //! that reads only `f0..155`, up to |0.489| SROCC for one that leans on the drifted block —
@@ -43,6 +48,21 @@ pub const DEFAULT_FEATURES_ROOT_372: &str =
 /// The pre-2026-08-30 372 root. Valid as a STORED-ERA read; not the default since 2026-08-30.
 pub const STORED_FEATURES_ROOT_2026_05_15: &str =
     "/mnt/v/zen/zensim-training/2026-05-15-full-features";
+
+/// `--regime 372` root re-extracted AFTER option C (`56bbcda2`) — **the era the shipped
+/// runtime actually produces.**
+///
+/// NOT the default: which root a flagless `bake_verdict` reads is a user decision, and
+/// flipping it silently re-bases every future 372 number. Named here so a lane can point
+/// at the runtime era explicitly and have the ruler line say so.
+///
+/// MEASURED (`benchmarks/d_ship_flip_2026-09-05.md` §3, reproduced by this lane on the dial
+/// grid and the negative-tail probe): [`DEFAULT_FEATURES_ROOT_372`] was built at `ea16c7ee`,
+/// **two hours before** `56bbcda2` landed, so it is one era BEHIND the runtime — on CSIQ the
+/// basic block `f0..155` differs on 120,804 of 135,096 cells. `f0..155` and `f156..227` are
+/// what the D lineage reads, so this is not a masked/IW-only concern.
+pub const POSTC_FEATURES_ROOT_372: &str =
+    "/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC";
 
 /// `--regime 720` feature root (folded+append 720-wide re-extraction).
 pub const FEATURES_ROOT_720: &str = "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22";
@@ -73,6 +93,9 @@ pub fn era_of(root: &Path) -> &'static str {
         }
         _ if s == STORED_FEATURES_ROOT_2026_05_15 => {
             "STORED-ERA 372 (2026-05-15 root — masked/IW f228..371 from the thread-dependent window)"
+        }
+        _ if s == POSTC_FEATURES_ROOT_372 => {
+            "post-option-C 372 (2026-09-05 root — the era the SHIPPED runtime extracts)"
         }
         _ if s == FEATURES_ROOT_720 => "720 folded+append (ext720-canonical-2026-07-22)",
         _ if s == FEATURES_ROOT_944 => "944 campaign root (ext944-canonical-2026-08-01)",
@@ -163,6 +186,7 @@ mod tests {
         let roots = [
             DEFAULT_FEATURES_ROOT_372,
             STORED_FEATURES_ROOT_2026_05_15,
+            POSTC_FEATURES_ROOT_372,
             FEATURES_ROOT_720,
             FEATURES_ROOT_944,
         ];

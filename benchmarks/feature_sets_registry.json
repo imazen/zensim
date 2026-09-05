@@ -134,6 +134,12 @@
    "root": null,
    "label": "era UNKNOWN (not a registered root \u2014 check its _MANIFEST.json)",
    "note": "NEVER silently treated as a match: 'we do not know which extractor made this' and 'we know it was a different one' have the same consequence for a published number."
+  },
+  "v1postc": {
+   "build_commit": "4fbd8ff8f8f0b66ca28a8dea41016646c1f505f4",
+   "root": "/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC",
+   "label": "post-option-C 372 (2026-09-05 root) -- the era the SHIPPED runtime extracts",
+   "note": "56bbcda2 (2026-08-30 15:43, 'STAGE 1 of the C rollout') removed v1's phantom pooled columns, so every non-tight width moved. The v1cur root was built at ea16c7ee, 2026-08-30 13:21 -- TWO HOURS EARLIER -- so v1cur is one era BEHIND the runtime. Measured on CSIQ: basic f0..155 differs on 120,804 of 135,096 cells, max |d| 4.536785 (benchmarks/d_ship_flip_2026-09-05.md section 3). Eight of the fourteen corpora are current-extractor reads here; six are byte-copies carried from v1cur, era-stamped per file in _MANIFEST.json."
   }
  },
  "sets": {
@@ -148,6 +154,18 @@
    "kind": "set",
    "legacy_name": "372",
    "evidence": "zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372"
+  },
+  "basic+peaks+masked+iw@w372/v1postc": {
+   "compute": "basic+peaks+masked+iw",
+   "layout": 372,
+   "era": "v1postc",
+   "slots": "0-371",
+   "slots_hash8": "d16a1091",
+   "n_slots": 372,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "372",
+   "evidence": "scripts/canonical_corpus/build_eval372_root.sh + pack_eval372_root.py at main 4fbd8ff8; benchmarks/d_peaks_372_postC_2026-09-05.md"
   },
   "basic+peaks+masked+iw@w372/v1pre": {
    "compute": "basic+peaks+masked+iw",
@@ -318,7 +336,8 @@
   "/mnt/v/zen/zensim-training/wlin7-pools944-2026-08-30": "basic+peaks+masked+iw+v2+append+append2@w944/pools",
   "/mnt/v/zen/zensim-training/r1b-ctrl944-2026-08-30": "basic+v2+append+append2@w944/pools",
   "/mnt/v/zen/zensim-training/wlin7-ctrl944-2026-08-30": "basic+v2+append+append2@w944/pools",
-  "/mnt/v/zen/zensim-training/r1b-a3fused-2026-08-30": "basic+carriers+v2+append+append2@w944/pools"
+  "/mnt/v/zen/zensim-training/r1b-a3fused-2026-08-30": "basic+carriers+v2+append+append2@w944/pools",
+  "/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC": "basic+peaks+masked+iw@w372/v1postc"
  },
  "regime_strings": {
   "folded720append2pools": {

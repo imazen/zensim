@@ -720,10 +720,59 @@ out by measurement: `ZENSIM_ERA2_DENSE=0` reproduces HEAD byte-for-byte (so
 `515001dc`'s era-2 flip is not the cause — it moves only `f372+`), and
 `v1_golden_bytes` passes 5/5 because every fixture is tight or below the tile.
 **The 944 roots are NOT affected** — `56bbcda2` verified structurally that the
-fold's production path never references the padding owner. A 372-root
-re-extraction at HEAD (`scripts/canonical_corpus/build_eval372_root.sh` +
-`pack_eval372_root.py`) is REGISTERED, not run. Record:
-`benchmarks/d_ship_flip_2026-09-05.md` §3.
+fold's production path never references the padding owner.
+
+**RUN 2026-09-05 — the runtime-era 372 root EXISTS**, and the era shift on RANK
+is far smaller than the 372 era before it.
+`/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC` (era token
+`v1postc`, `build_commit 4fbd8ff8`, `feature_set_id
+basic+peaks+masked+iw@w372/v1postc#d16a1091`; named once, in
+`zensim_validate::eval_roots::POSTC_FEATURES_ROOT_372`). Eight corpora
+re-extracted at HEAD, six byte-copied and era-stamped per file, `kon504`
+derived; `pack_eval372_root.py` now REFUSES a fresh table whose `human_score` is
+not bit-identical positionally to the superseded root's (it passed 8/8).
+**MEASURED across five shipped 372-class bakes, `v1cur` → `v1postc` moves CID22
+SROCC by ≤ 6.8e-4** (shipped D −5e-5, Profile A −5.9e-4, shipped B +2e-5) —
+two orders below the `v1pre → v1cur` step's |0.489| worst case, because that
+one moved `f228..371` while this one moves `f0..227` smoothly. **The DIAL moves
+much more than the rank does**, so this is not licence to read a stored 372
+dial number as current. **NOT the default** — which root a flagless
+`bake_verdict` reads stays a user decision.
+
+**⛔ The canonical 372 DIAL GRID cannot be re-extracted — its pixels are gone.**
+`eval_panels_2026-05-29/qsweep_372_grid.tsv` points every distorted cell at the
+`/mnt/v/input/zensim/images/<ref>/<codec>/q<N>.png` decode cache deleted
+2026-06-22; **0 of 2,560 paths exist**, and the jpeg leg was `mozjpeg-rs-420-e4`
+where the surviving `dial-grid-pixels-2026-07-27/` set is `zenjpeg`. A PRE-C
+binary does not reproduce the stored grid from those pixels either (basic max
+|Δ| 0.703 vs 0.055 for the whole preC→HEAD era step). The 2026-07-27 pixels are
+nevertheless the RIGHT instrument: the registered `peer_ssim2` grid pins were
+measured ON them (`dialcells_ssim2_qv2grid.tsv` IS the 944 table restricted to
+these 4,424 keys), and `peer_ssim2` reproduces its canonical registry row on all
+eight scalars there. Rebuilt grids + probes:
+`/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments/`, registered append-only
+in the G-ADDR floor registry; grade on them with
+`ZL_ERA=postC scripts/dialgate_arms.sh score …`. The identity probe is
+ERA-INVARIANT (a HEAD rebuild is BYTE-IDENTICAL to the 2026-09-04 one).
+
+Records: `benchmarks/d_ship_flip_2026-09-05.md` §3,
+`benchmarks/d_peaks_372_postC_2026-09-05.md` §1.
+
+**⛔ `extract_features_372col` DOES NOT EMIT ROWS IN INPUT ORDER — never
+re-attach key columns positionally.** It ends with
+`rows.sort_by(|a, b| a.0.cmp(&b.0))` (`extract_features_372col.rs:216`), a
+stable sort on `ref_basename`. The row count is right, every key appears once,
+and only the pairing is scrambled — it fails SILENTLY. MEASURED cost: the first
+build of the 2026-09-05 dial grid shuffled features across its 38 references,
+which collapsed every scorer's ladder monotonicity (shipped D **0.9847 →
+0.5611**), made jpeg q0 read a dial of 75.6 on an image whose ssim2 truth is
+−8.03, and moved `peer_ssim2`'s own `tied` from 0.0000 to 0.0672 — that last is
+what caught it. **Do not change the sort**: other callers (the root build above)
+compare positionally against stored tables built with it, and both sides being
+sorted is why that gate passes bit-exactly. Instead carry a numeric `row_id`
+column in the pairs TSV (`load_pairs_tsv` forwards every numeric extra) and
+invert the permutation, checked — the pattern
+`scripts/canonical_corpus/build_dial372_instruments.py` implements.
 
 **Block-skipping: `V2NewFeatureToggles::v1_only`.** A 372-only request skips
 every v2-era block AND its phase-A upstream (the four V-blur sweeps + the v2

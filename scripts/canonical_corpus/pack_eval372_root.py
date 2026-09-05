@@ -26,7 +26,18 @@ import pyarrow.parquet as pq
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "/mnt/v/zen/zensim-training/2026-08-30-full-features-372"
 WORK = sys.argv[2] if len(sys.argv) > 2 else os.path.expanduser("~/tmp/eval372root")
-OLD = "/mnt/v/zen/zensim-training/2026-05-15-full-features"
+# The root this one supersedes: the source of every `stored` copy AND the
+# reference the per-slot drift table is computed against. Third positional so
+# a later era can be packed against the era it actually follows -- packing the
+# 2026-09-05 post-option-C root against the 2026-05-15 root would report a drift
+# that is two era steps wide and attribute it to one.
+OLD = sys.argv[3] if len(sys.argv) > 3 else "/mnt/v/zen/zensim-training/2026-05-15-full-features"
+# The registered feature-set id this root PRODUCES (docs/FEATURE_SET_IDS.md).
+# Written into `_MANIFEST.json` as the `feature_set_id` key, which is the FIRST
+# and only ASSERTED source `zensim_validate::feature_set::root_feature_set_ref`
+# consults -- without it a reader can only INFER the id from the registry's
+# path table, which is evidence about the root's NAME, never about its BYTES.
+FEATURE_SET_ID = sys.argv[4] if len(sys.argv) > 4 else None
 
 # (corpus, bake_verdict filename, source): source = "fresh:<csv stem>" or "stored"
 JOBS = [
@@ -106,6 +117,69 @@ def graft_extras(fresh: pa.Table, stored_path: str, corpus: str, report: dict) -
     return pa.table({k: cols[k] for k in order})
 
 
+def build_commit() -> str:
+    """The commit the extracting tree was at.
+
+    `git rev-parse HEAD` alone is not enough: a **jj workspace has no `.git`**
+    (`CLAUDE.md`, the safe_push section), so a root packed from a sibling
+    workspace -- which is the mandated way to work in this repo -- silently got
+    `build_commit: ""`. An empty build_commit defeats the whole point of the
+    key (`~/work/zen/CLAUDE.md` ML-pipeline discipline #2: "is this data still
+    valid?" must be a grep, not a forensic audit), so fall back to jj's own
+    working-copy commit id, which IS the tree that produced the CSVs.
+    """
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # The EXTRACTOR's tree, when it differs from the packer's -- the binary is
+    # built once and the tree may move under it while a root is assembled.
+    # Pass it explicitly rather than letting the packer's own `@` stand in.
+    if os.environ.get("ZEN_BUILD_COMMIT"):
+        return os.environ["ZEN_BUILD_COMMIT"].strip()
+    for cmd in (["git", "-C", repo, "rev-parse", "HEAD"],
+                ["jj", "--repository", repo, "--no-pager", "log", "--no-graph",
+                 "-r", "@", "-T", "commit_id"]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+        except FileNotFoundError:
+            continue
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    raise SystemExit(f"cannot determine build_commit for {repo} (tried git and jj)")
+
+
+def check_row_alignment(fresh: pa.Table, stored_path: str, corpus: str) -> dict:
+    """REFUSE to pack a fresh table whose rows do not line up POSITIONALLY with
+    the superseded root's.
+
+    Every era comparison downstream -- the drift table below, and any
+    `bake_verdict` A/B across two roots -- pairs row i with row i. That is
+    sound only because both tables come from the same loader over the same
+    label file in the same order. It is not sound by construction: a corpus
+    whose label file changed, or a loader whose ordering changed, would still
+    produce the right ROW COUNT and silently compare different images.
+
+    `human_score` is the check because it is the one non-feature column both
+    eras carry, and it is a property of the LABEL, not of the extractor -- so
+    it must be BIT-identical (not merely close) row for row. A mismatch is a
+    hard failure: an era number computed across misaligned rows is worse than
+    no number.
+    """
+    if not os.path.exists(stored_path):
+        return {"checked": False, "reason": f"no stored counterpart at {stored_path}"}
+    st = pq.read_table(stored_path, columns=["human_score"]).to_pydict()["human_score"]
+    fr = fresh.to_pydict()["human_score"]
+    if len(st) != len(fr):
+        raise SystemExit(f"{corpus}: fresh has {len(fr)} rows, stored {len(st)} — NOT aligned")
+    bad = [i for i, (a, b) in enumerate(zip(fr, st)) if a != b]
+    if bad:
+        raise SystemExit(
+            f"{corpus}: human_score differs positionally on {len(bad)} of {len(fr)} rows "
+            f"(first at row {bad[0]}: fresh {fr[bad[0]]!r} vs stored {st[bad[0]]!r}) — "
+            "the two eras are NOT row-aligned, refusing to pack"
+        )
+    return {"checked": True, "column": "human_score", "rows": len(fr),
+            "bit_identical_positionally": True, "against": stored_path}
+
+
 def drift(stored_path, new_path, tag, outdir):
     """Per-slot era comparison via the drift lane's instrument (NOT re-implemented)."""
     cmp_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drift_cmp.py")
@@ -137,13 +211,14 @@ def main():
                        "bake_verdict hardcodes each corpus's filename, so a drop-in root must "
                        "reuse them; the ROOT directory carries the date.",
         "built_utc": datetime.now(timezone.utc).isoformat(),
-        "build_commit": subprocess.run(["git", "-C", os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)))), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip(),
+        "build_commit": build_commit(),
         "regime": "v1-372 (extended+iw, num_scales=4, blur_passes=1, blur_radius=5, "
                   "masking/iw strength 4.0, Box2x2 downscale)",
         "supersedes": OLD,
         "corpora": {},
     }
+    if FEATURE_SET_ID:
+        man["feature_set_id"] = FEATURE_SET_ID
     for corpus, fn, src in JOBS:
         dst = os.path.join(OUT, fn)
         rep = {"filename": fn, "source": src}
@@ -157,6 +232,7 @@ def main():
             rep["era"] = "current (re-extracted at build_commit)"
             rep["rows"] = t.num_rows
             rep["source_csv"] = csv_path
+            rep["row_alignment_vs_stored"] = check_row_alignment(t, stored, corpus)
         else:
             shutil.copy2(stored, dst)
             rep["rows"] = pq.ParquetFile(dst).metadata.num_rows
@@ -175,7 +251,15 @@ def main():
     # kon504 — the JPEG half of KonJND, the registered cross-class kon ruler
     # (`konjnd-372-full-file-dilution-2026-08-29`). Derived from the FRESH
     # konjnd by the stored 504's own keys (KonJND keys are unique: verified).
-    kon_stored_504 = os.path.join(OLD, "konjnd_jpeg504_372_2026-08-29.parquet")
+    # Whichever 504 ruler the superseded root carries -- the two names exist
+    # because the file was built per root (zensim_validate::eval_roots::
+    # KONJND_JPEG504_372_SLOTS, newest first). Only the KEYS are read from it.
+    kon_stored_504 = next(
+        (p for p in (os.path.join(OLD, n) for n in ("konjnd_jpeg504_372_2026-08-30.parquet",
+                                                    "konjnd_jpeg504_372_2026-08-29.parquet"))
+         if os.path.exists(p)),
+        os.path.join(OLD, "konjnd_jpeg504_372_2026-08-29.parquet"),
+    )
     if os.path.exists(kon_stored_504):
         st = pq.read_table(kon_stored_504).to_pydict()
         want = [(norm(r), round(float(h), 9))

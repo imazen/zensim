@@ -104,8 +104,16 @@ because **the shift between eras is model-specific, not a constant offset**:
 masked/IW block (`benchmarks/eval372_current_root_2026-08-30.md`). A number read
 on one era cannot be corrected into the other, only re-verdicted.
 
-Registered eras: `v1pre`, `v1cur`, `ext720`, `ext924`, `ext944`, `pools`,
-`era2r4`, `unknown`.
+Registered eras: `v1pre`, `v1cur`, `v1postc`, `ext720`, `ext924`, `ext944`,
+`pools`, `era2r4`, `unknown`.
+
+**`v1postc` is the era the SHIPPED runtime extracts** (2026-09-05 root, build
+`4fbd8ff8`). Option C (`56bbcda2`, 2026-08-30 15:43) stopped v1 pooling phantom
+columns, and the `v1cur` root was built at `ea16c7ee` two hours EARLIER — so
+both older 372 roots are one era behind the product. Unlike the `v1pre -> v1cur`
+step, this one moves `f0..227`, which every 372 bake reads; MEASURED on five
+shipped bakes the RANK shift is nevertheless <= 6.8e-4 SROCC, while the DIAL
+moves much more (`benchmarks/d_peaks_372_postC_2026-09-05.md` SS3).
 
 ### 2.4 `#<slots-hash8>` — the content hash
 
@@ -184,6 +192,7 @@ resolves to no id at all, and must be addressed per file.
 | id | legacy name | notes |
 |---|---|---|
 | `basic+peaks+masked+iw@w372/v1cur` | "372" | the default eval root since 2026-08-30 (`ea16c7ee`) |
+| `basic+peaks+masked+iw@w372/v1postc` | "372" | `2026-09-05-full-features-372-postC` (`4fbd8ff8`) — the RUNTIME era, post-option-C. NOT the default; that is a user decision |
 | `basic+peaks+masked+iw@w372/v1pre` | "372" | the 2026-05-15 stored root — masked/IW from the thread-dependent window |
 | `basic@w372/v1cur` | "156" | Profile **D** / **ADD156**-class: 372-wide caller, basic-only reads |
 | `basic+peaks+masked+iw+v2@w720/ext720` | "720" | `ext720-canonical-2026-07-22` |
@@ -249,7 +258,7 @@ Append-only, like the feature numbering itself: a set that is superseded gets a
 | `156` | `basic@w372/v1cur` | no |
 | `156+free` | `basic+peaks+moments@w944/era2r4` | no |
 | `+classC` | `basic+peaks+moments+classc@w944/era2r4` | no |
-| `372` | `basic+peaks+masked+iw@w372/v1cur` **or** `…/v1pre` | **YES — 2 eras** |
+| `372` | `basic+peaks+masked+iw@w372/v1cur`, `…/v1pre` **or** `…/v1postc` | **YES — 3 eras** |
 | `720` | `basic+peaks+masked+iw+v2@w720/ext720` | no |
 | `924` | `basic+v2+append@w924/ext924` | no |
 | `944` | six ids — §3.1 | **YES — 6 meanings** |

@@ -2175,6 +2175,23 @@ struct FitLassoArgs {
     /// is fatal, exit-4 class).
     #[arg(long)]
     embed_repro: bool,
+    /// Stamp `zentrain.feature_set_id` — the registered PRODUCER id of the
+    /// tables this fit trained on (`docs/FEATURE_SET_IDS.md`), e.g.
+    /// `basic+peaks+masked+iw@w372/v1pre#d16a1091`.
+    ///
+    /// OPT-IN and caller-supplied, for one reason: the id's ERA names the
+    /// EXTRACTOR that produced the gram's rows, and a `.npz` gram carries no
+    /// provenance at all — this tool cannot derive it and must not guess one.
+    /// The COMPUTE and LAYOUT halves ARE checkable, and are checked: the id
+    /// must parse, must be registered, must be a `producer`, its layout must
+    /// equal the emitted bake's caller width, and its slot set must COVER
+    /// every line the emitted bake actually reads. A stamp that disagrees with
+    /// the bytes is refused rather than written.
+    ///
+    /// Default off, so every stored `--expect-sha256` recipe still reproduces
+    /// byte-for-byte.
+    #[arg(long)]
+    feature_set_id: Option<String>,
     /// Take the LEADING `n_feat` columns of a wider `--anchor-parquet` — the
     /// opt-in companion of `gram --max-feat`, for the case where the same table
     /// served the gram at a narrower width (hybrid lane PART II: a 372-wide
@@ -2257,6 +2274,73 @@ fn load_sign_bounds(path: &Path, n_feat: usize) -> Result<(Vec<f64>, Vec<f64>), 
     }
     eprintln!("  bounds: {n_pinned} features pinned >= 0, rest free (of {n_feat})");
     Ok((lo, hi))
+}
+
+/// Stamp `zentrain.feature_set_id` onto an emitted bake, CHECKED against the
+/// bake's own bytes.
+///
+/// The stamp names the PRODUCER (the tables the fit trained on), so its slot
+/// set must COVER what the bake reads and its layout must equal the bake's
+/// caller width. Those two halves are verifiable here; the ERA is not, which
+/// is why it is caller-supplied (see the flag's docs). A stamp that disagrees
+/// is refused — an unverifiable id written anyway would be worse than none,
+/// because `bake_verdict` treats a stored id as ASSERTED, never inferred.
+fn stamp_feature_set_id(out: &Path, id: &str) -> Result<(), String> {
+    use zensim::feature_set_id::FeatureSetId;
+    let parsed = FeatureSetId::parse(id.trim()).ok_or_else(|| {
+        format!(
+            "--feature-set-id {id:?} is not a canonical id \
+                 (<compute>@w<layout>/<era>#<hash8>, see docs/FEATURE_SET_IDS.md)"
+        )
+    })?;
+    let reg = zensim_validate::feature_set::registry();
+    let class = format!(
+        "{}@w{}/{}",
+        parsed.compute(),
+        parsed.layout_width(),
+        parsed.era()
+    );
+    let set = reg
+        .set(id.trim())
+        .or_else(|| reg.set(&class))
+        .ok_or_else(|| {
+            format!(
+                "--feature-set-id {id:?} is not in benchmarks/feature_sets_registry.json — \
+                     register the set (and its era) before stamping a bake with it"
+            )
+        })?;
+    if set.role != "producer" {
+        return Err(format!(
+            "--feature-set-id {id:?} is registered as role {:?}; the stamp names the TABLES \
+             the fit trained on, which is a producer",
+            set.role
+        ));
+    }
+    let bytes = std::fs::read(out).map_err(|e| format!("re-read {out:?}: {e}"))?;
+    let model =
+        zenpredict::Model::from_bytes(&bytes).map_err(|e| format!("re-parse {out:?}: {e:?}"))?;
+    let consumer = zensim_validate::feature_set::bake_feature_set_ref(&model, parsed.era())
+        .map_err(|e| format!("derive the bake's own feature-set ref: {e}"))?;
+    if consumer.id.layout_width() != parsed.layout_width() {
+        return Err(format!(
+            "--feature-set-id declares w{} but the emitted bake's caller width is w{}",
+            parsed.layout_width(),
+            consumer.id.layout_width()
+        ));
+    }
+    if let Some(pinned) = set.as_ref()
+        && !pinned.slots.covers(&consumer.slots)
+    {
+        return Err(format!(
+            "--feature-set-id {id:?} does not POPULATE {} line(s) the emitted bake READS: {}",
+            pinned.slots.missing_from(&consumer.slots).len(),
+            pinned.slots.missing_from(&consumer.slots)
+        ));
+    }
+    let appended =
+        zenpredict_bake::append_metadata_utf8(&bytes, "zentrain.feature_set_id", id.trim())
+            .map_err(|e| format!("embed zentrain.feature_set_id FAILED (fatal): {e:?}"))?;
+    std::fs::write(out, appended).map_err(|e| format!("rewrite {out:?}: {e}"))
 }
 
 /// Embed `zentrain.repro` into an emitted bake through the canonical
@@ -2780,6 +2864,14 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
         );
         embed_repro_into(&a.out, &repro)?;
         eprintln!("  zentrain.repro embedded ({} B)", repro.len());
+    }
+
+    // The training-set stamp, AFTER the repro so the byte order is
+    // deterministic. Checked against the bytes that were just emitted, so a
+    // wrong stamp fails the fit instead of shipping inside it.
+    if let Some(id) = a.feature_set_id.as_deref() {
+        stamp_feature_set_id(&a.out, id)?;
+        eprintln!("  zentrain.feature_set_id embedded: {id}");
     }
 
     let out_bytes = std::fs::read(&a.out).map_err(|e| format!("re-read {:?}: {e}", a.out))?;
@@ -4967,6 +5059,67 @@ mod tests {
         std::fs::write(&above, tiny_bake(&[(5.0, 0.0), (10.0, 100.0)])).unwrap();
         let failed = cmd_gate(&gate_args(above, corpus)).expect("gate runs");
         assert!(failed, "all linear raw preds below knot 5.0 — must FAIL");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `--feature-set-id` writes a CHECKED stamp, or refuses.
+    ///
+    /// The stamp is what `bake_verdict` treats as ASSERTED (never inferred),
+    /// so a wrong one is worse than none. Four refusals and one accept, all on
+    /// a bake whose read set is known by construction.
+    #[test]
+    fn feature_set_id_stamp_is_checked_against_the_bake_bytes() {
+        // `~/tmp`, not `/tmp` — this workspace bans `/tmp` as scratch, and a
+        // bin unit test has no CARGO_TARGET_TMPDIR.
+        let dir = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+            .join("tmp")
+            .join(format!("zensim_fsid_stamp_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("stamp.bin");
+        // 372-wide caller, weight on f0..f5 only.
+        let n = 372usize;
+        let mut w = vec![0.0f32; n];
+        for (i, v) in w.iter_mut().enumerate().take(6) {
+            *v = 0.1 + i as f32 / 100.0;
+        }
+        let mean = vec![0.0f32; n];
+        let scale = vec![1.0f32; n];
+        emit_linear(&out, &mean, &scale, &w, 0.25, &[]).expect("emit");
+        let pristine = std::fs::read(&out).unwrap();
+
+        // (1) not a canonical id at all.
+        assert!(
+            stamp_feature_set_id(&out, "372").is_err(),
+            "a COUNT is not an id"
+        );
+        // (2) canonical but unregistered.
+        assert!(
+            stamp_feature_set_id(&out, "basic@w372/no_such_era#d16a1091").is_err(),
+            "an unregistered era must be refused, not written"
+        );
+        // (3) registered but a CONSUMER class — the stamp names the tables.
+        assert!(
+            stamp_feature_set_id(&out, "basic@w372/v1cur#1008b687").is_err(),
+            "a consumer-role entry must be refused"
+        );
+        // (4) a producer of the WRONG width.
+        assert!(
+            stamp_feature_set_id(&out, "basic+v2+append+append2@w944/ext944#7ed470b4").is_err(),
+            "w944 must not be stampable onto a w372 bake"
+        );
+        // Every refusal leaves the file untouched.
+        assert_eq!(
+            std::fs::read(&out).unwrap(),
+            pristine,
+            "a refused stamp must not write"
+        );
+
+        // (5) the correct producer id lands and reads back.
+        stamp_feature_set_id(&out, "basic+peaks+masked+iw@w372/v1pre#d16a1091").expect("accept");
+        let m = zenpredict::Model::from_bytes(&std::fs::read(&out).unwrap()).unwrap();
+        let got = zensim_validate::feature_set::bake_declared_training_set(&m)
+            .expect("the stamp must parse back");
+        assert_eq!(got.to_string(), "basic+peaks+masked+iw@w372/v1pre#d16a1091");
         std::fs::remove_dir_all(&dir).ok();
     }
 }
