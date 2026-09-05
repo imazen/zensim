@@ -1447,6 +1447,34 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   ECharts mounts + built options + both chart themes, and SSR-renders one option per
   panel kind through the real echarts (svg SSR, no canvas) so a malformed option
   fails the gate instead of blanking the page.
+  Plus (2026-09-05) **URL COMPARE SETS**: `#compare=<id1>,<id2>,...` in the fragment
+  (a bare `#<id1>,<id2>` list too, when the fragment carries no `key=`) pins the board to
+  exactly those models. Ids are board names AS RENDERED — matched exactly and
+  case-sensitively, with a case-insensitive fallback that the banner always reports. The
+  list sets `state.visible`, the ONE selection owner, so every list, table and chart
+  follows with no parallel filter, and it OVERRIDES every default: curated, family
+  toggles, the dominated default-off, the gate pre-filter and the forced `peer_ssim2`
+  reference row (an explicit list means explicit). The scoreboard RESTRICTS to the listed
+  rows rather than dimming them and defaults to the FRAGMENT order (sortKey `cmp`); a
+  header click sorts normally after that. A missing id raises a full-width `role=alert`
+  banner (`#cmpbanner`, above the sticky bar, theme-aware in both modes, not dismissible)
+  giving requested/found counts, every missing id verbatim, and up to 3 nearest board
+  names per miss as one-click adds (bounded Levenshtein + prefix/substring, client-side —
+  no library, no request); if NONE resolve, the banner shows and the normal default view
+  is rendered rather than an empty board; a fully exact list renders NO banner (the
+  compare strip in the bar is that status surface). Two-way: a selection edit rewrites
+  `location.hash` via `history.replaceState` — no scroll jump, no `hashchange` — and ONLY
+  when the set actually changed, so a shared link keeps a typo's evidence across a reload;
+  `hashchange` re-applies an in-place edit; *copy link to this comparison* sits by the
+  pickers with a try/catch-guarded clipboard call that ALWAYS also shows the URL as text.
+  Gate 4 in `gauntlet_gates.sh` runs three cases (two known ids → exactly those rows in
+  fragment order, banner absent / known + a proven-absent typo → banner names it verbatim
+  with real-board-name suggestions / `#compare=` empty → default view, no banner), each
+  also click-testing the copy control; the ids are READ OUT OF THE BOARD so the gate
+  cannot go stale, the location/history surface lives in the harness SHIM, and `CMPMODE`
+  is read from the app's own `state.cmp` through the vm context so the harness never
+  becomes a second owner of the matching rule. Examples + the two shareable URLs:
+  `benchmarks/fair_gauntlet_2026-09-04.md` "URL compare sets".
 The first two modes' plots: per-bake scatter+trend, grouped 10-band SROCC bars,
 calibration curve, residual, candlestick, SROCC heatmap, 2-panel Pareto trade
 (CID22 vs nonphoto / KonJND), composite ranking bar, per-codec dial plots +

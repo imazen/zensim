@@ -7776,3 +7776,26 @@ Fix `f22ade56`: one owner `blur::h_mirror_add_idx` (saturating_sub, matching the
 failing-first gate drives all five public H entries at tile-derived widths against a true reflect-101 scalar
 reference. Lesson: 38 hand-copies of one expression = 38 places for one bug; the width%tile==1 cell is now the
 named test whenever H_TILE_WIDTH changes.
+
+## ROUND 88 — 2026-09-05: the gauntlet takes a URL compare set, and says loudly when an id is wrong
+User ask, verbatim: *"can we make the gauntlet support urls that compare a comma delimited set of models,
+url fragment, filtering display and lists to the set listed, show warning big if the listed ids aren't all
+found."* Shipped `29bed11f`: `#compare=<id1>,<id2>,...` (bare `#<id1>,<id2>` too, when the fragment carries
+no `key=`) sets `state.visible` — the ONE selection owner — so every list, table and chart follows with no
+parallel filter, and an explicit list OVERRIDES curated, the family toggles, the dominated default-off, the
+gate pre-filter and the forced `peer_ssim2` reference row. The scoreboard RESTRICTS to the listed rows (the
+default board dims instead) and its default order is the FRAGMENT order. Matching is exact + case-sensitive
+with a case-insensitive fallback that is always reported. A miss raises a full-width `role=alert` banner
+above the sticky bar naming every missing id verbatim with up to 3 nearest board names (bounded Levenshtein
++ prefix/substring, client-side, no library); all-missing keeps the banner and falls back to the default
+view rather than an empty board; a fully exact list renders NO banner. Two-way: a selection edit rewrites
+`location.hash` through `history.replaceState` — and ONLY when the set changed, so a shared link keeps its
+typo evidence across a reload — plus a copy-link control whose clipboard call is try/catch guarded and
+which always shows the URL text. Gate 4 (three cases, ids read out of the board so it cannot go stale) is
+in `gauntlet_gates.sh`; the location/history surface is in the harness SHIM and `CMPMODE` is read from the
+app's own `state.cmp` through the vm context, so the harness never becomes a second owner of the matching
+rule. No assertion relaxed — the no-hash invocation still asserts composite-descending default order and the
+full-board row-count floor. Both boards regenerated and gated: fair 9,919,326 B (9.46 MB, under the 12 MB
+cap), all-rows 22,763,259 B. Drive-by: a paren defect had been passing the `curated+knobfail` button as the
+`curated` button's TITLE argument since it landed — it parsed, so no gate saw it, and the button simply was
+not on the bar.

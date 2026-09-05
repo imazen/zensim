@@ -332,6 +332,47 @@ these JSONs does not inherit the feature.**
 
 ---
 
+## URL compare sets
+
+Either board takes a comma-delimited model list in the URL fragment and pins itself to
+exactly that set (2026-09-05, `29bed11f`):
+
+```
+#compare=<id1>,<id2>,...
+```
+
+A bare `#<id1>,<id2>` list works too when the fragment carries no `key=` pair. Ids are the
+board names **as rendered** (era rows keep their `@cur372` suffix; ensemble and `peer_*`
+rows are ordinary ids). Matching is exact and case-sensitive, with a case-insensitive
+fallback that the banner always reports. `#compare=` with nothing after it is not a
+compare set — it renders the normal default view.
+
+The list overrides every default: curated, the family toggles, the dominated default-off,
+the gate pre-filter, and the forced `peer_ssim2` reference row in the beats-ssim2 table.
+**An explicit list means explicit** — a reference metric appears only if you name it. The
+scoreboard restricts to the listed rows (rather than dimming the rest) and its default
+order is the fragment order; clicking any header sorts normally from then on. Editing the
+selection rewrites the fragment, so the URL stays shareable, and *copy link to this
+comparison* in the control bar writes and copies it.
+
+**Clean example** — three fair-board rows, no banner:
+
+```
+http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=W10L9PH_s4004_packed,HDR944_L1T1_s4005_hfpack,LSTAR_s4021_packed
+```
+
+**With a deliberate typo** — the found row still renders, and a full-width red banner names
+the missing id verbatim with its three nearest board names as one-click adds:
+
+```
+http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=W10L9PH_s4004_packed,W10L9PH_s4004_pack
+```
+
+Gated by `gauntlet_gates.sh` gate 4 — two known ids (exact rows, fragment order, no
+banner) / known + typo (banner names it, suggestions are real board names) / empty
+`#compare=` (default view, no banner) — with the ids read out of the board under test, so
+the gate cannot go stale as the board changes.
+
 ## Reproduce
 
 ```sh
