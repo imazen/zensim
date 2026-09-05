@@ -1545,3 +1545,61 @@ the stored artifact before using it.
 
 Record: `benchmarks/imazen26_anchor_2026-09-04.md`. Artifacts:
 `/mnt/v/output/zensim/im26anchor-2026-09-04/{build,arms,probe}/`.
+
+### §3.36 — three 944-POOLS eval instruments built, and the 944 identity vector is NOT zero (2026-09-05)
+
+**What was needed and did not exist.** Grading a bake that reads `f156..371` (any model
+using the free set's 72 peaks) at 944 width required a dial grid, a negative-tail probe and
+an identity probe all in the **`folded720append2pools`** era of
+`/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30/` (`build_commit ced6f52a`). Only the
+grid existed (`wlin7b-2026-08-30/dial_grid_944col_POOLS_2026-08-30.parquet`). **The two
+stored 944 negative-tail probes are the wrong era** — `negtail_probe_944_2026-08-01era` and
+`…_era2r4_foldapp2` both carry `f156..371` STRUCTURALLY ZERO, which is exactly the block a
+peaks-using bake reads, so serving either would have mis-predicted silently. **No 944
+identity probe existed at any era.**
+
+**What was built** (all in `/mnt/v/output/zensim/dfree-2026-09-05/`, registered append-only
+in `benchmarks/dial_addressability_floor_2026-09-04.json` as `(instrument, peer_ssim2)` rows):
+
+| instrument | rows | sha256 | rule |
+|---|--:|---|---|
+| `probes/identity_probe_944pools_2026-09-05.parquet` | 39 | `31fc4403…` | the 39 dial-grid references paired with themselves, extracted by the PINNED pools-era binary |
+| `probes/negtail_probe_944pools_2026-09-05.parquet` | 2000 | `bafc8994…` | `cut_gaddr_negtail_probe.py`'s registered rule (20 equal-count quantile bins over the negative population, lowest 100 row indices per bin) applied to the pools safesyn leg's `human_score × 100` |
+| `anchors/anchor944_r1b_dial_{clamped,negrich}[_id21].parquet` | 1976 / 1997 | `235dd65c…` / `5742aa7b…` / `2871bb4e…` / `7af3e25e…` | stride 55 (the era-2 `anchor944_pools_dial` manifest's own rule) minus the 44 rows the negtail probe also selects, so anchor and probe are **disjoint by construction** |
+
+**The era control, run before anything rested on it.**
+`wlin7b-2026-08-30/v2_ab_extract_PREFIX_PINNED` at `ZENSIM_AB_MODE=foldapp2pools`
+reproduces **both** the r1b root (12 `ext_imazen26` rows × 944 = 11,328 cells, max |Δ| 0.0)
+**and** the POOLS dial grid (7 matched cells × 944 = 6,608, max |Δ| 0.0) **bit-exactly**.
+Separately MEASURED and REFUSED: `ext944-era2r4-2026-09-01/` declares the same regime and
+ships an `anchor944_pools_dial.parquet` and a pools-regime `ext_kadis.parquet`, but is a
+**different extractor era** — same rows, same order, `human_score` bit-identical, features
+NOT (max |Δ| 7.46e-2 on `f0`, 1.96e-2 on `f160`, 3.13e-3 on `f930`).
+
+**The finding: at 944 width the identity feature vector is NOT the zero vector.**
+`dial_addressability.rs` carries a named constant asserting *"ref == dist yields all-zero
+features for every image; identity dial = dial(0-vector)"*, and the 372 probe's registry row
+records that as a measured property. On the 39-row 944-POOLS probe, **286 of 944 slots are
+non-zero on at least one row and they VARY BY IMAGE** — the fold's own basic block
+(`f0`/`f1`/`f2` at 4.7e-6 … 8.1e-4), every peak triple, the whole `PJND_FRAGILITY` family
+(the formula artifact `free_features_classC_2026-09-04.md` §6.3 documents), and
+`LUMA_MEAN_REF`, which is REFERENCE-ONLY and therefore cannot be zero on a ref==dist pair.
+C5 and C6 still measure correctly (`IdentityMeasure` counts rows outside the band and
+compares grid cells against `dial_max`), but **the note string is wrong at this width and is
+emitted verbatim into every `--gaddr-json`**; the new registry row states the correction in
+its `measured_property` field. Making the constant conditional on the probe is REGISTERED,
+NOT DONE.
+
+**Round-trip control:** `peer_ssim2` graded against its own three freshly-appended rows
+reads **SHIPPABLE, 15 pass / 0 fail / 0 not-measured**, every bar tied bit-exactly; and the
+four grid scalars (`min −55.354544, max 99.993468, p5 12.0158692, p95 95.4858354`) reproduce
+the parked `gaddrinst` lane's independently-computed full-944 values EXACTLY. ssim2's
+identity is **100.000000** on all 39 (38 carried from the 372 lane's `zenmetrics batch
+--metric ssim2` run; the 39th, `9059ec43b26aa167_769x513`, measured here by the same tool).
+
+**⚠ These bars are NOT the 372 bars.** Most sharply on A8: this probe's ssim2 p1 is
+**−64.23** against the 372 kadis probe's **−187.13**, because safesyn's negative population
+is shallower than KADIS's. A number from the two instrument sets must never be compared.
+
+Record: `benchmarks/d_free_id100_2026-09-05.md` §§1.4, 2, 3. Artifacts + shas:
+`benchmarks/d_free_id100_bakes_2026-09-05.pointer.md`.
