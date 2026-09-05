@@ -649,3 +649,46 @@ quoted anywhere as a result.
   a bare `>>>>>>> conflict 1 of 1 ends` at line 59 as pushed, from an earlier
   lane's incomplete resolution. This lane's rebase kept **both** lanes' sections
   verbatim and dropped that one line.
+
+## L2.7 The next lever, located and measured but NOT taken
+
+The same defect class L16 fixed in the downscale is present, larger, in the
+kernel that is **38.53 % of the fast walk's instructions**. Disassembly of
+`fused_blur_h_ssim_inner_v4x`'s hot loop (0x10a1e0–0x10a5fd, **197
+instructions** per iteration), by category:
+
+| category | instrs | share |
+|---|---:|---:|
+| **bounds checks** (`cmp` 35 + `jae` 32) | **67** | **34.0 %** |
+| address computation (`mov` 53 + `lea` 14) | 67 | 34.0 % |
+| strided gather assembly (`vbroadcastss` 24, `vinsertps` 6, `vinsertf32x4` 6, `vmovss` 2) | 38 | 19.3 % |
+| mask ops (`kmovd`) | 12 | 6.1 % |
+| **actual arithmetic** (`vfmadd231ps` 3, `vaddps` 2) | **5** | **2.5 %** |
+
+**One third of the hottest kernel in the fast walk is bounds checking, and 2.5 %
+of it is arithmetic.** For scale, the whole of L16 was worth −7.23 % of walk Ir;
+this loop is 5.3× the downscale's share to begin with.
+
+Two things must be said before anyone treats that 34 % as free money:
+
+1. **The 38 gather instructions are structural, not waste.** Horizontal box
+   blurs here vectorise *across rows*, so each x-step assembles a vector from
+   strided scalar loads — one column across 16 rows. The rem-ring
+   (`extraction_perf_and_buffered_removal_2026-08-30.md`) already removed the
+   redundant *half* of those. Removing the rest means changing the LAYOUT, which
+   is the packed-tile result again, not a bounds-check fix.
+2. **The fixed-size-array pattern does not transfer directly.** L16 worked
+   because a downscale chunk reads 32 *contiguous* f32 at a computed offset, so
+   one `try_into` covers it. The H blur indexes a different row at each of 16
+   strided offsets, so there is no single contiguous window to name. The shape
+   that would work is hoisting each row's window to a fixed-length slice **once
+   per column group** and indexing the array inside — real work, and it must be
+   proven bit-exact against the rem-ring's running-sum order, which is exactly
+   the thing `H_TILE_WIDTH` boundaries already make delicate
+   (`blur::h_mirror_add_idx`, the `width % tile == 1` bug).
+
+Not attempted in this lane: the box was carrying the campaign lane's trainer
+for its whole second half, and landing a change of that size in the walk's
+hottest kernel without a clean wall-clock window would be exactly the
+"unestablished number" this lane's protocol exists to refuse. Recorded with the
+disassembly so the next lane starts from evidence rather than from a hunch.
