@@ -242,4 +242,31 @@ Nothing is relaxed to make an arm fit.
 
 ## 8. RESULTS
 
-*(Empty at pre-registration. Filled as arms land; §1-§7 are not edited.)*
+Full record: [`../benchmarks/ladder_instrument_2026-09-05.md`](../benchmarks/ladder_instrument_2026-09-05.md).
+§1-§7 above were not edited after pre-registration.
+
+**Against the pre-registered gate (§7): NOTHING INSTALLS — no arm passes, including
+the incumbent.** `ZensimProfile::D` is unchanged; `zensim/weights/` was never opened
+for writing.
+
+| pre-registered item | outcome |
+|---|---|
+| **ARM 0** encoder pins | DONE. `zenav1-svt` -> `2d75a105f` in zenavif `2ebca1b4` (on `origin/main`). Speed **MEASURED, not assumed: 1.498x** on summed `encode_ms`, 9/9 cells byte-identical — **not** the "2x" it was described as. |
+| **ARM 1** grid spec | DONE, and the floor map (§1) is what specified it. 5 ladders x 39 refs, 66-step floor-dense q axis, dedup by encode hash. |
+| **ARM 2** execution | LOCAL, by the pre-registered decision rule: measured ~28 min against a ~2 h threshold, so the fleet was not stood up. node-2/node-3 were **off**; r7900x and mac idle and left alone. |
+| **ARM 3** registration | DONE at **both** widths (372 `4c3874a7…`, 944 `0e8e5fb7…`), append-only, bars derived through the owner. Board re-grade scoped and deferred with a census (§11a). |
+| **ARM 4** anchor set | 32 k-means imazen-26 picks (12 content classes, 1,082-image population). **CID22 disjointness GATE PASSED: 0 hits at d <= 10**, closest d=19. |
+| **ARM 5(i)** D re-anchored | **Provably cannot pass** — §9.2 measures all 19 failing jpeg ladders as RAW inversions (raw-vs-dial verdicts agree 39/39), and two shipped D bakes with identical weights and different splines have identical A7r. A monotone spline moves range, never rank. |
+| **ARM 5(ii)** peaks arms on the new grid | Inversion **PERSISTS** and widens to three codecs — the pre-registered expectation. §9.4 then exhausts the whole λ family: every arm worse than the incumbent on every codec at every λ. |
+| **ARM 5(iii)** JXL-floor calibration gap | MEASURED: mean **−8.55** at the jxl floor, **not** the 20-30 the brief assumed (§9.3) — and jpeg's floor gap has the **opposite sign**. |
+
+**The pre-registered expectation that mattered.** §7 recorded, before measuring, that
+the peaks arms' jxl inversion should PERSIST because `d_peaks_jxl_floor` §4 had
+localised it to the weights — and that a "fixed by re-anchoring" result would be the
+suspicious one. It persisted.
+
+**What the program changed even though nothing shipped:** the instrument can now ask
+the question the user's rule names. Shipped Profile D reads a clean A7r pass on every
+older grid and **fails here on jpeg by one ladder** — a gap that was structurally
+unmeasurable while jpeg's bar was a vacuous `0.0000` over three samples of one
+setting. §9.5 localises the fix to `f93` (49.6 % of the move) and its neighbours.
