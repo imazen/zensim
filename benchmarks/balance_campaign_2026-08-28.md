@@ -8119,13 +8119,15 @@ settings, the same signature the floor-resolution lane found for the mentor's ow
 Only 1 of 10 is D-specific (ssim2 flat, D drops 3.6 points). Visual page (full-frame + native 1:1
 crop per step, imazen-only `zenpng`/`zenresize` via `ladder_tile_gen`, centered crop sized to 40% of
 the short side — not hand-picked): `http://192.168.50.44:3300/zensim/ladder-2026-09-05/inversions/
-index.html`, curl `200` both LAN and localhost. **Side finding, worked around not fixed:** a clean
-`zensim-bench` build is currently broken for ANY target — `zenjxl`'s `^0.3.2` jxl-encoder pin
-predates that sibling's already-pushed `0.4.0` release (`4363a3d5`, unrelated to today's concurrent
-issue-101 session there), so the `[patch.crates-io]` path patch is silently skipped by Cargo's
-semver check and falls through to an equally-incompatible crates.io. Worked around by temporarily
-dropping the unused-here `zenjxl` dependency edge from `zensim-bench/Cargo.toml`, then fully
-reverted (`jj status` clean, diff against the pre-edit file empty) before this lane ended — flagged
-for whoever owns `zenjxl`'s version pin, not fixed here. Nothing installed;
+index.html`, curl `200` both LAN and localhost. **Side finding, worked around not fixed at the
+time — FIXED later 2026-09-05, see `d_inversions_2026-09-05.md` §6 addendum:** a clean
+`zensim-bench` build was broken for ANY target — NOT actually `zenjxl`'s pin (that had already been
+bumped to `^0.4.0` on `origin/main` six days earlier, `5e9b8793`; this lane's local `~/work/zen/zenjxl`
+checkout was simply stale by 8 commits) but a separate, genuinely-live stopgap in
+`zensim-bench/Cargo.toml` itself: a git-rev-pinned `jxl-encoder` patch (`bfb880f9`, added 2026-08-29
+before zenjxl's fix existed, never retired after it landed) that stopped satisfying zenjxl's own
+`^0.4.0` requirement. At the time, worked around by temporarily dropping the unused-here `zenjxl`
+dependency edge from `zensim-bench/Cargo.toml`, then fully reverted (`jj status` clean, diff against
+the pre-edit file empty) before this lane ended. Nothing installed;
 `ZensimProfile::D`/`zensim/weights/` untouched; no registry write. Full census tables, per-codec
 breakdowns, and reproduction: [`d_inversions_2026-09-05.md`](d_inversions_2026-09-05.md).

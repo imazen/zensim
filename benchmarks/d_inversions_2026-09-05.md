@@ -235,6 +235,70 @@ did not touch `zenjxl` or `jxl-encoder`, and the underlying pin staleness (someo
 semver-checks) is a real, currently-live defect worth the user's attention, flagged here rather than
 silently worked around and left undocumented.
 
+### Addendum (2026-09-05, later same day): FIXED — but the live defect was one level deeper than
+### either of today's two reports found
+
+USER-AUTHORIZED sibling-repo fix, verbatim "fix the zenjxl pin." Two separate things were true at
+once, and each masked the other:
+
+1. **`zenjxl`'s own pin was NOT actually broken on `main` — it had been fixed six days earlier**
+   (`5e9b8793`, 2026-08-30, "fix(deps): jxl-encoder requirement 0.3.2 -> 0.4.0 + adapt to the 0.4.0
+   API restructure," already pushed to `origin/main`). Both this lane's report above and the
+   independent 2026-08-28-dated campaign-log mention of the same symptom
+   (`balance_campaign_2026-08-28.md`) were reading a **stale local `~/work/zen/zenjxl` checkout** —
+   8 commits behind `origin/main`, predating the fix — because nobody had run `jj git fetch` in
+   that repo since before 2026-08-30. `git log -S` on the (stale) checkout correctly showed the
+   fix commit didn't exist *there*, which is why both reports treated it as still-live; it existed
+   on the remote the whole time. `jj git fetch && jj new main@origin` in `~/work/zen/zenjxl` is the
+   entire fix for this half — zero new zenjxl code was needed.
+2. **A SEPARATE, genuinely live defect was hiding behind #1**: `zensim-bench/Cargo.toml`'s own
+   `[patch.crates-io]` table did not use a plain path patch for `jxl-encoder` — it pinned a specific
+   git rev (`jxl-encoder = { git = "file:///home/lilith/work/zen/jxl-encoder", rev = "bfb880f9",
+   package = "jxl-encoder" }`), added 2026-08-29 as a stopgap for the *original* version-mismatch
+   window (before zenjxl's own fix existed), with an explicit "retire this the moment zenjxl accepts
+   ^0.4" comment. zenjxl accepted `^0.4.0` the very next day (`5e9b8793`), but nobody retired the
+   stopgap. By 2026-09-05 the stopgap was itself failing — `bfb880f9` predates jxl-encoder's version
+   bump to 0.4.0 (it still declares itself `0.3.2`), so once zenjxl's requirement correctly reads
+   `^0.4.0` (post-fetch), that pinned rev **no longer satisfies zenjxl's own requirement**, and
+   `cargo update`/`cargo metadata` failed with the same-shaped error
+   ("candidate versions found which didn't match: 0.3.2, 0.3.1, 0.3.0...") one version later. This
+   is why fetching zenjxl alone was not sufficient to unblock `zensim-bench` — the real blocker by
+   today had moved into zensim's own tree.
+
+**Fix applied:** `zensim-bench/Cargo.toml`'s `jxl-encoder` patch reverted to a plain path patch
+(`{ path = "../../jxl-encoder/jxl-encoder" }`, matching zenjxl's own convention and the other
+sibling entries in the same table) — safe now because both sides' version strings agree (`0.4.0`).
+No zenjxl code changed; `zenjxl`'s six-day-old fix (`5e9b8793`) was re-verified, not redone.
+
+**Proof, all from an empty `zensim-bench/target/`:**
+- `cargo update` (zensim-bench workspace root): resolves clean, 329 packages locked, zero errors —
+  this is the operation that was actually failing (whole-graph resolution, independent of which
+  features a given build enables).
+- `cargo build -p zensim-bench --features training,zen-decode,verify-jxl` — rc=0. (Note:
+  `zensim-bench` has no `src/`/lib/default-bin, so a bare `-p` build with no example/bin target
+  compiles nothing beyond resolution — this confirms resolution but not compilation.)
+- `cargo build -p zensim-bench --example extract_features_372col --features
+  training,zen-decode,verify-jxl` — rc=0, genuinely compiles `zenjxl` (with `zencodec`+`decode`).
+- `cargo build -p zensim-bench --example extract_features_372col --features
+  training,zen-decode,verify-jxl,zenjxl/encode` — rc=0, additionally compiles **`jxl-encoder`
+  itself** and zenjxl's `encode`-gated `mod encoding` in `src/codec.rs` (the module containing
+  `wrap_codestream_with_metadata`, the local port that replaced `jxl_encoder::container::
+  wrap_in_container` when 0.4.0 privatized it) — the actual code this pin gates, not just the
+  dependency edge. Zero errors in all three build logs (`grep -c '^error'` = 0 on each).
+- `zenjxl`'s own full `just ci` (fmt-check + 5 clippy feature variants + 9 feature-check
+  build/test variants incl. `--all-features`) re-run clean after the fetch: **rc=0, 0 failures,
+  0 warnings, 1189s.**
+
+**Commits:** zenjxl `5e9b8793e71ce83802a81354b84a9b53e4aba986` (the original fix, 2026-08-30,
+already on `origin/main` before this addendum) + `681021dacca7...` (this lane's CHANGELOG note
+documenting the stale-checkout root cause, pushed 2026-09-05, verified
+`git merge-base --is-ancestor` against `origin/main`). zensim: the `zensim-bench/Cargo.toml` patch
+retirement, this commit.
+
+**Status: FIXED**, not merely worked around — the `zenjxl` dependency edge is back in the graph
+(unlike the §6 workaround above, which dropped it), and every build/example/test path that touches
+`zenjxl`/`jxl-encoder` is exercised clean.
+
 ## 7. Reproduction
 
 ```sh

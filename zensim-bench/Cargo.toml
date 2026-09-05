@@ -248,7 +248,7 @@ level = "warn"
 check-cfg = ['cfg(feature, values("training"))', 'cfg(has_cpp_ssimulacra2)', 'cfg(has_cpp_butteraugli)']
 
 # Patches for unpublished crates-io versions required by the sibling codec
-# deps (zenjxl wants jxl-encoder 0.3.2 + zenjpeg 0.8.7; max published are
+# deps (zenjxl wants jxl-encoder 0.4.0 + zenjpeg 0.8.7; max published are
 # lower). A dependency's own patch table is ignored — only a workspace
 # ROOT's applies, and this crate is now its own root, so declare them here.
 [patch.crates-io]
@@ -257,9 +257,20 @@ check-cfg = ['cfg(feature, values("training"))', 'cfg(has_cpp_ssimulacra2)', 'cf
 # the `~/work/zen/zenjxl` checkout still required `^0.3.2` — which was never
 # published — so every fresh resolve of this standalone workspace failed and only
 # checkouts carrying a warm pre-bump (gitignored) `Cargo.lock` still built. The
-# sibling checkout has since advanced to `06a8a94`, which requires `^0.4.0` and
-# matches the local crate again. If this line ever fails to resolve, check the two
-# siblings' versions against each other BEFORE touching anything here.
+# sibling checkout has since advanced to `06a8a94` (zenjxl's own `5e9b8793`,
+# 2026-08-30), which requires `^0.4.0` and matches the local crate again. If this
+# line ever fails to resolve, check the two siblings' versions against each other
+# BEFORE touching anything here.
+#
+# Re-verified independently 2026-09-05 (a second, later lane hit the same
+# already-fixed symptom without noticing this comment, because the git-rev
+# stopgap this replaced was gone by then but a stale local `~/work/zen/zenjxl`
+# checkout — 8 commits behind — made it LOOK unresolved again): from an empty
+# target dir, `cargo update` resolves clean (329 packages); `cargo build -p
+# zensim-bench --features training,zen-decode,verify-jxl` and the same with
+# `,zenjxl/encode` added (pulls in jxl-encoder itself + zenjxl's encode-gated
+# `codec.rs` module) both finish rc=0, zero errors. Full record + proof logs:
+# benchmarks/d_inversions_2026-09-05.md §6 addendum.
 jxl-encoder = { path = "../../jxl-encoder/jxl-encoder" }
 zenjpeg = { path = "../../zenjpeg/zenjpeg" }
 # use local sibling codecs so the whole graph resolves to one version (2026-07-18):
