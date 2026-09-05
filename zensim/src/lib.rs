@@ -253,6 +253,12 @@ pub mod cvvdp_features;
 #[cfg(feature = "training")]
 pub mod xyb_lms_features;
 
+// Feature-set identifiers — the naming system that replaces "944"/"156+free"
+// (docs/FEATURE_SET_IDS.md). NOT feature-gated: the grammar and the hash are
+// pure data, and every consumer (bake_verdict, the trainer, the extractors,
+// the board) needs them on a `--no-default-features` build too.
+pub mod feature_set_id;
+
 // V2 "bounded" feature extraction — opt-in, strictly additive. See
 // feature_v2.rs's module doc and docs/FEATURE_V2_SPEC_2026-07-18.md.
 #[cfg(feature = "feature-regime-v2")]
