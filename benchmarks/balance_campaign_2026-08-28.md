@@ -7572,3 +7572,55 @@ refused, correctly. `CLAUDE.md` now opens with PUSH ONLY THROUGH `scripts/safe_p
 `jj bookmark set` + `jj git push` is banned in this repo. Honest limit recorded: no server-side hook,
 so a lane that calls `jj git push` directly still bypasses it. Record:
 `benchmarks/push_clobber_2026-09-05.md` (commit `be604c12`).
+
+# ROUND row — replication lane (`claude-replicate`), 2026-09-05
+
+Paste into `benchmarks/balance_campaign_2026-08-28.md` as the next ROUND row. Written to
+`~/tmp` because the ledger's primary was held when this lane finished its first phase.
+
+---
+
+**ROUND 80 — the fair board's "top 8 are single draws" was two grouping defects, both fixed
+at the owner; best-of-k inflation survives.** (`34b4899f`)
+
+- **Defect 1 — `--dump-checkpoints-dir` was missing from `SEED_GROUP_DROP_FLAGS`** in BOTH
+  owners (`gauntlet.py`, `freeze_check.rs`). Every run passes it a per-run directory whose
+  name embeds the seed, so two seeds of one recipe differed by exactly that token and each
+  got its own key. MEASURED on 436 board fullevals: k≥2 groups **78 → 82**, and **8 of the
+  10 top-scoring combined-fair cells go k=1 → their true k=3**. Genuinely-k=1 combined-fair
+  recipes: **8 → 2** (one degenerate at composite 0.0000), so the real count is **one**.
+  A full-board scan for the general case found this one instance. Cross-owner parity gate
+  PASSes after the fix; new Rust regression test carries a negative control.
+- **Also not single draws:** `HYA_w084` and `BAL_E1_s4010_s4006` are 2-member **ensembles**
+  (`model.kind == "ensemble"`) → UNGROUPABLE by the owner's own clause 1, not UNREPLICATED.
+  The fairness TSV distinguishes them (`seed_group` = `-`) but prints `k = 1` for both
+  states. Observation, not a defect claim.
+- **Defect 2 — the seed-split READER shipped without its WRITER.** `--init-seed` /
+  `--sample-seed` landed 2026-09-04 so a study could separate init from sampling, but
+  `zentrain.repro` recorded only `"seed"`, whose default is **1**. Every arm of a k-arm
+  split-seed study would have recorded identity `"1"` and reported **k=1** — the exact
+  quantity such a study measures. Caught by reading the emission site before the third
+  fit; runner stopped, partial outputs deleted, nothing promoted. Fixed additively
+  (`null` on legacy runs, so no existing bake changes meaning), gated by
+  `zensim-validate/tests/repro_records_split_seeds.rs`, and **verified empirically**: a
+  1-epoch probe at `--init-seed 777 --sample-seed 888` embeds
+  `"init_seed":777,"sample_seed":888,"seed":1`.
+- **SURVIVES:** best-of-k inflation, recomputed over the 18 correctly-grouped combined-fair
+  groups — **median +0.0061, max +0.0223**; k-spread median 0.0141, max 0.0445. The fair
+  board's +0.0066/+0.0222 reproduces on a larger, correctly-grouped population.
+- **Corrected top of the fair board** (k-mean composite): `LSTAR` 0.8615 (k=3), `LSTAR3`
+  0.8604 (k=3), `A5_r4` 0.8595 (k=2), `W10L9PH` 0.8594 (k=6), `W10L9` 0.8589 (k=2). The
+  top four span 0.0021 on a median k-spread of 0.0141 — **still not distinguishable.**
+  `LSTAR`/`LSTAR3` were invisible as recipes before the fix.
+- **Wave registered before any fit** (`benchmarks/replication_wave_2026-09-05.md`): 17 fits,
+  arms **S** (order varies, init fixed) vs **I** (init varies, order fixed) on `LSTAR` /
+  `LSTAR3` / `W11J`, plus the one true k=1 recipe `A3b`. Pack recipe byte-verified on three
+  recipes; `A5_r4` dropped and `A3b`'s diagonal re-run because the wave-r4 lane's pack
+  recipe is uncommitted and its roots are era-2 × radius-4.
+- **Coverage question dropped before any fit**, per the subset-quality study (`92caf565`):
+  coverage is saturated, lucky seeds are not better covered, and the sample seed changes
+  the **order** rows are visited, not which rows. Coverage is reported, never explanatory.
+- **Board regression, self-reported:** both gauntlet HTMLs were regenerated at 19:14 local
+  from a tree lacking `d3a948ca` (dropped from `origin/main` by a sideways push), so they
+  currently carry **0 NOT-SHIPPABLE badges**. Derived artifacts, fully regenerable; both
+  gates PASS on the files as they stand. Must be regenerated after the `d3a948ca` recovery.
