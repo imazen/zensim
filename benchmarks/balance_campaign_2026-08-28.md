@@ -7447,3 +7447,91 @@ sample_coverage` (exact replay digest; two seeds of one recipe: 0.9988 vs 1.0000
 `--pair-sampling stratified` (2 compile errors, labelled); gaddrinst measured 5 premise corrections before pausing
 (two 944 eras not three; 39 refs; the 372-slice control doesn't hold; the ssim2 944 reference reading already exists;
 the percentile owner exists). Next: replication wave for the k=1 fair leaders using the split seeds + coverage.
+
+## ROUND 80 — G-ADDR board coverage: every fair cell graded, 47 NOT-SHIPPABLE by measurement (2026-09-04)
+
+**Commit:** originally `d3a948ca`; **re-landed as `2e5cdc8b`** after the 2026-09-04
+sideways-push clobber dropped it (this ledger row was dropped by the same push, as
+`c6ec0bcc`, and is restored here renumbered 78 → 80 because 78/79 were taken in the
+interval). Both verified on `origin/main` with `git merge-base --is-ancestor`.
+Incident record: `benchmarks/push_clobber_2026-09-05.md`.
+**Lane:** `claude-gaddrboard`, sibling jj workspace `~/work/zen/zensim--gaddrboard`
+(primary held by `claude-ownerfix2` throughout).
+**Record:** `benchmarks/dial_addressability_gate_2026-09-04.md` **§15**.
+**As-run:** `/mnt/v/output/zensim/gaddr-board-2026-09-04/{active,bpins,verdict,logs}/`
+(194 owner runs) + `/mnt/v/output/zensim/dialgate-2026-09-04/probes944/`.
+
+**What it closes.** Round 77's fair gauntlet reported that G-ADDR rendered but *"no board
+cell carries a CONTRACT-tier measurement"*, so NOT-SHIPPABLE badges could not be drawn
+against the user's rule that a model limiting dial range cannot ship. All **97** fair cells
+(42 VERIFIED-FAIR + 55 FAIR-NOTED) are now graded through `bake_verdict` under **both** pin
+sets — `peer_ssim2` (ACTIVE) and `shipped_b` (retired) — each on **its own** dial grid, with
+ensembles through `--ensemble`. **96 carry the verdict on the board**; the G-ADDR column
+reads `pass/15` instead of `pass/6`.
+
+**Result: 47 cells fail a MEASURED contract row and are NOT SHIPPABLE** (46 of them on the
+fair board — `ebothg_m504`'s read was refused, below). Per row: **C3 39, C4 39** (dials that
+never emit a value below zero on a probe where every row's reference metric is negative —
+the shipped dial's own defect, reproduced across most of the 944 population), **C2 23**,
+C6 2, C1 1, C5 1. **Exactly ONE cell is contract-clean 6/6: `v47_strict_QAT_native@cur372`
+(Profile A)** — an independent reproduction of gate-doc §14.6 from a different lane, binary
+and invocation. Shipped **B** reads **9/9 PASS** on the retired pins and **3 pass / 6 fail**
+on `peer_ssim2`, reproducing §14.3's "0 regression fails → 6" exactly; BHdr and v47 both
+fail exactly A1/A3/A6 on the retired pins, the three axes the registry calls BIASED.
+Only **3** cells have a gradeable REGRESSION tier at all — the other 94 sit on 944 grids
+nobody has measured the mentor on.
+
+**New instruments, and the one that could not be faked.** A probe is scored only when its
+column count equals the bake's caller width, so the two registered 372 probes reach 3 of 97
+cells. Two **944** negative-tail probes were cut in-era by the registered rule (20
+equal-count quantile bins over the negative population, lowest 100 row indices per bin),
+from sources carrying the same `build_commit` as the grid they serve
+(`ec3bdd6a` and `75c09149`) — that is what makes C3/C4 measurable on 81 more cells. The cut
+has a committed owner now (`scripts/cut_gaddr_negtail_probe.py`) with a control: re-cutting
+the ORIGINAL 372 source reproduces the stored probe's truth column **exactly**, 2,000 of
+2,000 rows, max abs diff 0.0. They are deliberately **NOT registered** — no reference has
+been measured on them, so A7–A9 read NOT MEASURED there while the absolute-bar C3/C4 read
+normally, per the registry's own "a bar you can dodge is not a bar".
+
+**MEASURED, and it is why 94 cells still read NOT MEASURED on C5/C6:** the 372-only
+*"identity feature vector is the ZERO vector"* property **does not extend to 944**.
+Extracting the same 38 `ref == dist` pairs through `sdr944_extract` gives **190 of 944 slots
+non-zero**, varying per image (row-to-row spread 0.594). A 944 identity read is an
+extractor-era-dependent measurement, not an algebraic constant, so it needs one real 38-pair
+extraction per 944 era at that era's build commit — seconds of compute behind an era-matched
+extractor build, and the single highest-value follow-up. The POOLS era additionally has **no
+negative-truth rows at all** (0 of 319,237; clamped at 0), so C3/C4 cannot be cut there
+either. An INCOMPLETE contract **never** draws the badge — unmeasured is not a fail.
+
+**Defect found, NOT fixed (needs the gate owner):** `bake_verdict` carries **two**
+percentile implementations that disagree by 1 ULP on the same sorted vector in the same
+process — `bake_verdict.rs:3213` (`lo*(1-frac)+hi*frac`) vs `dial_addressability.rs:244`
+(`lo+frac*(hi-lo)`). `--full-json` wrote `dial.p5 = 27.289567929893384` where `--gaddr-json`
+wrote `27.28956792989338`. **A4 and A6 grade on the second; every stored board cell carries
+the first.** Same hazard class as §6's `serde_json` one-ULP bar failure, and a
+no-duplication-rule violation. Collapsing them moves `pct`, which moves the committed
+registry bars and the tests pinned to them — the gate owner's call, not a graft's drive-by.
+The graft gate allows ≤ 4 ULP on interpolated dial scalars only and **records every slack it
+used** in `dial_gaddr_source.dial_scalar_ulp_slack`.
+
+**The same-grid gate earned its keep twice.** `HYA_w084` refused at equal ensemble weights
+(`mono_pct` 0.99404 vs the board's 0.99298) and reproduced the board's dial **byte-exactly**
+at **0.84 / 0.16** while 0.16 / 0.84 did not — so that ensemble's weights are a measured fact
+now, and the other 14 ensembles' equal weights are confirmed by the same gate passing first
+try. `ebothg_m504` (the known wrong-root cell) refused outright, 0.7754 vs 0.9273, and is the
+one fair cell with no board G-ADDR block; its own read exists as an artifact and is **not**
+citable as that row's behaviour.
+
+**Owners touched (additive, tested):** `promote_fulleval.py --graft-gaddr` (sha-gated on the
+scorer bake's own bytes, same-grid gated on every stored dial scalar, provenance in
+`dial_gaddr_source`) + `--self-test-graft-gaddr` (5 fixture assertions; negative control —
+setting the ULP slack to 0 fails the 1-ULP case, `rc=1`); `gauntlet.py` prefers the emitted
+15-row verdict over the 6 axes it can re-derive, prints both tiers with the owner's headline
+and NOT-MEASURED reasons verbatim, and draws the badge; `cut_gaddr_negtail_probe.py` is new.
+`just lint-scripts`: 566 scripts, all runnable. Stale claims corrected **in place** in
+`CLAUDE.md` (the zero-vector bullet) and `benchmarks/fair_gauntlet_2026-09-04.md` §4.
+
+**Boards** (regenerated + `gauntlet_gates.sh` **PASS** on both):
+`summer_gauntlet_fair.html` **8,205,798 B (7.8 MiB, under the 12 MB cap)**, 97 rows;
+`summer_gauntlet.html` **21,003,539 B (20.0 MiB, over cap — reported, not trimmed)**, 433 rows.
+`http://localhost:3300/zensim/reports/summer_gauntlet_fair.html`

@@ -10,6 +10,47 @@ finding, don't-build list). The f720+ append block
 (`benchmarks/v2_append_block_2026-07-26.md`, `FeatureRegime::Folded720Append`)
 implements its A1-A5/A9 candidates.
 
+## ⛔ PUSH ONLY THROUGH `scripts/safe_push.sh` — a bare `jj git push` clobbers other lanes (2026-09-05)
+
+**Do NOT run `jj bookmark set main -r @ && jj git push --bookmark main` in this
+repo. Run `scripts/safe_push.sh` instead.** (`-r <rev>` for an explicit target,
+`-b <bookmark>` for a bookmark other than `main`, `--dry-run` to check without
+pushing, `--self-test` to prove the guard still refuses a sideways target.)
+
+**Why it is a hard rule, not a preference.** With five-plus lanes pushing to
+`main` concurrently, `jj bookmark set` + `jj git push` performs a **non-fast-forward
+push with no prompt and no warning** whenever `@` does not descend from
+`main@origin`: the bookmark moves SIDEWAYS and every commit that was only
+reachable from the old tip becomes unreachable from the new one. The objects
+survive; nothing points at them. The pushing lane's own `jj log` looks correct,
+so the loss is invisible until somebody asks
+`git merge-base --is-ancestor <sha> origin/main`.
+
+**MEASURED 2026-09-04:** `main@origin` moved sideways **twice in one afternoon**
+(16:58:53 and 17:08:29 MDT, jj ops `db7c8ca86b69` and `0edf97e28a91`). The second
+move dropped **nine commits from six lanes**, including `d3a948ca` — the G-ADDR
+board-coverage feature, +555/−23 across six files. The boards on `/mnt/v` had
+been generated WITH that code, so the next regen from `main` would have silently
+un-drawn **46 NOT-SHIPPABLE badges** and dropped `promote_fulleval.py
+--graft-gaddr` and `cut_gaddr_negtail_probe.py` from the tree. Nothing failed;
+the numbers would just have been wrong. Full record:
+[`benchmarks/push_clobber_2026-09-05.md`](benchmarks/push_clobber_2026-09-05.md).
+
+`safe_push.sh` does: **fetch → assert `<bookmark>@origin` is an ANCESTOR of the
+target → bookmark set → push → verify the target landed.** On a sideways target it
+**exits 3, prints every commit the push would drop, and does not touch the
+bookmark.** There is no `--force`; the fix is `jj git fetch && jj rebase -d
+main@origin`, resolve keeping BOTH lanes' hunks, then re-run. The post-push verify
+exists because a push can report success and not land (2026-05-29 orphaned-bookmark
+incident). Guard self-test: 4 cases including the negative control (sideways
+REFUSED, remote provably unmoved) — `scripts/safe_push.sh --self-test`.
+
+Two jj traps the script already handles, which hand-rolled one-liners keep
+re-learning: a successful push makes `@` immutable and jj creates a **fresh empty
+`@` on top**, so `-r @` one command later targets the wrong commit; and a jj
+**workspace has no `.git`**, so read-only `git` verification must run as
+`git -C ~/work/zen/zensim …` against the primary checkout.
+
 ## Known Bugs
 
 - **⛔ THE STORED 372-COL masked/IW BLOCK IS PRE-FIX AND THREAD-DEPENDENT — THE
