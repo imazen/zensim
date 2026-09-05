@@ -1952,3 +1952,43 @@ distinction is precisely what decides servability.
 
 Record: `benchmarks/fastclass2_campaign_2026-09-05.md`, registration
 `docs/PLAN_FASTCLASS2_2026-09-05.md`; ledger ROUND 98.
+
+### §3.41 — the kernel lane 2 front-end levers move NO bytes, so no table and no bake is invalidated (2026-09-05)
+
+**Ledger ROUND 99.** Recorded here precisely because a "the extraction kernel
+changed" line in `git log` is the shape that makes a future session ask whether
+its parquets are stale. **They are not.** Three levers landed in the fast-class
+front end — `blur::downscale_2x_into`'s de-interleave (`3fde060b`),
+`RollingPlane::from_pooled`'s buffer growth, and the `color.rs` de-interleave
+bounds checks — and all three are **bit-exact by construction**, not by
+tolerance:
+
+* the downscale's per-lane add order `(((a+b)+c)+d) * 0.25` is unchanged and
+  nothing sums across lanes, so f32 non-associativity has nothing to bite;
+* `from_pooled` hands back a buffer whose contents are overwritten before any
+  reader can name it (and now always zeros, where `Vec::resize` left a prefix
+  of the previous walk's pixels — strictly *more* deterministic);
+* the bounds-check change moves no load and no operation, only where the range
+  is checked.
+
+**Evidence, not assertion:** a `to_bits()` A/B of the full feature vector,
+pre-lane binary vs post-lane binary, over **160 cells** = 20 geometries × 4
+arms (`156`/`15c`/`15f`/`944full`) × {serial, 3-thread} — **0 differing bits**
+on 320 dumps of 924/944/956 features each — plus `cargo test --workspace`
+1,548 passed / 0 failed including `v1_golden_bytes` and the 11-test
+`fold_engine_parity`, and `cargo public-api` at ZERO delta on 1,280 items.
+
+**So: no era break, no re-extraction, no re-training, no feature-set id
+change.** Every 372/720/924/944 root, every canonical parquet, every bake and
+every published verdict remains readable and comparable across this change.
+The one thing that DID change is speed (1T wall −14.9…−18.0 % on the `156`
+arm), and speed is not a column in any table.
+
+Registered and **NOT flipped** in the same lane: **E3**, dropping the
+front-end cube root from two Halley iterations to one, which removes 3 of the
+6 `vdivps` per 16 pixels and is worth ~4–7 % of the fast walk. That one *is*
+an era break — it moves every v1 byte on every corpus — and it is batched with
+E1/E2 per the lane's era policy rather than taken.
+
+Record: `benchmarks/kernel_fastclass_2026-09-05.md` §"LANE 2"; registration
+`docs/PLAN_KERNEL_FASTCLASS_2026-09-05.md` §"LANE 2".
