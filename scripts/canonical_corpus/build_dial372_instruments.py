@@ -323,16 +323,27 @@ LADDER_LEGS = {
 }
 
 
+def _legs(args) -> list[str] | None:
+    """The explicit leg subset for this run, or None = every leg."""
+    v = getattr(args, "legs", "") or ""
+    return [x for x in v.split(",") if x] or None
+
+
 _JXLQ: dict[float, float] = {}
 
 
-def _ladder_rows(ladder_dir: str, dropped: list | None = None) -> list[dict]:
+def _ladder_rows(ladder_dir: str, dropped: list | None = None,
+                 legs: list[str] | None = None) -> list[dict]:
     """Join each leg's metric TSV to its pairs TSV and hash the persisted bitstream.
 
     `dropped` collects cells that cannot enter the instrument (decode failures)."""
     out = []
     dropped = dropped if dropped is not None else []
     for leg, (codec_name, param_kind) in LADDER_LEGS.items():
+        # An EXPLICIT leg list, never silent tolerance: a run that quietly skipped a
+        # missing leg would emit a smaller instrument that looks like a complete one.
+        if legs is not None and leg not in legs:
+            continue
         tsv = os.path.join(ladder_dir, "tsv", f"{leg}.tsv")
         prs = os.path.join(ladder_dir, "pairs", f"{leg}.tsv")
         if not (os.path.exists(tsv) and os.path.exists(prs)):
@@ -452,7 +463,7 @@ def _drop_truncated_floor_ladders(rows: list[dict], dropped: list) -> tuple[list
 
 def build_ladder(args, work: str) -> dict:
     dropped: list = []
-    rows = _mark_saturated(_ladder_rows(args.ladder_dir, dropped))
+    rows = _mark_saturated(_ladder_rows(args.ladder_dir, dropped, _legs(args)))
     rows, excluded = _drop_truncated_floor_ladders(rows, dropped)
     distinct = [r for r in rows if not r["saturated"]]
 
@@ -535,7 +546,7 @@ def build_anchor(args, work: str) -> dict:
     Identity rows (`ref == dist`, target 100) are appended so the spline is pinned
     at the top by construction rather than by extrapolation."""
     dropped: list = []
-    rows = _mark_saturated(_ladder_rows(args.ladder_dir, dropped))
+    rows = _mark_saturated(_ladder_rows(args.ladder_dir, dropped, _legs(args)))
     distinct = [r for r in rows if not r["saturated"]]
     ident = sorted({r["ref_path"] for r in rows})
 
@@ -628,6 +639,10 @@ def main():
     ap.add_argument("--ladder944-csv", default="", help="v2_ab_extract output")
     ap.add_argument("--ladder944-pairs", default="", help="the pairs TSV it was run on")
     ap.add_argument("--ladder944-keys", default="", help="the 372 ladder instrument (keys)")
+    ap.add_argument("--legs", default="",
+                    help="comma-separated leg subset (jpeg,webp,avif_svt,avif_rav1e,jxl). "
+                         "Empty = all. EXPLICIT so a missing leg cannot silently shrink "
+                         "the instrument.")
     ap.add_argument("--ladder-dir", default="",
                     help="a build_ladder_grid.sh output dir; required for --what ladder")
     ap.add_argument("--what", default="grid,identity,negtail",
