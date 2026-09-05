@@ -606,11 +606,19 @@ conflict and neither is "the" number: −9.58 % is instructions at `v3`,
 Raw rows (every start, including the `SKIPPED_BOX_BUSY` gate decisions):
 `/mnt/v/output/zensim/kernel-2026-09-05/lane2/ab_downscale_2026-09-05.tsv`.
 
-### ⚠ The first run of this table was UNGATED, and the bug is worth keeping
+### ⚠ THE TABLE ABOVE IS THE UNGATED RUN — read it with that in front of you
 
-The table above is the **re-run**. The first run produced numbers that looked
-the same but were measured **beside a live `zensim_mlp_train`**, because this
-driver's own load gate never fired: it called
+**Status as written: the table above was measured beside a live
+`zensim_mlp_train`, and the re-gated re-run is QUEUED, not done.** It is left
+in place rather than deleted because it is the only wall reading this lane has,
+and deleting it would leave the section claiming an Ir result with no wall
+corroboration at all — but it is labelled here, in the section, so no reader
+can pick the table up without the label. If a later commit does not replace
+this paragraph with a clean-run table, **these numbers stand as
+CONTAMINATED**: directionally supported by the 1T control and by the Ir map,
+never quotable as a measured speedup.
+
+The driver's own load gate never fired, because it called
 `pgrep -x zensim_mlp_train`, and **`/proc/<pid>/comm` is truncated to 15
 characters**, so the 16-character name can never match. `pgrep -x` was chosen
 *specifically* to avoid the `pgrep -f` self-match footgun CLAUDE.md warns
@@ -621,9 +629,14 @@ pre-truncated (`zensim_mlp_trai`); this driver now truncates **in the gate
 itself**, so a caller may write the real name and still be gated. Knowing the
 warning was not enough; the code doing it is.
 
-The ungated rows are kept as
-`ab_downscale_CONTAMINATED_ungated_2026-09-05.tsv` — not deleted, and not
-quoted anywhere as a result.
+The rows behind the table above are
+`ab_downscale_CONTAMINATED_ungated_2026-09-05.tsv`. The re-gated run, when it
+lands, writes `ab_downscale_2026-09-05.tsv` beside it; both are kept.
+
+**Why this is labelled rather than silently re-run and forgotten:** an ungated
+number and a gated one are indistinguishable on the page. The only thing that
+makes the difference visible to a future reader is the label, and the label has
+to survive the moment when it would be more flattering to drop it.
 
 ## L2.5 Registered, measured, NOT implemented
 
