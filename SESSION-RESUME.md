@@ -1,11 +1,38 @@
 # SESSION-RESUME — read this first after every compact
 
-**Last updated: 2026-08-27 (production-readiness close-out; see the ⚡ 2026-08-27 block below).** The current era is the
+**Last updated: 2026-09-05 (the floor-dense ladder instrument; see the ⚡ 2026-09-05 block below).** The current era is the
 **SOTA-944 model campaign** — pre-registered, five seed/lever waves + two
 ensemble waves, all appended in place in the one authority doc:
 [`benchmarks/sota944_campaign_2026-08-03.md`](benchmarks/sota944_campaign_2026-08-03.md).
 Everything before it (372-era, 720/924-era) is historical context, era-tagged —
 never compare numbers across eras without the doc's era-bridge notes.
+
+## ⚡ 2026-09-05 — the FLOOR-DENSE ladder instrument: the shipped dial fails a jpeg floor it used to pass
+
+Read [`benchmarks/ladder_instrument_2026-09-05.md`](benchmarks/ladder_instrument_2026-09-05.md);
+plan (pre-registered) [`docs/PLAN_LADDER_INSTRUMENT_2026-09-05.md`](docs/PLAN_LADDER_INSTRUMENT_2026-09-05.md).
+Grade on it: `ZL_ERA=ladder scripts/dialgate_arms.sh score <label> <bake> 372`
+(944: add `ZL_GRID=<…/dial_grid_944col_ladder.parquet>` + `ZL_ROOT=<a 944 root>` and
+pass regime `944`).
+
+- **Every prior dial grid could not answer A7r's question for jpeg.** `zenjpeg` emits
+  **ONE bitstream for every q in 0..10**, so q 0/5/10 is one setting sampled three
+  times and the mentor's jpeg bar was a vacuous `0.0000`.
+- The rebuilt grid is floor-dense and dedups **by encode hash** (`avif-svt` is 36.4 %
+  duplicate settings vs `avif-rav1e`'s 3.0 % — no fixed step could serve both), with
+  **five ladders incl. two AVIF backends** at 39 refs each. Registered append-only at
+  both 372 (sha `4c3874a7…`) and 944 (`0e8e5fb7…`) with identical `peer_ssim2` bars.
+- **⛔ Shipped `ZensimProfile::D` FAILS A7r here — on `jpeg`, by one ladder** (0.5128
+  vs 0.5385) — plus A1 and A3. Profile B fails **all five** codecs. **Nothing was
+  installed;** `zensim/weights/` untouched.
+- **MEASURED: re-anchoring cannot fix it.** All 19 failing jpeg ladders are RAW
+  (pre-spline) inversions, raw-vs-dial verdicts agree **39/39**, and the two shipped
+  D bakes (same weights, different spline) have **identical A7r on all five codecs**.
+  **The lever is the WEIGHTS.**
+- Side-products: `imazen/jxl-encoder#101` (SizeHeader rounds odd dims UP to even at
+  distance **>= 10.0** exactly), the `zenav1-svt` pin at `2d75a105f` (**measured
+  1.498x**, 9/9 byte-identical — not the "2x" it was described as), and a fixed
+  silent fallback where `dialgate_arms.sh` ignored `ZL_GRID` for non-372 regimes.
 
 ## Current true state (2026-08-04)
 
