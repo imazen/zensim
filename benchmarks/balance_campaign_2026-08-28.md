@@ -7827,3 +7827,30 @@ peaks fully populated (72/72), so the peaks idea is a 372-width refit on the rig
 with the exact command; not run (new model ⇒ own gate pass). Lessons: a bake's DECLARED WIDTH is a runtime contract,
 not a label — check it before proposing any default; and a bit-identical control arm inside the same measurement is
 what separates "no change" from "1.5 % slower".
+
+## ROUND 90 — 2026-09-05: the peaks lambda sweep, the anchor-weight lever, and a mid-task rule change that unblocked most of it
+Registered follow-up from `d_peaks_372_postC_2026-09-05.md` §5 ("a λ sweep on the 228 slice is registered, not run").
+Sibling lane, sha `89f5eb4c3373` (code) + `cb12f938ab7e` (pre-registration), both verified on `origin/main`. New owner
+capability: `bake_dial_refit fit-lasso --anchor-weight <N>` (paired per `--anchor-parquet`, default all-1 byte-identical)
+— `fit_spline_knots` bins by percentile and takes bin MEDIANS, so "up-weighting" an anchor subset means physical row
+duplication, not a numeric weight; 4 unit tests, clippy/fmt clean. Grid (a): λ ∈ {5e-4,1e-3,2e-3-control,4e-3,8e-3,
+1.6e-2} on the peaks slice 0..227 — control BYTE-IDENTICAL to the registered `Dpeaks` bake after stripping repro.
+Grid (b): at the top-2 λ by CID22 (1e-3, 2e-3), a THIRD anchor-parquet holding only the 147 `ssim2_gpu<0` rows of
+`multiband_anchor_dial100.parquet`, at total weight ×2/×4 — a spline-only lever, CONFIRMED by construction and by a
+strip+cmp control (the CD lasso fit never reads an anchor row). Finding: heavier weight SHRINKS the negtail probe's
+own reach (both λ saturate at −57.405 at w4 — an OOD-floor-formula artifact, not a bug) by pulling the spline's
+bottom knots toward the anchor's own worst evidence (~−64) instead of letting a sparser layout extrapolate further —
+the opposite of what the old ssim2-pinned A7/A8 bars reward, so the lever always flips A8 PASS→FAIL versus its
+parent λ. **MID-TASK USER RULING, verbatim**: *"the negative tail bar is entirely arbitrary. below -5-50"* — replaced
+A7/A8 with four product-scoped checks (negtail min/p1 ≤ −50; band-restricted [−50,−5) fraction below −5 and below 0,
+report-only; canonical grid min ≤ −5), explicitly NOT touching `dial_addressability.rs`/the floor registry (a separate
+lane owns that re-pin). Every one of the 10 built arms clears all four checks trivially (shallowest reach in the whole
+sweep, −57.405, is still 7 points past −50). **Verdict: 7 of 10 arms pass the corrected ship rule** (CID22 ≥ D with a
+CI excluding zero, contract 6/6, checks 1-4, no other regression axis worse than D) — `lam5em4, lam1em3, lam2em3,
+lam4em3, lam1em3_w2, lam1em3_w4, lam2em3_w4`. Three fail: `lam8em3`/`lam16em3` (CID22 gain not distinguishable from
+D, CI includes zero) and `lam2em3_w2` (the one arm that regresses `A2`, the REAL codec-derived grid's own floor, by
+0.005 against D — an axis neither rule change touches). Under the ORIGINAL pre-ruling rule only `lam5em4`/`lam1em3`
+passed, because the weight lever always cost old-A8 regardless of λ. No arm dominates every corpus: `lam1em3` best on
+CID22/KonJND, worst on TID; `lam5em4` the only positive AIC-3 delta, worst TID loss in the sweep. **Nothing ships** —
+per lane scope, this is a table and a record; `ZensimProfile::D`/`zensim/weights/` untouched throughout. Full table +
+pre-registration + reproduction: [`d_peaks_lambda_sweep_2026-09-05.md`](d_peaks_lambda_sweep_2026-09-05.md).
