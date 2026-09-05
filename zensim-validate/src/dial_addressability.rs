@@ -63,7 +63,8 @@
 //! | `min`, `p5` | pooled dial-grid scores | **floor** — smaller is better |
 //! | `reach` (= max − min), `dynamic_range` (= p95 − p5) | pooled dial-grid scores | bigger is better |
 //! | `mono`, `tied` | the dial panel's ladder accounting | the registered G3 bars |
-//! | negative tail (per-family floor, pooled `p1`, per-family agreement) | the dial grid's codec families + a pinned negative-tail probe | reach the product bar **−50** (see the re-pin section below; `frac_below_zero` was the retired axis) |
+//! | floor representability (`A7r`) | the dial grid's per-codec quality ladders | the codec's lowest settings must still RESOLVE — see the re-pin section below; no dial value is a bar |
+//! | negative-tail probe (`A8r`) | a pinned negative-tail probe | **report-only**, no bar |
 //! | identity (`dial`, `above-identity` count) | a pinned identity probe (ref == dist) | inside the registered band, and nothing above it |
 //!
 //! # Why the floor axis is the hard one (read before trying to pass it)
@@ -84,60 +85,65 @@
 //! construction. The lever that exists is the **clamp**, not the anchor:
 //! unclamped negative targets give the bottom bins real `y < 0` evidence.
 //!
-//! # The NEGATIVE TAIL is re-pinned to an absolute, PER-CODEC product bar (2026-09-05)
+//! # The NEGATIVE TAIL is now FLOOR REPRESENTABILITY, per codec (2026-09-05)
 //!
-//! **USER RULING 2026-09-05**, verbatim: *"the negative tail bar is entirely
-//! arbitrary. below -5-50"*, corrected the same day, verbatim: *"i said -50 not
-//! -5, codecs are all different, some go lower than others"*.
+//! **USER RULING 2026-09-05 — the operative form**, verbatim: *"i care that the
+//! lowest configurable settings per codec are representable, not that negative
+//! fifty is in that specifically."*
 //!
-//! The mentor-pinned tail rows asked a candidate to reach `min ≤ −770.62` and
-//! `p1 ≤ −187.13` — `peer_ssim2`'s incidental depth on one probe, not a range
-//! anything needs to address — and `frac_below_zero ≥ 1.0000`, a bar that is
-//! **definitional** rather than measured (the probe's population was *selected*
-//! on `ssim2 < 0`, so the mentor is below zero on 100 % of it by construction).
-//! The ruling was minted after a D-peaks candidate — CID22 **+0.00798** over
-//! shipped D, CONTRACT **6/6** — was refused on **A8 alone**, `p1` −167.715
-//! against a bar of −187.131.
+//! *(Two earlier forms are recorded in the registry because they are how the
+//! rule was arrived at — "the negative tail bar is entirely arbitrary. below
+//! -5-50", then "i said -50 not -5, codecs are all different, some go lower
+//! than others". **Neither −5 nor −50 is a bar anywhere in the active tier.**)*
 //!
-//! So the tail rows are now **`A7r` / `A8r` / `A9r`**, absolute product bars:
+//! The retired rows asked a candidate to reach `min ≤ −770.62` and `p1 ≤
+//! −187.13` — `peer_ssim2`'s incidental depth on one probe — and
+//! `frac_below_zero ≥ 1.0000`, a bar that was **definitional** rather than
+//! measured (the probe's population was *selected* on `ssim2 < 0`). They were
+//! minted after a D-peaks candidate — CID22 **+0.00798** over shipped D,
+//! CONTRACT **6/6** — was refused on **A8 alone**.
 //!
-//! | row | axis | bar |
-//! |---|---|---|
-//! | `A7r` | **PER CODEC FAMILY**: where the REFERENCE's min on a family's rows is ≤ −50, the DIAL's min on those same rows | ≤ **−50** |
-//! | `A8r` | POOLED probe `p1` | ≤ **−50** |
-//! | `A9r` | **PER CODEC FAMILY**: of the family's rows whose REFERENCE truth is ≤ −50, the fraction the dial also places ≤ −50 | ≥ **0.90** *(user-provisional)* |
+//! **Depth was the wrong question.** A dial can reach −700 and still be useless
+//! at the bottom if its three lowest steps tie or invert; a dial that stops at
+//! −12 is fine if every step still resolves. So the axis asks whether the
+//! codec's lowest settings are *distinguishable*:
 //!
-//! **The tail is never pooled across codecs.** *"codecs are all different, some
-//! go lower than others"* is a MEASUREMENT, and the registry holds it: on the
-//! canonical dial grid `avif` reaches **−55.3545** and `webp` **−51.8466**,
-//! while `jpeg` bottoms out at **−8.0450** and `jxl` at **−39.6858**. The last
-//! two are **EXEMPT** — asking a dial to go deeper than the truth on their rows
-//! would bar it for being correct. `A8r` is the single deliberate exception:
-//! the negative-tail probes carry no codec column (`entry` is a bare row index
-//! over a KADIS synthetic-distortion cut), so a pooled percentile is the honest
-//! reading of that instrument.
+//! | row | tier | axis | bar |
+//! |---|---|---|---|
+//! | `A7r` | regression | **per codec** on the dial grid: fraction of `(image, codec)` ladders whose `K` lowest configurable settings are REPRESENTED | the **mentor's own fraction** on the same cells, registry-pinned |
+//! | `A8r` | **report-only** | the negative-tail probe: pooled `min` / `p1` | **none** |
 //!
-//! **The reachability guard is what keeps an absolute bar honest.** `A7r`
-//! handles it per family through the registered `exempt` flag. `A8r` PASSES on
-//! the measurement alone but may only FAIL when the probe's own `ssim2_gpu`
-//! truth reaches the bar. That replaces the retired set's *registration*
-//! requirement with something stronger: the registry's own rule — "a bar you
-//! can dodge by choosing a friendlier instrument is not a bar" — enforced by
-//! measurement rather than bookkeeping. A side-effect worth knowing: because a
-//! product bar needs no reference row, the tail is now measurable on probes
-//! that were never registered.
+//! A ladder is **REPRESENTED** when both halves hold:
 //!
-//! **`A9r` is NOT MEASURED on any registered instrument today, and that is
-//! reported rather than papered over.** The dial grids give only 4 avif rows
-//! and 1 webp row a reference truth at or below −50 — far under the derived
-//! `min_family_n` — and the probes have no codec column at all. Closing it
-//! needs a CODEC-LABELLED negative-tail probe. The per-family fractions are
-//! still printed.
+//! 1. **ordered** — the dial strictly increases across the `K` lowest steps
+//!    *and* into the next step up. A tie means the codec's two lowest settings
+//!    are indistinguishable; an inversion means they are ranked backwards.
+//! 2. **off the clamp** — no bottom-`K` value sits within `clamp_eps` of the
+//!    dial's instrument-wide minimum, *unless* this ladder is the **single**
+//!    ladder attaining it. Somebody has to be lowest; two or more ladders
+//!    sharing the bottom value is a floor that has collapsed onto a clamp.
+//!
+//! `q` is quality-oriented on every codec in the grid — JXL's `param_kind` is
+//! `distance` and its `q = 0` cells carry the **largest** distance — so "the
+//! lowest configurable settings" is always the smallest `q`, with no per-codec
+//! direction switch.
+//!
+//! **`A8r` is report-only for a measured reason**: the negative-tail probes
+//! carry no codec identity at all (`entry` is a bare row index over a KADIS
+//! synthetic-distortion cut), so they cannot answer a question about codec
+//! settings. Grading that instrument per *distortion* family at a fixed depth
+//! was measured to fail **every bake ever built** on one n=8 family
+//! (`benchmarks/d_peaks_lambda_sweep_2026-09-05.md` §4-§6).
+//!
+//! **`A9r` is dropped as a bar.** Its per-codec quantity is folded into the
+//! report block as one column, against a REPORTING threshold that is barred
+//! against nothing.
 //!
 //! **Scope.** The ruling is about the REGRESSION tail. No CONTRACT row was
 //! added, moved or removed, so the contract tier — and the board's
 //! contract-driven NOT SHIPPABLE badge — is untouched. `A1`-`A6` stay
-//! mentor-pinned.
+//! mentor-pinned, and `C3`/`C4` keep their absolute `0.0` bars, which are SIGN
+//! requirements rather than depth bars.
 //!
 //! **Nothing was rewritten.** `--gaddr-tail-pins retired` reproduces the
 //! pre-2026-09-05 grading exactly, because every G-ADDR number published before
@@ -196,17 +202,19 @@ pub struct FixedBars {
 /// Which pin set the NEGATIVE-TAIL rows are graded against.
 ///
 /// **USER RULING 2026-09-05**, verbatim: *"the negative tail bar is entirely
-/// arbitrary. below -5-50"*. The mentor-pinned tail (A7 `min` ≤ −770.62, A8
-/// `p1` ≤ −187.13) is retired as a *product* requirement — those were
-/// `peer_ssim2`'s incidental depth on one probe, not a range anything needs to
-/// address — and replaced by an absolute, PER-CODEC-FAMILY product bar at
-/// **−50**.
+/// arbitrary. below -5-50"*, in its operative form: *"i care that the lowest
+/// configurable settings per codec are representable, not that negative fifty
+/// is in that specifically."* The mentor-pinned tail (A7 `min` ≤ −770.62, A8
+/// `p1` ≤ −187.13) is retired as a *product* requirement — that was
+/// `peer_ssim2`'s incidental depth on one probe — and replaced by PER-CODEC
+/// FLOOR REPRESENTABILITY, which contains no dial-value bar at all.
 ///
 /// Both sets stay in the registry and both remain reachable, because every
 /// G-ADDR number published before 2026-09-05 is graded on the retired one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TailPins {
-    /// `A7r` / `A8r` / `A9r` — the absolute product range. The default.
+    /// `A7r` (per-codec FLOOR REPRESENTABILITY) + `A8r` (the probe,
+    /// report-only). The default. Contains no dial-value bar.
     #[default]
     Product,
     /// `A7` / `A8` / `A9` — the retired `peer_ssim2` pins. Reproduces every
@@ -235,82 +243,65 @@ impl TailPins {
     }
 }
 
-/// The registered ABSOLUTE product bars for the negative tail
-/// (`negative_tail_bars.pin_sets[product-range-2026-09-05]`).
-#[derive(Debug, Clone, Deserialize)]
-pub struct ProductTailBars {
-    /// The one number the ruling names: **−50**.
-    pub product_bar: f64,
-    /// Minimum rows-with-reference-truth-at-or-below-the-bar a codec family
-    /// needs before its `A9r` fraction is GRADED. Derived, not chosen: the
-    /// binomial SE at the 0.90 bar is `sqrt(0.9·0.1/n)`, and 36 is the
-    /// smallest `n` whose SE (0.050) is at or under half the 0.10 gap to a
-    /// perfect 1.00.
-    pub min_family_n: usize,
-    pub product_family_frac_min: f64,
-    #[serde(default)]
-    pub product_family_frac_min_status: String,
-}
-
-/// One codec family's REFERENCE behaviour on a registered dial grid.
+/// The registered parameters of the FLOOR-REPRESENTABILITY rule.
 ///
-/// **USER CORRECTION 2026-09-05**, verbatim: *"codecs are all different, some
-/// go lower than others"*. A family whose reference never reaches the bar is
-/// `exempt` — asking a dial to go deeper than the truth on those rows would bar
-/// it for being correct. MEASURED on the canonical grid: `avif` −55.3545 and
-/// `webp` −51.8466 reach −50; `jpeg` −8.0450 and `jxl` −39.6858 do not.
+/// **There is no numeric dial bar here, by USER RULING** (2026-09-05, final,
+/// verbatim): *"i care that the lowest configurable settings per codec are
+/// representable, not that negative fifty is in that specifically."* The rule
+/// asks whether a codec's **lowest configurable settings still resolve** — it
+/// never asks the dial to reach any particular value.
 #[derive(Debug, Clone, Deserialize)]
-pub struct FamilyFloor {
-    pub codec: String,
-    pub n: usize,
-    pub reference_min: f64,
-    /// Rows of this family whose reference truth is at or below the bar — the
-    /// denominator `A9r` would have, and the reason it is currently
-    /// NOT MEASURED everywhere (4 and 1).
-    pub n_at_or_below_bar: usize,
-    pub exempt: bool,
+pub struct FloorRepresentabilityRule {
+    /// How many of a ladder's lowest-quality steps must resolve. `K = 3`.
+    pub bottom_k: usize,
+    /// A dial value within this of the instrument-wide minimum is ON THE CLAMP.
+    pub clamp_eps: f64,
 }
 
-/// The per-codec-family reference floors registered for one dial grid.
+/// One codec's REFERENCE floor-representability on a registered dial grid —
+/// the bar `A7r` compares a candidate against, and the `incumbent` column.
 #[derive(Debug, Clone, Deserialize)]
-pub struct GridFamilyFloors {
+pub struct CodecFloorRow {
+    pub codec: String,
+    pub n_ladders: usize,
+    /// Fraction of that codec's ladders whose bottom `K` steps are
+    /// representable. **This is the bar** — a measurement of one scorer on one
+    /// instrument, never an invented threshold.
+    pub represented_frac: f64,
+}
+
+/// The registered per-codec floor representability for one dial grid.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GridFloorRepresentability {
     pub dial_grid_sha256: String,
     #[serde(default = "default_reference")]
     pub reference: String,
     pub label: String,
-    pub bar: f64,
-    pub families: Vec<FamilyFloor>,
+    pub bottom_k: usize,
+    pub codecs: Vec<CodecFloorRow>,
 }
 
-/// One row of `negative_tail_bars.pin_sets`. The product-bar fields are
-/// optional because the RETIRED set legitimately has none — it barred against
-/// the reference's own registry row instead. `#[serde(flatten)]` was
-/// deliberately not used: an `Option<Struct>` flatten silently yields `None`
-/// when a single field is mistyped, which is exactly how a gate quietly
-/// disarms itself.
+/// One row of `negative_tail_bars.pin_sets`. The rule fields are optional
+/// because the RETIRED set legitimately has none — it barred against the
+/// reference's own probe depth instead. `#[serde(flatten)]` was deliberately
+/// not used: an `Option<Struct>` flatten silently yields `None` when a single
+/// field is mistyped, which is exactly how a gate quietly disarms itself.
 #[derive(Debug, Clone, Deserialize)]
 struct TailPinSetRow {
     id: String,
     #[serde(default)]
-    product_bar: Option<f64>,
+    bottom_k: Option<usize>,
     #[serde(default)]
-    min_family_n: Option<usize>,
+    clamp_eps: Option<f64>,
     #[serde(default)]
-    product_family_frac_min: Option<f64>,
-    #[serde(default)]
-    product_family_frac_min_status: Option<String>,
+    report_floor_threshold: Option<f64>,
 }
 
 impl TailPinSetRow {
-    fn product(&self) -> Option<ProductTailBars> {
-        Some(ProductTailBars {
-            product_bar: self.product_bar?,
-            min_family_n: self.min_family_n?,
-            product_family_frac_min: self.product_family_frac_min?,
-            product_family_frac_min_status: self
-                .product_family_frac_min_status
-                .clone()
-                .unwrap_or_default(),
+    fn rule(&self) -> Option<FloorRepresentabilityRule> {
+        Some(FloorRepresentabilityRule {
+            bottom_k: self.bottom_k?,
+            clamp_eps: self.clamp_eps?,
         })
     }
 }
@@ -321,8 +312,52 @@ struct NegativeTailBarsRegistry {
     pin_sets: Vec<TailPinSetRow>,
 }
 
-/// One registered dial-grid row: the reference bake's end-of-range behaviour
-/// on the grid with this sha256.
+/// The registered FLOOR-REPRESENTABILITY rule. Owned by the registry, not by
+/// this file — the parameters a user moves live in one committed place.
+pub fn floor_rule() -> FloorRepresentabilityRule {
+    let r = registry();
+    let want = r.negative_tail_bars.active.clone();
+    r.negative_tail_bars
+        .pin_sets
+        .into_iter()
+        .find(|p| p.id == want)
+        .and_then(|p| p.rule())
+        .expect("the active negative-tail pin set must carry the floor rule")
+}
+
+/// The REPORTING threshold for the per-codec column folded in from the dropped
+/// `A9r`. **It is barred against nothing** — the active pin set contains no
+/// dial-value bar, by user ruling. This is the one place the old −50 survives,
+/// and it survives as information.
+pub fn report_floor_threshold() -> f64 {
+    let r = registry();
+    let want = r.negative_tail_bars.active.clone();
+    r.negative_tail_bars
+        .pin_sets
+        .into_iter()
+        .find(|p| p.id == want)
+        .and_then(|p| p.report_floor_threshold)
+        .unwrap_or(f64::NEG_INFINITY)
+}
+
+/// The registry's own name for the ACTIVE negative-tail pin set.
+pub fn active_tail_pin_set() -> String {
+    registry().negative_tail_bars.active
+}
+
+/// The registered per-codec floor representability for a dial grid, keyed by
+/// `(grid sha256, reference)` — the same two-part key every other registry
+/// lookup uses, for the same reason.
+pub fn floor_repr_for_grid(
+    grid_sha256: &str,
+    reference: &str,
+) -> Option<GridFloorRepresentability> {
+    registry()
+        .grid_floor_representability
+        .into_iter()
+        .find(|g| g.dial_grid_sha256 == grid_sha256 && g.reference == reference)
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct GridFloor {
     pub dial_grid_sha256: String,
@@ -379,7 +414,7 @@ pub struct IdentityFloor {
 struct Registry {
     fixed_bars: FixedBars,
     negative_tail_bars: NegativeTailBarsRegistry,
-    grid_family_floors: Vec<GridFamilyFloors>,
+    grid_floor_representability: Vec<GridFloorRepresentability>,
     grids: Vec<GridFloor>,
     negtail_probes: Vec<NegTailFloor>,
     identity_probes: Vec<IdentityFloor>,
@@ -394,34 +429,6 @@ fn registry() -> Registry {
 /// The registered fixed bars (mono / tied / identity band).
 pub fn fixed_bars() -> FixedBars {
     registry().fixed_bars
-}
-
-/// The registered ABSOLUTE product-range tail bars. Owned by the registry, not
-/// by this file — the numbers a user moves live in one committed place.
-pub fn product_tail_bars() -> ProductTailBars {
-    let r = registry();
-    let want = r.negative_tail_bars.active.clone();
-    r.negative_tail_bars
-        .pin_sets
-        .into_iter()
-        .find(|p| p.id == want)
-        .and_then(|p| p.product())
-        .expect("the active negative-tail pin set must carry the product bars")
-}
-
-/// The registry's own name for the ACTIVE negative-tail pin set.
-pub fn active_tail_pin_set() -> String {
-    registry().negative_tail_bars.active
-}
-
-/// The registered per-CODEC-FAMILY reference floors for a dial grid, keyed by
-/// `(grid sha256, reference)` — the same two-part key every other registry
-/// lookup uses, for the same reason.
-pub fn family_floors_for_grid(grid_sha256: &str, reference: &str) -> Option<GridFamilyFloors> {
-    registry()
-        .grid_family_floors
-        .into_iter()
-        .find(|g| g.dial_grid_sha256 == grid_sha256 && g.reference == reference)
 }
 
 /// The registered floor for a dial grid, keyed by `(grid file sha256,
@@ -526,7 +533,8 @@ impl GridMeasure {
 ///
 /// Carries the probe's OWN reference truth extremes, which the 2026-09-05
 /// product bar needs: an absolute bar is still instrument-dependent, and a
-/// probe whose truth never reaches −50 cannot discriminate.
+/// probe whose truth is shallow cannot say much about a floor. Reported, never
+/// barred.
 #[derive(Debug, Clone, Copy)]
 pub struct NegTailMeasure {
     pub n: usize,
@@ -589,94 +597,230 @@ impl NegTailMeasure {
     }
 }
 
-/// One codec family's DIAL behaviour on an instrument that carries codec
-/// identity — the candidate side of `A7r` / `A9r`.
+/// One codec's FLOOR REPRESENTABILITY on an instrument that carries codec
+/// identity and quality ladders — the candidate side of `A7r`.
 ///
-/// **The tail is never pooled across codecs** (USER CORRECTION 2026-09-05:
-/// *"codecs are all different, some go lower than others"*), so this is the
-/// unit the two per-family rows are graded on.
+/// **USER RULING 2026-09-05 (final)**, verbatim: *"i care that the lowest
+/// configurable settings per codec are representable, not that negative fifty
+/// is in that specifically."*
 #[derive(Debug, Clone)]
-pub struct FamilyDial {
+pub struct CodecFloor {
     pub codec: String,
-    pub n: usize,
-    /// The dial's minimum over this family's rows.
+    /// `(image_id, codec)` ladders long enough to test (`bottom_k + 1` steps).
+    pub n_ladders: usize,
+    pub n_represented: usize,
+    /// Ladders skipped because they are shorter than `bottom_k + 1`.
+    pub n_too_short: usize,
+    pub represented_frac: f64,
+    /// Why the failures failed, so a report says which half of the rule bit.
+    pub n_fail_order: usize,
+    pub n_fail_clamp: usize,
+    /// The dial's minimum over this codec's cells.
     pub dial_min: f64,
-    /// Rows of this family whose REFERENCE truth is at or below the bar —
-    /// `A9r`'s denominator. `None` when no per-row reference truth was
-    /// supplied for the instrument.
-    pub n_ref_at_or_below: Option<usize>,
-    /// Of those rows, the fraction the DIAL also places at or below the bar.
-    /// `None` for the same reason.
-    pub frac_at_or_below: Option<f64>,
+    /// Median dial value at each of the bottom `K` quality steps, lowest first.
+    pub bottom_medians: Vec<f64>,
+    /// REPORT-ONLY, folded in from the dropped `A9r`: of this codec's cells
+    /// whose reference truth is at or below the report threshold, the fraction
+    /// the dial also places at or below it. `None` without per-row truth.
+    pub report_frac_at_floor: Option<f64>,
+    pub report_n_at_floor: Option<usize>,
 }
 
-/// Per-codec-family dial behaviour on one instrument, with the instrument named
-/// so the report can say which one the families came from.
+/// Per-codec floor representability on one instrument.
 #[derive(Debug, Clone)]
-pub struct FamilyMeasure {
+pub struct FloorMeasure {
     pub instrument: String,
-    pub families: Vec<FamilyDial>,
+    /// The dial's minimum over the WHOLE instrument — the clamp value a bottom
+    /// step is tested against.
+    pub grid_min: f64,
+    /// How many distinct ladders attain `grid_min`. **One** is a genuine floor
+    /// (some ladder has to be lowest); **two or more is a collapsed floor**,
+    /// and then every cell sitting there counts as clamped.
+    pub n_ladders_at_min: usize,
+    pub codecs: Vec<CodecFloor>,
 }
 
-impl FamilyMeasure {
-    /// Build from row-aligned `(codec, dial)` and, when available, the
-    /// instrument's own per-row reference truth.
-    pub fn from_rows(
+impl FloorMeasure {
+    /// Measure floor representability from row-aligned
+    /// `(image_id, codec, q, dial)`, where `q` is QUALITY-ORIENTED on every
+    /// codec (the dial grid stores JXL's largest distance as its lowest `q`,
+    /// so "lowest configurable settings" is always the smallest `q`).
+    ///
+    /// A ladder is REPRESENTED when both halves hold:
+    ///
+    /// 1. **ordered** — the dial is strictly increasing across the bottom `K`
+    ///    steps AND from the `K`-th step to the next one up. No ties, no
+    ///    inversions. A tie at the bottom means the codec's two lowest
+    ///    settings are indistinguishable on the dial; an inversion means they
+    ///    are ranked backwards.
+    /// 2. **off the clamp** — no bottom-`K` value sits within `clamp_eps` of
+    ///    the instrument-wide minimum, *unless* this ladder is the single
+    ///    ladder attaining that minimum. Somebody has to be lowest; two or
+    ///    more ladders sharing the bottom value is a floor that has collapsed
+    ///    onto a clamp, and neither is then addressable.
+    ///
+    /// `report_truth` is optional per-row reference truth used ONLY for the
+    /// report-only column folded in from the dropped `A9r`; it never affects
+    /// whether a ladder is represented.
+    pub fn from_grid(
         instrument: &str,
+        image_id: &[String],
         codec: &[String],
+        q: &[f64],
         dial: &[f64],
-        truth: Option<&[f64]>,
-        bar: f64,
+        report_truth: Option<&[f64]>,
+        report_threshold: f64,
     ) -> Self {
-        let truth = truth.filter(|t| t.len() == dial.len());
-        let mut order: Vec<String> = Vec::new();
-        let mut acc: std::collections::HashMap<String, (usize, f64, usize, usize)> =
-            std::collections::HashMap::new();
-        for (i, c) in codec.iter().enumerate().take(dial.len()) {
-            let d = dial[i];
-            if !d.is_finite() {
+        let rule = floor_rule();
+        let k = rule.bottom_k;
+        let n = dial.len().min(image_id.len()).min(codec.len()).min(q.len());
+        let report_truth = report_truth.filter(|t| t.len() == dial.len());
+
+        // Build the ladders, then sort each by QUALITY.
+        let mut ladders: std::collections::BTreeMap<(String, String), Vec<(f64, f64)>> =
+            std::collections::BTreeMap::new();
+        for i in 0..n {
+            if !dial[i].is_finite() {
                 continue;
             }
+            ladders
+                .entry((image_id[i].clone(), codec[i].clone()))
+                .or_default()
+                .push((q[i], dial[i]));
+        }
+        for v in ladders.values_mut() {
+            v.sort_by(|a, b| a.0.total_cmp(&b.0));
+        }
+
+        let grid_min = ladders
+            .values()
+            .flat_map(|v| v.iter().map(|(_, d)| *d))
+            .fold(f64::INFINITY, f64::min);
+        let n_ladders_at_min = ladders
+            .values()
+            .filter(|v| {
+                v.iter()
+                    .any(|(_, d)| (*d - grid_min).abs() <= rule.clamp_eps)
+            })
+            .count();
+
+        // Per-codec accumulation, in a stable (sorted) codec order.
+        let mut order: Vec<String> = Vec::new();
+        #[derive(Default)]
+        struct Acc {
+            n: usize,
+            rep: usize,
+            short: usize,
+            fail_order: usize,
+            fail_clamp: usize,
+            dial_min: f64,
+            steps: Vec<Vec<f64>>,
+        }
+        let mut acc: std::collections::HashMap<String, Acc> = std::collections::HashMap::new();
+        for ((_, c), cells) in &ladders {
             let e = acc.entry(c.clone()).or_insert_with(|| {
                 order.push(c.clone());
-                (0, f64::INFINITY, 0, 0)
+                Acc {
+                    dial_min: f64::INFINITY,
+                    steps: vec![Vec::new(); k],
+                    ..Default::default()
+                }
             });
-            e.0 += 1;
-            if d < e.1 {
-                e.1 = d;
+            for (_, d) in cells {
+                if *d < e.dial_min {
+                    e.dial_min = *d;
+                }
             }
-            if let Some(t) = truth {
-                if t[i].is_finite() && t[i] <= bar {
-                    e.2 += 1;
-                    if d <= bar {
-                        e.3 += 1;
-                    }
+            if cells.len() < k + 1 {
+                e.short += 1;
+                continue;
+            }
+            e.n += 1;
+            for (j, slot) in e.steps.iter_mut().enumerate() {
+                slot.push(cells[j].1);
+            }
+            // (1) strictly increasing across the bottom K and into step K.
+            let ordered = (0..k).all(|j| cells[j].1 < cells[j + 1].1);
+            // (2) off the clamp — the single lowest ladder is allowed to BE
+            //     the minimum; two or more sharing it is a collapsed floor.
+            let sole_min_holder = n_ladders_at_min == 1
+                && cells
+                    .iter()
+                    .any(|(_, d)| (*d - grid_min).abs() <= rule.clamp_eps);
+            let clamped =
+                !sole_min_holder && (0..k).any(|j| (cells[j].1 - grid_min).abs() <= rule.clamp_eps);
+            if ordered && !clamped {
+                e.rep += 1;
+            } else {
+                if !ordered {
+                    e.fail_order += 1;
+                }
+                if clamped {
+                    e.fail_clamp += 1;
                 }
             }
         }
+
+        // Report-only column (folded in from the dropped A9r).
+        let mut rep_hit: std::collections::HashMap<String, (usize, usize)> =
+            std::collections::HashMap::new();
+        if let Some(t) = report_truth {
+            for i in 0..n {
+                if !dial[i].is_finite() || !t[i].is_finite() || t[i] > report_threshold {
+                    continue;
+                }
+                let e = rep_hit.entry(codec[i].clone()).or_insert((0, 0));
+                e.0 += 1;
+                if dial[i] <= report_threshold {
+                    e.1 += 1;
+                }
+            }
+        }
+
         order.sort();
-        let families = order
+        let median = |v: &[f64]| -> f64 {
+            if v.is_empty() {
+                return f64::NAN;
+            }
+            let mut w = v.to_vec();
+            w.sort_by(f64::total_cmp);
+            w[w.len() / 2]
+        };
+        let codecs = order
             .into_iter()
             .map(|c| {
-                let (n, dmin, nref, nhit) = acc[&c];
-                FamilyDial {
-                    codec: c,
-                    n,
-                    dial_min: dmin,
-                    n_ref_at_or_below: truth.map(|_| nref),
-                    frac_at_or_below: truth.and_then(|_| {
-                        if nref == 0 {
+                let a = &acc[&c];
+                let hit = rep_hit.get(&c);
+                CodecFloor {
+                    codec: c.clone(),
+                    n_ladders: a.n,
+                    n_represented: a.rep,
+                    n_too_short: a.short,
+                    represented_frac: if a.n == 0 {
+                        f64::NAN
+                    } else {
+                        a.rep as f64 / a.n as f64
+                    },
+                    n_fail_order: a.fail_order,
+                    n_fail_clamp: a.fail_clamp,
+                    dial_min: a.dial_min,
+                    bottom_medians: a.steps.iter().map(|v| median(v)).collect(),
+                    report_frac_at_floor: hit.and_then(|(nn, hh)| {
+                        if *nn == 0 {
                             None
                         } else {
-                            Some(nhit as f64 / nref as f64)
+                            Some(*hh as f64 / *nn as f64)
                         }
                     }),
+                    report_n_at_floor: report_truth.map(|_| hit.map(|(nn, _)| *nn).unwrap_or(0)),
                 }
             })
             .collect();
         Self {
             instrument: instrument.to_string(),
-            families,
+            grid_min,
+            n_ladders_at_min,
+            codecs,
         }
     }
 }
@@ -855,26 +999,33 @@ pub struct Verdict {
     /// The per-codec-family tail rows, joined to their registered reference
     /// floors. Printed as its own table — the ruling's "codecs are all
     /// different" is not a footnote, it is the shape of the measurement.
-    pub family_rows: Vec<FamilyRow>,
+    pub codec_floor_rows: Vec<CodecFloorReport>,
 }
 
-/// One rendered per-codec-family tail row: the candidate's dial beside the
-/// registered reference floor for the same family.
+/// One rendered per-codec floor row: the candidate's representability beside
+/// the mentor's (the bar) and the incumbent's, plus the information the ruling
+/// asked to see at a glance — the dial's min and its bottom-`K` medians next to
+/// the reference's.
 #[derive(Debug, Clone)]
-pub struct FamilyRow {
+pub struct CodecFloorReport {
     pub codec: String,
-    pub n: usize,
-    pub reference_min: f64,
-    pub exempt: bool,
+    pub n_ladders: usize,
+    pub n_too_short: usize,
+    /// Candidate / mentor (the bar) / incumbent representability fractions.
+    pub frac: f64,
+    pub frac_reference: Option<f64>,
+    pub frac_incumbent: Option<f64>,
+    pub n_fail_order: usize,
+    pub n_fail_clamp: usize,
     pub dial_min: f64,
-    /// `A9r`'s denominator — rows whose reference truth is at or below the bar.
-    pub n_ref_at_or_below: Option<usize>,
-    pub frac_at_or_below: Option<f64>,
-    /// `A7r` for this family alone. Exempt families are `NotMeasured` with the
-    /// exemption as their reason.
-    pub a7r: State,
-    /// `A9r` for this family alone.
-    pub a9r: State,
+    pub reference_min: Option<f64>,
+    pub bottom_medians: Vec<f64>,
+    pub reference_bottom_medians: Option<Vec<f64>>,
+    /// REPORT-ONLY, folded in from the dropped `A9r`.
+    pub report_frac_at_floor: Option<f64>,
+    pub report_n_at_floor: Option<usize>,
+    /// `A7r` for this codec alone.
+    pub state: State,
     pub note: String,
 }
 
@@ -1048,12 +1199,13 @@ pub fn evaluate_with_reference(
 /// NEGATIVE-TAIL pin set.
 ///
 /// The tail selector exists because of the **USER RULING 2026-09-05** —
-/// *"the negative tail bar is entirely arbitrary. below -5-50"* — which
-/// retired the mentor-pinned A7/A8/A9 in favour of the absolute product range
-/// A7r/A8r/A9r. Every G-ADDR number published before that date is graded on
-/// the retired set, so it stays reachable: `TailPins::Retired` reproduces it
-/// exactly. A1-A6 are untouched by the ruling and stay mentor-pinned in both
-/// arms.
+/// *"i care that the lowest configurable settings per codec are representable,
+/// not that negative fifty is in that specifically"* — which retired the
+/// mentor-pinned A7/A8/A9 in favour of per-codec FLOOR REPRESENTABILITY
+/// (`A7r`) plus a report-only probe row (`A8r`). Every G-ADDR number published
+/// before that date is graded on the retired set, so it stays reachable:
+/// `TailPins::Retired` reproduces it exactly. A1-A6 are untouched by the
+/// ruling and stay mentor-pinned in both arms.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_full(
     reference: &str,
@@ -1063,7 +1215,7 @@ pub fn evaluate_full(
     m: &GridMeasure,
     negtail: Option<(&NegTailMeasure, &str)>,
     identity: Option<(&IdentityMeasure, &str)>,
-    families: Option<&FamilyMeasure>,
+    floors: Option<&FloorMeasure>,
 ) -> Verdict {
     let bars = fixed_bars();
     let floor = floor_for_grid(grid_sha256, reference);
@@ -1143,13 +1295,13 @@ pub fn evaluate_full(
 
     // ── negative tail ──
     // Filled by the product arm; empty under the retired pins, which had no
-    // per-family concept at all.
-    let mut family_rows: Vec<FamilyRow> = Vec::new();
+    // per-codec concept at all.
+    let mut codec_floor_rows: Vec<CodecFloorReport> = Vec::new();
     //
     // Two pin sets, selected by `tail_pins`. `Product` (the default since the
-    // USER RULING 2026-09-05) grades A7r/A8r/A9r against the ABSOLUTE product
-    // range; `Retired` grades A7/A8/A9 against the mentor's own depth, which
-    // is what every pre-2026-09-05 number was graded on.
+    // USER RULING 2026-09-05) asks FLOOR REPRESENTABILITY per codec and reports
+    // the probe; `Retired` grades A7/A8/A9 against the mentor's own probe
+    // depth, which is what every pre-2026-09-05 number was graded on.
     match tail_pins {
         // The RETIRED pins: three probe-derived rows, all mentor-barred.
         TailPins::Retired => match negtail {
@@ -1219,82 +1371,55 @@ pub fn evaluate_full(
         // GRID, not the probe — so they do NOT depend on a negative-tail probe
         // being supplied. A8r is the one pooled, probe-derived row.
         TailPins::Product => {
-            let ptb = product_tail_bars();
-            let (a7r, a9r, frows) = per_family_tail_rows(grid_sha256, reference, families, &ptb);
-            family_rows = frows;
+            // A7r — FLOOR REPRESENTABILITY, per codec, on the dial grid.
+            let (a7r, rows_out) = per_codec_floor_rows(grid_sha256, reference, floors);
+            codec_floor_rows = rows_out;
             rows.push(a7r);
-            match negtail {
-                Some((nm, sha)) => {
-                    let nfi = floor_for_negtail(sha, INCUMBENT_REFERENCE);
-                    // The negative-tail probes carry no codec identity
-                    // (`entry` is a bare row index over a KADIS
-                    // synthetic-distortion cut, not a codec sweep), so a
-                    // per-family split is not available there and a pooled
-                    // percentile is the honest reading of that instrument.
-                    // ONE axis, TWO numbers: pooled `min` AND pooled `p1`
-                    // must both reach the bar. `min <= p1` always holds, so
-                    // `p1` is the binding one — but both are checked
-                    // explicitly, so the row cannot silently start meaning
-                    // something else if a percentile convention moves, and
-                    // both are printed.
-                    let a8_discriminating =
-                        nm.truth_p1.is_finite() && nm.truth_p1 <= ptb.product_bar;
-                    let both = if nm.min <= ptb.product_bar && nm.p1 <= ptb.product_bar {
-                        // Report the binding number.
-                        nm.p1
-                    } else {
-                        // Report whichever misses (the larger of the two).
-                        nm.min.max(nm.p1)
-                    };
-                    let a8_note = if a8_discriminating {
-                        format!(
-                            "POOLED by design, ONE axis / TWO numbers: pooled min {:.4} AND \
-                             pooled p1 {:.4} must both be ≤ {:.1}. This probe carries no CODEC \
-                             column at all — MEASURED: its rows are KADIS distortion types \
-                             (mean_shift, noneccentricity, …), not codec output — so the \
-                             per-codec split A7r uses does not apply here and a pooled \
-                             percentile is the honest reading of this instrument. (probe truth \
-                             p1 {:.4})",
-                            nm.min, nm.p1, ptb.product_bar, nm.truth_p1
-                        )
-                    } else if nm.truth_p1.is_finite() {
-                        format!(
-                            "pooled min {:.4} / p1 {:.4}; probe's OWN reference truth p1 is \
-                             {:.4}, which does not reach the {:.1} bar — this instrument cannot \
-                             discriminate, so a miss is NOT MEASURED rather than a fail",
-                            nm.min, nm.p1, nm.truth_p1, ptb.product_bar
-                        )
-                    } else {
-                        format!(
-                            "pooled min {:.4} / p1 {:.4}; probe carries no readable `ssim2_gpu` \
-                             truth column — the reachability guard cannot run, so a miss is NOT \
-                             MEASURED rather than a fail",
-                            nm.min, nm.p1
-                        )
-                    };
-                    rows.push(product_row(
-                        "A8r",
-                        "negative tail — POOLED probe min AND p1 (this probe has no codec column)",
-                        both,
-                        ptb.product_bar,
-                        "≤",
-                        a8_discriminating,
-                        nfi.as_ref().map(|x| x.p1),
-                        a8_note,
-                    ));
-                }
-                None => rows.push(row(
-                    "A8r",
-                    Tier::Regression,
-                    "negative tail — POOLED probe min AND p1 (this probe has no codec column)",
-                    None,
-                    None,
-                    "≤",
-                    None,
-                    "no --negtail-probe supplied".into(),
-                )),
-            }
-            rows.push(a9r);
+            // A8r — the negative-tail probe, REPORT-ONLY. No bar: it carries no
+            // codec identity (its rows are KADIS distortion types), and the
+            // ruling is about codec settings.
+            let a8 = match negtail {
+                Some((nm, _)) => CheckRow {
+                    id: "A8r",
+                    tier: Tier::Report,
+                    what: "negative tail — pooled probe min / p1 (REPORT-ONLY, no bar)",
+                    measured: if nm.p1.is_finite() { Some(nm.p1) } else { None },
+                    bar: None,
+                    cmp: "≤",
+                    state: State::NotMeasured,
+                    incumbent: None,
+                    note: format!(
+                        "REPORT-ONLY — no bar, gates nothing. Pooled min {:.4} / p1 {:.4} \
+                         (probe n={}{}). This instrument carries NO codec identity — its rows \
+                         are KADIS distortion types, not codec output — so it cannot answer \
+                         the ruling's question (\"the lowest configurable settings per codec\") \
+                         and is reported rather than barred. The per-DISTORTION-family reading \
+                         is measured in benchmarks/d_peaks_lambda_sweep_2026-09-05.md §4-§6.",
+                        nm.min,
+                        nm.p1,
+                        nm.n,
+                        match (nm.truth_min.is_finite(), nm.truth_p1.is_finite()) {
+                            (true, true) => format!(
+                                ", reference truth min {:.4} / p1 {:.4}",
+                                nm.truth_min, nm.truth_p1
+                            ),
+                            _ => ", probe carries no readable `ssim2_gpu` truth column".to_string(),
+                        }
+                    ),
+                },
+                None => CheckRow {
+                    id: "A8r",
+                    tier: Tier::Report,
+                    what: "negative tail — pooled probe min / p1 (REPORT-ONLY, no bar)",
+                    measured: None,
+                    bar: None,
+                    cmp: "≤",
+                    state: State::NotMeasured,
+                    incumbent: None,
+                    note: "REPORT-ONLY — no --negtail-probe supplied".into(),
+                },
+            };
+            rows.push(a8);
         }
     }
 
@@ -1473,214 +1598,168 @@ pub fn evaluate_full(
             .map(|x| format!("{} — {}", INCUMBENT_REFERENCE, x.label))
             .unwrap_or_else(|| format!("{INCUMBENT_REFERENCE} (no registry row)")),
         tail_pins,
-        family_rows,
+        codec_floor_rows,
     }
 }
 
-/// Build the two PER-CODEC-FAMILY tail rows (`A7r`, `A9r`) and the per-family
-/// table that is printed beside them.
+/// Build the `A7r` FLOOR-REPRESENTABILITY row and the per-codec table printed
+/// beside it.
 ///
-/// The registered `grid_family_floors` row supplies each family's REFERENCE
-/// minimum and its exemption; the run supplies each family's DIAL minimum. A
-/// family the reference never takes below the bar is EXEMPT — never a fail,
-/// never a silent pass, printed as exempt.
-fn per_family_tail_rows(
+/// The bar is the **mentor's own representability fraction on the same cells**,
+/// registry-pinned per codec — a measurement of one scorer on one instrument,
+/// never an invented threshold, and never a dial value. A codec on which the
+/// mentor itself represents nothing has a bar of 0.0, which is the natural
+/// analogue of an exemption and needs no special case.
+fn per_codec_floor_rows(
     grid_sha256: &str,
     reference: &str,
-    families: Option<&FamilyMeasure>,
-    ptb: &ProductTailBars,
-) -> (CheckRow, CheckRow, Vec<FamilyRow>) {
-    let floors = family_floors_for_grid(grid_sha256, reference);
-    let (floors, fm) = match (floors, families) {
-        (Some(f), Some(m)) => (f, m),
-        (floors, _) => {
-            let why = if floors.is_none() {
-                format!(
-                    "no per-codec-family reference floors registered for grid {} / reference \
-                     `{reference}` — the exemption set is unknown, so the per-family tail is \
-                     NOT MEASURED (never pooled as a substitute)",
-                    &grid_sha256[..grid_sha256.len().min(16)]
-                )
-            } else {
-                "the caller supplied no per-codec-family dial minima (the instrument carries \
-                 no codec column)"
-                    .to_string()
-            };
+    floors: Option<&FloorMeasure>,
+) -> (CheckRow, Vec<CodecFloorReport>) {
+    let rule = floor_rule();
+    let reg = floor_repr_for_grid(grid_sha256, reference);
+    let inc = floor_repr_for_grid(grid_sha256, INCUMBENT_REFERENCE);
+    // A missing MENTOR row leaves the axis NOT MEASURED — but the measurement
+    // is still REPORTED, because that is how the mentor's own pins get derived
+    // in the first place (run the gate on the peer, read the fractions, append
+    // them). A missing ladder MEASUREMENT has nothing to report.
+    let fm = match floors {
+        Some(m) => m,
+        None => {
             return (
                 row(
                     "A7r",
                     Tier::Regression,
-                    "negative tail — per-codec-family floor at the product bar",
+                    "floor representability — lowest configurable settings resolve, per codec",
                     None,
                     None,
                     "≤",
                     None,
-                    why.clone(),
+                    "the caller supplied no per-codec ladder measurement (this instrument \
+                     carries no codec / quality-ladder columns)"
+                        .to_string(),
                 ),
-                CheckRow {
-                    id: "A9r",
-                    tier: Tier::Report,
-                    what: "negative tail — per-codec agreement at the product bar (REPORT-ONLY, \
-                           no bar)",
-                    measured: None,
-                    bar: None,
-                    cmp: "≥",
-                    state: State::NotMeasured,
-                    incumbent: None,
-                    note: why,
-                },
                 Vec::new(),
             );
         }
     };
-    let mut table: Vec<FamilyRow> = Vec::new();
-    for ff in &floors.families {
-        let dial = fm.families.iter().find(|d| d.codec == ff.codec);
-        let dial_min = dial.map(|d| d.dial_min).unwrap_or(f64::NAN);
-        let n_ref = dial.and_then(|d| d.n_ref_at_or_below);
-        let frac = dial.and_then(|d| d.frac_at_or_below);
-        let a7r = if ff.exempt {
-            State::NotMeasured
-        } else if !dial_min.is_finite() {
-            State::NotMeasured
-        } else if dial_min <= ptb.product_bar {
-            State::Pass
-        } else {
-            State::Fail
+    let unregistered_note = reg.is_none().then(|| {
+        format!(
+            "no per-codec floor-representability row registered for grid {} / reference \
+             `{reference}` — the bar is the MENTOR's own fraction on these cells and it has not \
+             been measured here, so A7r is NOT MEASURED (never pooled, never defaulted). The \
+             fractions below are still REPORTED: appending them for the reference IS how the \
+             bar is derived.",
+            &grid_sha256[..grid_sha256.len().min(16)]
+        )
+    });
+    let mut table: Vec<CodecFloorReport> = Vec::new();
+    for cf in &fm.codecs {
+        let bar = reg
+            .as_ref()
+            .and_then(|g| g.codecs.iter().find(|c| c.codec == cf.codec))
+            .map(|c| c.represented_frac);
+        let inc_frac = inc
+            .as_ref()
+            .and_then(|g| g.codecs.iter().find(|c| c.codec == cf.codec))
+            .map(|c| c.represented_frac);
+        let state = match (bar, cf.represented_frac.is_finite()) {
+            (Some(b), true) if cf.represented_frac >= b => State::Pass,
+            (Some(_), true) => State::Fail,
+            _ => State::NotMeasured,
         };
-        // A9r is REPORT-ONLY (USER REFINEMENT 2026-09-05): the fraction is
-        // measured and printed per family, and NOTHING is barred on it. So a
-        // family's A9r state is never Pass/Fail — the number is the point.
-        let a9r = State::NotMeasured;
-        let dial_vs_ref = if dial_min.is_finite() {
-            format!(
-                "dial min {:.4} vs reference min {:.4} ({:+.4})",
-                dial_min,
-                ff.reference_min,
-                dial_min - ff.reference_min
-            )
-        } else {
-            format!(
-                "reference min {:.4}; no dial min measured",
-                ff.reference_min
-            )
+        let note = match bar {
+            None => format!(
+                "no registered mentor fraction for `{}` on this grid — NOT MEASURED",
+                cf.codec
+            ),
+            Some(b) => format!(
+                "{}/{} ladders represented ({:.4} vs mentor {:.4}); failures: {} unordered, {} on \
+                 the clamp{}",
+                cf.n_represented,
+                cf.n_ladders,
+                cf.represented_frac,
+                b,
+                cf.n_fail_order,
+                cf.n_fail_clamp,
+                if cf.n_too_short > 0 {
+                    format!(
+                        "; {} ladder(s) shorter than {} steps, not tested",
+                        cf.n_too_short,
+                        rule.bottom_k + 1
+                    )
+                } else {
+                    String::new()
+                }
+            ),
         };
-        let note = if ff.exempt {
-            format!(
-                "EXEMPT — the reference itself only reaches {:.4} on this family, never the \
-                 {:.1} bar (\"some go lower than others\"). {dial_vs_ref}",
-                ff.reference_min, ptb.product_bar
-            )
-        } else {
-            let a9 = match (n_ref, frac) {
-                (Some(n), Some(fr)) => format!(
-                    "A9r (report-only) {fr:.4} over {n} rows whose reference truth is ≤ {:.1}",
-                    ptb.product_bar
-                ),
-                (Some(n), None) => format!(
-                    "A9r (report-only) — no rows of this family have a reference truth ≤ {:.1} \
-                     (n={n})",
-                    ptb.product_bar
-                ),
-                _ => "A9r (report-only) — no per-row reference truth supplied for this \
-                      instrument (pass --gaddr-grid-truth)"
-                    .to_string(),
-            };
-            format!("{dial_vs_ref}. {a9}")
-        };
-        table.push(FamilyRow {
-            codec: ff.codec.clone(),
-            n: ff.n,
-            reference_min: ff.reference_min,
-            exempt: ff.exempt,
-            dial_min,
-            n_ref_at_or_below: n_ref,
-            frac_at_or_below: frac,
-            a7r,
-            a9r,
+        table.push(CodecFloorReport {
+            codec: cf.codec.clone(),
+            n_ladders: cf.n_ladders,
+            n_too_short: cf.n_too_short,
+            frac: cf.represented_frac,
+            frac_reference: bar,
+            frac_incumbent: inc_frac,
+            n_fail_order: cf.n_fail_order,
+            n_fail_clamp: cf.n_fail_clamp,
+            dial_min: cf.dial_min,
+            reference_min: None,
+            bottom_medians: cf.bottom_medians.clone(),
+            reference_bottom_medians: None,
+            report_frac_at_floor: cf.report_frac_at_floor,
+            report_n_at_floor: cf.report_n_at_floor,
+            state,
             note,
         });
     }
-    // A7r: the COUNT of non-exempt families the dial fails, barred at ≤ 0.
-    let n_gradeable_a7 = table.iter().filter(|r| r.a7r != State::NotMeasured).count();
-    let n_fail_a7 = table.iter().filter(|r| r.a7r == State::Fail).count();
-    let a7_row = CheckRow {
+    let n_gradeable = table
+        .iter()
+        .filter(|r| r.state != State::NotMeasured)
+        .count();
+    let n_fail = table.iter().filter(|r| r.state == State::Fail).count();
+    let a7 = CheckRow {
         id: "A7r",
         tier: Tier::Regression,
-        what: "negative tail — per-codec-family floor at the product bar",
-        measured: if n_gradeable_a7 > 0 {
-            Some(n_fail_a7 as f64)
+        what: "floor representability — lowest configurable settings resolve, per codec",
+        measured: if n_gradeable > 0 {
+            Some(n_fail as f64)
         } else {
             None
         },
         bar: Some(0.0),
         cmp: "≤",
-        state: if n_gradeable_a7 == 0 {
+        state: if n_gradeable == 0 {
             State::NotMeasured
-        } else if n_fail_a7 == 0 {
+        } else if n_fail == 0 {
             State::Pass
         } else {
             State::Fail
         },
         incumbent: None,
         note: format!(
-            "families graded on `{}`: {} of {} non-exempt ({} EXEMPT — the reference never \
-             reaches {:.1} there); value = number of non-exempt families whose dial min misses \
-             the bar",
+            "K={} lowest steps per `(image, codec)` ladder on `{}`; a ladder is REPRESENTED when \
+             the dial is strictly increasing across those steps AND into the next one up, and no \
+             bottom step sits within {:.0e} of the instrument minimum {:.4} ({} ladder(s) attain \
+             it{}). Value = number of codecs whose fraction is below the MENTOR's own on the same \
+             cells; {} of {} codecs graded.",
+            rule.bottom_k,
             fm.instrument,
-            n_gradeable_a7,
-            table.len(),
-            table.iter().filter(|r| r.exempt).count(),
-            ptb.product_bar
-        ),
-    };
-    // A9r: REPORT-ONLY. Per non-exempt family, the fraction of rows whose
-    // reference truth is at or below the bar that the DIAL also places at or
-    // below it. NO bar — the user asked to see the number across the mentor,
-    // the incumbent and the shipped profiles before deciding what it should
-    // require. `Tier::Report` is excluded from both tier verdicts, so this row
-    // can never block a ship.
-    let reported: Vec<f64> = table
-        .iter()
-        .filter(|r| !r.exempt)
-        .filter_map(|r| r.frac_at_or_below)
-        .collect();
-    let worst = reported.iter().copied().fold(f64::INFINITY, f64::min);
-    let a9_row = CheckRow {
-        id: "A9r",
-        tier: Tier::Report,
-        what: "negative tail — per-codec agreement at the product bar (REPORT-ONLY, no bar)",
-        measured: if reported.is_empty() {
-            None
-        } else {
-            Some(worst)
-        },
-        bar: None,
-        cmp: "≥",
-        state: State::NotMeasured,
-        incumbent: None,
-        note: format!(
-            "REPORT-ONLY — no bar, gates nothing (a proposed {:.2} is registered as {} and \
-             deliberately NOT applied). Value shown is the WORST non-exempt codec; the \
-             per-codec fractions and their `n` are in the family table. {} The companion \
-             per-DISTORTION-family reading on the negative-tail probe is measured in \
-             benchmarks/d_peaks_lambda_sweep_2026-09-05.md §4-§6 — that instrument is KADIS \
-             distortion types, not codecs, so it is reported there and never barred here.",
-            ptb.product_family_frac_min,
-            if ptb.product_family_frac_min_status.is_empty() {
-                "registered"
+            rule.clamp_eps,
+            fm.grid_min,
+            fm.n_ladders_at_min,
+            if fm.n_ladders_at_min == 1 {
+                " — a sole holder, which is a genuine floor, not a clamp"
             } else {
-                ptb.product_family_frac_min_status.as_str()
+                " — a COLLAPSED floor: two or more ladders share the bottom value"
             },
-            if reported.is_empty() {
-                "No per-row reference truth was supplied for this instrument (pass \
-                 --gaddr-grid-truth), so no fraction could be computed."
-            } else {
-                ""
-            }
+            n_gradeable,
+            table.len()
         ),
     };
-    (a7_row, a9_row, table)
+    let a7 = match unregistered_note {
+        Some(n) => CheckRow { note: n, ..a7 },
+        None => a7,
+    };
+    (a7, table)
 }
 
 /// Markdown section for the verdict report.
@@ -1712,17 +1791,17 @@ pub fn render_markdown(v: &Verdict) -> String {
         v.tail_pins.tag(),
         match v.tail_pins {
             TailPins::Product => format!(
-                "`A7r`/`A8r`/`A9r` are ABSOLUTE product bars at **{:.1}**, not mentor pins. \
-                 **USER RULING 2026-09-05:** *\"the negative tail bar is entirely arbitrary. \
-                 below -5-50\"*, corrected the same day: *\"i said -50 not -5, codecs are all \
-                 different, some go lower than others\"*. `A7r` and `A9r` are graded **PER \
-                 CODEC FAMILY** and never pooled — a family whose REFERENCE never reaches \
-                 {:.1} is EXEMPT, because asking a dial to go deeper than the truth would bar \
-                 it for being correct. `A8r` is the one pooled row: the negative-tail probes \
-                 carry no codec column. A miss is a FAIL only where the instrument can \
-                 discriminate; otherwise NOT MEASURED.",
-                product_tail_bars().product_bar,
-                product_tail_bars().product_bar,
+                "`A7r` is **FLOOR REPRESENTABILITY**, per codec, on the dial grid; `A8r` is \
+                 the negative-tail probe, **REPORT-ONLY**. **USER RULING 2026-09-05 \
+                 (operative):** *\"i care that the lowest configurable settings per codec are \
+                 representable, not that negative fifty is in that specifically.\"* **No dial \
+                 value is a bar anywhere in this tier.** For each `(image, codec)` ladder the \
+                 K={} lowest configurable steps must be strictly ordered with quality — and \
+                 into the next step up — and must not sit on the dial's clamp (the instrument \
+                 minimum, unless that ladder is its sole holder; two or more sharing it is a \
+                 collapsed floor). The per-codec bar is the **MENTOR's own fraction on the \
+                 same cells**, registry-pinned; the incumbent's is printed beside it.",
+                floor_rule().bottom_k,
             ),
             TailPins::Retired =>
                 "`A7`/`A8`/`A9` are the RETIRED mentor pins (`peer_ssim2`'s own depth on this \
@@ -1774,39 +1853,52 @@ pub fn render_markdown(v: &Verdict) -> String {
     // The ruling's "codecs are all different" is the shape of the measurement,
     // not a footnote, so the families are printed as their own table with the
     // reference floor that decides each one's exemption.
-    if !v.family_rows.is_empty() {
+    if !v.codec_floor_rows.is_empty() {
+        let k = floor_rule().bottom_k;
         s.push_str(&format!(
-            "**Per-codec-family negative tail** (bar {:.1}; A7r/A9r are graded here, never \
-             pooled). `ref min` is the REFERENCE metric's own floor on that family's rows — a \
-             family it never takes to the bar is EXEMPT.\n\n\
-             | codec | n | ref min | exempt | dial min | A7r | rows ref ≤ bar | dial ≤ bar | A9r |\n\
-             |---|--:|--:|:--:|--:|:--:|--:|--:|:--:|\n",
-            product_tail_bars().product_bar
+            "**Per-codec FLOOR REPRESENTABILITY** (`A7r`; bar = the mentor's own fraction on \
+             these cells). `repr` is the fraction of `(image, codec)` ladders whose {k} lowest \
+             configurable steps are strictly ordered and off the clamp. Everything right of \
+             `A7r` is **information, not bars**.\n\n\
+             | codec | ladders | repr (dial) | repr (ssim2 = bar) | repr (incumbent) | A7r | \
+             unordered | clamped | dial min | bottom-{k} medians (lowest first) | ref≤floor also dial≤floor |\n\
+             |---|--:|--:|--:|--:|:--:|--:|--:|--:|---|--:|\n"
         ));
-        for r in &v.family_rows {
+        for r in &v.codec_floor_rows {
+            let f = |x: Option<f64>| match x {
+                Some(v) if v.is_finite() => format!("{v:.4}"),
+                _ => "—".into(),
+            };
             s.push_str(&format!(
-                "| {} | {} | {:.4} | {} | {} | {} | {} | {} | {} |\n",
+                "| {} | {}{} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
                 r.codec,
-                r.n,
-                r.reference_min,
-                if r.exempt { "**EXEMPT**" } else { "" },
-                if r.dial_min.is_finite() {
-                    format!("{:.4}", r.dial_min)
+                r.n_ladders,
+                if r.n_too_short > 0 {
+                    format!(" (+{} short)", r.n_too_short)
                 } else {
-                    "—".into()
+                    String::new()
                 },
-                r.a7r.mark(),
-                r.n_ref_at_or_below
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "—".into()),
-                r.frac_at_or_below
-                    .map(|f| format!("{f:.4}"))
-                    .unwrap_or_else(|| "—".into()),
-                r.a9r.mark(),
+                f(Some(r.frac)),
+                f(r.frac_reference),
+                f(r.frac_incumbent),
+                r.state.mark(),
+                r.n_fail_order,
+                r.n_fail_clamp,
+                f(Some(r.dial_min)),
+                r.bottom_medians
+                    .iter()
+                    .map(|x| format!("{x:.3}"))
+                    .collect::<Vec<_>>()
+                    .join(" / "),
+                match (r.report_frac_at_floor, r.report_n_at_floor) {
+                    (Some(fr), Some(n)) => format!("{fr:.4} (n={n})"),
+                    (None, Some(n)) => format!("— (n={n})"),
+                    _ => "—".into(),
+                },
             ));
         }
         s.push('\n');
-        for r in &v.family_rows {
+        for r in &v.codec_floor_rows {
             if !r.note.is_empty() {
                 s.push_str(&format!("- **{}**: {}\n", r.codec, r.note));
             }
@@ -1870,28 +1962,25 @@ pub fn to_json(v: &Verdict) -> serde_json::Value {
                 "truth_min": if n.truth_min.is_finite() { Some(n.truth_min) } else { None },
                 "truth_p1": if n.truth_p1.is_finite() { Some(n.truth_p1) } else { None },
             })),
-            // The PER-CODEC-FAMILY tail, reported whether or not it is graded.
-            "families": if v.family_rows.is_empty() { serde_json::Value::Null } else {
-                serde_json::json!(v.family_rows.iter().map(|r| serde_json::json!({
+            // The PER-CODEC floor table, reported whether or not it is graded.
+            "codec_floor": if v.codec_floor_rows.is_empty() { serde_json::Value::Null } else {
+                serde_json::json!(v.codec_floor_rows.iter().map(|r| serde_json::json!({
                     "codec": r.codec,
-                    "n": r.n,
-                    "reference_min": r.reference_min,
-                    "exempt": r.exempt,
+                    "n_ladders": r.n_ladders,
+                    "n_too_short": r.n_too_short,
+                    "represented_frac": if r.frac.is_finite() { Some(r.frac) } else { None },
+                    "represented_frac_reference": r.frac_reference,
+                    "represented_frac_incumbent": r.frac_incumbent,
+                    "n_fail_order": r.n_fail_order,
+                    "n_fail_clamp": r.n_fail_clamp,
                     "dial_min": if r.dial_min.is_finite() { Some(r.dial_min) } else { None },
-                    "n_ref_at_or_below_bar": r.n_ref_at_or_below,
-                    "frac_at_or_below_bar": r.frac_at_or_below,
-                    "a7r": r.a7r.tag(),
-                    "a9r": r.a9r.tag(),
+                    "bottom_medians": r.bottom_medians,
+                    "report_frac_at_floor": r.report_frac_at_floor,
+                    "report_n_at_floor": r.report_n_at_floor,
+                    "state": r.state.tag(),
                     "note": r.note,
                 })).collect::<Vec<_>>())
             },
-            "identity": v.identity.as_ref().map(|i| serde_json::json!({
-                "n": i.n, "dial_min": i.dial_min, "dial_median": i.dial_median,
-                "dial_max": i.dial_max, "n_outside_band": i.n_outside_band,
-                "n_above_identity": i.n_above_identity,
-                "n_grid_cells_total": i.n_grid_cells_total,
-                "note": IDENTITY_IS_THE_ZERO_VECTOR,
-            })),
         },
         "checks": v.rows.iter().map(|r| serde_json::json!({
             "id": r.id,
@@ -1962,37 +2051,33 @@ mod tests {
             .iter()
             .find(|p| p.id == r.negative_tail_bars.active)
             .expect("the active negative-tail pin set must exist");
-        let pb = active
-            .product()
-            .expect("the active tail pin set must carry every product bar (all-or-nothing)");
+        let rule = active
+            .rule()
+            .expect("the active tail pin set must carry the floor rule (all-or-nothing)");
         assert!(
-            pb.product_bar < 0.0,
-            "the product bar is a negative dial value"
+            rule.bottom_k >= 1,
+            "K must name at least one lowest setting"
         );
-        assert!(
-            pb.product_family_frac_min > 0.0 && pb.product_family_frac_min <= 1.0,
-            "A9r's bar is a fraction"
-        );
-        assert!(pb.min_family_n > 0);
-        // Every registered per-family floor row must agree with the active bar
-        // and must derive `exempt` FROM the measurement.
-        for g in &r.grid_family_floors {
+        assert!(rule.clamp_eps > 0.0 && rule.clamp_eps < 1e-3);
+        // Every registered per-codec mentor row must be cut at the SAME K and
+        // must carry real fractions — a bar cut at a different K would be a
+        // different measurement wearing the same name.
+        for g in &r.grid_floor_representability {
             assert_eq!(g.dial_grid_sha256.len(), 64);
             assert_eq!(
-                g.bar, pb.product_bar,
-                "{}: a family floor cut at a different bar cannot grade this pin set",
-                g.label
+                g.bottom_k, rule.bottom_k,
+                "{}: a floor row cut at K={} cannot bar a K={} rule",
+                g.label, g.bottom_k, rule.bottom_k
             );
-            assert!(!g.families.is_empty(), "{}: no families", g.label);
-            for fam in &g.families {
-                assert_eq!(
-                    fam.exempt,
-                    fam.reference_min > g.bar,
-                    "{} / {}: `exempt` must BE the measurement, never a hand flag",
+            assert!(!g.codecs.is_empty(), "{}: no codecs", g.label);
+            for c in &g.codecs {
+                assert!(
+                    (0.0..=1.0).contains(&c.represented_frac),
+                    "{} / {}: representability is a fraction",
                     g.label,
-                    fam.codec
+                    c.codec
                 );
-                assert!(fam.n > 0);
+                assert!(c.n_ladders > 0, "{} / {}", g.label, c.codec);
             }
         }
         // The retired shipped-B pin set must SURVIVE the re-pin. It is what the
@@ -2076,7 +2161,7 @@ mod tests {
     }
 
     /// Build a `NegTailMeasure` fixture. `truth_*` are the probe's OWN
-    /// reference-truth extremes, which drive `A8r`'s reachability guard.
+    /// reference-truth extremes, printed by the report-only `A8r` row.
     fn nt(
         n: usize,
         min: f64,
@@ -2097,8 +2182,7 @@ mod tests {
         }
     }
 
-    /// The registered 372 kadis probe's OWN truth, measured 2026-09-05 from
-    /// `negtail_probe_372_2026-09-04.parquet`: min −770.6197, p1 −187.1314.
+    /// The registered 372 kadis probe's OWN truth, measured 2026-09-05.
     const P372_TRUTH_MIN: f64 = -770.6197;
     const P372_TRUTH_P1: f64 = -187.1314;
 
@@ -2114,63 +2198,61 @@ mod tests {
         )
     }
 
-    /// A per-codec-family fixture for the canonical grid: every registered
-    /// family present, each with the dial min the caller names. `truth` is
-    /// whether per-row reference truth was supplied (A9r's denominator).
-    fn fams(dial_min: &[(&str, f64)], n_ref: Option<&[(&str, usize, f64)]>) -> FamilyMeasure {
-        FamilyMeasure {
-            instrument: "test-grid".into(),
-            families: dial_min
-                .iter()
-                .map(|(c, m)| {
-                    let hit = n_ref.and_then(|r| r.iter().find(|(cc, _, _)| cc == c));
-                    FamilyDial {
-                        codec: (*c).to_string(),
-                        n: 100,
-                        dial_min: *m,
-                        n_ref_at_or_below: hit.map(|(_, n, _)| *n),
-                        frac_at_or_below: hit.map(|(_, _, f)| *f),
-                    }
-                })
-                .collect(),
+    /// A synthetic grid: `n_lad` ladders per codec, `steps` q-steps each, whose
+    /// dial values come from `f(codec, ladder_idx, step_idx)`.
+    fn synth_grid(
+        codecs: &[&str],
+        n_lad: usize,
+        steps: usize,
+        f: impl Fn(&str, usize, usize) -> f64,
+    ) -> (Vec<String>, Vec<String>, Vec<f64>, Vec<f64>) {
+        let (mut img, mut cod, mut q, mut d) = (vec![], vec![], vec![], vec![]);
+        for c in codecs {
+            for l in 0..n_lad {
+                for j in 0..steps {
+                    img.push(format!("img{l}"));
+                    cod.push((*c).to_string());
+                    q.push(j as f64 * 5.0);
+                    d.push(f(c, l, j));
+                }
+            }
         }
+        (img, cod, q, d)
     }
 
-    /// The canonical grid's registered families, with the dial reaching the
-    /// bar on both non-exempt ones. No per-row truth ⇒ A9r NOT MEASURED.
-    fn fams_ok() -> FamilyMeasure {
-        fams(
-            &[
-                ("avif", -60.0),
-                ("jpeg", -8.0),
-                ("jxl", -39.0),
-                ("webp", -55.0),
-            ],
-            None,
-        )
+    /// A `FloorMeasure` over a synthetic grid.
+    fn fm_of(
+        codecs: &[&str],
+        n_lad: usize,
+        steps: usize,
+        f: impl Fn(&str, usize, usize) -> f64,
+    ) -> FloorMeasure {
+        let (img, cod, q, d) = synth_grid(codecs, n_lad, steps, f);
+        FloorMeasure::from_grid("test-grid", &img, &cod, &q, &d, None, -50.0)
     }
 
-    /// `fams_ok` plus a denominator big enough to GRADE A9r, at perfect
-    /// agreement — the shape the reference itself has.
-    fn fams_ok_graded() -> FamilyMeasure {
-        let n = product_tail_bars().min_family_n;
-        fams(
-            &[
-                ("avif", -60.0),
-                ("jpeg", -8.0),
-                ("jxl", -39.0),
-                ("webp", -55.0),
-            ],
-            Some(&[("avif", n, 1.0), ("webp", n, 1.0)]),
-        )
+    /// A clean grid: every ladder strictly increasing, well off any clamp.
+    fn fm_clean() -> FloorMeasure {
+        // Each codec gets its own offset so exactly ONE ladder in the whole
+        // instrument holds the minimum. Without that the collapsed-floor rule
+        // fires — correctly — and the fixture would not be "clean".
+        fm_of(&["avif", "jpeg", "jxl", "webp"], 8, 6, |c, l, j| {
+            let off = match c {
+                "avif" => 0.0,
+                "jpeg" => 0.5,
+                "jxl" => 1.5,
+                _ => 2.5,
+            };
+            10.0 + off + l as f64 * 3.0 + j as f64 * 7.0
+        })
     }
 
-    /// `evaluate_full` with the canonical grid + a family measure.
+    /// `evaluate_full` on the canonical grid with a floor measure.
     fn ev(
         tp: TailPins,
         f: &GridFloor,
         nm: Option<(&NegTailMeasure, &str)>,
-        fm: Option<&FamilyMeasure>,
+        fl: Option<&FloorMeasure>,
     ) -> Verdict {
         evaluate_full(
             ACTIVE_REFERENCE,
@@ -2180,7 +2262,7 @@ mod tests {
             &tie(f),
             nm,
             None,
-            fm,
+            fl,
         )
     }
 
@@ -2223,7 +2305,7 @@ mod tests {
         let f = canonical();
         let (nf, _) = probes();
         let nm = nt_from(&nf);
-        let fm = fams_ok_graded();
+        let fm = fm_clean();
         for tp in [TailPins::Product, TailPins::Retired] {
             let v = ev(tp, &f, Some((&nm, &nf.probe_sha256)), Some(&fm));
             for r in v.rows.iter().filter(|r| r.tier == Tier::Regression) {
@@ -2303,17 +2385,19 @@ mod tests {
         assert_eq!(row_by_id(&v, "A8").state, State::Fail);
         assert_eq!(v.regression, Overall::Fail);
 
-        // …and the SAME numbers are a PASS under the −50 product bar, which is
-        // exactly what the ruling intended: −187.1304 is still far below −50.
+        // …and under the ACTIVE rule those same numbers bar NOTHING: the probe
+        // is report-only, and the floor question is asked of the CODEC LADDERS
+        // instead. That is the whole re-spec in one assertion.
         let vp = ev(
             TailPins::Product,
             &f,
             Some((&nm, &nf.probe_sha256)),
-            Some(&fams_ok()),
+            Some(&fm_clean()),
         );
-        for id in ["A7r", "A8r"] {
-            assert_eq!(row_by_id(&vp, id).state, State::Pass, "{id}");
-        }
+        assert_eq!(row_by_id(&vp, "A8r").tier, Tier::Report);
+        assert_eq!(row_by_id(&vp, "A8r").bar, None);
+        assert_eq!(row_by_id(&vp, "A7r").state, State::Pass, "clean ladders");
+        assert_ne!(vp.regression, Overall::Fail);
     }
 
     /// An unregistered grid can never pass, no matter how good the numbers.
@@ -2354,7 +2438,8 @@ mod tests {
             .filter(|r| r.state == State::NotMeasured)
             .map(|r| r.id)
             .collect();
-        assert_eq!(nm, vec!["A7r", "A8r", "A9r", "C3", "C4", "C5", "C6"]);
+        // A7r has no ladder measurement, A8r is report-only with no probe.
+        assert_eq!(nm, vec!["A7r", "A8r", "C3", "C4", "C5", "C6"]);
         assert_eq!(v.regression, Overall::Incomplete);
         assert_eq!(v.contract, Overall::Incomplete);
         assert!(!v.shippable());
@@ -2769,205 +2854,255 @@ mod tests {
         }
     }
 
-    // ───────── the 2026-09-05 USER RULING: the −50 per-codec tail ─────────
+    // ──── the 2026-09-05 USER RULING (final): FLOOR REPRESENTABILITY ────
 
-    /// The ruling's numbers, pinned. They live in the REGISTRY, not in this
-    /// file, so a user who moves them edits one committed place — and this test
-    /// is what says which numbers were in force when a verdict was written.
+    /// The active rule carries **no dial-value bar** — only how many of a
+    /// codec's lowest settings must resolve, and a float tolerance. This test
+    /// is what says the ruling's operative form is the one in force.
     #[test]
-    fn the_product_tail_bars_are_the_registered_product_bar() {
-        let b = product_tail_bars();
-        assert_eq!(
-            b.product_bar, -50.0,
-            "USER CORRECTION 2026-09-05, verbatim: \"i said -50 not -5\" — nothing with −5 in \
-             it may be a bar here"
-        );
-        assert_eq!(
-            b.product_family_frac_min, 0.9,
-            "A9r: per-family agreement ≥ 0.90"
-        );
-        assert_eq!(
-            b.product_family_frac_min_status, "user-provisional",
-            "A9r's 0.90 is this lane's PROPOSAL, not a user number — it must stay labelled so, \
-             or the next reader will cite it as settled"
-        );
-        assert_eq!(
-            b.min_family_n, 36,
-            "derived: binomial SE at the 0.90 bar ≤ half the 0.10 gap to a perfect 1.00"
-        );
-        assert_eq!(active_tail_pin_set(), "product-range-2026-09-05");
+    fn the_active_rule_carries_no_dial_value_bar() {
+        let r = floor_rule();
+        assert_eq!(r.bottom_k, 3, "K = the 3 lowest configurable settings");
+        assert_eq!(r.clamp_eps, 1e-9);
+        assert_eq!(active_tail_pin_set(), "floor-representability-2026-09-05");
         assert_eq!(TailPins::default(), TailPins::Product);
-    }
-
-    /// **THE CORRECTION, as a test.** *"codecs are all different, some go lower
-    /// than others"* — MEASURED on the canonical grid: `avif` reaches −55.3545
-    /// and `webp` −51.8466, so both are graded; `jpeg` bottoms out at −8.0450
-    /// and `jxl` at −39.6858, so both are EXEMPT. A registry that ever calls
-    /// jpeg or jxl gradeable would bar a dial for tracking the truth.
-    #[test]
-    fn the_registered_family_floors_encode_the_codecs_are_different_measurement() {
-        let ff = family_floors_for_grid(CANONICAL_GRID_SHA, ACTIVE_REFERENCE)
-            .expect("the canonical grid must have per-family reference floors");
-        assert_eq!(ff.bar, -50.0);
-        let by = |c: &str| {
-            ff.families
-                .iter()
-                .find(|f| f.codec == c)
-                .unwrap_or_else(|| panic!("family {c}"))
-        };
-        assert!(!by("avif").exempt && by("avif").reference_min <= -50.0);
-        assert!(!by("webp").exempt && by("webp").reference_min <= -50.0);
-        assert!(by("jpeg").exempt && by("jpeg").reference_min > -50.0);
-        assert!(by("jxl").exempt && by("jxl").reference_min > -50.0);
-        for f in &ff.families {
-            assert_eq!(
-                f.exempt,
-                f.reference_min > ff.bar,
-                "{}: `exempt` must BE the measurement (reference_min > bar), never a hand flag",
-                f.codec
+        // The whole point of the final ruling: no threshold in the ACTIVE pin
+        // set is a bar. `report_floor_threshold` exists, and is barred against
+        // nothing — the only place a dial value survives, as information.
+        let reg: serde_json::Value = serde_json::from_str(REGISTRY_JSON).unwrap();
+        let active = reg["negative_tail_bars"]["pin_sets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == "floor-representability-2026-09-05")
+            .expect("active pin set");
+        for k in [
+            "product_bar",
+            "product_min_max",
+            "product_p1_max",
+            "band_lo",
+            "band_hi",
+            "band_threshold",
+            "product_family_frac_min",
+            "product_band_frac_min",
+        ] {
+            assert!(
+                active.get(k).is_none(),
+                "the active pin set must carry NO dial-value bar, but `{k}` is present — the \
+                 ruling is \"i care that the lowest configurable settings per codec are \
+                 representable, not that negative fifty is in that specifically\""
             );
         }
-        // A9r's denominators, measured — and the reason it is not gradeable.
-        assert_eq!(by("avif").n_at_or_below_bar, 4);
-        assert_eq!(by("webp").n_at_or_below_bar, 1);
         assert!(
-            by("avif").n_at_or_below_bar < product_tail_bars().min_family_n,
-            "if this ever clears the minimum, A9r becomes gradeable here and §16 must be redone"
+            active["report_floor_threshold"].is_number(),
+            "the report-only column keeps its threshold, clearly labelled"
         );
     }
 
-    /// **THE RULING, as a test.** D-peaks (`Dpeaks372_id100negrich_dial`,
-    /// 2026-09-05) measured `min` −213.1486 / `p1` −167.7154 on the registered
-    /// 372 probe: CID22 **+0.00798** over shipped D, CONTRACT **6/6**, and
-    /// refused on **A8 alone** because −167.715 is 19.4 short of the mentor's
-    /// −187.131. Under the −50 product bar `A8r` PASSES.
-    ///
-    /// This test fails on the pre-ruling binary — `A8r` does not exist there.
+    /// **THE RULE, as a test.** A ladder is represented when its bottom K steps
+    /// are strictly ordered — into the next step up — and off the clamp. Each
+    /// half fails on its own.
     #[test]
-    fn the_ruling_unblocks_d_peaks_on_the_pooled_tail_row() {
-        let f = canonical();
-        let (nf, _) = probes();
-        // MEASURED (arms/postC/gaddr_Dpeaks.json, 2026-09-05).
-        let dpeaks = nt(
-            2000,
-            -213.14861297607422,
-            -167.7153769991675,
-            -113.72318973552896,
-            0.8755,
-            P372_TRUTH_MIN,
-            P372_TRUTH_P1,
-        );
-        let retired = ev(
-            TailPins::Retired,
-            &f,
-            Some((&dpeaks, &nf.probe_sha256)),
-            None,
-        );
-        assert_eq!(
-            row_by_id(&retired, "A8").state,
-            State::Fail,
-            "the retired grading must stay reproducible — this is the refusal the ruling names"
-        );
-        let product = ev(
-            TailPins::Product,
-            &f,
-            Some((&dpeaks, &nf.probe_sha256)),
-            Some(&fams_ok()),
-        );
-        assert_eq!(
-            row_by_id(&product, "A8r").state,
-            State::Pass,
-            "−167.72 clears the −50 product bar"
-        );
+    fn a_ladder_is_represented_only_when_ordered_and_off_the_clamp() {
+        let k = floor_rule().bottom_k;
+        // (a) clean: every ladder resolves.
+        let m = fm_clean();
+        assert_eq!(m.codecs.len(), 4);
+        for c in &m.codecs {
+            assert_eq!(c.represented_frac, 1.0, "{}", c.codec);
+            assert_eq!(c.n_fail_order, 0);
+            assert_eq!(c.n_fail_clamp, 0);
+            assert_eq!(c.bottom_medians.len(), k);
+        }
+        // (b) a TIE inside the bottom K fails ORDER alone.
+        let m = fm_of(&["avif"], 4, 6, |_, l, j| {
+            if l == 0 && j == 1 {
+                10.0
+            } else {
+                10.0 + j as f64 * 7.0 + l as f64
+            }
+        });
+        let c = &m.codecs[0];
+        assert_eq!(c.n_fail_order, 1, "the tied ladder");
+        assert_eq!(c.n_fail_clamp, 0);
+        assert!((c.represented_frac - 0.75).abs() < 1e-12);
+        // (c) an INVERSION against the NEXT step up (step K vs K+1) also fails,
+        //     even though the bottom K alone are increasing.
+        let m = fm_of(&["avif"], 4, 6, |_, l, j| {
+            let base = 10.0 + j as f64 * 7.0 + l as f64;
+            if l == 0 && j == 3 { -100.0 } else { base }
+        });
+        assert_eq!(m.codecs[0].n_fail_order, 1, "step K must exceed step K−1");
+        // (d) the CLAMP: two ladders pinned to the same instrument minimum.
+        let m = fm_of(&["avif"], 4, 6, |_, l, j| {
+            if l < 2 && j == 0 {
+                -213.0
+            } else {
+                10.0 + j as f64 * 7.0 + l as f64
+            }
+        });
+        assert_eq!(m.n_ladders_at_min, 2, "a COLLAPSED floor");
+        assert_eq!(m.codecs[0].n_fail_clamp, 2);
+        assert!((m.codecs[0].represented_frac - 0.5).abs() < 1e-12);
+        // (e) …but a SOLE holder of the minimum is a genuine floor, not a clamp.
+        let m = fm_of(&["avif"], 4, 6, |_, l, j| {
+            if l == 0 && j == 0 {
+                -213.0
+            } else {
+                10.0 + j as f64 * 7.0 + l as f64
+            }
+        });
+        assert_eq!(m.n_ladders_at_min, 1);
+        assert_eq!(m.codecs[0].n_fail_clamp, 0, "somebody has to be lowest");
+        assert_eq!(m.codecs[0].represented_frac, 1.0);
     }
 
-    /// `A7r` is PER FAMILY and never pooled: one non-exempt family missing the
-    /// bar fails the row even when the pooled minimum clears it, and an EXEMPT
-    /// family missing it changes nothing.
+    /// A ladder too short to hold `K + 1` steps is NOT TESTED — never counted
+    /// as represented, never counted as a failure.
     #[test]
-    fn a7r_is_per_family_and_never_pooled() {
-        let f = canonical();
-        // avif reaches −60 (pass) but webp stops at −20 — pooled min is −60,
-        // which would hide the webp failure entirely.
-        let bad_webp = fams(
-            &[
-                ("avif", -60.0),
-                ("jpeg", -8.0),
-                ("jxl", -39.0),
-                ("webp", -20.0),
-            ],
-            None,
-        );
-        let v = ev(TailPins::Product, &f, None, Some(&bad_webp));
-        assert_eq!(row_by_id(&v, "A7r").state, State::Fail);
-        assert_eq!(
-            row_by_id(&v, "A7r").measured,
-            Some(1.0),
-            "one non-exempt family fails"
-        );
-        let webp = v.family_rows.iter().find(|r| r.codec == "webp").unwrap();
-        assert_eq!(webp.a7r, State::Fail);
-        let avif = v.family_rows.iter().find(|r| r.codec == "avif").unwrap();
-        assert_eq!(avif.a7r, State::Pass);
+    fn a_ladder_shorter_than_k_plus_one_is_not_tested() {
+        let k = floor_rule().bottom_k;
+        let m = fm_of(&["avif"], 3, k, |_, l, j| 10.0 + j as f64 + l as f64);
+        let c = &m.codecs[0];
+        assert_eq!(c.n_ladders, 0, "no ladder is long enough");
+        assert_eq!(c.n_too_short, 3);
+        assert!(c.represented_frac.is_nan());
+    }
 
-        // An EXEMPT family well short of the bar is NOT a fail — that is the
-        // whole "some go lower than others" clause.
-        let shallow_jpeg = fams(
-            &[
-                ("avif", -60.0),
-                ("jpeg", 5.0),
-                ("jxl", 10.0),
-                ("webp", -55.0),
-            ],
-            None,
-        );
-        let v = ev(TailPins::Product, &f, None, Some(&shallow_jpeg));
+    /// **The bar is the MENTOR's own fraction on the same cells** — never a
+    /// number chosen here. A candidate matching it passes; one below it fails;
+    /// and a codec the mentor cannot represent either has a bar of 0.0, which
+    /// is the natural analogue of an exemption.
+    #[test]
+    fn the_bar_is_the_mentors_own_fraction_per_codec() {
+        let f = canonical();
+        let reg = floor_repr_for_grid(CANONICAL_GRID_SHA, ACTIVE_REFERENCE)
+            .expect("the canonical grid must have per-codec mentor fractions");
+        assert_eq!(reg.bottom_k, floor_rule().bottom_k);
+        assert!(!reg.codecs.is_empty());
+        for c in &reg.codecs {
+            assert!(
+                (0.0..=1.0).contains(&c.represented_frac),
+                "{}: a fraction",
+                c.codec
+            );
+            assert!(c.n_ladders > 0, "{}", c.codec);
+        }
+        // Tie the mentor exactly ⇒ every codec passes.
+        let tie_fm = FloorMeasure {
+            instrument: "test".into(),
+            grid_min: -100.0,
+            n_ladders_at_min: 1,
+            codecs: reg
+                .codecs
+                .iter()
+                .map(|c| CodecFloor {
+                    codec: c.codec.clone(),
+                    n_ladders: c.n_ladders,
+                    n_represented: 0,
+                    n_too_short: 0,
+                    represented_frac: c.represented_frac,
+                    n_fail_order: 0,
+                    n_fail_clamp: 0,
+                    dial_min: -100.0,
+                    bottom_medians: vec![1.0, 2.0, 3.0],
+                    report_frac_at_floor: None,
+                    report_n_at_floor: None,
+                })
+                .collect(),
+        };
+        let v = ev(TailPins::Product, &f, None, Some(&tie_fm));
         assert_eq!(row_by_id(&v, "A7r").state, State::Pass);
         assert_eq!(row_by_id(&v, "A7r").measured, Some(0.0));
-        for c in ["jpeg", "jxl"] {
-            let r = v.family_rows.iter().find(|r| r.codec == c).unwrap();
-            assert!(r.exempt, "{c} must be exempt");
-            assert_eq!(r.a7r, State::NotMeasured, "{c}: exempt is never a fail");
-            assert!(r.note.contains("EXEMPT"), "{c}: the report must say why");
+        for r in &v.codec_floor_rows {
+            assert_eq!(r.state, State::Pass, "{}", r.codec);
+            assert_eq!(r.frac_reference, Some(r.frac));
         }
-        // Inclusive at the bar.
-        let at_bar = fams(
-            &[
-                ("avif", -50.0),
-                ("jpeg", -8.0),
-                ("jxl", -39.0),
-                ("webp", -50.0),
-            ],
-            None,
-        );
-        assert_eq!(
-            row_by_id(&ev(TailPins::Product, &f, None, Some(&at_bar)), "A7r").state,
-            State::Pass
-        );
+        // Drop ONE codec below its bar ⇒ that codec fails, alone, and only if
+        // the mentor could represent something there.
+        let gradeable = reg
+            .codecs
+            .iter()
+            .find(|c| c.represented_frac > 0.0)
+            .map(|c| c.codec.clone());
+        if let Some(target) = gradeable {
+            let mut worse = tie_fm.clone();
+            let cf = worse.codecs.iter_mut().find(|c| c.codec == target).unwrap();
+            cf.represented_frac -= 1e-6;
+            let v = ev(TailPins::Product, &f, None, Some(&worse));
+            assert_eq!(row_by_id(&v, "A7r").state, State::Fail);
+            assert_eq!(
+                row_by_id(&v, "A7r").measured,
+                Some(1.0),
+                "exactly one codec"
+            );
+            assert_eq!(
+                v.codec_floor_rows
+                    .iter()
+                    .find(|r| r.codec == target)
+                    .unwrap()
+                    .state,
+                State::Fail
+            );
+        }
     }
 
-    /// Without registered family floors — or without per-family dial minima —
-    /// the per-family rows are NOT MEASURED. They are never pooled as a
-    /// substitute, which is exactly what the correction forbids.
+    /// A codec the MENTOR cannot represent at all sets a bar of 0.0 — anything
+    /// passes there. That is the exemption, expressed as a measurement.
     #[test]
-    fn the_per_family_rows_are_not_measured_rather_than_pooled() {
+    fn a_codec_the_mentor_cannot_represent_bars_nothing() {
         let f = canonical();
-        // No family measure supplied at all.
-        let v = ev(TailPins::Product, &f, None, None);
-        for id in ["A7r", "A9r"] {
-            assert_eq!(row_by_id(&v, id).state, State::NotMeasured, "{id}");
-            assert!(!row_by_id(&v, id).note.is_empty(), "{id}: say why");
+        let reg = floor_repr_for_grid(CANONICAL_GRID_SHA, ACTIVE_REFERENCE).unwrap();
+        let fm = FloorMeasure {
+            instrument: "test".into(),
+            grid_min: -100.0,
+            n_ladders_at_min: 1,
+            codecs: reg
+                .codecs
+                .iter()
+                .map(|c| CodecFloor {
+                    codec: c.codec.clone(),
+                    n_ladders: c.n_ladders,
+                    n_represented: 0,
+                    n_too_short: 0,
+                    represented_frac: 0.0,
+                    n_fail_order: c.n_ladders,
+                    n_fail_clamp: 0,
+                    dial_min: -100.0,
+                    bottom_medians: vec![1.0, 2.0, 3.0],
+                    report_frac_at_floor: None,
+                    report_n_at_floor: None,
+                })
+                .collect(),
+        };
+        let v = ev(TailPins::Product, &f, None, Some(&fm));
+        for r in &v.codec_floor_rows {
+            let bar = r.frac_reference.unwrap();
+            assert_eq!(
+                r.state,
+                if bar > 0.0 { State::Fail } else { State::Pass },
+                "{}: bar {bar}",
+                r.codec
+            );
         }
-        assert!(v.family_rows.is_empty());
+    }
+
+    /// Without a registered mentor row — or without a ladder measurement —
+    /// `A7r` is NOT MEASURED. It is never pooled or defaulted into a pass.
+    #[test]
+    fn a7r_is_not_measured_without_a_mentor_row_or_a_measurement() {
+        let f = canonical();
+        let v = ev(TailPins::Product, &f, None, None);
+        assert_eq!(row_by_id(&v, "A7r").state, State::NotMeasured);
+        assert!(v.codec_floor_rows.is_empty());
         assert!(!v.shippable());
-        // A grid with no registered family floors.
-        let unreg_grid = "7".repeat(64);
-        assert!(family_floors_for_grid(&unreg_grid, ACTIVE_REFERENCE).is_none());
-        let fm = fams_ok();
+        let unreg = "7".repeat(64);
+        assert!(floor_repr_for_grid(&unreg, ACTIVE_REFERENCE).is_none());
+        let fm = fm_clean();
         let v = evaluate_full(
             ACTIVE_REFERENCE,
             TailPins::Product,
-            &unreg_grid,
+            &unreg,
             "unregistered",
             &tie(&f),
             None,
@@ -2975,226 +3110,109 @@ mod tests {
             Some(&fm),
         );
         assert_eq!(row_by_id(&v, "A7r").state, State::NotMeasured);
-        assert!(
-            row_by_id(&v, "A7r")
-                .note
-                .contains("exemption set is unknown")
-        );
+        assert!(row_by_id(&v, "A7r").note.contains("MENTOR"));
     }
 
-    /// `A9r` is **REPORT-ONLY** (USER REFINEMENT 2026-09-05): per non-exempt
-    /// codec it reports the fraction of rows whose reference truth is at or
-    /// below the bar that the dial also places at or below it — with NO bar, so
-    /// it can never pass, fail, or block a ship. The number is the deliverable.
+    /// `A8r` is REPORT-ONLY: no bar, never a pass or a fail, and it cannot
+    /// block a ship no matter what the probe reads.
     #[test]
-    fn a9r_is_report_only_and_gates_nothing() {
+    fn a8r_is_report_only_and_gates_nothing() {
         let f = canonical();
-        // The REAL denominators on this grid: avif 4, webp 1.
-        let real = fams(
-            &[
-                ("avif", -60.0),
-                ("jpeg", -8.0),
-                ("jxl", -39.0),
-                ("webp", -55.0),
-            ],
-            Some(&[("avif", 4, 1.0), ("webp", 1, 0.0)]),
+        let (nf, _) = probes();
+        // Shipped B's own tail: never below zero, the worst reading there is.
+        let (nfb, _) = probes_b();
+        let nm = nt_from(&nfb);
+        let reg = floor_repr_for_grid(CANONICAL_GRID_SHA, ACTIVE_REFERENCE).unwrap();
+        let fm = FloorMeasure {
+            instrument: "test".into(),
+            grid_min: -100.0,
+            n_ladders_at_min: 1,
+            codecs: reg
+                .codecs
+                .iter()
+                .map(|c| CodecFloor {
+                    codec: c.codec.clone(),
+                    n_ladders: c.n_ladders,
+                    n_represented: c.n_ladders,
+                    n_too_short: 0,
+                    represented_frac: 1.0,
+                    n_fail_order: 0,
+                    n_fail_clamp: 0,
+                    dial_min: -100.0,
+                    bottom_medians: vec![1.0, 2.0, 3.0],
+                    report_frac_at_floor: None,
+                    report_n_at_floor: None,
+                })
+                .collect(),
+        };
+        let v = ev(
+            TailPins::Product,
+            &f,
+            Some((&nm, &nf.probe_sha256)),
+            Some(&fm),
         );
-        let v = ev(TailPins::Product, &f, None, Some(&real));
-        let a9 = row_by_id(&v, "A9r");
-        assert_eq!(a9.tier, Tier::Report, "A9r must be report-only");
-        assert_eq!(a9.bar, None, "a report-only row carries NO bar");
-        assert_eq!(a9.state, State::NotMeasured, "it never passes or fails");
-        assert!(a9.note.contains("REPORT-ONLY"));
-        assert_eq!(
-            a9.measured,
-            Some(0.0),
-            "the WORST non-exempt codec is reported — never pooled, never averaged"
+        let a8 = row_by_id(&v, "A8r");
+        assert_eq!(a8.tier, Tier::Report);
+        assert_eq!(a8.bar, None, "a report-only row carries NO bar");
+        assert_eq!(a8.state, State::NotMeasured);
+        assert!(a8.note.contains("REPORT-ONLY"));
+        assert!(a8.note.contains("NO codec identity"));
+        // The regression tier is decided by A1-A6 + A7r only.
+        assert!(
+            v.rows
+                .iter()
+                .filter(|r| r.tier == Tier::Regression)
+                .all(|r| r.id != "A8r")
         );
-        // …and a catastrophic 0.0 must NOT block the ship, because it is not a
-        // bar. Only A1-A8r decide the regression tier.
-        for r in v.rows.iter().filter(|r| r.tier == Tier::Regression) {
-            assert_ne!(r.id, "A9r");
-        }
         assert_ne!(
             v.regression,
             Overall::Fail,
             "a report-only row must never turn the regression tier to FAIL"
         );
-        // The per-codec fractions and their n are REPORTED.
-        let avif = v.family_rows.iter().find(|r| r.codec == "avif").unwrap();
-        assert_eq!(avif.n_ref_at_or_below, Some(4));
-        assert_eq!(avif.frac_at_or_below, Some(1.0));
-        let webp = v.family_rows.iter().find(|r| r.codec == "webp").unwrap();
-        assert_eq!(webp.n_ref_at_or_below, Some(1));
-        assert_eq!(webp.frac_at_or_below, Some(0.0));
-        assert!(webp.note.contains("report-only"));
+        // A9r no longer exists as a row at all.
+        assert!(v.rows.iter().all(|r| r.id != "A9r"), "A9r is dropped");
     }
 
-    /// Every family row must print the codec's DIAL min beside the REFERENCE's
-    /// min, and their difference — the per-codec reading the user asked to see
-    /// at a glance. MEASURED example: shipped D misses `webp` by 1.9.
+    /// The retired grading stays reproducible, and the two pin sets genuinely
+    /// disagree — the retired one fails the shipped dial's tail on all three
+    /// rows, the active one never grades the probe at all.
     #[test]
-    fn every_family_row_prints_dial_min_beside_the_reference_min() {
-        let f = canonical();
-        // Shipped D's real grid min is -12.204 pooled; here the point is the
-        // per-codec presentation, so a webp miss of 1.9 is used as the fixture.
-        let d_like = fams(
-            &[
-                ("avif", -60.0),
-                ("jpeg", -8.0),
-                ("jxl", -39.0),
-                ("webp", -48.1),
-            ],
-            None,
-        );
-        let v = ev(TailPins::Product, &f, None, Some(&d_like));
-        let webp = v.family_rows.iter().find(|r| r.codec == "webp").unwrap();
-        assert_eq!(webp.a7r, State::Fail, "-48.1 misses the -50 bar by 1.9");
-        assert!(webp.note.contains("dial min -48.1000"));
-        assert!(webp.note.contains("reference min -51.8466"));
-        let md = render_markdown(&v);
-        assert!(
-            md.contains("| ref min |"),
-            "the table names the reference min"
-        );
-        assert!(
-            md.contains("| dial min |"),
-            "and the dial min, side by side"
-        );
-        assert!(md.contains("-48.1000") && md.contains("-51.8466"));
-    }
-
-    /// `A8r` is the ONE pooled row, and its reachability guard is the probe's
-    /// own truth: a probe whose truth never reaches −50 cannot discriminate, so
-    /// a miss there is NOT MEASURED — never a fail. A PASS stays a pass.
-    #[test]
-    fn a8r_is_pooled_and_guarded_by_the_probes_own_truth() {
+    fn the_retired_pins_stay_reproducible() {
         let f = canonical();
         let (nf, _) = probes();
-        let fm = fams_ok();
-        // Shallow probe (the real shape of negtail_probe_944_era2r4_foldapp2).
-        let shallow = nt(2000, -0.9, -0.8, -0.5, 1.0, -1.0, -0.95);
-        let v = ev(
-            TailPins::Product,
-            &f,
-            Some((&shallow, &nf.probe_sha256)),
-            Some(&fm),
-        );
-        assert_eq!(row_by_id(&v, "A8r").state, State::NotMeasured);
-        assert!(row_by_id(&v, "A8r").note.contains("cannot discriminate"));
-        assert_eq!(
-            v.regression,
-            Overall::Incomplete,
-            "unmeasured is not a pass"
-        );
-        assert!(!v.shippable());
-
-        // Same shallow instrument, dial DOES reach −50: still a pass.
-        let deep = nt(2000, -60.0, -55.0, -30.0, 1.0, -1.0, -0.95);
-        let v = ev(
-            TailPins::Product,
-            &f,
-            Some((&deep, &nf.probe_sha256)),
-            Some(&fm),
-        );
-        assert_eq!(row_by_id(&v, "A8r").state, State::Pass);
-
-        // A discriminating probe where the dial falls short: a real FAIL.
-        let short = nt(
-            2000,
-            -60.0,
-            -49.9,
-            -30.0,
-            0.9,
-            P372_TRUTH_MIN,
-            P372_TRUTH_P1,
-        );
-        let v = ev(
-            TailPins::Product,
-            &f,
-            Some((&short, &nf.probe_sha256)),
-            Some(&fm),
-        );
-        assert_eq!(row_by_id(&v, "A8r").state, State::Fail);
-    }
-
-    /// A probe with NO readable truth column reads NOT MEASURED on `A8r` —
-    /// never silently rescaled from a differently-united column.
-    /// (`negtail_probe_944_era2r4_foldapp2.parquet` stores `human_score_norm`,
-    /// a ÷100 quantity; accepting it would put the −50 bar 100× off.)
-    #[test]
-    fn a_probe_without_a_truth_column_is_not_measured_on_a8r() {
-        let f = canonical();
-        let (nf, _) = probes();
-        let no_truth = NegTailMeasure::from_scores(&[-40.0, -20.0, -3.0]);
-        assert!(no_truth.truth_min.is_nan() && no_truth.truth_p1.is_nan());
-        let v = ev(
-            TailPins::Product,
-            &f,
-            Some((&no_truth, &nf.probe_sha256)),
-            Some(&fams_ok()),
-        );
-        assert_eq!(row_by_id(&v, "A8r").state, State::NotMeasured);
-        assert!(row_by_id(&v, "A8r").note.contains("ssim2_gpu"));
-    }
-
-    /// The product rows need no `negtail_probes` registry row — an absolute bar
-    /// has no reference to look up. That is a real coverage expansion, and the
-    /// guards above are what keep it honest.
-    #[test]
-    fn a8r_grades_on_an_unregistered_probe() {
-        let f = canonical();
-        let unregistered = "9".repeat(64);
-        assert!(floor_for_negtail(&unregistered, ACTIVE_REFERENCE).is_none());
-        let m = nt(
-            2000,
-            -213.0,
-            -167.0,
-            -100.0,
-            0.87,
-            P372_TRUTH_MIN,
-            P372_TRUTH_P1,
-        );
-        let retired = ev(TailPins::Retired, &f, Some((&m, &unregistered)), None);
+        let (nfb, _) = probes_b();
+        let nm = nt_from(&nfb);
+        let retired = ev(TailPins::Retired, &f, Some((&nm, &nf.probe_sha256)), None);
         for id in ["A7", "A8", "A9"] {
-            assert_eq!(row_by_id(&retired, id).state, State::NotMeasured, "{id}");
+            assert_eq!(row_by_id(&retired, id).state, State::Fail, "{id}");
         }
+        assert!(
+            retired.codec_floor_rows.is_empty(),
+            "no per-codec table there"
+        );
         let product = ev(
             TailPins::Product,
             &f,
-            Some((&m, &unregistered)),
-            Some(&fams_ok()),
+            Some((&nm, &nf.probe_sha256)),
+            Some(&fm_clean()),
         );
-        assert_eq!(row_by_id(&product, "A8r").state, State::Pass);
-        assert_eq!(row_by_id(&product, "A7r").state, State::Pass);
+        for id in ["A7", "A8", "A9"] {
+            assert!(product.rows.iter().all(|r| r.id != id), "{id} is retired");
+        }
     }
 
-    /// **THE BADGE-INVARIANCE TEST.** The board's red NOT SHIPPABLE badge is
-    /// driven by CONTRACT-row failures. The ruling touched only the REGRESSION
-    /// tail, so every contract row — and the `contract` tier verdict — must be
-    /// identical under both tail pin sets, for every fixture.
+    /// **THE BADGE-INVARIANCE TEST.** The board's NOT SHIPPABLE badge is
+    /// CONTRACT-driven and the ruling touched the REGRESSION tail only, so
+    /// every contract row must be identical under both tail pin sets.
     #[test]
     fn the_contract_tier_is_identical_under_both_tail_pin_sets() {
         let f = canonical();
         let (nf, idf) = probes();
         let (nfb, idfb) = probes_b();
-        let fm = fams_ok();
+        let fm = fm_clean();
         let fixtures = [
             ("mentor", nt_from(&nf), idf.clone()),
             ("shipped_b", nt_from(&nfb), idfb.clone()),
-            (
-                "d_peaks",
-                nt(
-                    2000,
-                    -213.14861297607422,
-                    -167.7153769991675,
-                    -113.72318973552896,
-                    0.8755,
-                    P372_TRUTH_MIN,
-                    P372_TRUTH_P1,
-                ),
-                idf.clone(),
-            ),
             (
                 "no_truth",
                 NegTailMeasure::from_scores(&[-200.0, -1.0, 3.0]),
@@ -3229,7 +3247,7 @@ mod tests {
             let b = go(TailPins::Retired);
             assert_eq!(
                 a.contract, b.contract,
-                "{name}: the tail re-pin must not move the CONTRACT tier — the board's \
+                "{name}: the tail re-spec must not move the CONTRACT tier — the board's \
                  NOT SHIPPABLE badge reads it"
             );
             let cols = |v: &Verdict| -> Vec<_> {
@@ -3245,10 +3263,6 @@ mod tests {
                 "{name}: contract rows must be identical"
             );
             assert_eq!(cols(&a).len(), 6, "{name}: six contract rows, unchanged");
-            // Row COUNT is stable too, so a board reading `pass/15` keeps
-            // reading `pass/15`.
-            assert_eq!(a.rows.len(), b.rows.len());
-            assert_eq!(a.rows.len(), 15);
             for id in ["A1", "A2", "A3", "A4", "A5", "A6"] {
                 assert_eq!(
                     row_by_id(&a, id).state,
@@ -3264,10 +3278,6 @@ mod tests {
     #[test]
     fn tail_pin_selector_rejects_an_unknown_value() {
         assert_eq!(TailPins::parse("product").unwrap(), TailPins::Product);
-        assert_eq!(
-            TailPins::parse("product-range-2026-09-05").unwrap(),
-            TailPins::Product
-        );
         assert_eq!(TailPins::parse("retired").unwrap(), TailPins::Retired);
         assert_eq!(
             TailPins::parse("mentor-2026-09-04").unwrap(),
@@ -3278,119 +3288,72 @@ mod tests {
         assert!(TailPins::parse("").is_err());
     }
 
-    /// `FamilyMeasure::from_rows` must group by the ROW PAIRING — per-family
-    /// minima, per-family denominators — and degrade to "no truth" on a length
-    /// mismatch rather than zipping short into a misattributed family.
+    /// The report and the JSON must name the tail pin set, and the product arm
+    /// must PRINT the per-codec table with the dial's min and bottom-K medians
+    /// beside the mentor's fraction — the "information, not bars" half.
     #[test]
-    fn family_measure_groups_by_the_row_pairing() {
-        let codec: Vec<String> = ["avif", "avif", "jpeg", "webp", "avif"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let dial = [-60.0, -10.0, -3.0, -80.0, 12.0];
-        let truth = [-55.0, -9.0, -2.0, -51.0, 40.0];
-        let m = FamilyMeasure::from_rows("g", &codec, &dial, Some(&truth), -50.0);
-        assert_eq!(
-            m.families
-                .iter()
-                .map(|f| f.codec.as_str())
-                .collect::<Vec<_>>(),
-            vec!["avif", "jpeg", "webp"],
-            "families are sorted, so a report is stable across runs"
-        );
-        let avif = &m.families[0];
-        assert_eq!(avif.n, 3);
-        assert_eq!(
-            avif.dial_min, -60.0,
-            "the family's own minimum, not the pool's"
-        );
-        assert_eq!(avif.n_ref_at_or_below, Some(1), "only the −55 row");
-        assert_eq!(
-            avif.frac_at_or_below,
-            Some(1.0),
-            "and the dial has it at −60"
-        );
-        let webp = &m.families[2];
-        assert_eq!(webp.n_ref_at_or_below, Some(1));
-        assert_eq!(webp.frac_at_or_below, Some(1.0));
-        let jpeg = &m.families[1];
-        assert_eq!(jpeg.n_ref_at_or_below, Some(0));
-        assert_eq!(jpeg.frac_at_or_below, None, "an empty denominator is None");
-        // Length mismatch ⇒ no truth at all.
-        let bad = FamilyMeasure::from_rows("g", &codec, &dial, Some(&truth[..2]), -50.0);
-        assert!(bad.families.iter().all(|f| f.n_ref_at_or_below.is_none()));
-    }
-
-    /// The report and the JSON must both SAY which tail pin set graded them,
-    /// and the product arm must PRINT the per-codec-family table — a number
-    /// whose bars are not named is not readable a week later.
-    #[test]
-    fn the_report_and_json_name_the_tail_pin_set_and_print_the_families() {
+    fn the_report_prints_the_per_codec_floor_table() {
         let f = canonical();
         let (nf, _) = probes();
         let nm = nt_from(&nf);
-        let fm = fams(
-            &[
-                ("avif", -60.0),
-                ("jpeg", -8.0),
-                ("jxl", -39.0),
-                ("webp", -55.0),
-            ],
-            Some(&[("avif", 4, 1.0), ("webp", 1, 1.0)]),
-        );
-        for (tp, want_row, want_tag) in [
-            (TailPins::Product, "A7r", "product"),
-            (TailPins::Retired, "A7", "retired"),
-        ] {
-            let v = ev(tp, &f, Some((&nm, &nf.probe_sha256)), Some(&fm));
-            assert_eq!(v.tail_pins, tp);
-            let md = render_markdown(&v);
-            assert!(
-                md.contains(&format!("| {want_row} |")),
-                "{want_tag}: row id"
-            );
-            assert!(
-                md.contains(&format!("negative-tail pin set: `{want_tag}`")),
-                "{want_tag}: the report must name its own tail bars"
-            );
-            assert!(!md.contains("−5,"), "no −5 band may survive anywhere");
-            let j = to_json(&v);
-            assert_eq!(j["tail_pins"], want_tag);
-            assert!(j["tail_pin_set"].is_string());
-        }
+        let fm = fm_clean();
         let v = ev(
             TailPins::Product,
             &f,
             Some((&nm, &nf.probe_sha256)),
             Some(&fm),
         );
+        assert_eq!(v.tail_pins, TailPins::Product);
         let md = render_markdown(&v);
-        assert!(
-            md.contains("Per-codec-family negative tail"),
-            "the product arm must PRINT the per-family table"
-        );
+        assert!(md.contains("| A7r |"));
+        assert!(md.contains("| A8r |"));
+        assert!(!md.contains("| A9r |"), "A9r is dropped");
+        assert!(md.contains("negative-tail pin set: `product`"));
+        assert!(md.contains("Per-codec FLOOR REPRESENTABILITY"));
+        assert!(md.contains("repr (ssim2 = bar)"));
+        assert!(md.contains("bottom-3 medians"));
         for c in ["avif", "jpeg", "jxl", "webp"] {
-            assert!(md.contains(c), "family {c} must appear in the table");
+            assert!(md.contains(c), "codec {c} must appear");
         }
-        assert!(md.contains("**EXEMPT**"), "exempt families must be marked");
         let j = to_json(&v);
-        let fams_json = &j["measured"]["families"];
-        assert!(fams_json.is_array());
-        assert_eq!(fams_json.as_array().unwrap().len(), 4);
-        assert_eq!(fams_json[0]["codec"], "avif");
-        assert_eq!(fams_json[0]["n_ref_at_or_below_bar"], 4);
-        // The probe's own truth must ride along so a stored verdict can be
-        // re-graded without re-reading the parquet.
-        assert!(j["measured"]["negtail"]["truth_min"].is_f64());
-        assert!(j["measured"]["negtail"]["truth_p1"].is_f64());
-        // The RETIRED arm carries no family block at all.
+        assert_eq!(j["tail_pins"], "product");
+        let cf = &j["measured"]["codec_floor"];
+        assert!(cf.is_array());
+        assert_eq!(cf.as_array().unwrap().len(), 4);
+        assert!(cf[0]["represented_frac"].is_f64());
+        assert!(cf[0]["bottom_medians"].is_array());
+        // The RETIRED arm carries no per-codec table at all.
         let vr = ev(
             TailPins::Retired,
             &f,
             Some((&nm, &nf.probe_sha256)),
             Some(&fm),
         );
-        assert!(to_json(&vr)["measured"]["families"].is_null());
+        assert!(to_json(&vr)["measured"]["codec_floor"].is_null());
+    }
+
+    /// `q` is quality-oriented on every codec, so "the lowest configurable
+    /// settings" is always the smallest `q` — including JXL, whose lowest `q`
+    /// carries the LARGEST butteraugli distance. This is asserted against the
+    /// registry's recorded orientation so a grid that ever breaks it is caught.
+    #[test]
+    fn the_lowest_setting_is_always_the_smallest_q() {
+        let reg: serde_json::Value = serde_json::from_str(REGISTRY_JSON).unwrap();
+        let active = reg["negative_tail_bars"]["pin_sets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == "floor-representability-2026-09-05")
+            .unwrap();
+        let note = active["quality_orientation"].as_str().unwrap();
+        assert!(note.contains("jxl"), "the JXL direction must be recorded");
+        assert!(note.contains("25.0"), "with the measured extreme");
+        // And the walk really does take the SMALLEST q: a ladder whose dial
+        // rises with q is represented, one that falls with q is not.
+        let up = fm_of(&["avif"], 2, 6, |_, l, j| 1.0 + j as f64 + l as f64 * 0.1);
+        assert_eq!(up.codecs[0].represented_frac, 1.0);
+        let down = fm_of(&["avif"], 2, 6, |_, l, j| 100.0 - j as f64 - l as f64 * 0.1);
+        assert_eq!(down.codecs[0].represented_frac, 0.0);
     }
 
     /// The comparators must be literal, including the strict forms the

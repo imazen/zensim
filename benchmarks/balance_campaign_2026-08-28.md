@@ -7915,3 +7915,37 @@ invocation with one flag changed); `LabeledGrid.truth_ssim2` reads `ssim2_gpu` *
 [`dial_addressability_gate_2026-09-04.md`](dial_addressability_gate_2026-09-04.md) §16; registry entry
 `gaddr-negtail-bars-retired-2026-09-05`. Lesson: **a bar copied from a reference's incidental behaviour is not a
 product requirement** — and when a rule says "codecs differ", the instrument it is graded on had better contain codecs.
+
+## ROUND 92 — 2026-09-05: the tail stops being a depth bar and becomes FLOOR REPRESENTABILITY, per codec
+USER RULING, third and operative form of the day: *"i care that the lowest configurable settings per codec are
+representable, not that negative fifty is in that specifically"* (after *"the negative tail bar is entirely arbitrary.
+below -5-50"* and *"i said -50 not -5, codecs are all different, some go lower than others"*). ROUND 91's `-50`
+per-codec bars are **superseded within the day** — **no dial value is a bar anywhere in the active tier**, and a test
+fails if any retired bar key reappears in the registry. `A7r` now asks, per codec on the canonical dial grid, what
+fraction of `(image_id, codec)` ladders have their **K=3 lowest configurable settings REPRESENTED**: the dial strictly
+increasing across those steps *and into the next one up*, with no bottom step within 1e-9 of the instrument-wide
+minimum unless that ladder is its **sole** holder (two or more sharing it = a collapsed floor). **The bar is the
+MENTOR's own fraction on the same cells**, derived through the owner and registry-pinned per codec. `A8r` (the negtail
+probe) is **REPORT-ONLY, no bar** — that instrument carries no codec identity at all (KADIS distortion types), and the
+λ-sweep lane measured that grading it per distortion family at a fixed depth fails **every bake ever built** on one n=8
+family. `A9r` is **dropped** and folded into the report block. **MEASURED bars** (bit-identical on the canonical/preC/
+postC grids): avif **1.0000**, jxl **0.9697**, webp **1.0000**, jpeg **0.0000** — and **jpeg's zero is the ENCODER
+saturating, not a scorer defect**: on **22 of 22** jpeg ladders the three lowest settings are byte-identical output
+(max |Δ| over all 372 features exactly **0.0**; ssim2 itself returns −8.045 at q=0/5/10). That is what makes exemption
+a *measurement*: a codec the mentor cannot represent bars nothing, with no hand-set flag. **THE INSTALL ANSWER, 16
+scorers graded on the runtime-era instruments: shipped Profile D is the ONLY bake that is both `A7r`-PASS on every
+codec AND CONTRACT-PASS**, and it *beats* the mentor on jxl (1.0000 vs 0.9697). All **11 λ-sweep arms and D-peaks
+FAIL**, every one of them on **jxl** (0.818-0.909); shipped B fails avif+jxl; Profile A fails avif. Note the axis
+inversion this exposes: D-peaks is **44 points DEEPER** than shipped D at the probe's p1 and **worse** at resolving
+jxl's lowest settings — which is precisely why depth was the wrong bar. Under the RETIRED pins shipped D read
+`A7`=FAIL, i.e. the old bars faulted the dial that is in fact best at the floor. **Board: all 97 fair cells re-graded
+under both pin sets and re-grafted; the CONTRACT-driven NOT SHIPPABLE badge is UNCHANGED at 47 measured / 46 on board
+with 0 contract rows changed** — asserted by the grafter and by a unit test, not assumed. `A7r` grades on 12 cells (3
+canonical-372 + 9 on the 944-POOLS grid, whose mentor bar was derived and registered this pass) and a per-codec floor
+table is now reported on all 97. `--gaddr-tail-pins retired` reproduces the pre-ruling grading row-for-row on 88 of 97.
+`ZensimProfile::D` and `zensim/weights/` untouched — the axis now *endorses* the installed dial instead of failing it.
+Boards regenerated + gated (both rc=0): fair **10,168,951 B** / 128 rows, all-rows **23,012,884 B** / 465 rows.
+Record: [`dial_addressability_gate_2026-09-04.md`](dial_addressability_gate_2026-09-04.md) §16 (rewritten in place);
+registry entry `gaddr-tail-floor-representability-2026-09-05`, superseding `gaddr-negtail-bars-retired-2026-09-05`.
+Lesson: **"can the dial still tell the codec's lowest settings apart" is a better floor question than "how far down
+does it go"** — the first is calibration-free and has a reference answer; the second was one scorer's accident.

@@ -1577,36 +1577,46 @@ current bar. Re-pin record: gate doc **§14**.
   `p1` −187.13142579 / `frac<0` 1.0000 are **RETIRED 2026-09-05** — see the tail re-pin
   below. They remain the grading of every G-ADDR number published before that date.)*
 
-**⛔ THE NEGATIVE-TAIL BARS ARE RE-PINNED — A7/A8/A9 are RETIRED, A7r/A8r/A9r are the
-gate (USER RULING 2026-09-05).** Verbatim: *"the negative tail bar is entirely arbitrary.
-below -5-50"*, corrected the same day: *"i said -50 not -5, codecs are all different, some
-go lower than others"*. The mentor-pinned depths were `peer_ssim2`'s incidental reach on
-one probe (and A9's 1.0000 bar was **definitional** — the probe's population was selected
-on `ssim2 < 0`). The bar is now an absolute **−50**, and the floor rows are **PER CODEC**:
+**⛔ THE NEGATIVE TAIL IS NOW *FLOOR REPRESENTABILITY*, PER CODEC — A7/A8/A9 RETIRED, and
+NO DIAL VALUE IS A BAR (USER RULING 2026-09-05, operative form).** Verbatim: *"i care that
+the lowest configurable settings per codec are representable, not that negative fifty is in
+that specifically."* (Two earlier forms — *"the negative tail bar is entirely arbitrary.
+below -5-50"*, then *"i said -50 not -5, codecs are all different, some go lower than
+others"* — are recorded in the registry as the path to it. **Neither −5 nor −50 is a bar
+anywhere in the active tier**; a test fails if any retired bar key reappears.)
 
   | row | tier | axis | bar |
   |---|---|---|---|
-  | `A7r` | regression | **per codec** on the dial grid: where ssim2's min on a codec's cells is ≤ −50, the dial's min on those cells | ≤ **−50** (value = count of non-exempt codecs that miss) |
-  | `A8r` | regression | **pooled** negtail probe — one axis, two numbers: `min` AND `p1` | both ≤ **−50** |
-  | `A9r` | **report-only** | per codec: of cells with ssim2 ≤ −50, the fraction the dial also puts ≤ −50 | **NO BAR** (0.90 registered `user-provisional`, deliberately not applied) |
+  | `A7r` | regression | **per codec** on the dial grid: fraction of `(image_id, codec)` ladders whose **K=3** lowest configurable settings are REPRESENTED | the **mentor's own fraction** on the same cells, registry-pinned |
+  | `A8r` | **report-only** | the negtail probe: pooled `min`/`p1` + its truth extremes | **none** |
+  | ~~`A9r`~~ | — | **dropped**; its per-codec quantity folds into the report block | — |
 
-  **Exemption is a MEASUREMENT.** On every registered grid: `avif` −55.3545 and `webp`
-  −51.8466 reach the bar and are graded; `jpeg` −8.0450 and `jxl` −39.6858 never do and are
-  **EXEMPT** — asking a dial to go deeper than the truth would bar it for being correct.
-  Registered as `grid_family_floors`; a test asserts `exempt == (reference_min > bar)`.
-  `A8r` is pooled only because the probes carry **no codec column at all** (their rows are
-  KADIS distortion types) — and grading that instrument per *distortion* family at −50
-  fails every bake ever built on one n=8 family (`benchmarks/d_peaks_lambda_sweep_2026-09-05.md`
-  §4-§6). **Reproduce any pre-ruling grading with `--gaddr-tail-pins retired`**; the retired
-  set stays in the registry and re-running all 97 board cells under it reproduces the
-  2026-09-04 states row-for-row on 88 of 97 (the other 9 moved for an unrelated registry
-  append). **MEASURED consequences:** D-peaks' sole blocker A8 → `A8r` **PASS**, but it now
-  fails `A7r` on **webp** by 4.28 (dial −45.72 vs ssim2 −51.85) and shipped D by **1.88**
-  (−48.12); shipped B fails both tail rows on every codec; **76 of 97 board cells never
-  reach −50 on the pooled probe**. The board's NOT SHIPPABLE badge is contract-driven and
-  is **unchanged (47 measured / 46 on board), asserted not assumed** — the graft refuses to
-  write if the count moves. Record: gate doc **§16**.
-- **It is NOT a relaxation — it moved the difficulty to the FLOOR.** Re-grading all 17
+  **REPRESENTED** = (i) the dial strictly increases across the bottom K steps *and* into the
+  next step up (no ties, no inversions), and (ii) no bottom step sits within 1e-9 of the
+  dial's instrument-wide minimum, unless that ladder is its **sole** holder (two or more
+  sharing it = a collapsed floor). `q` is quality-oriented on every codec — JXL's `q=0` is
+  its **largest** distance — so "lowest settings" is always the smallest `q`.
+  **The bars, MEASURED** (identical on the canonical/preC/postC grids): avif **1.0000**,
+  jxl **0.9697**, webp **1.0000**, jpeg **0.0000**. **jpeg's 0.0 is the ENCODER saturating,
+  not a scorer defect** — on 22/22 ladders its three lowest settings are byte-identical
+  output (max |Δ| over 372 features exactly 0.0; ssim2 itself returns −8.045 at all three).
+  That is what makes exemption a *measurement*: a codec the mentor cannot represent bars
+  nothing. `A8r` is report-only because the probes carry **no codec identity at all** (KADIS
+  distortion types), and grading that instrument per distortion family at a fixed depth was
+  measured to fail every bake ever built on one n=8 family.
+  **THE INSTALL ANSWER (16 scorers, postC instruments): shipped Profile D is the ONLY bake
+  that is both `A7r`-PASS on every codec and CONTRACT-PASS** — it beats the mentor on jxl
+  (1.0000 vs 0.9697). All 11 λ-sweep arms and D-peaks FAIL on **jxl** (0.818-0.909); shipped
+  B fails avif + jxl; Profile A fails avif. Under the RETIRED pins shipped D read A7=FAIL,
+  i.e. the old bars faulted the dial that is in fact best at the floor. **Reproduce any
+  pre-ruling grading with `--gaddr-tail-pins retired`** (row-for-row on 88 of 97 board cells;
+  the other 9 moved for an unrelated registry append). The board's NOT SHIPPABLE badge is
+  contract-driven and **unchanged (47 measured / 46 on board, 0 contract rows changed),
+  asserted not assumed**. Record: gate doc **§16**.
+
+- *(The three bullets below describe the 2026-09-04 ssim2 re-pin of `A1`-`A6`, which the
+  2026-09-05 floor re-spec did NOT touch.)* **It is NOT a relaxation — it moved the
+  difficulty to the FLOOR.** Re-grading all 17
   candidates under both pin sets flips **70 cells PASS→FAIL against 9 FAIL→PASS**; shipped B
   goes from **0** regression fails (it *was* the bar) to **6**.
 - **ssim2 PASSES the whole CONTRACT tier (6/6)** — mono **0.9924** (more monotone than the
@@ -1622,9 +1632,9 @@ on `ssim2 < 0`). The bar is now an absolute **−50**, and the floor rows are **
   99.98 clears A1 while sitting 1.6 above the reference metric). G-ADDR is an
   **addressability** gate, not a calibration gate; the calibration-referenced reading
   (`|dial end − truth end| ≤ δ`, or MAE vs the reference metric) remains an unimplemented
-  user option. The 2026-09-05 tail re-pin narrows this for the FLOOR only: `A7r` is
-  referenced to each codec's own ssim2 min, so a codec the reference never takes to −50
-  cannot be failed there.
+  user option. The 2026-09-05 floor re-spec sidesteps it for the FLOOR: `A7r` asks whether
+  a codec's lowest settings still RESOLVE, which is a calibration-free question, and its bar
+  is the reference metric's own answer on the same cells.
 - **Flags that make all of this measurable:** `--negtail-peer-scores` /
   `--identity-peer-scores` (a reference metric has no bake, so its floor axes were previously
   unmeasurable; peer mode is now **all-or-nothing per axis** and never fills a probe from

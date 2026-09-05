@@ -56,13 +56,14 @@ case "${ZL_ERA:-canonical}" in
     OUT_DEF=/mnt/v/output/zensim/dpeaks372-2026-09-05/arms/preC ;;
   *) echo "unknown ZL_ERA=${ZL_ERA} (canonical|postC|preC)" >&2; exit 2 ;;
 esac
-# The REFERENCE metric's own per-cell scores on the dial grid. Only A9r (the
-# report-only per-codec agreement row) needs it; A7r's per-codec exemptions come
-# from the registry. Same table --dial-peer-scores reads, and the ssim2 truth is
-# a property of the PIXELS, so one file serves all three 372 eras.
+# The REFERENCE metric's own per-cell scores on the dial grid. Only the
+# report-only per-codec column needs it; A7r's bars come from the registry. Same
+# table --dial-peer-scores reads, and the ssim2 truth is a property of the
+# PIXELS, so one file serves all three 372 eras.
 GRIDTRUTH="${ZL_GRIDTRUTH:-/mnt/v/output/zensim/ssim2-bar-2026-08-31/dialcells_ssim2_qv2grid.tsv}"
-# Which NEGATIVE-TAIL pin set grades A7*/A8*/A9*: `product` (the 2026-09-05
-# -50 per-codec bars, the default) or `retired` (the pre-ruling mentor pins).
+# Which NEGATIVE-TAIL pin set is in force: `product` (the 2026-09-05 per-codec
+# FLOOR REPRESENTABILITY rule, the default) or `retired` (the pre-ruling mentor
+# probe-depth pins).
 TAILPINS="${ZL_TAILPINS:-product}"
 GRID="${ZL_GRID:-$GRID_DEF}"
 NEGTAIL="${ZL_NEGTAIL:-$NEGTAIL_DEF}"
@@ -101,12 +102,13 @@ if m.get('negtail') and m.get('identity'):
         m['negtail']['min'],m['negtail']['p1'],m['negtail']['frac_below_zero'],
         m['identity']['dial_max'],m['identity']['n_above_identity']))
 print('   bar set:', a.get('reference'), '| tail pins:', a.get('tail_pins'))
-for fam in (m.get('families') or []):
-    print('   %-6s ref_min %9.4f  dial_min %s  exempt=%-5s A7r=%-13s n_ref<=bar=%s frac=%s'%(
-        fam['codec'], fam['reference_min'],
-        ('%9.4f'%fam['dial_min']) if fam.get('dial_min') is not None else '        -',
-        fam['exempt'], fam['a7r'],
-        fam.get('n_ref_at_or_below_bar'), fam.get('frac_at_or_below_bar')))
+for c in (m.get('codec_floor') or []):
+    print('   %-5s repr %.4f (bar %s, incumbent %s) %-13s order_fail=%3d clamp_fail=%3d dial_min %9.4f med %s'%(
+        c['codec'], c['represented_frac'],
+        ('%.4f'%c['represented_frac_reference']) if c.get('represented_frac_reference') is not None else '  -   ',
+        ('%.4f'%c['represented_frac_incumbent']) if c.get('represented_frac_incumbent') is not None else '  -   ',
+        c['state'], c['n_fail_order'], c['n_fail_clamp'], c['dial_min'],
+        ' / '.join('%.2f'%x for x in c['bottom_medians'])))
 print('   fails:', [c['id'] for c in a['checks'] if c['state']=='fail'],
       '| not measured:', [c['id'] for c in a['checks'] if c['state']=='not_measured'])
 try:

@@ -2917,34 +2917,37 @@ fn dial_panel(
             sha.clone(),
         )
     });
-    // ── PER-CODEC-FAMILY tail (A7r / A9r) ──
-    // USER CORRECTION 2026-09-05: "codecs are all different, some go lower than
-    // others." The dial grid is the only instrument on hand that carries codec
-    // identity — the negative-tail probes do not — so the per-family rows are
-    // built here, from the SAME pooled score vector G1 and A1-A6 read.
-    // Per-ROW reference truth (A9r's denominator) is optional and comes from
-    // `--gaddr-grid-truth`; A7r's exemptions come from the registry.
+    // ── PER-CODEC FLOOR REPRESENTABILITY (A7r) ──
+    // USER RULING 2026-09-05 (operative): "i care that the lowest configurable
+    // settings per codec are representable, not that negative fifty is in that
+    // specifically." The dial grid is the only instrument on hand that carries
+    // codec identity AND quality ladders — the negative-tail probes carry
+    // neither — so the per-codec rows are built here, from the SAME pooled
+    // score vector G1 and A1-A6 read. Per-ROW reference truth is optional and
+    // feeds only the report-only column folded in from the dropped A9r.
     let grid_truth: Option<Vec<f64>> =
         gaddr_grid_truth.and_then(|p| match load_peer_dial_scores(p, &grid) {
             Ok(v) => Some(v),
             Err(e) => {
                 eprintln!(
-                    "bake_verdict: --gaddr-grid-truth {} failed to load: {e} — the per-family \
-                     A9r columns will read NOT MEASURED",
+                    "bake_verdict: --gaddr-grid-truth {} failed to load: {e} — the per-codec \
+                     report columns will read NOT MEASURED",
                     p.display()
                 );
                 None
             }
         });
-    let family_measure = gaddr::FamilyMeasure::from_rows(
+    let floor_measure = gaddr::FloorMeasure::from_grid(
         &grid_path
             .file_name()
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_else(|| grid_path.display().to_string()),
+        &grid.image_id,
         &grid.codec,
+        &grid.q,
         &scores,
         grid_truth.as_deref(),
-        gaddr::product_tail_bars().product_bar,
+        gaddr::report_floor_threshold(),
     );
     let addr_verdict = gaddr::evaluate_full(
         gaddr_reference,
@@ -2954,7 +2957,7 @@ fn dial_panel(
         &addr_measure,
         probes.negtail.as_ref().map(|(m, sha)| (m, sha.as_str())),
         identity_measure.as_ref().map(|(m, sha)| (m, sha.as_str())),
-        Some(&family_measure),
+        Some(&floor_measure),
     );
     s.push_str(&gaddr::render_markdown(&addr_verdict));
 
