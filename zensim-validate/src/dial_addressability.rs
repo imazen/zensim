@@ -1798,6 +1798,16 @@ fn row(
 /// reach the bar (or the probe has no truth column at all): a PASS is still a
 /// real fact, but a MISS says nothing about the dial, so it is NOT MEASURED —
 /// never a fail, and never a silent pass either.
+///
+/// Not currently called (CI hygiene pass, 2026-09-05: this is the only place
+/// in the file implementing the "not discriminating -> demote Fail to
+/// NotMeasured" rule the doc comment describes; every live call site still
+/// builds rows via [`row`] or an inline `CheckRow` literal, so this hasn't
+/// been wired to a probe yet). Left in place rather than deleted because the
+/// discriminating-probe logic is unique, not a duplicate of anything live —
+/// whoever next touches the C3/C4/A7-A9 negative-tail probes should decide
+/// whether to wire this in or remove it, not a hygiene pass.
+#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 fn product_row(
     id: &'static str,
