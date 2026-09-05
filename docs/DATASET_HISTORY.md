@@ -1990,5 +1990,17 @@ front-end cube root from two Halley iterations to one, which removes 3 of the
 an era break — it moves every v1 byte on every corpus — and it is batched with
 E1/E2 per the lane's era policy rather than taken.
 
+**Amended same day — a FOURTH lever landed after this section was first
+written, and it does not change the conclusion.** **L18** hoists the H blur's
+30 strided `(src, dst)` gathers to one range check each
+(`fused_blur_h_ssim_inner_v4x` **2,634 → 1,683** static instructions,
+callgrind Ir **−15.2 %** on the kernel, walk-side **−6.48 %**; cumulative for
+the lane **−15.44 %**). It moves WHERE a bound is proven, not what is read, and
+it was re-gated by the SAME 160-cell `to_bits()` A/B **on the exact pushed
+binary** — 0 differing bits, 0 empty dumps — plus `public-api` ZERO delta and
+the lane-1 ratchets unchanged (175.0 allocations/walk, linearity exactly 2×).
+So the "no era break, no re-extraction" conclusion above covers all four
+levers, not three.
+
 Record: `benchmarks/kernel_fastclass_2026-09-05.md` §"LANE 2"; registration
 `docs/PLAN_KERNEL_FASTCLASS_2026-09-05.md` §"LANE 2".
