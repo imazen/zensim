@@ -158,3 +158,70 @@ competitiveness and shippability are now two separate questions with two
 different blockers. The plan's ship rule is unrelaxed; A7r becomes a reported
 axis on every arm (gate G6) so the answer to "does any set or shape move it?"
 is data rather than a single end-of-campaign verdict.
+
+### 3.3 The A7r design, filled in across WIDTH × CLASS (all from bakes that already existed)
+
+The `d_peaks_jxl_floor` lane attributed A7r failure to the **peaks block**:
+shipped D (`f0..155` only) is clean on all 33 jxl ladders while *every*
+peaks-slice fit it tried inverts on the same 4 images. Crucially, **every model
+in that arc is a sparse LINEAR lasso fit — the lane ran no MLP at all**, so
+whether an MLP over the same slice inverts was open. Filling the design:
+
+| bake | width | class | slice | **A7r** | C1 mono |
+|---|--:|---|---|--:|--:|
+| shipped Profile D | 372 | additive | 156 | **0** | 0.9931 |
+| shipped D, era-1 dial | 372 | additive | 156 | **0** | 0.9942 |
+| `Fctl_id100negrich` | 944 | additive | 156 | 2 | 0.9879 |
+| `v47_strict_qat_native` | 372 | **MLP** | 372-full | 4 | 0.9803 |
+| `Fpeaks` / `Fpeaks_id100negrich` | 944 | additive | 228 | 4 | 0.9604 / 0.9628 |
+| `Ffree_id100negrich` | 944 | additive | 265 | 4 | 0.9615 |
+| `W10L9PH_s4006` / `W11J_s4013` | 944 | MLP | 944-full | 4 | 0.9849 / 0.9902 |
+| shipped Profile B | 372 | additive | 372 linear | 5 | 0.9776 |
+| `A3b_s4004` | 944 | MLP | 265 | 5 | 0.9419 |
+| `FC_D3_s4004` (incumbent) | 944 | MLP | 265 | **5** | 0.9398 |
+
+**Neither "372" nor "additive" is the explanation.** Shipped Profile *B* is a
+372-width additive fit and reads **5**; `v47` is a 372-width MLP and reads 4.
+The single scorer that passes is shipped Profile D, whose distinguishing
+property is the **156-basic-only slice** — and the one other 156-only model in
+the table (`Fctl`, the same slice at 944 width, a different fit) is the next
+best at **2**. Everything that adds coordinates beyond `f0..155` — peaks,
+moments, the full v2 block, class-C — sits at 4 or 5 regardless of width or
+class.
+
+That is consistent with the jxl-floor lane's attribution and **extends it to
+the MLP class it never tested**: this campaign's `S156` arm (an MLP on
+`f0..155` at 944 width, k = 3) is the decisive cell, and it is already in Phase
+A.
+
+### 3.4 A THIRD blocker, and it is wiring rather than physics
+
+`Zensim::compute()` emits a **372**-layout vector, so a 944-declared-width bake
+is refused with `ModelForwardFailed { reason: "bake declares more input
+features than the caller supplied" }` — the D+free lane hit this on
+`Fpeaks_id100negrich` and it applies to **every candidate this campaign
+produces**.
+
+**It is not an impossibility, and the distinction matters.** The 944-layout
+walk + forward already runs today in this repo's own speed instrument:
+`zensim-bench/benches/ssim2_speed_bar.rs`'s `free156_peaks_raw` arm loads an
+`A3b`/`A4b`-class 944-width bake through `ZEN_HY_FREE` and forwards it over
+`compute_folded720_features_streaming(.., v1_basic_free, ..)`. What is missing
+is a `ZensimProfile` wired to that walk — the W7 clause the fastclass wave's
+§6e already named.
+
+**Two ship paths follow, and only one needs new code:**
+
+1. **Wire a 944-emitting profile** (the W7 task). Serves any of S156/S228/S261/
+   S265/S289 as trained.
+2. **Refit the winner at 372 width**, which is possible *only* for S156 and
+   S228 — `f0..227 ⊂ f0..371`, whereas S261/S265 need `f733+` and S289 needs
+   `f377+`. This is exactly the move the d_peaks lane made
+   (`Dpeaks372_id100negrich_dial_fsid.bin`, 20 basic + 6 peaks coefficients at
+   f162-164/f211-212/f224). Its prerequisite is a 372-wide, era-consistent
+   version of this recipe's training legs: the 372 roots carry the eval corpora
+   but the big legs exist only at older eras (`tbig_372_200k.parquet`,
+   `2026-05-1x` safesyn), so assembling one is a corpus job, not a flag.
+
+**Recorded, not attempted.** Both are named here with their prerequisites so
+the ship decision is a choice rather than a discovery.
