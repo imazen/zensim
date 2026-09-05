@@ -6,7 +6,13 @@
 # Usage: score_arm.sh <bake.bin> <NAME> [regime]
 set -euo pipefail
 BAKE="${1:?bake required}"; NAME="${2:?name required}"; REGIME="${3:-944}"
-BIN=/mnt/v/zen/cargo-targets/waver4/release
+# ZL_BIN (2026-09-05, fastclass2 lane): the default is UNCHANGED, so every
+# existing caller emits the same commands. It exists because this path is one
+# lane's cargo target dir; a later lane that pins its own build must be able to
+# say so without editing this script (repo rule: no hardcoded per-lane paths in
+# committed scripts). Whichever build is used is recorded per arm by the
+# verdict's own provenance.
+BIN="${ZL_BIN:-/mnt/v/zen/cargo-targets/waver4/release}"
 R4="${WR4_ROOT:-/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01}"
 OUT="${WR4_SCORE:-/mnt/v/output/zensim/wave-r4-2026-09-01}"
 DIAL="${WR4_DIAL:-/mnt/v/output/zensim/wlin7b-2026-08-30/dial_grid_944col_POOLS_2026-08-30.parquet}"

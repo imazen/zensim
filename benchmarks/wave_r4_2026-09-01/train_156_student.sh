@@ -55,6 +55,30 @@
 #                                        of the gradient)
 #              WR4_N_HIDDEN_LAYERS=<n> -> --n-hidden-layers <n> (default 0,
 #                                        A4b's own value; 2 = 944->128->64)
+#   A3b/A4b MATRIX-SHAPE levers (fastclass2 lane, 2026-09-05): three MORE
+#            env vars, every one a NO-OP when unset, so an unset invocation
+#            still reproduces A4b/D3 byte-identically (gate G1 of
+#            benchmarks/fastclass2_campaign_2026-09-05.md):
+#              WR4_HIDDEN=<n>       -> --hidden <n>   (hidden-layer width; the
+#                                      trainer's own default is 128, which is
+#                                      what every A3b/A4b/FC_* bake carries, so
+#                                      omitting the flag when unset keeps that
+#                                      exact argv)
+#              WR4_ALPHA_HEAD=1     -> --per-sample-alpha-head. Needed because
+#                                      --keep-features is implemented on the
+#                                      plain n_features->n_hidden->1 path AND on
+#                                      --per-sample-alpha-head only; a 2-layer
+#                                      student of this class is UNBUILDABLE
+#                                      without it (fastclass wave arm E1 died on
+#                                      exactly that refusal, its section 7.6).
+#                                      Changes the HEAD as well as the depth, so
+#                                      a depth-1 alpha-head control is mandatory
+#                                      to read a depth effect apart from a head
+#                                      effect.
+#              WR4_SKIP=1           -> --skip-connection (input->output linear
+#                                      skip alongside the MLP, ~n_in extra
+#                                      params; a shape lever that adds no walk
+#                                      cost at all)
 #            WR4_KADIS was already here and is used unchanged by that lane's
 #            KADIS-role arm.
 #   A4  MODE=distill  : the tsafesyn leg is re-targeted at the TEACHER's
@@ -95,6 +119,9 @@ KONW="${WR4_KONJND_TRAIN_W:-1.2}"
 KONFLAGS="both"; if [ -n "${WR4_KON_WITHINREF:-}" ]; then KONFLAGS="both,withinref"; fi
 HFFLAGS="both";  if [ -n "${WR4_HF_WITHINREF:-}" ];  then HFFLAGS="both,withinref"; fi
 NHL="${WR4_N_HIDDEN_LAYERS:-0}"
+HIDDEN="${WR4_HIDDEN:-}"
+ALPHA_HEAD="${WR4_ALPHA_HEAD:-}"
+SKIPC="${WR4_SKIP:-}"
 mkdir -p "$OUTDIR"
 
 TTBIG=""
@@ -162,8 +189,14 @@ fi
 
 EXTRA=()
 if [ -n "${WR4_HIGH_Q_BOOST:-}" ]; then EXTRA+=( --high-q-boost "$WR4_HIGH_Q_BOOST" ); fi
+# Matrix-shape levers. Each flag is OMITTED when its env var is unset, so the
+# emitted argv (and therefore the embedded zentrain.repro) is byte-identical to
+# a pre-2026-09-05 run -- that is what gate G1 checks.
+if [ -n "$HIDDEN" ];     then EXTRA+=( --hidden "$HIDDEN" ); fi
+if [ -n "$ALPHA_HEAD" ]; then EXTRA+=( --per-sample-alpha-head ); fi
+if [ -n "$SKIPC" ];      then EXTRA+=( --skip-connection ); fi
 
-echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) konjnd_train_w=$KONW kon_flags=$KONFLAGS hf_flags=$HFFLAGS n_hidden_layers=$NHL extra=(${EXTRA[*]+"${EXTRA[*]}"}) $(date -u +%H:%M:%SZ)"
+echo "== $ARM MODE=$MODE seed=$SEED out=$OUT transforms=${#TF[@]} width=(${WIDTH_ARGS[*]}) konjnd_train_w=$KONW kon_flags=$KONFLAGS hf_flags=$HFFLAGS n_hidden_layers=$NHL hidden=${HIDDEN:-default128} alpha_head=${ALPHA_HEAD:-0} skip=${SKIPC:-0} extra=(${EXTRA[*]+"${EXTRA[*]}"}) $(date -u +%H:%M:%SZ)"
 exec "$TRAIN" "${TRAIN_GROUPS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} \
   --n-hidden-layers "$NHL" --target-column human_score --target-scale 100 \
   --epochs 120 --pairs-per-epoch 50000 "${WIDTH_ARGS[@]}" \
