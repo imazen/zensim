@@ -88,6 +88,67 @@ loop-side (photo-seeded tables). zensim-loop cost ≈ butteraugli-loop cost (~3�
 encode); measured loop targeting = residual 0.84 in 4 passes vs one-shot 4.33 in 1 pass
 (`benchmarks/rd_probe_results_2026-07-18.md`).
 
+### 1b. SERVABILITY and the FLOOR — two things that decide a fast-class model before rank does (2026-09-05)
+
+Added because a campaign spent its first hours discovering both, and neither is
+findable from this file's other sections.
+
+**SERVABILITY is a LAYOUT question, and only two fast-class sets pass it.**
+`Zensim::compute` emits a **372-layout** vector with `free_extras: Off`
+(`feature_v2.rs:7532`, `fold_engine.rs:158`; kernel lane `8817f379`), so **no
+`V1FreeExtras` slot is reachable from the production path today** and
+`wide_bake_v2_read` is dead code. MEASURED end-to-end
+(`zensim/examples/serve_custom_bake.rs`, which loads any ZNPR through
+`ZensimProfile::Custom` and calls the real `compute`):
+
+| bake | declared | production path |
+|---|---|---|
+| shipped Profile D (156) | `caller=372` | **SERVED** |
+| a 372 bake that READS PEAKS (`Dpeaks372`) | `caller=372` | **SERVED** |
+| any 944-declared bake (`A3b`/`A4b` class, `Fpeaks_id100negrich`) | `caller=944` | **REFUSED** — `ModelForwardFailed` |
+
+So **train a fast-class candidate at the v1-372 layout** (`f0..227` fits inside
+it) unless you intend to build the 944-layout scoring path. A 265- or 289-wide
+bake trains fine and cannot be served.
+
+**The FLOOR (`A7r`) is the binding ship clause, and it is a WEIGHTS property.**
+Under the 2026-09-05 ruling `A7r` — per-codec floor representability, graded
+`--floor-rule resolvable` against the mentor's own fraction — is the *only*
+regression row left by default. Facts to design against:
+
+* **Only the 156-basic slice has ever passed it, in either model class.** At
+  fixed class, layout, anchor chain and instrument, 156 → 228 costs **three of
+  five codecs** and 0.0315 of dial monotonicity.
+* **Every failure in the measured population is an ORDERING inversion; zero are
+  clamps.** So a monotone output spline cannot fix it — the `id100`/`negtail`
+  chain moves `A7r` by exactly zero codecs — and neither can anything that
+  changes the dial's range.
+* **It survives seven training-recipe variants** (uniform pairing, either
+  within-ref ladder, both, high-q-boost, KADIS, class-C): all read 5/5 failing,
+  not one of 35 codec cells clearing the mentor. The recipe axis is empty.
+* The one ordering-aware lever in the trainer is **`--monotonicity-reg`**, and
+  it is wired **only on `--per-sample-alpha-head`** — as are
+  `--konjnd-aggregation-*`, `--pjnd-passthrough-*` and `--monotone-cbc`.
+
+**And `--coarse-decay` is NOT wired on that head** (fixed 2026-09-05 to fail
+loud): it rides `apply_post_adam_penalties`, which only the plain training loop
+calls. An alpha-head arm therefore needs its own no-coarse-decay plain control,
+or it differs from its baseline by two things.
+
+**Identity: the product already returns 100 for byte-identical input.**
+`Zensim::compute` short-circuits to `(100, 0, zeros)` before the model
+(`metric.rs:3509/5225`). C5 is still the right gate — it governs NEAR-identity,
+which is where a near-lossless dial lives — but a C5 failure is never a claim
+that `zensim(x, x) != 100`. For a 944-layout reader set, the identity vector is
+not zero and the contamination above 5e-3 is exactly four slots
+(`LUMA_MEAN_REF` f926/931/936/941, 0.45–0.64 % of layer-0 mass); the `id100`
+anchor chain takes the contract 5/6 → 6/6 with rank bit-unchanged.
+
+Evidence: `benchmarks/fastclass2_campaign_2026-09-05.md`,
+`benchmarks/kernel_fastclass_2026-09-05.md`,
+`benchmarks/d_peaks_jxl_floor_2026-09-05.md`,
+`benchmarks/ladder_floor_resolution_2026-09-05.md`.
+
 ## 2. The top models (2026-07-18) and what each is FOR
 
 > **2026-08-05 — Profile `C` shipped (SOTA-944 era; supersedes this table's
