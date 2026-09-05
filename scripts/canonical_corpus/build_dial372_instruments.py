@@ -326,9 +326,12 @@ LADDER_LEGS = {
 _JXLQ: dict[float, float] = {}
 
 
-def _ladder_rows(ladder_dir: str) -> list[dict]:
-    """Join each leg's metric TSV to its pairs TSV and hash the persisted bitstream."""
+def _ladder_rows(ladder_dir: str, dropped: list | None = None) -> list[dict]:
+    """Join each leg's metric TSV to its pairs TSV and hash the persisted bitstream.
+
+    `dropped` collects cells that cannot enter the instrument (decode failures)."""
     out = []
+    dropped = dropped if dropped is not None else []
     for leg, (codec_name, param_kind) in LADDER_LEGS.items():
         tsv = os.path.join(ladder_dir, "tsv", f"{leg}.tsv")
         prs = os.path.join(ladder_dir, "pairs", f"{leg}.tsv")
@@ -339,15 +342,45 @@ def _ladder_rows(ladder_dir: str) -> list[dict]:
         pair = {key(r): r for r in csv.DictReader(open(prs), delimiter="\t")}
         enc_dir = os.path.join(ladder_dir, "encoded", leg)
         for r in csv.DictReader(open(tsv), delimiter="\t"):
+            sc = r.get("score_ssim2", "")
+            scored = sc not in ("", None) and sc.lower() not in ("nan",)
             pr = pair.get(key(r))
             if pr is None:
-                raise SystemExit(f"{leg}: metric row {key(r)} has no pairs row — refusing")
+                # A cell whose DECODE failed writes no distorted PNG and therefore no
+                # pairs row. That is a legitimate absence and is COUNTED. A missing
+                # pairs row for a cell that DID score is an inconsistency and still
+                # refuses — the two must not be conflated.
+                if scored:
+                    raise SystemExit(f"{leg}: metric row {key(r)} scored {sc} but has no "
+                                     f"pairs row — refusing")
+                dropped.append({"leg": leg, "image": os.path.basename(r["image_path"]),
+                                "param": (json.loads(r["knob_tuple_json"] or "{}")
+                                          .get("distance", r["q"])),
+                                "why": "decode-fail (no distorted pixels, no pairs row)"})
+                continue
             knob = json.loads(r["knob_tuple_json"] or "{}")
             param = float(knob["distance"]) if param_kind == "distance" else float(r["q"])
             enc = os.path.join(enc_dir, r["encoded_filename"]) if r.get("encoded_filename") else ""
             if not enc or not os.path.exists(enc):
                 raise SystemExit(f"{leg}: encoded bitstream missing for {key(r)} — the "
                                  f"whole point of this rebuild is that bytes are kept")
+            # A cell whose DECODE failed has no distorted pixels and no score, so it
+            # cannot carry features and must not enter the instrument. It is COUNTED
+            # and reported, never dropped silently.
+            #
+            # MEASURED 2026-09-05, and PRE-EXISTING rather than introduced here: the
+            # `zenjxl` leg loses exactly 13 images x the 10 largest distances = 130
+            # cells, and all 13 are ODD-dimensioned (513x769 / 769x513). The
+            # 2026-07-27 run of the same sources shows the identical signature (the
+            # same 13 images at distances 10..25). Because those are the LARGEST
+            # distances, the loss is precisely each affected ladder's FLOOR, so those
+            # jxl ladders cannot be floor-graded at all — which is why this is
+            # surfaced rather than absorbed.
+            if not scored or not os.path.exists(pr["dist_path"]):
+                dropped.append({"leg": leg, "image": os.path.basename(pr["ref_path"]),
+                                "param": param,
+                                "why": "decode-fail (no distorted pixels)"})
+                continue
             qcol = (_JXLQ.setdefault(param, _jxl_q_for_distance(param))
                     if param_kind == "distance" else float(r["q"]))
             row = {"image_id": stem(os.path.basename(pr["ref_path"])),
@@ -383,8 +416,44 @@ def _mark_saturated(rows: list[dict]) -> list[dict]:
     return [r for lad in by.values() for r in lad]
 
 
+def _drop_truncated_floor_ladders(rows: list[dict], dropped: list) -> tuple[list[dict], list]:
+    """Remove any ladder whose OWN FLOOR cells are missing.
+
+    A ladder that lost its most-extreme settings cannot answer the question A7r
+    asks. Its surviving bottom three are simply the lowest settings that happened
+    to decode, several steps up the curve — grading them would flatter the bar
+    while looking exactly like a normal measurement.
+
+    CONCRETE: `zenjxl` at distance >= 10 on ODD-dimensioned sources (513x769 /
+    769x513) emits a bitstream that fails to decode — 13 images x the 10 largest
+    distances, and the 2026-07-27 run of the same sources shows the identical
+    signature, so it is pre-existing rather than introduced by this instrument.
+    Those are exactly the FLOOR cells, so all 13 ladders are excluded here and
+    reported as NOT MEASURABLE rather than silently graded on distance 8."""
+    lost: dict = {}
+    for d in dropped:
+        lost.setdefault((stem(d["image"]), d["leg"]), []).append(d["param"])
+    excluded, keep = [], []
+    for r in rows:
+        # `leg` and `codec` differ (avif_svt vs avif-svt); match on both spellings.
+        hit = lost.get((r["image_id"], r["codec"])) or               lost.get((r["image_id"], r["codec"].replace("-", "_")))
+        if hit is None:
+            keep.append(r)
+            continue
+        floorward = max(hit) if r["param_kind"] == "distance" else min(hit)
+        surviving = r["codec_param"]
+        more_extreme = (floorward > surviving) if r["param_kind"] == "distance"             else (floorward < surviving)
+        if more_extreme:
+            excluded.append((r["image_id"], r["codec"]))
+        else:
+            keep.append(r)
+    return keep, sorted(set(excluded))
+
+
 def build_ladder(args, work: str) -> dict:
-    rows = _mark_saturated(_ladder_rows(args.ladder_dir))
+    dropped: list = []
+    rows = _mark_saturated(_ladder_rows(args.ladder_dir, dropped))
+    rows, excluded = _drop_truncated_floor_ladders(rows, dropped)
     distinct = [r for r in rows if not r["saturated"]]
 
     # FULL archive first — it must survive even if extraction later fails.
@@ -421,9 +490,21 @@ def build_ladder(args, work: str) -> dict:
         d["cells"] += 1
         d["saturated"] += int(r["saturated"])
         d["ladders"].add(r["image_id"])
+    drop_by_leg: dict = {}
+    for d in dropped:
+        drop_by_leg.setdefault(d["leg"], {"n": 0, "images": set(), "params": set()})
+        drop_by_leg[d["leg"]]["n"] += 1
+        drop_by_leg[d["leg"]]["images"].add(d["image"])
+        drop_by_leg[d["leg"]]["params"].add(d["param"])
     return {"file": dst, "rows": len(distinct), "sha256": sha256(dst),
             "full_table": full, "full_rows": len(rows), "full_sha256": sha256(full),
             "grid_truth_tsv": truth, "grid_truth_sha256": sha256(truth),
+            "dropped_cells": len(dropped),
+            "excluded_truncated_floor_ladders": [list(e) for e in excluded],
+            "n_excluded_ladders": len(excluded),
+            "dropped_by_leg": {k: {"n": v["n"], "n_images": len(v["images"]),
+                                   "params": sorted(v["params"])}
+                               for k, v in sorted(drop_by_leg.items())},
             "pairs_tsv": tsv,
             "per_codec": {c: {"cells": d["cells"], "saturated": d["saturated"],
                               "distinct": d["cells"] - d["saturated"],
@@ -453,9 +534,10 @@ def build_anchor(args, work: str) -> dict:
 
     Identity rows (`ref == dist`, target 100) are appended so the spline is pinned
     at the top by construction rather than by extrapolation."""
-    rows = _mark_saturated(_ladder_rows(args.ladder_dir))
+    dropped: list = []
+    rows = _mark_saturated(_ladder_rows(args.ladder_dir, dropped))
     distinct = [r for r in rows if not r["saturated"]]
-    ident = sorted({r["ref_path"] for r in _ladder_rows(args.ladder_dir)})
+    ident = sorted({r["ref_path"] for r in rows})
 
     pair_rows = [[r["ref_path"], r["dist_path"], f"{r['score_ssim2']:.6f}"] for r in distinct]
     pair_rows += [[p, p, "100.000000"] for p in ident]
@@ -481,6 +563,7 @@ def build_anchor(args, work: str) -> dict:
     neg = sum(1 for t in target if t < 0.0)
     return {"file": dst, "rows": len(target), "sha256": sha256(dst),
             "identity_rows": len(ident), "distinct_cells": len(distinct),
+            "dropped_cells": len(dropped),
             "negative_target_rows": neg,
             "min_target": min(target), "max_target": max(target),
             "note": "target is UNCLAMPED ssim2 (negative rows PRESERVED — the shipped "

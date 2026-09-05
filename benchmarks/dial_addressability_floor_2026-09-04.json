@@ -46,7 +46,11 @@
     "registered": "2026-09-04",
     "retired_on": "2026-09-05",
     "retired_by": "USER RULING 2026-09-05, final form, verbatim: \"i care that the lowest configurable settings per codec are representable, not that negative fifty is in that specifically\"",
-    "axes": ["A7", "A8", "A9"],
+    "axes": [
+     "A7",
+     "A8",
+     "A9"
+    ],
     "bars": "the ACTIVE reference's own row in `negtail_probes` for the same probe sha -- A7 `min` <= reference min, A8 `p1` <= reference p1, A9 `frac_below_zero` >= reference frac_below_zero",
     "reproduce": "bake_verdict --gaddr-tail-pins retired (grading is bit-reproducible; nothing was rewritten)",
     "note": "RETAINED, not deleted: every G-ADDR number published before 2026-09-05 -- the gate record's sections 0-15, the 2026-09-04 board grading, and both re-graded candidate tables -- is graded on THESE bars. A count quoted from that era is only readable against them."
@@ -55,7 +59,10 @@
     "id": "floor-representability-2026-09-05",
     "status": "active",
     "registered": "2026-09-05",
-    "axes": ["A7r", "A8r"],
+    "axes": [
+     "A7r",
+     "A8r"
+    ],
     "bottom_k": 3,
     "clamp_eps": 1e-09,
     "report_floor_threshold": -50.0,
@@ -86,10 +93,26 @@
    "registered": "2026-09-05",
    "active": true,
    "codecs": [
-    {"codec": "avif", "n_ladders": 35, "represented_frac": 1.0},
-    {"codec": "jpeg", "n_ladders": 22, "represented_frac": 0.0},
-    {"codec": "jxl", "n_ladders": 33, "represented_frac": 0.9696969696969697},
-    {"codec": "webp", "n_ladders": 16, "represented_frac": 1.0}
+    {
+     "codec": "avif",
+     "n_ladders": 35,
+     "represented_frac": 1.0
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 22,
+     "represented_frac": 0.0
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 33,
+     "represented_frac": 0.9696969696969697
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 16,
+     "represented_frac": 1.0
+    }
    ],
    "note": "THE BAR. `peer_ssim2`'s own floor representability on these cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) at full f64 -- never re-implemented beside it. NOTE `jpeg` reads 0.000000: MEASURED 2026-09-05, that codec's three lowest settings are BYTE-IDENTICAL encoder output on 22 of 22 ladders (max |delta| over the 372 features is exactly 0.0, and ssim2 itself returns the identical value at q=0/5/10), so NO scorer can resolve them -- the encoder does not. A bar of 0.0 there is the honest outcome and it is what makes the 'exemption' a measurement rather than an exception."
   },
@@ -102,10 +125,26 @@
    "registered": "2026-09-05",
    "active": true,
    "codecs": [
-    {"codec": "avif", "n_ladders": 35, "represented_frac": 0.7714285714285715},
-    {"codec": "jpeg", "n_ladders": 22, "represented_frac": 0.0},
-    {"codec": "jxl", "n_ladders": 33, "represented_frac": 0.7575757575757576},
-    {"codec": "webp", "n_ladders": 16, "represented_frac": 1.0}
+    {
+     "codec": "avif",
+     "n_ladders": 35,
+     "represented_frac": 0.7714285714285715
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 22,
+     "represented_frac": 0.0
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 33,
+     "represented_frac": 0.7575757575757576
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 16,
+     "represented_frac": 1.0
+    }
    ],
    "note": "The INCUMBENT column -- shipped Profile B's own floor representability on these cells. Printed beside the bar so a reader can always tell 'worse than the mentor' from 'worse than what shipped'. Never used as a bar."
   },
@@ -118,10 +157,26 @@
    "registered": "2026-09-05",
    "active": true,
    "codecs": [
-    {"codec": "avif", "n_ladders": 35, "represented_frac": 1.0},
-    {"codec": "jpeg", "n_ladders": 22, "represented_frac": 0.0},
-    {"codec": "jxl", "n_ladders": 33, "represented_frac": 0.9696969696969697},
-    {"codec": "webp", "n_ladders": 16, "represented_frac": 1.0}
+    {
+     "codec": "avif",
+     "n_ladders": 35,
+     "represented_frac": 1.0
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 22,
+     "represented_frac": 0.0
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 33,
+     "represented_frac": 0.9696969696969697
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 16,
+     "represented_frac": 1.0
+    }
    ],
    "note": "THE BAR. `peer_ssim2`'s own floor representability on these cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) at full f64 -- never re-implemented beside it. NOTE `jpeg` reads 0.000000: MEASURED 2026-09-05, that codec's three lowest settings are BYTE-IDENTICAL encoder output on 22 of 22 ladders (max |delta| over the 372 features is exactly 0.0, and ssim2 itself returns the identical value at q=0/5/10), so NO scorer can resolve them -- the encoder does not. A bar of 0.0 there is the honest outcome and it is what makes the 'exemption' a measurement rather than an exception."
   },
@@ -134,10 +189,26 @@
    "registered": "2026-09-05",
    "active": true,
    "codecs": [
-    {"codec": "avif", "n_ladders": 35, "represented_frac": 0.6},
-    {"codec": "jpeg", "n_ladders": 22, "represented_frac": 0.0},
-    {"codec": "jxl", "n_ladders": 33, "represented_frac": 0.7878787878787878},
-    {"codec": "webp", "n_ladders": 16, "represented_frac": 1.0}
+    {
+     "codec": "avif",
+     "n_ladders": 35,
+     "represented_frac": 0.6
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 22,
+     "represented_frac": 0.0
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 33,
+     "represented_frac": 0.7878787878787878
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 16,
+     "represented_frac": 1.0
+    }
    ],
    "note": "The INCUMBENT column -- shipped Profile B's own floor representability on these cells. Printed beside the bar so a reader can always tell 'worse than the mentor' from 'worse than what shipped'. Never used as a bar."
   },
@@ -150,10 +221,26 @@
    "registered": "2026-09-05",
    "active": true,
    "codecs": [
-    {"codec": "avif", "n_ladders": 35, "represented_frac": 1.0},
-    {"codec": "jpeg", "n_ladders": 22, "represented_frac": 0.0},
-    {"codec": "jxl", "n_ladders": 33, "represented_frac": 0.9696969696969697},
-    {"codec": "webp", "n_ladders": 16, "represented_frac": 1.0}
+    {
+     "codec": "avif",
+     "n_ladders": 35,
+     "represented_frac": 1.0
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 22,
+     "represented_frac": 0.0
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 33,
+     "represented_frac": 0.9696969696969697
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 16,
+     "represented_frac": 1.0
+    }
    ],
    "note": "THE BAR. `peer_ssim2`'s own floor representability on these cells, derived through the owner instrument (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`) at full f64 -- never re-implemented beside it. NOTE `jpeg` reads 0.000000: MEASURED 2026-09-05, that codec's three lowest settings are BYTE-IDENTICAL encoder output on 22 of 22 ladders (max |delta| over the 372 features is exactly 0.0, and ssim2 itself returns the identical value at q=0/5/10), so NO scorer can resolve them -- the encoder does not. A bar of 0.0 there is the honest outcome and it is what makes the 'exemption' a measurement rather than an exception."
   },
@@ -166,14 +253,29 @@
    "registered": "2026-09-05",
    "active": true,
    "codecs": [
-    {"codec": "avif", "n_ladders": 35, "represented_frac": 0.6},
-    {"codec": "jpeg", "n_ladders": 22, "represented_frac": 0.0},
-    {"codec": "jxl", "n_ladders": 33, "represented_frac": 0.8181818181818182},
-    {"codec": "webp", "n_ladders": 16, "represented_frac": 1.0}
+    {
+     "codec": "avif",
+     "n_ladders": 35,
+     "represented_frac": 0.6
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 22,
+     "represented_frac": 0.0
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 33,
+     "represented_frac": 0.8181818181818182
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 16,
+     "represented_frac": 1.0
+    }
    ],
    "note": "The INCUMBENT column -- shipped Profile B's own floor representability on these cells. Printed beside the bar so a reader can always tell 'worse than the mentor' from 'worse than what shipped'. Never used as a bar."
-  }
-,
+  },
   {
    "dial_grid_sha256": "694e16c4520a5d41b986cebe5ab9c8390c1eabdfef15b44386fe71abcd3c5593",
    "reference": "peer_ssim2",
@@ -183,12 +285,66 @@
    "registered": "2026-09-05",
    "active": true,
    "codecs": [
-    {"codec": "avif", "n_ladders": 35, "represented_frac": 1.0},
-    {"codec": "jpeg", "n_ladders": 23, "represented_frac": 0.0},
-    {"codec": "jxl", "n_ladders": 33, "represented_frac": 0.9696969696969697},
-    {"codec": "webp", "n_ladders": 24, "represented_frac": 1.0}
+    {
+     "codec": "avif",
+     "n_ladders": 35,
+     "represented_frac": 1.0
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 23,
+     "represented_frac": 0.0
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 33,
+     "represented_frac": 0.9696969696969697
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 24,
+     "represented_frac": 1.0
+    }
    ],
    "note": "THE BAR for the 944 POOLS grid, derived through the owner from dialcells_ssim2_944grid.tsv. There is deliberately NO `shipped_b` companion row here: shipped B is a 372-width bake and cannot score this grid, so the `incumbent` column reads em-dash rather than borrowing a number from a different instrument. The fractions match the 372 grids on avif/jxl/webp exactly (same cells, same ssim2) and jpeg is 0.000000 for the same measured reason -- its three lowest settings are byte-identical encoder output."
+  },
+  {
+   "dial_grid_sha256": "4c3874a78c469e15c664a63e10216760317bd9501b9fe9365b6b93845cb5f980",
+   "reference": "peer_ssim2",
+   "label": "dial_grid_372col_ladder_2026-09-05 (FLOOR-DENSE: per-codec lowest DISTINCT settings, 2 AVIF backends) -- per-CODEC FLOOR REPRESENTABILITY",
+   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
+   "bottom_k": 3,
+   "registered": "2026-09-05",
+   "active": true,
+   "codecs": [
+    {
+     "codec": "avif-rav1e",
+     "n_ladders": 39,
+     "represented_frac": 0.5384615384615384
+    },
+    {
+     "codec": "avif-svt",
+     "n_ladders": 39,
+     "represented_frac": 1.0
+    },
+    {
+     "codec": "jpeg",
+     "n_ladders": 39,
+     "represented_frac": 0.5384615384615384
+    },
+    {
+     "codec": "jxl",
+     "n_ladders": 26,
+     "represented_frac": 0.9230769230769231
+    },
+    {
+     "codec": "webp",
+     "n_ladders": 39,
+     "represented_frac": 1.0
+    }
+   ],
+   "grid_truth_sha256": "df784f0dca3a5caba7715bde682a64e868ce5a3a8e3aa22eaec1d0d0675d5ab3",
+   "note": "THE BAR for this instrument. `peer_ssim2`'s own floor representability, derived through the owner (`bake_verdict --dial-peer-scores peer_ssim2=<cells> --gaddr-json`), copied verbatim. The floor here is each codec's lowest DISTINCT settings: saturated steps (identical encoded bytes) are removed from the instrument, so jpeg's bottom three are three SETTINGS rather than three samples of one. `avif-svt` and `avif-rav1e` are separate ladders \u2014 different encoders, different quantizer mappings."
   }
  ],
  "grids": [
@@ -304,6 +460,23 @@
    "provenance_note": "EXISTS ONLY to make the extractor era separable from the pixels: it and the postC row differ in exactly one thing, the extractor commit. peer_ssim2's values are identical on the two (same cells, same ssim2), which is the control.",
    "bars_note": "peer_ssim2's values here are BIT-IDENTICAL to its canonical-grid row on all six grid scalars -- the ssim2 truth is a property of the PIXELS and these are the pixels it was measured on (dialcells_ssim2_qv2grid.tsv IS dialcells_ssim2_944grid.tsv restricted to these 4,424 keys, 4,424 of 4,424 exactly equal). So the mentor's bars transfer unchanged; only the FEATURE era differs.",
    "control_note": "CONTROL: on this grid peer_ssim2 reproduces its CANONICAL-grid row EXACTLY on all eight recorded scalars -- min/max/p5/p95/reach/dynamic_range AND mono 0.99235757295044 / tied 0.0000. Same cells, same ssim2 values, so the mentor's bars are transferable and only the FEATURE era differs. That equality is also the check that caught this row's first build: `extract_features_372col` ends with `rows.sort_by(ref_basename)`, so attaching (image_id, codec, q) POSITIONALLY scrambled features across the 38 references -- every scorer's mono collapsed (shipped D 0.9847 -> 0.5611) and tied read 0.0672. The pairs TSV now carries a `row_id` the extractor hands back and the permutation is checked, not assumed."
+  },
+  {
+   "dial_grid_sha256": "4c3874a78c469e15c664a63e10216760317bd9501b9fe9365b6b93845cb5f980",
+   "reference": "peer_ssim2",
+   "label": "dial_grid_372col_ladder_2026-09-05 (FLOOR-DENSE: per-codec lowest DISTINCT settings, 2 AVIF backends)",
+   "path": "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
+   "n_rows": 9593,
+   "min": -64.326595,
+   "max": 100.0,
+   "p5": -16.252150599999997,
+   "p95": 93.9743354,
+   "reach": 164.326595,
+   "dynamic_range": 110.226486,
+   "mono": 0.9888428434810328,
+   "tied": 0.0,
+   "registered": "2026-09-05",
+   "active": true
   }
  ],
  "negtail_probes": [

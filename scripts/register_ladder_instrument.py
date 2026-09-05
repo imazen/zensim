@@ -17,7 +17,11 @@ Usage:
 from __future__ import annotations
 import argparse, hashlib, json, os, subprocess, sys, tempfile
 
-REPO = "/home/lilith/work/zen/zensim"
+# Resolve everything relative to THIS FILE's checkout, never a hard-coded repo
+# root: this script is run from jj sibling workspaces, and a hard-coded
+# `~/work/zen/zensim` made it append to the PRIMARY checkout's registry — which was
+# sitting on an older commit, so the append landed on a stale copy of the file.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REG_DEFAULT = os.path.join(REPO, "benchmarks/dial_addressability_floor_2026-09-04.json")
 
 
@@ -40,10 +44,13 @@ def derive(bv: str, bake: str, grid: str, truth: str, out: str) -> dict:
         sys.stderr.write(r.stdout + r.stderr)
         raise SystemExit(f"bake_verdict failed rc={r.returncode}")
     d = json.load(open(out))
-    who = d.get("scorer") or d.get("describes") or ""
-    if who and "peer" not in str(who).lower():
-        raise SystemExit(f"--gaddr-json describes {who!r}, not the peer — refusing to "
-                         f"register a candidate's numbers as the mentor's bar")
+    # `--gaddr-json` IS the G-ADDR block (not nested under `dial`). Its `scorer`
+    # says WHOSE numbers these are; registering a candidate's as the mentor's bar
+    # would silently pin the gate to the thing being graded.
+    sc = d.get("scorer") or {}
+    if sc.get("kind") != "peer" or sc.get("label") != "peer_ssim2":
+        raise SystemExit(f"--gaddr-json describes scorer={sc!r}, not peer_ssim2 — "
+                         f"refusing to register a candidate's numbers as the bar")
     return d
 
 
@@ -72,15 +79,19 @@ def main() -> None:
 
     work = tempfile.mkdtemp(prefix="ladderreg_")
     d = derive(a.bv, a.bake, a.grid, a.truth, os.path.join(work, "peer.json"))
-    dial, meas = d["dial"], d["dial"]["addressability"]["measured"]
+    meas = d["measured"]
+    dial = meas["grid"]
     import pyarrow.parquet as pq
     n_rows = pq.read_metadata(a.grid).num_rows
 
-    grid_row = {"dial_grid_sha256": gsha, "label": a.label, "path": os.path.abspath(a.grid),
+    # `reference` is LOAD-BEARING on a grids row: the A1-A6 lookup keys on
+    # (dial_grid_sha256, reference), and a row without it never resolves — the grid
+    # reads "not in the G-ADDR floor registry" even though a row exists for its sha.
+    grid_row = {"dial_grid_sha256": gsha, "reference": "peer_ssim2",
+                "label": a.label, "path": os.path.abspath(a.grid),
                 "n_rows": n_rows,
-                **{k: dial[k] for k in ("min", "max", "p5", "p95", "reach")},
-                "dynamic_range": dial["dynamic_range"],
-                "mono": dial["mono_pct"], "tied": dial["tied_pct"],
+                **{k: dial[k] for k in ("min", "max", "p5", "p95", "reach",
+                                        "dynamic_range", "mono", "tied")},
                 "registered": "2026-09-05", "active": True}
     floor_row = {
         "dial_grid_sha256": gsha, "reference": "peer_ssim2",

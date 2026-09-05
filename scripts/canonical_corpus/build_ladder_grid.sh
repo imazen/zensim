@@ -51,7 +51,13 @@ run_leg () {                       # run_leg <label> <codec> <qgrid> [knob-json]
   local t0 t1
   echo "== leg $label ($codec) start $(date -u +%H:%M:%SZ)" | tee -a "$OUT/logs/progress.log"
   t0=$(date +%s)
+  # LADDER_JOBS bounds sweep parallelism. Load-bearing on large sources: the
+  # anchor leg (6.27 MP mean, up to 12 MP) was SIGKILLed at 38 s with an empty log
+  # at the default job count — each in-flight cell holds the reference, the
+  # distorted image and butteraugli's own buffers, so the burst scales with
+  # jobs x megapixels, not with the corpus size.
   local args=(sweep --codec "$codec" --sources "$SRC" --q-grid "$qg"
+              --jobs "${LADDER_JOBS:-0}"
               "${METRIC_ARGS[@]}"
               --output       "$OUT/tsv/$label.tsv"
               --distorted-out-dir "$OUT/dist/$label"
