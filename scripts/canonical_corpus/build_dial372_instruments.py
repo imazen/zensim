@@ -430,6 +430,64 @@ def build_ladder(args, work: str) -> dict:
                               "ladders": len(d["ladders"])} for c, d in sorted(per.items())}}
 
 
+def build_anchor(args, work: str) -> dict:
+    """The dial-calibration ANCHOR from a ladder run: features + an UNCLAMPED target.
+
+    Two deliberate differences from the shipped anchor
+    (`canonical-2026-05-21/train/multiband_anchor_dial100.parquet`) and from the
+    2026-09-04 imazen-26 proposal, both measured problems rather than preferences:
+
+    1. **The target is NOT clamped.** Both prior anchors store
+       `target_score = max(ssim2, 0)`. On the shipped one that stores 147 of 2,000
+       genuinely-negative rows (down to ssim2 -64.16) as a single 0, and
+       `fit_spline_knots` then collapses that whole run onto ONE bottom knot —
+       which is why shipped Profile B emits `frac_below_zero = 0.0000` on a probe
+       whose every row's ssim2 truth is negative. The lever for the floor is the
+       CLAMP, so this anchor keeps the sign.
+    2. **Target and features are ONE era.** The 2026-09-04 anchor's targets are
+       bigcodec's stored ssim2 from its own decode era while its features are
+       decoded today; the measured cost of that kind of skew is -3.658 dial points
+       on shipped B (DATASET_HISTORY 3.34), and its own 2x2 put anchor ERA at
+       +3.9/+4.8/+3.9 against anchor CONTENT at -0.4/-1.0/-0.2. Here both sides
+       come from the same fresh sweep.
+
+    Identity rows (`ref == dist`, target 100) are appended so the spline is pinned
+    at the top by construction rather than by extrapolation."""
+    rows = _mark_saturated(_ladder_rows(args.ladder_dir))
+    distinct = [r for r in rows if not r["saturated"]]
+    ident = sorted({r["ref_path"] for r in _ladder_rows(args.ladder_dir)})
+
+    pair_rows = [[r["ref_path"], r["dist_path"], f"{r['score_ssim2']:.6f}"] for r in distinct]
+    pair_rows += [[p, p, "100.000000"] for p in ident]
+    tsv = os.path.join(work, "anchor_pairs.tsv")
+    write_pairs(tsv, ["ref_path", "dist_path", "human_score"], pair_rows)
+    feats = extract(args.extractor, tsv, os.path.join(work, "anchor.csv"))
+
+    target = [r["score_ssim2"] for r in distinct] + [100.0] * len(ident)
+    cols = {
+        "image_id": [r["image_id"] for r in distinct] + [stem(os.path.basename(p)) for p in ident],
+        "codec": [r["codec"] for r in distinct] + ["identity"] * len(ident),
+        "codec_param": [r["codec_param"] for r in distinct] + [0.0] * len(ident),
+        # THREE names for one column, because the consumers disagree:
+        # `extend-top --target-col target_score`, `fit-lasso --anchor-target ssim2_gpu`,
+        # and the parquet loader's `human_score`. Same values; no consumer silently
+        # picks up a different quantity.
+        "target_score": list(target), "ssim2_gpu": list(target), "human_score": list(target),
+    }
+    for i in range(NF):
+        cols[f"f{i}"] = [row[i] for row in feats]
+    dst = os.path.join(args.out_dir, f"ladder_anchor_372col_{args.tag}.parquet")
+    pq.write_table(pa.table(cols), dst, compression="zstd")
+    neg = sum(1 for t in target if t < 0.0)
+    return {"file": dst, "rows": len(target), "sha256": sha256(dst),
+            "identity_rows": len(ident), "distinct_cells": len(distinct),
+            "negative_target_rows": neg,
+            "min_target": min(target), "max_target": max(target),
+            "note": "target is UNCLAMPED ssim2 (negative rows PRESERVED — the shipped "
+                    "anchor's max(ssim2,0) is what collapses the negative tail); identity "
+                    "rows carry 100.0"}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--extractor", required=True,
@@ -464,6 +522,11 @@ def main():
             raise SystemExit("--what ladder needs --ladder-dir")
         man["ladder_dir"] = args.ladder_dir
         man["instruments"]["ladder_grid"] = build_ladder(args, work)
+    if "anchor" in want:
+        if not args.ladder_dir:
+            raise SystemExit("--what anchor needs --ladder-dir")
+        man["ladder_dir"] = args.ladder_dir
+        man["instruments"]["ladder_anchor"] = build_anchor(args, work)
     mp = os.path.join(args.out_dir, f"_MANIFEST_{args.tag}.json")
     with open(mp, "w") as f:
         json.dump(man, f, indent=1)
