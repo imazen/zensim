@@ -3244,3 +3244,106 @@ within one architecture. **Reusable: a cross-architecture score bar for this
 metric cannot be tighter than ~3e-2 while that `mul_add` stays unfused; i686 and
 wasm32-simd128 are ONE class; and a tolerance derivation must name the
 population it was measured on.** Record: `../benchmarks/dense_serving_ungate_2026-09-06.md` §2d.
+
+---
+
+## §3.56 — output polarity had no owner, and it is why the campaign's best CID22 *ordering* arrived negative (2026-09-06)
+
+**What a future session needs from this section:** no stored number moved, but
+one CLASS of result is retrospectively explained, and two trainer flags now mean
+something they did not before.
+
+### The thought-why
+
+The fastclass2 campaign (`benchmarks/fastclass2_campaign_2026-09-05.md` §11)
+measured its 2-layer per-sample-α arm as **the campaign's single best CID22
+ordering — `|−0.8921|`, beating the plain path's `+0.8863` — with the sign
+backwards**, and could not ship it: `bake_dial_refit pack` reported
+`packed tanh-pin range … corr=−0.8350` → `spline fit produced only 1 knots`,
+because the output calibration spline is monotone increasing by construction.
+The campaign's determination was "a property of the WEIGHTS … the right repair
+is the head's output orientation at training time, not a post-hoc negation," and
+it stopped there. All three seeds carry `.HARVEST_FAILED`; there is no fulleval
+for them on the board.
+
+### The actual-why, read from source and then MEASURED
+
+`mlp_train/mod.rs:2088` has always derived `rank_target_sign` — `−1.0` when any
+group carries an absolute/MSE term, else `+1.0` — with a correct comment and a
+2026-07-15 measurement behind it (HF held-out per-ref SROCC **+0.6393 →
+−0.3454** when rank supervision was *added* to a corpus). **It was used at
+exactly one of eight polarity-sensitive sites** (`:2556`). The pool head, the
+hybrid head, the per-sample-α head and BOTH plain-path mini-batch helpers each
+recomputed a bare `signum(mos_a − mos_b)`; both TV within-ladder hinges assumed
+DISTANCE in prose; the α head's monotonicity hinge assumed SCORE — *against its
+own RankNet term, on the same path*.
+
+The fastclass 372 recipe declares `:both` on 4 of its 6 legs. So the plain path
+is SCORE-shaped and the α head stayed DISTANCE-shaped. Two terms, one output,
+opposite directions.
+
+**Reproduced in a 0.5-second unit test** (`tests/output_polarity.rs`): an α-head
+recipe carrying an absolute term reads raw SROCC **−0.9970** at depth 1 and
+**−0.9986** at depth 2 on a synthetic corpus where the plain path reads +0.99.
+At `main@origin 0c6307a7`, **4 of 5 of those tests FAIL**; the fifth
+("rank-only recipes are DISTANCE-shaped on every path") passes at both commits,
+which is the control.
+
+### What this does and does NOT invalidate
+
+- **No stored bake's bytes move.** `OutputPolarity::Distance` is the default and
+  reproduces the legacy convention. `tests/legacy_bake_sha.rs` pins five
+  rank-only recipes to sha256 digests measured at the parent commit; all five
+  reproduce byte-for-byte, **including both TV arms** (which is what proves the
+  newly-reachable `--tv-margin` is the identical function at its `0.0` default).
+- **No board number is affected.** The α-head arms this explains have no
+  fulleval, and no board bake sets `--minibatch-size > 1` or NiN with an
+  absolute term.
+- **Two flags now mean something new.** `--minibatch-size > 1` and
+  `--norm-in-norm-weight > 0` with an absolute term used to silently DISCARD
+  that term; they now refuse. `--n-hidden-layers >= 2` and `--skip-connection`
+  used to be silent no-ops off the α-head path; they now refuse. A recipe that
+  used either combination did not train what it said it trained.
+- **`--leaky-alpha` was a train/serve divergence.** Every emitter hard-coded
+  `Activation::LeakyRelu` while the runtime applies a hard-coded
+  `zenpredict::LEAKY_RELU_ALPHA`. Any run with a different slope trained one
+  function and served another. Now derived and refused when unrepresentable.
+  Incidental measurement: the runtime constant is an **f32**, so
+  `LEAKY_RELU_ALPHA as f64 = 0.009999999776482582`, not the f64 literal `0.01`
+  the trainer defaults to — a ~2.2e-10 relative slope gap every LeakyReLU bake
+  has always carried, below every gate's tolerance and worth naming once.
+
+### The architecture this unblocked
+
+`--nonneg-distance` makes the dial's identity (C5) and no-cell-above-identity
+(C6) rows STRUCTURAL: `raw(x) = pin − g(x)` with `g ≥ 0` and `g(0⃗) = 0`
+bit-exactly, so `raw(0⃗)` is the argmax over the whole input space by
+construction. It exists because
+`benchmarks/dial_addressability_gate_2026-09-04.md` §10.3 proves **no monotone
+output spline can satisfy both C2 and C6** when real cells out-rank a perfect
+copy in raw space — a weights defect, so it is fixed in the weights. It is
+expressible in the SHIPPED wire format with **zero** runtime change, which is
+why softplus / ReLU² / squared-norm were rejected. It does **not** claim C3/C4 or
+A7r, and `g` is CONVEX at one hidden layer.
+
+Record: [`benchmarks/best_of_all_2026-09-06.md`](../benchmarks/best_of_all_2026-09-06.md);
+plan + deviations: [`docs/PLAN_BEST_OF_ALL_2026-09-06.md`](PLAN_BEST_OF_ALL_2026-09-06.md).
+
+### One more owner defect found on the way
+
+`bake_dial_refit densify`'s identity gate fed BOTH arms the pre-densify
+caller-width row. A bake whose kept ids are a **contiguous prefix** densifies to
+the IDENTITY layout, so `zensim::declared_feature_ids` returns `None` for it by
+design and its gather is POSITIONAL — it must be fed its own narrower row.
+Measured: `feature row has 372 values, bake expects 228`. Every shipped bake the
+subcommand had been run on reads a SCATTERED id set (shipped D:
+`6,8,11,14,…,155`), which is why the path had never been exercised. Fixed and
+gated with the scattered control beside it.
+
+**And a consequence worth carrying:** a DENSIFIED bake cannot be graded by the
+pinned probes. Every registered negtail/identity probe is 372-wide and
+`bake_verdict` scores a probe only when its column count equals the bake's
+`caller_input_width`, so a densified 228-caller bake reads **C3, C4, C5 and C6
+all NOT MEASURED** — the entire contract tier. Score the PACKED bake (372 caller
+width via `Drop` transforms) and treat `densify` as a servability artifact.
+
