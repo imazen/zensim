@@ -1238,7 +1238,23 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         # G-ADDR: the six axes every cell already stores (dial p5/p95/reach/DR/mono/tied)
         # against the registry's bars, PLUS the emitted `dial.addressability` block when
         # a verdict carries one (the gate landed 2026-09-04; no board cell has it yet).
-        addr = (o.get("dial") or {}).get("addressability")
+        # ── THE OPERATIVE DIAL RULER (2026-09-06) ──────────────────────────────
+        # `dial_ladder` is the 2026-09-05 FLOOR-DENSE ladder instrument's reading
+        # (5 codec families incl. both AVIF backends, a 66-step floor-dense q
+        # axis, saturation flagged by encode hash) and is the board's OPERATIVE
+        # ruler: it is the only instrument on which the operative `resolvable`
+        # A7r rule has a registered per-codec bar, on which jpeg's floor bar is
+        # real (0.5385, not the canonical grid's vacuous 0.0000 -- q 0/5/10 are
+        # ONE bitstream there), and on which the two-reference inversion rule is
+        # measurable at all. `dial.addressability` is the CANONICAL-grid read,
+        # kept verbatim and surfaced as `dial_canonical` for context.
+        # THEY ARE DIFFERENT INSTRUMENTS: read a pair DOWN, never across -- a
+        # ladder fraction and a canonical fraction are different quantities.
+        # Precedence has ONE owner here and ONE in `freeze_check::gaddr_block`.
+        ladder_addr = o.get("dial_ladder")
+        canon_addr = (o.get("dial") or {}).get("addressability")
+        addr = ladder_addr or canon_addr
+        gcanon = None
         gcells, gpass, gfail = [], 0, 0
         gmeta = None
         if isinstance(addr, dict) and isinstance(addr.get("checks"), list):
@@ -1280,10 +1296,39 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                      # invite exactly the comparison the owner refuses to make.
                      "rule": addr.get("floor_rule"),
                      "vpins": addr.get("value_pins"),
+                     # WHICH instrument this verdict is OF. `ladder` = the
+                     # operative 2026-09-05 floor-dense instrument; `canonical`
+                     # = the cell's own (retired-era) dial grid, shown when no
+                     # ladder read exists for it. Never blend the two.
+                     "ruler": "ladder" if ladder_addr is not None else "canonical",
+                     "instrument": (addr.get("instrument") or {}).get(
+                         "registered_label") or addr.get("grid_label"),
                      "floors": [[c.get("codec"), c.get("represented_frac"),
                                  c.get("represented_frac_reference"),
                                  c.get("n_ladders"), c.get("state")]
                                 for c in ((addr.get("measured") or {}).get("codec_floor") or [])]}
+        # `dial_canonical` — the retained canonical-grid read, carried ONLY when
+        # the operative ruler is the ladder, and ONLY as hover context. It is
+        # never sorted on, never counted, never mixed into a column: the two
+        # instruments answer different questions on different cells.
+        if ladder_addr is not None and isinstance(canon_addr, dict):
+            # Floats are ROUNDED and the headline TRUNCATED here for the same
+            # reason the operative block's cells are: this is hover context on a
+            # page held under a registered 12 MiB cap, not a number anyone reads
+            # to five significant figures. The full-precision canonical values
+            # stay in the fulleval's own `dial.addressability`.
+            _r5 = lambda x: None if x is None else round(float(x), 5)
+            gcanon = {
+                "headline": (canon_addr.get("headline") or "")[:120] or None,
+                "contract": canon_addr.get("contract"),
+                "regression": canon_addr.get("regression"),
+                "grid": canon_addr.get("grid_label"),
+                "rule": canon_addr.get("floor_rule"),
+                "cfail": [c.get("id") for c in (canon_addr.get("checks") or [])
+                          if c.get("tier") == "contract" and c.get("state") == "fail"],
+                "floors": [[c.get("codec"), _r5(c.get("represented_frac")), c.get("state")]
+                           for c in ((canon_addr.get("measured") or {}).get("codec_floor") or [])],
+            }
         elif gaddr and gaddr.get("grid"):
             _grid = gaddr["grid"]
             _fx = gaddr["fixed_bars"]
@@ -1382,6 +1427,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "repro": o.get("repro"),
             "annotations": matched_ann,
             "fair": fair,
+            "gaddrCanon": gcanon,
             "gaddr": dict({"cells": gcells, "pass": gpass, "fail": gfail,
                            "emitted": bool(gmeta)}, **(gmeta or {"src": "derived",
                                                                  "total": 6})) if gcells else None,
@@ -1821,7 +1867,23 @@ const gaddrTitle=b=>{if(!b.gaddr)return 'G-ADDR: NOT MEASURED (no registry / no 
     +'sha-gated + same-grid gated) — all '+b.gaddr.total+' rows below are copied from it, none re-derived.');
     L.push('VERDICT: '+(b.gaddr.headline||'?'));
     L.push('  regression: '+(b.gaddr.regression||'?')+'   contract: '+(b.gaddr.contract||'?'));
-    if(b.gaddr.grid)L.push('  instrument: '+b.gaddr.grid);}
+    if(b.gaddr.grid)L.push('  instrument: '+b.gaddr.grid);
+    // WHICH RULER. Since 2026-09-06 the operative one is the FLOOR-DENSE ladder.
+    if(b.gaddr.ruler==='ladder')L.push('  RULER: the 2026-09-05 FLOOR-DENSE LADDER instrument — the '
+      +'board\u2019s OPERATIVE dial ruler (5 codec families incl. both AVIF backends, 66 floor-dense '
+      +'steps, saturation flagged by encode hash). It is the only instrument on which the operative '
+      +'`resolvable` A7r rule has a registered per-codec bar and jpeg\u2019s floor bar is REAL '
+      +'(0.5385 — on the canonical grid q 0/5/10 are ONE bitstream, so its bar is a vacuous 0.0000).');
+    else L.push('  RULER: this cell\u2019s own CANONICAL dial grid (retired era) — no ladder read '
+      +'exists for it, so nothing here is comparable with a ladder-graded cell.');
+    if(b.gaddrCanon){const c=b.gaddrCanon;
+      L.push('  dial_canonical (the RETAINED canonical-grid read, context only — A DIFFERENT '
+        +'INSTRUMENT; never compare a value across the two):');
+      L.push('    '+(c.headline||'?')+'   [regression '+(c.regression||'?')+' / contract '+(c.contract||'?')+']');
+      if(c.grid)L.push('    instrument: '+c.grid);
+      if((c.cfail||[]).length)L.push('    contract FAILED there on: '+c.cfail.join(', '));
+      if((c.floors||[]).length)L.push('    its A7r per codec: '+c.floors.map(r=>r[0]+' '
+        +(r[1]==null?'—':f3(r[1]))+' '+(r[2]||'')).join('  |  '));}}
   let tier='';
   (b.gaddr.cells||[]).forEach(c=>{
     const t=c[7]||(c[0].charAt(0)==='A'?'regression':'contract');
@@ -2709,7 +2771,10 @@ function renderTable(){
         if(b.gaddr&&b.gaddr.fail)td.style.color='var(--critical)';}
       if(c[0]==='floors'){
         const F=(b.gaddr&&b.gaddr.floors)||[],R=(b.gaddr&&b.gaddr.rule)||'?';
-        let t='A7r FLOOR REPRESENTABILITY, per codec — the fraction of this '+
+        let t=(b.gaddr&&b.gaddr.ruler==='ladder'
+          ?'RULER: the 2026-09-05 FLOOR-DENSE LADDER instrument (operative).\n'
+          :'RULER: this cell\u2019s own CANONICAL dial grid — NOT comparable with a ladder-graded row.\n')
+        +'A7r FLOOR REPRESENTABILITY, per codec — the fraction of this '+
           'codec\u2019s (image, codec) ladders whose lowest configurable '+
           'settings still RESOLVE on the dial.\nrule=`'+R+'`'+
           (R==='resolvable'?' (the OPERATIVE rule since the 2026-09-05 ruling: '+
