@@ -135,6 +135,7 @@ fn usage() -> ! {
                              [--annotations <registry.json|none>]\n\
                 freeze_check --select <a.fulleval.json> <b...> [--tsv]\n\
                              [--seed-group] [--min-k N] [--floor-basis all|mean|legacy]\n\
+         \x20                    [--gaddr-block auto|canonical|ladder]\n\
                 freeze_check --tsv-header | --select-tsv-header | \
                 --seed-group-tsv-header\n\n\
          --select: the REGISTERED k-seed selection rule (campaign appendix\n\
@@ -208,7 +209,16 @@ fn usage() -> ! {
          reproduction escape hatch ONLY, never for a real selection. The\n\
          mean is reported either way. No basis can admit a candidate the\n\
          pre-amendment rule refused -- all three only remove (`legacy`\n\
-         aside, which exists purely to reproduce the pre-fix defect).\n\n\
+         aside, which exists purely to reproduce the pre-fix defect).\n\
+         --gaddr-block auto|canonical|ladder (default auto): WHICH dial\n\
+         instrument the CONTRACT veto and the A7r floors are read from.\n\
+         `auto` = the cell's `dial_ladder` block (the 2026-09-05 FLOOR-DENSE\n\
+         ladder -- the board's OPERATIVE ruler since 2026-09-06) when it has\n\
+         one, else its canonical `dial.addressability`. `canonical`\n\
+         reproduces the pre-2026-09-06 reading; `ladder` refuses to fall\n\
+         back, so a cell with no ladder read counts as NOT MEASURED rather\n\
+         than being graded on a different instrument. The two blocks are\n\
+         different INSTRUMENTS -- never compare a value across them.\n\n\
          default (no --profile): the §5 freeze bar (unchanged).\n\
          --bar sets/overrides a cross-bake numeric bar for: csiq, live\n\
          (§5 only; their §5 bars are \"≥ best 924-arm\" — externally chosen, so\n\
@@ -1360,10 +1370,47 @@ fn rank_pool(rows: &mut [&SelectRow], basis: FloorBasis) {
 /// reported, never scored as a defect, same rule as an unmeasured M3a). An
 /// absent `dial.addressability` block (no G-ADDR ever ran) returns empty,
 /// for the same reason: absence is not evidence of failure.
-fn gaddr_contract_fails(v: &serde_json::Value) -> Vec<(String, String)> {
-    let checks = match v
-        .get("dial")
-        .and_then(|d| d.get("addressability"))
+/// WHICH G-ADDR block is this candidate's OPERATIVE dial ruler.
+///
+/// Since 2026-09-06 the board's operative dial instrument is the FLOOR-DENSE
+/// LADDER (`docs/PLAN_BOARD_LADDER_RULER_2026-09-06.md`): five codec families
+/// including both AVIF backends, a 66-step floor-dense q axis, and the only
+/// instrument on which the operative `resolvable` `A7r` rule has a registered
+/// per-codec bar and the two-reference inversion rule is measurable at all. A
+/// cell's `dial.addressability` remains its CANONICAL-grid read and is kept
+/// verbatim — the two are DIFFERENT instruments and a value from one is never
+/// comparable with a value from the other, which is why the ladder reading gets
+/// its own block instead of overwriting the canonical one.
+///
+/// Precedence is `dial_ladder` then `dial.addressability`, through this ONE
+/// function, so the CONTRACT veto and the `A7r` floor fold cannot drift apart
+/// on which ruler they are reading. `--gaddr-block canonical` forces the
+/// pre-2026-09-06 reading for audit; `ladder` refuses to fall back.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GaddrBlock {
+    /// **Default.** `dial_ladder` when the cell carries one, else the
+    /// canonical `dial.addressability`. A cell with neither reads empty,
+    /// which is "no G-ADDR ever ran" — never a fail.
+    Auto,
+    /// The canonical-grid read only — reproduces the pre-2026-09-06 rule.
+    Canonical,
+    /// The ladder read only. A cell with no `dial_ladder` reads empty
+    /// (NOT MEASURED), never its canonical block.
+    Ladder,
+}
+
+fn gaddr_block<'a>(v: &'a serde_json::Value, which: GaddrBlock) -> Option<&'a serde_json::Value> {
+    let ladder = v.get("dial_ladder");
+    let canon = v.get("dial").and_then(|d| d.get("addressability"));
+    match which {
+        GaddrBlock::Ladder => ladder,
+        GaddrBlock::Canonical => canon,
+        GaddrBlock::Auto => ladder.or(canon),
+    }
+}
+
+fn gaddr_contract_fails_of(v: &serde_json::Value, which: GaddrBlock) -> Vec<(String, String)> {
+    let checks = match gaddr_block(v, which)
         .and_then(|a| a.get("checks"))
         .and_then(|c| c.as_array())
     {
@@ -1395,10 +1442,8 @@ fn gaddr_contract_fails(v: &serde_json::Value) -> Vec<(String, String)> {
 /// recomputed. A codec this instrument never touched is returned (so a
 /// reader can see it was skipped) but is excluded from every count by
 /// [`gaddr_measured_floor_counts`].
-fn gaddr_codec_states(v: &serde_json::Value) -> Vec<(String, Option<bool>)> {
-    let rows = match v
-        .get("dial")
-        .and_then(|d| d.get("addressability"))
+fn gaddr_codec_states_of(v: &serde_json::Value, which: GaddrBlock) -> Vec<(String, Option<bool>)> {
+    let rows = match gaddr_block(v, which)
         .and_then(|a| a.get("measured"))
         .and_then(|m| m.get("codec_floor"))
         .and_then(|c| c.as_array())
@@ -2298,6 +2343,7 @@ fn run_select(
     seed_group: bool,
     min_k: usize,
     basis: FloorBasis,
+    gblock: GaddrBlock,
 ) -> i32 {
     // The replication floor makes the SEED GROUP the unit of selection, so the
     // grouped section is printed whenever it is active — hiding the basis of a
@@ -2342,8 +2388,8 @@ fn run_select(
             group_key: seed_group_key(&v),
             seed_id: seed_identity(&v),
             seed_text: seed_label(&v),
-            gaddr_contract_fails: gaddr_contract_fails(&v),
-            gaddr_codec: gaddr_codec_states(&v),
+            gaddr_contract_fails: gaddr_contract_fails_of(&v, gblock),
+            gaddr_codec: gaddr_codec_states_of(&v, gblock),
         });
     }
 
@@ -2858,6 +2904,9 @@ fn main() {
     // default. `--min-k 1` is the documented pre-amendment escape.
     let mut min_k: usize = 2;
     let mut basis = FloorBasis::AllReps;
+    // Which G-ADDR block is the OPERATIVE dial ruler (2026-09-06). Default `auto`
+    // = the ladder instrument when the cell carries one, else its canonical read.
+    let mut gblock = GaddrBlock::Auto;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         // After `--select`, bare paths accumulate until the next flag.
@@ -2888,6 +2937,20 @@ fn main() {
                     }
                 };
                 in_select = was_in_select;
+            }
+            "--gaddr-block" => {
+                gblock = match args.next().as_deref() {
+                    Some("auto") => GaddrBlock::Auto,
+                    Some("canonical") => GaddrBlock::Canonical,
+                    Some("ladder") => GaddrBlock::Ladder,
+                    other => {
+                        eprintln!(
+                            "freeze_check: --gaddr-block takes `auto`, `canonical` or \
+                             `ladder` (got {other:?})"
+                        );
+                        std::process::exit(2);
+                    }
+                };
             }
             "--floor-basis" => {
                 basis = match args.next().as_deref() {
@@ -2962,7 +3025,9 @@ fn main() {
             std::process::exit(2);
         }
         let anns = load_annotations_arg(annotations_arg.as_deref());
-        std::process::exit(run_select(&select, &anns, tsv, seed_group, min_k, basis));
+        std::process::exit(run_select(
+            &select, &anns, tsv, seed_group, min_k, basis, gblock,
+        ));
     }
     if seed_group {
         eprintln!("freeze_check: --seed-group only applies to --select");
@@ -3846,8 +3911,8 @@ mod tests {
             group_key: seed_group_key(v),
             seed_id: seed_identity(v),
             seed_text: seed_label(v),
-            gaddr_contract_fails: gaddr_contract_fails(v),
-            gaddr_codec: gaddr_codec_states(v),
+            gaddr_contract_fails: gaddr_contract_fails_of(v, GaddrBlock::Auto),
+            gaddr_codec: gaddr_codec_states_of(v, GaddrBlock::Auto),
         }
     }
 
@@ -4327,6 +4392,60 @@ mod tests {
 
     // ── G-ADDR CONTRACT pre-filter (2026-09-06 owner fix, registry
     // select-rule-blind-to-dial-contract-2026-09-06) ────────────────────
+
+    /// **The 2026-09-06 ruler switch.** `dial_ladder` is the OPERATIVE dial
+    /// instrument and `dial.addressability` the retained canonical read; both
+    /// are visible at once and a value from one is NOT comparable with a value
+    /// from the other, so the choice must have exactly one owner
+    /// ([`gaddr_block`]). This pins all three modes on a cell carrying BOTH
+    /// blocks with OPPOSITE verdicts, plus the two absence cases — a cell with
+    /// only a canonical block still reads under `auto`, and `ladder` refuses to
+    /// fall back to it (NOT MEASURED, never another instrument's number).
+    #[test]
+    fn gaddr_block_precedence_is_ladder_then_canonical_and_ladder_never_falls_back() {
+        let mk = |id: &str, state: &str| {
+            serde_json::json!({"id": id, "tier": "contract", "state": state,
+                               "measured": 1.0, "bar": 0.0, "cmp": "\u{2265}",
+                               "note": format!("{id} {state}"), "what": "x"})
+        };
+        let canon = serde_json::json!({
+            "checks": [mk("C2", "fail")],
+            "measured": {"codec_floor": [{"codec": "jpeg", "state": "fail"}]}});
+        let ladder = serde_json::json!({
+            "checks": [mk("C2", "pass")],
+            "measured": {"codec_floor": [{"codec": "jpeg", "state": "pass"},
+                                         {"codec": "avif-svt", "state": "fail"}]}});
+        let both = serde_json::json!({"dial": {"addressability": canon.clone()},
+                                      "dial_ladder": ladder.clone()});
+        // auto + ladder read the LADDER (C2 passes there, so no veto);
+        // canonical reads the canonical block (C2 fails ⇒ a veto).
+        assert!(gaddr_contract_fails_of(&both, GaddrBlock::Auto).is_empty());
+        assert!(gaddr_contract_fails_of(&both, GaddrBlock::Ladder).is_empty());
+        assert_eq!(
+            gaddr_contract_fails_of(&both, GaddrBlock::Canonical)
+                .iter()
+                .map(|(i, _)| i.as_str())
+                .collect::<Vec<_>>(),
+            vec!["C2"]
+        );
+        // The A7r per-codec table follows the SAME block — never a mix.
+        assert_eq!(gaddr_codec_states_of(&both, GaddrBlock::Auto).len(), 2);
+        assert_eq!(gaddr_codec_states_of(&both, GaddrBlock::Canonical).len(), 1);
+
+        // Canonical only: `auto` falls back, `ladder` does NOT (absence is NOT
+        // MEASURED, which is never a fail and never another ruler's number).
+        let only_canon = serde_json::json!({"dial": {"addressability": canon}});
+        assert_eq!(gaddr_contract_fails_of(&only_canon, GaddrBlock::Auto).len(), 1);
+        assert!(gaddr_contract_fails_of(&only_canon, GaddrBlock::Ladder).is_empty());
+        assert!(gaddr_codec_states_of(&only_canon, GaddrBlock::Ladder).is_empty());
+
+        // Neither block: empty under every mode — "no G-ADDR ever ran".
+        let none = serde_json::json!({"rank": {}});
+        for m in [GaddrBlock::Auto, GaddrBlock::Canonical, GaddrBlock::Ladder] {
+            assert!(gaddr_contract_fails_of(&none, m).is_empty());
+            assert!(gaddr_codec_states_of(&none, m).is_empty());
+        }
+    }
 
     /// A synthetic `dial.addressability` block, mirroring EXACTLY the JSON
     /// shape `dial_addressability::to_json` emits (never a second
