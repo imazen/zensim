@@ -721,6 +721,106 @@ def graft_gaddr(board: Path, gaddr: Path, dry_run: bool = False) -> bool:
                               f"graft dial.addressability ({g.get('headline')})")
 
 
+# ── THE LADDER BLOCK ────────────────────────────────────────────────────────
+# The 2026-09-05 FLOOR-DENSE ladder instrument is the board's OPERATIVE dial ruler
+# (pre-registration: docs/PLAN_BOARD_LADDER_RULER_2026-09-06.md).  It is a DIFFERENT
+# instrument from the grid a cell's own `dial` block was cut on -- 9,593 distinct
+# settings across five codec families against the canonical grid's 4,424 across four
+# -- so it gets its OWN block rather than overwriting `dial.addressability`.  That is
+# not a convention: `graft_gaddr`'s same-grid gate REFUSES a ladder reading, correctly
+# (gate doc S17.7 measured the refusal), because two instruments in one column produce
+# silently wrong cross-cell comparisons.
+#
+# So the gate here is the MIRROR of that one.  Where `graft_gaddr` proves "this read
+# was taken on the board's own grid", this proves "this read was taken on a REGISTERED
+# LADDER grid" -- resolved from benchmarks/dial_addressability_floor_2026-09-04.json at
+# run time, never hard-coded -- and it writes only `dial_ladder`/`dial_ladder_source`.
+# `dial` is not in the allow-list, so the canonical block cannot move.
+LADDER_GRID_PATHS = (
+    "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_372col_ladder.parquet",
+    "/mnt/v/output/zensim/ladder-2026-09-05/instruments/dial_grid_944col_ladder.parquet",
+)
+
+
+def registered_ladder_grid_shas(registry: Path | None = None) -> dict:
+    """{sha256: label} for the REGISTERED ladder instruments, READ from the G-ADDR
+    registry.  An empty result means the registry does not list them and every graft
+    is refused -- absence is a refusal, never a pass."""
+    reg = registry or (Path(__file__).resolve().parent.parent
+                       / "benchmarks/dial_addressability_floor_2026-09-04.json")
+    try:
+        rows = json.loads(reg.read_text()).get("grids", [])
+    except (OSError, json.JSONDecodeError):
+        return {}
+    want = {str(Path(p)) for p in LADDER_GRID_PATHS}
+    return {r["dial_grid_sha256"]: r.get("label", "")
+            for r in rows if r.get("path") and str(Path(r["path"])) in want}
+
+
+def graft_gaddr_ladder(board: Path, gaddr: Path, dry_run: bool = False) -> bool:
+    """Copy a LADDER-instrument G-ADDR verdict into a board fulleval's `dial_ladder`.
+
+    Three gates, all refusals rather than warnings:
+      1. the reading's `grid_sha256` must be a REGISTERED ladder grid;
+      2. for a bake-scored reading, the scorer bake's bytes must sha-match the board
+         cell's `bake_sha256` (identical to `graft_gaddr`'s gate);
+      3. for a PEER reading (a reference metric -- no bake exists to sha), the board
+         cell must itself be a `reference-metric` whose name matches the peer label.
+    Nothing is recomputed; the block is copied verbatim and stamped with its source.
+    `dial` is NOT in the write allow-list, so the canonical read cannot move."""
+    bdoc = _load_board(board)
+    g_bytes = gaddr.read_bytes()
+    g = json.loads(g_bytes)
+    if not isinstance(g.get("checks"), list):
+        raise SystemExit(f"graft-gaddr-ladder: {gaddr} carries no G-ADDR `checks` list")
+    ladder = registered_ladder_grid_shas()
+    gsha = g.get("grid_sha256") or ""
+    if gsha not in ladder:
+        raise SystemExit(
+            f"graft-gaddr-ladder: {gaddr.name} was cut on grid {gsha[:16]}, which is not a "
+            f"REGISTERED ladder instrument ({', '.join(s[:16] for s in ladder) or 'none registered'}); "
+            f"refusing — a non-ladder read belongs in `dial.addressability` via --graft-gaddr")
+    scorer = g.get("scorer") or {}
+    kind = scorer.get("kind")
+    if kind == "bake":
+        bake_path = Path(scorer.get("label") or "")
+        if not bake_path.is_file():
+            raise SystemExit(f"graft-gaddr-ladder: scorer bake {bake_path} is not on disk; refusing")
+        sha = hashlib.sha256(bake_path.read_bytes()).hexdigest()
+        if bdoc.get("bake_sha256") != sha:
+            raise SystemExit(
+                f"graft-gaddr-ladder: bake_sha256 mismatch — {board.name} "
+                f"({bdoc.get('bake_sha256')}) is not the bake {gaddr.name} scored ({sha}); refusing")
+    elif kind == "peer":
+        label = scorer.get("label")
+        if (bdoc.get("model") or {}).get("kind") != "reference-metric" or bdoc.get("name") != label:
+            raise SystemExit(
+                f"graft-gaddr-ladder: {gaddr.name} is a PEER read of {label!r} and {board.name} "
+                f"is not the matching reference-metric cell; refusing")
+    else:
+        raise SystemExit(f"graft-gaddr-ladder: unknown scorer.kind={kind!r}; refusing")
+    blk = {k: g[k] for k in ("headline", "regression", "contract", "shippable", "checks",
+                             "grid_label", "grid_sha256", "active_reference",
+                             "incumbent_reference", "reference", "measured", "floor_rule",
+                             "value_pins", "tail_pin_set", "tail_pins",
+                             "n_pass", "n_fail", "n_not_measured") if k in g}
+    blk["instrument"] = {"family": "ladder-2026-09-05", "registered_label": ladder[gsha],
+                         "grid_sha256": gsha, "scorer_kind": kind}
+    if _jc(bdoc.get("dial_ladder")) == _jc(blk):
+        print(f"graft-gaddr-ladder: {board.name} already carries this ladder block — unchanged")
+        return False
+    doc = copy.deepcopy(bdoc)
+    doc["dial_ladder"] = blk
+    doc["dial_ladder_source"] = {
+        "path": str(gaddr), "sha256": hashlib.sha256(g_bytes).hexdigest(),
+        "reference": g.get("reference") or g.get("active_reference"),
+        "note": "OPERATIVE dial ruler. A DIFFERENT instrument from `dial.addressability` "
+                "(the canonical-grid read, retained unchanged) — never compare a value "
+                "across the two."}
+    return _write_board_gated(board, bdoc, doc, {"dial_ladder", "dial_ladder_source"},
+                              dry_run, f"graft dial_ladder ({g.get('headline')})")
+
+
 def set_block_profile(board: Path, bbp_bin: str, dry_run: bool = False) -> bool:
     """Compute the static feature-block usage fingerprint from the fulleval's
     own bake bytes (`bake_block_profile --json`, sha-gated against
@@ -787,6 +887,101 @@ def graft_corruption_head(board: Path, verdict: Path, dry_run: bool = False) -> 
     board.write_text(json.dumps(doc))
     print(f"grafted corruption_head into {board}  (pass_q20={ch.get('pass_q20')})")
     return True
+
+
+def self_test_graft_gaddr_ladder() -> int:
+    """Exercise `graft_gaddr_ladder` on synthetic fixtures. Five behaviours:
+    the happy path writes ONLY `dial_ladder`/`dial_ladder_source` and leaves the
+    canonical `dial` block byte-identical; a read cut on a NON-ladder grid is
+    REFUSED (the negative control — this is the whole point of the block split);
+    a bake sha mismatch is REFUSED; a PEER read grafts onto its matching
+    reference-metric cell; and a PEER read is REFUSED onto a bake cell."""
+    import os, tempfile
+    fails = []
+    ladder = registered_ladder_grid_shas()
+    if not ladder:
+        print("self-test graft_gaddr_ladder: FAIL — no ladder grid registered")
+        return 1
+    lsha = sorted(ladder)[0]
+
+    def gaddr(grid_sha, scorer):
+        return {"scorer": scorer, "headline": "L", "regression": "FAIL",
+                "contract": "INCOMPLETE (not a pass)", "shippable": False,
+                "n_pass": 1, "n_fail": 1, "n_not_measured": 4,
+                "reference": "peer_ssim2", "active_reference": "peer_ssim2",
+                "floor_rule": "resolvable", "value_pins": "report",
+                "grid_label": "ladder", "grid_sha256": grid_sha,
+                "checks": [{"id": "A7r", "tier": "regression", "state": "fail",
+                            "measured": 0.51, "bar": 0.66, "cmp": "\u2265",
+                            "incumbent": None, "note": "", "what": "floor"}],
+                "measured": {"grid": {"mono": 0.97, "n": 9593},
+                             "codec_floor": [{"codec": "jpeg", "represented_frac": 0.51,
+                                              "state": "fail"}]}}
+
+    def run(tmp, bdict, gdict):
+        b = tmp / "cell.fulleval.json"; g = tmp / "g.json"
+        b.write_text(json.dumps(bdict)); g.write_text(json.dumps(gdict))
+        before = json.loads(b.read_text())
+        try:
+            graft_gaddr_ladder(b, g)
+            return True, json.loads(b.read_text()), before
+        except SystemExit as e:
+            return False, str(e), before
+
+    scratch = Path(os.environ.get("ZEN_TMP", str(Path.home() / "tmp")))
+    scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=str(scratch)) as td:
+        tmp = Path(td)
+        bake = tmp / "b.bin"; bake.write_bytes(b"znpr-fixture-bytes")
+        sha = hashlib.sha256(bake.read_bytes()).hexdigest()
+        canon = {"addressability": {"headline": "CANONICAL", "grid_sha256": "canon"},
+                 "mono_pct": 0.99, "min": 3.0, "max": 93.0}
+        bcell = {"name": "T", "bake": str(bake), "bake_sha256": sha,
+                 "dial": canon, "model": {"n_inputs": 372, "kind": "single"}}
+        bscorer = {"kind": "bake", "label": str(bake)}
+
+        ok, after, before = run(tmp, json.loads(json.dumps(bcell)), gaddr(lsha, bscorer))
+        if not ok:
+            fails.append(f"happy path refused: {after}")
+        else:
+            if (after.get("dial_ladder") or {}).get("headline") != "L":
+                fails.append("happy path did not write dial_ladder")
+            if _jc(before["dial"]) != _jc(after["dial"]):
+                fails.append("happy path MOVED the canonical dial block")
+            for k in set(before) | set(after):
+                if k in ("dial_ladder", "dial_ladder_source"):
+                    continue
+                if _jc(before.get(k)) != _jc(after.get(k)):
+                    fails.append(f"happy path changed unrelated key {k}")
+
+        # NEGATIVE CONTROL: a non-ladder grid must be refused outright.
+        ok, msg, _ = run(tmp, json.loads(json.dumps(bcell)),
+                         gaddr("6546c43e6d9572dcf0740c6346cd604fd8cd3ff01ee2f7031aca998fd8fec2bd",
+                               bscorer))
+        if ok or "not a REGISTERED ladder instrument" not in str(msg):
+            fails.append(f"non-ladder grid was NOT refused: {msg}")
+
+        bad = json.loads(json.dumps(bcell)); bad["bake_sha256"] = "0" * 64
+        ok, msg, _ = run(tmp, bad, gaddr(lsha, bscorer))
+        if ok or "bake_sha256 mismatch" not in str(msg):
+            fails.append(f"sha mismatch was NOT refused: {msg}")
+
+        peer_cell = {"name": "peer_ssim2", "dial": dict(canon),
+                     "model": {"kind": "reference-metric"}}
+        pscorer = {"kind": "peer", "label": "peer_ssim2"}
+        ok, after, _ = run(tmp, peer_cell, gaddr(lsha, pscorer))
+        if not ok:
+            fails.append(f"peer graft refused: {after}")
+
+        ok, msg, _ = run(tmp, json.loads(json.dumps(bcell)), gaddr(lsha, pscorer))
+        if ok or "is not the matching reference-metric cell" not in str(msg):
+            fails.append(f"peer read onto a bake cell was NOT refused: {msg}")
+
+    for f in fails:
+        print(f"  FAIL: {f}")
+    print(f"self-test graft_gaddr_ladder: {'FAIL' if fails else 'PASS'} "
+          f"({len(fails)} failure(s))")
+    return 1 if fails else 0
 
 
 def self_test_graft_gaddr() -> int:
@@ -937,6 +1132,12 @@ def main(argv=None) -> int:
                          "`bake_verdict --gaddr-json` output. Sha-gated on the scorer bake's "
                          "bytes, and every pre-existing dial scalar must match the read's own "
                          "grid measure (that identity is what proves the same dial grid)")
+    ap.add_argument("--graft-gaddr-ladder", default=None, type=Path, metavar="GADDR_JSON",
+                    help="with --graft-into: copy a LADDER-instrument G-ADDR verdict into "
+                         "`dial_ladder` (the board's OPERATIVE dial ruler). Refuses unless the "
+                         "read's grid is a REGISTERED ladder instrument; sha-gated on the scorer "
+                         "bake (or, for a reference metric, name-gated on the peer cell). `dial` "
+                         "is never written — the canonical read stays exactly as it is")
     ap.add_argument("--set-block-profile", default=None, type=Path, metavar="BOARD_JSON",
                     help="BLOCK-PROFILE mode: compute the static feature-block fingerprint from "
                          "the fulleval's bake bytes (bake_block_profile --json, sha-gated) and "
@@ -944,11 +1145,16 @@ def main(argv=None) -> int:
     ap.add_argument("--bbp-bin", default=None,
                     help="bake_block_profile binary (default: $BBP_BIN or "
                          "target/release/bake_block_profile next to this repo)")
+    ap.add_argument("--self-test-graft-gaddr-ladder", action="store_true",
+                    help="run graft_gaddr_ladder's fixture self-test and exit (no files touched)")
     ap.add_argument("--self-test-graft-gaddr", action="store_true",
                     help="run graft_gaddr's fixture self-test and exit (no files touched)")
     ap.add_argument("--out-dir", default=DEFAULT_OUT, type=Path)
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
+
+    if a.self_test_graft_gaddr_ladder:
+        return self_test_graft_gaddr_ladder()
 
     if a.self_test_graft_gaddr:
         return self_test_graft_gaddr()
@@ -979,6 +1185,18 @@ def main(argv=None) -> int:
         bbp = a.bbp_bin or os.environ.get("BBP_BIN") or str(
             Path(__file__).resolve().parent.parent / "target/release/bake_block_profile")
         set_block_profile(a.set_block_profile, bbp, a.dry_run)
+        return 0
+
+    if a.graft_gaddr_ladder is not None:
+        if a.verdict or a.name or a.members or a.members_file:
+            ap.error("--graft-gaddr-ladder takes only --graft-into/--dry-run")
+        if a.graft_into is None:
+            ap.error("--graft-gaddr-ladder requires --graft-into <board.fulleval.json>")
+        if not a.graft_into.exists():
+            raise SystemExit(f"graft-gaddr-ladder: board file not found: {a.graft_into}")
+        if not a.graft_gaddr_ladder.exists():
+            raise SystemExit(f"graft-gaddr-ladder: gaddr json not found: {a.graft_gaddr_ladder}")
+        graft_gaddr_ladder(a.graft_into, a.graft_gaddr_ladder, a.dry_run)
         return 0
 
     if a.graft_gaddr is not None:
