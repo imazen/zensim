@@ -439,6 +439,50 @@ lane uses — not a retyped one.
 
 ---
 
+## 5b. DEVIATIONS FROM THIS PRE-REGISTRATION (recorded here, not buried)
+
+A pre-registration is only worth something if the deviations are written into
+it. Three, all decided before any wave cell was scored:
+
+**D-1 — the `rev2` axis is DROPPED.** Pre-registered as an arm axis; removed on
+five measured grounds from `benchmarks/rev2_refit_2026-09-06.md` (all five are
+in `benchmarks/best_of_all_2026-09-06.md` §4). The short form: on the fast class
+the revision is INERT (every Δ inside its own seed spread), its seed-matched
+paired bootstrap SIGN-FLIPS with all three CIs excluding zero, only 3 of 6
+groups are substitutable so the arm is 42.6 % in-era, its transform screen is
+era-bound, and the two candidate rev2 safesyn tables differ on 51.2 % of cells
+over an **unadjudicated AVIF decoder era** under an AVIF backend HOLD. Running
+it would have spent half the wave measuring a known-inert, structurally
+confounded axis on an input era nobody has ruled on.
+
+**D-2 — `E_plainlad` is ADDED** with the freed budget: the control plus the
+ladder hinge and **no** architecture change. Without it, a win by
+`nonneg + ladder` cannot be attributed to either half. This is a strengthening
+of the design, and it is exactly what the rev2 budget bought.
+
+**D-3 — the capacity axis is asymmetric.** Pre-registered as `{H32, H128}`
+across all arms. Run as H128 for every arm plus H32 for the constrained arm only
+(`F_nonneg32`). Capacity is MEASURED not to be a lever on this class (composite
+moves −0.0038…+0.0021 across six set×width pairs, inside every per-seed spread),
+so a full H32 replication would double the wave to re-measure a known null. The
+constraint cost is read at MATCHED capacity (H128 vs H128), which is what the
+confound control was for; `F_nonneg32` is a bytes/speed variant, not a control.
+
+Not deviations, but worth stating because the plan implied otherwise:
+
+- **`--ladder-hinge` is `--tv-weight`.** The plan already said this; the wave
+  confirms the owner needed two extensions first (`--tv-margin` on the plain
+  path, and polarity-awareness), and those landed.
+- **`zentrain.feature_ids` is stamped by `densify`, not the trainer.** The plan
+  listed trainer-side stamping as an A-item; it is not the trainer's job and
+  adding it would have been a duplicate. `densify` runs in the wave as a
+  servability artifact.
+- **The SCORED bake is the PACKED one, not the densified one** — MEASURED, see
+  `benchmarks/best_of_all_2026-09-06.md` §5.1(b): a densified 228-caller bake
+  reads C3/C4/C5/C6 as NOT MEASURED because every registered probe is 372-wide.
+
+---
+
 ## 6. PHASE C — gates (all pre-registered; none may be relaxed)
 
 **The bar moved after several of the records the brief cites were written, and
