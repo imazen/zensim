@@ -19,7 +19,10 @@ gpu-wgpu = ["zensim-train-gpu/gpu-wgpu"]
 gpu-cpu  = ["zensim-train-gpu/gpu-cpu"]
 
 [dependencies]
-zensim = { path = "../zensim", features = ["training"] }
+# `corruption-head`: the ZCTH evaluator + the ONE owner of the deploy
+# composition, which `bake_verdict` and `corrhead_parity` both consume
+# rather than re-implementing (docs/PLAN_CORRHEAD_SERVING_2026-09-06.md).
+zensim = { path = "../zensim", features = ["training", "corruption-head"] }
 zensim-experimental = { path = "../zensim-experimental" }
 zensim-train-core = { path = "../zensim-train-core" }
 zensim-train-gpu = { path = "../zensim-train-gpu" }

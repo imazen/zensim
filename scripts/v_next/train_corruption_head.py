@@ -87,7 +87,7 @@ for _tvar in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
               "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS", "BLIS_NUM_THREADS"):
     os.environ[_tvar] = "1"
 
-import argparse, json, subprocess, struct
+import argparse, json, subprocess, struct, sys
 import numpy as np, pyarrow.parquet as pq
 import threadpoolctl
 from sklearn.linear_model import LogisticRegression
@@ -142,8 +142,169 @@ def make_classifier(name="logistic", seed=0):
                      f"(logistic | mlp32 | mlp64_32 | hgb)")
 
 
+def _sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sklearn_version():
+    import sklearn
+    return sklearn.__version__
+
+
 def can_bake(name):
-    return name == "logistic"
+    """Forms that have an EXPORTER. Widened 2026-09-06: `logistic` bakes ZNPR
+    v3 via `emit_znpr` (byte-identical default path, unchanged), `hgb` bakes
+    ZCTH v1 via `emit_zcth`. The MLP forms still have no wire format and are
+    still refused loudly rather than emitted wrong."""
+    return name in ("logistic", "hgb")
+
+
+# ---- ZCTH v1: the corruption head's OWN wire format (2026-09-06) ----------
+# Reader + full format spec: `zensim/src/corruption_head.rs`.
+# Decision + reasoning: `docs/PLAN_CORRHEAD_SERVING_2026-09-06.md` section 1.
+ZCTH_MAGIC = b"ZCTH"
+ZCTH_VERSION = 1
+ZCTH_HEADER_LEN = 120
+ZCTH_FLAG_ISOTONIC = 1 << 0
+ZCTH_FLAG_SCALER = 1 << 1
+ZCTH_NODE_LEAF = 1 << 0
+ZCTH_NODE_MISSING_LEFT = 1 << 1
+
+
+def _fnv1a64(b):
+    h = 0xCBF29CE484222325
+    for x in b:
+        h = ((h ^ x) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_knots):
+    """The canonical shape descriptor, byte-for-byte what
+    `corruption_head::schema_descriptor` builds. Covers SHAPE and the read set,
+    never the fitted numbers: the hash answers "is this structurally the head I
+    think it is?", while a changed threshold is a DIFFERENT model that must get
+    a different file, not a corrupted one."""
+    import struct as _s
+    d = bytearray(ZCTH_MAGIC)
+    d += _s.pack("<H", ZCTH_VERSION)
+    d += _s.pack("<IIII", caller_width, n_declared, n_trees, n_nodes)
+    d += _s.pack("<f", clip)
+    for i in ids:
+        d += _s.pack("<H", int(i))
+    d += _s.pack("<I", n_knots)
+    return _fnv1a64(bytes(d))
+
+
+def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
+              deadband_t, provenance):
+    """Emit a gradient-boosted-tree corruption head as a ZCTH v1 file.
+
+    The mirror of `emit_znpr`, and the reason `can_bake` is no longer
+    `name == "logistic"`. Every field is copied out of the fitted estimator;
+    NOTHING is re-fit, re-quantized or re-parameterized here, because the whole
+    point of the theory lane's result is that the model FORM is the result.
+
+    Refusals, all loud, all for a reason a wrong number would otherwise hide:
+
+      * a categorical split -- `HistGradientBoostingClassifier` can encode one
+        as a bitset the format has no room for. Our features are all continuous
+        and `categorical_features` is never set, so this cannot fire today; it
+        exists so it cannot fire SILENTLY tomorrow.
+      * `n_trees_per_iteration_ != 1` -- multiclass. The head is binary by
+        construction (corrupt vs honest) and a multiclass ensemble would need a
+        per-class raw vector the deadband has no meaning for.
+      * a declared feature id at or past `caller_width` -- the reader refuses it
+        too, but catching it here names the position instead of the byte.
+    """
+    import struct as _s
+    import numpy as _np
+
+    if getattr(clf, "n_trees_per_iteration_", 1) != 1:
+        raise SystemExit(f"ZCTH is binary-only; this estimator emits "
+                         f"{clf.n_trees_per_iteration_} trees per iteration")
+    preds = [pl[0] for pl in clf._predictors]
+    for t, pr in enumerate(preds):
+        if int(pr.nodes["is_categorical"].sum()) != 0:
+            raise SystemExit(f"ZCTH v1 has no categorical-split encoding; tree "
+                             f"{t} has {int(pr.nodes['is_categorical'].sum())}")
+
+    ids = [int(i) for i in feat_idx]
+    for pos, i in enumerate(ids):
+        if not (0 <= i < caller_width):
+            raise SystemExit(f"declared id[{pos}] = f{i} outside caller width "
+                             f"{caller_width}")
+
+    tree_offsets, node_blob, n_nodes = [0], bytearray(), 0
+    for pr in preds:
+        nodes = pr.nodes
+        for n in nodes:
+            flags = 0
+            if int(n["is_leaf"]):
+                flags |= ZCTH_NODE_LEAF
+            if int(n["missing_go_to_left"]):
+                flags |= ZCTH_NODE_MISSING_LEFT
+            node_blob += _s.pack("<dIIIId",
+                                 float(n["num_threshold"]),
+                                 int(n["left"]), int(n["right"]),
+                                 int(n["feature_idx"]), flags,
+                                 float(n["value"]))
+        n_nodes += len(nodes)
+        tree_offsets.append(n_nodes)
+
+    iso_x = _np.asarray(iso.X_thresholds_, dtype=_np.float64) if iso is not None else _np.empty(0)
+    iso_y = _np.asarray(iso.y_thresholds_, dtype=_np.float64) if iso is not None else _np.empty(0)
+    baseline = float(_np.ravel(clf._baseline_prediction)[0])
+
+    def f64s(v):
+        return _np.asarray(v, dtype=_np.float64).tobytes(order="C")
+
+    body, secs = bytearray(), []
+
+    def push(data):
+        off = ZCTH_HEADER_LEN + len(body)
+        body.extend(data)
+        secs.append((off, len(data)))
+
+    push(b"".join(_s.pack("<H", i) for i in ids))
+    push(f64s(mean))
+    push(f64s(scale))
+    push(b"".join(_s.pack("<I", o) for o in tree_offsets))
+    push(bytes(node_blob))
+    push(iso_x.tobytes(order="C"))
+    push(iso_y.tobytes(order="C"))
+    push(json.dumps(provenance, sort_keys=True).encode("utf-8"))
+
+    flags = ZCTH_FLAG_SCALER | (ZCTH_FLAG_ISOTONIC if len(iso_x) else 0)
+    schema = zcth_schema_hash(caller_width, len(ids), len(preds), n_nodes,
+                              float(clip), ids, len(iso_x))
+    h = bytearray(ZCTH_HEADER_LEN)
+    h[0:4] = ZCTH_MAGIC
+    h[4:6] = _s.pack("<H", ZCTH_VERSION)
+    h[6:8] = _s.pack("<H", flags)
+    h[8:16] = _s.pack("<Q", schema)
+    h[16:20] = _s.pack("<I", caller_width)
+    h[20:24] = _s.pack("<I", len(ids))
+    h[24:28] = _s.pack("<I", len(preds))
+    h[28:32] = _s.pack("<I", n_nodes)
+    h[32:40] = _s.pack("<d", baseline)
+    h[40:48] = _s.pack("<d", float(deadband_t))
+    h[48:52] = _s.pack("<f", float(clip))
+    for k, (off, ln) in enumerate(secs):
+        h[56 + k * 8: 64 + k * 8] = _s.pack("<II", off, ln)
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "wb") as f:
+        f.write(bytes(h) + bytes(body))
+    print(f"BAKED (ZCTH v1) -> {out_path} ({os.path.getsize(out_path)} B; "
+          f"caller width {caller_width}, reads {len(ids)}; {len(preds)} trees / "
+          f"{n_nodes} nodes; schema {schema:#018x}; deadband P>{deadband_t}, "
+          f"i.e. score < {100.0 * (1.0 - deadband_t):g})")
+    return out_path
 
 
 def load_X(path, idx, extra=()):
@@ -306,6 +467,15 @@ def main():
                          "`bake_verdict --corruption-head` can score it (that flag "
                          "takes a BAKE, never the JSON — which is why no 372 head "
                          "has ever been through the gate). Needs zenpredict-bake.")
+    ap.add_argument("--deadband-t", type=float, default=None,
+                    help="the deadband the BAKE carries, overriding the "
+                         "heuristic recommendation (lowest T with severe-honest "
+                         "FP < 1%%). The heuristic is form-dependent -- it "
+                         "returns 0.9 for the logistic head and 0.5 for hgb, "
+                         "whose severe FP is already under 1%% at 0.5 -- while "
+                         "the REGISTERED operating point for the deploy "
+                         "composition is T=0.9. Unset leaves both the value and "
+                         "the logistic bake's bytes exactly as they were.")
     ap.add_argument("--bake-bin", default=os.path.expanduser(
                         "~/work/zen/zenanalyze/target/release/zenpredict-bake"))
     ap.add_argument("--no-broad-honest", action="store_true",
@@ -548,6 +718,12 @@ def main():
         if row.get("fp_severe_honest", 1.0) < 0.01:
             rec = row["T"]; break
     metrics["recommended_deadband_T"] = rec
+    # What the BAKE carries. Kept separate from `rec` so `metrics.json` still
+    # reports the heuristic's own answer and the override is visible as an
+    # override rather than as a silently different recommendation.
+    bake_t = rec if a.deadband_t is None else a.deadband_t
+    if a.deadband_t is not None:
+        print(f"deadband: bake carries T={bake_t} (heuristic recommended {rec})")
 
     # --- PERSIST durably to block storage: portable head + calibration + metrics + manifest ---
     from sklearn.isotonic import IsotonicRegression
@@ -562,36 +738,68 @@ def main():
     head = {"nfeat": len(FEAT_IDX), "feat_idx": [int(i) for i in FEAT_IDX],
             "model": a.model,
             "mean": sc.mean_.tolist(), "scale": sc.scale_.tolist(),
-            "coef": lr.coef_[0].tolist() if can_bake(a.model) else None,
-            "intercept": float(lr.intercept_[0]) if can_bake(a.model) else None, "clip": 8.0,
+            # LINEAR-only fields. `can_bake` no longer implies "has coef_"
+            # (ZCTH bakes trees), so the test is the model form itself.
+            "coef": lr.coef_[0].tolist() if a.model == "logistic" else None,
+            "intercept": (float(lr.intercept_[0]) if a.model == "logistic"
+                          else None), "clip": 8.0,
             "calibration": {"x": iso.X_thresholds_.tolist(), "y": iso.y_thresholds_.tolist()},
             "recommended_deadband_T": rec,
             "deploy": "x=feat[feat_idx]; P=isotonic(sigmoid(clip((x-mean)/scale,±8)·coef+intercept)); "
                       "gate=100 unless P>recommended_deadband_T; final=min(perceptual,gate)"}
     json.dump(head, open(a.out, "w"))
     if a.bake_out:
-        u_tr = -_df(Z(X[tr]))
-        emit_znpr(a.bake_out, a.bake_bin, CORPUS_NFEAT, FEAT_IDX,
-                  sc.mean_[:], sc.scale_[:], lr.coef_[0], float(lr.intercept_[0]),
-                  8.0, iso, float(u_tr.min()), float(u_tr.max()),
-                  {"corpus": a.corpus, "corpus_nfeat": CORPUS_NFEAT,
-                   "negrich": a.negrich, "feat_range": a.feat_range,
-                   "n_features": len(FEAT_IDX), "seed": 0,
-                   "recommended_deadband_T": rec,
-                   "broad_honest": [list(b) for b in broad]})
+        def prov(w, native):
+            """Provenance for one emitted width.
+
+            The LOGISTIC shape is frozen: the native-width bake carries no
+            `caller_width` key and no `model`/`sklearn` keys, exactly as it did
+            before ZCTH existed, because `zentrain.repro` is serialized INTO the
+            bake and any added key changes its bytes. `scripts/
+            verify_corrhead_logistic_identity.sh` gates that byte-identity, so
+            this is a checked property rather than a comment. ZCTH is a new
+            format with nothing to preserve, so it carries the fuller record.
+            """
+            d = {"corpus": a.corpus, "corpus_nfeat": CORPUS_NFEAT,
+                 "negrich": a.negrich, "feat_range": a.feat_range,
+                 "n_features": len(FEAT_IDX), "seed": 0,
+                 "recommended_deadband_T": bake_t,
+                 "broad_honest": [list(b) for b in broad]}
+            if not native:
+                d["caller_width"] = w
+            if a.model != "logistic":
+                d.update(caller_width=w, model=a.model,
+                         sklearn=_sklearn_version(),
+                         split_out=a.split_out, argv=sys.argv[1:],
+                         corpus_sha256=_sha256(a.corpus),
+                         feature_set_id=f"basic+peaks@w{CORPUS_NFEAT}"
+                                        f"/rev1#f0_{max(FEAT_IDX)}")
+            return d
+
+        widths = [CORPUS_NFEAT]
         for w in (a.bake_extra_width or []):
             if w < (max(FEAT_IDX) + 1):
                 raise SystemExit(f"--bake-extra-width {w} is narrower than the "
                                  f"head's highest read line f{max(FEAT_IDX)}")
-            stem, ext = os.path.splitext(a.bake_out)
-            emit_znpr(f"{stem}_w{w}{ext}", a.bake_bin, w, FEAT_IDX,
-                      sc.mean_[:], sc.scale_[:], lr.coef_[0], float(lr.intercept_[0]),
-                      8.0, iso, float(u_tr.min()), float(u_tr.max()),
-                      {"corpus": a.corpus, "corpus_nfeat": CORPUS_NFEAT,
-                       "negrich": a.negrich, "feat_range": a.feat_range,
-                       "n_features": len(FEAT_IDX), "seed": 0, "caller_width": w,
-                       "recommended_deadband_T": rec,
-                       "broad_honest": [list(b) for b in broad]})
+            widths.append(w)
+
+        # The output path for the FIRST (native) width is `--bake-out` verbatim;
+        # every extra width lands next to it as `<stem>_w<width><ext>`, which is
+        # the convention `bake_verdict --corruption-head` and the d228 artifacts
+        # already speak.
+        stem, ext = os.path.splitext(a.bake_out)
+        for k, w in enumerate(widths):
+            path = a.bake_out if k == 0 else f"{stem}_w{w}{ext}"
+            if a.model == "logistic":
+                u_tr = -_df(Z(X[tr]))
+                emit_znpr(path, a.bake_bin, w, FEAT_IDX,
+                          sc.mean_[:], sc.scale_[:], lr.coef_[0],
+                          float(lr.intercept_[0]), 8.0, iso,
+                          float(u_tr.min()), float(u_tr.max()),
+                          prov(w, k == 0))
+            else:
+                emit_zcth(path, w, FEAT_IDX, sc.mean_[:], sc.scale_[:], 8.0,
+                          lr, iso, bake_t, prov(w, k == 0))
     json.dump(metrics, open(os.path.join(outdir, "metrics.json"), "w"), indent=1)
     try:
         commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()

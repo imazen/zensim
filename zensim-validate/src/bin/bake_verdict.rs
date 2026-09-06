@@ -930,6 +930,12 @@ struct Args {
     /// `P(corruption) > T`; a head baked to emit `100*(1-P)` turns that
     /// into `head_score < 100*(1-T)`, so `T = 0.9` is `10.0` here.
     corruption_head_threshold: f64,
+    /// Whether the caller passed `--corruption-head-threshold` explicitly. A
+    /// ZCTH head carries its own baked deadband; when the caller did not ask
+    /// for a specific one, the head's own value wins so the report and the
+    /// file agree by construction. A ZNPR head has no baked deadband, so it
+    /// always uses the flag.
+    corruption_head_threshold_set: bool,
     /// `--negtail-probe <parquet>`: pinned negative-tail probe (`entry, f0..`)
     /// for the G-ADDR floor axis — rows whose reference metric is genuinely
     /// negative, so "does the dial still go below zero, and as deep as the
@@ -1102,6 +1108,15 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         });
     let mut corruption_head: Option<PathBuf> = None;
     let mut corruption_head_threshold: f64 = 10.0;
+    // Tracked so a ZCTH head can use ITS OWN baked deadband when the caller
+    // did not ask for a specific one. The two are the same operating point
+    // (T = 0.9) but not the same f64: the flag's default is the literal
+    // `10.0`, while the head computes `100 * (1 - 0.9)` =
+    // 9.999999999999998. Comparing a score against the wrong one of those
+    // can only ever move a row that lands between them — which is exactly
+    // the kind of one-row difference that makes two records disagree for a
+    // reason nobody can find later.
+    let mut corruption_head_threshold_set = false;
     let mut negtail_probe: Option<PathBuf> = None;
     let mut identity_probe: Option<PathBuf> = None;
     let mut dial_peer_scores: Option<(String, PathBuf)> = None;
@@ -1345,6 +1360,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 corruption_head_threshold = v
                     .parse()
                     .map_err(|_| "--corruption-head-threshold must be a number")?;
+                corruption_head_threshold_set = true;
             }
             "--corruption-head" => {
                 let v = args.next().ok_or("--corruption-head requires <bake.bin>")?;
@@ -1582,6 +1598,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         corruption_grid,
         corruption_head,
         corruption_head_threshold,
+        corruption_head_threshold_set,
         negtail_probe,
         identity_probe,
         dial_peer_scores,
@@ -1622,6 +1639,89 @@ const SCORE_CHUNK_ROWS: usize = 512;
 /// Below this many rows the sequential path is used — spawning tasks for
 /// a 100-row grid costs more than the forward does.
 const SCORE_PARALLEL_MIN_ROWS: usize = 2048;
+
+/// A companion corruption head, in either of the two wire formats it can
+/// legitimately arrive in.
+///
+/// The two are told apart by MAGIC, not by file extension or by trying one
+/// parser and falling back — a ZNPR dial bake handed to `--corruption-head` by
+/// mistake must be a loud refusal, and a ZCTH tree head must never be run
+/// through the MLP forward. That is the whole reason the tree got its own
+/// magic instead of hiding in a ZNPR metadata entry
+/// (`docs/PLAN_CORRHEAD_SERVING_2026-09-06.md` section 1).
+enum CompanionHead {
+    /// The incumbent logistic + isotonic head, baked as ZNPR v3. Path
+    /// unchanged, byte-for-byte, from before ZCTH existed.
+    Znpr(Box<Model>),
+    /// The gradient-boosted tree head, `zensim::corruption_head`.
+    Tree(Box<zensim::corruption_head::CorruptionHead>),
+}
+
+impl CompanionHead {
+    fn kind_label(&self) -> &'static str {
+        match self {
+            Self::Znpr(_) => "ZNPR linear",
+            Self::Tree(_) => "ZCTH tree ensemble",
+        }
+    }
+
+    fn caller_input_width(&self) -> usize {
+        match self {
+            Self::Znpr(m) => m.caller_input_width(),
+            Self::Tree(h) => h.caller_input_width(),
+        }
+    }
+
+    /// The head's own baked deadband in score units, when it has one. ZNPR
+    /// carries no deadband section, so a linear head always defers to the
+    /// `--corruption-head-threshold` flag.
+    fn baked_deadband_score(&self) -> Option<f64> {
+        match self {
+            Self::Znpr(_) => None,
+            Self::Tree(h) => Some(h.deadband_score()),
+        }
+    }
+
+    /// Score every grid row, in the dial's units (higher = better quality).
+    fn score_grid(&self, rows: &[Vec<f64>]) -> Vec<f64> {
+        match self {
+            Self::Znpr(m) => {
+                let tf = m.has_nontrivial_feature_transforms();
+                let n = m.caller_input_width();
+                score_grid_one(m, tf, n, rows)
+            }
+            Self::Tree(h) => rows
+                .iter()
+                .map(|r| {
+                    h.score_f64(r)
+                        .unwrap_or_else(|e| panic!("corruption head: {e}"))
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Sniff the magic and parse accordingly. Neither magic → refuse, naming what
+/// was seen, rather than reporting a parser's own error for a file that was
+/// never that format.
+fn load_companion_head(path: &std::path::Path) -> Result<CompanionHead, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    match bytes.get(..4) {
+        Some(m) if m == zensim::corruption_head::MAGIC => {
+            zensim::corruption_head::CorruptionHead::from_bytes(&bytes)
+                .map(|h| CompanionHead::Tree(Box::new(h)))
+                .map_err(|e| e.to_string())
+        }
+        Some(b"ZNPR") => Model::from_bytes(&bytes)
+            .map(|m| CompanionHead::Znpr(Box::new(m)))
+            .map_err(|e| format!("{e:?}")),
+        Some(m) => Err(format!(
+            "`{}` starts with {m:?}; a corruption head is either ZNPR (linear) or ZCTH (tree)",
+            path.display()
+        )),
+        None => Err(format!("`{}` is shorter than 4 bytes", path.display())),
+    }
+}
 
 fn score_grid_one(
     model: &Model,
@@ -5401,6 +5501,11 @@ Run the dedicated q-sweep harness for those._\n",
     let mut corruption_stats: Option<eval_report::CorruptionStats> = None;
     let mut corruption_head_stats: Option<eval_report::CorruptionStats> = None;
     let mut corruption_deploy_stats: Option<eval_report::CorruptionStats> = None;
+    // The deadband ACTUALLY applied by the composition. Not always
+    // `args.corruption_head_threshold`: a ZCTH head carries its own baked
+    // value and uses it unless the caller asked for a specific one, so
+    // reporting the flag would describe a threshold the run did not use.
+    let mut corruption_deploy_threshold: f64 = args.corruption_head_threshold;
     if args.corruption_grid.exists() {
         match parquet_loader::load_labeled_grid(&args.corruption_grid) {
             Ok(grid) => {
@@ -5433,21 +5538,17 @@ Run the dedicated q-sweep harness for those._\n",
                 // freeze gate reads the HEAD's numbers; the dial-alone section
                 // above stays for honesty.
                 if let Some(head_path) = &args.corruption_head {
-                    match std::fs::read(head_path)
-                        .map_err(|e| e.to_string())
-                        .and_then(|b| Model::from_bytes(&b).map_err(|e| format!("{e:?}")))
-                    {
+                    match load_companion_head(head_path) {
                         Ok(head) if head.caller_input_width() == grid.n_features => {
-                            let head_tf = head.has_nontrivial_feature_transforms();
-                            let head_n = head.caller_input_width();
-                            let scores = score_grid_one(&head, head_tf, head_n, &grid.feature_rows);
+                            let scores = head.score_grid(&grid.feature_rows);
                             let stats = eval_report::corruption_gate(&grid.label, &scores);
                             buf.push_str(&eval_report::corruption_gate_section(
                                 &stats,
                                 &args.corruption_grid.display().to_string(),
                                 &format!(
-                                    "Corruption gate — companion head `{}` (the shipping owner)",
-                                    basename(head_path)
+                                    "Corruption gate — companion head `{}` ({}, the shipping owner)",
+                                    basename(head_path),
+                                    head.kind_label()
                                 ),
                             ));
                             corruption_head_stats = Some(stats);
@@ -5458,14 +5559,26 @@ Run the dedicated q-sweep harness for those._\n",
                             // out-rank its own honest anchor. This is the
                             // number the product sees; the two sections above
                             // are each half of it.
-                            let thr = args.corruption_head_threshold;
+                            // A ZCTH head carries its own baked deadband;
+                            // an explicit flag always wins. See
+                            // `Args::corruption_head_threshold_set` for why
+                            // the two are the same operating point and not
+                            // the same f64.
+                            let thr = match head.baked_deadband_score() {
+                                Some(t) if !args.corruption_head_threshold_set => t,
+                                _ => args.corruption_head_threshold,
+                            };
                             if let Some(dial) = dial_scores.as_ref() {
+                                // ONE owner for the composition — the same
+                                // function the runtime companion applies, so
+                                // a verdict and a served score cannot drift.
                                 let composed: Vec<f64> = dial
                                     .iter()
                                     .zip(scores.iter())
-                                    .map(|(&d, &h)| if h < thr { d.min(0.0) } else { d })
+                                    .map(|(&d, &h)| zensim::corruption_head::gate_score(d, h, thr))
                                     .collect();
                                 let cstats = eval_report::corruption_gate(&grid.label, &composed);
+                                corruption_deploy_threshold = thr;
                                 let title = format!(
                                     "Corruption gate - DEPLOY composition `min(dial, gate)` (head `{}`, deadband head_score < {thr})",
                                     basename(head_path)
@@ -5484,10 +5597,11 @@ Run the dedicated q-sweep harness for those._\n",
                         }
                         Ok(head) => buf.push_str(&format!(
                             "\n## Corruption gate (head) — ⚠ SKIPPED (feature-count mismatch)\n\n\
-                             Grid `{}` has {} feature columns; head `{}` expects {}.\n",
+                             Grid `{}` has {} feature columns; head `{}` ({}) expects {}.\n",
                             args.corruption_grid.display(),
                             grid.n_features,
                             head_path.display(),
+                            head.kind_label(),
                             head.caller_input_width()
                         )),
                         Err(e) => buf.push_str(&format!(
@@ -5977,7 +6091,7 @@ Run the dedicated q-sweep harness for those._\n",
         let corruption_deploy = match &corruption_deploy_stats {
             Some(cs) => json!({
                 "head": args.corruption_head.as_ref().map(|p| basename(p)),
-                "threshold": args.corruption_head_threshold,
+                "threshold": corruption_deploy_threshold,
                 "n_triples": cs.n_triples,
                 "pass_q20": cs.pass_q20,
                 "pass_q10": cs.pass_q10,

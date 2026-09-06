@@ -458,18 +458,13 @@ def t6(d):
     log(f"T6 gate grid: {pos.sum()} corruption / {q10.sum()} q10 / {q20.sum()} q20, "
         f"{len(set(trip))} triples, 1 source")
 
-    from sklearn.isotonic import IsotonicRegression
-    from sklearn.preprocessing import StandardScaler
     rows, gate = [], []
     for m in ("logistic", "mlp32", "mlp64_32", "hgb"):
-        sc = StandardScaler().fit(d.Xs[d.tr])
-        Z = lambda M: np.clip(sc.transform(M), -8, 8)
-        clf = C.make_classifier(m).fit(Z(d.Xs[d.tr]), d.y[d.tr])
-        raw = lambda M: (clf.decision_function(Z(M)) if hasattr(clf, "decision_function")
-                         else np.log(np.clip(clf.predict_proba(Z(M))[:, 1], 1e-12, 1-1e-12) /
-                                     np.clip(1-clf.predict_proba(Z(M))[:, 1], 1e-12, 1-1e-12)))
-        pv = 1 / (1 + np.exp(-raw(d.Xs[d.va])))
-        iso = IsotonicRegression(out_of_bounds="clip").fit(pv, d.y[d.va])
+        # `fit_head` IS the body this loop used to inline, factored out
+        # 2026-09-06 so the ZCTH exporter fits the head the same way rather
+        # than a fifth way. Arithmetic-neutral: same calls, same order — and
+        # gated, not asserted (re-running t6 reproduces both TSVs exactly).
+        _sc, clf, iso, raw = C.fit_head(d.Xs, d.y, d.tr, d.va, model=m)
         pr = 1 / (1 + np.exp(-raw(Xg)))
         p = C.rank_break(iso.predict(pr), pr)
         rows.append(dict(arm=m, pauc5=C.pauc(p, pos, hon),

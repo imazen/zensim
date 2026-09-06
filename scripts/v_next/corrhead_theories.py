@@ -205,6 +205,34 @@ def standardize(Xtr, Xall, clip=8.0):
     return np.clip(sc.transform(Xall), -clip, clip)
 
 
+def fit_head(Xall, y, tr, va, model="logistic", seed=0):
+    """Fit the SHIPPED head shape and return the three fitted objects.
+
+    Factored out 2026-09-06 so that `fit_probs`, `t6`'s gate-grid scoring and
+    the ZCTH `export` command all fit the head ONE way instead of three. The
+    body is the code `t6` already ran, in the same order with the same calls,
+    so the refactor is arithmetic-neutral by construction and gated by
+    re-running `t6` and diffing its TSVs (see the serving record).
+
+    Returns `(sc, clf, iso, raw)` where `raw(M)` is the estimator's own
+    decision function over RAW (unstandardized) rows, so a caller holding a
+    matrix that was never part of `Xall` -- the gate grid -- can score it
+    without rebuilding the scaler.
+    """
+    from sklearn.isotonic import IsotonicRegression
+    from sklearn.preprocessing import StandardScaler
+    sc = StandardScaler().fit(Xall[tr])
+    Z = lambda M: np.clip(sc.transform(M), -8.0, 8.0)          # noqa: E731
+    clf = make_classifier(model, seed=seed).fit(Z(Xall[tr]), y[tr])
+    raw = lambda M: (clf.decision_function(Z(M))               # noqa: E731
+                     if hasattr(clf, "decision_function")
+                     else np.log(np.clip(clf.predict_proba(Z(M))[:, 1], 1e-12, 1 - 1e-12) /
+                                 np.clip(1 - clf.predict_proba(Z(M))[:, 1], 1e-12, 1 - 1e-12)))
+    pv = 1.0 / (1.0 + np.exp(-raw(Xall[va])))
+    iso = IsotonicRegression(out_of_bounds="clip").fit(pv, y[va])
+    return sc, clf, iso, raw
+
+
 def fit_probs(Xall, y, tr, va, model="logistic", seed=0, calibrate=True):
     """Fit `model` on train, isotonic-calibrate on val, return P over all rows.
 
@@ -357,6 +385,59 @@ def write_tsv(path, rows, cols=None):
     log(f"wrote {path}")
 
 
+def export(model="hgb", widths=(372, 944), deadband_t=0.9):
+    """Export THIS lane's own fitted head through the owner's ZCTH writer.
+
+    Exists because a fresh training run through `train_corruption_head.py`
+    CANNOT bit-reproduce the trees measured here, and saying so is cheaper than
+    discovering it: `HistGradientBoostingClassifier(early_stopping=True)` draws
+    its internal validation split with `train_test_split(random_state=0)` over
+    the rows **in the order they are stacked**, and the owner permutes its
+    broad-honest block (`rng.choice(n, n, replace=False)`) while `prep()` does
+    not. Same rows, different order, different trees.
+
+    So the artifact the serving lane gates end-to-end is the model whose gate
+    numbers are published in `t6_gate_pass.tsv`, exported by the owner's
+    `emit_zcth` -- the format writer stays single-owner even though the fit
+    lives here.
+    """
+    import train_corruption_head as OWN            # THE owner (format writer)
+    d = D()
+    log(f"export: fitting {model} on the frozen split")
+    sc, clf, iso, _raw = fit_head(d.Xs, d.y, d.tr, d.va, model=model)
+    ids = list(range(NFEAT_SLICE))
+    for w in widths:
+        path = f"{OUT}/corrhead_{model}_theoryfit_w{w}.zcth"
+        OWN.emit_zcth(path, w, ids, sc.mean_, sc.scale_, 8.0, clf, iso,
+                      deadband_t,
+                      {"lane": "corrserve", "fit": "corrhead_theories.export",
+                       "model": model, "sklearn": OWN._sklearn_version(),
+                       "dataset": CACHE, "gate_grid": GATE, "caller_width": w,
+                       "feature_slice": f"f0..f{NFEAT_SLICE - 1}",
+                       "era": "rev1",
+                       "split": "corruption-head-2026-09-05/d228/split.tsv",
+                       "deadband_t": deadband_t,
+                       "record": "benchmarks/corruption_head_serving_2026-09-06.md"})
+    # The parity vectors the Rust evaluator is gated against: raw decision
+    # function AND calibrated probability, on the frozen TEST fold plus the
+    # whole gate grid, in f64.
+    z = np.load(f"{OUT}/gate_rev1.npz", allow_pickle=False)
+    Xg = z["X"][:, :NFEAT_SLICE].astype(np.float64)
+    Zc = lambda M: np.clip(sc.transform(M), -8.0, 8.0)         # noqa: E731
+    out = {}
+    for name, X in (("test", d.Xs[d.te]), ("gate", Xg)):
+        rawv = clf.decision_function(Zc(X))
+        praw = 1.0 / (1.0 + np.exp(-rawv))
+        out[f"{name}_X"] = X.astype(np.float64)
+        out[f"{name}_raw"] = rawv.astype(np.float64)
+        out[f"{name}_p"] = iso.predict(praw).astype(np.float64)
+    out["gate_entry"] = z["entry"].astype(str)
+    out["gate_dial"] = z["dial"].astype(np.float64)
+    np.savez(f"{OUT}/parity_{model}.npz", **out)
+    log(f"export: parity vectors -> {OUT}/parity_{model}.npz "
+        f"(test {out['test_X'].shape}, gate {out['gate_X'].shape})")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tests", nargs="+")
@@ -365,6 +446,8 @@ def main():
     for t in a.tests:
         if t == "prep":
             prep()
+        elif t == "export":
+            export()
         else:
             import corrhead_tests
             getattr(corrhead_tests, t)(D())
