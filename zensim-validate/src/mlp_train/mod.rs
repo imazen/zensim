@@ -2200,6 +2200,24 @@ pub fn train_mlp_strategy(
     // and produces a bake byte-identical to a no-triplet run. Measured
     // 2026-07-16: depth_v6 (--triplet-weight 0.5, plain 2-layer) == depth_v2
     // byte-for-byte. Fail loud instead of throwing the flag away.
+    // Same silent-no-op class as the guards above, and missed until 2026-09-06:
+    // `use_2layer` / `use_skip` are read at exactly two lines in this file, both
+    // inside `train_mlp_per_sample_alpha_head`. A run that asked for depth 2 or a
+    // skip connection on any other head got a 1-layer, skip-less net and a bake
+    // byte-identical to one that never asked.
+    for (name, on) in [
+        ("--n-hidden-layers >= 2", hyperparams.n_hidden_layers >= 2),
+        ("--skip-connection", hyperparams.skip_connection),
+    ] {
+        if on && !hyperparams.per_sample_alpha_head {
+            panic!(
+                "{name} is only wired on the per_sample_alpha_head path; this run has \
+                 per_sample_alpha_head=false, so the architecture flag would be \
+                 silently ignored and the bake would be byte-identical to a run that \
+                 never set it. Add --per-sample-alpha-head, or drop the flag."
+            );
+        }
+    }
     let triplet_requested = hyperparams.triplet_weight > 0.0
         && triplets.map(|t| !t.responses.is_empty()).unwrap_or(false);
     if triplet_requested && !hyperparams.per_sample_alpha_head {
