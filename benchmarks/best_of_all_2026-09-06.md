@@ -474,7 +474,49 @@ than the shipped dial on the axis C1 measures, and **the architecture makes it
 worse, not better** (0.94868 → 0.93040 at the matched seed). That is the gap the
 ladder arms exist to close, and it is the honest reading of the cost so far.
 
-*(RESULTS — filled when the wave lands.)*
+### 5.5 The constrained arm at k = 3 — the contract is bought, and here is the price
+
+| arm | k | CID22 | KonJND \|·\| | AIC-3 | composite | contract | A7r | identity outside | above-identity |
+|---|--:|--:|--:|--:|--:|:--:|--:|--:|--:|
+| `A_plain` (control) | 3 | 0.8891 ±0.0042 | 0.4997 ±0.0117 | 0.7974 ±0.0059 | 0.8729 ±0.0008 | **4/6** | 5.0 | 38.0 | 1491.3 |
+| `B_nonneg` | 3 | 0.8800 ±0.0049 | 0.4987 ±0.0251 | 0.7878 ±0.0072 | 0.8646 ±0.0020 | **6/6** | 5.0 | **0.0** | **0.0** |
+| shipped D | — | 0.86333 | 0.53670 | 0.77700 | 0.82444 | **6/6** | **0.0** | 0 | 0 |
+
+**CONTRACT 6/6 ON ALL THREE SEEDS.** `identity outside` and `above-identity` are
+`0.0` as *means over three seeds*, i.e. every seed, not a lucky draw — which is
+what "by construction" is supposed to mean and is the point of measuring it k=3.
+
+**THE CONSTRAINT COST, at matched seeds, capacity and features:**
+
+| axis | Δ (`B_nonneg` − `A_plain`) | control's own seed spread |
+|---|--:|--:|
+| CID22 | **−0.0091** | 0.0042 |
+| AIC-3 | **−0.0096** | 0.0059 |
+| composite | **−0.0083** | 0.0008 |
+| KonJND \|·\| | −0.0010 | 0.0117 |
+
+CID22, AIC-3 and composite all move by **more than the control's seed spread**,
+so the cost is real and not a draw. KonJND is a wash inside its own (large)
+spread. This is the number the plan pre-registered as "the finding either way",
+and it is: **contract 6/6 costs about 0.009 CID22.**
+
+For scale: `B_nonneg` still sits **+0.0167 CID22 over shipped D** while matching
+its contract. The blocker is not rank.
+
+**A7r is the blocker, and the architecture makes the floors WORSE.**
+
+| | rav1e | svt | jpeg | jxl | webp |
+|---|--:|--:|--:|--:|--:|
+| mentor bar | 0.6410 | 1.0000 | 0.6667 | 0.9615 | 1.0000 |
+| `A_plain` (k=3 mean) | 0.1538 | 0.7778 | 0.5470 | 0.4231 | 0.9658 |
+| `B_nonneg` (k=3 mean) | **0.1880** | 0.6068 | 0.4017 | 0.3205 | 0.8034 |
+
+One codec up, four down. §2.2 pre-registered that the architecture does not
+address A7r; this is stronger than "does not help" — the constraint **costs**
+floor representability on four of five codecs. Whatever the ladder arms do, that
+is the baseline they have to climb out of.
+
+*(RESULTS — ladder arms pending.)*
 
 ---
 
