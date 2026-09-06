@@ -730,6 +730,18 @@ struct Args {
     /// (via [`slot_720`]). Selected by `--regime 720` (and by `--regime 944`,
     /// which shares the slot mechanics).
     regime_720: bool,
+    /// True when the caller passed `--features-root` explicitly. When they
+    /// did, `--regime`'s NUMBER says nothing about the width being read (the
+    /// preset root is overridden), so the "can this regime carry the bake"
+    /// check must not fire on it — the frozen as-run LOO drivers pass
+    /// `--regime 720` for its corpora/grid preset while reading a 944 root.
+    features_root_explicit: bool,
+    /// True when the caller actually typed `--regime`. The WIDTH it names is
+    /// derived from the bake (`feature_set::derive_regime`), so the flag is
+    /// deprecated as a width selector and survives only because it also picks
+    /// the corpora list and the dial/corruption grids. Recorded so the run can
+    /// say so once, rather than guessing from the resolved defaults.
+    regime_flag_passed: bool,
     /// `--regime 944`: the SOTA-944 campaign preset — same slot mechanics as
     /// 720, but the defaults resolve to the ext944 roots/grids/per-pair source
     /// and the frozen campaign corpus list (see [`SOTA944_CORPORA`]). Only
@@ -1017,7 +1029,12 @@ DEFAULTS:\n\
                     (the CURRENT-extractor 372 root, default since 2026-08-30; the\n\
                     2026-05-15 root stays on disk as a valid STORED-ERA read)\n\
 \n\
-REGIMES (--regime 372|720|944):\n\
+REGIMES (--regime 372|720|944) — DEPRECATED as a width selector:\n\
+    The WIDTH is DERIVED from the bake and printed on every run\n\
+    (feature_set::derive_regime: the narrowest registered layout that\n\
+    carries every id it reads). A passed value that CANNOT carry the\n\
+    bake is REFUSED, not obeyed. The flag survives only because it also\n\
+    picks the corpora list and the dial/corruption grids.\n\
     372  (default) v1 feature space, 372col corpora\n\
     720  folded+append feature space; swaps unset root/grid defaults to the\n\
          720-wide variants and keeps only corpora with a 720 extraction\n\
@@ -1109,6 +1126,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     // here) — explicit flags always win over the preset.
     let mut regime_720 = false;
     let mut regime_944 = false;
+    let mut regime_flag_passed = false;
     let mut print_features_root = false;
     let mut cross_regime = false;
     let mut allow_unpopulated_slots = false;
@@ -1138,6 +1156,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 features_root_set = true;
             }
             "--regime" => {
+                regime_flag_passed = true;
                 let v = args.next().ok_or("--regime requires 372|720|944")?;
                 match v.as_str() {
                     "372" => {
@@ -1550,6 +1569,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         features_root,
         regime_720,
         regime_944,
+        regime_flag_passed,
+        features_root_explicit: features_root_set,
         print_features_root,
         per_pair_output,
         per_pair_refs,
@@ -4231,6 +4252,7 @@ fn main() -> ExitCode {
     // skipped for having a packed width. Identity bakes keep the exact
     // `n_features == n_inputs` rule they had.
     let gather_for_grids = CallerGather::for_model(&models[0]);
+
     if let Some((p, m)) = members
         .iter()
         .zip(models.iter())
@@ -4267,6 +4289,98 @@ fn main() -> ExitCode {
             root_regime.as_deref().unwrap_or("?")
         );
     }
+    // ── `--regime` is a DERIVED, PRINTED value ────────────────────────────
+    //
+    // The width a caller used to type is a FACT ABOUT THE BAKE: it is the
+    // narrowest registered layout that carries every id the bake reads, and
+    // the bake knows its own read set. `feature_set::derive_regime` is the one
+    // owner; a derived value cannot be typed wrong, and printing it on every
+    // run makes a verdict self-describing about the ruler it used — the same
+    // reason the features-root era note exists.
+    //
+    // The flag stays ACCEPTED (it also selects the corpora list and the
+    // dial/corruption grids, which the bake alone cannot decide), and a value
+    // that DISAGREES with the derivation is refused rather than obeyed. Two
+    // disagreements matter, and they are not symmetric:
+    //
+    //  * a NARROWER regime than the bake needs cannot carry its ids at all;
+    //  * a folded regime (720/924/944) ZEROES `f156..371`, so a bake that
+    //    reads that block is scored on structural fill there — the recorded
+    //    instance is shipped `B` reading CID22 **0.3862** against its true
+    //    **0.8764** under `--regime 944`.
+    //
+    // A WIDER regime that carries every id is legitimate and stays a note: the
+    // board's own era rows deliberately read 372-class bakes at the ext720
+    // root.
+    match zensim_validate::feature_set::derive_regime(&models[0]) {
+        Ok(d) => {
+            let effective = if args.regime_944 {
+                944
+            } else if args.regime_720 {
+                720
+            } else {
+                372
+            };
+            eprintln!(
+                "bake_verdict: regime — DERIVED {} (reads {} ids, highest f{}{}); \
+                 effective {effective}{}",
+                d.regime,
+                d.n_read,
+                d.max_read_id,
+                if d.reads_pool_block {
+                    ", incl. the f156..371 pool block"
+                } else {
+                    ""
+                },
+                if args.regime_flag_passed {
+                    "  [--regime is DEPRECATED as a width selector: the width is derived; the \
+                     flag now only picks the corpora/grid preset]"
+                } else {
+                    ""
+                }
+            );
+            // Only when the regime's PRESET ROOT is in effect: with an
+            // explicit `--features-root` the flag's number no longer names
+            // the width being read, and refusing on it would break the frozen
+            // as-run drivers that pass `--regime 720` for its corpora/grid
+            // preset while pointing at a 944 root.
+            if effective < d.regime && !args.features_root_explicit {
+                eprintln!(
+                    "bake_verdict: REFUSING — --regime {effective} cannot carry this bake: it reads \
+                     f{} and {effective} stops at f{}. The width is derivable from the bake \
+                     ({}); pass that or drop the flag.",
+                    d.max_read_id,
+                    effective - 1,
+                    d.regime
+                );
+                return ExitCode::from(2);
+            }
+            // ROOT-AWARE, exactly like the pre-existing 944 guard below: a
+            // `…pools` / `…carriers` root is 944 wide with f156..371 LIVE, so
+            // reading a pool-using bake there is sound. And `--regime 944` is
+            // left to that guard, which is the tested owner of this refusal at
+            // that width — this adds the same protection at 720/924, where
+            // nothing checked it.
+            if effective > d.regime
+                && d.reads_pool_block
+                && !args.cross_regime
+                && !root_block_live
+                && !args.regime_944
+            {
+                eprintln!(
+                    "bake_verdict: REFUSING — --regime {effective} is a FOLDED regime, which zeroes \
+                     f156..371, and this bake READS that block. Every number would be computed \
+                     from structural fill there (the recorded instance: shipped B, CID22 \
+                     0.3862 against its true 0.8764). Score it at --regime {} or pass \
+                     --cross-regime to state the cross-root read is intentional.",
+                    d.regime
+                );
+                return ExitCode::from(2);
+            }
+        }
+        Err(e) => eprintln!("bake_verdict: regime — NOT DERIVABLE ({e}); no width check made"),
+    }
+
     if args.regime_944 && !args.cross_regime && !root_block_live {
         for (p, m) in members.iter().zip(models.iter()) {
             match zensim_validate::block_profile::folded_root_conflict(m) {

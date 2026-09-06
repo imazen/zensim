@@ -452,6 +452,43 @@ pub fn profile(model: &Model) -> Result<BlockProfile, String> {
     let max_norm = norms.iter().cloned().fold(0.0f64, f64::max);
     let near = NEAR_ZERO_REL * max_norm;
 
+    // **The family table is in ID space, not position space.**
+    //
+    // `caller_line_norms` is indexed by layer-0 POSITION, and every family
+    // range below (`f156..372`, `f372..720`, …) is a range of FEATURE IDS.
+    // They are the same numbers for an identity layout — every bake that
+    // shipped before 2026-09-06 — and they are not for a DENSE one, whose
+    // position `j` carries whatever id it declared `j`-th.
+    //
+    // Getting this wrong DISARMS the guard this module exists for. MEASURED:
+    // a densified shipped `B` reads `f3..f369` at positions `0..94`, so the
+    // positional fold reported `uses_f156_371: false` for a bake that reads
+    // **49** lines in that block — and `folded_root_conflict`, whose entire
+    // job is to refuse exactly that read at a folded root (the recorded CID22
+    // **0.3862** against its true **0.8764**), returned `None` and let it
+    // through.
+    //
+    // So the norms are scattered into id space first. An identity bake maps
+    // `j -> j` and the vector is unchanged, which is why no existing profile
+    // moves.
+    let (norms, caller_width) = match zensim::declared_feature_ids(model) {
+        None => (norms, caller_width),
+        Some(ids) => {
+            let width = ids
+                .iter()
+                .map(|&id| usize::from(id) + 1)
+                .max()
+                .unwrap_or(caller_width);
+            let mut by_id = vec![0.0f64; width];
+            for (pos, &id) in ids.iter().enumerate() {
+                if let (Some(v), Some(slot)) = (norms.get(pos), by_id.get_mut(usize::from(id))) {
+                    *slot = *v;
+                }
+            }
+            (by_id, width)
+        }
+    };
+
     let tabulate = |spec: &'static [(&'static str, usize, usize)]| -> Vec<FamilyStats> {
         let mut out = Vec::new();
         for &(label, lo, hi) in spec {
@@ -498,4 +535,114 @@ pub fn profile(model: &Model) -> Result<BlockProfile, String> {
         families,
         v1_families,
     })
+}
+
+#[cfg(test)]
+mod dense_family_tabulation_tests {
+    use super::*;
+
+    /// A 1-layer bake of `ids.len()` inputs declaring those ids explicitly,
+    /// every one carrying a live weight.
+    fn dense_bake(ids: &[usize]) -> Vec<u8> {
+        let arr = |v: &[f32]| {
+            let mut s = String::from("[");
+            for (i, x) in v.iter().enumerate() {
+                if i > 0 {
+                    s.push(',');
+                }
+                s.push_str(&x.to_string());
+            }
+            s.push(']');
+            s
+        };
+        let n = ids.len();
+        let list = ids
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join("\\n");
+        let json = format!(
+            r#"{{"schema_hash":1,"scaler_mean":{},"scaler_scale":{},
+                 "metadata":[{{"key":"zentrain.feature_ids","type":"utf8","text":"{list}"}}],
+                 "layers":[{{"in_dim":{n},"out_dim":1,"activation":"identity",
+                 "dtype":"f32","weights":{},"biases":[0.0]}}]}}"#,
+            arr(&vec![0.0f32; n]),
+            arr(&vec![1.0f32; n]),
+            arr(&vec![1.0f32; n]),
+        );
+        zenpredict_bake::bake_from_json_str(&json).expect("synthetic dense bake")
+    }
+
+    /// **The family table is in ID space.** `caller_line_norms` is indexed by
+    /// layer-0 POSITION and every family range is a range of feature IDS; for
+    /// an identity layout they coincide and for a dense one they do not.
+    ///
+    /// Getting it wrong DISARMS `folded_root_conflict`, whose whole job is to
+    /// refuse a pool-reading bake at a folded root (the recorded CID22
+    /// **0.3862** against its true **0.8764**). MEASURED on the real artifact:
+    /// a densified shipped `B` reads `f3..f369` at positions `0..94`, and the
+    /// positional fold reported `uses_f156_371: false` for a bake that reads
+    /// 49 lines in that block.
+    #[test]
+    fn a_dense_bake_reports_the_families_its_declared_ids_land_in() {
+        // Three ids, one per v1 pool family, at positions 0/1/2.
+        let bytes = dense_bake(&[160, 240, 340]);
+        let m = Model::from_bytes(&bytes).expect("parse dense bake");
+        assert_eq!(m.caller_input_width(), 3, "3 declared ids, 3 caller inputs");
+        let p = profile(&m).expect("profile");
+        assert!(
+            p.uses_f156_371,
+            "the bake reads f160/f240/f340 — every one of them is in f156..371"
+        );
+        let used_in = |label: &str| {
+            p.families
+                .iter()
+                .find(|f| f.label == label)
+                .map(|f| f.used)
+                .unwrap_or(0)
+        };
+        assert_eq!(used_in("f156_371"), 3, "all three land in the pool block");
+        assert_eq!(used_in("f0_155"), 0, "none lands in basic");
+
+        // NEGATIVE CONTROL: the SAME weights with no declaration are an
+        // identity 3-wide bake, whose three positions really are f0/f1/f2 —
+        // so it reports the opposite, and the test cannot pass vacuously.
+        let plain = {
+            let n = 3;
+            let arr = |v: &[f32]| format!("[{},{},{}]", v[0], v[1], v[2]);
+            let json = format!(
+                r#"{{"schema_hash":1,"scaler_mean":{},"scaler_scale":{},"metadata":[],
+                     "layers":[{{"in_dim":{n},"out_dim":1,"activation":"identity",
+                     "dtype":"f32","weights":{},"biases":[0.0]}}]}}"#,
+                arr(&[0.0, 0.0, 0.0]),
+                arr(&[1.0, 1.0, 1.0]),
+                arr(&[1.0, 1.0, 1.0]),
+            );
+            zenpredict_bake::bake_from_json_str(&json).expect("synthetic plain bake")
+        };
+        let pm = Model::from_bytes(&plain).expect("parse plain bake");
+        let pp = profile(&pm).expect("profile");
+        assert!(
+            !pp.uses_f156_371,
+            "an UNDECLARED 3-wide bake reads f0..f2, not the pool block"
+        );
+    }
+
+    /// And the guard that depends on it is re-armed.
+    #[test]
+    fn folded_root_conflict_fires_for_a_dense_pool_reading_bake() {
+        let bytes = dense_bake(&[3, 200, 369]);
+        let m = Model::from_bytes(&bytes).expect("parse");
+        let why = folded_root_conflict(&m)
+            .expect("profile ok")
+            .expect("a pool-reading bake at a folded root must be refused");
+        assert!(why.contains("f156-371"), "{why}");
+        // NEGATIVE CONTROL: a basic-only dense bake is not a conflict.
+        let ok = dense_bake(&[3, 40, 155]);
+        let om = Model::from_bytes(&ok).expect("parse");
+        assert!(
+            folded_root_conflict(&om).expect("profile ok").is_none(),
+            "a basic-only bake reads nothing in f156-371"
+        );
+    }
 }

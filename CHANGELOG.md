@@ -48,6 +48,32 @@ on the supported surface, and `#[doc(hidden)] feature_set_id::registered_layout_
 (the candidate clip-width list a layout-free id is reconstructed against; not the
 supported surface).
 
+### Changed — `--regime` is a DERIVED, printed value; the flag is deprecated as a width selector (2026-09-06)
+
+- **`feature_set::derive_regime`** is the one owner: the narrowest registered
+  layout width that carries every id a bake reads, from the bake's own bytes.
+  `bake_verdict` prints it on every run (`regime — DERIVED 372 (reads 95 ids,
+  highest f369, incl. the f156..371 pool block); effective 372`). Candidates come
+  from `registered_layout_widths()`, so it cannot invent an unregistered width.
+- **The flag stays accepted** (it also selects the corpora list and the
+  dial/corruption grids) but a value that disagrees with the derivation is
+  REFUSED. A **bare** `bake_verdict --bake <944 bake>` now refuses instead of
+  silently scoring at the 372 root, and shipped `B` at `--regime 720` now refuses
+  — 720 zeroes `f156..371` and `B` reads 49 lines there, which nothing checked
+  before. A WIDER regime that carries every id stays allowed (the board's ext720
+  era rows), and the carry-check does not fire when `--features-root` is explicit
+  (the frozen as-run LOO drivers pass `--regime 720` while reading a 944 root).
+- **Fixed, and found by running the matrix**: `block_profile::profile` tabulated
+  its family table by indexing position-keyed norms with ID ranges, so a dense
+  bake reported `uses_f156_371: false` while reading 49 lines there — which
+  DISARMED `folded_root_conflict`, the guard that exists to refuse exactly that
+  read. Now tabulated in id space; identity bakes map `j -> j` and do not move.
+- Two `--regime 372` script literals dropped (no-ops beside their explicit
+  `--features-root`); the 195 `720/924/944` literals are KEPT, because there the
+  flag selects roots, grids and the corpora list — deleting it would change what
+  those scripts measure. `just lint-scripts`: 611 scripts, all runnable.
+  Record: `benchmarks/regime_derived_2026-09-06.md`.
+
 ### Added — `rescore_parquet --densify`, and the loaders stop truncating at a gap (2026-09-06)
 
 - **`rescore_parquet --densify`** rewrites a feature parquet to store exactly the

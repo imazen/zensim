@@ -1,7 +1,10 @@
 #!/bin/bash
 # fastclass2 — the SERVABLE (372-layout) lane runner. Train + score inline.
 # Cells are SET:HIDDEN:HEAD, same grammar as the 944 runner; SET in
-# {S156, S228, SFULL372}. Scored with bake_verdict --regime 372 on the current
+# {S156, S228, SFULL372}. Scored with bake_verdict on the current
+# (the `--regime 372` literal was dropped 2026-09-06: 372 sets no default the
+#  explicit --features-root below does not already set, and the WIDTH is now
+#  derived from the bake and printed on every run)
 # default 372 root, and with the 372 ladder instrument for A7r.
 set -euo pipefail
 REPO="${FC2_REPO:-/home/lilith/work/zen/zensim--fastclass2}"
@@ -63,9 +66,9 @@ for CELL in $CELLS; do
       [ -f "$PACKED" ] || "$BIN/bake_dial_refit" pack --in "$RAW" --out "$PACKED" --neg-tail \
         --anchor "$ANCHOR" --target-col target_score \
         --verify "$R372/cid22_features_372col_2026-05-15.parquet" --verify-col human_score
-      "$BIN/bake_verdict" --bake "$PACKED" --regime 372 --features-root "$R372" \
+      "$BIN/bake_verdict" --bake "$PACKED" --features-root "$R372" \
         --name "$NAME" --full-json "$O/${NAME}.fulleval.json" --output "$O/${NAME}.verdict.md"
-      "$BIN/bake_verdict" --bake "$PACKED" --regime 372 --features-root "$R372" \
+      "$BIN/bake_verdict" --bake "$PACKED" --features-root "$R372" \
         --dial-grid "$LG" --gaddr-grid-truth "$LT" --floor-rule resolvable \
         --negtail-probe "$NT" --identity-probe "$ID" --name "${NAME}@ladder" \
         --gaddr-json "$O/gaddr/gaddr_${NAME}_ladder.json" --output /dev/null

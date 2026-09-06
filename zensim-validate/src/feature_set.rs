@@ -963,3 +963,135 @@ pub fn resolve_features_root(
         )),
     }
 }
+
+/// What a bake NEEDS, derived from its own bytes — the replacement for asking
+/// a caller to type `--regime`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedRegime {
+    /// The narrowest registered layout width that can carry every id the bake
+    /// reads. This is the number `--regime` was being used to spell.
+    pub regime: usize,
+    /// The highest feature id the bake reads.
+    pub max_read_id: usize,
+    /// How many ids it reads.
+    pub n_read: usize,
+    /// True when the bake reads any of `f156..371`. A folded regime ZEROES
+    /// that block, so such a bake cannot be scored at 720/924/944 — this is
+    /// the `--regime 944` silent-mis-scoring class (shipped `B`: CID22 0.3862
+    /// against its true 0.8764).
+    pub reads_pool_block: bool,
+}
+
+/// Derive [`DerivedRegime`] from a bake's bytes.
+///
+/// **`--regime N` was always a fact about the BAKE, typed by hand.** The bake
+/// knows its own read set — literally, since 2026-09-06, for the four shipped
+/// profiles that declare their ids — so the width it needs is derivable, and a
+/// derived value cannot be typed wrong. Every candidate comes from
+/// `zensim::feature_set_id::registered_layout_widths`, so this cannot invent a
+/// regime the registry does not know.
+///
+/// The `era` argument only labels the returned reference internally; it does
+/// not affect the width.
+pub fn derive_regime(model: &Model) -> Result<DerivedRegime, String> {
+    let r = bake_feature_set_ref(model, ERA_UNKNOWN)?;
+    let max_read_id = r
+        .slots
+        .ranges()
+        .last()
+        .map(|(_, end)| end - 1)
+        .ok_or_else(|| "the bake reads no feature ids".to_string())?;
+    let mut widths: Vec<usize> = zensim::feature_set_id::registered_layout_widths().to_vec();
+    widths.sort_unstable();
+    let regime = widths
+        .iter()
+        .copied()
+        .find(|w| max_read_id < *w)
+        .ok_or_else(|| {
+            format!("the bake reads f{max_read_id}, past every registered layout width {widths:?}")
+        })?;
+    let reads_pool_block = (156..372).any(|s| r.slots.contains(s));
+    Ok(DerivedRegime {
+        regime,
+        max_read_id,
+        n_read: r.slots.len(),
+        reads_pool_block,
+    })
+}
+
+#[cfg(test)]
+mod derive_regime_tests {
+    use super::*;
+
+    fn bake(width: usize, live: impl Fn(usize) -> bool) -> Vec<u8> {
+        let arr = |v: &[f32]| {
+            let mut s = String::from("[");
+            for (i, x) in v.iter().enumerate() {
+                if i > 0 {
+                    s.push(',');
+                }
+                s.push_str(&x.to_string());
+            }
+            s.push(']');
+            s
+        };
+        let w: Vec<f32> = (0..width)
+            .map(|i| if live(i) { 1.0 } else { 0.0 })
+            .collect();
+        let json = format!(
+            r#"{{"schema_hash":1,"scaler_mean":{},"scaler_scale":{},"metadata":[],
+                 "layers":[{{"in_dim":{width},"out_dim":1,"activation":"identity",
+                 "dtype":"f32","weights":{},"biases":[0.0]}}]}}"#,
+            arr(&vec![0.0; width]),
+            arr(&vec![1.0; width]),
+            arr(&w),
+        );
+        zenpredict_bake::bake_from_json_str(&json).expect("synthetic bake")
+    }
+
+    /// The width a caller used to type is a FACT ABOUT THE BAKE, and it is
+    /// derivable — including the case the `--regime 944` bug is about: a
+    /// 372-class bake that reads the pool block cannot be scored at a folded
+    /// regime, and the derivation says so without being told.
+    #[test]
+    fn the_regime_is_derived_from_the_read_set() {
+        // Basic-only: everything it reads fits in 372.
+        let m = Model::from_bytes(&bake(372, |i| i < 28)).expect("parse");
+        let d = derive_regime(&m).expect("derive");
+        assert_eq!(d.regime, 372);
+        assert_eq!(d.max_read_id, 27);
+        assert_eq!(d.n_read, 28);
+        assert!(!d.reads_pool_block);
+
+        // Reads the IW pool: still 372, and flagged — this is shipped B's
+        // shape, the one `--regime 944` silently mis-scored.
+        let m = Model::from_bytes(&bake(372, |i| i == 3 || i == 369)).expect("parse");
+        let d = derive_regime(&m).expect("derive");
+        assert_eq!(d.regime, 372);
+        assert_eq!(d.max_read_id, 369);
+        assert!(d.reads_pool_block, "f369 is in the IW pool");
+
+        // A 944-class bake needs 944, derived rather than typed.
+        let m = Model::from_bytes(&bake(944, |i| i < 156 || i >= 700)).expect("parse");
+        let d = derive_regime(&m).expect("derive");
+        assert_eq!(d.regime, 944);
+        assert_eq!(d.max_read_id, 943);
+        assert!(!d.reads_pool_block, "it reads no f156..371");
+    }
+
+    /// Every candidate comes from the registry's width list, so the derivation
+    /// cannot invent a regime nothing is registered at.
+    #[test]
+    fn the_derived_regime_is_always_a_registered_width() {
+        for hi in [0usize, 155, 371, 500, 719, 900, 943, 955] {
+            let m = Model::from_bytes(&bake(956, |i| i == hi)).expect("parse");
+            let d = derive_regime(&m).expect("derive");
+            assert!(
+                zensim::feature_set_id::registered_layout_widths().contains(&d.regime),
+                "f{hi} derived regime {} is not a registered width",
+                d.regime
+            );
+            assert!(d.regime > hi, "f{hi} must fit in regime {}", d.regime);
+        }
+    }
+}
