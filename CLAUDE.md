@@ -778,7 +778,7 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   `scripts/serving_matrix.sh` (the cross-build diff, with a vacuity guard so at
   least one arm is genuinely v2-free), and
   `zensim-wasm-tests::large_image_noise_distortion_matches_the_pinned_score`.
-  **⚠ THE PINNED-SCORE TOLERANCE IS `0.25`, AND THAT NUMBER IS ITSELF A
+  **⚠ THE PINNED-SCORE TOLERANCE IS `0.16`, AND THAT NUMBER IS ITSELF A
   MEASUREMENT — a same-day i686 CI failure corrected it.** Set at `1e-2` from an
   x86-64-only population (max 1.048e-5), it went red on
   `PreviewV0_1/single-LSB` (98.378873 vs 98.394763, delta 1.589e-2) — not a
@@ -793,9 +793,13 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   distance 1.42 %) and `100 - 18·d^0.7` has slope -35.5 there. The kernel fix
   was tried and rejected in `e1324192` (shifts `sigma_sq`/`sigma12`, breaks
   `cross_platform::pixel_format_equivalence`; root cause upstream in
-  magetypes). `0.25` is the GEOMETRIC MIDPOINT of the two measured populations
-  (noise 2.8221e-2, smallest real defect 2.258) — 8.86× above one, 9.03× below
-  the other. **Consequences for anyone else: a cross-architecture SCORE bar for
+  magetypes). `0.16` is the GEOMETRIC MIDPOINT of two populations, each measured on
+  the population that bounds it: noise **2.8221e-2** (160 cells; the gate's own
+  16 cells top out at 1.5890e-2) and the smallest real mis-serve **on the
+  gate's own cells**, **0.945195** — measured directly by bypassing the gather
+  in a local build, where all 8 dense-profile cells move, from `B`/single-LSB
+  +0.945195 to `D`/quantize+shift −172.261448 (`D` inverts to −155.77). So
+  5.67× above the noise and 5.91× below the defect. **Consequences for anyone else: a cross-architecture SCORE bar for
   this metric cannot be tighter than ~3e-2; i686 and wasm32-simd128 are ONE
   class, so validating on either covers both; and a tolerance derivation must
   state the POPULATION it was measured on — a same-architecture one understates

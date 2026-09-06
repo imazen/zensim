@@ -157,17 +157,33 @@ tests but *"measurably shifts sigma_sq/sigma12 and newly failed
 cross_platform::pixel_format_equivalence's Srgb16Rgba case"*, and the root cause
 is upstream in magetypes. Nothing in this lane changes that judgement.
 
-**The corrected bar.** The gate must separate two MEASURED populations:
-cross-class noise **2.8221e-2** (160 cells, §2d) and the smallest mis-serve it
-exists to catch, **2.258** points — the minimum over the 24 A/B/BHdr/D cells of
-§2, whose distortion families (`truncate_lsb`, `blur3`, `checker_lsb`) are the
-same ones the gate's own two cells use. Scoped honestly: that minimum is
-measured on the serving-matrix population, not on the two census cells
-themselves, because reproducing the mis-serve on those would mean re-gating the
-code the fix removed. `TOL = 0.25` is their **geometric midpoint**
-(`sqrt(2.8221e-2 · 2.258) = 0.2524`) — **8.86× above the noise, 9.03× below the
-defect**: the maximally-separated choice, not one picked to make a build pass.
-The same bar replaces the `1e-2` in `zensim-wasm-tests`. MEASURED why that one
+**The corrected bar, both sides measured on the population that bounds them.**
+
+* **Noise** — cross-arithmetic-class spread, max **2.8221e-2** over the 160
+  cells above. The gate's OWN 16 cells (8 profiles × 2 census pairs at 64×64)
+  top out at **1.5890e-2**; the wider number is used deliberately, because 16
+  cells under-sample a floor an unseen platform could push on.
+* **Signal** — the smallest movement a real mis-serve produces **on the gate's
+  own cells**, MEASURED directly by bypassing the gather in a local build and
+  re-running the test. All 8 dense-profile cells move:
+
+  | cell | mis-served | pinned | Δ |
+  |---|--:|--:|--:|
+  | `B`/single-LSB | 97.050058 | 96.104863 | **+0.945195** ← tightest |
+  | `BHdr`/single-LSB | 92.008254 | 95.561811 | −3.553557 |
+  | `A`/single-LSB | 89.072179 | 93.833130 | −4.760951 |
+  | `D`/single-LSB | 89.881110 | 97.179189 | −7.298079 |
+  | `A`/quantize+shift | 50.602437 | 38.570207 | +12.032230 |
+  | `BHdr`/quantize+shift | 79.312096 | 60.136846 | +19.175250 |
+  | `B`/quantize+shift | 16.067649 | 40.856949 | −24.789300 |
+  | `D`/quantize+shift | **−155.771086** | 16.490362 | −172.261448 |
+
+`TOL = 0.16` is their **geometric midpoint** (`sqrt(2.8221e-2 · 0.945195) =
+0.1633`, to two significant figures) — **5.67× above the conservative noise
+(10.07× above the gate's own cells) and 5.91× below the smallest real defect**.
+Balanced in log space, every input measured on a stated population, rather than
+a number chosen to make a build pass.
+The same `0.16` replaces the `1e-2` in `zensim-wasm-tests`. MEASURED why that one
 passed: **its cell is well-conditioned** — wasm32 reads `93.150736250847`, the
 x86-64 pin to all 12 printed digits, because 256×256 puts the pooled features
 far from the cancellation floor. The bar is not set by that cell; it is set by
@@ -257,13 +273,13 @@ the gather.
 
 | gate | where | what it proves |
 |---|---|---|
-| `serving::tests::every_shipped_profile_scores_its_pinned_value` | `zensim/src/serving.rs` | Every shipped profile's score on two fixed 64×64 pairs, pinned, **under every cargo feature permutation CI builds**. Tolerance **`0.25`** — the geometric midpoint of the two MEASURED populations it must separate: cross-arithmetic-class noise 2.8221e−2 (§2d) and the smallest real defect 2.258 (§2), so 8.86× above one and 9.03× below the other. Widen it only by re-deriving on a larger measured population — never to make a build pass. |
+| `serving::tests::every_shipped_profile_scores_its_pinned_value` | `zensim/src/serving.rs` | Every shipped profile's score on two fixed 64×64 pairs, pinned, **under every cargo feature permutation CI builds**. Tolerance **`0.16`** — the geometric midpoint of the two MEASURED populations it must separate: cross-arithmetic-class noise 2.8221e−2 (§2d) and the smallest real defect **measured on this gate's own cells** by bypassing the gather, 0.945195 (§2d), so 5.67× above one and 5.91× below the other. Widen it only by re-deriving on a larger measured population — never to make a build pass. |
 | `serving::tests::dense_bakes_resolve_to_a_dense_layout_and_the_gather_is_not_a_no_op` | same | The declaration is READ in this build, and — the negative control — the gathered vector genuinely DIFFERS from the positional prefix, so the gate can tell a served bake from a mis-served one. |
 | `serving::tests::every_shipped_profile_is_servable` | same | Zero refusals, in every feature set (was v2-gated, i.e. blind exactly where it mattered). |
 | `serving::tests::every_included_bake_is_packaged` | same | Every `include_bytes!("../weights/…")` is in `Cargo.toml`'s `include` allowlist. No filesystem — `include_str!` on both files. §2c is what it would have caught. |
 | `serving::tests::the_serving_matrix_example_carries_the_same_roster` | same | The cross-build example's `#[cfg]`-dependent profile list and `shipped_profiles`'s reduce to the same `(gating feature, profile)` pairs. `#[cfg]`-independent by construction, because it compares SOURCE TEXT — a runtime comparison could not be. |
 | `scripts/serving_matrix.sh` | repo | THE cross-build diff: 2 environments × 6 arms, every arm bit-identical to its environment's reference or a NAMED refusal. A third outcome is the failure. |
-| `zensim-wasm-tests` | crate | Keeps `feature-regime-v2` (from `e1324192`) **and** now pins `ZensimProfile::A`'s score on the single-LSB distortion that first exposed this, at the same derived `0.25` (§2d — wasm32 is bit-identical to i686 scalar and carries the same 2.8e−2 floor). |
+| `zensim-wasm-tests` | crate | Keeps `feature-regime-v2` (from `e1324192`) **and** now pins `ZensimProfile::A`'s score on the single-LSB distortion that first exposed this, at the same derived `0.16` (§2d — wasm32 is bit-identical to i686 scalar and carries the same 2.8e−2 floor). |
 
 `scripts/serving_matrix.sh` result after the fix: **PASS**, all 8 arms, both
 environments, **zero refusals**. Before the fix the v2-free arm differed on 48

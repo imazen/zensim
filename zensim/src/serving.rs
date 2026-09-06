@@ -289,16 +289,26 @@ mod tests {
     /// it shifted `sigma_sq`/`sigma12` and broke
     /// `cross_platform::pixel_format_equivalence`.
     ///
-    /// So the bar is set from the two populations this gate must separate:
-    /// cross-class noise **2.8221e-2** (160 cells) and the smallest mis-serve
-    /// it exists to catch, **2.258** points — the minimum over the 24
-    /// A/B/BHdr/D cells of the record's §2, whose distortion families are the
-    /// same ones these two census cells use. That minimum is measured on the
-    /// serving-matrix population, not on these two cells, because reproducing
-    /// the mis-serve here would mean re-gating the code the fix removed. `TOL = 0.25` is their GEOMETRIC
-    /// MIDPOINT (`sqrt(2.8221e-2 · 2.258) = 0.2524`) — **8.86× above the
-    /// measured noise and 9.03× below the smallest real defect**, i.e. the
-    /// maximally-separated choice rather than one picked to make CI pass.
+    /// So the bar is set from two populations, **both measured, each on the
+    /// population that actually bounds it**:
+    ///
+    /// * **noise** — cross-arithmetic-class spread, max **2.8221e-2** over the
+    ///   160 cells above. This gate's OWN 16 cells top out at 1.5890e-2; the
+    ///   wider number is used deliberately, because 16 cells under-sample a
+    ///   floor an unseen platform could push on.
+    /// * **signal** — the smallest movement a real mis-serve produces ON THIS
+    ///   GATE'S OWN CELLS: **0.945195** points. MEASURED directly, by bypassing
+    ///   the gather in a local build and re-running this test: all 8
+    ///   dense-profile cells moved, from `B`/single-LSB **0.945195** to
+    ///   `D`/quantize+shift **172.261448** (`D` inverts, to −155.77). Measured
+    ///   here, not inferred from the serving-matrix population.
+    ///
+    /// `TOL = 0.16` is their GEOMETRIC MIDPOINT
+    /// (`sqrt(2.8221e-2 · 0.945195) = 0.1633`, to two significant figures) —
+    /// **5.67× above the conservative noise (10.07× above this gate's own
+    /// cells) and 5.91× below the smallest real defect**. Balanced in log
+    /// space, every input measured on a stated population, rather than a
+    /// number chosen to make CI pass.
     ///
     /// The tight complement lives in `scripts/serving_matrix.sh`, which
     /// requires **bit-exact** agreement across feature sets WITHIN one
@@ -312,8 +322,9 @@ mod tests {
     #[test]
     fn every_shipped_profile_scores_its_pinned_value() {
         /// See the doc comment: the geometric midpoint of the measured
-        /// cross-class noise (2.8221e-2) and the smallest real defect (2.258).
-        const TOL: f64 = 0.25;
+        /// cross-class noise (2.8221e-2) and the smallest real defect measured
+        /// on these very cells (0.945195).
+        const TOL: f64 = 0.16;
         // (profile, quantize+shift pair, single-LSB pair). Captured from the
         // default build at 2026-09-06 with the dense gather live.
         let pins: &[(&str, f64, f64)] = &[

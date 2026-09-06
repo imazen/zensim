@@ -3232,9 +3232,13 @@ near-identical pair puts the dissimilarity features at the f32 cancellation
 floor (193/228 features differ, worst **7.4x relative** at ~1e-6 absolute; raw
 distance moves 1.42 %) and `100 - 18*d^0.7` has slope -35.5 there. The
 kernel-side fusing fix was tried and rejected in `e1324192`. `TOL` is re-derived
-as the geometric midpoint of the two measured populations — noise 2.8221e-2 and
-smallest real defect 2.258 — giving **0.25**, 8.86x above one and 9.03x below
-the other; `zensim-wasm-tests` takes the same bar (its `1e-2` passed by luck on
+as the geometric midpoint of two populations each measured on the population
+that bounds it — noise **2.8221e-2** (160 cells; the gate's own 16 cells top out
+at 1.5890e-2) and the smallest real mis-serve **on the gate's own cells**,
+**0.945195**, measured directly by bypassing the gather in a local build (all 8
+dense-profile cells move, `B`/single-LSB +0.945195 to `D`/quantize+shift
+-172.261448, `D` inverting to -155.77) — giving **0.16**, 5.67x above one and
+5.91x below the other; `zensim-wasm-tests` takes the same bar (its `1e-2` passed by luck on
 its one cell). `scripts/serving_matrix.sh` still demands BIT-EXACT agreement
 within one architecture. **Reusable: a cross-architecture score bar for this
 metric cannot be tighter than ~3e-2 while that `mul_add` stays unfused; i686 and

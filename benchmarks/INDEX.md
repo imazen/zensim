@@ -38,7 +38,8 @@
 > while **i686 scalar and wasm32 simd128 are BIT-IDENTICAL to each other (160/160)** and up to
 > **2.8221e-2** from the fused-`mul_add` class, because magetypes implements `mul_add` unfused there
 > and a near-identical pair's features sit at the f32 cancellation floor. `TOL` re-derived as the
-> geometric midpoint of noise (2.8221e-2) and smallest real defect (2.258) = **0.25**.
+> geometric midpoint of noise (2.8221e-2) and the smallest real defect measured on the gate's OWN
+> cells by bypassing the gather (0.945195) = **0.16**.
 > Ledger `docs/DATASET_HISTORY.md` §3.55 (ROUND 106) + its amendment.
 
 > **★★ F19 — THE SCORE PATH TOO; OWNER + ERA LANDED, FLIP NOT TAKEN 2026-09-06:**

@@ -78,10 +78,14 @@ tried and rejected in `e1324192` (it shifts `sigma_sq`/`sigma12` and breaks
 `cross_platform::pixel_format_equivalence`); root cause is upstream in
 magetypes.
 
-`TOL` is re-derived as the **geometric midpoint** of the two measured
-populations the gate must separate — cross-class noise 2.8221e−2 and the
-smallest real mis-serve 2.258 — i.e. **`0.25`, 8.86× above one and 9.03× below
-the other**. `zensim-wasm-tests` takes the same bar; its `1e-2` passed only
+`TOL` is re-derived as the **geometric midpoint** of two populations, each
+measured on the population that bounds it — cross-class noise **2.8221e−2**
+(160 cells; the gate's own 16 cells top out at 1.5890e−2) and the smallest real
+mis-serve **on the gate's own cells**, **0.945195** (measured directly by
+bypassing the gather in a local build: all 8 dense-profile cells move, from
+`B`/single-LSB +0.945195 to `D`/quantize+shift −172.261448, `D` inverting to
+−155.77). That gives **`0.16`, 5.67× above the noise and 5.91× below the
+defect** — balanced in log space, not chosen to make a build pass. `zensim-wasm-tests` takes the same bar; its `1e-2` passed only
 because its one pinned cell fell inside it. `scripts/serving_matrix.sh` still
 requires **bit-exact** agreement within one architecture — loose across classes,
 exact within one. Record:
@@ -152,7 +156,7 @@ wrong**:
 
 Gates: `serving::tests::every_shipped_profile_scores_its_pinned_value` (two
 fixed 64×64 pairs per profile, pinned, running under **every** cargo feature
-permutation; tolerance **`0.25`** — see the amendment below),
+permutation; tolerance **`0.16`** — see the amendment below),
 `dense_bakes_resolve_to_a_dense_layout_and_the_gather_is_not_a_no_op` (with a
 negative control: the gathered vector must differ from the positional prefix),
 `every_shipped_profile_is_servable`, `every_included_bake_is_packaged`

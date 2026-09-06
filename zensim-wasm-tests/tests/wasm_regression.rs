@@ -277,7 +277,7 @@ fn large_image_noise_distortion() {
 /// `> 90.0` bound above is the only reason anybody noticed. A bound catches a
 /// mis-serve by luck; a pin catches it by construction, so both stay.
 ///
-/// Tolerance `0.25`, the SAME derived bar as
+/// Tolerance `0.16`, the SAME derived bar as
 /// `zensim::serving::tests::every_shipped_profile_scores_its_pinned_value` —
 /// and this crate is exactly why it has to be that wide. MEASURED 2026-09-06
 /// over 160 cells (`benchmarks/dense_serving_ungate_2026-09-06.md` §2d): the
@@ -285,8 +285,9 @@ fn large_image_noise_distortion() {
 /// and up to **2.8221e-2** away from every FUSED-`mul_add` backend (AVX-512,
 /// AVX2, NEON), because magetypes implements `mul_add` unfused there and a
 /// near-identical pair's features sit at the f32 cancellation floor. `0.25` is
-/// the geometric midpoint of that noise and the 2.258-point smallest real
-/// mis-serve — 8.86× above one, 9.03× below the other.
+/// the geometric midpoint of that noise and the smallest real mis-serve
+/// measured on the gate's own cells (0.945195 points, from bypassing the
+/// gather in a local build) — 5.67× above one, 5.91× below the other.
 ///
 /// An earlier `1e-2` here passed, and MEASURED why: **this particular cell is
 /// well-conditioned** — wasm32 reads `93.150736250847`, the x86-64 pin to all
@@ -300,7 +301,7 @@ fn large_image_noise_distortion_matches_the_pinned_score() {
     // Captured 2026-09-06 from the native default build with the dense gather
     // live; the pre-fix, gather-less reading of this same cell was 86.30.
     const PINNED: f64 = 93.150_736_250_847;
-    const TOL: f64 = 0.25;
+    const TOL: f64 = 0.16;
     let z = Zensim::new(ZensimProfile::A);
     let base = generators::value_noise(256, 256, 99);
     let distorted = distortions::truncate_lsb(&base);
