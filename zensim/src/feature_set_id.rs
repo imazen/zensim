@@ -13,18 +13,16 @@
 //! `--regime 944` silently mis-scores a 372 bake that reads `f156..371`
 //! (shipped `B`: CID22 0.3862 against its true 0.8764).
 //!
-//! An id has four parts:
+//! An id has three parts, plus an OPTIONAL fourth:
 //!
 //! ```text
-//!   basic+peaks+moments@w944/era2r4#a1b2c3d4
+//!   basic+peaks+moments/era2r4#a1b2c3d4          <- canonical, layout-free
+//!   basic+peaks+moments@w944/era2r4#a1b2c3d4     <- legacy alias, still parses
 //!   └─COMPUTE──────────┘ └LAYOUT┘ └ERA─┘ └hash8┘
 //! ```
 //!
 //! * **COMPUTE** — which slot families are actually populated
 //!   ([`ComputeToken`]), `+`-joined in registry order.
-//! * **LAYOUT** — the emitted vector width (`w<N>`). NOT the compute set: a
-//!   `v1_only` request at 944 is still a 944-wide row with `f372..` at the
-//!   structural `0.0`.
 //! * **ERA** — the registered extractor-era token. Load-bearing because the
 //!   shift between eras is model-specific, not a constant offset
 //!   (`benchmarks/eval372_current_root_2026-08-30.md`).
@@ -32,6 +30,29 @@
 //!   de-duplicated slot-id list. The NAME is a handle; the HASH is the
 //!   identity, so two sets with the same name and different slot lists cannot
 //!   collide.
+//! * **LAYOUT** (optional, `@w<N>`) — the emitted vector width. **Not part of
+//!   the identity**: two ids that differ only here are EQUAL, hash equal, and
+//!   name the same set.
+//!
+//! ## Why the layout left the identity (2026-09-06)
+//!
+//! The layout is the WIRE SHAPE, not the feature set, and with a dense wire it
+//! carries nothing the hash does not. It also lied inside a refusal surface:
+//! the cruft purge measured a densified shipped `B` and its wide twin as
+//! `basic+peaks+masked+iw@w95/unknown#9403d2a7` and
+//! `…@w372/unknown#9403d2a7` — the same compute tokens and the SAME slots hash
+//! — so `feature_set::check` reported a `LayoutDiffers` mismatch on every
+//! dense-bake/wide-table pair, for a difference that cannot make a read
+//! unsound. The width now belongs to the ARTIFACT
+//! (`zensim_validate::feature_set::FeatureSetRef::layout`), where a shortfall
+//! is a real finding.
+//!
+//! It is still ACCEPTED, and every `@w<N>` string ever written still parses,
+//! because it remains a **reconstruction aid**: [`crate::feature_layout`]
+//! rebuilds a registered set from its compute tokens, and a SPARSE id's set is
+//! the family union CLIPPED to its width, so knowing the width turns a search
+//! over candidate widths into a single check. Identity is the hash; the width
+//! is a hint about how to reproduce it.
 //!
 //! ## Substrate: `zenanalyze-api`, reused not paralleled
 //!
@@ -451,47 +472,104 @@ pub fn is_valid_token(s: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
-/// A feature-set identifier: `<compute>@w<layout>/<era>#<hash8>`.
+/// A feature-set identifier: `<compute>/<era>#<hash8>`, optionally carrying a
+/// legacy `@w<layout>` width.
 ///
-/// Equality is over all four parts — same slots at a different era is a
-/// DIFFERENT id, which is the whole point (the `ext944` / `era2r4` pair is
-/// bit-identical except `f720..923`, and a published number cannot be
-/// corrected across the boundary, only re-verdicted).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// **Equality is over compute + era + hash, and NOT over the layout.** Same
+/// slots at a different era is a DIFFERENT id, which is the whole point (the
+/// `ext944` / `era2r4` pair is bit-identical except `f720..923`, and a
+/// published number cannot be corrected across the boundary, only
+/// re-verdicted). Same slots at a different WIRE WIDTH is the SAME id, which
+/// is what makes every `@w<N>` spelling an alias of its layout-free form
+/// rather than a different set — see the module docs for the measurement that
+/// forced this.
+#[derive(Debug, Clone, Eq)]
 pub struct FeatureSetId {
     compute: ComputeParts,
-    layout_width: usize,
+    /// The legacy wire width, when the id string carried one. A
+    /// RECONSTRUCTION AID, never part of the identity: excluded from
+    /// [`PartialEq`] and [`Hash`] by hand below, so an id parsed from
+    /// `…@w372/…` and the same id parsed from `…/…` are interchangeable in
+    /// every set, map and comparison.
+    layout_width: Option<usize>,
     era: String,
     slots_hash: u32,
 }
 
+impl PartialEq for FeatureSetId {
+    fn eq(&self, other: &Self) -> bool {
+        self.compute == other.compute
+            && self.era == other.era
+            && self.slots_hash == other.slots_hash
+    }
+}
+
+impl core::hash::Hash for FeatureSetId {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.compute.hash(state);
+        self.era.hash(state);
+        self.slots_hash.hash(state);
+    }
+}
+
 impl FeatureSetId {
-    /// Build from an already-computed slot hash. `None` when `era` is not a
-    /// valid token.
+    /// Build the canonical, LAYOUT-FREE id from an already-computed slot hash.
+    /// `None` when `era` is not a valid token.
     #[must_use]
-    pub fn new(
-        compute: ComputeParts,
-        layout_width: usize,
-        era: &str,
-        slots_hash: u32,
-    ) -> Option<Self> {
+    pub fn new(compute: ComputeParts, era: &str, slots_hash: u32) -> Option<Self> {
         is_valid_token(era).then(|| Self {
             compute,
-            layout_width,
+            layout_width: None,
             era: era.to_string(),
             slots_hash,
         })
     }
 
+    /// [`new`](Self::new) carrying the legacy `@w<layout>` width — a
+    /// reconstruction aid, never part of the identity. Use it when you KNOW
+    /// the wire width and want a reader to be able to rebuild the set without
+    /// searching candidate widths.
+    #[must_use]
+    pub fn new_with_layout(
+        compute: ComputeParts,
+        layout_width: usize,
+        era: &str,
+        slots_hash: u32,
+    ) -> Option<Self> {
+        Self::new(compute, era, slots_hash).map(|id| id.with_layout(layout_width))
+    }
+
+    /// This id carrying `layout_width`. Changes the rendering, never the
+    /// identity: the result compares and hashes EQUAL to `self`.
+    #[must_use]
+    pub fn with_layout(mut self, layout_width: usize) -> Self {
+        self.layout_width = Some(layout_width);
+        self
+    }
+
+    /// This id without its layout — the canonical form. Compares and hashes
+    /// EQUAL to `self`; the difference is only what [`Display`] writes.
+    #[must_use]
+    pub fn layout_free(mut self) -> Self {
+        self.layout_width = None;
+        self
+    }
+
     /// Build from the slot set itself — hashes through [`slots_hash8`].
     #[must_use]
-    pub fn from_slots(
+    pub fn from_slots(compute: ComputeParts, era: &str, slots: &SlotSet) -> Option<Self> {
+        Self::new(compute, era, slots.hash8())
+    }
+
+    /// [`from_slots`](Self::from_slots) carrying the legacy width.
+    #[must_use]
+    pub fn from_slots_with_layout(
         compute: ComputeParts,
         layout_width: usize,
         era: &str,
         slots: &SlotSet,
     ) -> Option<Self> {
-        Self::new(compute, layout_width, era, slots.hash8())
+        Self::from_slots(compute, era, slots).map(|id| id.with_layout(layout_width))
     }
 
     /// The COMPUTE token set.
@@ -499,9 +577,14 @@ impl FeatureSetId {
     pub fn compute(&self) -> ComputeParts {
         self.compute
     }
-    /// The emitted vector width.
+    /// The legacy emitted-vector width, when the id string carried one.
+    ///
+    /// `None` for the canonical form. **Never a tie-breaker in a comparison**
+    /// — it is excluded from equality and hashing on purpose; it exists so a
+    /// reader can rebuild a SPARSE set (the family union clipped to this
+    /// width) without searching.
     #[must_use]
-    pub fn layout_width(&self) -> usize {
+    pub fn layout_width(&self) -> Option<usize> {
         self.layout_width
     }
     /// The registered extractor-era token.
@@ -515,25 +598,35 @@ impl FeatureSetId {
         self.slots_hash
     }
 
-    /// Same compute + layout + slots, ignoring the era — the "is this the same
-    /// feature set, made by a possibly-different extractor?" question.
+    /// Same compute + slots, ignoring the era — the "is this the same feature
+    /// set, made by a possibly-different extractor?" question. The layout was
+    /// dropped from this comparison with the rest of the identity: a set does
+    /// not stop being itself because it was written into a narrower vector.
     #[must_use]
     pub fn same_set_ignoring_era(&self, other: &Self) -> bool {
-        self.compute == other.compute
-            && self.layout_width == other.layout_width
-            && self.slots_hash == other.slots_hash
+        self.compute == other.compute && self.slots_hash == other.slots_hash
     }
 
-    /// Parse the canonical short form. Strict, exactly like
+    /// Parse either form. Strict, exactly like
     /// `zenanalyze_api::NamedFeature::parse`: 8 LOWERCASE hex digits, a closed
-    /// token vocabulary, `[a-z0-9_]+` eras, and a mandatory `w` on the width.
+    /// token vocabulary, `[a-z0-9_]+` eras — and, when the legacy `@w<N>`
+    /// component is present, a mandatory `w` on the width.
+    ///
+    /// **Both spellings of the same set parse to EQUAL ids**, which is what
+    /// makes every `@w<N>` string ever written an alias rather than a
+    /// different set.
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
-        let (compute_s, rest) = s.split_once('@')?;
-        let (layout_s, rest) = rest.split_once('/')?;
+        // The `@w<N>` component is optional. Split on the FIRST `/` after the
+        // compute part: everything before it is `<compute>` or
+        // `<compute>@w<N>`.
+        let (head, rest) = s.split_once('/')?;
+        let (compute_s, layout_width) = match head.split_once('@') {
+            Some((c, layout_s)) => (c, Some(layout_s.strip_prefix('w')?.parse::<usize>().ok()?)),
+            None => (head, None),
+        };
         let (era, hash_s) = rest.split_once('#')?;
         let compute = ComputeParts::parse(compute_s)?;
-        let layout_width = layout_s.strip_prefix('w')?.parse::<usize>().ok()?;
         if hash_s.len() != 8
             || !hash_s
                 .bytes()
@@ -542,18 +635,42 @@ impl FeatureSetId {
             return None;
         }
         let slots_hash = u32::from_str_radix(hash_s, 16).ok()?;
-        Self::new(compute, layout_width, era, slots_hash)
+        let id = Self::new(compute, era, slots_hash)?;
+        Some(match layout_width {
+            Some(w) => id.with_layout(w),
+            None => id,
+        })
     }
 }
 
 impl fmt::Display for FeatureSetId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}@w{}/{}#{:08x}",
-            self.compute, self.layout_width, self.era, self.slots_hash
-        )
+        match self.layout_width {
+            Some(w) => write!(
+                f,
+                "{}@w{}/{}#{:08x}",
+                self.compute, w, self.era, self.slots_hash
+            ),
+            None => write!(f, "{}/{}#{:08x}", self.compute, self.era, self.slots_hash),
+        }
     }
+}
+
+/// Every emitted-vector width a registered PRODUCER set has used — the
+/// candidate clip widths a reader searches when an id carries no legacy
+/// `@w<N>` component.
+///
+/// **This bounds a search; it is never an identity.** A width here can only
+/// CONFIRM a reconstruction (the `slots_hash8` decides), so adding one cannot
+/// change which set any existing id names. `#[doc(hidden)]` and not the
+/// supported surface: it exists so `zensim-validate`'s
+/// `every_registered_layout_width_is_a_candidate` can hold this list and
+/// `benchmarks/feature_sets_registry.json` in sync — registering a set at a
+/// new width fails that gate instead of silently becoming unreproducible.
+#[doc(hidden)]
+#[must_use]
+pub fn registered_layout_widths() -> &'static [usize] {
+    crate::feature_defs::REGISTERED_LAYOUT_WIDTHS
 }
 
 /// The canonical era token for "we do not know which extractor made this".

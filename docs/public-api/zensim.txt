@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zensim.txt 539 lines (supported surface) | zensim.features.txt 164 added (features: avx512,candidate-profiles,classification,custom-profiles,deprecated-profiles,feature-regime-v2,imgref,iw-diagnostics,oracle,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 178 lines (252 hidden + 0 excluded-feature)
+# files: zensim.txt 543 lines (supported surface) | zensim.features.txt 164 added (features: avx512,candidate-profiles,classification,custom-profiles,deprecated-profiles,feature-regime-v2,imgref,iw-diagnostics,oracle,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 179 lines (253 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -14,7 +14,7 @@
 #   pub types (struct/enum/trait/alias)        41
 #   pub consts/statics                        112
 #   free functions                             20
-#   inherent methods                          212
+#   inherent methods                          216
 #   struct fields                              33
 #   enum variants                              84
 #   re-exports                                  3
@@ -24,13 +24,13 @@
 #
 # per-module pub lines:
 #   (root)                          183
-#   feature_set_id                   47
+#   feature_set_id                   51
 #   feature_v2                      184
 #   mapping                          12
 #   profile                          30
 #   source                           59
 
-## items (504 lines)
+## items (508 lines)
 
 pub mod zensim
 pub use Stop
@@ -63,12 +63,16 @@ pub const fn feature_set_id::ComputeParts::with(self, feature_set_id::ComputeTok
 pub struct feature_set_id::FeatureSetId
 pub fn feature_set_id::FeatureSetId::compute(&self) -> feature_set_id::ComputeParts
 pub fn feature_set_id::FeatureSetId::era(&self) -> &str
-pub fn feature_set_id::FeatureSetId::from_slots(feature_set_id::ComputeParts, usize, &str, &feature_set_id::SlotSet) -> core::option::Option<Self>
-pub fn feature_set_id::FeatureSetId::layout_width(&self) -> usize
-pub fn feature_set_id::FeatureSetId::new(feature_set_id::ComputeParts, usize, &str, u32) -> core::option::Option<Self>
+pub fn feature_set_id::FeatureSetId::from_slots(feature_set_id::ComputeParts, &str, &feature_set_id::SlotSet) -> core::option::Option<Self>
+pub fn feature_set_id::FeatureSetId::from_slots_with_layout(feature_set_id::ComputeParts, usize, &str, &feature_set_id::SlotSet) -> core::option::Option<Self>
+pub fn feature_set_id::FeatureSetId::layout_free(self) -> Self
+pub fn feature_set_id::FeatureSetId::layout_width(&self) -> core::option::Option<usize>
+pub fn feature_set_id::FeatureSetId::new(feature_set_id::ComputeParts, &str, u32) -> core::option::Option<Self>
+pub fn feature_set_id::FeatureSetId::new_with_layout(feature_set_id::ComputeParts, usize, &str, u32) -> core::option::Option<Self>
 pub fn feature_set_id::FeatureSetId::parse(&str) -> core::option::Option<Self>
 pub fn feature_set_id::FeatureSetId::same_set_ignoring_era(&self, &Self) -> bool
 pub fn feature_set_id::FeatureSetId::slots_hash(&self) -> u32
+pub fn feature_set_id::FeatureSetId::with_layout(self, usize) -> Self
 pub struct feature_set_id::SlotSet
 pub fn feature_set_id::SlotSet::clipped_to(&self, usize) -> feature_set_id::SlotSet
 pub fn feature_set_id::SlotSet::contains(&self, usize) -> bool

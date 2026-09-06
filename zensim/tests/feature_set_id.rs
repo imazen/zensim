@@ -26,8 +26,8 @@ fn same_slots_different_era_is_a_different_id() {
         .with(T::Append)
         .with(T::Append2);
     let slots = SlotSet::parse("0-155,372-943").unwrap();
-    let a = FeatureSetId::from_slots(compute, 944, "ext944", &slots).unwrap();
-    let b = FeatureSetId::from_slots(compute, 944, "era2r4", &slots).unwrap();
+    let a = FeatureSetId::from_slots_with_layout(compute, 944, "ext944", &slots).unwrap();
+    let b = FeatureSetId::from_slots_with_layout(compute, 944, "era2r4", &slots).unwrap();
     assert_eq!(
         a.slots_hash(),
         b.slots_hash(),
@@ -65,7 +65,7 @@ fn slot_hash_algorithm_is_pinned() {
 /// non-basic slots do not intersect at all.
 #[test]
 fn same_era_different_slots_is_a_different_id() {
-    let pools = FeatureSetId::from_slots(
+    let pools = FeatureSetId::from_slots_with_layout(
         ComputeParts::EMPTY
             .with(T::Basic)
             .with(T::Peaks)
@@ -79,7 +79,7 @@ fn same_era_different_slots_is_a_different_id() {
         &SlotSet::parse("0-943").unwrap(),
     )
     .unwrap();
-    let free = FeatureSetId::from_slots(
+    let free = FeatureSetId::from_slots_with_layout(
         ComputeParts::EMPTY
             .with(T::Basic)
             .with(T::Peaks)
@@ -104,14 +104,14 @@ fn same_name_different_slots_cannot_collide() {
         .with(T::Basic)
         .with(T::Peaks)
         .with(T::Moments);
-    let with_all_free = FeatureSetId::from_slots(
+    let with_all_free = FeatureSetId::from_slots_with_layout(
         compute,
         944,
         "era2r4",
         &SlotSet::parse("0-227,733-735,750-752").unwrap(),
     )
     .unwrap();
-    let with_some_free = FeatureSetId::from_slots(
+    let with_some_free = FeatureSetId::from_slots_with_layout(
         compute,
         944,
         "era2r4",
@@ -237,4 +237,74 @@ fn compute_parts_render_in_registry_order_regardless_of_insertion_order() {
     assert_eq!(ComputeParts::EMPTY.to_string(), "none");
     assert_eq!(ComputeParts::parse("none"), Some(ComputeParts::EMPTY));
     assert!(a.contains(T::Basic) && !a.contains(T::Iw));
+}
+
+/// **The layout is a HINT, not the identity** (2026-09-06). Two spellings of
+/// the same set are EQUAL, hash equal, and interchangeable in a `HashSet` —
+/// which is what makes every `@w<N>` string ever written an alias rather than
+/// a different set.
+///
+/// The NEGATIVE CONTROL is in the same test: era and slots still separate ids,
+/// so this is not "equality got weaker", it is "one component that described
+/// the wire left the identity".
+#[test]
+fn the_layout_component_is_not_part_of_the_identity() {
+    use std::collections::HashSet;
+    let slots = SlotSet::from_ranges([(0, 156)]);
+    let compute = ComputeParts::EMPTY.with(T::Basic);
+
+    let free = FeatureSetId::from_slots(compute, "era2r4", &slots).unwrap();
+    let w372 = FeatureSetId::from_slots_with_layout(compute, 372, "era2r4", &slots).unwrap();
+    let w944 = FeatureSetId::from_slots_with_layout(compute, 944, "era2r4", &slots).unwrap();
+
+    assert_eq!(free, w372);
+    assert_eq!(w372, w944);
+    let set: HashSet<FeatureSetId> = [free.clone(), w372.clone(), w944.clone()].into();
+    assert_eq!(set.len(), 1, "three spellings must be ONE id in a hash set");
+
+    // Rendering still differs, and that is the point: the hint survives.
+    assert_eq!(free.to_string(), "basic/era2r4#3ffe8670");
+    assert_eq!(w372.to_string(), "basic@w372/era2r4#3ffe8670");
+    assert_eq!(w944.to_string(), "basic@w944/era2r4#3ffe8670");
+    assert_eq!(free.layout_width(), None);
+    assert_eq!(w372.layout_width(), Some(372));
+
+    // Both spellings PARSE, to equal ids, with the hint preserved.
+    for s in [
+        "basic/era2r4#3ffe8670",
+        "basic@w372/era2r4#3ffe8670",
+        "basic@w944/era2r4#3ffe8670",
+    ] {
+        let p = FeatureSetId::parse(s).unwrap_or_else(|| panic!("{s} must parse"));
+        assert_eq!(p, free, "{s} must be the same id");
+        assert_eq!(p.to_string(), s, "{s} must round-trip its own spelling");
+    }
+
+    // NEGATIVE CONTROLS: era and slots still separate.
+    let other_era = FeatureSetId::from_slots(compute, "ext944", &slots).unwrap();
+    assert_ne!(free, other_era, "a different era is a different id");
+    let other_slots =
+        FeatureSetId::from_slots(compute, "era2r4", &SlotSet::from_ranges([(0, 155)])).unwrap();
+    assert_ne!(free, other_slots, "different slots are a different id");
+}
+
+/// `same_set_ignoring_era` no longer compares the layout either — a set does
+/// not stop being itself because it was written into a narrower vector.
+#[test]
+fn same_set_ignoring_era_ignores_the_layout_too() {
+    let slots = SlotSet::from_ranges([(0, 156)]);
+    let compute = ComputeParts::EMPTY.with(T::Basic);
+    let a = FeatureSetId::from_slots_with_layout(compute, 372, "era2r4", &slots).unwrap();
+    let b = FeatureSetId::from_slots_with_layout(compute, 944, "ext944", &slots).unwrap();
+    assert!(a.same_set_ignoring_era(&b));
+    assert_ne!(a, b, "the eras differ, so the IDS differ");
+    // NEGATIVE CONTROL: different slots are still a different set.
+    let c = FeatureSetId::from_slots_with_layout(
+        compute,
+        372,
+        "era2r4",
+        &SlotSet::from_ranges([(0, 100)]),
+    )
+    .unwrap();
+    assert!(!a.same_set_ignoring_era(&c));
 }

@@ -42,6 +42,39 @@ Additions (each lands with its increment): an id-addressed feature accessor, and
 a result's declared feature set. Positional accessors get `#[deprecated]` shims
 for one release. **No crates.io publish in this work.**
 
+Landed with the layout removal (2026-09-06), all additive:
+`FeatureSetId::{new_with_layout, from_slots_with_layout, with_layout, layout_free}`
+on the supported surface, and `#[doc(hidden)] feature_set_id::registered_layout_widths()`
+(the candidate clip-width list a layout-free id is reconstructed against; not the
+supported surface).
+
+### Changed — the LAYOUT is out of a feature-set id's identity (2026-09-06)
+
+- **Canonical form is `<compute>/<era>#<hash8>`.** Two ids differing only in
+  `@w<N>` are now EQUAL, hash equal, and interchangeable in every map and set —
+  `PartialEq`/`Hash` are over compute + era + slots-hash. `Display` emits the
+  layout only when the id carries one.
+- **Every `@w<N>` string ever written still parses and still resolves**, to an id
+  equal to its layout-free spelling. `benchmarks/feature_sets_registry.json` is
+  NOT edited: `Registry` indexes the layout-free spelling of every append-only
+  key (and refuses a collision), and `every_legacy_at_w_key_resolves_from_its_layout_free_spelling`
+  holds that contract on the committed registry.
+- **Why**: MEASURED, a densified shipped `B` and its wide twin read
+  `…@w95/unknown#9403d2a7` and `…@w372/unknown#9403d2a7` — same compute, same
+  slots hash, same read set — and `feature_set::check` reported `LayoutDiffers`
+  on every dense-bake/wide-table pair, inside a REFUSAL surface, for a difference
+  that cannot make a read unsound.
+- The width moves to `FeatureSetRef::layout` (`Option<usize>`), a property of the
+  ARTIFACT, and `LayoutDiffers` now fires only on a real SHORTFALL (the consumer
+  needs a wider row than the producer emits). A NARROWER consumer is the dense
+  design, not a mismatch.
+- It survives on the id as an optional RECONSTRUCTION hint, because a sparse set
+  is the family union clipped to a width. Dropping it never loses information —
+  the canonical form searches `registered_layout_widths()` where the legacy form
+  pins one candidate. MEASURED: one registry entry (`…#0b476506`) is
+  reconstructible ONLY from its layout-free spelling, because its `@w944` records
+  the wire width of the tables it reads while its set is the union clipped to 924.
+
 ### Added — F17: the v1 HF-energy ratio family gets ONE owner and five runtime arms (2026-09-06)
 
 - `zensim::hf_gain_form` (internal) is THE owner of `contrast_inc` /

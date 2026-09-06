@@ -130,7 +130,7 @@ fn a_dense_bake_and_its_w944_twin_score_identically() {
     // SAME weight for the SAME id — so equal scores mean the same features
     // reached the same weights.
     let dense_w: Vec<f32> = slots.iter_slots().map(weight_for).collect();
-    let dense_id = FeatureSetId::from_slots(compute_parts(), 265, "era2r4", &slots)
+    let dense_id = FeatureSetId::from_slots_with_layout(compute_parts(), 265, "era2r4", &slots)
         .expect("a dense feature-set id");
     let dense_bytes = bake(265, &dense_w, Some(&dense_id.to_string()));
 
@@ -225,7 +225,7 @@ thread_local! {
 fn a_dense_bake_refuses_a_feature_vector_that_does_not_reach_its_ids() {
     let slots = free_set_slots();
     let dense_w: Vec<f32> = slots.iter_slots().map(weight_for).collect();
-    let dense_id = FeatureSetId::from_slots(compute_parts(), 265, "era2r4", &slots)
+    let dense_id = FeatureSetId::from_slots_with_layout(compute_parts(), 265, "era2r4", &slots)
         .expect("a dense feature-set id");
     let bytes = bake(265, &dense_w, Some(&dense_id.to_string()));
     let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());

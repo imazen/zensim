@@ -12,7 +12,7 @@
 #   pub modules                                 3
 #   pub types (struct/enum/trait/alias)         7
 #   pub consts/statics                          3
-#   free functions                             21
+#   free functions                             22
 #   inherent methods                           73
 #   struct fields                              24
 #   enum variants                              13
@@ -22,14 +22,14 @@
 # per-module pub lines:
 #   (root)                           21
 #   __bench_stages                    9
-#   feature_set_id                    4
+#   feature_set_id                    5
 #   feature_v2                       21
 #   fold_engine                       8
 #   profile                           1
 #   research                         76
 #   source                            4
 
-## items (144 lines)
+## items (145 lines)
 
 pub const ZENTRAIN_FEATURE_IDS_KEY: &str
 pub const research::BASE_REVISION_ERA: &str
@@ -66,6 +66,7 @@ pub fn feature_set_id::ComputeParts::assert_fields_are_eq(&self)
 pub fn feature_set_id::ComputeToken::assert_fields_are_eq(&self)
 pub fn feature_set_id::FeatureSetId::assert_fields_are_eq(&self)
 pub fn feature_set_id::SlotSet::assert_fields_are_eq(&self)
+pub fn feature_set_id::registered_layout_widths() -> &'static [usize]
 pub fn feature_v2::FeatureRegime::assert_fields_are_eq(&self)
 pub fn feature_v2::FormulaRevision::assert_fields_are_eq(&self)
 pub fn feature_v2::FormulaRevision::clone(&self) -> feature_v2::FormulaRevision

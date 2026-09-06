@@ -2783,14 +2783,17 @@ fn stamp_feature_set_id(out: &Path, id: &str) -> Result<(), String> {
         )
     })?;
     let reg = zensim_validate::feature_set::registry();
-    let class = format!(
-        "{}@w{}/{}",
-        parsed.compute(),
-        parsed.layout_width(),
-        parsed.era()
-    );
+    // Registry keys are append-only and were written in the LEGACY `@w<N>`
+    // spelling; the canonical id form dropped that component on 2026-09-06.
+    // Try every spelling of the same id.
+    let class_legacy = parsed
+        .layout_width()
+        .map(|w| format!("{}@w{}/{}", parsed.compute(), w, parsed.era()));
+    let class = format!("{}/{}", parsed.compute(), parsed.era());
     let set = reg
         .set(id.trim())
+        .or_else(|| reg.set(&parsed.clone().layout_free().to_string()))
+        .or_else(|| class_legacy.as_deref().and_then(|c| reg.set(c)))
         .or_else(|| reg.set(&class))
         .ok_or_else(|| {
             format!(
@@ -2810,11 +2813,15 @@ fn stamp_feature_set_id(out: &Path, id: &str) -> Result<(), String> {
         zenpredict::Model::from_bytes(&bytes).map_err(|e| format!("re-parse {out:?}: {e:?}"))?;
     let consumer = zensim_validate::feature_set::bake_feature_set_ref(&model, parsed.era())
         .map_err(|e| format!("derive the bake's own feature-set ref: {e}"))?;
-    if consumer.id.layout_width() != parsed.layout_width() {
+    // The declared `@w<N>` is a legacy hint and may be absent; when it IS
+    // present it must agree with the bake's own caller width, because that is
+    // the pair a stamp gets wrong in a way nothing else catches.
+    if let (Some(declared), Some(actual)) = (parsed.layout_width(), consumer.layout)
+        && declared != actual
+    {
         return Err(format!(
-            "--feature-set-id declares w{} but the emitted bake's caller width is w{}",
-            parsed.layout_width(),
-            consumer.id.layout_width()
+            "--feature-set-id declares w{declared} but the emitted bake's caller width is \
+             w{actual}"
         ));
     }
     if let Some(pinned) = set.as_ref()

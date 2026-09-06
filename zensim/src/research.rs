@@ -227,11 +227,32 @@ impl Request {
         // and reproducing it means emitting into that dense layout — not into
         // an identity layout of its packed width, which would be a different
         // table entirely.
-        let dense = want.len() == id.layout_width()
-            && want.iter_slots().last() != Some(id.layout_width() - 1);
+        //
+        // **Sparse-vs-dense CANNOT be recovered from the slots.** The same 265
+        // ids are a sparse layout at w944 (their own indices, 679 structural
+        // fills) and a dense one at w265 (packed, no gaps) — two different
+        // tables. That is precisely why the layout survives as an optional
+        // `@w<N>` hint on an id whose IDENTITY no longer includes it: the hash
+        // says WHICH set, the width says HOW it was written.
+        //
+        // With a width: the historical rule, unchanged — dense iff the width
+        // equals the member count and the set is not already the identity
+        // range. Without one: the SPARSE reading, because it is the
+        // conservative default (emitting a set at its own indices can only add
+        // structural fills, while guessing "dense" would PERMUTE the vector).
+        // A caller who means the dense layout says so, either by keeping the
+        // `@w<packed>` hint on the id or by using
+        // [`Request::for_slots`] + [`Request::dense`].
+        let (dense, layout_width) = match id.layout_width() {
+            Some(w) => (
+                want.len() == w && want.iter_slots().last() != Some(w - 1),
+                w,
+            ),
+            None => (false, want.iter_slots().last().map_or(0, |s| s + 1)),
+        };
         Ok(Request {
             want,
-            layout_width: id.layout_width(),
+            layout_width,
             revision: RevisionRef::Current,
             era_label: id.era().to_string(),
             parallel: false,
@@ -822,7 +843,10 @@ pub fn extract(
         .compute
         .feature_set_id(ns, plan.walk_width(), &req.era_label)
         .and_then(|id| {
-            FeatureSetId::new(
+            // The emitted width is recorded as the legacy `@w<N>` hint so a
+            // reader can rebuild a SPARSE set without searching candidate
+            // widths; it is not part of the id's identity.
+            FeatureSetId::new_with_layout(
                 id.compute(),
                 plan.layout_width(),
                 &req.era_label,
@@ -1142,7 +1166,7 @@ mod tests {
         let want = SlotSet::from_ranges([(0, 228)])
             .union(&family_slots(ComputeToken::Moments))
             .clipped_to(944);
-        let id = FeatureSetId::from_slots(
+        let id = FeatureSetId::from_slots_with_layout(
             crate::feature_set_id::ComputeParts::EMPTY
                 .with(ComputeToken::Basic)
                 .with(ComputeToken::Peaks)
@@ -1336,8 +1360,12 @@ mod tests {
         );
         assert_eq!(a.slots_hash(), b.slots_hash(), "same slots, same hash");
         assert_eq!(a.slots_hash(), want.hash8());
-        assert_eq!(a.layout_width(), 944);
-        assert_eq!(b.layout_width(), 265);
+        // The layout is a HINT, not the identity — so the two ids are EQUAL
+        // even though they were emitted at different widths, and the recorded
+        // hint still says which width each came out at.
+        assert_eq!(a, b, "same compute, same era, same slots => the SAME id");
+        assert_eq!(a.layout_width(), Some(944));
+        assert_eq!(b.layout_width(), Some(265));
         assert_eq!(a.compute(), b.compute());
         // And the dense id reads BACK to the same slot set — the property
         // `declared_layout` depends on.

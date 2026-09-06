@@ -118,7 +118,7 @@ fn a_basic_only_bake_is_compatible_with_every_registered_producer() {
     assert_eq!(bake_ref.id.compute().to_string(), "basic");
     for (id, set) in feature_set::registry().sets() {
         let Some(p) = set.as_ref() else { continue };
-        if p.id.layout_width() < 372 {
+        if p.layout.is_none_or(|w| w < 372) {
             continue;
         }
         let slot_fails = feature_set::check(&bake_ref, p)
@@ -180,10 +180,18 @@ fn every_registered_set_agrees_with_the_hash_owner() {
     let reg = feature_set::registry();
     let mut pinned = 0usize;
     for (key, set) in reg.sets() {
-        assert_eq!(
-            set.id.to_string_class(),
-            key.split('#').next().unwrap(),
-            "the registry key must be the canonical id (modulo the hash)"
+        // Registry keys are APPEND-ONLY and were all written in the legacy
+        // `@w<N>` spelling; the canonical id form dropped that component on
+        // 2026-09-06. A key must render back as one of the two, and which one
+        // is a property of when it was written, not of what it names.
+        let key_class = key.split('#').next().unwrap();
+        let legacy = set.id.to_string_class_legacy();
+        assert!(
+            key_class == set.id.to_string_class() || legacy.as_deref() == Some(key_class),
+            "the registry key must be the canonical id or its legacy \
+             `@w<N>` spelling (modulo the hash): key {key_class:?}, canonical {:?}, \
+             legacy {legacy:?}",
+            set.id.to_string_class()
         );
         if let Some(p) = set.as_ref() {
             pinned += 1;
@@ -197,7 +205,8 @@ fn every_registered_set_agrees_with_the_hash_owner() {
                 set.n_slots.expect("pinned sets carry n_slots")
             );
             assert!(
-                p.id.layout_width() >= p.slots.ranges().last().map(|r| r.1).unwrap_or(0),
+                p.layout
+                    .is_some_and(|w| w >= p.slots.ranges().last().map(|r| r.1).unwrap_or(0)),
                 "{key}: slots overflow the declared layout"
             );
         }
@@ -305,4 +314,134 @@ fn a_manifest_declared_feature_set_id_resolves_to_the_registered_slots() {
         "a hash that disagrees with the registry must resolve to NO slots"
     );
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// **The alias contract, held on the committed registry.** Every declared key
+/// is the legacy `<compute>@w<N>/<era>[#hash]` spelling; its LAYOUT-FREE
+/// spelling must resolve to the SAME entry, and the two id strings must parse
+/// to EQUAL ids naming the same slots and the same hash.
+///
+/// This is the whole justification for dropping the layout component: if a
+/// canonical id could not find an append-only legacy key, the change would be
+/// a migration rather than a rename, and every published id would need
+/// rewriting.
+#[test]
+fn every_legacy_at_w_key_resolves_from_its_layout_free_spelling() {
+    use zensim::feature_set_id::FeatureSetId;
+    let reg = feature_set::registry();
+    let (mut checked, mut both, mut canonical_only) = (0usize, 0usize, 0usize);
+    for (key, set) in reg.sets() {
+        let Some((head, rest)) = key.split_once('/') else {
+            continue;
+        };
+        let Some((compute, w)) = head.split_once('@') else {
+            continue; // already layout-free
+        };
+        assert!(
+            w.starts_with('w'),
+            "{key}: malformed layout component {w:?}"
+        );
+        let alias = format!("{compute}/{rest}");
+        let via_alias = reg
+            .set(&alias)
+            .unwrap_or_else(|| panic!("{key}: layout-free spelling {alias:?} does not resolve"));
+        assert_eq!(
+            via_alias.key, set.key,
+            "{alias} resolved to a different set"
+        );
+        checked += 1;
+
+        // Both id STRINGS parse, and to equal ids.
+        if let (Some(a), Some(b)) = (FeatureSetId::parse(key), FeatureSetId::parse(&alias)) {
+            assert_eq!(a, b, "{key}: the two spellings must be the SAME id");
+            assert_eq!(a.slots_hash(), b.slots_hash());
+            assert_eq!(a.compute(), b.compute());
+            assert_eq!(a.era(), b.era());
+            assert_eq!(a.layout_width(), Some(w[1..].parse::<usize>().unwrap()));
+            assert_eq!(
+                b.layout_width(),
+                None,
+                "the canonical form carries no width"
+            );
+            // Reconstruction: when BOTH spellings rebuild a set, it must be
+            // the SAME set. The layout-free form must also never reconstruct
+            // LESS often — dropping a hint cannot lose information, because
+            // the hint only picks one candidate out of the list the canonical
+            // form searches.
+            let ra = zensim::research::Request::for_set(&a)
+                .map(|r| r.want().clone())
+                .ok();
+            let rb = zensim::research::Request::for_set(&b)
+                .map(|r| r.want().clone())
+                .ok();
+            if let (Some(x), Some(y)) = (&ra, &rb) {
+                assert_eq!(
+                    x, y,
+                    "{key}: the two spellings reconstruct different slot sets"
+                );
+                both += 1;
+            }
+            assert!(
+                !(ra.is_some() && rb.is_none()),
+                "{key}: the legacy spelling reconstructs and the canonical one does not — \
+                 dropping a hint must not lose information"
+            );
+            if ra.is_none() && rb.is_some() {
+                // MEASURED, and it is the canonical form being STRICTLY
+                // better rather than a defect: this set is the family union at
+                // a clip that is not the width the id records. The one
+                // instance today is the `#0b476506` CONSUMER entry — the 265
+                // free set minus the four LUMA_MEAN_REF slots — which is
+                // exactly `union.clipped_to(924)`, while its `@w944` records
+                // the WIRE width of the tables it reads. The legacy spelling
+                // therefore pins the wrong candidate and fails; the canonical
+                // one searches and finds it.
+                canonical_only += 1;
+            }
+        }
+    }
+    assert!(
+        checked >= 12,
+        "the registry must carry legacy keys, saw {checked}"
+    );
+    // MEASURED, not aspirational: most registered sets are NOT reconstructible
+    // from their compute tokens at any clip — they are PINNED slot lists (the
+    // carriers set's scattered slots, the consumer read sets), which is why
+    // the registry stores `slots` at all. Reconstruction is a convenience for
+    // the family-union sets; the pinned list is the truth for the rest. The
+    // properties that matter are the two asserted inside the loop: equal when
+    // both rebuild, and never worse without the hint.
+    assert!(
+        both >= 1,
+        "at least one key must reconstruct both ways, saw {both}"
+    );
+    assert_eq!(
+        canonical_only, 1,
+        "exactly one registered key is reconstructible ONLY from its layout-free spelling \
+         (the #0b476506 consumer set, whose @w944 is a wire width and not its clip); a new \
+          one is a finding to record, not a number to bump"
+    );
+}
+
+/// The candidate clip-width list `zensim` searches for a layout-free id must
+/// cover every width the committed registry actually uses. Registering a set
+/// at a new width without extending the list would make that set
+/// unreproducible from its canonical id — silently, because the search would
+/// simply not find a hash match.
+#[test]
+fn every_registered_layout_width_is_a_candidate() {
+    let candidates = zensim::feature_set_id::registered_layout_widths();
+    let reg = feature_set::registry();
+    let mut seen = 0usize;
+    for (key, set) in reg.sets() {
+        let Some(w) = set.id.layout else { continue };
+        seen += 1;
+        assert!(
+            candidates.contains(&w),
+            "{key}: layout w{w} is registered but not in \
+             zensim::feature_set_id::registered_layout_widths() {candidates:?} — a canonical \
+             (layout-free) id for this set could not be reconstructed"
+        );
+    }
+    assert!(seen >= 12, "the registry must record layouts, saw {seen}");
 }

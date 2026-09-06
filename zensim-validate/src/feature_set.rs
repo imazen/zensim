@@ -74,17 +74,29 @@ impl RegisteredSet {
 pub struct ClassId {
     /// The COMPUTE token set.
     pub compute: ComputeParts,
-    /// The emitted vector width.
-    pub layout: usize,
+    /// The emitted vector width, when the registry entry records one. A
+    /// RECONSTRUCTION HINT, not part of the identity — see
+    /// `zensim::feature_set_id`'s module docs.
+    pub layout: Option<usize>,
     /// The registered extractor-era token.
     pub era: String,
 }
 
 impl ClassId {
-    /// `"<compute>@w<layout>/<era>"` — the id without its hash.
+    /// `"<compute>/<era>"` — the canonical class form, without the hash and
+    /// without the layout.
     #[must_use]
     pub fn to_string_class(&self) -> String {
-        format!("{}@w{}/{}", self.compute, self.layout, self.era)
+        format!("{}/{}", self.compute, self.era)
+    }
+
+    /// The LEGACY class form `"<compute>@w<layout>/<era>"`, when a layout is
+    /// recorded. Registry keys were written this way and are append-only, so
+    /// a lookup must still be able to spell one.
+    #[must_use]
+    pub fn to_string_class_legacy(&self) -> Option<String> {
+        self.layout
+            .map(|w| format!("{}@w{}/{}", self.compute, w, self.era))
     }
 }
 
@@ -97,6 +109,17 @@ pub struct FeatureSetRef {
     /// The slots this reference stands for — populated (producer) or read
     /// (consumer).
     pub slots: SlotSet,
+    /// **The ARTIFACT's emitted/declared vector width**, when it is known — a
+    /// bake's `caller_input_width()`, a table's `feat_*` column count.
+    ///
+    /// This left [`FeatureSetId`] on 2026-09-06 because it is not part of a
+    /// feature set's identity: a densified shipped `B` and its wide twin
+    /// produced the same compute tokens and the same slots hash at `@w95` and
+    /// `@w372`, and [`check`] reported a mismatch for a difference that cannot
+    /// make a read unsound. Here it is a property of the thing on disk, and
+    /// only a real SHORTFALL (a consumer needing a wider row than the producer
+    /// emits) is a finding.
+    pub layout: Option<usize>,
     /// Human description of where the id came from, printed beside every use.
     pub source: String,
     /// `true` when the id was INFERRED (from the registry's root/regime tables
@@ -148,13 +171,21 @@ impl std::fmt::Display for Mismatch {
 #[must_use]
 pub fn check(consumer: &FeatureSetRef, producer: &FeatureSetRef) -> Vec<Mismatch> {
     let mut out = Vec::new();
-    if consumer.id.layout_width() != producer.id.layout_width() {
+    // **A SHORTFALL, not a difference.** This used to fire whenever the two
+    // ids' `@w<N>` components differed, which after the dense-bake flip meant
+    // every dense-bake/wide-table pair — a mismatch reported inside a REFUSAL
+    // surface for a difference that cannot make a read unsound (a dense bake
+    // GATHERS its ids out of a wider row; that is the whole design). The
+    // unsound direction is the other one: a consumer that needs a wider row
+    // than the producer emits. Both widths must be KNOWN to say anything.
+    if let (Some(c), Some(p)) = (consumer.layout, producer.layout)
+        && c > p
+    {
         out.push(Mismatch {
             kind: MismatchKind::LayoutDiffers,
             detail: format!(
-                "bake declares w{} but the table is w{}",
-                consumer.id.layout_width(),
-                producer.id.layout_width()
+                "the bake needs a {c}-wide row and the table emits {p} — the shortfall is \
+                 filled structurally, so every number below it is computed from fill"
             ),
         });
     }
@@ -240,11 +271,15 @@ pub fn bake_feature_set_ref(model: &Model, era: &str) -> Result<FeatureSetRef, S
         ),
     };
     let compute = compute_parts_for_slots(&slots);
-    let id = FeatureSetId::from_slots(compute, width, era, &slots)
+    // The bake's caller width rides on the REF, not on the id: it describes
+    // this artifact's wire, and a dense bake's is deliberately narrower than
+    // the table it reads.
+    let id = FeatureSetId::from_slots(compute, era, &slots)
         .ok_or_else(|| format!("invalid era token {era:?} (charset [a-z0-9_]+)"))?;
     Ok(FeatureSetRef {
         id,
         slots,
+        layout: Some(width),
         source,
         inferred: false,
     })
@@ -376,20 +411,38 @@ pub fn root_feature_set_ref(root: &Path) -> Option<FeatureSetRef> {
         // only accept it when the registered `slots_hash8` AGREES with the
         // declared one -- a disagreement means the name and the bytes have
         // come apart, which must not resolve silently.
-        let class = format!("{}@w{}/{}", id.compute(), id.layout_width(), id.era());
+        // Registry keys are append-only and were written in the LEGACY
+        // `@w<N>` spelling, so a lookup tries every spelling of the same id:
+        // the string as declared, the canonical layout-free form, and both
+        // class forms. `Registry::set` also indexes the layout-free spelling
+        // of every legacy key, so an id declared canonically finds a key
+        // written with a width.
+        let class_forms: Vec<String> = [
+            Some(format!("{}/{}", id.compute(), id.era())),
+            id.layout_width()
+                .map(|w| format!("{}@w{}/{}", id.compute(), w, id.era())),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let slots = reg
             .set(&id.to_string())
+            .or_else(|| reg.set(&id.clone().layout_free().to_string()))
             .or_else(|| {
-                reg.set(&class).filter(|s| {
-                    s.as_ref()
-                        .is_some_and(|r| r.id.slots_hash() == id.slots_hash())
+                class_forms.iter().find_map(|c| {
+                    reg.set(c).filter(|s| {
+                        s.as_ref()
+                            .is_some_and(|r| r.id.slots_hash() == id.slots_hash())
+                    })
                 })
             })
             .and_then(|s| s.as_ref().map(|r| r.slots.clone()))
             .unwrap_or_default();
+        let layout = id.layout_width();
         return Some(FeatureSetRef {
             id,
             slots,
+            layout,
             source: format!("{}/_MANIFEST.json feature_set_id", root.display()),
             inferred: false,
         });
@@ -414,10 +467,11 @@ pub fn root_feature_set_ref(root: &Path) -> Option<FeatureSetRef> {
         let era = reg
             .era_for_root(key)
             .unwrap_or_else(|| ERA_UNKNOWN.to_string());
-        let id = FeatureSetId::from_slots(compute, layout, &era, &slots)?;
+        let id = FeatureSetId::from_slots(compute, &era, &slots)?;
         return Some(FeatureSetRef {
             id,
             slots,
+            layout: Some(layout),
             source: format!("{}/_MANIFEST.json regime {regime:?}", root.display()),
             inferred: true,
         });
@@ -445,6 +499,9 @@ fn json_string_field(txt: &str, key: &str) -> Option<String> {
 #[derive(Debug)]
 pub struct Registry {
     sets: BTreeMap<String, RegisteredSet>,
+    /// The LAYOUT-FREE spelling of every declared key → that key. Built at
+    /// load time so a canonical id resolves to an append-only legacy entry.
+    layout_free_keys: BTreeMap<String, String>,
     /// features-root path → set key.
     pub roots: BTreeMap<String, String>,
     regimes: BTreeMap<String, (ComputeParts, usize, SlotSet)>,
@@ -453,15 +510,34 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// A registered set by its key (the canonical id string, or the class
-    /// form for a `class` entry).
+    /// A registered set by any spelling of its key.
+    ///
+    /// **Registry keys are APPEND-ONLY and were all written in the legacy
+    /// `<compute>@w<N>/<era>[#hash]` form.** The canonical id form dropped the
+    /// `@w<N>` component on 2026-09-06, so a caller holding a canonical id
+    /// would otherwise miss every entry. This resolves both, by consulting an
+    /// index built at load time from the layout-free spelling of each key —
+    /// which is what makes "registry aliases for every existing `@w<N>` id"
+    /// a lookup rather than a migration. Nothing on disk is edited.
     #[must_use]
     pub fn set(&self, key: &str) -> Option<&RegisteredSet> {
-        self.sets.get(key)
+        self.sets.get(key).or_else(|| {
+            self.layout_free_keys
+                .get(key)
+                .and_then(|k| self.sets.get(k))
+        })
     }
-    /// Every registered set, key-ordered.
+    /// Every registered set, key-ordered. Iterates the DECLARED keys only —
+    /// the layout-free aliases are a lookup index, not extra sets.
     pub fn sets(&self) -> impl Iterator<Item = (&str, &RegisteredSet)> {
         self.sets.iter().map(|(k, v)| (k.as_str(), v))
+    }
+    /// Every layout-free alias → declared key, alias-ordered. The alias table
+    /// the id-form change rests on, exposed so a test can hold it.
+    pub fn layout_free_aliases(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.layout_free_keys
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
     }
     /// Every alias, name-ordered.
     pub fn aliases(&self) -> impl Iterator<Item = (&str, &[String])> {
@@ -546,7 +622,7 @@ fn parse_registry(txt: &str) -> Result<Registry, String> {
                 .to_string();
             let id = ClassId {
                 compute,
-                layout,
+                layout: Some(layout),
                 era: era.clone(),
             };
             let pinned = match e.get("slots").and_then(|x| x.as_str()) {
@@ -554,7 +630,7 @@ fn parse_registry(txt: &str) -> Result<Registry, String> {
                 Some(s) => {
                     let slots =
                         SlotSet::parse(s).ok_or_else(|| format!("{key}: unparseable slots"))?;
-                    let fid = FeatureSetId::from_slots(compute, layout, &era, &slots)
+                    let fid = FeatureSetId::from_slots_with_layout(compute, layout, &era, &slots)
                         .ok_or_else(|| format!("{key}: bad era token"))?;
                     let stored = e.get("slots_hash8").and_then(|x| x.as_str());
                     if let Some(h) = stored
@@ -568,6 +644,7 @@ fn parse_registry(txt: &str) -> Result<Registry, String> {
                     Some(FeatureSetRef {
                         id: fid,
                         slots,
+                        layout: Some(layout),
                         source: format!("registry sets[{key}]"),
                         inferred: false,
                     })
@@ -642,8 +719,29 @@ fn parse_registry(txt: &str) -> Result<Registry, String> {
             aliases.insert(k.clone(), ids);
         }
     }
+    // The layout-free alias index. A key is `<compute>[@w<N>]/<era>[#hash8]`;
+    // dropping `@w<N>` is a pure string edit at a fixed position, so the index
+    // cannot disagree with the parse. A COLLISION (two declared keys whose
+    // layout-free spellings are equal) would make a canonical lookup
+    // ambiguous, so it is an ERROR rather than a last-writer-wins.
+    let mut layout_free_keys: BTreeMap<String, String> = BTreeMap::new();
+    for k in sets.keys() {
+        let Some((head, rest)) = k.split_once('/') else {
+            continue;
+        };
+        let Some((compute, _w)) = head.split_once('@') else {
+            continue; // already layout-free
+        };
+        let alias = format!("{compute}/{rest}");
+        if let Some(prev) = layout_free_keys.insert(alias.clone(), k.clone()) {
+            return Err(format!(
+                "registry keys {prev:?} and {k:?} have the same layout-free spelling                  {alias:?} — a canonical id could not resolve to one of them"
+            ));
+        }
+    }
     Ok(Registry {
         sets,
+        layout_free_keys,
         roots,
         regimes,
         aliases,

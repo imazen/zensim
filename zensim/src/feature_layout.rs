@@ -192,12 +192,28 @@ pub(crate) fn slots_of(id: &FeatureSetId) -> Option<SlotSet> {
     for t in id.compute().iter() {
         union = union.union(&crate::feature_defs::family_slots(t, ns));
     }
-    let sparse = union.clipped_to(id.layout_width());
-    if sparse.hash8() == id.slots_hash() {
-        return Some(sparse);
-    }
     let dense = union.clipped_to(crate::feature_defs::full_width(ns));
-    (dense.hash8() == id.slots_hash() && dense.len() == id.layout_width()).then_some(dense)
+    // The SPARSE reading needs a clip width. A legacy `@w<N>` id names it; the
+    // canonical layout-free form does not, so try every width any registered
+    // producer set has used. The hash decides — this list only bounds the
+    // search, and an id whose clip width is not on it is reported
+    // unreproducible rather than guessed at.
+    let candidates: &[usize] = match id.layout_width() {
+        Some(w) => &[w],
+        None => crate::feature_defs::REGISTERED_LAYOUT_WIDTHS,
+    };
+    for &w in candidates {
+        let sparse = union.clipped_to(w);
+        if sparse.hash8() == id.slots_hash() {
+            return Some(sparse);
+        }
+    }
+    // The DENSE reading. The recorded width is NOT re-checked here: it is not
+    // part of the identity, the hash already pins the exact slot list, and the
+    // one caller that needs "this set has as many members as the bake asks
+    // for" ([`declared_layout`]) applies that filter itself against the BAKE's
+    // width, which is the number that actually matters.
+    (dense.hash8() == id.slots_hash()).then_some(dense)
 }
 
 /// The layout a loaded bake DECLARES.
@@ -307,8 +323,10 @@ fn dense_slots_of(id: &FeatureSetId) -> Option<SlotSet> {
     // would only make `is_identity` say something different about a vector
     // nothing did to.
     let is_identity_range = dense.iter_slots().last() == Some(dense.len().saturating_sub(1));
-    (dense.hash8() == id.slots_hash() && dense.len() == id.layout_width() && !is_identity_range)
-        .then_some(dense)
+    // The recorded width is not consulted: it is not part of the identity, and
+    // `declared_layout` — the only caller — filters on the BAKE's caller width,
+    // which is the number a mis-sized layout would actually break.
+    (dense.hash8() == id.slots_hash() && !is_identity_range).then_some(dense)
 }
 
 #[cfg(test)]
@@ -404,7 +422,7 @@ pub(crate) mod tests {
             ))
             .clipped_to(944);
         assert_eq!(slots.len(), 265);
-        let id = crate::feature_set_id::FeatureSetId::from_slots(
+        let id = crate::feature_set_id::FeatureSetId::from_slots_with_layout(
             crate::feature_set_id::ComputeParts::EMPTY
                 .with(ComputeToken::Basic)
                 .with(ComputeToken::Peaks)

@@ -1670,6 +1670,25 @@ pub(crate) fn block_base(
     None
 }
 
+/// Every emitted-vector width a registered PRODUCER set has ever used —
+/// the candidate clip widths [`crate::feature_layout::slots_of`] searches when
+/// an id does not carry a legacy `@w<N>` component.
+///
+/// **This bounds a search; it is not an identity.** A feature-set id's identity
+/// is its `slots_hash8`, so a width on this list can only ever CONFIRM a
+/// reconstruction, never change which set an id names. An id whose sparse clip
+/// width is not here is reported unreproducible by this build, which is the
+/// same answer it would give for an unknown compute token — and the honest one,
+/// because guessing would name a different set.
+///
+/// Sourced from `benchmarks/feature_sets_registry.json`'s `sets[].layout`
+/// (append-only; 2026-09-06: 372, 720, 924, 944, 956) plus the registry's full
+/// width. `zensim-validate`'s
+/// `every_registered_layout_width_is_a_candidate` holds the two in sync, so
+/// registering a set at a new width fails the build rather than silently
+/// becoming unreproducible.
+pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[372, 720, 924, 944, 956];
+
 /// Total layout width at `n_scales` with every registered block present.
 pub(crate) fn full_width(n_scales: usize) -> usize {
     BLOCKS.iter().map(|b| b.width(n_scales)).sum()

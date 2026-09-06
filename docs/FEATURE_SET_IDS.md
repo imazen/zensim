@@ -35,20 +35,28 @@ width}, and gets read as all three.**
 
 ## 2. The identifier
 
-Four orthogonal parts. The first three are the human handle; the fourth is the
-identity.
+Three parts, plus an optional legacy fourth. The first two are the human
+handle; the hash is the identity.
 
 ```
-  <compute>@w<layout>/<era>#<slots-hash8>
-  │          │          │     │
-  │          │          │     └─ 8 lowercase hex — hash of the ORDERED slot-id list
-  │          │          │        actually populated (or, for a consumer, read)
-  │          │          └─ registered extractor ERA token  [a-z0-9_]+
-  │          └─ LAYOUT: the vector width the runtime emits
+  <compute>/<era>#<slots-hash8>                 <- CANONICAL
+  <compute>@w<layout>/<era>#<slots-hash8>       <- legacy alias, still parses
+  │          │        │     │
+  │          │        │     └─ 8 lowercase hex — hash of the ORDERED slot-id list
+  │          │        │        actually populated (or, for a consumer, read)
+  │          │        └─ registered extractor ERA token  [a-z0-9_]+
+  │          └─ LAYOUT (optional): the vector width the runtime emits
   └─ COMPUTE: `+`-joined registered block tokens, in registry order
 ```
 
-Example: `basic+peaks+moments@w944/era2r4#a1b2c3d4`
+Example: `basic+peaks+moments/era2r4#a1b2c3d4`
+
+**The LAYOUT left the identity on 2026-09-06** (`docs/PLAN_CRUFT_PURGE_2026-09-06.md`
+§3, pre-registered before it landed). Two ids that differ only in `@w<N>` are
+EQUAL, hash equal, and interchangeable in every map and set. Every `@w<N>`
+string ever written still parses and still resolves to the same set — the
+registry indexes the layout-free spelling of every append-only key, so nothing
+on disk was edited and no published id needs rewriting.
 
 ### 2.1 COMPUTE — which kernels/slot families actually run
 
@@ -83,16 +91,45 @@ registry entry's `notes`. The name is a handle; the hash is the identity. Adding
 five more tokens to the short form would make every 944 name unreadable and buy
 nothing the hash does not already guarantee.
 
-### 2.2 LAYOUT — the emitted width
+### 2.2 LAYOUT — the emitted width, and why it is only a HINT
 
 `w<N>`, `N` = the width of the vector the runtime emits / the table stores /
 the model declares as `caller_input_width()`. Registered widths today: `w372`,
-`w720`, `w924`, `w944`, `w956`.
+`w720`, `w924`, `w944`, `w956` (`zensim::feature_set_id::registered_layout_widths`,
+held in sync with the registry by `every_registered_layout_width_is_a_candidate`).
 
 **LAYOUT is not COMPUTE.** A `v1_only` request at 944 is still a 944-wide row with
-`f372..` at the structural `0.0`; `basic+peaks+moments@w944` and
-`basic+peaks+masked+iw+v2+append+append2@w944` are the same width and different
-data. That distinction is exactly what the counts erased.
+`f372..` at the structural `0.0`; `basic+peaks+moments` and
+`basic+peaks+masked+iw+v2+append+append2` at the same width are different
+data. That distinction is exactly what the counts erased — and it is carried by
+the COMPUTE tokens and the hash, not by the width.
+
+**LAYOUT is also not IDENTITY, and pretending it was cost a refusal surface its
+credibility.** MEASURED (the cruft purge's increment B-2): a densified shipped
+`B` and its wide twin read `basic+peaks+masked+iw@w95/unknown#9403d2a7` and
+`…@w372/unknown#9403d2a7` — the same compute tokens and the SAME slots hash,
+because they ARE the same read set; only the wire differs. `feature_set::check`
+duly reported `LayoutDiffers` on every dense-bake/wide-table pair, for a
+difference that cannot make a read unsound (a dense bake GATHERS its ids out of
+a wider row — that is the design).
+
+So the width now lives on the ARTIFACT, as
+`zensim_validate::feature_set::FeatureSetRef::layout`, and `check` reports it
+only as a **shortfall**: the consumer needs a wider row than the producer emits.
+
+It survives on the id as an OPTIONAL hint because it is a **reconstruction
+aid**. A registered set can often be rebuilt from its compute tokens, and a
+SPARSE set is the family union CLIPPED to a width — so knowing the width turns
+a search over `registered_layout_widths()` into one check. Identity is the
+hash; the width says how the set was written. Two consequences worth knowing:
+
+* a PRODUCER should keep recording it (`FeatureSetId::from_slots_with_layout`),
+  because it is exactly the party that knows;
+* dropping it never loses information — the canonical form searches where the
+  legacy form pins one candidate. MEASURED on the committed registry: one entry
+  (`…#0b476506`, a CONSUMER set) is reconstructible ONLY from its layout-free
+  spelling, because its `@w944` records the wire width of the tables it reads
+  while its slot set is the family union clipped to **924**.
 
 ### 2.3 ERA — which extractor produced it
 
@@ -212,8 +249,12 @@ Two id flavours, both the same type:
 
 A read is sound iff:
 
-1. `layout_width` agrees (a consumer cannot read a column that is not there —
-   this already fails loud today via `FeatureLenMismatch`), **and**
+1. the producer's row REACHES the consumer (a consumer cannot read a column
+   that is not there — this already fails loud today via `FeatureLenMismatch`,
+   and `check` reports the shortfall from the two artifacts' recorded widths).
+   **Note the asymmetry: a NARROWER consumer is fine.** A dense bake declares
+   fewer inputs than the table has columns and gathers its ids out of it; only
+   `consumer > producer` is a finding, **and**
 2. `consumer.slots ⊆ producer.slots` — every slot the bake reads is actually
    populated, **and**
 3. `era` agrees, or the difference is explicitly acknowledged.

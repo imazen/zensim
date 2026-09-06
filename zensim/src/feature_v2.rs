@@ -2320,7 +2320,11 @@ impl ComputeSet {
         layout_width: usize,
         era: &str,
     ) -> Option<crate::feature_set_id::FeatureSetId> {
-        crate::feature_set_id::FeatureSetId::from_slots(
+        // The emitted width rides along as the legacy `@w<N>` hint — a
+        // PRODUCER's id is exactly where recording it pays, because a reader
+        // rebuilding this sparse set from its compute tokens needs the clip.
+        // It is not part of the id's identity.
+        crate::feature_set_id::FeatureSetId::from_slots_with_layout(
             self.compute_parts(),
             layout_width,
             era,
