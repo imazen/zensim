@@ -51,8 +51,109 @@
   slots + 12 `PJND_FRAGILITY` at 944, reproduced from the registry's own `Form`
   declarations.
 
+#### Phase 2 — the RESEARCH engine and per-feature provenance (2026-09-05)
+
+Record: `benchmarks/feature_system_phase2_2026-09-05.md`.
+
+- **`zensim::research`** (`#[doc(hidden)] pub`, `feature-regime-v2`-gated) —
+  ONE plan-driven, full-width, deterministic entry that computes every
+  registered signal and reports what each emitted value IS: id, name, family,
+  scale, channel, statistic, per-SLOT cost, tranche, difference-form, monotone
+  direction, owning kernel, resolved revision + commit, any PROPOSED revision,
+  any live defect id, and whether the plan populated the position or left the
+  layout's structural zero. `Request::{everything, for_slots, for_set,
+  for_bake_bytes}` + `.at_revision()` / `.with_era_label()` / `.with_parallel()`
+  / `.validate()`; `Extraction::manifest_json()` renders the whole table.
+  **The SUPPORTED public API (`docs/public-api/zensim.txt`) is unchanged.**
+- **Revision SELECTION from the registry, composing with the revision lane's
+  arithmetic switch.** `RevisionRef::Named(era)` is servable iff, for every
+  requested slot, the signal's EFFECTIVE era (its latest revision *this build
+  actually computes*, asking `ssim_form::active_revision` rather than assuming
+  the shipped default) is that era **or** no revision entry of that signal
+  names it — an era is a boundary in time, not a label every slot must wear.
+  Anything else is refused, naming the slots; an unregistered token is caught
+  first as a typo. Naming the CURRENT era is byte-identical to not naming one.
+  MEASURED end to end: under Rev1 a `v1ssimcap` request refuses **exactly** the
+  slots `FormulaRevision::Rev2::moved_slots` declares (132 at `0..372`, 36 for
+  `basic` alone — gated against that owner, not a copied list); under
+  `ZENSIM_FORMULA_REV=2` the same request SUCCEEDS with no change in this
+  module, and re-extraction moves exactly those **132 columns** (36 basic / 24
+  peaks / 36 masked / 36 iw, max |Δ| 3.36e-1). The manifest now records
+  `formula_revision` + `formula_revision_eras` beside the requested one, so a
+  table produced under a pinned arithmetic era cannot hide it.
+- **`v2_ab_extract` gained `ZENSIM_AB_MODE=research`** (`ZENSIM_RESEARCH_
+  {SET,WIDTH,ERA,REVISION}`), which writes the CSV **and** a `_MANIFEST.json`
+  carrying the provenance table, the producer `feature_set_id`, the emitted
+  slot set, and both build-commit readings (compiled-in and runtime-git,
+  reported separately with a warning on disagreement — never merged into one
+  guessed value). Extended, not forked: same pairs TSV, same `zen_io` decode,
+  same grouped ref-reuse, same NO-GRACEFUL-SKIPS abort.
+- **Gates (pre-registered), all PASS** under `--features
+  training,feature-regime-v2,threads`: **G2.1** parity — 45,440 bit
+  comparisons across 3 layouts × the shared 20-cell matrix, plus 60 real CID22
+  pairs where research and production CSVs are **byte-identical** (sha256
+  `253d864c…`); **G2.2** thread invariance across rayon pools 1/2/3/8/16 at 24
+  cells; **G2.3** completeness — all 956 registered slots, zero unregistered
+  positions; **G2.4** provenance verified by a perturbation probe over 5
+  families × 20 cells.
+- **Cost, MEASURED and reported (not gated):** 60 CID22 pairs at 512², one
+  binary, interleaved, min of 3 — production `foldapp2pools` **55.7 ms/pair**,
+  research at the same plan **55.8 (+0.2 %, inside a 4.3 ms spread)**, research
+  at 956 **58.0 (+4.1 %, the CSFW block's own work)**, research at 372
+  **27.5 (0.49×)**. The named entry costs nothing measurable; a narrower plan
+  really is cheaper.
+- **The design's "buffered / oracle-backed" research walk is CORRECTED, from
+  source:** the buffered walk takes no `V2NewFeatureToggles` and is
+  structurally v1-only (372 of 956 slots), and the `oracle` accumulators
+  produce different bits by design, which would make bit-exact parity
+  unsatisfiable. The research engine therefore drives the fold with the
+  production reduction; what distinguishes the engines is the PLAN and the
+  OUTPUT.
+
 ### Fixed
 
+- **`Plan` described walks that cannot exist — found by phase 2's perturbation
+  probe.** `V2NewFeatureToggles` has exactly ONE layout/compute separation
+  (`v1_only`); `ComputeSet::from_toggles` derives `append`/`append2`/`csfw`
+  from the same `*_block` flags that set the WIDTH and hard-sets `v1_basic`.
+  So a plan saying "compute append but not CSFW at layout 956" emitted
+  `csfw_block` from the width, the walk computed CSFW, and `emit` called those
+  twelve positions structural zeros — MEASURED: `f944` at **0.0678** on a plan
+  that declared it unpopulated. Fixed by normalizing through the toggles the
+  plan itself emits, so `compute == ComputeSet::from_toggles(plan.toggles())`
+  **by construction**, in all four constructors. `emit` only WIDENS, so no
+  request that planned before stops planning and the servability census is
+  unchanged. `normalization_is_a_fixed_point` +
+  `a_wide_layout_computes_every_block_it_reaches` (a NEGATIVE gate pinning the
+  limitation) are the gates; the missing per-block layout-only flag is
+  REGISTERED, not built — it needs a walk change.
+- **The structural fill is NOT a constant — measured.** A `v1_only` 944 walk
+  leaves 572 positions uncomputed; **560 read exactly `0.0` and twelve read
+  exactly `1.0`**, and the twelve are precisely the `v2_pjnd_fragility` slots
+  the defect audit tagged **F15**. Same finaliser as F15's identity-pair
+  instance, observed in a second place: it returns `1.0` for its degenerate
+  no-samples branch and runs whether or not its kernel did. NOT fixed here
+  (kernel arithmetic belongs to the revision lane and a fix moves shipped
+  bytes); instead `research::nonzero_structural_fill_slots()` derives the
+  exception FROM the registry's defect field, and
+  `the_structural_fill_value_is_zero_except_on_the_f15_slots` pins both halves
+  so neither a new nonzero position nor a silently-fixed F15 slot can pass
+  unnoticed. `ZensimV2Result`'s "structural 0.0" doc is a difference-form
+  assumption; **"unpopulated" and "zero" are different claims**.
+- **The parity geometry matrix has ONE owner**, `zensim/tests/common/
+  parity_cells.rs`. It was a `const` inside `fold_engine_parity.rs` and its
+  four-cell pool-sweep extension was written out identically at **three** call
+  sites with nothing checking the three stayed equal.
+- **Stale test names and counts corrected in place.**
+  `folded_v1_only_matches_full_walk` **has never existed in the tree** — three
+  live `feature_v2.rs` doc comments and CLAUDE.md cited it; the real cousin is
+  `free_extras_are_pure_addition_to_the_v1_only_walk`. `fold_engine_parity.rs`
+  is **14 tests over 20 cells** (24 in the three pool-sweeping tests), not "11
+  tests over 18 geometries". `pyramid_stride_has_no_phantom_columns` lives in
+  `feature_v2.rs`, not `blur.rs`. `v1_golden_bytes.rs`'s determinism test says
+  "BOTH fixtures" and runs **three**. CLAUDE.md now also records that
+  `training` is NOT a default feature, so a plain `cargo test -p zensim`
+  compiles **none** of the three primary byte gates.
 - **`docs/FEATURE_SET_IDS.md` §1 failure #9 corrected in place** — "the v1-372
   `f0..155` is NOT the 944 fold's" is an ERA artifact of two stored instruments;
   in one process at one commit they are bit-identical on 372 of 372 slots at 11

@@ -9,27 +9,27 @@
 
 ## summary
 #
-#   pub modules                                16
-#   pub types (struct/enum/trait/alias)        59
+#   pub modules                                17
+#   pub types (struct/enum/trait/alias)        61
 #   pub consts/statics                         34
-#   pub macros                                  3
-#   free functions                             49
-#   inherent methods                          390
-#   struct fields                             193
-#   enum variants                             142
-#   trait roster entries (type × trait)       149
-#   auto-trait-complete types                  30
+#   free functions                             53
+#   inherent methods                          399
+#   struct fields                             196
+#   enum variants                             144
+#   trait roster entries (type × trait)       159
+#   auto-trait-complete types                  32
 #
 # per-module pub lines:
-#   (root)                           21
+#   (root)                           18
 #   checksums                         1
-#   layout                          859
+#   font                              1
+#   layout                          879
 #   manifest                          1
 #   petname                           1
 #   simd                              1
 #   testing                           2
 
-## items (842 lines)
+## items (860 lines)
 
 #[non_exhaustive] pub enum layout::ContainerKind [also: layout::diagnostics]
 #[non_exhaustive] pub enum layout::NodeKind [also: layout::diagnostics]
@@ -67,6 +67,7 @@ pub const layout::text::DEFAULT_LINE_HEIGHT: f32
 pub const layout::text::DEFAULT_PAD_H_FRAC: f32
 pub const layout::text::DEFAULT_PAD_V_FRAC: f32
 pub enum layout::Axis [also: layout::geom]
+pub enum layout::Backend
 pub enum layout::CrossAlign [also: layout::sizing]
 pub enum layout::Fit [also: layout::sizing]
 pub enum layout::HAlign [also: layout::geom]
@@ -77,6 +78,12 @@ pub enum layout::Track [also: layout::sizing]
 pub enum layout::VAlign [also: layout::geom]
 pub fn Bitmap::assert_fields_are_eq(&self)
 pub fn checksums::EntryKind::assert_fields_are_eq(&self)
+pub fn font::bench_build_scaled_run(u32, u32, u32, u32) -> usize
+pub fn layout::Backend::assert_fields_are_eq(&self)
+pub fn layout::Backend::clone(&self) -> layout::Backend
+pub fn layout::Backend::default() -> layout::Backend
+pub fn layout::Backend::eq(&self, &layout::Backend) -> bool
+pub fn layout::Backend::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn layout::LayoutMod::align(self, layout::geom::HAlign, layout::geom::VAlign) -> layout::node::Node
 pub fn layout::LayoutMod::align_h(self, layout::geom::HAlign) -> layout::node::Node
 pub fn layout::LayoutMod::align_v(self, layout::geom::VAlign) -> layout::node::Node
@@ -113,6 +120,7 @@ pub fn layout::LayoutMod::width_percent(self, f32) -> layout::node::Node
 pub fn layout::RenderConfig::clone(&self) -> layout::RenderConfig
 pub fn layout::RenderConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn layout::RenderConfig::new(u32) -> Self
+pub fn layout::RenderConfig::with_backend(self, layout::Backend) -> Self
 pub fn layout::RenderConfig::with_base_em(self, u32) -> Self
 pub fn layout::RenderConfig::with_bg(self, layout::color::Color) -> Self
 pub fn layout::RenderConfig::with_limits(self, layout::safety::LayoutLimits) -> Self
@@ -484,6 +492,12 @@ pub fn layout::stack::Stack::size(self, u32, u32) -> layout::node::Node
 pub fn layout::stack::Stack::size_percent(self, f32, f32) -> layout::node::Node
 pub fn layout::stack::Stack::width(self, layout::sizing::SizeRule) -> layout::node::Node
 pub fn layout::stack::Stack::width_percent(self, f32) -> layout::node::Node
+pub fn layout::taffy_backend::Coverage::clone(&self) -> layout::taffy_backend::Coverage
+pub fn layout::taffy_backend::Coverage::default() -> layout::taffy_backend::Coverage
+pub fn layout::taffy_backend::Coverage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::taffy_backend::render_scaled(&layout::node::Node, u32, layout::color::Color) -> Bitmap
+pub fn layout::taffy_backend::render_via_taffy(&layout::node::Node, &layout::RenderConfig) -> (Bitmap, layout::taffy_backend::Coverage)
+pub fn layout::taffy_backend::render_via_taffy_bg(&layout::node::Node, u32, layout::color::Color) -> (Bitmap, layout::taffy_backend::Coverage)
 pub fn layout::text(layout::text::TextSpec) -> layout::node::Node [also: layout::node]
 pub fn layout::text::TextSpec::auto_fit(impl core::convert::Into<alloc::string::String>, layout::color::Color, layout::color::Color) -> Self
 pub fn layout::text::TextSpec::clone(&self) -> layout::text::TextSpec
@@ -502,9 +516,6 @@ pub fn petname::MemorableNameParts::assert_fields_are_eq(&self)
 pub fn simd::CryptoGrouping::assert_fields_are_eq(&self)
 pub fn testing::ComparisonMethod::assert_fields_are_eq(&self)
 pub fn testing::DimensionMismatchKind::assert_fields_are_eq(&self)
-pub macro column!
-pub macro layers!
-pub macro row!
 pub mod layout
 pub mod layout::color
 pub mod layout::compose
@@ -520,6 +531,7 @@ pub mod layout::paint
 pub mod layout::safety
 pub mod layout::sizing
 pub mod layout::stack
+pub mod layout::taffy_backend
 pub mod layout::text
 pub struct layout::Grid [also: layout::grid]
 pub struct layout::GridSpan [also: layout::grid]
@@ -536,10 +548,13 @@ pub struct layout::Stack [also: layout::stack]
 pub struct layout::compose::ColumnCtx
 pub struct layout::compose::LayersCtx
 pub struct layout::compose::RowCtx
+pub struct layout::taffy_backend::Coverage
 pub trait layout::LayoutMod: core::marker::Sized [also: layout::modifiers]
 pub type layout::Color = [u8; 4] [also: layout::color]
 pub layout::Axis::Horizontal
 pub layout::Axis::Vertical
+pub layout::Backend::Native
+pub layout::Backend::Taffy
 pub layout::ContainerKind::Grid
 pub layout::ContainerKind::Layers
 pub layout::ContainerKind::Stack
@@ -666,6 +681,7 @@ pub layout::Rect::h: u32
 pub layout::Rect::w: u32
 pub layout::Rect::x: u32
 pub layout::Rect::y: u32
+pub layout::RenderConfig::backend: layout::Backend
 pub layout::RenderConfig::base_em: u32
 pub layout::RenderConfig::bg: layout::color::Color
 pub layout::RenderConfig::limits: layout::safety::LayoutLimits
@@ -854,6 +870,8 @@ pub layout::sizing::Track::FrMin::min_px: u32
 pub layout::sizing::Track::FrMin::weight: u32
 pub layout::sizing::Track::Percent(f32)
 pub layout::sizing::Track::Px(u32)
+pub layout::taffy_backend::Coverage::approximated: alloc::vec::Vec<(&'static str, &'static str)>
+pub layout::taffy_backend::Coverage::mapped: alloc::vec::Vec<&'static str>
 pub layout::text::TextSpec::bg: layout::color::Color
 pub layout::text::TextSpec::line_height: f32
 pub layout::text::TextSpec::pad_h_frac: f32
@@ -874,10 +892,11 @@ pub layout::text::TextStyle::Wrapped::char_h: u32
 pub layout::text::TextStyle::Wrapped::fg: layout::color::Color
 pub layout::text::TextStyle::Wrapped::text: alloc::string::String
 
-## trait impls (34 types)
+## trait impls (36 types)
 
 BitmapRef<'a>: TrivialClone
 checksums::EntryKind: TrivialClone
+layout::Backend: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
 layout::RenderConfig: Clone, Debug
 layout::RenderOutcome: Debug, Display
 layout::diagnostics::ContainerKind: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
@@ -903,6 +922,7 @@ layout::sizing::MainAlign: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialCl
 layout::sizing::SizeRule: Clone, Copy, Debug, Default, PartialEq, TrivialClone
 layout::sizing::Track: Clone, Copy, Debug, PartialEq, TrivialClone
 layout::stack::Stack: Clone, Debug, layout::modifiers::LayoutMod
+layout::taffy_backend::Coverage: Clone, Debug, Default
 layout::text::TextSpec: Clone, Debug
 layout::text::TextStyle: Clone, Debug
 manifest::ManifestStatus: TrivialClone
@@ -913,4 +933,4 @@ testing::DimensionMismatchKind: TrivialClone
 
 ## auto traits
 
-30 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+32 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

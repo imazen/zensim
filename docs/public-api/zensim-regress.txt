@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zensim-regress.txt 549 lines (supported surface) | zensim-regress.features.txt 21 added (features: archmage,threads) | zensim-regress.internal.txt 877 lines (1276 hidden + 3 excluded-feature)
+# files: zensim-regress.txt 549 lines (supported surface) | zensim-regress.features.txt 24 added (features: archmage,sdf-font,taffy-backend,threads) | zensim-regress.internal.txt 897 lines (1322 hidden + 0 excluded-feature)
 
 ## summary
 #

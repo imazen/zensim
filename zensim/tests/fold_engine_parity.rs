@@ -131,47 +131,7 @@ fn assert_result_bit_identical(ctx: &str, buffered: &ZensimResult, fold: &Zensim
     }
 }
 
-/// The geometry matrix. `v1_372_bit_exact_to_fold_at_every_width`'s cells
-/// (tight, non-tight even, non-tight odd, and the three `h = 93` cells that
-/// were the last residual under the option-A pre-pad workaround) plus the two
-/// procedural golden geometries and a sub-64 cell that exercises the shared
-/// reflect-pad.
-const CELLS: &[(usize, usize)] = &[
-    // WIDER THAN `H_TILE_WIDTH` (1024) — the only cells here that exercise the
-    // era-2 column tile at its SHIPPED width. Every other cell is narrower
-    // than the tile and so runs the untiled path by construction
-    // (`width > tile` guards every H entry), which means that without these
-    // the whole parity suite would leave the shipped configuration untested.
-    // 1153 is deliberately odd and crosses the boundary with a 129-column
-    // remainder tile; 2049 crosses two boundaries with a 1-column remainder,
-    // the narrowest tile the loop can emit.
-    (1153, 72),
-    (2049, 40),
-    // the procedural golden fixtures
-    (64, 64),
-    (200, 150),
-    // formerly "tight"
-    (96, 64),
-    (208, 144),
-    (592, 80),
-    (128, 93),
-    // formerly divergent — even, non-tight
-    (200, 151),
-    (576, 96),
-    (100, 96),
-    // formerly divergent — odd, non-tight
-    (127, 64),
-    (129, 96),
-    (255, 96),
-    (577, 80),
-    // the h = 93 cells
-    (126, 93),
-    (127, 93),
-    (255, 93),
-    // sub-64: the SHARED reflect-pad runs before either walk
-    (48, 40),
-    (17, 96),
-];
+use common::parity_cells::CELLS;
 
 fn run_both<F>(profile: ZensimProfile, parallel: bool, f: F) -> (ZensimResult, ZensimResult)
 where
@@ -272,11 +232,7 @@ fn both_engines_are_bit_identical_across_rayon_pool_sizes() {
     // per-channel fan-out — so a band boundary interacting with a geometry is
     // exactly the failure mode, and only a pool sweep over every geometry can
     // see it.
-    let cells: Vec<(usize, usize)> = CELLS
-        .iter()
-        .copied()
-        .chain([(256usize, 256usize), (96, 320), (320, 96), (577, 385)])
-        .collect();
+    let cells = common::parity_cells::pool_sweep_cells();
     for &(w, h) in &cells {
         let (r, d) = pair(w, h);
         let mut first: Option<(ZensimResult, ZensimResult)> = None;
@@ -696,11 +652,7 @@ fn unread_feature_skipping_is_inert_on_a_profile_that_reads_the_block() {
         zensim::feature_v2::V1PoolsMode::Full,
         "B reads f228..372 — the policy must refuse to skip it"
     );
-    let cells: Vec<(usize, usize)> = CELLS
-        .iter()
-        .copied()
-        .chain([(256usize, 256usize), (96, 320), (320, 96), (577, 385)])
-        .collect();
+    let cells = common::parity_cells::pool_sweep_cells();
     for &(w, h) in &cells {
         let (r, d) = pair(w, h);
         for threads in [1usize, 2, 3, 8, 16] {
@@ -777,11 +729,7 @@ fn folded944_is_bit_identical_across_rayon_pool_sizes() {
         append2_block: true,
         ..Default::default()
     };
-    let cells: Vec<(usize, usize)> = CELLS
-        .iter()
-        .copied()
-        .chain([(256usize, 256usize), (96, 320), (320, 96), (577, 385)])
-        .collect();
+    let cells = common::parity_cells::pool_sweep_cells();
     assert!(cells.len() >= 18, "geometry set shrank to {}", cells.len());
     for &(w, h) in &cells {
         let (r, d) = pair(w, h);

@@ -745,9 +745,11 @@ score.** `ZensimV2Result` still has none, but
 `compute_with_codec_hint`, `compute_extended_features`,
 `compute_all_features`, `compute_with_ref` and `classify` through the fold and
 returns a **BIT-IDENTICAL** `ZensimResult` — score, `raw_distance`, every
-feature, and `mean_offset`. Gates: `zensim/tests/fold_engine_parity.rs` (11
-tests, `to_bits()` equality over 18 geometries × {serial, rayon} × rayon pools
-1/2/3/8/16) and `fold_backed_fixtures_match_golden` in `v1_golden_bytes.rs`
+feature, and `mean_offset`. Gates: `zensim/tests/fold_engine_parity.rs` (**14
+tests**, `to_bits()` equality over the **20-cell** geometry matrix ×
+{serial, rayon}; the three pool-sweeping tests widen it to **24 cells** ×
+rayon pools 1/2/3/8/16) and `fold_backed_fixtures_match_golden` in
+`v1_golden_bytes.rs`
 (the fold reproduces the PINNED golden arrays, not merely the buffered path).
 Record: [`benchmarks/fold_engine_2026-08-31.md`](benchmarks/fold_engine_2026-08-31.md).
 
@@ -832,7 +834,8 @@ rollout" until 2026-09-05; that was stale by six days and cost a lane an
 afternoon. Corrected in place, per DOCS: SEARCH + UPDATE.)* `blur::
 pyramid_plane_stride` now returns the width and is the one greppable owner;
 `mirror_pad_columns` and its three call sites are DELETED.
-`pyramid_stride_has_no_phantom_columns` pins it at the owner over 24 widths.
+`pyramid_stride_has_no_phantom_columns` (in `feature_v2.rs`, NOT `blur.rs` —
+it drives the owner from the caller's side) pins it over 24 widths.
 
 **Consequence you must know before citing any 372 number: the shipped runtime
 is one extraction era AHEAD of BOTH v1-372 eval roots.** The default root
@@ -905,8 +908,12 @@ invert the permutation, checked — the pattern
 **Block-skipping: `V2NewFeatureToggles::v1_only`.** A 372-only request skips
 every v2-era block AND its phase-A upstream (the four V-blur sweeps + the v2
 activity chain). 249 M Ir vs buffered v1-372's 336 M (**0.743×**) and
-944-full's 535 M (**0.466×**). Gate: `folded_v1_only_matches_full_walk`
-(bit-identical emitted slots, skipped range asserted FINITE).
+944-full's 535 M (**0.466×**). Gate:
+`free_extras_are_pure_addition_to_the_v1_only_walk` (bit-identical emitted
+slots, skipped range asserted FINITE). *(Called
+`folded_v1_only_matches_full_walk` in four source doc comments and several
+campaign records until 2026-09-05 — that name has never existed in the tree;
+corrected at the four live sites, left in the historical records.)*
 
 **MT: the fold saturated at exactly 3 threads and REGRESSED past it** (2.26×
 @3T, then worse) — the channel fan-out is the whole of its parallelism. Band
@@ -1008,6 +1015,21 @@ bodies, so tail rows differ from vector rows in the last ulp or two (2528.7349 v
 2528.7344). Pre-existing; `fused_blur_h_ssim` already fixed it via a masked
 vector tail. Converting `mu` would move v1's shipped bytes — golden-gate policy,
 not a drive-by.
+
+**The gates are FEATURE-GATED, and `training` is NOT default.** All three
+primary byte gates — `v1_golden_bytes.rs`, `fold_engine_parity.rs`,
+`v1_feature_width_pure_function.rs` — open with
+`#![cfg(all(feature = "training", ...))]`, so a plain `cargo test -p zensim`
+compiles **none** of them and reports a green run that proved nothing. Run
+them as `cargo test -p zensim --features
+training,classification,custom-profiles,feature-regime-v2,threads`. The
+canonical geometry list is `feature_v2.rs`'s
+`v1_372_bit_exact_to_fold_at_every_width` (19 cells, duplicated verbatim a few
+tests below it); the parity suite's own 20-cell matrix now has ONE owner,
+`zensim/tests/common/parity_cells.rs`. The ONLY tolerances anywhere in the
+parity suite are `mean_offset < 1e-10` in `compute_with_ref_cross_engine` and
+the golden policy `|Δ| <= max(1e-6, 1e-5·scale)`; everything else is
+`to_bits()`.
 
 **Profiling here:** `perf` is unusable (`perf_event_paranoid = 4` under WSL2
 refuses even user-space events). Use callgrind on a `--no-default-features`

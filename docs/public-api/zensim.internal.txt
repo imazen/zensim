@@ -9,36 +9,155 @@
 
 ## summary
 #
-#   free functions                              5
-#   inherent methods                            9
-#   enum variants                               2
-#   trait roster entries (type × trait)        17
+#   pub modules                                 3
+#   pub types (struct/enum/trait/alias)         6
+#   pub consts/statics                          2
+#   free functions                             18
+#   inherent methods                           62
+#   struct fields                              23
+#   enum variants                              11
+#   trait roster entries (type × trait)        49
+#   auto-trait-complete types                   5
 #
 # per-module pub lines:
-#   (root)                           12
+#   (root)                           19
+#   __bench_stages                    9
+#   feature_set_id                    4
+#   feature_v2                        7
+#   fold_engine                       8
 #   profile                           1
-#   source                            3
+#   research                         73
+#   source                            4
 
-## items (16 lines)
+## items (125 lines)
 
+pub const research::BASE_REVISION_ERA: &str
+pub const research::BUILD_COMMIT: core::option::Option<&str>
+pub enum fold_engine::ScoringEngine
+pub enum research::ResearchError
+pub enum research::RevisionRef
 pub fn BlurKernel::assert_fields_are_eq(&self)
 pub fn ErrorCategory::assert_fields_are_eq(&self)
 pub fn IwWeightKind::assert_fields_are_eq(&self)
 pub fn UnsupportedFormat::assert_fields_are_eq(&self)
+pub fn Zensim::engine(&self) -> fold_engine::ScoringEngine
+pub fn Zensim::score_pool_mode(&self) -> feature_v2::V1PoolsMode
+pub fn Zensim::with_engine(self, fold_engine::ScoringEngine) -> Self
+pub fn Zensim::with_unread_feature_skipping(self, bool) -> Self
 pub fn ZensimError::assert_fields_are_eq(&self)
 pub fn ZensimResult::nan() -> Self
+pub fn __bench_stages::abs_diff_sum(&[f32], &[f32]) -> f64
+pub fn __bench_stages::box_blur_1pass_into(&[f32], &mut [f32], &mut [f32], usize, usize, usize)
+pub fn __bench_stages::box_spread_merge_f32(&mut [f32], &mut [f32], usize, usize, usize, &mut alloc::vec::Vec<f32>, &mut alloc::vec::Vec<f32>, bool)
+pub fn __bench_stages::downscale_2x_into(&[f32], usize, &mut [f32], usize, usize)
+pub fn __bench_stages::fused_blur_h_ssim(&[f32], &[f32], &mut [f32], &mut [f32], &mut [f32], &mut [f32], usize, usize, usize)
+pub fn __bench_stages::mul_into(&[f32], &[f32], &mut [f32])
+pub fn __bench_stages::sq_diff_sum(&[f32], &[f32]) -> f64
+pub fn __bench_stages::sq_sum_into(&[f32], &[f32], &mut [f32])
+pub fn __bench_stages::srgb_to_positive_xyb_planar_into(&[[u8; 3]], &mut [f32], &mut [f32], &mut [f32])
 pub fn bench_pu_xyb_dispatch(&[[f32; 3]], &mut [f32], &mut [f32], &mut [f32])
 pub fn bench_pu_xyb_scalar(&[[f32; 3]], &mut [f32], &mut [f32], &mut [f32])
 pub fn compute_zensim_with_config(&[[u8; 3]], &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
 pub fn compute_zensim_with_ref_and_config(&PrecomputedReference, &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
+pub fn feature_set_id::ComputeParts::assert_fields_are_eq(&self)
+pub fn feature_set_id::ComputeToken::assert_fields_are_eq(&self)
+pub fn feature_set_id::FeatureSetId::assert_fields_are_eq(&self)
+pub fn feature_set_id::SlotSet::assert_fields_are_eq(&self)
+pub fn feature_v2::FeatureRegime::assert_fields_are_eq(&self)
+pub fn feature_v2::V1FreeExtras::assert_fields_are_eq(&self)
+pub fn feature_v2::V1PoolsMode::assert_fields_are_eq(&self)
+pub fn feature_v2::V2NewFeatureToggles::feature_set_id(&self, usize, usize, &str) -> core::option::Option<feature_set_id::FeatureSetId>
+pub fn feature_v2::V2NewFeatureToggles::populated_slots(&self, usize, usize) -> feature_set_id::SlotSet
+pub fn fold_engine::ScoringEngine::assert_fields_are_eq(&self)
+pub fn fold_engine::ScoringEngine::clone(&self) -> fold_engine::ScoringEngine
+pub fn fold_engine::ScoringEngine::default() -> fold_engine::ScoringEngine
+pub fn fold_engine::ScoringEngine::eq(&self, &fold_engine::ScoringEngine) -> bool
+pub fn fold_engine::ScoringEngine::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn precompute_reference_with_scales(&[[u8; 3]], usize, usize, usize) -> core::result::Result<PrecomputedReference, ZensimError>
+pub fn research::Extraction::build_commit(&self) -> &str
+pub fn research::Extraction::clone(&self) -> research::Extraction
+pub fn research::Extraction::emitted(&self) -> &feature_set_id::SlotSet
+pub fn research::Extraction::feature_set_id(&self) -> core::option::Option<&feature_set_id::FeatureSetId>
+pub fn research::Extraction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::Extraction::into_values(self) -> alloc::vec::Vec<f64>
+pub fn research::Extraction::layout_width(&self) -> usize
+pub fn research::Extraction::manifest_json(&self) -> alloc::string::String
+pub fn research::Extraction::n_scales(&self) -> usize
+pub fn research::Extraction::provenance(&self) -> &[research::FeatureProvenance]
+pub fn research::Extraction::revision(&self) -> &research::RevisionRef
+pub fn research::Extraction::values(&self) -> &[f64]
+pub fn research::FeatureProvenance::assert_fields_are_eq(&self)
+pub fn research::FeatureProvenance::clone(&self) -> research::FeatureProvenance
+pub fn research::FeatureProvenance::eq(&self, &research::FeatureProvenance) -> bool
+pub fn research::FeatureProvenance::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::Request::at_revision(self, research::RevisionRef) -> research::Request
+pub fn research::Request::clone(&self) -> research::Request
+pub fn research::Request::everything() -> research::Request
+pub fn research::Request::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::Request::for_bake_bytes(&[u8]) -> core::result::Result<research::Request, research::ResearchError>
+pub fn research::Request::for_set(&feature_set_id::FeatureSetId) -> core::result::Result<research::Request, research::ResearchError>
+pub fn research::Request::for_slots(feature_set_id::SlotSet, usize) -> research::Request
+pub fn research::Request::layout_width(&self) -> usize
+pub fn research::Request::validate(&self) -> core::result::Result<feature_set_id::SlotSet, research::ResearchError>
+pub fn research::Request::want(&self) -> &feature_set_id::SlotSet
+pub fn research::Request::with_era_label(self, impl core::convert::Into<alloc::string::String>) -> research::Request
+pub fn research::Request::with_parallel(self, bool) -> research::Request
+pub fn research::ResearchError::clone(&self) -> research::ResearchError
+pub fn research::ResearchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::RevisionRef::assert_fields_are_eq(&self)
+pub fn research::RevisionRef::clone(&self) -> research::RevisionRef
+pub fn research::RevisionRef::eq(&self, &research::RevisionRef) -> bool
+pub fn research::RevisionRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::extract(&research::Request, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<research::Extraction, research::ResearchError>
+pub fn research::family_slots(feature_set_id::ComputeToken) -> feature_set_id::SlotSet
+pub fn research::full_width() -> usize
+pub fn research::nonzero_structural_fill_slots() -> feature_set_id::SlotSet
 pub fn source::AlphaMode::assert_fields_are_eq(&self)
 pub fn source::ColorPrimaries::assert_fields_are_eq(&self)
+pub fn source::GamutMapping::assert_fields_are_eq(&self)
 pub fn source::PixelFormat::assert_fields_are_eq(&self)
+pub mod __bench_stages
+pub mod fold_engine
+pub mod research
+pub struct research::Extraction
+pub struct research::FeatureProvenance
+pub struct research::Request
 pub ZensimProfile::LegacyLinearV0_2
+pub feature_v2::V2NewFeatureToggles::free_extras: feature_v2::V1FreeExtras
+pub feature_v2::V2NewFeatureToggles::v1_only: bool
+pub fold_engine::ScoringEngine::Buffered
+pub fold_engine::ScoringEngine::Fold
 pub profile::ZensimProfile::LegacyLinearV0_2
+pub research::FeatureProvenance::channel: &'static str
+pub research::FeatureProvenance::cost: &'static str
+pub research::FeatureProvenance::defect: core::option::Option<&'static str>
+pub research::FeatureProvenance::deprecated: bool
+pub research::FeatureProvenance::direction: &'static str
+pub research::FeatureProvenance::family: &'static str
+pub research::FeatureProvenance::form: &'static str
+pub research::FeatureProvenance::id: u16
+pub research::FeatureProvenance::kernel: &'static str
+pub research::FeatureProvenance::name: alloc::string::String
+pub research::FeatureProvenance::populated: bool
+pub research::FeatureProvenance::proposed_revision: core::option::Option<&'static str>
+pub research::FeatureProvenance::revision_commit: &'static str
+pub research::FeatureProvenance::revision_era: alloc::string::String
+pub research::FeatureProvenance::scale: u8
+pub research::FeatureProvenance::statistic: &'static str
+pub research::FeatureProvenance::tranche: &'static str
+pub research::ResearchError::Compute(ZensimError)
+pub research::ResearchError::Plan(alloc::string::String)
+pub research::ResearchError::RevisionUnavailable
+pub research::ResearchError::RevisionUnavailable::actual: alloc::vec::Vec<alloc::string::String>
+pub research::ResearchError::RevisionUnavailable::incompatible: feature_set_id::SlotSet
+pub research::ResearchError::RevisionUnavailable::wanted: alloc::string::String
+pub research::ResearchError::RevisionUnregistered
+pub research::ResearchError::RevisionUnregistered::wanted: alloc::string::String
+pub research::ResearchError::UnreadableBake
+pub research::RevisionRef::Current
+pub research::RevisionRef::Named(alloc::string::String)
 
-## trait impls (17 types)
+## trait impls (32 types)
 
 BlurKernel: TrivialClone
 DiffmapOptions: TrivialClone
@@ -50,10 +169,29 @@ IwWeightKind: TrivialClone
 UnsupportedFormat: TrivialClone
 ZensimConfig: TrivialClone
 ZensimError: TrivialClone
+feature_set_id::ComputeParts: TrivialClone
+feature_set_id::ComputeToken: TrivialClone
+feature_v2::FeatureRegime: TrivialClone
+feature_v2::FeatureViewV2<'a>: TrivialClone
+feature_v2::HdrEncoding: TrivialClone
+feature_v2::V1FreeExtras: TrivialClone
+feature_v2::V1PoolsMode: TrivialClone
+feature_v2::V2NewFeatureToggles: TrivialClone
+fold_engine::ScoringEngine: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
 profile::ZensimProfile: TrivialClone
+research::Extraction: Clone, Debug
+research::FeatureProvenance: Clone, Debug, Eq, PartialEq
+research::Request: Clone, Debug
+research::ResearchError: Clone, Debug, Display, Error
+research::RevisionRef: Clone, Debug, Eq, PartialEq
 source::AlphaMode: TrivialClone
 source::ColorPrimaries: TrivialClone
+source::GamutMapping: TrivialClone
 source::PixelFormat: TrivialClone
 source::RgbSlice<'a>: TrivialClone
 source::RgbaSlice<'a>: TrivialClone
 source::StridedBytes<'a>: TrivialClone
+
+## auto traits
+
+5 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

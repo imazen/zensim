@@ -231,7 +231,10 @@ fn v1_nontight_fixture_matches_golden() {
 /// of the same fixture must agree bit-for-bit on all 372 features. Catches
 /// nondeterminism (thread-order-dependent reductions, uninitialized reads,
 /// iteration-order dependence) on every runner class, without asserting the
-/// vendor-portability the exact golden falsely claimed. Runs BOTH fixtures.
+/// vendor-portability the exact golden falsely claimed. Runs all THREE
+/// fixtures — the two procedural ones (64x64 tight, 200x150 non-tight) and
+/// the real-image PNG pair. (Said "BOTH" until 2026-09-05; the third was
+/// added with the non-tight golden and the doc was not.)
 #[test]
 fn v1_same_class_determinism_bitexact() {
     let compare_bits = |name: &str, a: &[f64], b: &[f64]| {

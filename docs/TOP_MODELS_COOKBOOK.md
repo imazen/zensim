@@ -252,6 +252,19 @@ w[156:]=0 constraint). **B:** `benchmarks/profile_b_methodology_2026-07-12.md`.
 5. Rebuild the dashboard (`bandwise_dashboard.py --bakes ...`), write the benchmarks doc with
    honest losses, commit data + doc, update memory. Ship swaps are user-gated.
 
+**Extracting a NEW table? Use the research mode, and its manifest answers
+"what is column N?" for you** (2026-09-05). `ZENSIM_AB_MODE=research` on
+`zensim/examples/v2_ab_extract.rs` (env `ZENSIM_RESEARCH_{SET,WIDTH,ERA,REVISION}`)
+writes the CSV **and** a `_MANIFEST.json` with one provenance row per column —
+name, family, scale/channel, statistic, per-slot cost, difference-form,
+monotone direction, owning kernel, resolved revision, any live defect id, and
+whether the plan populated the position or left the structural fill. It also
+REFUSES loudly, before decoding a single image, if the requested set or era
+cannot be produced. Bit-identical to the production walk at the same plan
+(60 CID22 pairs, byte-identical CSVs) and **+0.2 % cost**; a narrower set is
+genuinely cheaper (`basic+peaks+masked+iw@372` runs at 0.49×). Record:
+[`../benchmarks/feature_system_phase2_2026-09-05.md`](../benchmarks/feature_system_phase2_2026-09-05.md).
+
 **Pitfall list (all measured, all in git):** trainer-emits-MLP-always · MSE-collapse-fake-dial
 · spline-on-spline · abs-vs-signed fold per family · `DiffmapResult::score()` pre-834b4387 ·
 inert zenjpeg passes · legacy-seeded codec tables · SROCC-only verdicts · train==val KADID/TID

@@ -327,6 +327,21 @@ pub(crate) mod fold_timing;
 #[doc(hidden)]
 pub mod fold_engine;
 
+// **The RESEARCH engine** (phase 2 of the feature-system refactor,
+// `docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`): one plan-driven, full-width,
+// deterministic entry that computes every registered signal and reports what
+// each emitted value IS — id, name, family, statistic, cost, form, direction,
+// owning kernel, resolved revision, live defect, and whether the plan
+// populated the position or left the layout's structural zero.
+//
+// `#[doc(hidden)]`: research and extraction machinery, not product surface —
+// the SUPPORTED API (`docs/public-api/zensim.txt`) is unchanged by it. Gated
+// on `feature-regime-v2` because the walk it drives is; a
+// `--no-default-features` build has neither.
+#[cfg(feature = "feature-regime-v2")]
+#[doc(hidden)]
+pub mod research;
+
 // --- Primary API ---
 /// Cooperative-cancellation vocabulary, re-exported from the
 /// [`enough`](https://docs.rs/enough) crate for use with

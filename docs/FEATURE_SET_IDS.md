@@ -310,6 +310,28 @@ READ-BUT-NOT-POPULATED, which is the mechanism behind that read's CID22
   existing `features_root` block stays.
 * **a dial/corruption grid** — same as a features root.
 
+**As of 2026-09-05 a table produced by the RESEARCH engine carries more than
+the id.** `ZENSIM_AB_MODE=research` (`zensim/examples/v2_ab_extract.rs`) writes
+a `_MANIFEST.json` whose `engine` block holds the producer `feature_set_id`,
+the emitted slot set, the resolved revision, the build commit — **and one row
+per COLUMN**: id, name, family, scale, channel, statistic, per-slot cost,
+tranche, difference-form, monotone direction, owning kernel, that signal's
+resolved revision + commit, any registered PROPOSED revision, any live defect
+id, and whether the plan POPULATED the position or left the layout's
+structural fill. So *"what IS column 353 in this table?"* is a lookup in the
+table's own manifest rather than an archaeology problem. Owner:
+`zensim::research`; record:
+[`../benchmarks/feature_system_phase2_2026-09-05.md`](../benchmarks/feature_system_phase2_2026-09-05.md).
+
+**And a structural fill is NOT always `0.0`.** MEASURED 2026-09-05: of the 572
+positions a `v1_only` 944 walk leaves uncomputed, 560 read `0.0` and **twelve
+read `1.0`** — exactly the `v2_pjnd_fragility` slots carrying defect **F15**,
+whose finaliser returns its degenerate value whether or not its kernel ran. A
+manifest's `populated: false` is therefore the authority on "this column
+carries no computed number"; the BYTE at such a column is a per-signal
+property. `zensim::research::nonzero_structural_fill_slots()` derives the
+exception from the registry rather than hard-coding it.
+
 ### 6.2 What is deliberately NOT changed
 
 * `zenanalyze-api` — FROZEN, consumed only.

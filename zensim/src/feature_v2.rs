@@ -1485,7 +1485,7 @@ pub struct V2NewFeatureToggles {
     /// 2026-08-30 by user decision: 944 with all pools live is
     /// the ONLY product mode; there is no 372-only product path and no public
     /// or CLI surface offers one). Retained solely as the control arm for
-    /// `folded_v1_only_matches_full_walk` and for pricing what the v2-era
+    /// `free_extras_are_pure_addition_to_the_v1_only_walk` and for pricing what the v2-era
     /// blocks cost inside the one product walk.
     ///
     /// It stays `pub` only because the struct is constructed by external
@@ -1506,7 +1506,7 @@ pub struct V2NewFeatureToggles {
     ///
     /// PURE COMPUTE-SKIPPING — the slots that ARE emitted are bit-identical
     /// to the same request with this off (gated by
-    /// `folded_v1_only_matches_full_walk`). Semantics are untouched; this
+    /// `free_extras_are_pure_addition_to_the_v1_only_walk`). Semantics are untouched; this
     /// is not the padded-width question.
     ///
     /// The emitted vector keeps the requesting regime's WIDTH, with
@@ -7544,7 +7544,7 @@ pub(crate) fn compute_folded720_streaming_impl(
 /// the streaming walk asked for exactly what a v1 score needs and nothing
 /// else — `v1_only` (skip every v2-era block *and* its upstream V-blur /
 /// activity work; pure compute-skipping, gated by
-/// `folded_v1_only_matches_full_walk`) plus [`V1PoolsMode::Full`] (emit
+/// `free_extras_are_pure_addition_to_the_v1_only_walk`) plus [`V1PoolsMode::Full`] (emit
 /// `f156..372` live). Returns `(features, mean_offset)` where
 /// `features[0..372]` is **bit-identical to v1's 372-feature extraction** at
 /// every width under option C — `v1_372_bit_exact_to_fold_at_every_width` is

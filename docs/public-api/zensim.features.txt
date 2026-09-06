@@ -1,5 +1,5 @@
 # zensim public API — additions from non-default features
-# features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels
+# features: avx512,candidate-profiles,classification,custom-profiles,deprecated-profiles,feature-regime-v2,imgref,iw-diagnostics,oracle,streaming_strips_oom,threads,training,zenpixels
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -10,26 +10,31 @@
 ## summary
 #
 #   pub modules                                 2
-#   pub types (struct/enum/trait/alias)        14
+#   pub types (struct/enum/trait/alias)        17
 #   pub consts/statics                         10
-#   free functions                              4
-#   inherent methods                           21
-#   struct fields                              49
-#   enum variants                              13
-#   trait roster entries (type × trait)        49
-#   auto-trait-complete types                  14
+#   free functions                              8
+#   inherent methods                           46
+#   struct fields                              50
+#   enum variants                              14
+#   trait roster entries (type × trait)        51
+#   auto-trait-complete types                  17
 #
 # per-module pub lines:
-#   (root)                           89
+#   (root)                          119
 #   cvvdp_features                    2
+#   feature_v2                        4
 #   profile                          20
 #   xyb_lms_features                  2
 
-## items (113 lines)
+## items (147 lines)
 
 pub mod cvvdp_features
 pub const cvvdp_features::CVVDP_FEATURE_COUNT: usize
 pub fn cvvdp_features::extract_cvvdp_features(&[u8], &[u8], usize, usize) -> alloc::vec::Vec<f32>
+pub fn feature_v2::bench_dense_era1(&[f32], &[f32], &[f32], &[f32], &[f32], &[f32], &[f32], usize, usize, bool) -> f64
+pub fn feature_v2::bench_dense_era2(&[f32], &[f32], &[f32], &[f32], &[f32], &[f32], &[f32], usize, usize, bool) -> f64
+pub fn feature_v2::harness_active_tier() -> &'static str
+pub fn feature_v2::harness_dense_slots(&[f32], &[f32], &[f32], &[f32], &[f32], &[f32], &[f32], usize, usize, bool, bool) -> [f64; 35]
 pub profile::ZensimProfile::Custom
 pub profile::ZensimProfile::Custom::name: &'static str
 pub profile::ZensimProfile::Custom::params: &'static profile::ProfileParams
@@ -56,6 +61,7 @@ pub fn xyb_lms_features::extract_xyb_lms_features(&[u8]) -> alloc::vec::Vec<f32>
 #[non_exhaustive] pub enum BlurKernel
 pub BlurKernel::Box
 pub BlurKernel::Box::passes: u8
+pub DiffmapWeighting::ModelSensitivity(&'static [f64])
 #[non_exhaustive] pub enum DownscaleFilter
 pub DownscaleFilter::Box2x2
 #[non_exhaustive] pub enum ErrorCategory
@@ -76,6 +82,20 @@ pub ZensimProfile::Custom::params: &'static profile::ProfileParams
 pub AlphaStratifiedStats::max_abs_delta: [f64; 3]
 pub AlphaStratifiedStats::mean_abs_delta: [f64; 3]
 pub AlphaStratifiedStats::pixel_count: u64
+#[non_exhaustive] pub struct AttributionResult
+pub fn AttributionResult::bin(&self) -> usize
+pub fn AttributionResult::block_sums(&self, usize) -> alloc::vec::Vec<f64>
+pub fn AttributionResult::density(&self) -> &[f32]
+pub fn AttributionResult::from_density(alloc::vec::Vec<f32>, usize, usize) -> Self
+pub fn AttributionResult::grid_height(&self) -> usize
+pub fn AttributionResult::grid_width(&self) -> usize
+pub fn AttributionResult::height(&self) -> usize
+pub fn AttributionResult::query_rect(&self, usize, usize, usize, usize) -> f64
+pub fn AttributionResult::width(&self) -> usize
+pub struct AttributionSession
+pub fn AttributionSession::new() -> Self
+pub fn AttributionSession::recycle(&mut self, AttributionResult)
+pub fn AttributionSession::reset(&mut self)
 #[non_exhaustive] pub struct ClassifiedResult
 pub ClassifiedResult::classification: ErrorClassification
 pub ClassifiedResult::delta_stats: DeltaStats
@@ -97,10 +117,13 @@ pub DeltaStats::semitransparent_stats: core::option::Option<AlphaStratifiedStats
 pub DeltaStats::signed_small_histogram: [[u64; 7]; 3]
 pub DeltaStats::src_histogram: [[u64; 256]; 4]
 pub DeltaStats::stddev_delta: [f64; 3]
+pub DiffmapOptions::guided_coarse_redistribution: bool
 #[non_exhaustive] pub struct ErrorClassification
 pub ErrorClassification::confidence: f64
 pub ErrorClassification::dominant: ErrorCategory
 pub ErrorClassification::rounding_bias: core::option::Option<RoundingBias>
+pub struct Fused944Session
+pub fn Fused944Session::new() -> Self
 pub struct IwWeightConfig
 pub IwWeightConfig::info_log_sigma_e_sq: core::option::Option<f32>
 pub IwWeightConfig::kernel_half: usize
@@ -115,6 +138,18 @@ pub fn ZenpixelsSource<'a>::try_from_buffer(&'a zenpixels::buffer::PixelBuffer) 
 pub fn ZenpixelsSource<'a>::try_from_slice(&'a zenpixels::buffer::PixelSlice<'a>) -> core::result::Result<Self, UnsupportedFormat>
 pub fn Zensim::classify(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ClassifiedResult, ZensimError>
 pub fn Zensim::compute_all_features(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_attribution_density(&self, &impl source::ImageSource, &impl source::ImageSource, &[f64]) -> core::result::Result<AttributionResult, ZensimError>
+pub fn Zensim::compute_attribution_density_binned(&self, &impl source::ImageSource, &impl source::ImageSource, &[f64], usize) -> core::result::Result<AttributionResult, ZensimError>
+pub fn Zensim::compute_attribution_density_full(&self, &impl source::ImageSource, &impl source::ImageSource, &[f64]) -> core::result::Result<AttributionResult, ZensimError>
+pub fn Zensim::compute_attribution_density_full_binned(&self, &impl source::ImageSource, &impl source::ImageSource, &[f64], usize) -> core::result::Result<AttributionResult, ZensimError>
+pub fn Zensim::compute_attribution_density_with_ref(&self, &PrecomputedReference, &impl source::ImageSource, &[f64]) -> core::result::Result<AttributionResult, ZensimError>
+pub fn Zensim::compute_attribution_density_with_ref_binned(&self, &PrecomputedReference, &impl source::ImageSource, &[f64], usize) -> core::result::Result<AttributionResult, ZensimError>
+pub fn Zensim::compute_folded944_score_and_attribution(&self, &impl source::ImageSource, &PrecomputedReference, &impl source::ImageSource, &[f64], &mut Fused944Session) -> core::result::Result<(ZensimResult, feature_v2::ZensimV2Result, AttributionResult), ZensimError>
+pub fn Zensim::compute_folded944_score_and_attribution_binned(&self, &impl source::ImageSource, &PrecomputedReference, &impl source::ImageSource, &[f64], &mut Fused944Session, usize) -> core::result::Result<(ZensimResult, feature_v2::ZensimV2Result, AttributionResult), ZensimError>
+pub fn Zensim::compute_with_ref_score_and_attribution(&self, &PrecomputedReference, &impl source::ImageSource, &[f64]) -> core::result::Result<(ZensimResult, AttributionResult), ZensimError>
+pub fn Zensim::compute_with_ref_score_and_attribution_binned(&self, &PrecomputedReference, &impl source::ImageSource, &[f64], usize) -> core::result::Result<(ZensimResult, AttributionResult), ZensimError>
+pub fn Zensim::compute_with_ref_score_and_attribution_stale(&self, &PrecomputedReference, &impl source::ImageSource, &[f64], &mut AttributionSession) -> core::result::Result<(ZensimResult, AttributionResult), ZensimError>
+pub fn Zensim::compute_with_ref_score_and_attribution_stale_binned(&self, &PrecomputedReference, &impl source::ImageSource, &[f64], &mut AttributionSession, usize) -> core::result::Result<(ZensimResult, AttributionResult), ZensimError>
 pub fn Zensim::compute_with_params(&profile::ProfileParams, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
 #[non_exhaustive] pub struct ZensimConfig
 pub ZensimConfig::allow_multithreading: bool
@@ -141,15 +176,17 @@ pub const WEIGHTS: &[f64; 228]
 pub fn compute_iw_weights(&[f32], usize, usize, usize, IwWeightConfig) -> alloc::vec::Vec<f32>
 pub fn try_score_from_features(&[f64], &[f64]) -> core::result::Result<(f64, f64), ZensimError>
 
-## trait impls (14 types)
+## trait impls (16 types)
 
 AlphaStratifiedStats: Clone, Debug
+AttributionSession: Default
 BlurKernel: Clone, Copy, Debug, Default, Eq, PartialEq
 ClassifiedResult: Clone, Debug
 DeltaStats: Clone, Debug
 DownscaleFilter: Clone, Copy, Debug, Default, PartialEq
 ErrorCategory: Clone, Copy, Debug, Eq, PartialEq
 ErrorClassification: Clone, Debug
+Fused944Session: Default
 IwWeightConfig: Clone, Copy, Debug, Default
 IwWeightKind: Clone, Copy, Debug, Default, Eq, PartialEq
 RoundingBias: Clone, Debug
@@ -160,4 +197,4 @@ profile::ProfileParamsBuilder: Debug
 
 ## auto traits
 
-14 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+17 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

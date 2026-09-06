@@ -167,6 +167,71 @@ accumulators, emitting values **+ per-feature provenance**.
   owning kernel is verified by a perturbation probe: disabling that kernel must
   change that feature and no other.
 
+### RESULTS — phase 2 LANDED 2026-09-05
+
+Record: [`benchmarks/feature_system_phase2_2026-09-05.md`](../benchmarks/feature_system_phase2_2026-09-05.md).
+Code: `zensim/src/research.rs`, `zensim/tests/research_engine_parity.rs`,
+`zensim/examples/v2_ab_extract.rs` (`ZENSIM_AB_MODE=research`).
+
+| gate | result |
+|---|---|
+| **G2.1** engine parity | **PASS.** 3 tests × the 20-cell shared matrix: v1 layout (7,440 bit comparisons vs `compute_extended_features`), 944 layout (18,880 vs the production append2 walk), full 956 (19,120 vs the CSFW walk). Plus a real-corpus check: 60 CID22 pairs, `research(everything@944)` vs production `foldapp2pools`, CSVs **byte-identical** (sha256 `253d864c…`). |
+| **G2.2** thread invariance | **PASS.** `Request::everything()` bit-identical across rayon pools 1/2/3/8/16 **and** equal to the serial answer, over all 24 pool-sweep cells. |
+| **G2.3** completeness | **PASS.** `Request::everything()` emits and populates all **956** registered slots; every position resolves to a registry definition (zero `unregistered_*` rows). |
+| **G2.4** provenance checked | **PASS**, and it FOUND A DEFECT (below). Perturbation probe over 5 families × 20 cells: every position the narrowed plan still populates is bit-identical to the full walk's, and every unpopulated position is exactly `0.0`. |
+
+**Measured cost — reported, not gated** (60 CID22 pairs at 512×512, one
+binary, arms interleaved, 3 reps, min per arm, compute-only µs/pair):
+
+| arm | ms/pair | vs production |
+|---|--:|--:|
+| production `foldapp2pools` (944, pools Full) | 55.7 | — |
+| **research** `everything@944` | **55.8** | **+0.2 %** (inside the run-to-run spread of 55.7–60.0) |
+| research `everything@956` (adds CSFW) | 58.0 | +4.1 % — the CSFW block's own work |
+| research `basic+peaks+masked+iw@372` | 27.5 | **0.49×** — the narrow plan really does skip |
+
+So the named entry costs nothing measurable over calling the walk by hand, and
+a narrower plan is genuinely cheaper. **The research engine is not a slower
+second implementation; it is the same walk with a plan and a manifest.**
+
+**Two design points where the plan doc's sketch did not survive the code, both
+for measured reasons** (full argument in `research.rs`'s module doc):
+
+* **It is NOT the buffered walk.** `streaming::compute_multiscale_stats_
+  streaming` takes no `V2NewFeatureToggles` and mentions `append_block` /
+  `csfw_block` nowhere — it is structurally v1-only, i.e. it tops out at 372
+  of 956 slots. A research engine that cannot compute two thirds of the
+  registry is not comprehensive.
+* **It is NOT oracle-backed by default.** `feature_v2::oracle`'s `Neumaier` /
+  `Exact` accumulators produce DIFFERENT bits from the production reduction —
+  that is their purpose as a ruler. Using them would make G2.1 unsatisfiable
+  by construction. The oracle stays the separately-gated precision ruler.
+
+**DEFECT FOUND AND FIXED by G2.4 — `Plan` described walks that cannot exist.**
+`V2NewFeatureToggles` has exactly ONE layout/compute separation (`v1_only`);
+there is no per-block layout-only flag, because `ComputeSet::from_toggles`
+derives `append`/`append2`/`csfw` from the same `*_block` flags that set the
+WIDTH, and hard-sets `v1_basic: true`. So a plan saying "compute append but
+not CSFW at layout 956" produced `toggles()` with `csfw_block` on (from the
+width), the walk computed CSFW, and `emit` — derived from the un-normalized
+request — called those twelve positions structural zeros. The probe measured
+`f944` at **0.0678** on a plan that declared it unpopulated. Fixed by
+normalizing through the toggles the plan itself emits, so `compute ==
+ComputeSet::from_toggles(plan.toggles())` **by construction**
+(`normalization_is_a_fixed_point`), applied in all four constructors
+(`derive`, `for_bake`, `v1`, `union`). `emit` only ever WIDENS, so nothing
+that planned before stops planning and no served bake changes — the whole
+servability census still passes. The missing capability (a per-block
+layout-only flag) is REGISTERED, not built: it needs a walk change and this
+lane's scope is dispatch. `a_wide_layout_computes_every_block_it_reaches` is
+its negative gate.
+
+**Also landed (not a gate, a duplication removal):** the parity geometry
+matrix has ONE owner, `zensim/tests/common/parity_cells.rs`. It was a
+`const` inside `fold_engine_parity.rs`, and its four-cell pool-sweep extension
+was written out identically at **three** call sites with nothing checking the
+three stayed equal.
+
 ---
 
 ### Phase 2b — land F5 while it is still free

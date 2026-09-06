@@ -114,6 +114,23 @@ pub(crate) enum Statistic {
     Global,
 }
 
+impl Statistic {
+    /// Stable lower-case token, for provenance output.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Statistic::Mean => "mean",
+            Statistic::L2 => "l2",
+            Statistic::L4 => "l4",
+            Statistic::L8 => "l8",
+            Statistic::Max => "max",
+            Statistic::WeightedMean => "weighted_mean",
+            Statistic::Ratio => "ratio",
+            Statistic::Bin => "bin",
+            Statistic::Global => "global",
+        }
+    }
+}
+
 /// What a slot costs when its OWNING BLOCK runs.
 ///
 /// This is the signal's base cost. It is NOT the whole cost story: a slot can
@@ -128,6 +145,17 @@ pub(crate) enum CostClass {
     Cheap,
     /// Needs its own pass, plane, or kernel.
     Expensive,
+}
+
+impl CostClass {
+    /// Stable lower-case token, for provenance output.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            CostClass::Free => "free",
+            CostClass::Cheap => "cheap",
+            CostClass::Expensive => "expensive",
+        }
+    }
 }
 
 /// Whether a slot can be harvested by a v1-only walk that never runs the
@@ -150,6 +178,17 @@ pub(crate) enum Tranche {
     /// `V1FreeExtras::RawMomentsPlusBoundedErr`'s addition: derivable from
     /// the fused kernel's saturating-MSE and luminance-weighted sums.
     ClassC,
+}
+
+impl Tranche {
+    /// Stable lower-case token, for provenance output.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Tranche::None => "none",
+            Tranche::RawMoments => "raw_moments",
+            Tranche::ClassC => "class_c",
+        }
+    }
 }
 
 /// Which (scale, channel) placements of a signal its [`Tranche`] can serve.
@@ -198,6 +237,18 @@ pub(crate) enum Form {
     Undeclared,
 }
 
+impl Form {
+    /// Stable lower-case token, for provenance output.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Form::Difference => "difference",
+            Form::Similarity => "similarity",
+            Form::ReferenceOnly => "reference_only",
+            Form::Undeclared => "undeclared",
+        }
+    }
+}
+
 /// The monotone expectation a dial gate may rely on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Direction {
@@ -214,6 +265,18 @@ pub(crate) enum Direction {
     /// registry currently declares it, so nothing constructs it yet.
     #[allow(dead_code)]
     Undeclared,
+}
+
+impl Direction {
+    /// Stable lower-case token, for provenance output.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Direction::HigherIsWorse => "higher_is_worse",
+            Direction::HigherIsBetter => "higher_is_better",
+            Direction::Unsigned => "unsigned",
+            Direction::Undeclared => "undeclared",
+        }
+    }
 }
 
 /// The kernel that owns a signal's accumulation — the "who computes this"
@@ -243,6 +306,24 @@ pub(crate) enum KernelId {
     FreeBoundedErr,
 }
 
+impl KernelId {
+    /// Stable lower-case token, for provenance output.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            KernelId::V1Fused => "v1_fused",
+            KernelId::V1Peaks => "v1_peaks",
+            KernelId::V1MaskIw => "v1_mask_iw",
+            KernelId::V2Dense => "v2_dense",
+            KernelId::V2Gradient => "v2_gradient",
+            KernelId::Append => "append",
+            KernelId::Append2 => "append2",
+            KernelId::Csfw => "csfw",
+            KernelId::FreeRawMoments => "free_raw_moments",
+            KernelId::FreeBoundedErr => "free_bounded_err",
+        }
+    }
+}
+
 /// Whether a [`Revision`] has LANDED (the values moved) or is PROPOSED (the
 /// defect is known and modelled, the fix is not applied).
 ///
@@ -256,6 +337,16 @@ pub(crate) enum RevisionStatus {
     Landed,
     /// Registered, NOT applied. Shipped bytes are unchanged.
     Proposed,
+}
+
+impl RevisionStatus {
+    /// Stable lower-case token, for provenance output.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            RevisionStatus::Landed => "landed",
+            RevisionStatus::Proposed => "proposed",
+        }
+    }
 }
 
 /// A known defect in a signal's current definition.

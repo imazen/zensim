@@ -152,7 +152,7 @@ impl Plan {
             V1FreeExtras::Off
         };
 
-        let compute = ComputeSet {
+        let requested = ComputeSet {
             v1_basic: touches(ComputeToken::Basic) || v1_pools != V1PoolsMode::Off,
             v1_pools,
             v2_blocks,
@@ -161,23 +161,67 @@ impl Plan {
             transducer_bank: v2_blocks,
             transducers_luma_only: false,
             append,
-            append2: append2 || (append && LayoutBlocks::for_width(layout_width, ns).append2),
+            append2,
             append2_dst_activity: false,
             csfw,
             free_extras,
         };
-        let emit = compute.populated_slots(ns, layout_width);
-        if !emit.covers(&want) {
+        let plan = Plan::normalized(requested, layout_width);
+        if !plan.emit.covers(&want) {
             return Err(PlanError::Uncomputable {
-                missing: emit.missing_from(&want),
+                missing: plan.emit.missing_from(&want),
                 layout_width,
             });
         }
-        Ok(Plan {
+        Ok(plan)
+    }
+
+    /// Build a plan whose `compute` is **what the walk will actually run**,
+    /// not merely what was asked for, and whose `emit` follows from it.
+    ///
+    /// ## Why this exists (found by phase 2's perturbation probe, 2026-09-05)
+    ///
+    /// `V2NewFeatureToggles` has exactly ONE layout/compute separation:
+    /// `v1_only`, which turns every v2-era kernel off while leaving the
+    /// declared width alone. There is no *per-block* layout-only flag —
+    /// [`ComputeSet::from_toggles`] derives `append`/`append2`/`csfw` from the
+    /// SAME `*_block` flags that decide the width (`append_block &&
+    /// v2_blocks`, …), and it hard-sets `v1_basic: true` because no toggle can
+    /// turn v1's basic block off.
+    ///
+    /// So a plan that said "compute the append block but not CSFW, at layout
+    /// 956" described a walk that cannot exist: `toggles()` set `csfw_block`
+    /// from the WIDTH, the walk computed CSFW, and `emit` — derived from the
+    /// un-normalized request — said those twelve positions were structural
+    /// zeros. They were not. The probe measured `f944` at `0.0678` on a plan
+    /// that declared it unpopulated.
+    ///
+    /// The fix is a fixed point rather than a second rule: normalize through
+    /// the toggles the plan would emit, so
+    /// `compute == ComputeSet::from_toggles(plan.toggles())` **by
+    /// construction** ([`toggle_gates::normalization_is_a_fixed_point`]).
+    /// `emit` only ever WIDENS, so no request that planned before stops
+    /// planning, and nothing that was served changes.
+    ///
+    /// The missing capability — a per-block layout-only flag, so a 956-wide
+    /// vector could carry a computed append block beside a zeroed CSFW one —
+    /// is REGISTERED, not built: it needs a walk change, and this lane's
+    /// scope is dispatch. Today the honest answer is that the walk computes
+    /// every block its declared width reaches, and the plan now says so.
+    fn normalized(requested: ComputeSet, layout_width: usize) -> Plan {
+        let ns = crate::NUM_SCALES;
+        let probe = Plan {
+            compute: requested,
+            layout_width,
+            emit: SlotSet::from_slots([]),
+        };
+        let compute = ComputeSet::from_toggles(probe.toggles());
+        let emit = compute.populated_slots(ns, layout_width);
+        Plan {
             compute,
             layout_width,
             emit,
-        })
+        }
     }
 
     /// Plan for a loaded bake — **the servability entry point**.
@@ -189,21 +233,17 @@ impl Plan {
     pub(crate) fn for_bake(model: &crate::mlp::Model) -> Result<Plan, PlanError> {
         let ns = crate::NUM_SCALES;
         let layout_width = model.caller_input_width();
-        let compute = ComputeSet::from_block_profile(model);
-        let emit = compute.populated_slots(ns, layout_width);
+        let plan = Plan::normalized(ComputeSet::from_block_profile(model), layout_width);
         let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
         let want = want.clipped_to(layout_width);
-        if !emit.covers(&want) {
+        if !plan.emit.covers(&want) {
             return Err(PlanError::Uncomputable {
-                missing: emit.missing_from(&want),
+                missing: plan.emit.missing_from(&want),
                 layout_width,
             });
         }
-        Ok(Plan {
-            compute,
-            layout_width,
-            emit,
-        })
+        let _ = ns;
+        Ok(plan)
     }
 
     /// A v1-layout plan at an explicit pool mode — the shape every pre-plan
@@ -223,12 +263,7 @@ impl Plan {
             csfw: false,
             free_extras: V1FreeExtras::Off,
         };
-        let emit = compute.populated_slots(crate::NUM_SCALES, layout_width);
-        Plan {
-            compute,
-            layout_width,
-            emit,
-        }
+        Plan::normalized(compute, layout_width)
     }
 
     /// The extraction request this plan resolves to.
@@ -305,12 +340,8 @@ impl Plan {
             csfw: a.csfw || b.csfw,
             free_extras: free_union(a.free_extras, b.free_extras),
         };
-        let emit = compute.populated_slots(ns, layout_width);
-        Plan {
-            compute,
-            layout_width,
-            emit,
-        }
+        let _ = ns;
+        Plan::normalized(compute, layout_width)
     }
 }
 
@@ -512,6 +543,86 @@ mod tests {
 #[cfg(test)]
 mod toggle_gates {
     use super::*;
+
+    /// **The normalization is a FIXED POINT.** `Plan::normalized` resolves
+    /// `compute` through the toggles it would emit; applying it again must
+    /// change nothing, or "what the walk runs" would depend on how many times
+    /// the plan was rebuilt.
+    ///
+    /// Also pins the WIDENING direction: normalization may only ADD emitted
+    /// slots. A narrowing would mean a request that planned before stops
+    /// planning — the servability regression this whole design exists to
+    /// prevent.
+    #[test]
+    fn normalization_is_a_fixed_point() {
+        let ns = crate::NUM_SCALES;
+        let cases: [(SlotSet, usize); 8] = [
+            (SlotSet::from_ranges([(0, 156)]), 372),
+            (SlotSet::from_ranges([(0, 372)]), 372),
+            (SlotSet::from_ranges([(0, 228)]), 944),
+            (SlotSet::from_ranges([(0, 944)]), 944),
+            (SlotSet::from_ranges([(0, 956)]), 956),
+            // The case that FOUND the defect: a wide layout whose request
+            // deliberately skips the top block.
+            (
+                SlotSet::from_slots((0..956).filter(|s| {
+                    !crate::feature_defs::family_slots(ComputeToken::Csfw, ns).contains(*s)
+                })),
+                956,
+            ),
+            (
+                SlotSet::from_ranges([(0, 228)]).union(&crate::feature_defs::family_slots(
+                    ComputeToken::Moments,
+                    ns,
+                )),
+                944,
+            ),
+            (SlotSet::from_ranges([(0, 720)]), 720),
+        ];
+        for (want, width) in cases {
+            let p = Plan::derive(&want, width).expect("plan");
+            let again = Plan::normalized(p.compute, width);
+            assert_eq!(
+                again.compute, p.compute,
+                "normalization moved on the second pass at width {width}"
+            );
+            assert_eq!(again.emit, p.emit, "emit moved at width {width}");
+            // `compute == from_toggles(toggles())`, by construction.
+            assert_eq!(
+                ComputeSet::from_toggles(p.toggles()),
+                p.compute,
+                "the walk would run something else at width {width}"
+            );
+            assert!(
+                p.emit.covers(&want.clipped_to(width)),
+                "normalization must never narrow below the request at width {width}"
+            );
+        }
+    }
+
+    /// A wide layout computes every block it reaches — the honest statement
+    /// of the capability the toggles do NOT have.
+    ///
+    /// This is a NEGATIVE gate: it pins a limitation so that the day a
+    /// per-block layout-only flag lands, this test fails and forces the plan
+    /// to stop over-claiming.
+    #[test]
+    fn a_wide_layout_computes_every_block_it_reaches() {
+        let ns = crate::NUM_SCALES;
+        let csfw = crate::feature_defs::family_slots(ComputeToken::Csfw, ns);
+        let want = SlotSet::from_slots((0..956).filter(|s| !csfw.contains(*s)));
+        let p = Plan::derive(&want, 956).expect("plan");
+        assert!(
+            p.compute.csfw,
+            "at layout 956 with the v2 blocks on, the walk computes CSFW \
+             whether or not it was asked for — `csfw_block` is both the \
+             layout flag and the compute flag"
+        );
+        assert!(
+            p.emit.covers(&csfw),
+            "and the plan must SAY those slots are populated"
+        );
+    }
 
     /// The plan's toggles must round-trip through `ComputeSet::from_toggles`
     /// to the plan's own compute set — otherwise the walk would run something

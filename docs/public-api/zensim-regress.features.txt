@@ -1,5 +1,5 @@
 # zensim-regress public API — additions from non-default features
-# features: archmage,threads
+# features: archmage,sdf-font,taffy-backend,threads
 # (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
 # Encodings: crate-name prefix stripped; auto traits collapse to a
 # count + exceptions; trait impls collapse to one roster line per
@@ -11,6 +11,7 @@
 #
 #   pub modules                                 1
 #   pub types (struct/enum/trait/alias)         3
+#   pub macros                                  3
 #   free functions                              3
 #   struct fields                               7
 #   enum variants                               3
@@ -18,10 +19,10 @@
 #   auto-trait-complete types                   3
 #
 # per-module pub lines:
-#   (root)                            1
+#   (root)                            4
 #   simd                             16
 
-## items (17 lines)
+## items (20 lines)
 
 pub mod simd
 pub enum simd::CryptoGrouping
@@ -40,6 +41,9 @@ pub simd::TierComparison::tier_label: alloc::string::String
 pub fn simd::check_simd_consistency(impl core::ops::function::Fn() -> (alloc::vec::Vec<u8>, u32, u32), &testing::RegressionTolerance, archmage::testing::CompileTimePolicy) -> core::result::Result<simd::SimdConsistencyReport, error::RegressError>
 pub fn simd::check_simd_consistency_f32(impl core::ops::function::Fn() -> (alloc::vec::Vec<f32>, u32, u32, usize), &testing::RegressionTolerance, archmage::testing::CompileTimePolicy) -> core::result::Result<simd::SimdConsistencyReport, error::RegressError>
 pub fn simd::check_simd_consistency_opts(impl core::ops::function::Fn() -> (alloc::vec::Vec<u8>, u32, u32), &testing::RegressionTolerance, archmage::testing::CompileTimePolicy, simd::CryptoGrouping) -> core::result::Result<simd::SimdConsistencyReport, error::RegressError>
+pub macro column!
+pub macro layers!
+pub macro row!
 
 ## trait impls (3 types)
 

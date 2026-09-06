@@ -34,6 +34,38 @@
 //! cargo run --release -p zensim --features feature-regime-v2,threads \
 //!   --example v2_ab_extract -- pairs.tsv ext_out.csv
 //! ```
+//!
+//! ## `ZENSIM_AB_MODE=research` — the PROVENANCE-carrying mode (2026-09-05)
+//!
+//! Phase 2 of the feature-system refactor
+//! (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`) added
+//! `zensim::research::extract`, one plan-driven entry that computes every
+//! registered signal and reports what each emitted value IS. This mode drives
+//! it, and — unlike every other mode here — writes a `_MANIFEST.json` beside
+//! the CSV carrying, per column: id, name, family, scale, channel, statistic,
+//! per-slot cost, tranche, form, direction, owning kernel, resolved revision
+//! (+ commit), any registered PROPOSED revision, any live defect id, and
+//! whether the plan populated the position or left the layout's structural
+//! zero. Plus the producer `feature_set_id`, the emitted slot set, and the
+//! build commit.
+//!
+//! It is an EXTENSION of this extractor, not a fork: same pairs TSV, same
+//! `zen_io` decode, same grouped ref-reuse flow, same NO-GRACEFUL-SKIPS rule,
+//! same CSV shape.
+//!
+//! ```sh
+//! # every registered slot at the full registered width, provenance included
+//! ZENSIM_AB_MODE=research ZENSIM_RESEARCH_SET=everything \
+//!   cargo run --release -p zensim --features feature-regime-v2,threads \
+//!   --example v2_ab_extract -- pairs.tsv research_out.csv
+//!
+//! # a named subset at a declared layout width
+//! ZENSIM_AB_MODE=research ZENSIM_RESEARCH_SET=basic+peaks+moments \
+//!   ZENSIM_RESEARCH_WIDTH=944 ZENSIM_RESEARCH_ERA=era2r4 ...
+//!
+//! # a specific era's semantics — refused, naming slots, if unreproducible
+//! ZENSIM_AB_MODE=research ZENSIM_RESEARCH_REVISION=v1postc ...
+//! ```
 
 #[path = "support/zen_io.rs"]
 mod zen_io;
@@ -171,6 +203,88 @@ fn load_pairs_tsv(path: &str) -> Vec<Pair> {
         .collect()
 }
 
+/// Build the RESEARCH request from the environment.
+///
+/// `ZENSIM_RESEARCH_SET`   — `everything` (default), or a `+`-joined
+///                           `ComputeToken` list (`basic+peaks+moments`).
+/// `ZENSIM_RESEARCH_WIDTH` — declared layout width; defaults to the full
+///                           registered width for `everything`, else the
+///                           narrowest registered width that covers the set.
+/// `ZENSIM_RESEARCH_ERA`   — the extractor era token stamped into the
+///                           producer `feature_set_id` (default `unknown`).
+/// `ZENSIM_RESEARCH_REVISION` — a per-signal era to reproduce; omitted means
+///                           "whatever this build computes".
+///
+/// Every refusal is loud and names what it refused — an unparseable token, a
+/// width the set does not fit in, an era this build cannot reproduce.
+fn research_request_from_env() -> zensim::research::Request {
+    use zensim::feature_set_id::{ComputeParts, ComputeToken, SlotSet};
+    use zensim::research::{Request, RevisionRef};
+
+    let set = std::env::var("ZENSIM_RESEARCH_SET").unwrap_or_else(|_| "everything".into());
+    let mut req = if set == "everything" {
+        Request::everything()
+    } else {
+        let mut parts = ComputeParts::EMPTY;
+        let mut want = SlotSet::from_slots([]);
+        for tok in set.split('+').filter(|t| !t.is_empty()) {
+            let Some(t) = ComputeToken::parse(tok) else {
+                eprintln!(
+                    "ABORT: ZENSIM_RESEARCH_SET names {tok:?}, which is not a \
+                     registered compute token. Registered: {}",
+                    ComputeToken::ALL
+                        .iter()
+                        .map(|t| t.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                std::process::exit(2);
+            };
+            parts = parts.with(t);
+            want = want.union(&zensim::research::family_slots(t));
+        }
+        let width = std::env::var("ZENSIM_RESEARCH_WIDTH")
+            .ok()
+            .map(|v| v.parse::<usize>().expect("ZENSIM_RESEARCH_WIDTH"))
+            .unwrap_or_else(|| want.iter_slots().max().map_or(0, |m| m + 1));
+        let _ = parts;
+        Request::for_slots(want.clipped_to(width), width)
+    };
+    if let Ok(w) = std::env::var("ZENSIM_RESEARCH_WIDTH")
+        && set == "everything"
+    {
+        let width: usize = w.parse().expect("ZENSIM_RESEARCH_WIDTH");
+        req = Request::for_slots(
+            SlotSet::from_ranges([(0, width.min(zensim::research::full_width()))]),
+            width,
+        );
+    }
+    if let Ok(era) = std::env::var("ZENSIM_RESEARCH_ERA") {
+        req = req.with_era_label(era);
+    }
+    if let Ok(rev) = std::env::var("ZENSIM_RESEARCH_REVISION") {
+        req = req.at_revision(RevisionRef::Named(rev));
+    }
+    req
+}
+
+/// The build commit, resolved at RUN time from git when the tree is
+/// reachable. Distinct from `zensim::research::BUILD_COMMIT`, which is baked
+/// at compile time and is `None` unless the build env set it — the manifest
+/// records both and says which is which, rather than silently preferring one.
+fn runtime_build_commit() -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8(out.stdout).ok()?;
+    let s = s.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() != 2 {
@@ -252,6 +366,10 @@ fn main() {
     let do_app2 = mode == "foldapp2" || mode == "foldcsfw" || pools_on;
     let app2_on = mode.starts_with("foldapp2") || mode.starts_with("foldcsfw");
     let csfw_on = mode.starts_with("foldcsfw");
+    // "research" (2026-09-05) = the plan-driven RESEARCH engine
+    // (`zensim::research`) with per-feature provenance written to a
+    // `_MANIFEST.json` sidecar. See the module doc for the env knobs.
+    let do_research = mode == "research";
     let do_v1stream = mode == "v1stream";
     let do_v1ref = mode == "v1ref";
     let do_v1streamref = mode == "v1streamref";
@@ -259,6 +377,7 @@ fn main() {
         "v1" | "v1e" | "v1s" => (true, false),
         "v2" => (false, true),
         // own branches below
+        "research" => (false, false),
         "none" | "fold" | "foldapp" | "foldstream" | "foldappstream" | "foldapphdr100"
         | "foldapphdrpq" | "foldapp2" | "foldapp2pools" | "foldapp2carriers" | "foldapp2fast"
         | "foldapp2hdr100" | "foldapp2hdrpq" | "foldcsfw" | "foldcsfwhdr100" | "foldcsfwhdrpq"
@@ -284,6 +403,30 @@ fn main() {
         && std::env::var("ZENSIM_APPEND2_DSTACT")
             .map(|v| v == "1")
             .unwrap_or(false);
+
+    // The research plan + its captured manifest. Built ONCE, before any
+    // pair, so an unplannable request fails before a single image is decoded.
+    let research_req = &if do_research {
+        let req = research_request_from_env();
+        // Validate ONCE, before a single image is decoded — an unservable
+        // request must cost nothing and print one message, not one per pair.
+        match req.validate() {
+            Ok(emit) => eprintln!(
+                "research: {} slot(s) requested, {} emitted, layout width {}",
+                req.want().len(),
+                emit.len(),
+                req.layout_width()
+            ),
+            Err(e) => {
+                eprintln!("ABORT: {e}");
+                std::process::exit(2);
+            }
+        }
+        req
+    } else {
+        zensim::research::Request::everything()
+    };
+    let research_manifest: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
     let n_feat_seen = AtomicUsize::new(0);
     let n_done = AtomicUsize::new(0);
@@ -439,6 +582,41 @@ fn main() {
                 Ok(r) => combined.extend_from_slice(r.features()),
                 Err(e) => {
                     eprintln!("SKIP foldapp2 compute error {:?}: {e:?}", p.dist_path);
+                    return None;
+                }
+            }
+        }
+        // RESEARCH mode: one plan-driven extraction with provenance. The
+        // provenance is a property of the PLAN, not of the pair, so the
+        // manifest is captured once from the first pair that succeeds and
+        // every later pair asserts it has not changed — a mid-run plan change
+        // would be a defect, and a silently-changing manifest is how it would
+        // hide.
+        if do_research {
+            let t0 = std::time::Instant::now();
+            let r = zensim::research::extract(
+                research_req,
+                &RgbSlice::new(r_px, rw, rh),
+                &RgbSlice::new(&d_px, dw, dh),
+            );
+            compute_us.fetch_add(t0.elapsed().as_micros() as usize, Ordering::Relaxed);
+            match r {
+                Ok(r) => {
+                    let m = r.manifest_json();
+                    match research_manifest.get() {
+                        Some(seen) => assert_eq!(
+                            seen, &m,
+                            "the research plan changed mid-run — the manifest \
+                             would not describe every row"
+                        ),
+                        None => {
+                            let _ = research_manifest.set(m);
+                        }
+                    }
+                    combined.extend_from_slice(r.values());
+                }
+                Err(e) => {
+                    eprintln!("SKIP research error {:?}: {e}", p.dist_path);
                     return None;
                 }
             }
@@ -752,6 +930,47 @@ fn main() {
         rows.len(),
         args[1]
     );
+    // PROVENANCE SIDECAR. Only the research mode has per-feature provenance
+    // to write; the legacy modes' column meanings live in this file's doc and
+    // are deliberately not restated here as a second, drift-prone claim.
+    if do_research {
+        let manifest = research_manifest
+            .get()
+            .expect("research mode produced no manifest");
+        let path = std::path::Path::new(&args[1]).with_extension("_MANIFEST.json");
+        let baked = zensim::research::BUILD_COMMIT.unwrap_or("unrecorded");
+        let runtime = runtime_build_commit();
+        // Insert the extractor-side provenance ahead of the engine's own.
+        let head = format!(
+            "{{\n  \"producer\": \"zensim/examples/v2_ab_extract.rs\",\n  \
+             \"mode\": \"research\",\n  \
+             \"rows\": {},\n  \"columns\": {},\n  \
+             \"pairs_tsv\": \"{}\",\n  \
+             \"build_commit_compiled_in\": \"{}\",\n  \
+             \"build_commit_runtime_git\": {},\n  \
+             \"engine\": ",
+            rows.len(),
+            n_feat,
+            args[0].replace('\\', "\\\\").replace('"', "\\\""),
+            baked,
+            match &runtime {
+                Some(c) => format!("\"{c}\""),
+                None => "null".to_string(),
+            }
+        );
+        let json = format!("{head}{manifest}}}\n");
+        std::fs::write(&path, json).expect("write manifest");
+        eprintln!("wrote provenance manifest to {}", path.display());
+        if let Some(c) = runtime
+            && baked != "unrecorded"
+            && c != baked
+        {
+            eprintln!(
+                "WARNING: compiled-in build commit {baked} disagrees with the \
+                 tree's HEAD {c} — the binary is older than the checkout."
+            );
+        }
+    }
     let cu = compute_us.load(Ordering::Relaxed);
     if cu > 0 {
         eprintln!(

@@ -6,29 +6,272 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zensim.txt 249 lines (supported surface) | zensim.features.txt 128 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 33 lines (33 hidden + 0 excluded-feature)
+# files: zensim.txt 538 lines (supported surface) | zensim.features.txt 164 added (features: avx512,candidate-profiles,classification,custom-profiles,deprecated-profiles,feature-regime-v2,imgref,iw-diagnostics,oracle,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 158 lines (215 hidden + 0 excluded-feature)
 
 ## summary
 #
-#   pub modules                                 4
-#   pub types (struct/enum/trait/alias)        26
-#   pub consts/statics                          8
-#   free functions                             16
-#   inherent methods                          120
-#   struct fields                              19
-#   enum variants                              45
-#   trait roster entries (type × trait)        65
-#   auto-trait-complete types                  17
+#   pub modules                                10
+#   pub types (struct/enum/trait/alias)        41
+#   pub consts/statics                        112
+#   free functions                             20
+#   inherent methods                          212
+#   struct fields                              32
+#   enum variants                              84
+#   re-exports                                  3
+#   trait roster entries (type × trait)       136
+#   auto-trait-complete types                  30
+#   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                          146
+#   (root)                          183
+#   feature_set_id                   47
+#   feature_v2                      183
 #   mapping                          12
-#   profile                          27
-#   source                           53
+#   profile                          30
+#   source                           59
 
-## items (228 lines)
+## items (503 lines)
 
 pub mod zensim
+pub use Stop
+pub use StopReason
+pub use Unstoppable
+pub mod feature_set_id
+#[non_exhaustive] pub enum feature_set_id::ComputeToken
+pub feature_set_id::ComputeToken::Append
+pub feature_set_id::ComputeToken::Append2
+pub feature_set_id::ComputeToken::Basic
+pub feature_set_id::ComputeToken::Carriers
+pub feature_set_id::ComputeToken::ClassC
+pub feature_set_id::ComputeToken::Csfw
+pub feature_set_id::ComputeToken::Hdr
+pub feature_set_id::ComputeToken::Iw
+pub feature_set_id::ComputeToken::Masked
+pub feature_set_id::ComputeToken::Moments
+pub feature_set_id::ComputeToken::Peaks
+pub feature_set_id::ComputeToken::V2
+pub const feature_set_id::ComputeToken::ALL: &'static [feature_set_id::ComputeToken]
+pub const fn feature_set_id::ComputeToken::as_str(self) -> &'static str
+pub fn feature_set_id::ComputeToken::parse(&str) -> core::option::Option<Self>
+pub struct feature_set_id::ComputeParts(_)
+pub const feature_set_id::ComputeParts::EMPTY: Self
+pub const fn feature_set_id::ComputeParts::contains(self, feature_set_id::ComputeToken) -> bool
+pub const fn feature_set_id::ComputeParts::is_empty(self) -> bool
+pub fn feature_set_id::ComputeParts::iter(self) -> impl core::iter::traits::iterator::Iterator<Item = feature_set_id::ComputeToken>
+pub fn feature_set_id::ComputeParts::parse(&str) -> core::option::Option<Self>
+pub const fn feature_set_id::ComputeParts::with(self, feature_set_id::ComputeToken) -> Self
+pub struct feature_set_id::FeatureSetId
+pub fn feature_set_id::FeatureSetId::compute(&self) -> feature_set_id::ComputeParts
+pub fn feature_set_id::FeatureSetId::era(&self) -> &str
+pub fn feature_set_id::FeatureSetId::from_slots(feature_set_id::ComputeParts, usize, &str, &feature_set_id::SlotSet) -> core::option::Option<Self>
+pub fn feature_set_id::FeatureSetId::layout_width(&self) -> usize
+pub fn feature_set_id::FeatureSetId::new(feature_set_id::ComputeParts, usize, &str, u32) -> core::option::Option<Self>
+pub fn feature_set_id::FeatureSetId::parse(&str) -> core::option::Option<Self>
+pub fn feature_set_id::FeatureSetId::same_set_ignoring_era(&self, &Self) -> bool
+pub fn feature_set_id::FeatureSetId::slots_hash(&self) -> u32
+pub struct feature_set_id::SlotSet
+pub fn feature_set_id::SlotSet::clipped_to(&self, usize) -> feature_set_id::SlotSet
+pub fn feature_set_id::SlotSet::contains(&self, usize) -> bool
+pub fn feature_set_id::SlotSet::covers(&self, &feature_set_id::SlotSet) -> bool
+pub fn feature_set_id::SlotSet::from_ranges(impl core::iter::traits::collect::IntoIterator<Item = (usize, usize)>) -> Self
+pub fn feature_set_id::SlotSet::from_slots(impl core::iter::traits::collect::IntoIterator<Item = usize>) -> Self
+pub fn feature_set_id::SlotSet::hash8(&self) -> u32
+pub fn feature_set_id::SlotSet::intersect(&self, &feature_set_id::SlotSet) -> feature_set_id::SlotSet
+pub fn feature_set_id::SlotSet::is_empty(&self) -> bool
+pub fn feature_set_id::SlotSet::iter_slots(&self) -> impl core::iter::traits::iterator::Iterator<Item = usize> + '_
+pub fn feature_set_id::SlotSet::len(&self) -> usize
+pub fn feature_set_id::SlotSet::missing_from(&self, &feature_set_id::SlotSet) -> feature_set_id::SlotSet
+pub fn feature_set_id::SlotSet::parse(&str) -> core::option::Option<Self>
+pub fn feature_set_id::SlotSet::ranges(&self) -> &[(usize, usize)]
+pub fn feature_set_id::SlotSet::union(&self, &feature_set_id::SlotSet) -> feature_set_id::SlotSet
+pub const feature_set_id::ERA_UNKNOWN: &str
+pub fn feature_set_id::hex8(u32) -> alloc::string::String
+pub fn feature_set_id::is_valid_token(&str) -> bool
+pub fn feature_set_id::slots_hash8(impl core::iter::traits::collect::IntoIterator<Item = usize>) -> u32
+pub mod feature_v2
+pub mod feature_v2::idx
+pub const feature_v2::idx::ART: usize
+pub const feature_v2::idx::ART_SOFT_PEAK: usize
+pub const feature_v2::idx::BANDING: usize
+pub const feature_v2::idx::BLOCKINESS: usize
+pub const feature_v2::idx::DET: usize
+pub const feature_v2::idx::DET_SOFT_PEAK: usize
+pub const feature_v2::idx::EDGE_WIDTH_CHANGE: usize
+pub const feature_v2::idx::GMS: usize
+pub const feature_v2::idx::HF_GAIN: usize
+pub const feature_v2::idx::HF_LOSS: usize
+pub const feature_v2::idx::HF_MAG_LOSS: usize
+pub const feature_v2::idx::IW_ART: usize
+pub const feature_v2::idx::IW_DET: usize
+pub const feature_v2::idx::IW_MSE: usize
+pub const feature_v2::idx::IW_SSIM: usize
+pub const feature_v2::idx::MASKED_ART: usize
+pub const feature_v2::idx::MASKED_DET: usize
+pub const feature_v2::idx::MASKED_MSE: usize
+pub const feature_v2::idx::MASKED_SSIM: usize
+pub const feature_v2::idx::MSE: usize
+pub const feature_v2::idx::PJND_FRAGILITY: usize
+pub const feature_v2::idx::PJND_TRANSDUCER: usize
+pub const feature_v2::idx::PJND_TRANSDUCER_HIGH_K: usize
+pub const feature_v2::idx::PJND_TRANSDUCER_LOW_K: usize
+pub const feature_v2::idx::RINGING: usize
+pub const feature_v2::idx::SSIM_DEV2: usize
+pub const feature_v2::idx::SSIM_DEV4: usize
+pub const feature_v2::idx::SSIM_MEAN: usize
+pub const feature_v2::idx::SSIM_SOFT_PEAK: usize
+pub mod feature_v2::idx_append
+pub const feature_v2::idx_append::ART_DEV2: usize
+pub const feature_v2::idx_append::CONTRAST_GAIN: usize
+pub const feature_v2::idx_append::CONTRAST_LOSS: usize
+pub const feature_v2::idx_append::DET_DEV2: usize
+pub const feature_v2::idx_append::GLOBAL_CGAIN: usize
+pub const feature_v2::idx_append::GLOBAL_CLOSS: usize
+pub const feature_v2::idx_append::GLOBAL_DMEAN: usize
+pub const feature_v2::idx_append::GMS_DEV2: usize
+pub const feature_v2::idx_append::GRAD_SRC_MEAN: usize
+pub const feature_v2::idx_append::LUM_BRIGHT_ERR: usize
+pub const feature_v2::idx_append::LUM_DARK_ERR: usize
+pub const feature_v2::idx_append::LUM_MID_ERR: usize
+pub const feature_v2::idx_append::LUM_TRANSDUCER: usize
+pub const feature_v2::idx_append::MSCN_DIFF_L2: usize
+pub const feature_v2::idx_append::MSCN_DIFF_MEAN: usize
+pub const feature_v2::idx_append::TEXTURE_DISSIM: usize
+pub const feature_v2::idx_append::XMASK_TRANSDUCER: usize
+pub mod feature_v2::idx_append2
+pub const feature_v2::idx_append2::BANDVIS_GAIN: usize
+pub const feature_v2::idx_append2::BANDVIS_LOSS: usize
+pub const feature_v2::idx_append2::HL_BIN1: usize
+pub const feature_v2::idx_append2::HL_BIN2: usize
+pub const feature_v2::idx_append2::LUMA_MEAN_REF: usize
+pub mod feature_v2::idx_csfw
+pub const feature_v2::idx_csfw::W_GLOBAL_CGAIN: usize
+pub const feature_v2::idx_csfw::W_GLOBAL_CLOSS: usize
+pub const feature_v2::idx_csfw::W_GLOBAL_DMEAN: usize
+#[non_exhaustive] pub enum feature_v2::FeatureRegime
+pub feature_v2::FeatureRegime::Folded720
+pub feature_v2::FeatureRegime::Folded720Append
+pub feature_v2::FeatureRegime::Folded720Append2
+pub feature_v2::FeatureRegime::Folded720Csfw
+pub feature_v2::FeatureRegime::V1
+pub feature_v2::FeatureRegime::V2Bounded
+pub enum feature_v2::HdrEncoding
+pub feature_v2::HdrEncoding::Hlg
+pub feature_v2::HdrEncoding::Hlg::ambient_lux: f32
+pub feature_v2::HdrEncoding::Hlg::peak_nits: f32
+pub feature_v2::HdrEncoding::Linear
+pub feature_v2::HdrEncoding::Pq
+pub feature_v2::HdrEncoding::Pq::peak_nits: f32
+pub enum feature_v2::V1FreeExtras
+pub feature_v2::V1FreeExtras::Off
+pub feature_v2::V1FreeExtras::RawMoments
+pub feature_v2::V1FreeExtras::RawMomentsPlusBoundedErr
+pub enum feature_v2::V1PoolsMode
+pub feature_v2::V1PoolsMode::Carriers
+pub feature_v2::V1PoolsMode::Full
+pub feature_v2::V1PoolsMode::Off
+pub feature_v2::V1PoolsMode::Peaks
+pub const feature_v2::V1PoolsMode::CARRIER_SLOTS: [usize; 10]
+pub struct feature_v2::FeatureViewV2<'a>
+pub fn feature_v2::FeatureViewV2<'a>::art(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::art_soft_peak(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::banding(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::blockiness(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::det(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::det_soft_peak(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::edge_width_change(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::gms(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::hf_gain(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::hf_loss(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::hf_mag_loss(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::iw_art(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::iw_det(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::iw_mse(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::iw_ssim(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::masked_art(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::masked_det(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::masked_mse(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::masked_ssim(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::mse(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::n_scales(&self) -> usize
+pub fn feature_v2::FeatureViewV2<'a>::new(&'a [f64], usize) -> core::option::Option<Self>
+pub fn feature_v2::FeatureViewV2<'a>::pjnd_fragility(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::pjnd_transducer(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::pjnd_transducer_high_k(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::pjnd_transducer_low_k(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::ringing(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::ssim_dev2(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::ssim_dev4(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::ssim_mean(&self, usize, usize) -> f64
+pub fn feature_v2::FeatureViewV2<'a>::ssim_soft_peak(&self, usize, usize) -> f64
+pub struct feature_v2::V2NewFeatureToggles
+pub feature_v2::V2NewFeatureToggles::append2_block: bool
+pub feature_v2::V2NewFeatureToggles::append2_dst_activity: bool
+pub feature_v2::V2NewFeatureToggles::append_block: bool
+pub feature_v2::V2NewFeatureToggles::blockiness: bool
+pub feature_v2::V2NewFeatureToggles::csfw_block: bool
+pub feature_v2::V2NewFeatureToggles::gradient_features: bool
+pub feature_v2::V2NewFeatureToggles::transducer_bank: bool
+pub feature_v2::V2NewFeatureToggles::transducers_luma_only: bool
+pub feature_v2::V2NewFeatureToggles::v1_pools: feature_v2::V1PoolsMode
+pub struct feature_v2::V2PreparedReference
+pub fn feature_v2::V2PreparedReference::has_cached_moments(&self) -> bool
+pub fn feature_v2::V2PreparedReference::height(&self) -> usize
+pub fn feature_v2::V2PreparedReference::width(&self) -> usize
+pub struct feature_v2::V2Scratch
+pub fn feature_v2::V2Scratch::new() -> Self
+pub struct feature_v2::ZensimV2Result
+pub fn feature_v2::ZensimV2Result::append2_features(&self) -> core::option::Option<&[f64]>
+pub fn feature_v2::ZensimV2Result::append_features(&self) -> core::option::Option<&[f64]>
+pub fn feature_v2::ZensimV2Result::csfw_features(&self) -> core::option::Option<&[f64]>
+pub fn feature_v2::ZensimV2Result::features(&self) -> &[f64]
+pub fn feature_v2::ZensimV2Result::into_features(self) -> alloc::vec::Vec<f64>
+pub fn feature_v2::ZensimV2Result::n_scales(&self) -> usize
+pub fn feature_v2::ZensimV2Result::regime(&self) -> feature_v2::FeatureRegime
+pub fn feature_v2::ZensimV2Result::v1_pools(&self) -> feature_v2::V1PoolsMode
+pub fn feature_v2::ZensimV2Result::v1_pools_live(&self) -> bool
+pub fn feature_v2::ZensimV2Result::view(&self) -> feature_v2::FeatureViewV2<'_>
+pub const feature_v2::APPEND2_PER_SCALE: usize
+pub const feature_v2::APPEND_SKIP_B_SCALE0: bool
+pub const feature_v2::C1_V2: f64
+pub const feature_v2::C2_V2: f64
+pub const feature_v2::CSFW_PER_SCALE: usize
+pub const feature_v2::C_ACTIVITY: f64
+pub const feature_v2::C_BAND_DST: f64
+pub const feature_v2::C_BAND_SRC: f64
+pub const feature_v2::C_BLOCK: f64
+pub const feature_v2::C_CONTRAST: f64
+pub const feature_v2::C_EDGE: f64
+pub const feature_v2::C_EDGEWIDTH: f64
+pub const feature_v2::C_GCONTRAST: f64
+pub const feature_v2::C_GDMEAN: f64
+pub const feature_v2::C_GMS: f64
+pub const feature_v2::C_GRADM: f64
+pub const feature_v2::C_GRAD_DECAY: f64
+pub const feature_v2::C_HF: f64
+pub const feature_v2::C_LUM_T: f64
+pub const feature_v2::C_MSCN_ABS: f64
+pub const feature_v2::C_MSCN_SQ: f64
+pub const feature_v2::C_MSCN_VAR: f64
+pub const feature_v2::C_MSE: f64
+pub const feature_v2::C_PEAK: f64
+pub const feature_v2::C_PJND_CLAMP: f64
+pub const feature_v2::C_PJND_GRAD: f64
+pub const feature_v2::C_RING_EDGE: f64
+pub const feature_v2::C_RING_ERR: f64
+pub const feature_v2::FEATURES_PER_CHANNEL_APPEND: usize
+pub const feature_v2::FEATURES_PER_CHANNEL_V2_BASIC: usize
+pub const feature_v2::FEATURES_PER_CHANNEL_V2_IW: usize
+pub const feature_v2::FEATURES_PER_CHANNEL_V2_MASKED: usize
+pub const feature_v2::FEATURES_PER_CHANNEL_V2_NEW: usize
+pub const feature_v2::FEATURES_PER_CHANNEL_V2_PEAK: usize
+pub const feature_v2::FEATURES_PER_CHANNEL_V2_PJND: usize
+pub const feature_v2::FEATURES_PER_CHANNEL_V2_TOTAL: usize
+pub const feature_v2::IW_WEIGHT_FLOOR: f64
+pub const feature_v2::K_LUM_ADAPT: f64
+pub const feature_v2::K_PJND_MASK: f64
+pub const feature_v2::K_PJND_MASK_HIGH: f64
+pub const feature_v2::K_PJND_MASK_LOW: f64
+pub const feature_v2::K_XCH: f64
 pub mod mapping
 pub fn mapping::butteraugli_to_zensim(f64) -> f64
 pub fn mapping::dssim_to_zensim(f64) -> f64
@@ -46,6 +289,9 @@ pub mod profile
 pub profile::ZensimProfile::A
 pub profile::ZensimProfile::B
 pub profile::ZensimProfile::BHdr
+pub profile::ZensimProfile::C
+pub profile::ZensimProfile::CHdr
+pub profile::ZensimProfile::D
 pub profile::ZensimProfile::PreviewV0_1
 pub profile::ZensimProfile::PreviewV0_2
 pub const fn profile::ZensimProfile::codec_target() -> Self [also: (root)]
@@ -77,6 +323,8 @@ pub fn source::AlphaMode::is_straight(self) -> bool
 pub source::ColorPrimaries::Bt2020
 pub source::ColorPrimaries::DisplayP3
 pub source::ColorPrimaries::Srgb
+pub source::GamutMapping::Clip
+pub source::GamutMapping::Preserve
 pub source::PixelFormat::LinearF32Rgba
 pub source::PixelFormat::Srgb16Rgba
 pub source::PixelFormat::Srgb8Bgra
@@ -95,8 +343,10 @@ pub fn source::StridedBytes<'a>::try_new(&'a [u8], usize, usize, usize, source::
 pub fn source::StridedBytes<'a>::try_with_alpha_mode(&'a [u8], usize, usize, usize, source::PixelFormat, source::AlphaMode) -> core::result::Result<Self, ZensimError>
 pub fn source::StridedBytes<'a>::with_alpha_mode(&'a [u8], usize, usize, usize, source::PixelFormat, source::AlphaMode) -> Self
 pub fn source::StridedBytes<'a>::with_color_primaries(self, source::ColorPrimaries) -> Self
+pub fn source::StridedBytes<'a>::with_gamut_mapping(self, source::GamutMapping) -> Self
 pub fn source::ImageSource::alpha_mode(&self) -> source::AlphaMode
 pub fn source::ImageSource::color_primaries(&self) -> source::ColorPrimaries
+pub fn source::ImageSource::gamut_mapping(&self) -> source::GamutMapping
 pub fn source::ImageSource::height(&self) -> usize
 pub fn source::ImageSource::is_hdr(&self) -> bool
 pub fn source::ImageSource::pixel_format(&self) -> source::PixelFormat
@@ -115,6 +365,9 @@ pub ColorPrimaries::Srgb
 pub DiffmapWeighting::Balanced
 pub DiffmapWeighting::Custom([f32; 3])
 pub DiffmapWeighting::Trained
+#[non_exhaustive] pub enum GamutMapping [also: source]
+pub GamutMapping::Clip
+pub GamutMapping::Preserve
 #[non_exhaustive] pub enum PixelFormat [also: source]
 pub PixelFormat::LinearF32Rgba
 pub PixelFormat::Srgb16Rgba
@@ -124,6 +377,8 @@ pub PixelFormat::Srgb8Rgba
 pub fn source::PixelFormat::bytes_per_pixel(self) -> usize
 pub fn source::PixelFormat::has_alpha(self) -> bool
 #[non_exhaustive] pub enum ZensimError
+pub ZensimError::Cancelled
+pub ZensimError::Cancelled::reason: enough::reason::StopReason
 pub ZensimError::DimensionMismatch
 pub ZensimError::FeatureWeightsLengthMismatch
 pub ZensimError::HdrInputRequiresPuPath
@@ -140,6 +395,9 @@ pub ZensimError::UnsupportedPixelFormat
 pub ZensimProfile::A
 pub ZensimProfile::B
 pub ZensimProfile::BHdr
+pub ZensimProfile::C
+pub ZensimProfile::CHdr
+pub ZensimProfile::D
 pub ZensimProfile::PreviewV0_1
 pub ZensimProfile::PreviewV0_2
 pub fn profile::ZensimProfile::latest() -> Self
@@ -207,14 +465,30 @@ pub fn source::StridedBytes<'a>::try_new(&'a [u8], usize, usize, usize, source::
 pub fn source::StridedBytes<'a>::try_with_alpha_mode(&'a [u8], usize, usize, usize, source::PixelFormat, source::AlphaMode) -> core::result::Result<Self, ZensimError>
 pub fn source::StridedBytes<'a>::with_alpha_mode(&'a [u8], usize, usize, usize, source::PixelFormat, source::AlphaMode) -> Self
 pub fn source::StridedBytes<'a>::with_color_primaries(self, source::ColorPrimaries) -> Self
+pub fn source::StridedBytes<'a>::with_gamut_mapping(self, source::GamutMapping) -> Self
 pub struct Zensim
 pub fn Zensim::compute(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_extended_features(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_folded720_append2_features(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_folded720_append2_features_hdr(&self, &impl source::ImageSource, &impl source::ImageSource, feature_v2::HdrEncoding, feature_v2::V2NewFeatureToggles, &mut feature_v2::V2Scratch) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_folded720_append_features(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_folded720_append_features_hdr(&self, &impl source::ImageSource, &impl source::ImageSource, feature_v2::HdrEncoding, feature_v2::V2NewFeatureToggles, &mut feature_v2::V2Scratch) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_folded720_append_features_streaming(&self, &impl source::ImageSource, &impl source::ImageSource, feature_v2::V2NewFeatureToggles, &mut feature_v2::V2Scratch) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_folded720_csfw_features(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_folded720_csfw_features_hdr(&self, &impl source::ImageSource, &impl source::ImageSource, feature_v2::HdrEncoding, feature_v2::V2NewFeatureToggles, &mut feature_v2::V2Scratch) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_folded720_features(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_folded720_features_hdr(&self, &impl source::ImageSource, &impl source::ImageSource, feature_v2::HdrEncoding, feature_v2::V2NewFeatureToggles, &mut feature_v2::V2Scratch) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_folded720_features_streaming(&self, &impl source::ImageSource, &impl source::ImageSource, feature_v2::V2NewFeatureToggles, &mut feature_v2::V2Scratch) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
 pub fn Zensim::compute_pu_linear(&self, &[f32], &[f32], usize, usize, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_pu_linear_extended_features(&self, &[f32], &[f32], usize, usize, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_pu_linear_planar(&self, [&[f32]; 3], [&[f32]; 3], usize, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_streaming_strips(&self, &impl source::ImageSource, &impl source::ImageSource, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_streaming_strips_default(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_v2_diffmap(&self, &impl source::ImageSource, &impl source::ImageSource, &[f64]) -> core::result::Result<alloc::vec::Vec<f32>, ZensimError>
+pub fn Zensim::compute_v2_features(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_v2_features_with_ref(&self, &feature_v2::V2PreparedReference, &impl source::ImageSource) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_v2_features_with_ref_and_scratch(&self, &feature_v2::V2PreparedReference, &impl source::ImageSource, feature_v2::V2NewFeatureToggles, &mut feature_v2::V2Scratch) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
+pub fn Zensim::compute_v2_features_with_toggles(&self, &impl source::ImageSource, &impl source::ImageSource, feature_v2::V2NewFeatureToggles) -> core::result::Result<feature_v2::ZensimV2Result, ZensimError>
 pub fn Zensim::compute_with_codec_hint(&self, &impl source::ImageSource, &impl source::ImageSource, core::option::Option<&str>) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_with_ref(&self, &PrecomputedReference, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_with_ref_into(&self, &PrecomputedReference, &impl source::ImageSource, &mut ZensimScratch) -> core::result::Result<ZensimResult, ZensimError>
@@ -225,9 +499,12 @@ pub fn Zensim::new(profile::ZensimProfile) -> Self
 pub fn Zensim::parallel(&self) -> bool
 pub fn Zensim::precompute_reference(&self, &impl source::ImageSource) -> core::result::Result<PrecomputedReference, ZensimError>
 pub fn Zensim::precompute_reference_linear_planar(&self, [&[f32]; 3], usize, usize, usize) -> core::result::Result<PrecomputedReference, ZensimError>
+pub fn Zensim::prepare_v2_reference(&self, &impl source::ImageSource) -> core::result::Result<feature_v2::V2PreparedReference, ZensimError>
+pub fn Zensim::prepare_v2_reference_with_moments(&self, &impl source::ImageSource) -> core::result::Result<feature_v2::V2PreparedReference, ZensimError>
 pub fn Zensim::profile(&self) -> profile::ZensimProfile
 pub fn Zensim::with_max_pixels(self, usize) -> Self
 pub fn Zensim::with_parallel(self, bool) -> Self
+pub fn Zensim::with_stop(self, impl enough::Stop + 'static) -> Self
 pub fn Zensim::compute_with_diffmap(&self, &impl source::ImageSource, &impl source::ImageSource, impl core::convert::Into<DiffmapOptions>) -> core::result::Result<DiffmapResult, ZensimError>
 pub fn Zensim::compute_with_ref_and_diffmap(&self, &PrecomputedReference, &impl source::ImageSource, impl core::convert::Into<DiffmapOptions>) -> core::result::Result<DiffmapResult, ZensimError>
 pub fn Zensim::compute_with_ref_and_diffmap_linear_planar(&self, &PrecomputedReference, [&[f32]; 3], usize, usize, usize, impl core::convert::Into<DiffmapOptions>) -> core::result::Result<DiffmapResult, ZensimError>
@@ -247,31 +524,46 @@ pub fn ZensimScratch::new() -> Self
 pub trait ImageSource: core::marker::Sync [also: source]
 pub fn ImageSource::alpha_mode(&self) -> source::AlphaMode
 pub fn ImageSource::color_primaries(&self) -> source::ColorPrimaries
+pub fn ImageSource::gamut_mapping(&self) -> source::GamutMapping
 pub fn ImageSource::height(&self) -> usize
 pub fn ImageSource::is_hdr(&self) -> bool
 pub fn ImageSource::pixel_format(&self) -> source::PixelFormat
 pub fn ImageSource::row_bytes(&self, usize) -> &[u8]
 pub fn ImageSource::width(&self) -> usize
 pub fn dissimilarity_to_score(f64) -> f64
+pub fn score_features_fd_gradient_with_profile(profile::ZensimProfile, &[f64], u32, u32) -> core::result::Result<alloc::vec::Vec<f64>, ZensimError>
 pub fn score_features_with_profile(profile::ZensimProfile, &[f64], u32, u32) -> core::result::Result<f64, ZensimError>
 pub fn score_features_with_profile_and_codec(profile::ZensimProfile, &[f64], u32, u32, core::option::Option<&str>) -> core::result::Result<f64, ZensimError>
 pub fn score_to_dissimilarity(f64) -> f64
 
-## trait impls (20 types)
+## trait impls (33 types)
 
 DiffmapOptions: Clone, Copy, Debug, Default, From<DiffmapWeighting>
 DiffmapWeighting: Clone, Copy, Debug, Default
 FeatureView<'a>: Clone, Debug
 Zensim: Clone, Debug
-ZensimError: Clone, Copy, Debug, Display, Eq, Error, PartialEq
+ZensimError: Clone, Copy, Debug, Display, Eq, Error, From<enough::reason::StopReason>, PartialEq
 ZensimResult: Clone, Debug
 ZensimScratch: Default
+feature_set_id::ComputeParts: Clone, Copy, Debug, Default, Display, Eq, Hash, Ord, PartialEq, PartialOrd
+feature_set_id::ComputeToken: Clone, Copy, Debug, Display, Eq, Hash, Ord, PartialEq, PartialOrd
+feature_set_id::FeatureSetId: Clone, Debug, Display, Eq, Hash, PartialEq
+feature_set_id::SlotSet: Clone, Debug, Default, Display, Eq, Hash, PartialEq
+feature_v2::FeatureRegime: Clone, Copy, Debug, Eq, PartialEq
+feature_v2::FeatureViewV2<'a>: Clone, Copy, Debug
+feature_v2::HdrEncoding: Clone, Copy, Debug, PartialEq
+feature_v2::V1FreeExtras: Clone, Copy, Debug, Default, Eq, PartialEq
+feature_v2::V1PoolsMode: Clone, Copy, Debug, Default, Eq, PartialEq
+feature_v2::V2NewFeatureToggles: Clone, Copy, Debug, Default
+feature_v2::V2Scratch: Default
+feature_v2::ZensimV2Result: Clone, Debug
 imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>: source::ImageSource
 imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>: source::ImageSource
 profile::ProfileParams: Debug
 profile::ZensimProfile: Clone, Copy, Debug, Display, Eq, Hash, PartialEq
 source::AlphaMode: Clone, Copy, Debug, Default, Eq, Hash, PartialEq
 source::ColorPrimaries: Clone, Copy, Debug, Default, Eq, Hash, PartialEq
+source::GamutMapping: Clone, Copy, Debug, Default, Eq, Hash, PartialEq
 source::PixelFormat: Clone, Copy, Debug, Eq, Hash, PartialEq
 source::RgbSlice<'_>: source::ImageSource
 source::RgbSlice<'a>: Clone, Copy, Debug
@@ -282,4 +574,5 @@ source::StridedBytes<'a>: Clone, Copy, Debug
 
 ## auto traits
 
-17 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+30 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+Zensim: !RefUnwindSafe !UnwindSafe

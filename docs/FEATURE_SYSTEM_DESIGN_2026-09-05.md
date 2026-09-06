@@ -367,10 +367,34 @@ buffered walks (11 tests, 18 geometries × {serial, rayon} × pools 1/2/3/8/16) 
 generalized from "one pair of walks" to "any plan".
 
 The research engine is not new code so much as a **named, complete** entry to
-machinery that exists: the buffered walk, the `oracle` module's `Neumaier` and
-`Exact` accumulators (`feature_v2.rs:18826`, already the standing regression
-ruler), and the full toggle set. What it adds is (a) an entry that takes a
-`Plan`, (b) per-feature provenance, (c) the revision selector.
+machinery that exists. What it adds is (a) an entry that takes a `Plan`,
+(b) per-feature provenance, (c) the revision selector.
+
+> **LANDED 2026-09-05 — and this paragraph's "buffered / oracle-backed" is
+> CORRECTED, from measurement.** `zensim::research` drives the **fold**, not
+> the buffered walk, and uses the production reduction, not the oracle
+> accumulators. Both changes are forced:
+>
+> * `streaming::compute_multiscale_stats_streaming` (the BUFFERED path) takes
+>   no `V2NewFeatureToggles` and mentions `append_block`/`csfw_block` nowhere
+>   — it is structurally v1-only, i.e. **372 of the 956 registered slots**. A
+>   research engine that cannot compute two thirds of the registry is not
+>   comprehensive.
+> * `feature_v2::oracle`'s `Neumaier` / `Exact` accumulators
+>   (`feature_v2.rs:18824`) produce *different bits* from the production
+>   reduction — their purpose as a ruler. Making them the research arithmetic
+>   would make G2.1 (bit-exact parity on every shared id) **unsatisfiable by
+>   construction**. They stay the separately-gated precision ruler.
+>
+> The table above's RESEARCH column should therefore read *walk:* **the fold,
+> full plan** and *arithmetic:* **production**. What actually distinguishes
+> the two engines is the PLAN (complete vs minimal) and the OUTPUT (values +
+> provenance vs values), which is the distinction that was load-bearing all
+> along. MEASURED: at the same plan the research entry costs **+0.2 %** over
+> the production walk (55.8 vs 55.7 ms/pair, inside a 4.3 ms spread), a
+> narrower plan costs **0.49×**, and on 60 real CID22 pairs the two produce
+> **byte-identical** tables. Record:
+> [`../benchmarks/feature_system_phase2_2026-09-05.md`](../benchmarks/feature_system_phase2_2026-09-05.md).
 
 ---
 
