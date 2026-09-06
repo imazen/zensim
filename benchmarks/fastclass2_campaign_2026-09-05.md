@@ -766,3 +766,61 @@ serve with the rev1 **F5 route skew, ≤ 2.5e-4**, until rev2 lands — that tou
 where the 228 sets are clearly worse than the 156 sets (0.35–0.37 vs 0.50–0.52),
 and it is in this repo's circularity-excluded set, so it is reported and not
 composited.
+
+## 14. THE FULL D SHIP GATE ON THE WINNER — three weights defects, so PROPOSE not INSTALL
+
+`S372_S228_H128_p` (+ the `id100` chain), graded on the floor-dense **372 ladder
+instrument** with `--floor-rule resolvable`, the postC identity probe and the
+postC negative-tail probe:
+
+| row | requirement | measured | verdict |
+|---|---|---|---|
+| **C1** monotonicity | ≥ 0.93 | 0.9514 | **PASS** |
+| **C2** flat/clamp dead-zone | ≤ 0.05 | 0.0017 | **PASS** |
+| **C3** negative values work | > 0 | pass | **PASS** |
+| **C4** deepest probe dial < 0 | < 0 | pass | **PASS** |
+| **C5** identity in [97.5, 100] | 0 rows outside | **38 of 38 outside — identity dial = 90.9368** | **FAIL** |
+| **C6** no cell out-scores identity | 0 | **1,642 of 9,593 (17.1 %)** | **FAIL** |
+| **A7r** floor representability | 0 codecs below mentor | **5 of 5** (avif-rav1e 0.1795, avif-svt 0.8205, jpeg 0.5641, jxl 0.3846, webp 0.9744) | **FAIL** |
+| rank ≥ today's D on CID22 | ≥ 0.8633 | **0.8896** | **PASS** (+0.0263) |
+
+**C5 and C6 are the registered either/or, and it is a WEIGHTS defect.** At 372
+the identity feature vector is **exactly zero** (measured: 0 of 372 slots
+non-zero on the 38-ref probe), so the identity dial is the scalar `dial(0⃗)` =
+90.9368 — and 1,642 grid cells score *above* it, meaning `raw(0⃗)` is not the
+maximum raw prediction. CLAUDE.md already states the consequence for shipped B
+in exactly these terms: *"pin identity at 100 and those cells cap (tied > 0.05);
+leave it below and they out-score identity. No monotone output spline can
+satisfy both. It is a weights defect."* This candidate is **worse** on that axis
+than shipped B (17.1 % of cells vs B's 6.01 %). **So the id100 anchor chain
+cannot help here** — and measurement agrees: the chained and unchained bakes
+differ by ≤0.005 on C1 and not at all on C5/C6/A7r. *(That is the opposite of
+the 944 result in §3.1, where the identity vector is image-dependent, the
+identity rows span a percentile bin, and the chain took the contract 5/6 → 6/6.
+The chain's mechanism needs a non-degenerate identity distribution.)*
+
+**A7r fails on all five codecs**, consistent with §8: this is a 228 slice.
+`S156` at 372 does better — **A7r 4.3–4.7**, best cell **4**, mono 0.976–0.979 —
+and still does not pass.
+
+### INSTALL DECISION: **PROPOSE. Do not install.**
+
+The registered ship rule (plan §8) requires **all four** clauses; clause 1
+(contract 6/6 **and** resolvable floors on all 5 codecs) fails on three rows,
+every one of them a weights property that no packaging step can reach. Clause 2
+passes by a wide margin. `ZensimProfile::D`, `zensim/weights/`, `profile.rs` and
+the manifests are **untouched by this campaign**.
+
+**What is being proposed instead**, with everything needed to act on it:
+
+* **`S372_S228_H128_p`** — 372-layout, 228-slice, `--hidden 128`, 37,923 B
+  packed, servable through `Zensim::compute` today. Rank: composite 0.8732 /
+  CID22 0.8896 / KonJND 0.4999 at k=3, clearing all three era-closed 944-leader
+  bars and beating shipped D's CID22 by **+0.0263**.
+* **The blocker is one quantity with two faces** — `raw(0⃗)` is not the model's
+  maximum, which is C5+C6, and the bottom of each codec ladder is mis-ordered,
+  which is A7r. Both are ordering properties of the weights.
+* **The one untried lever is `--monotonicity-reg`** (§11: alpha-head-only, and
+  the alpha head is a −0.89-CID22 inverted ranker on this recipe, so reaching it
+  needs the head's output orientation fixed first). That is the registered next
+  step, with its prerequisite named.
