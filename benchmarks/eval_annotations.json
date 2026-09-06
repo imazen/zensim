@@ -2491,7 +2491,7 @@
     "dial_gaddr_source"
    ],
    "scope": {
-    "present": "dial.addressability"
+    "manual": "documentation-only: like the A7r rule entry, this is a statement about the RULER and not about any cell -- it holds for every `dial.addressability` block that exists, so a per-cell badge on 171 of 171 would be noise. The board says it where a reader meets the number: every G-ADDR tooltip NAMES its ruler, and a ladder-graded cell renders the canonical read as `dial_canonical` explicitly labelled a DIFFERENT INSTRUMENT. The genuinely per-cell fact -- THIS cell has no ladder reading and here is why -- is carried by dial-ladder-not-measured-off-instrument-2026-09-06, which keeps its machine scope."
    },
    "reason": "This block is the CANONICAL-grid read and is NO LONGER the board's operative dial ruler. Since 2026-09-06 the operative instrument is the 2026-09-05 FLOOR-DENSE LADDER (`dial_ladder`): 9,593 distinct settings over FIVE codec families (both AVIF backends) against this grid's 4,424 over four, and the only instrument on which the operative `resolvable` A7r rule has a registered per-codec bar, on which jpeg's floor bar is REAL (0.5385/0.6667, against this grid's vacuous 0.0000 -- zenjpeg emits ONE bitstream for q 0..10, so its three lowest 'settings' here are one setting sampled three times), and on which the two-reference inversion rule is measurable at all (the canonical grids carry butteraugli-max only; the rule needs pnorm3). Every dial-addressability number published before 2026-09-06 -- including every A7r fraction, every per-codec floor state, and the NOT-SHIPPABLE badge derived from it -- is scoped to THIS instrument. Read a cell's two blocks DOWN, never across: a ladder fraction and a canonical fraction are different quantities on different cells. The block is NOT wrong and was NOT rewritten; it is a reading of a retired-era ruler.",
    "evidence": "docs/PLAN_BOARD_LADDER_RULER_2026-09-06.md; benchmarks/board_ladder_ruler_2026-09-06.md; benchmarks/ladder_instrument_2026-09-05.md SS1/SS5/SS9; benchmarks/dial_addressability_gate_2026-09-04.md SS19",
@@ -2520,7 +2520,7 @@
     "dial.addressability.measured.codec_floor"
    ],
    "scope": {
-    "present": "dial_ladder"
+    "manual": "documentation-only: this is a property of the RULER, not of any cell -- it fires identically on every ladder-graded cell, so a per-cell badge would be noise rather than information. The board states it where a reader meets the number instead: the `floors ok` column's tooltip NAMES the ruler on every row, and the G-ADDR panel prints `floor_rule` beside every fraction."
    },
    "reason": "A7r's per-codec fractions on the board are cut under the OPERATIVE `resolvable` rule (margin 0.5), whose mentor bars are avif-rav1e 0.6410 / avif-svt 1.0000 / jpeg 0.6667 / jxl 0.9615 / webp 1.0000 -- NOT the `distinct` bars (0.5385 / 1.0000 / 0.5385 / 0.9231 / 1.0000) that benchmarks/ladder_instrument_2026-09-05.md SS9-SS9.4 tabulates. The two are different quantities on the same cells and the difference changes verdicts: under `distinct` that record measured shipped Profile D FAILING jpeg by one ladder (0.5128 vs 0.5385); under `resolvable` the same ADD156/D lineage passes all five codecs (0.6667 / 1.0000 / 0.6667 / 1.0000 / 1.0000). Always read the `floor_rule` field beside the fraction.",
    "evidence": "benchmarks/ladder_floor_resolution_2026-09-05.md; benchmarks/board_ladder_ruler_2026-09-06.md SS5; the registry's own grid_floor_representability rows carry both rules",

@@ -3451,3 +3451,105 @@ named above, noted rather than silently swapped).
 record the board-hygiene mechanics and the one factual correction to the brief (the
 already-classified cells), per the standing rule that a durable finding goes in the
 ledger in the same pass it's made rather than only in chat.
+
+---
+
+## §3.50 — the board's operative dial ruler becomes the LADDER instrument (2026-09-06)
+
+**Ledger ROUND 102.** Two lanes hit the same wall on the same day: the board's
+`dial` / `dial.addressability` column is the **2026-05-29 CANONICAL** grid (4,424
+cells, 106 ladders, one AVIF backend, jpeg's three lowest "settings" byte-identical),
+while every current gate — per-codec floor representability under the operative
+`resolvable` rule (`A7r`), the two-reference inversions, the contract rows on true
+floors — is defined on the **2026-09-05 FLOOR-DENSE LADDER**
+(`benchmarks/ladder_instrument_2026-09-05.md`). `promote_fulleval.py --graft-gaddr`
+**correctly refused** to merge ladder readings into the canonical column (two
+instruments in one column = silently wrong cross-cell comparisons), so the ladder
+readings sat in a sidecar the board could not see and `freeze_check --select`'s new
+CONTRACT veto could not act on them.
+
+**Resolved by giving the ladder reading its OWN block, not by relaxing the refusal.**
+`dial_ladder` + `dial_ladder_source`, written by `--graft-gaddr-ladder` whose gate is
+the MIRROR of `--graft-gaddr`'s: where that proves *"this read was taken on the
+board's own grid"*, this proves *"on a REGISTERED ladder grid"* (resolved from
+`benchmarks/dial_addressability_floor_2026-09-04.json` at run time). **`dial` is not
+in its write allow-list and 0 of 508 `dial` blocks changed.**
+
+**Coverage: 450 of 508 cells graded, 58 NOT MEASURED with a recorded reason each.**
+The 2026-09-04 as-run replay covered 97; `scripts/gaddr_board_ladder.py` reconstructs
+an invocation for every cell from the fulleval's own fields when no log exists.
+
+**The era gate is MEASURED, and it is the load-bearing decision.** Populated-slot
+signatures: the ladder-944 grid and `dial_grid_944col_POOLS_2026-08-30` populate
+**905** slots with `f0..719` LIVE (slot-set sha8 **`b6811ae0`**); `bake_verdict`'s
+DEFAULT 944 grid (`dial_grid_944col_2026-08-01`) and `era2-rank`'s `r4` populate
+**689** with **`f156..371` STRUCTURALLY ZERO** (**`026c0aba`**). A bake trained where
+that block is always zero receives **zero gradient** on those 216 weights, so they
+keep their INIT values, and a grid that populates them multiplies live data by
+untrained weights — the `--regime 944` silent-mis-scoring bug class. So a 944 cell is
+graded only when its own instrument is already pools-era **or**
+`bake_block_profile`'s `uses_f156_371` is false. **359 of 381 admitted 944 cells are
+provably immune** (weights exactly zero — reproducing this repo's "944 MLPs zero them
+exactly, 216/216" on a 381-cell population), 22 are pools-era, **34 are refused**.
+
+**Probe recovery is PROVEN, not guessed.** `measured.negtail` is a function of
+`(bake, probe)` ONLY and never touches the dial grid, so the correct probe is the one
+whose read reproduces the board's block **bit-for-bit** — verified identical on
+`W10L9PH_s4007_packed` (`frac_below_zero` 0.0265, `min` −69.61934236224508). 14
+recovered, 0 unrecovered. Two traps: **`measured.identity` mixes probe reads with GRID
+counts** (`n_grid_cells_total` 4,817 on POOLS vs 9,593 on the ladder) so it can never
+match across instruments — only its probe-scoped fields are compared; and **this build
+emits C5/C6 as measured CHECKS while serialising no `measured.identity` dict**, so
+"the identity probe was accepted" is read from the check states.
+
+**WHAT FLIPPED — and the decomposition is the whole finding.** The NOT-SHIPPABLE badge
+goes **63 → 75**, against a pre-registered expectation of a small DECREASE. Decomposed:
+**21 of the +22 are NEWLY-GRADED cells that had no dial ruler at all** (171 of 508 cells
+carried a G-ADDR block before, 450 do now); there is exactly **ONE true up-flip**
+(`A2b_l0.002`, C1) against **TEN true down-flips** — a ruler effect of **−9**. On the 93
+cells shared with the 2026-09-04 as-run set the contract-fail count goes **46 → 42**,
+reproducing gate doc §17.7's 47 → 43 on a different code path. Every one of the 21 new
+badges is on a LEGACY/FAIR-NOTED cell; every one of the 10 lost is VERIFIED-FAIR.
+
+**The switch is DIRECTIONAL PER ROW, not uniformly stricter** — the most misreadable
+fact here. **C1** (`mono`) gets **harder** (the ladder samples q 0..30 at step 1, so far
+more near-flat adjacent rungs: `A2b_l0.002` 0.97852 → 0.91712 against 0.93); **C2** (*no
+cell out-scores a perfect copy*) gets **easier** (floor-dense sampling puts fewer cells
+near the ceiling clamp: `W10L9PH_s4007_packed` 0.09081 → 0.03060 against 0.05).
+
+**`freeze_check --select`'s pick does NOT move** — `11e243eb0b86`
+(`fc2_372_S228_H128_s4004/5/6`) under `--gaddr-block canonical`, `auto` and `ladder`
+alike over the 125 VERIFIED-FAIR cells, with `canonical` **byte-identical to a pristine
+`main@origin` binary** built from the parent revision's own source. But **10 fair cells
+go `NO — CONTRACT FAIL` → `yes`** because their C2 genuinely passes on the operative
+instrument: **the CONTRACT veto's removal-only property holds *within* a ruler, not
+*across* one.**
+
+**⚠ THE BOARD'S A7r FRACTIONS ARE `resolvable`, NOT the `distinct` ones the ladder
+record's §9–§9.4 tables carry.** Operative mentor bars `avif-rav1e` **0.6410** /
+`avif-svt` 1.0000 / `jpeg` **0.6667** / `jxl` 0.9615 / `webp` 1.0000 against
+`distinct`'s 0.5385 / 1.0000 / 0.5385 / 0.9231 / 1.0000 — and the difference flips a
+verdict: under `distinct` shipped Profile D fails jpeg by one ladder (0.5128); **under
+the operative rule the ADD156/D lineage passes all five codecs** (0.6667 / 1.0000 /
+0.6667 / 1.0000 / 1.0000) and is the only bake family on the board that does.
+`peer_ssim2` is the only other five-codec pass; `peer_butteraugli` fails four of five,
+a second independent argument against it as a mentor. Board-wide **10 of 450 clear all
+five and 293 clear none**; every best-of-all and fast-class arm — including the
+registered `--select` winner — collapses on `avif-rav1e` (0.13–0.21 against 0.641).
+
+**Registry (append-only, +3):** `dial-addressability-canonical-instrument-2026-09-06`
+(every pre-switch dial number is scoped to the canonical instrument — not wrong, not
+rewritten, a retired-era ruler), `dial-ladder-not-measured-off-instrument-2026-09-06`
+(the 58 cells, absent-not-failed, with their reasons),
+`a7r-floor-rule-operative-resolvable-not-distinct-2026-09-06`.
+
+**Board state:** fair 171 of 508 cells at **12,528,928 B (11.9485 MiB)** — margin under
+the registered 12 MiB cap fell from ~164 KB to **53,984 B** because 279 cells gained a
+first-ever G-ADDR block; all-rows 508 of 508 at 26,167,081 B. `gauntlet_gates.sh` rc=0
+on both; both served 200; the named compare fragment
+`#compare=d_id100_negrich@did100lane,BOA_F_nonneg32_s4004,D_guard12_p999@dguard2,peer_ssim2`
+resolves 4/4 with no missing-id banner.
+
+Record: `benchmarks/board_ladder_ruler_2026-09-06.md`; plan:
+`docs/PLAN_BOARD_LADDER_RULER_2026-09-06.md`; gate doc §19; CLAUDE.md G-ADDR +
+dashboard paragraphs corrected in place.

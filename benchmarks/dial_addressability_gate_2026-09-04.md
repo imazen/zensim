@@ -1619,3 +1619,75 @@ is counted in `dial.inversion_truth.n_attribution_unknown` — unknown is never 
 --encoder-inversion-census`): `imazen/zenjpeg#201` (5 pairs, all costing bytes),
 `imazen/zenrav1e#42` (20 pairs / 14 refs, 13 costing bytes), `imazen/zenav1-svt#19` (1 pair,
 plus the 36.4 % setting-saturation observation). jxl and webp are clean — zero confirmed.
+
+---
+
+## 19. THE BOARD'S OPERATIVE DIAL RULER IS THE LADDER INSTRUMENT (2026-09-06)
+
+Full record: [`board_ladder_ruler_2026-09-06.md`](board_ladder_ruler_2026-09-06.md).
+Pre-registration: [`../docs/PLAN_BOARD_LADDER_RULER_2026-09-06.md`](../docs/PLAN_BOARD_LADDER_RULER_2026-09-06.md)
+(pushed `22ffc5d2` before any cell was re-graded).
+
+**§17.7 said the ladder re-grade "is not grafted, and cannot be". That is now
+resolved — not by relaxing the refusal, which was correct, but by giving the ladder
+reading its own block.** `promote_fulleval.py --graft-gaddr` still refuses a
+ladder read into `dial.addressability`; the new `--graft-gaddr-ladder` writes
+`dial_ladder`, gated on the read's grid being a REGISTERED ladder instrument
+(resolved from this file's registry at run time). `dial` is not in its write
+allow-list — **0 of 508 `dial` blocks changed**.
+
+**Coverage.** §11(a) of the ladder record projected the re-grade would move "41 of
+467 cells" because a 372 grid cannot score a 944 bake. With the 944 ladder built
+(§11b) and an era gate that admits provably-immune bakes, it moves **450 of 508**:
+359 944-cells whose `f156..371` weights are exactly zero (immune — the pools-vs-folded
+difference cannot reach them), 22 already pools-era, 67 at 372, 2 peer cells. **58 are
+NOT MEASURED with a recorded reason**, 34 of them an era refusal.
+
+**What the ruler switch does to the NOT-SHIPPABLE badge: 63 → 75, of which 21 are
+FIRST-EVER coverage.** True flips: **one up** (`A2b_l0.002`, C1) and **ten down** — a
+ruler effect of **−9**. On the 93 cells this lane shares with §17's as-run set the
+contract-fail count goes **46 → 42**, reproducing §17.7's 47 → 43 on a different code
+path.
+
+**The switch is DIRECTIONAL PER ROW, not uniformly stricter** — the single most
+misreadable fact here:
+
+* **C1** (`mono`) gets **harder**: the ladder samples q 0..30 at step 1, so it holds
+  far more near-flat adjacent pairs. `A2b_l0.002` 0.97852 → **0.91712** against 0.93.
+* **C2** (*no cell out-scores a perfect copy*) gets **easier**: floor-dense sampling
+  puts proportionally fewer cells near the ceiling clamp. `W10L9PH_s4007_packed`
+  0.09081 → **0.03060** against 0.05.
+
+Board-wide C-row fails on the ladder: C3 43, C4 43, C2 22, C1 20, C5 5.
+
+**⚠ THE BOARD'S A7r FRACTIONS ARE `resolvable`, NOT the `distinct` ones the ladder
+record's §9–§9.4 tables carry.** Operative mentor bars: `avif-rav1e` **0.6410** /
+`avif-svt` 1.0000 / `jpeg` **0.6667** / `jxl` 0.9615 / `webp` 1.0000 — against
+`distinct`'s 0.5385 / 1.0000 / 0.5385 / 0.9231 / 1.0000. The difference changes
+verdicts: **under `distinct` shipped Profile D fails jpeg by one ladder (0.5128); under
+the operative `resolvable` rule the ADD156/D lineage passes all five codecs** (0.6667 /
+1.0000 / 0.6667 / 1.0000 / 1.0000) and is the only bake family on the board that does.
+`peer_ssim2` is the only other five-codec pass; `peer_butteraugli` fails four of five,
+a second independent argument against it as a mentor alongside §18's C1 finding.
+Registry: `a7r-floor-rule-operative-resolvable-not-distinct-2026-09-06`.
+
+**`freeze_check --select` — the pick does NOT move.** `11e243eb0b86`
+(`fc2_372_S228_H128_s4004/5/6`) under `--gaddr-block canonical`, `auto` and `ladder`
+alike, over the 125 VERIFIED-FAIR cells. `canonical` is **byte-identical to a pristine
+`main@origin` binary** built from the parent revision's own source. **10 fair cells
+change selectability, all `NO → yes`**, because their C2 genuinely passes on the
+operative instrument — worth stating plainly: the CONTRACT veto's removal-only
+property holds *within* a ruler, not across one.
+
+**The era gate, measured rather than assumed.** The ladder-944 grid populates 905
+slots (`f0..719` live, slot-set sha8 `b6811ae0`); `bake_verdict`'s default 944 grid
+populates 689 with `f156..371` STRUCTURALLY ZERO (`026c0aba`). A bake trained on the
+latter has untrained weights on those 216 columns, so a cell is graded on the ladder
+only when its own instrument is already pools-era or `block_profile.uses_f156_371`
+is false. Registry: `dial-ladder-not-measured-off-instrument-2026-09-06`.
+
+**Reading rule for anything published before 2026-09-06:** every
+`dial.addressability` number — every A7r fraction, every per-codec floor state, the
+badge derived from them — is a CANONICAL-instrument reading. It is not wrong and it
+was not rewritten; it is a retired-era ruler. Read a cell's two blocks DOWN, never
+across. Registry: `dial-addressability-canonical-instrument-2026-09-06`.

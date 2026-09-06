@@ -274,14 +274,26 @@ removal-only property holds within a ruler, not across one.
 | G4 | both promoter self-tests, incl. the negative control | **PASS** |
 | G5 | `--gaddr-block canonical` reproduces the pristine binary | **PASS** — byte-identical |
 | G6 | `gauntlet_gates.sh` on both boards | **PASS** — rc=0 both |
-| G7 | fair board under the registered 12 MiB cap | **PASS** — 12,524,832 B (11.944 MiB), margin **58,080 B** |
+| G7 | fair board under the registered 12 MiB cap | **PASS** — 12,528,928 B (11.9485 MiB), margin **53,984 B** |
 | G8 | served board + named compare fragment | **PASS** — 200 on both; fragment resolves 4/4, no banner |
 | G9 | superseded dial numbers scoped in the registry | **PASS** — 3 entries |
 
-**G7 is the one to watch.** The margin fell from ~164 KB to 58 KB, because 279 cells
-gained a first-ever G-ADDR block. The registered trim levers (curated-set per-pair
-stripping, note truncation) are untouched and available; the next lane that adds a
-per-cell block should re-measure before assuming headroom.
+**G7 is the one to watch.** The margin fell from ~164 KB to **53,984 B**, because 279
+cells gained a first-ever G-ADDR block. The registered trim levers (curated-set
+per-pair stripping, note truncation) are untouched and available; the next lane that
+adds a per-cell block should re-measure before assuming headroom.
+
+**Two of the three new registry entries are deliberately DOCUMENTATION-ONLY**
+(`{"manual": ...}` scope), and the reason is editorial before it is bytes: an
+annotation that fires on 450 of 450 ladder-graded cells, or on 171 of 171 canonical
+blocks, is a statement about the RULER and carries no information about the CELL — a
+badge on every row is noise. The board says both things where a reader actually meets
+the number: every G-ADDR tooltip NAMES its ruler, the `floors ok` tooltip names it
+again, and a ladder-graded cell renders `dial_canonical` explicitly labelled a
+different instrument. Only the genuinely per-cell fact — *this* cell has no ladder
+reading, and here is why — keeps a machine scope. (It also bought 38,448 B of the
+margin above; the editorial call and the byte saving happened to point the same way,
+and the first was decided before the second was measured.)
 
 ## 9. Reproduce
 

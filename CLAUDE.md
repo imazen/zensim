@@ -2205,6 +2205,21 @@ combined dashboard; EXTEND it, don't rebuild a thinner one. Three modes:
   band edges disagree are refused. Read down a column, never across one: band
   SROCC is range-restricted. All values are read from `rank.<corpus>.bands[]`;
   nothing is recomputed.
+  Plus (2026-09-06) **THE OPERATIVE DIAL RULER**: the board's dial-addressability
+  column, the **NOT-SHIPPABLE badge**, the `floors ok` (A7r) column and the G-ADDR
+  panel read a cell's **`dial_ladder`** block (the 2026-09-05 FLOOR-DENSE instrument —
+  five codec families incl. both AVIF backends, 66 floor-dense steps) when it has one,
+  else its canonical `dial.addressability`. **ONE owner picks** (the operative-block
+  pick in `load_fulleval`, mirrored by `freeze_check::gaddr_block`) so no two consumers
+  can disagree about which instrument they describe. A ladder-graded cell carries the
+  canonical read beside it as **`dial_canonical`** — **hover context only**: never
+  sorted on, never counted, never mixed into a column, and every tooltip NAMES its
+  ruler. **They are different INSTRUMENTS — read a pair DOWN, never across.** 450 of
+  508 cells carry a ladder block; the other 58 are NOT MEASURED with a recorded reason
+  (never a zero). Record: `benchmarks/board_ladder_ruler_2026-09-06.md`.
+  ⚠ **The fair board's size margin is now 53,984 B under the 12 MiB cap** (12,528,928 B
+  at 171 cells) because 279 cells gained a first-ever G-ADDR block — re-measure before
+  adding another per-cell block.
   Plus (2026-08-30) **ERA ROWS**: a board name ending in `gauntlet.ERA372_CUR_SUFFIX`
   (**`@cur372`**) is the SAME BAKE as its unsuffixed sibling, read on the
   current-extractor 372 root instead of the 2026-05-15 one — same stem so the pair
@@ -2552,7 +2567,47 @@ anywhere in the active tier**; a test fails if any retired bar key reappears.)
   `--bake`), `--gaddr-json` (the G-ADDR block alone at full f64, stamped with which scorer it
   describes — peer-safe where `--full-json`/`--fulleval` are refused), `--gaddr-reference`.
   Re-grade an existing bake with `scripts/dialgate_arms.sh score <label> <bake.bin> [regime]`.
-- **BOARD COVERAGE (2026-09-04, gate doc §15):** all **97** fair-board cells are graded under
+- **⭐ THE BOARD'S OPERATIVE DIAL RULER IS THE LADDER INSTRUMENT (2026-09-06, gate doc §19).**
+  Record: [`benchmarks/board_ladder_ruler_2026-09-06.md`](benchmarks/board_ladder_ruler_2026-09-06.md);
+  plan: [`docs/PLAN_BOARD_LADDER_RULER_2026-09-06.md`](docs/PLAN_BOARD_LADDER_RULER_2026-09-06.md).
+  **450 of 508** board cells now carry a **`dial_ladder`** block — the read on the
+  2026-09-05 floor-dense instrument of their own width — and the board's
+  `dial.addressability` column, the **NOT-SHIPPABLE badge**, the `floors ok` (A7r)
+  column and `freeze_check --select`'s CONTRACT veto ALL read it, through ONE owner
+  (`gauntlet.py`'s operative-block pick; `freeze_check::gaddr_block`). The canonical
+  read is **retained byte-for-byte** as `dial.addressability` and surfaced on hover as
+  **`dial_canonical`** — **0 of 508 `dial` blocks changed**. **They are DIFFERENT
+  INSTRUMENTS: read a cell's two blocks DOWN, never across.** The **58** cells with no
+  ladder read are NOT MEASURED with a recorded reason (34 era mismatch — the bake reads
+  `f156..371`, which its own 944 instrument zeroes at slot-set `026c0aba`/689 and the
+  ladder-944 populates at `b6811ae0`/905, so it would be scored through weights that
+  never took a gradient; 21 at a width the ladder was never built at; 2 peer metrics
+  with no per-cell table; 1 bake not on disk). Tooling:
+  `scripts/gaddr_board_ladder.py {grade|graft}` + `promote_fulleval.py
+  --graft-gaddr-ladder` (refuses any grid that is not a REGISTERED ladder instrument;
+  `--graft-gaddr`'s same-grid gate is NOT relaxed) + `freeze_check --gaddr-block
+  auto|canonical|ladder` (`canonical` is byte-identical to the pre-2026-09-06 binary,
+  proven against a pristine build).
+  **What moved:** the badge count 63 → 75, but **21 of the +22 are FIRST-EVER coverage**
+  on cells that had no dial ruler at all — the true ruler effect is **ONE up-flip
+  (`A2b_l0.002`, C1) against TEN down-flips**. The switch is **directional per row, not
+  uniformly stricter**: **C1 gets HARDER** (the ladder samples q 0..30 at step 1, so far
+  more near-flat adjacent rungs) and **C2 gets EASIER** (floor-dense sampling puts fewer
+  cells near the ceiling clamp — `W10L9PH_s4007_packed` 0.0908 → 0.0306 against a 0.05
+  bar). `freeze_check --select`'s pick does **NOT** move (`11e243eb0b86` =
+  `fc2_372_S228_H128_s4004/5/6` under all three rulers), but **10 fair cells go
+  `NO — CONTRACT FAIL` → `yes`**: the veto's removal-only property holds *within* a
+  ruler, not *across* one.
+  **⚠ THE BOARD'S A7r FRACTIONS ARE `resolvable`, NOT the `distinct` ones the ladder
+  record's §9 tables carry** (operative bars `avif-rav1e` **0.6410** / `avif-svt` 1.0000 /
+  `jpeg` **0.6667** / `jxl` 0.9615 / `webp` 1.0000). Under `distinct` shipped D fails
+  jpeg; **under the operative rule the ADD156/D lineage passes all five codecs** (0.6667 /
+  1.0000 / 0.6667 / 1.0000 / 1.0000) and is the only bake family on the board that does —
+  `peer_ssim2` is the only other five-codec pass, and `peer_butteraugli` fails four of
+  five. Board-wide only **10 of 450** cells clear all five and **293 clear none**; every
+  best-of-all / fast-class arm collapses on `avif-rav1e` (0.13–0.21 against 0.641).
+- **BOARD COVERAGE (2026-09-04, gate doc §15) — SUPERSEDED as the operative ruler by the
+  bullet above; still the record of the CANONICAL-instrument pass:** all **97** fair-board cells are graded under
   both pin sets and 96 carry the verdict; the board draws a **NOT SHIPPABLE** badge off a
   MEASURED contract FAIL (**47** cells; C3+C4 dominate at 39 each — dials that never go below
   zero on an all-negative probe — then C2 at 23). The **only** contract-clean cell is
@@ -2594,9 +2649,15 @@ Grade on it with `ZL_ERA=ladder scripts/dialgate_arms.sh score <label> <bake> 37
   whatever strings the grid carries, so this needed **zero** production code change.
   The backend is a KNOB (`--codec zenavif --knob-grid '{"backend":["svt-rs"]}'`,
   feature `avif-svt`) — there is no `zenavif-svt` codec string.
-- **⛔ SHIPPED PROFILE D FAILS A7r ON THIS INSTRUMENT — on `jpeg`, by one ladder**
-  (0.5128 vs the mentor's 0.5385; 20/39 vs 21/39), plus A1 (99.99996372 vs ssim2's
-  exact 100.0) and A3 (p95 93.884 vs 93.974). It passes A7r on every older grid.
+- **⛔ SHIPPED PROFILE D FAILS A7r ON THIS INSTRUMENT UNDER THE `distinct` RULE — on
+  `jpeg`, by one ladder** (0.5128 vs the mentor's 0.5385; 20/39 vs 21/39), plus A1
+  (99.99996372 vs ssim2's exact 100.0) and A3 (p95 93.884 vs 93.974). It passes A7r on
+  every older grid. **⚠ CORRECTED 2026-09-06 (gate doc §19): that is the RETIRED
+  `distinct` window. Under the OPERATIVE `resolvable` rule (margin 0.5, bars
+  `avif-rav1e` 0.6410 / `avif-svt` 1.0000 / `jpeg` 0.6667 / `jxl` 0.9615 / `webp`
+  1.0000) the ADD156/D lineage PASSES all five codecs** (0.6667 / 1.0000 / 0.6667 /
+  1.0000 / 1.0000) — the two rules are different quantities on the same cells and the
+  difference flips the verdict, so always read `floor_rule` beside a fraction.
   **Do not read a pre-2026-09-05 A7r pass as evidence the dial resolves jpeg's
   lowest settings — it never measured that.**
 - **MEASURED, and it closes off a whole class of fix: re-anchoring cannot repair
