@@ -1724,6 +1724,109 @@ pub fn train_mlp(
     train_mlp_with_tv(groups, n_features, hyperparams, log, None)
 }
 
+/// THE owner of the model's output-sign convention.
+///
+/// The trainer has always had two incompatible readings of what its single
+/// scalar output *means*, and until 2026-09-06 exactly one of the eight
+/// polarity-sensitive loss sites knew which one was in force:
+///
+/// - **`Distance`** (the legacy rank-only convention) — higher quality maps to a
+///   LOWER raw output. The synthetic gate says so in as many words
+///   ("MLP output is raw_distance (lower = more similar)"), the RankNet term is
+///   written for it, and the TV within-ladder hinge assumes it in prose.
+/// - **`Score`** — higher quality maps to a HIGHER raw output. Every *absolute*
+///   term assumes this, because it regresses the output directly onto
+///   `human_score`, and so does the α head's monotonicity hinge.
+///
+/// Mixed without reconciliation the two pull in opposite directions and a
+/// corpus **ranks backwards**. MEASURED 2026-07-15 on the round-7 recipe: the HF
+/// held-out per-ref SROCC went `+0.6393` (6 % backwards) WITHOUT the HF group to
+/// `−0.3454` (75 % backwards) WITH it — adding rank supervision to a corpus made
+/// that corpus rank backwards, which is only possible if the terms are fighting.
+///
+/// The reconciliation existed, correctly, at `train_mlp_strategy`'s sequential
+/// RankNet site and **nowhere else**: the pool head, the hybrid head, the
+/// per-sample-α head and both plain-path mini-batch helpers each recomputed a
+/// bare `signum(mos_a − mos_b)`, while the TV hinge (two copies) and the α head's
+/// monotonicity hinge each hard-coded an *opposite* assumption. On the α-head
+/// path that produces a model whose ordering is intact and whose sign is
+/// backwards — the campaign's best CID22 ordering, `|−0.8921|`, arriving as a
+/// negative number that `bake_dial_refit pack` then cannot spline because the
+/// output calibration spline is monotone increasing by construction.
+///
+/// So the decision is made **once**, here, and every site asks this type instead
+/// of re-deriving it. `Distance` is the default, which keeps every rank-only
+/// recipe — i.e. every board bake — byte-identical.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OutputPolarity {
+    /// Higher quality → LOWER raw output.
+    Distance,
+    /// Higher quality → HIGHER raw output.
+    Score,
+}
+
+impl OutputPolarity {
+    /// Derive the convention from the run's loss terms.
+    ///
+    /// An **absolute** term (per-group `Mse`/`Both`, or the α head's global
+    /// `--mse-weight`) regresses the output onto a score-unit target and so
+    /// forces `Score`. Everything else is `Distance`.
+    ///
+    /// The per-group half reproduces the pre-2026-09-06 `rank_target_sign`
+    /// derivation exactly, so no existing recipe moves. The α-head half is new:
+    /// `--mse-weight` is a *global* flag on that path (it does not need a group
+    /// to opt in), and that path never reconciled anything, which is the defect
+    /// this type exists to close.
+    pub fn for_groups(groups: &[TrainingGroup<'_>], hyperparams: &MlpHyperparams) -> Self {
+        let group_absolute = groups.iter().any(|g| g.loss_mode.has_mse());
+        let alpha_head_absolute =
+            hyperparams.per_sample_alpha_head && hyperparams.mse_weight > 0.0;
+        if group_absolute || alpha_head_absolute {
+            Self::Score
+        } else {
+            Self::Distance
+        }
+    }
+
+    /// Multiplier on `signum(mos_a − mos_b)` for the RankNet term.
+    ///
+    /// The RankNet site computes `z = −target·(y_b − y_a)`; with `target = +1`
+    /// for a better-than-b pair that minimizes `softplus(y_a − y_b)` and pushes
+    /// `y_a` DOWN, which is `Distance`.
+    #[inline]
+    pub fn rank_target_sign(self) -> f64 {
+        match self {
+            Self::Distance => 1.0,
+            Self::Score => -1.0,
+        }
+    }
+
+    /// Multiplier on `(y_better − y_worse)` for an ordering hinge — the TV
+    /// within-ladder penalty and the α head's monotonicity penalty.
+    ///
+    /// Under `Distance` the better member must score LOWER, so a positive
+    /// `(y_better − y_worse)` is the violation. Under `Score` it is the
+    /// negation. Both hinges take the form
+    /// `max(0, ladder_sign·(y_better − y_worse) + margin)`.
+    #[inline]
+    pub fn ladder_sign(self) -> f64 {
+        match self {
+            Self::Distance => 1.0,
+            Self::Score => -1.0,
+        }
+    }
+
+    /// Human-readable name for the training log — the convention a bake was
+    /// trained under must never be a silent default.
+    #[inline]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Distance => "DISTANCE (higher quality → LOWER raw output)",
+            Self::Score => "SCORE (higher quality → HIGHER raw output)",
+        }
+    }
+}
+
 /// TV (total-variation) regularizer for adjacent-q monotonicity.
 ///
 /// `pairs[k] = (lo_idx, hi_idx)` references rows in the concatenated
@@ -2085,11 +2188,35 @@ pub fn train_mlp_strategy(
     // score-shaped and the rank term flips to match. With no absolute term
     // the sign is +1 and the legacy distance convention is preserved
     // bit-for-bit (every existing recipe is `Rank`-only).
-    let rank_target_sign = if groups.iter().any(|g| g.loss_mode.has_mse()) {
-        -1.0
-    } else {
-        1.0
-    };
+    // ONE OWNER (2026-09-06). This block used to derive the sign inline, here,
+    // and nowhere else — see `OutputPolarity` for the eight sites that did not
+    // get it and what that cost. `for_groups` reproduces this derivation exactly
+    // for every non-α-head recipe, so the change is byte-identical.
+    let polarity = OutputPolarity::for_groups(groups, hyperparams);
+    let rank_target_sign = polarity.rank_target_sign();
+    let ladder_sign = polarity.ladder_sign();
+    // `run_parallel_minibatch` / `run_minibatch_with_nin` carry NO absolute term
+    // and no polarity reconciliation — they are pure RankNet + PWRC. Before
+    // 2026-09-06 a run that set both an absolute term and K>1 (or NiN) silently
+    // trained pure rank, throwing the absolute term away without a word, which
+    // is the same silent-no-op class the dispatcher already fails loud for.
+    // Refuse instead of lying. Rank-only recipes at any K are unaffected.
+    if polarity == OutputPolarity::Score
+        && (hyperparams.parallel_batch && hyperparams.minibatch_size.max(1) > 1
+            || hyperparams.norm_in_norm_weight > 0.0)
+    {
+        panic!(
+            "an absolute (mse/both) term is active, but --minibatch-size {} \
+             (parallel_batch={}) / --norm-in-norm-weight {} routes pairs through a \
+             mini-batch helper that implements RankNet only. The absolute term would \
+             be silently discarded and the bake would be byte-identical to a run that \
+             never asked for it. Use --minibatch-size 1 with --norm-in-norm-weight 0, \
+             or drop the absolute term.",
+            hyperparams.minibatch_size,
+            hyperparams.parallel_batch,
+            hyperparams.norm_in_norm_weight,
+        );
+    }
 
     let train_indices: Vec<usize> = groups
         .iter()
@@ -2112,6 +2239,14 @@ pub fn train_mlp_strategy(
         eprintln!("{msg}");
         log.push(msg.to_string());
     };
+
+    // Say the output convention out loud: a bake trained under DISTANCE and a
+    // bake trained under SCORE are not interchangeable, and which one a run got
+    // must never be a silent default (`OutputPolarity`).
+    log_line(
+        &format!("MLP train: output polarity = {}", polarity.label()),
+        log,
+    );
 
     log_line(
         &format!(
@@ -2475,6 +2610,7 @@ pub fn train_mlp_strategy(
                         hyperparams.norm_in_norm_weight,
                         hyperparams.norm_in_norm_p,
                         hyperparams.norm_in_norm_q,
+                        rank_target_sign,
                     );
                     parallel_batch_buffer.clear();
                     total_loss += loss_added;
@@ -2513,6 +2649,7 @@ pub fn train_mlp_strategy(
                         hyperparams.pwrc_pair_weight,
                         hyperparams.pwrc_sensory_threshold,
                         hyperparams.pwrc_band_weights.as_deref(),
+                        rank_target_sign,
                     );
                     parallel_batch_buffer.clear();
                     total_loss += loss_added;
@@ -2734,12 +2871,21 @@ pub fn train_mlp_strategy(
                         n_hidden,
                         hyperparams.leaky_alpha,
                     );
-                    // Violation = (y_hi - y_lo) > 0 (worse direction).
-                    let viol = y_hi - y_lo;
+                    // Violation, in the run's declared convention (2026-09-06):
+                    // `ladder_sign · (y_better − y_worse) + margin`. `hi` is the
+                    // higher-quality (hi_q) member. Under DISTANCE `ladder_sign`
+                    // is +1 and this is the historical `y_hi - y_lo`; under SCORE
+                    // it flips, because a score-shaped model must put the better
+                    // member HIGHER and the un-flipped hinge would train the
+                    // ladder backwards. `--tv-margin` is honoured here as of
+                    // 2026-09-06 (it was read on the α-head path only); the
+                    // default 0.0 keeps every existing TV recipe byte-identical.
+                    let viol = ladder_sign * (y_hi - y_lo) + tv_cfg.margin;
                     if viol <= 0.0 {
                         continue;
                     }
-                    // d_loss/d_y_hi = +scale ; d_loss/d_y_lo = -scale
+                    // d_loss/d_y_hi = +scale·ladder_sign ; d_loss/d_y_lo = -scale·ladder_sign
+                    let scale = scale * ladder_sign;
                     backprop_step(
                         xhi,
                         &h_hi_pre,
@@ -2827,6 +2973,7 @@ pub fn train_mlp_strategy(
                         hyperparams.norm_in_norm_weight,
                         hyperparams.norm_in_norm_p,
                         hyperparams.norm_in_norm_q,
+                        rank_target_sign,
                     );
                     total_loss += loss_added;
                     n_steps += steps_added;
@@ -2853,6 +3000,7 @@ pub fn train_mlp_strategy(
                     hyperparams.pwrc_pair_weight,
                     hyperparams.pwrc_sensory_threshold,
                     hyperparams.pwrc_band_weights.as_deref(),
+                    rank_target_sign,
                 );
                 parallel_batch_buffer.clear();
                 total_loss += loss_added;
@@ -3094,6 +3242,14 @@ fn train_mlp_pool_head_with_tv(
         );
     }
 
+    // ONE OWNER for the output-sign convention (2026-09-06). This path used to
+    // recompute a bare `signum(mos_a - mos_b)` for RankNet while its TV hinge
+    // (and, on the α head, its monotonicity hinge) each hard-coded an opposite
+    // assumption — see `OutputPolarity`. `Distance` is the default, so every
+    // rank-only recipe is byte-identical.
+    let polarity = OutputPolarity::for_groups(groups, hyperparams);
+    let rank_target_sign = polarity.rank_target_sign();
+    let ladder_sign = polarity.ladder_sign();
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
     assert!(
         train_total > 0.0,
@@ -3121,6 +3277,14 @@ fn train_mlp_pool_head_with_tv(
         eprintln!("{msg}");
         log.push(msg.to_string());
     };
+
+    // Say the output convention out loud: a bake trained under DISTANCE and a
+    // bake trained under SCORE are not interchangeable, and which one a run got
+    // must never be a silent default (`OutputPolarity`).
+    log_line(
+        &format!("MLP train: output polarity = {}", polarity.label()),
+        log,
+    );
 
     log_line(
         &format!(
@@ -3396,7 +3560,13 @@ fn train_mlp_pool_head_with_tv(
 
             let mos_a = g.human_scores[ia];
             let mos_b = g.human_scores[ib];
-            let target = (mos_a - mos_b).signum();
+            // `quality_sign` is the raw ordering of the pair by human score;
+            // `target` is that ordering expressed in the run's declared output
+            // convention. Ordering HINGES must keep using `quality_sign` (they
+            // need to know which member is better, not which way `y` points);
+            // only the RankNet term takes the signed `target`.
+            let quality_sign = (mos_a - mos_b).signum();
+            let target = rank_target_sign * quality_sign;
             if target == 0.0 {
                 if nin_on {
                     nin_buffer.push(None);
@@ -3622,10 +3792,14 @@ fn train_mlp_pool_head_with_tv(
                     let (y_hi, h_hi_pre, h_hi, s_hi, max_hi) = ph::forward_pool_head(
                         xhi, &w1, &b1, &reducer_w, reducer_b, n_features, n_hidden, alpha,
                     );
-                    let viol = y_hi - y_lo;
+                    // `ladder_sign · (y_better − y_worse) + margin` — see the
+                    // plain path's copy. `--tv-margin` is honoured here as of
+                    // 2026-09-06; default 0.0 keeps existing recipes identical.
+                    let viol = ladder_sign * (y_hi - y_lo) + tv_cfg.margin;
                     if viol <= 0.0 {
                         continue;
                     }
+                    let scale = scale * ladder_sign;
                     let mut tv_red_w: [f64; 4] = [0.0; 4];
                     let mut tv_red_b: f64 = 0.0;
                     ph::backprop_step_pool_head(
@@ -3950,6 +4124,14 @@ fn train_mlp_hybrid_head_with_tv(
         );
     }
 
+    // ONE OWNER for the output-sign convention (2026-09-06). This path used to
+    // recompute a bare `signum(mos_a - mos_b)` for RankNet while its TV hinge
+    // (and, on the α head, its monotonicity hinge) each hard-coded an opposite
+    // assumption — see `OutputPolarity`. `Distance` is the default, so every
+    // rank-only recipe is byte-identical.
+    let polarity = OutputPolarity::for_groups(groups, hyperparams);
+    let rank_target_sign = polarity.rank_target_sign();
+    let ladder_sign = polarity.ladder_sign();
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
     assert!(
         train_total > 0.0,
@@ -3977,6 +4159,14 @@ fn train_mlp_hybrid_head_with_tv(
         eprintln!("{msg}");
         log.push(msg.to_string());
     };
+
+    // Say the output convention out loud: a bake trained under DISTANCE and a
+    // bake trained under SCORE are not interchangeable, and which one a run got
+    // must never be a silent default (`OutputPolarity`).
+    log_line(
+        &format!("MLP train: output polarity = {}", polarity.label()),
+        log,
+    );
 
     log_line(
         &format!(
@@ -4283,7 +4473,13 @@ fn train_mlp_hybrid_head_with_tv(
 
             let mos_a = g.human_scores[ia];
             let mos_b = g.human_scores[ib];
-            let target = (mos_a - mos_b).signum();
+            // `quality_sign` is the raw ordering of the pair by human score;
+            // `target` is that ordering expressed in the run's declared output
+            // convention. Ordering HINGES must keep using `quality_sign` (they
+            // need to know which member is better, not which way `y` points);
+            // only the RankNet term takes the signed `target`.
+            let quality_sign = (mos_a - mos_b).signum();
+            let target = rank_target_sign * quality_sign;
             if target == 0.0 {
                 if nin_on {
                     nin_buffer.push(None);
@@ -4579,10 +4775,14 @@ fn train_mlp_hybrid_head_with_tv(
                         n_hidden,
                         leaky,
                     );
-                    let viol = y_hi - y_lo;
+                    // `ladder_sign · (y_better − y_worse) + margin` — see the
+                    // plain path's copy. `--tv-margin` is honoured here as of
+                    // 2026-09-06; default 0.0 keeps existing recipes identical.
+                    let viol = ladder_sign * (y_hi - y_lo) + tv_cfg.margin;
                     if viol <= 0.0 {
                         continue;
                     }
+                    let scale = scale * ladder_sign;
                     let mut tv_rank_w_buf = vec![0.0f64; n_hidden];
                     let mut tv_rank_b_buf = 0.0f64;
                     let mut tv_red_w: [f64; 4] = [0.0; 4];
@@ -5707,6 +5907,12 @@ fn run_parallel_minibatch(
     pwrc_enabled: bool,
     pwrc_sensory_threshold: f64,
     pwrc_band_weights: Option<&[f64]>,
+    // The run's declared output convention, from the ONE owner
+    // (`OutputPolarity::rank_target_sign`). This helper implements RankNet only
+    // — the dispatcher refuses to route an absolute term here — so it is always
+    // `+1.0` today; it is threaded rather than re-derived so the convention
+    // keeps having exactly one source.
+    rank_target_sign: f64,
 ) -> (u64, f64) {
     // Chunk size is a **fixed function of K** (not thread count) so
     // the chunk partition — and therefore the FP reduce order — is
@@ -5763,7 +5969,7 @@ fn run_parallel_minibatch(
 
                 let mos_a = groups[g_idx].human_scores[ia];
                 let mos_b = groups[g_idx].human_scores[ib];
-                let target = (mos_a - mos_b).signum();
+                let target = rank_target_sign * (mos_a - mos_b).signum();
                 if target == 0.0 {
                     continue;
                 }
@@ -5929,6 +6135,12 @@ fn run_minibatch_with_nin(
     nin_weight: f64,
     nin_p: f64,
     nin_q: f64,
+    // The run's declared output convention, from the ONE owner
+    // (`OutputPolarity::rank_target_sign`). Like `run_parallel_minibatch`, this
+    // helper implements RankNet + NiN only and the dispatcher refuses to route
+    // an absolute term here, so it is always `+1.0` today; it is threaded
+    // rather than re-derived so the convention keeps one source.
+    rank_target_sign: f64,
 ) -> (u64, f64) {
     // Per-pair forward outputs kept around for the second pass (the
     // NiN-augmented backward). `Option` because skipped pairs (target
@@ -5959,7 +6171,7 @@ fn run_minibatch_with_nin(
         let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
         let mos_a = groups[g_idx].human_scores[ia];
         let mos_b = groups[g_idx].human_scores[ib];
-        let target = (mos_a - mos_b).signum();
+        let target = rank_target_sign * (mos_a - mos_b).signum();
         if target == 0.0 {
             forwards.push(None);
             continue;
@@ -6640,6 +6852,14 @@ fn train_mlp_per_sample_alpha_head(
         n_hidden
     };
 
+    // ONE OWNER for the output-sign convention (2026-09-06). This path used to
+    // recompute a bare `signum(mos_a - mos_b)` for RankNet while its TV hinge
+    // (and, on the α head, its monotonicity hinge) each hard-coded an opposite
+    // assumption — see `OutputPolarity`. `Distance` is the default, so every
+    // rank-only recipe is byte-identical.
+    let polarity = OutputPolarity::for_groups(groups, hyperparams);
+    let rank_target_sign = polarity.rank_target_sign();
+    let ladder_sign = polarity.ladder_sign();
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
     assert!(train_total > 0.0, "no training groups");
 
@@ -6664,6 +6884,14 @@ fn train_mlp_per_sample_alpha_head(
         eprintln!("{msg}");
         log.push(msg.to_string());
     };
+
+    // Say the output convention out loud: a bake trained under DISTANCE and a
+    // bake trained under SCORE are not interchangeable, and which one a run got
+    // must never be a silent default (`OutputPolarity`).
+    log_line(
+        &format!("MLP train: output polarity = {}", polarity.label()),
+        log,
+    );
 
     log_line(
         &format!(
@@ -8092,7 +8320,13 @@ fn train_mlp_per_sample_alpha_head(
 
             let mos_a = g.human_scores[ia];
             let mos_b = g.human_scores[ib];
-            let target = (mos_a - mos_b).signum();
+            // `quality_sign` is the raw ordering of the pair by human score;
+            // `target` is that ordering expressed in the run's declared output
+            // convention. Ordering HINGES must keep using `quality_sign` (they
+            // need to know which member is better, not which way `y` points);
+            // only the RankNet term takes the signed `target`.
+            let quality_sign = (mos_a - mos_b).signum();
+            let target = rank_target_sign * quality_sign;
             if target == 0.0 {
                 if nin_on {
                     nin_buffer.push(None);
@@ -8238,20 +8472,29 @@ fn train_mlp_per_sample_alpha_head(
             total_loss += mse_loss_pair;
 
             let (dl_dya_mono, dl_dyb_mono, mono_loss_pair) =
-                if hyperparams.monotonicity_reg > 0.0 && target != 0.0 {
-                    // target = signum(mos_a - mos_b); target > 0 means a is hi.
+                if hyperparams.monotonicity_reg > 0.0 && quality_sign != 0.0 {
+                    // Which member is BETTER is a property of the human scores,
+                    // never of the output convention — so this reads
+                    // `quality_sign`, not the polarity-signed `target`. Before
+                    // 2026-09-06 it read `target`, which was the bare signum,
+                    // and then applied a hard-coded SCORE-shaped violation on a
+                    // path whose RankNet term was DISTANCE-shaped: the two terms
+                    // pulled against each other. The hinge now takes the run's
+                    // declared direction like every other ordering hinge.
                     let target_gap = (mos_a - mos_b).abs();
                     if target_gap > hyperparams.monotonicity_margin {
-                        let (y_hi, y_lo, sign_hi_is_a) = if target > 0.0 {
+                        let (y_hi, y_lo, sign_hi_is_a) = if quality_sign > 0.0 {
                             (ya, yb, true)
                         } else {
                             (yb, ya, false)
                         };
-                        let violation = (y_lo - y_hi) + hyperparams.monotonicity_margin;
+                        let violation =
+                            ladder_sign * (y_hi - y_lo) + hyperparams.monotonicity_margin;
                         if violation > 0.0 {
                             let l = hyperparams.monotonicity_reg * violation * violation;
-                            let g_hi = -2.0 * hyperparams.monotonicity_reg * violation;
-                            let g_lo = 2.0 * hyperparams.monotonicity_reg * violation;
+                            let g_hi = 2.0 * ladder_sign * hyperparams.monotonicity_reg * violation;
+                            let g_lo =
+                                -2.0 * ladder_sign * hyperparams.monotonicity_reg * violation;
                             if sign_hi_is_a {
                                 (g_hi, g_lo, l)
                             } else {
@@ -8663,12 +8906,17 @@ fn train_mlp_per_sample_alpha_head(
                     // so d(viol)/dy is unchanged — the gradient direction is identical;
                     // it just fires on correctly-ordered pairs whose gap is too small,
                     // spreading the ladder instead of letting it collapse flat.
-                    let viol = yhi - ylo + tv_margin_val;
+                    // `ladder_sign · (y_better − y_worse) + margin` (2026-09-06).
+                    // Under DISTANCE this is the historical `yhi - ylo + margin`;
+                    // under SCORE it flips, because this hinge and the RankNet
+                    // term on the SAME path previously disagreed about which way
+                    // `y` points.
+                    let viol = ladder_sign * (yhi - ylo) + tv_margin_val;
                     if viol > 0.0 {
                         total_loss += tv_weight_val * viol;
                         n_steps += 1;
-                        let dl_dy_hi = tv_weight_val * dyhi_dpre; // push y_hi down
-                        let dl_dy_lo = -tv_weight_val * dylo_dpre; // push y_lo up
+                        let dl_dy_hi = ladder_sign * tv_weight_val * dyhi_dpre;
+                        let dl_dy_lo = -ladder_sign * tv_weight_val * dylo_dpre;
                         arch_backward(
                             xhi,
                             &fwd_hi,
