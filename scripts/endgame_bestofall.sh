@@ -158,11 +158,20 @@ do_board() {
     local name; name=$(basename "$f" .fulleval.json)
     [[ "$name" == _* ]] && continue
     local g="$OUT/gaddr/gaddr_${name}.json"
-    local args=(--verdict "$f" --name "BOA_${name}" --out-dir "$BOARD")
-    [[ -s "$g" ]] && args+=(--graft-gaddr "$g")
+    # Two steps, because `--graft-gaddr` is its own MODE (it takes
+    # `--graft-into`, not `--verdict`): promote the cell, then attach the G-ADDR
+    # block to the promoted file so the board's dial columns come from the same
+    # run that produced them.
     say "promote BOA_${name}"
-    python3 "$WS/scripts/promote_fulleval.py" "${args[@]}" \
-      >> "$OUT/gates/board_promote.log" 2>&1 || say "promote FAILED BOA_${name}"
+    python3 "$WS/scripts/promote_fulleval.py" --verdict "$f" --name "BOA_${name}" \
+      --out-dir "$BOARD" >> "$OUT/gates/board_promote.log" 2>&1 \
+      || { say "promote FAILED BOA_${name}"; continue; }
+    if [[ -s "$g" ]]; then
+      python3 "$WS/scripts/promote_fulleval.py" --graft-gaddr "$g" \
+        --graft-into "$BOARD/BOA_${name}.fulleval.json" \
+        >> "$OUT/gates/board_promote.log" 2>&1 \
+        || say "gaddr graft FAILED BOA_${name}"
+    fi
   done
   say "board promotion done — regen with scripts/v_next/bandwise_dashboard.py --fulleval-dir $BOARD"
 }
