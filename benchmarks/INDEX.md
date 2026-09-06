@@ -31,6 +31,30 @@
 > revision-1 `contrast_inc` up to **1.30e7** — 3.7e7× the pathology bar and 357× the worst R6b
 > measured, all of it pinned to the linear head's ±8 clip. Nothing installed into `ZensimProfile::D`.
 
+> **★★ REV2-D — EVERY F17 ARM IN THE SHIPPED D CHAIN; THE BOUND COSTS RANK AND `satexcess` COSTS THE MOST 2026-09-06:**
+> [`rev2_d_arms_2026-09-06.md`](rev2_d_arms_2026-09-06.md) — pre-registered as
+> `docs/PLAN_FEATURE_REV2_2026-09-05.md` §12 and pushed before the first gram. Five F17 arms
+> (`ratio`/`cap`/`log1p`/`bexcess`/`satexcess`) × two slices + three winsor controls, all through
+> the shipped Profile-D chain, all graded in-era. Controls: the `ratio` and `satexcess` grams are
+> **BYTE-IDENTICAL** to the REFIT lane's, its four bakes byte-identical modulo `zentrain.repro`,
+> and the `satexcess` CID22 delta reproduces **−0.00456 [−0.00549, −0.00364]** exactly.
+> **★ EVERY arm that changes the feature loses CID22, CI-excluding, and `satexcess` — the
+> registry's choice — is the WORST of the four at BOTH slices** (−0.00456 / −0.00406 against
+> `log1p`'s −0.00088 and `bexcess`'s −0.00206, both of which R6b's structural gates eliminate).
+> Every arm also drops the `avif-rav1e` floor below revision 1 while IMPROVING `jpeg`. **No arm is
+> eligible under the pre-registered rule; step 3 fires and `REV2_HFGAIN` STAYS `SaturatingExcess`
+> because no single arm wins for both model classes** — the trade goes to the user (§10.1).
+> **★ The bake-side alternative is real: `W-f17` (winsor p99.9 on the twelve F17 slots only,
+> revision-1 features) is the ONLY non-rev1 model here with A7r 0 fails AND contract 6/6, and the
+> best outlier-row ordering of all eight** — at CID22 −0.00348, i.e. 76 % of `satexcess`'s cost,
+> with no era break. Scope is what matters: the same guard on all 372 slots (`W-all`, the shipped
+> Profile-B recipe) is the WORST model in the study. And `add-winsor`'s literal chain CARRIES the
+> pre-clamp spline — `W-all-carried` ties rev1 on CID22 and wins CSIQ **+0.04862** but breaks
+> contract **C6**, the stale-spline defect predicted from the owner's source before it was run.
+> Also corrected here: `feature_rev2_2026-09-05.md` §11.8's "122 of 779 ROWS" is the CELL count;
+> LIVE carries **60** rows with a `contrast_inc` cell above 100.
+
+
 > **★ 2026-09-05 — DEFAULT PROPOSALS:** [`default_proposals_2026-09-05.md`](default_proposals_2026-09-05.md)
 > — the SDR + HDR default answer under the 2026-09-05 G-ADDR ruling (`resolvable` floor window
 > operative, `A1`-`A6` report-only). **SDR: keep Profile D** (the only scorer passing both tiers on

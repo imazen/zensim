@@ -809,7 +809,48 @@ bars to instruments about to be superseded. No fast-class retrain and no
 corruption-head refit: the REFIT lane measured the tree CANDIDATE invariant to
 the revision to nine decimals (§8.6r).
 
-### 12.6 RESULTS
+### 12.6 RESULTS — ANSWERED 2026-09-06. Step 3 fired; the registry does NOT move
 
-*(filled by the record; this heading exists so the pre-registration and the
-answer live at one anchor.)*
+Full numbers: [`../benchmarks/rev2_d_arms_2026-09-06.md`](../benchmarks/rev2_d_arms_2026-09-06.md).
+
+**Controls all pass.** This lane's `ratio` and `satexcess` grams are
+**BYTE-IDENTICAL** to the REFIT lane's, its four rev1/rev2 bakes are
+byte-identical modulo the tool-path-bearing `zentrain.repro`, `extend-top` is a
+byte no-op on all 10 arm bakes, `densify`'s identity gate is BIT-identical
+10/10, and the `satexcess` a156 CID22 delta reproduces the REFIT lane's
+**−0.00456 [−0.00549, −0.00364]** exactly from an independent gram, fit, verdict
+and bootstrap.
+
+**Step 0** leaves `satexcess` the only recommendable arm (`log1p` fails H3,
+`bexcess` and `cap` fail H5). **Step 1** finds NO eligible candidate at a156 —
+every bounded arm and every winsor variant drops `avif-rav1e` below revision 1's
+0.6667, and `W-all-carried` additionally breaks contract C6. At a228 `cap` and
+`satexcess` are eligible (floors equal on all five codecs), but **step 2** fails
+for both: CID22 −0.00309 and −0.00406, CIs excluding zero. **Step 3 fires.**
+
+> **The bound costs CID22 in the shipped D's model class on every form tested,
+> and `satexcess` — the form chosen for the wide class — is the most expensive
+> of the four at BOTH slices** (−0.00456 / −0.00406 vs `log1p`'s −0.00088 /
+> `bexcess`'s −0.00206, both of which step 0 eliminates).
+
+**Step 4** is not met: `satexcess` is best for R6b's 147-coefficient class and
+worst for the 28–39-coefficient D class, and no arm wins both. So
+**`REV2_HFGAIN` STAYS `SaturatingExcess`** and the trade goes to the user
+(record §10.1). Nothing was installed.
+
+**The bake-side control produced the finding the brief anticipated.**
+`W-f17` — `winsor_p99 [p0.1, p99.9]` on the twelve F17 slots only, revision-1
+features, clamp inside the fit — is **the only non-revision-1 model in the study
+that keeps A7r 0 fails AND contract 6/6**, and it has the best outlier-row
+ordering of all eight (+0.94348 against revision 1's +0.93491 on the 60 LIVE
+rows whose `contrast_inc` exceeds 100). It is **not free** (CID22 −0.00348, 76 %
+of `satexcess`'s cost) and it is **not eligible** either (its `avif-rav1e` 0.6410
+sits on the mentor bar but below revision 1's 0.6667). Two neighbours settle its
+scope: `W-all`, the same guard on all 372 slots (the shipped Profile-B recipe),
+is the WORST model in the study (CID22 −0.01536, KonJND −0.02339, outlier-row
+SROCC +0.87152); and `W-all-carried`, the literal `add-winsor` chain whose
+spline is carried, ties revision 1 on CID22 (−0.00002, CI includes 0) and WINS
+CSIQ by **+0.04862** — but breaks contract C6 (1 of 9,593 cells out-scores a
+perfect copy), exactly the stale-spline defect §12.2 predicted from the owner's
+source. A serve-time guard with a REFIT spline is registered as a follow-up, not
+run.

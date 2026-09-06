@@ -2726,3 +2726,103 @@ WAVE's refit lane measured the same head at revision 2 separately (§8 of
 
 Record: [`../benchmarks/corruption_head_serving_2026-09-06.md`](../benchmarks/corruption_head_serving_2026-09-06.md).
 Artifacts + shas: `/mnt/v/output/zensim/corruption-head-2026-09-05/theories/_MANIFEST_ZCTH.json`.
+
+---
+
+## §3.50 — every F17 arm through the SHIPPED D chain: the bound costs rank, and the form the wide class chose costs the most (2026-09-06)
+
+**Ledger ROUND 102.** §11.10a of the rev2 plan set `REV2_HFGAIN =
+SaturatingExcess` from R6b's 147-coefficient lasso, where it wins CID22
+**+0.00272** CI-excluding. The REFIT lane then ran the SHIPPED Profile-D chain
+— same λ, [0, 1] target, 28 coefficients — on the same tables and measured the
+same arm **losing 0.00456**, also CI-excluding, and named the cause: F17's
+benefit is model-class-dependent. **A form chosen on one model class had never
+been tested on the class that ships.** This section is that test: five arms ×
+two slices + three winsor controls, pre-registered as plan §12 and pushed
+(`1992505c`) before the first gram existed.
+
+**Thought-why vs actual-why, the entry that earns its place.** The lane was
+framed as "which bound is cheapest for a monotone sparse model" — i.e. as a
+question about the VALUE the model reads. Measured first, from
+`bake_block_profile` on the REFIT lane's own bakes, it is not that question at
+all: **the revision-1 D reads ONE of the twelve F17 slots (f77) among 28 active
+coefficients, and the revision-2 D reads FIVE (f12 f38 f64 f129 f155) among 33**
+— at a228, one of 27 against seven of 39. An unbounded column with a 36,466 max
+and a 2.6 %-above-1 tail has, after standardization, its variance carried by a
+handful of rows; L1 drops it. Bound it and it becomes well-conditioned and L1
+keeps it. **So "rev1 vs rev2 in the D chain" is a comparison of two different
+SPARSE SUPPORTS, not of one model with a rescaled input** — which is exactly why
+a single arm's delta cannot separate "bounding costs rank" from "*this* bound
+costs rank", and why the per-arm sweep was the only instrument that could
+answer it.
+
+**The result, and it is one-signed.** Every arm that changes the feature loses
+CID22 with a CI excluding zero, at BOTH slices, and loses CSIQ and LIVE at a156
+as well. `satexcess` is the **WORST of the four** at both: **−0.00456** (a156) /
+**−0.00406** (a228), against `log1p` −0.00088 / −0.00211 and `bexcess`
+−0.00153 / −0.00206 — and the two cheaper arms are exactly the two R6b's
+structural gates eliminate (`log1p` declares no bound; `bexcess` reads the
+MAGNITUDE of `var_src`, not the ratio, and inverts the order 263,195 times).
+Every arm also drops the `avif-rav1e` per-codec floor below revision 1's 0.6667
+(`log1p` closest at 0.6154, three arms at 0.5897) while every arm IMPROVES
+`jpeg` (0.7179 → 0.7692). Under the pre-registered rule NO arm is eligible at
+a156; at a228 `cap` and `satexcess` are (floors equal on all five codecs) and
+both fail the CID22 clause. **Step 3 fired. `REV2_HFGAIN` STAYS
+`SaturatingExcess`, because step 4 forbids a per-class revision and no arm wins
+both classes** — the trade is recorded for the user, not resolved here.
+
+**The outlier read is the one that most changes how the arms should be
+described.** On the 60 LIVE rows whose revision-1 `contrast_inc` exceeds 100 —
+the rows the whole defect is about — `satexcess` at a156 is **worse** than
+revision 1 (+0.93203 vs +0.93491); only `bexcess` and the winsor control beat
+it there. At a228 the sign flips and every arm beats revision 1. **"Bounding
+the feature fixes the ordering where it is pathological" is not a claim this
+study can support.** *(A units correction on the way: `feature_rev2`'s "122 of
+779 rows" is the CELL count of 9,348; the ROW count is 60.)*
+
+**And the bake-side alternative is real, which the lane did not expect.**
+`W-f17` — `winsor_p99 [p0.1, p99.9]` on the twelve F17 slots only, revision-1
+features, clamp inside the fit — is the **ONLY** non-revision-1 model in the
+study that keeps A7r 0 fails AND contract 6/6, and it has the **best
+outlier-row ordering of all eight** (+0.94348). No era break, no recalculation,
+no re-extraction. It costs CID22 −0.00348, **76 % of `satexcess`'s cost**.
+Scope is the whole story: the SAME guard on all 372 slots — the shipped
+Profile-B recipe — is the **worst** model in the study (CID22 −0.01536, KonJND
+−0.02339, outlier-row SROCC **+0.87152**), because a p99.9 window fitted on
+safesyn clamps LIVE's pathological rows onto a shared ceiling and deletes their
+ordering. That is `cap`'s H5 new-ties failure arriving through the bake instead
+of through the feature.
+
+**A defect predicted from source and then measured.** `bake_dial_refit
+add-winsor` carries *"everything the raw bake had (incl. its spline)
+verbatim"*, so the literal `add-winsor → extend-top` chain leaves an
+output-calibration spline fitted on the UN-clamped net — QUANTIZE-then-CALIBRATE
+in another guise. Graded rather than argued: `W-all-carried` TIES revision 1 on
+CID22 (−0.00002, CI [−0.00007, +0.00002]) and WINS CSIQ by **+0.04862**
+CI-excluding — the largest single rank gain anywhere here, because it keeps
+revision 1's weights and clamps only at inference — but it fails contract
+**C6** (1 of 9,593 grid cells out-scores a perfect copy) and the `avif-svt`
+floor. **A serve-time guard whose spline is REFIT would plausibly keep the CSIQ
+gain without the C6 break; registered, not run.**
+
+**Controls, because every number above rests on them.** This lane's `ratio` and
+`satexcess` grams are **BYTE-IDENTICAL** to the REFIT lane's; its four
+rev1/rev2 bakes are byte-identical modulo the tool-path-bearing
+`zentrain.repro`; `extend-top` is a byte no-op on all ten arm bakes;
+`densify`'s identity gate is BIT-identical 10/10; all five arms' identity
+tables are all-zero on 372/372 slots so the 21-row identity anchor is
+arm-independent by construction; and the `satexcess` a156 CID22 delta
+reproduces **−0.00456 [−0.00549, −0.00364]** exactly from an independent gram,
+fit, verdict and bootstrap. All sixteen bakes PASS the two-reference inversion
+gate (G3 ≤ 0.07) — a pre-registered axis that turned out flat, reported as a
+result rather than omitted.
+
+**Nothing shipped.** `ssim_form::SHIPPED_REVISION` is `Rev1`,
+`ZensimProfile::D` unchanged, `zensim/weights/` unchanged,
+`benchmarks/feature_sets_registry.json` unchanged, the G-ADDR floor registry
+NOT appended (these are R6b's arm probes, not the wave's canonical instruments),
+no board cell, zero Rust changed.
+
+Record: [`../benchmarks/rev2_d_arms_2026-09-06.md`](../benchmarks/rev2_d_arms_2026-09-06.md).
+Pre-registration: [`PLAN_FEATURE_REV2_2026-09-05.md`](PLAN_FEATURE_REV2_2026-09-05.md) §12.
+Artefacts + shas: `/mnt/v/output/zensim/rev2-d-arms-2026-09-06/_MANIFEST.json` (392 files).

@@ -252,6 +252,34 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   only `v1ssimcap` + `freecomp` under-declares every table by twelve slots).
   Record: `benchmarks/feature_rev2_2026-09-05.md` §11; pre-registration:
   `docs/PLAN_FEATURE_REV2_2026-09-05.md` §11.
+  **⚠ THE ARM WAS DECIDED ON ONE MODEL CLASS, AND IT IS THE WORST ARM ON THE
+  CLASS THAT SHIPS (measured 2026-09-06, `benchmarks/rev2_d_arms_2026-09-06.md`,
+  pre-registration §12).** All five arms re-run through the SHIPPED Profile-D
+  chain, ×2 slices, in-era: **every arm that changes the feature loses CID22
+  with a CI excluding zero, and `satexcess` is LAST of the four at both slices**
+  — −0.00456 / −0.00406 against `log1p` −0.00088 / −0.00211 and `bexcess`
+  −0.00153 / −0.00206 (the two cheaper arms are exactly the two the structural
+  gates kill). Every arm drops the `avif-rav1e` floor below rev1's 0.6667 while
+  every arm IMPROVES `jpeg` 0.7179 → 0.7692. **`REV2_HFGAIN` still STAYS
+  `SaturatingExcess`** — one feature has one definition and no arm wins both
+  classes — but **do not cite R6b's +0.0027 as what rev2 does to a bake**:
+  it is a property of a 147-coefficient fit, and the D lineage's 28–39 lose.
+  MEASURED mechanism: **the two revisions do not read the same slots** —
+  `D_ratio_s156` reads ONE F17 id (f77) of 28 active, `D_satexcess_s156` reads
+  FIVE of 33 — so bounding changes which inputs L1 keeps, not just their scale.
+  On the 60 LIVE rows whose rev1 `contrast_inc` exceeds 100, `satexcess` at
+  a156 is WORSE than rev1 (+0.93203 vs +0.93491); the bound does **not**
+  demonstrably fix the ordering where the pathology fires. **THE BAKE-SIDE
+  ALTERNATIVE IS REAL AND CHEAPER: `winsor_p99 [p0.1,p99.9]` on the twelve F17
+  slots ONLY, rev1 features (`W-f17`), is the only non-rev1 model in that study
+  with A7r 0 fails AND contract 6/6 and the best outlier-row ordering of all
+  eight, at 76 % of `satexcess`'s CID22 cost and NO era break** — but the SAME
+  guard on all 372 slots (the shipped Profile-B recipe) is the WORST model in
+  the study. **And `add-winsor` CARRIES the input bake's output spline
+  verbatim**, so the literal `add-winsor → extend-top` chain calibrates on the
+  un-clamped net: that variant ties rev1 on CID22 and wins CSIQ **+0.04862**
+  but breaks contract **C6**. A serve-time guard with a REFIT spline is
+  registered, not run. Ledger: `docs/DATASET_HISTORY.md` §3.50.
 
 - **⛔ THE STORED 372-COL masked/IW BLOCK IS PRE-FIX AND THREAD-DEPENDENT — THE
   RUNTIME PROFILE B IS NOT THE EVALUATED PROFILE B (found + measured 2026-08-30,
