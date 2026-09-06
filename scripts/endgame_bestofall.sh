@@ -170,7 +170,6 @@ do_board() {
   for f in "$OUT"/verdicts/*.fulleval.json; do
     local name; name=$(basename "$f" .fulleval.json)
     [[ "$name" == _* ]] && continue
-    local g="$OUT/gaddr/gaddr_${name}.json"
     # Two steps, because `--graft-gaddr` is its own MODE (it takes
     # `--graft-into`, not `--verdict`): promote the cell, then attach the G-ADDR
     # block to the promoted file so the board's dial columns come from the same
@@ -179,12 +178,15 @@ do_board() {
     python3 "$WS/scripts/promote_fulleval.py" --verdict "$f" --name "BOA_${name}" \
       --out-dir "$BOARD" >> "$OUT/gates/board_promote.log" 2>&1 \
       || { say "promote FAILED BOA_${name}"; continue; }
-    if [[ -s "$g" ]]; then
-      python3 "$WS/scripts/promote_fulleval.py" --graft-gaddr "$g" \
-        --graft-into "$BOARD/BOA_${name}.fulleval.json" \
-        >> "$OUT/gates/board_promote.log" 2>&1 \
-        || say "gaddr graft FAILED BOA_${name}"
-    fi
+    # ⛔ NO G-ADDR GRAFT. The grafter REFUSES it, correctly:
+    #   "dial.mono_pct differs between the board (0.9667) and the G-ADDR read
+    #    (0.9610) — the read was NOT taken on the board's dial grid; refusing"
+    # This lane's G-ADDR is measured on the floor-dense LADDER instrument, while
+    # the board's dial column is the canonical grid across all 481 existing
+    # cells. Grafting would put two different instruments in one column, which
+    # is the error the refusal exists to prevent. The ladder G-ADDR readings live
+    # in this lane's artifacts and in benchmarks/best_of_all_2026-09-06.md, where
+    # they are labelled with their instrument.
   done
   say "board promotion done — regen with scripts/v_next/bandwise_dashboard.py --fulleval-dir $BOARD"
 }
