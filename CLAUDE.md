@@ -53,6 +53,45 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
 
 ## Known Bugs
 
+- **★ FEATURE REVISION 2 IS LANDED AND INERT — `ssim_form::SHIPPED_REVISION`
+  is still `Rev1`, and flipping it is gated (2026-09-05).** Both of the
+  audit's arithmetic defects now have fixes in tree behind
+  `FormulaRevision::Rev2` (`ZENSIM_FORMULA_REV=1|2` pins an era from one
+  binary). Nothing shipped has moved: the 22,397-row `to_bits()` dump is
+  byte-identical, sha256 `940c82dd0499d3ad…`. Read
+  [`benchmarks/feature_rev2_2026-09-05.md`](benchmarks/feature_rev2_2026-09-05.md)
+  before citing any F4/F5 number. Four things there supersede what is written
+  elsewhere in this file and in the audit:
+  - **F4's blast radius is 132 slots, not 72.** The audit scopes it to masked
+    + IW; a bounded-form re-extraction MEASURES basic 36 + peaks 24 + masked
+    36 + IW 36. The peaks pair (`ssim_max`, `ssim_l8`) is an every-third-slot
+    comb no per-block reading predicts. The registry assertion was WIDENED.
+  - **The no-C1 form is genuinely ssimulacra2's** — verified against
+    `fast-ssim2`'s own kernels, not assumed from `lib.rs`. So a bounded form
+    is a deliberate deviation from that lineage. (`fast-ssim2` carries the
+    same unbounded term; different repo, NOT touched, reported only.)
+  - **F4's arm is NOT chosen, and the ladder instrument cannot choose it** —
+    all four arms give identical monotonicity on both control-passing ladders
+    (132/132 noise, 116/132 quantize), because the ladders never reach the
+    regime where the arms differ. The decision needs a real monotone-linear
+    fit on real corpora (plan R6). Do not infer an arm from a ladder result.
+  - **⛔ "F5 is free" is RETIRED.** Fixing F5 requires changing the APPEND
+    route, and `bake_block_profile` MEASURES all three shipped 944 bakes
+    (`c_sdr_mlp944_corrmix` = Profile **C**, `c_hdr_l1t1944` = **CHdr**,
+    `c_sdr_purity944`) reading the full `GLOBAL_*` set — 11 `DMEAN` + 11
+    `CGAIN` + 11 `CLOSS` each. `candidate-profiles` is default-on and C's bake
+    ships to crates.io. Flipping rev2 moves 22 of those 33 per bake (`DMEAN`
+    is untouched, by construction and by test), so C and CHdr need
+    re-verdicting. Phase 2b's G2b.2 precondition is FALSE.
+  F5 itself is FIXED behind the flag: paired free-vs-append disagreement past
+  the 2e-5 bar goes **8.30 % → 0.18 %** (93 → 2 of 1,120 cells), worst
+  2.31e-4 → 2.49e-5. Three plausible fixes were measured and FAILED first
+  (per-row granularity; Kahan on the free route; Kahan on both) — the
+  registry's own proposed "compensated accumulation" is among them. The
+  working fix is reassociation of BOTH terms of `gvar2 − gvar1` into per-pixel
+  differences; doing only the second moment leaves `GLOBAL_CGAIN` flat.
+
+
 - **⛔ 92 % OF THIS REPO'S BAKES CANNOT BE SERVED BY `Zensim::compute`, AND TWO
   SHIPPED PROFILES ARE AMONG THEM (measured 2026-09-05, OPEN — the architecture
   lane owns the fix).** Census through the production entry on the committed
