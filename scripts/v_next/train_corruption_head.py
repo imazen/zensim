@@ -54,6 +54,40 @@ DST = "/mnt/v/output/zensim/signedpow-clean-2026-07-24"
 PERC = f"{DST}/ideal_p0p2_L0p003_F0p005_bd.bin"
 
 
+def make_classifier(name="logistic", seed=0):
+    """THE classifier factory for the corruption head — one owner, several forms.
+
+    Added 2026-09-06 for the pre-registered T2 (MLP-vs-logistic) test so the
+    study driver and this trainer instantiate the SAME estimators rather than
+    each building their own. `logistic` reproduces the historical hard-coded
+    estimator exactly (`C=0.05, class_weight="balanced", max_iter=3000`), so the
+    default path is unchanged.
+
+    Only `logistic` can be BAKED — `emit_znpr` writes one identity layer from
+    `coef_`/`intercept_`, which the non-linear forms do not have. `main()`
+    refuses `--bake-out` for them loudly rather than emitting a wrong head.
+    """
+    if name == "logistic":
+        return LogisticRegression(C=0.05, class_weight="balanced", max_iter=3000)
+    if name in ("mlp32", "mlp64_32"):
+        from sklearn.neural_network import MLPClassifier
+        hidden = (32,) if name == "mlp32" else (64, 32)
+        return MLPClassifier(hidden_layer_sizes=hidden, early_stopping=True,
+                             n_iter_no_change=10, validation_fraction=0.1,
+                             max_iter=400, random_state=seed)
+    if name == "hgb":
+        from sklearn.ensemble import HistGradientBoostingClassifier
+        return HistGradientBoostingClassifier(early_stopping=True,
+                                              class_weight="balanced",
+                                              random_state=seed)
+    raise SystemExit(f"unknown --model {name!r} "
+                     f"(logistic | mlp32 | mlp64_32 | hgb)")
+
+
+def can_bake(name):
+    return name == "logistic"
+
+
 def load_X(path, idx, extra=()):
     cols = [f"f{i}" for i in idx]
     t = pq.read_table(path, columns=cols + list(extra))
@@ -204,6 +238,9 @@ def main():
     ap.add_argument("--broad-honest", action="append", default=None,
                     help="LABEL:PATH[:IDCOL] broad-honest negatives (repeatable). "
                          "IDCOL defaults to ref_basename. Overrides the legacy list.")
+    ap.add_argument("--model", default="logistic",
+                    help="classifier form: logistic (default, the shipped head) | "
+                         "mlp32 | mlp64_32 | hgb. Only logistic can be --bake-out.")
     ap.add_argument("--thresholds", default="0.5,0.9,0.95,0.99",
                     help="comma-separated detection thresholds to report")
     ap.add_argument("--bake-out", default=None,
@@ -386,7 +423,10 @@ def main():
             print(f"    f{int(i):<3} coef={base.coef_[0][i]:+.3f}  {feat_desc(int(i))}")
         return
 
-    clf = CalibratedClassifierCV(LogisticRegression(C=0.05, class_weight="balanced", max_iter=3000),
+    if a.bake_out and not can_bake(a.model):
+        raise SystemExit(f"--model {a.model} cannot be baked (no coef_/intercept_); "
+                         f"drop --bake-out or use --model logistic")
+    clf = CalibratedClassifierCV(make_classifier(a.model),
                                  method="isotonic", cv=3).fit(Z(X[tr]), y[tr])
     P = lambda M: clf.predict_proba(Z(M))[:, 1]
 
@@ -453,21 +493,26 @@ def main():
 
     # --- PERSIST durably to block storage: portable head + calibration + metrics + manifest ---
     from sklearn.isotonic import IsotonicRegression
-    lr = LogisticRegression(C=0.05, class_weight="balanced", max_iter=3000).fit(Z(X[tr]), y[tr])
-    raw_va = lr.decision_function(Z(X[va])) if va.sum() else lr.decision_function(Z(X[tr]))
+    lr = make_classifier(a.model).fit(Z(X[tr]), y[tr])
+    _df = (lr.decision_function if hasattr(lr, "decision_function")
+           else (lambda M: np.log(np.clip(lr.predict_proba(M)[:, 1], 1e-12, 1 - 1e-12) /
+                                  np.clip(1 - lr.predict_proba(M)[:, 1], 1e-12, 1 - 1e-12))))
+    raw_va = _df(Z(X[va])) if va.sum() else _df(Z(X[tr]))
     y_va = y[va] if va.sum() else y[tr]
     iso = IsotonicRegression(out_of_bounds="clip").fit(1 / (1 + np.exp(-raw_va)), y_va)
     outdir = os.path.dirname(a.out); os.makedirs(outdir, exist_ok=True)
     head = {"nfeat": len(FEAT_IDX), "feat_idx": [int(i) for i in FEAT_IDX],
+            "model": a.model,
             "mean": sc.mean_.tolist(), "scale": sc.scale_.tolist(),
-            "coef": lr.coef_[0].tolist(), "intercept": float(lr.intercept_[0]), "clip": 8.0,
+            "coef": lr.coef_[0].tolist() if can_bake(a.model) else None,
+            "intercept": float(lr.intercept_[0]) if can_bake(a.model) else None, "clip": 8.0,
             "calibration": {"x": iso.X_thresholds_.tolist(), "y": iso.y_thresholds_.tolist()},
             "recommended_deadband_T": rec,
             "deploy": "x=feat[feat_idx]; P=isotonic(sigmoid(clip((x-mean)/scale,±8)·coef+intercept)); "
                       "gate=100 unless P>recommended_deadband_T; final=min(perceptual,gate)"}
     json.dump(head, open(a.out, "w"))
     if a.bake_out:
-        u_tr = -lr.decision_function(Z(X[tr]))
+        u_tr = -_df(Z(X[tr]))
         emit_znpr(a.bake_out, a.bake_bin, CORPUS_NFEAT, FEAT_IDX,
                   sc.mean_[:], sc.scale_[:], lr.coef_[0], float(lr.intercept_[0]),
                   8.0, iso, float(u_tr.min()), float(u_tr.max()),

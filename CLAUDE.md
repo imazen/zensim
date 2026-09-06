@@ -602,6 +602,21 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   passes cleanly. Shipped bakes were never affected. Commit: see
   `fix(#35)`.
 
+- **⚠ `train_corruption_head.py`'s BAKE IS A FUNCTION OF THE BLAS THREAD COUNT (found +
+  measured 2026-09-06, OPEN).** Same recipe, same data, same commit, byte-identical
+  source-held-out split, differing only in `OMP_NUM_THREADS`: `corruption_head_d228.bin`
+  comes out `6f97b653…` (1T) / `1229842d…` (4T) / `23ad9c5b…` (8T) / **`da411c8c…` (28T)**.
+  The shipped 2026-09-05 `d228` head is the 28T one, so **re-running the identical command
+  under `run-heavy --jobs 8` does NOT reproduce it**. Mechanism: the lbfgs solve's BLAS
+  reduction order moves the weights in the last bits and the f16 pack quantizes them
+  differently; the published `metrics.json` moves too (T = 0.9 detection 0.89527 → 0.89465,
+  per-family recall up to 0.4 pt). Same *class* as the v1 extractor's `RAYON_NUM_THREADS`
+  dependence below, far smaller amplitude. **Not fixed** — pinning the thread count or the
+  solver re-dates every published head number. **Quote a head bake's sha256 with the thread
+  count that produced it**, and never call a different-`--jobs` re-run a reproduction.
+  Measured chain (patched owner ≡ `main` owner ≡ shipped bake at 28T):
+  `benchmarks/corruption_head_theories_2026-09-06.md` §9.
+
 ## Canonical training data + indexes (added 2026-05-20)
 
 **The canonical index for all ML data lives at `~/work/zen/DATA_PROVENANCE.md`.**

@@ -2421,3 +2421,46 @@ revision is `Proposed`, and every stored table and published verdict is
 unaffected. The revision-1 control arm reproduces the prior wave's tables on all
 ten legs AND its four bakes sha for sha, end to end. The lane's tables, 20
 bakes and `_MANIFEST.json` are at `/mnt/v/output/zensim/rev2-2026-09-05/r6b/`.
+
+### §3.47 — the corruption head's four theories, tested at rev1 (2026-09-06)
+
+**Round row.** Pre-registered (`docs/PLAN_CORRHEAD_THEORIES_2026-09-06.md`, pushed
+at `bdb46b75` before any result existed), executed against the 2026-09-05 rev1
+tables with **no re-extraction and no fleet**. The incumbent `d228` split.tsv is
+read VERBATIM — never re-derived — and the reconstruction is parity-gated against
+that head's own `metrics.json` (subclass counts and fold sizes exact) before any
+arm is fitted. Slice `f0..227` throughout, the slice free at D's
+`V1PoolsMode::Peaks` walk.
+
+**Data**: `im26_corruption_372_postC` (116,928 + 348), `negrich_372_postC`
+(60,000), the 2026-09-05 ladder (9,593), the `gb82_dog` gate grid (2,016), and
+Profile D's dial scored over every row via `predict_features_with_bake
+--bake-post raw`. Cached at
+`/mnt/v/output/zensim/corruption-head-2026-09-05/theories/dataset_rev1.npz`
+(233 MB) with a `_MANIFEST.json` carrying `build_commit` and per-file sha256.
+
+**The headline is a model-form result, and it dissolves the other three
+questions.** pAUC over ladder-FP ∈ [0, 5 %]: **logistic 54.20 → `mlp64_32` 97.73
+→ `hgb` 98.11**, train ≈ test for every arm, same ordering on the single-source
+gate grid that removes the content degree of freedom. The near-lossless false
+positives §3-era work called "a separability limit of the feature set" are
+separable in the SAME 228 features (q ≥ 95 FP **50.00 % → 2.38 %** at higher
+detection), and the miss profile (`whole`-region, low-amplitude edits; worst
+family 17.2 %) lifts to a worst family of 82.8 %.
+
+**Two era/measurement lessons worth carrying.** (1) *Never compare corruption-head
+arms at a fixed threshold.* Removing positives shifts the balanced class prior, so
+a leave-one-family-out at T = 0.9 raises FP **and** detection together and the real
+effect is invisible; at matched FP the greedy 8-family cull reads −4.30 pt FP and
++12.88 pt detection, both CIs excluding zero. (2) *Isotonic plateaus break matched
+operating points.* The first pass reported an arm at FP exactly 0.00 % for three
+different targets because its top plateau exceeded the FP budget; the fix is a
+rank tie-break inside the plateau (`eps * rank(p_raw)`), after which every arm
+lands on the identical achieved FP at every target.
+
+**ERA**: rev1 (`ssim_form::SHIPPED_REVISION = Rev1`, post-option-C `56bbcda2`).
+Revision 2 changes 12 basic slots this head reads, so none of these numbers
+survive that flip unmeasured. **Nothing was wired in, no bake replaced, no ZNPR
+emitted** — the winning forms have no wire format (`emit_znpr` writes one identity
+layer from `coef_`; the owner now refuses `--bake-out` for them). Record:
+`benchmarks/corruption_head_theories_2026-09-06.md`.
