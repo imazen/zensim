@@ -7,6 +7,34 @@ ensemble waves, all appended in place in the one authority doc:
 Everything before it (372-era, 720/924-era) is historical context, era-tagged —
 never compare numbers across eras without the doc's era-bridge notes.
 
+## ⚡ 2026-09-06 — the dial's C5/C6 can be made STRUCTURAL, and output polarity had no owner
+
+Read [`benchmarks/best_of_all_2026-09-06.md`](benchmarks/best_of_all_2026-09-06.md);
+plan + deviations [`docs/PLAN_BEST_OF_ALL_2026-09-06.md`](docs/PLAN_BEST_OF_ALL_2026-09-06.md);
+ledger [`docs/DATASET_HISTORY.md`](docs/DATASET_HISTORY.md) §3.56.
+
+- **`--nonneg-distance` makes C5 and C6 structural.** `raw(x) = pin − g(x)` with
+  `g ≥ 0` and `g(0⃗) = 0` bit-exactly ⇒ `raw(0⃗)` is the argmax over the whole
+  input space, by construction, in the SHIPPED wire format with **zero** runtime
+  change. MEASURED on the 228-slot recipe against its own control: **C6
+  1,642 → 0 WHILE `tied` goes 0.0017 → 0.0000** (the gate record's C2 ⊻ C6
+  either/or is DISSOLVED, not traded), C5 38 → 0, grid max **exactly 100.000**.
+  Cost at that seed: CID22 −0.0088, C1 0.94868 → 0.93040 against a 0.93 bar.
+  **It does NOT buy A7r** — 5 of 5 still fail and the per-codec floors move in
+  BOTH directions.
+- **Output polarity had one owner at 1 of 8 loss sites**, which is why the
+  fastclass2 campaign's best CID22 *ordering* (`|−0.8921|`) arrived negative and
+  could not be splined. Reproduced at raw SROCC −0.9970/−0.9986 in a unit test;
+  **4 of 5 of those tests FAIL at `0c6307a7`**. Nothing shipped moved — five
+  rank-only bake sha256s reproduce byte-for-byte.
+- Four flags stopped being silent no-ops (`--minibatch-size>1`/NiN with an
+  absolute term; `--n-hidden-layers>=2`/`--skip-connection` off the α-head path),
+  and `--leaky-alpha` stopped being a train/serve divergence.
+- **Two chain traps:** `shared-anchor` asserts a SINGLE-LAYER linear bake (an MLP
+  must concatenate anchors up front), and a **DENSIFIED bake cannot be graded by
+  the pinned probes** (they are 372-wide; a densified 228-caller bake reads
+  C3/C4/C5/C6 all NOT MEASURED). Score the PACKED bake.
+
 ## ⚡ 2026-09-05 — the FLOOR-DENSE ladder instrument: the shipped dial fails a jpeg floor it used to pass
 
 Read [`benchmarks/ladder_instrument_2026-09-05.md`](benchmarks/ladder_instrument_2026-09-05.md);
@@ -25,6 +53,12 @@ pass regime `944`).
 - **⛔ Shipped `ZensimProfile::D` FAILS A7r here — on `jpeg`, by one ladder** (0.5128
   vs 0.5385) — plus A1 and A3. Profile B fails **all five** codecs. **Nothing was
   installed;** `zensim/weights/` untouched.
+  **⚠ NAME THE RULE (clarified 2026-09-06).** That jpeg failure is under
+  `--floor-rule distinct`. The OPERATIVE default is now **`resolvable` @ margin
+  0.5** (`bake_verdict` calls `operative_floor_rule()` when `--floor-rule` is
+  omitted), and under it shipped D passes **5 of 5**. Both readings are true of
+  different rules; an A7r number without its rule is not a number. Grade both —
+  `distinct` is what every published board cell used.
 - **MEASURED: re-anchoring cannot fix it.** All 19 failing jpeg ladders are RAW
   (pre-spline) inversions, raw-vs-dial verdicts agree **39/39**, and the two shipped
   D bakes (same weights, different spline) have **identical A7r on all five codecs**.
