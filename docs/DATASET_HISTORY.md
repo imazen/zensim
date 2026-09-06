@@ -2212,6 +2212,8 @@ is the fail-loud contract behaving correctly, not a silent wrong answer. LIVE is
 run: add a `zenbitmaps` BMP arm to `zenmetrics-cli/src/decode.rs`. Note also
 that LIVE's stored row ORDER is not its pairs-TSV order, so it needs a key-based
 join, not the positional compare the other three corpora use.
+**✅ BOTH DONE — §3.45 corrects the "key-based join" framing** (it's a stable
+sort, not a join) **and reports the fix + G-BITEXACT re-run at 0 differ.**
 
 **The 6 byte-COPY corpora stay excluded from every count above** (aic4,
 nonphoto, imazen26, sdr25, hfnlproxy, hf_nearlossless): they are copies in the
@@ -2295,3 +2297,50 @@ F4's flat-source mechanism, while `var_loss`/`tex_loss` are bounded at 1.0.
 gate — reported, not fixed.
 
 Record: [`../benchmarks/f4_arm_decision_2026-09-05.md`](../benchmarks/f4_arm_decision_2026-09-05.md).
+
+### §3.45 — §3.43's two prerequisites closed: the 372 corpora are on the LAN store, and `live` re-extracts bit-exact (2026-09-06)
+
+Ops lane, independent of the F4 arm token §3.43/§3.44 are blocked on. Both
+findings live in `~/work/zen/DATA_PROVENANCE.md` (`rev2-lan-stage-2026-09-06`)
+and zenmetrics `docs/PLAN_REV2_RECALC_2026-09-06.md` §7.5 — this section is the
+short version for readers of this ledger.
+
+**LAN staging.** The 8 re-extractable 372 corpora (cid22, kadid, tid, csiq,
+live, aic3, konjnd, pipal — 43,870 rows, ~25 GB) are synced to
+`s3://codec-corpus/eval372-rev2-2026-09-06/<corpus>/`. Verified reachable with
+NO executor code change: `zenmetrics-cli`'s `resolve_source` /
+`resolve_feature_input` already handle `s3://…` for both sides of a Feature
+job — `zenmetrics scripts/jobsys/verify_lan_stage_reachability.sh` proves
+bit-identical features between the staged `s3://` paths and the local
+originals on csiq/live/pipal/konjnd (0 cells differ), and `r7900x` read 3
+staged files by sha256 over SSH (3/3 matched). **PIPAL is staged as the full
+23,200-pair set** (200 refs x 116 distortions, `load_pipal` returns it
+un-truncated) — 1,400 more than the postC root's 21,800; no per-reference
+selection rule was found (not `--max-images`, which defaults to 0/all and
+isn't passed by the build script), so this is registered as open, not solved.
+
+**LIVE re-extracts bit-exact.** The BMP arm §3.43 registered landed in
+zenmetrics (`crates/zenmetrics-cli/src/decode.rs`, commit `5be5da80`):
+`zenbitmaps::decode_bmp` funnelled through every named `PixelLayout`, gated
+behind a new `bmp` cargo feature, 4 unit tests round-tripping real BMP bytes
+from `zenbitmaps`' own encoder. **§3.43's "needs a key-based join" was an
+overstatement of the real fix**: MEASURED, a **stable sort of LIVE's pairs by
+`basename(ref_path)`** (Python `sorted(key=…)`, matching the Rust
+`rows.sort_by(|a,b| a.0.cmp(&b.0))` at
+`zensim-bench/examples/extract_features_372col.rs:216` that
+`extract_features_372col` runs before writing its CSV) reproduces the stored
+table's exact row order — verified positionally against BOTH `ref_basename`
+and `human_score` on all 779 rows, zero mismatches. No join key beyond the
+reference's own filename was needed. Gate re-run
+(`zenmetrics scripts/jobsys/rev2_bitexact_gate.py`) with the fixed binary and
+the stable-sorted pairs:
+
+```
+compared 289788 cells (779 rows x 372 features)
+RESULT: BIT-EXACT — 0 of 289788 cells differ
+```
+
+§3.43's G-BITEXACT table (csiq/tid/kadid) plus this result now covers all 4
+of the postC root's non-byte-copy producers this box can re-extract: 14,770
+rows, 5,494,440 cells, 0 differ. No arithmetic changed — this is entirely
+fleet-side (decode dispatch) + data-side (staging, and a row-order finding).
