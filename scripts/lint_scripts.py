@@ -39,6 +39,10 @@ Checks:
   DEAD-LINK / DEAD-REF — a README under scripts/ indexes a file that is gone.
               The index is how people find tools; when it rots it sends the
               next session to rebuild something that already exists.
+  WIN-PATH  — a tracked filename Windows cannot check out at all
+  CONFLICT  — a leaked git/jj conflict-marker line (see check_conflict_markers
+              below for the exact forms) in any tracked text file, not just
+              scripts/ -- a conflict "resolved" by hand that missed a line
 
 A hardcoded build artifact under THIS repo's own `target/` is only a warning:
 it may simply not be built yet. A path under a *deleted worktree* is fatal —
@@ -346,6 +350,180 @@ def check_windows_paths() -> list[str]:
     return bad
 
 
+# --- Leaked conflict-marker lines ------------------------------------------
+#
+# Verified against real jj 0.44.0 output (`ui.conflict-marker-style = "diff"`,
+# the default) by materializing an actual 2-sided conflict and reading the
+# bytes jj wrote into the working-copy file. A jj block looks like this
+# (leading "#   " added here only so this comment doesn't trip its own
+# check -- the real lines start at column 0 with no indentation at all):
+#
+#   <<<<<<< conflict 1 of 1
+#   %%%%%%% diff from: <rev> <sha> "<desc>"
+#   \\\\\\\        to: <rev> <sha> "<desc>"
+#   -removed line
+#   +added line
+#   +++++++ <rev> <sha> "<desc>"
+#   kept-as-is content
+#   >>>>>>> conflict 1 of 1 ends
+#
+# A plain git merge conflict is the <<<<<<< / ======= / >>>>>>> subset of
+# this; git's diff3/zdiff3 conflict style additionally inserts a |||||||
+# common-ancestor line between the open marker and =======. Every one of
+# these is a run of ONE repeated character, 7 or more long -- both tools
+# widen the run past 7 for a conflict nested inside an already-conflicted
+# region, so the patterns below use {7,}, never a fixed {7}.
+CONFLICT_OPEN_RE = re.compile(r"^<{7,}(?:\s.*)?$")
+CONFLICT_CLOSE_RE = re.compile(r"^>{7,}(?:\s.*)?$")
+# None of these six carry a label in real output beyond what's shown above;
+# they mean something ONLY between an open and a close marker (see the
+# `in_block` gate in find_conflict_markers) -- a bare ======= is a Markdown
+# H1 underline and a bare ------- is an hr / table rule, both used all over
+# this repo's own docs on purpose, and flagging either unconditionally would
+# make this check useless within a day.
+_CONFLICT_INNER_RES = (
+    re.compile(r"^={7,}\s*$"),          # git `=======`
+    re.compile(r"^\|{7,}(?:\s.*)?$"),   # git diff3/zdiff3 `||||||| <label>`
+    re.compile(r"^%{7,}(?:\s.*)?$"),     # jj `%%%%%%% diff from: ...`
+    re.compile(r"^\+{7,}(?:\s.*)?$"),   # jj `+++++++ <label>`
+    re.compile(r"^-{7,}(?:\s.*)?$"),     # jj `-------` / a removed diff line
+    re.compile(r"^\\{7,}(?:\s.*)?$"),  # jj's `to:` continuation line
+)
+
+
+def find_conflict_markers(text: str) -> list[tuple[int, str]]:
+    """(line, message) for every leaked conflict-marker line in `text`.
+
+    `<<<<<<<` and `>>>>>>>` are flagged UNCONDITIONALLY: there is no
+    legitimate reason either shape opens a line of prose, Markdown, code, or
+    config, and the 2026-09-05 incident this check exists for was exactly a
+    lone trailing `>>>>>>> conflict 1 of 1 ends` with no opening marker left
+    anywhere in the file -- a conflict resolved by hand that missed its own
+    closing line. The other forms (`=======`, `|||||||`, and jj's
+    `%%%%%%%`/`+++++++`/`-------`/backslash-run) are conflict markers only
+    BETWEEN an open and a close, so they're gated on being inside that span.
+    """
+    hits: list[tuple[int, str]] = []
+    in_block = False
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if CONFLICT_OPEN_RE.match(line):
+            hits.append((lineno, f"conflict marker: {line.strip()!r}"))
+            in_block = True
+            continue
+        if CONFLICT_CLOSE_RE.match(line):
+            hits.append((lineno, f"conflict marker: {line.strip()!r}"))
+            in_block = False
+            continue
+        if in_block and any(pat.match(line) for pat in _CONFLICT_INNER_RES):
+            hits.append((lineno, f"conflict marker: {line.strip()!r}"))
+    return hits
+
+
+BINARY_SNIFF_BYTES = 8192
+
+
+def _tracked_files() -> list[str] | None:
+    """Every file tracked in the working copy -- however this checkout
+    happens to reach its VCS.
+
+    CI (`actions/checkout`) and the primary jj-colocated checkout both have a
+    working `git`, so `git ls-files` is tried first, exactly like
+    `check_windows_paths` above. A SECONDARY jj sibling workspace (`jj
+    workspace add ../zensim--foo`) has no `.git` at all -- only the
+    workspace jj was colocated from keeps the git sidecar -- so `git
+    ls-files` there fails outright (nonzero exit, no exception) and this
+    falls back to `jj file list`, which every jj workspace of the same repo
+    answers identically since they share the underlying operation log.
+    Returns None (checked nothing) only when neither VCS answers, e.g. a
+    plain source export with no `.git` and no `.jj`.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "-c", "core.quotepath=off", "ls-files", "-z"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if out.returncode == 0:
+            return [f for f in out.stdout.split("\0") if f]
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    try:
+        out = subprocess.run(
+            ["jj", "file", "list"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if out.returncode == 0:
+            return [f for f in out.stdout.split("\n") if f]
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    return None
+
+
+def _scan_file(fp: Path) -> list[tuple[int, str]]:
+    """Binary-sniff + decode + find_conflict_markers for one file on disk.
+
+    Split out from check_conflict_markers so the per-file pipeline is
+    testable directly against a real temp file, independent of the repo's
+    own tracked-file list (which a test has no business depending on).
+    Returns [] for a file that can't be read or looks binary -- same
+    "nothing to report" shape as a clean text file, deliberately: neither
+    case is a conflict-marker finding.
+    """
+    try:
+        raw = fp.read_bytes()
+    except OSError:
+        return []
+    if b"\0" in raw[:BINARY_SNIFF_BYTES]:
+        return []
+    text = raw.decode("utf-8", errors="replace")
+    return find_conflict_markers(text)
+
+
+def check_conflict_markers() -> list[str]:
+    """Leaked git/jj conflict-marker lines in any tracked text file.
+
+    WHY THIS EXISTS. On 2026-09-05 two lanes each committed Markdown
+    (CHANGELOG.md, benchmarks/INDEX.md) carrying a stray trailing
+    `>>>>>>> conflict 1 of 1 ends` -- a jj conflict resolved by hand that
+    missed its own closing marker line. Both were caught only by a human
+    re-reading the file later, and fixed by hand. Nothing had checked for
+    this class of defect; this closes the gap the same way DEAD-WT/DEAD-BIN
+    close theirs -- scan on every push instead of trusting a resolve to be
+    complete.
+
+    Binary files are skipped by a NUL sniff over their first
+    BINARY_SNIFF_BYTES (a `.bin` bake, a `.parquet` sidecar, an image -- none
+    of these are meant to be read as text, and a coincidental hit inside one
+    is noise, not signal). `.orig`/`.rej` files are skipped outright: patch
+    and merge tooling legitimately writes literal diff/conflict markers into
+    those by design, and nobody intends to commit them clean.
+
+    Unlike the scripts/-only checks above, this scans every tracked path in
+    the whole repo -- a leaked marker is exactly as real in a doc or a Rust
+    source file as it is in a script.
+    """
+    files = _tracked_files()
+    if not files:
+        return []
+
+    fails: list[str] = []
+    for rel in files:
+        if rel.endswith((".orig", ".rej")):
+            continue
+        for lineno, msg in _scan_file(ROOT / rel):
+            fails.append(f"{rel}:{lineno}: {msg}")
+    return fails
+
+
 def main() -> int:
     list_only = "--list" in sys.argv
     failures: dict[str, list[str]] = {}
@@ -371,6 +549,10 @@ def main() -> int:
     win = check_windows_paths()
     if win:
         failures["<tracked paths>"] = win
+
+    conflicts = check_conflict_markers()
+    if conflicts:
+        failures["<conflict markers>"] = conflicts
 
     if not failures:
         print(f"lint_scripts: {n} scripts checked, all runnable")
