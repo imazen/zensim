@@ -48,6 +48,119 @@ on the supported surface, and `#[doc(hidden)] feature_set_id::registered_layout_
 (the candidate clip-width list a layout-free id is reconstructed against; not the
 supported surface).
 
+### Fixed — CI hygiene lane 2: i686 overflow/FMA divergence, four `-D warnings` sites masked behind them, and a WASM silent mis-score (2026-09-06)
+
+Eight independent standing-red CI causes across the `Feature permutations`,
+`Clippy`, `Test (i686-unknown-linux-gnu)` and `WASM SIMD128` jobs (run
+`34018326139` on `87f4cc03`, plus one found on `main@origin` after this
+lane's rebase — see the last bullet). None is a test/threshold relaxation;
+four (`zensim-validate`'s clippy errors, the two feature-census assertions,
+the i686 FMA divergence, and the post-rebase `approx_constant`) were masked
+by an EARLIER failure in the same job/run and only became visible once that
+one was fixed — each is independently real, not something this pass
+introduced:
+
+- `zensim/src/blur.rs` + `zensim/src/feature_v2.rs`: nine test-only
+  deterministic-hash generators multiplied a `usize` loop index by the
+  32-bit-hash constant `2654435761` (and `40503`) directly. On 64-bit hosts
+  the product never approached `usize::MAX` so the wraparound the hash
+  intends was invisible; on `i686-unknown-linux-gnu` (`usize` = 32 bits) it
+  overflowed for `i >= 2`, panicking under debug overflow checks
+  (`attempt to multiply with overflow`, 8 test failures). Switched to
+  `wrapping_mul`/`wrapping_add`, which is what these generators already
+  wanted — the tests only compare a kernel's output against a reference
+  computed from the same generated input, so the actual hash values were
+  never load-bearing, only their determinism and non-panicking.
+- `zensim/src/metric.rs`: `score_features_fd_gradient_with_profile` declared
+  `let mut gathered: Vec<f64> = Vec::new();` unconditionally, but it is only
+  read inside a `#[cfg(feature = "feature-regime-v2")]` block — a genuinely
+  dead, `mut`-unused binding on any feature permutation without that
+  (default-on) feature. Gated the declaration the same way.
+- `zensim/src/corruption_head.rs`: `let mut push = |body: &mut Vec<u8>, ...|`
+  never mutates a captured variable (it takes `&mut Vec<u8>` as an explicit
+  argument each call), so the closure binding never needed `mut`.
+- `zensim-wasm-tests/Cargo.toml`: was missing `feature-regime-v2` from its
+  explicit feature list (the workspace-level `zensim` dependency sets
+  `default-features = false`, same reason `deprecated-profiles` had to be
+  named explicitly above). Since `cb2f412daee2` (cruft purge 2A) shipped `A`
+  / `B` / `BHdr` / `D`'s bakes DENSE unconditionally, but the machinery that
+  serves a dense bake correctly lives entirely behind `feature-regime-v2`,
+  this crate's build was silently mis-scoring: `ZensimProfile::A` on a
+  256x256 value-noise image with a single-LSB `truncate_lsb` distortion
+  (near-invisible; should score >90) read 86.30-86.34 without the feature vs.
+  93.15+ with it — bisected via `jj new <rev>` across the range, confirmed by
+  toggling the one feature flag with everything else held fixed. Added it;
+  full 15/15 `wasm_regression` suite reverified under the real
+  wasm32-wasip1 + wasmtime + SIMD128 recipe.
+- `zensim/src/feature_plan.rs` (`shipped_profiles`'s own doc already warns
+  "the roster is `#[cfg]`-dependent, which is exactly the kind of list a
+  copy gets wrong") + `zensim/src/feature_layout.rs`: two census tests —
+  `from_block_profile_agrees_with_the_id_space_derivation` and
+  `every_shipped_bake_resolves_to_its_own_declared_width` — hardcoded
+  `>= 5` / `>= 4` floors sized for the DEFAULT feature set
+  (`deprecated-profiles` + `candidate-profiles` both on). The CI matrix's
+  own `--features feature-regime-v2` cell (neither extra feature) can only
+  ever reach `B` + `BHdr` (2 bakes, both dense), so the floor was
+  unsatisfiable there — masked until now because an earlier `zensim`
+  clippy error in the SAME script stopped it before this combo ran. Added
+  `expected_min_bake_count` / `expected_min_dense_count` (one owner, next
+  to `shipped_profiles`, mirroring its exact `#[cfg]` gates) instead of a
+  second hardcoded number.
+- `zensim-validate/src/parquet_loader.rs`: four `let n_arrow_cols =
+  arrow_fields.len();` locals were dead leftovers from before their
+  functions were refactored to delegate to the shared, bounds-checked
+  `feature_column_run` helper (which recomputes its own bound) — removed.
+  Also inserted the blank doc-comment line `clippy::doc_lazy_continuation`
+  asked for (a bold header line was reading as an unindented continuation
+  of the bullet list above it; no wording changed).
+  `zensim-validate/src/feature_set.rs`: one test's `i < 156 || i >= 700`
+  rewritten as `!(156..700).contains(&i)` per `clippy::manual_range_contains`
+  (identical predicate). All six were unreachable in the original failing
+  run because `zensim`'s own compile error (the `corruption_head.rs` `mut`
+  above) aborted `cargo clippy --workspace` before `zensim-validate` — a
+  downstream crate — was ever type-checked.
+- `zensim/src/blur.rs`: two bit-exactness gates —
+  `fused_h_ring_matches_regathered_reference` and
+  `h_entries_are_bit_exact_at_a_degenerate_last_column_tile` — build their
+  OWN "want" reference value with raw `f32::mul_add` (always genuinely
+  fused, one rounding) and compare it against `fused_blur_h_ssim_inner`
+  (the `#[magetypes(neon, wasm128, scalar)]` monomorphization — the ONLY
+  tier i686 can reach, since none of the x86-64-v3/v4/v4x tiers apply to a
+  32-bit target). `magetypes`' `scalar` and `wasm128` backends implement
+  `f32x8::mul_add` as the UNFUSED `a*b+c`
+  (`magetypes/src/simd/impls/{scalar,wasm128}.rs`) while every hardware
+  backend (x86 FMA3, NEON `vfma`) is genuinely fused, so on i686 the
+  reference's assumption ("this tier's `mul_add` fuses like mine does")
+  was simply false and the two sides diverged by 1 ULP (MEASURED:
+  `-79349770 != -79349760`, `-290626370 != -290626340`). Root cause is
+  upstream in `magetypes` — out of scope to change here, and it fixes
+  nothing to make the KERNEL genuinely fused either: an earlier attempt
+  did exactly that (extract lanes, call `f32::mul_add` directly, bypassing
+  the tier's own unfused `mul_add`) and it DID make both gates
+  bit-identical on i686, but it also measurably changed
+  `sigma_sq`/`sigma12`'s actual computed values, and that shift compounded
+  enough through a 128×128, 4-scale pipeline to newly fail
+  `cross_platform::pixel_format_equivalence`'s `Srgb16Rgba` case (diff
+  0.000852 → 0.011138 against a 0.01 tolerance) — a real production score
+  changing to fix a test, which is backwards. Fixed at the actual fault
+  instead: the two gates' OWN reference computation, which now mirrors
+  WHICH form the active tier's `mul_add` actually takes
+  (`ref_fma`, gated on `cfg!(any(target_arch = "x86", target_arch =
+  "wasm32"))` — a compile-time constant, so it costs nothing and can't
+  itself introduce a runtime mismatch) instead of assuming it always
+  fuses. Production bytes are untouched on every tier; the test's own
+  modeling bug is what's fixed. Verified: `cross test --target
+  i686-unknown-linux-gnu -p zensim -p zensim-regress` clean, 0 failures,
+  including `pixel_format_equivalence` back at its original diff.
+- `zensim/src/det_math.rs` (landed on `main` between this lane's fetch and
+  push, as part of F18/F19 above): `POW_TRUTH`'s `x = 3.14159265358979` test
+  input tripped `clippy::approx_constant` under `--all-features`. It is
+  deliberately NOT `std::f64::consts::PI` — its recorded `u64` "correctly
+  rounded" bits were computed by an external Python reference for THIS exact
+  15-digit literal, so substituting the real constant would silently
+  retarget the row at a different `x`. `#[allow(clippy::approx_constant)]`,
+  scoped to the one `const`, with a comment stating why.
+
 ### Added — F19: the SCORE path gets the same owner, and revision 2 stops being libc-dependent end to end (2026-09-06)
 
 F18 fixed the FEATURE path and **named this as the exposure it could not

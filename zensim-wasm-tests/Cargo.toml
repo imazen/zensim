@@ -13,10 +13,30 @@ description = "Integration tests for zensim under wasm32-wasip1 + simd128"
 # only — `wasm_regression.rs` still names it, so the WASM job has failed with
 # `E0599: no variant ... named A` ever since. Named explicitly so this crate
 # tests the profile set users actually get.
+#
+# `feature-regime-v2` is ALSO default-ON for real users (since 2026-09-01, the
+# Profile-D no-tax flip) and was missing here for the same
+# `default-features = false` reason — found 2026-09-06 via CI hygiene lane 2,
+# bisected to `cb2f412daee2` ("cruft purge 2A"). That commit made `A`, `B`,
+# `BHdr` and the default `D` ship DENSE, id-declared bakes unconditionally
+# (`mlp_bake_*` is not itself feature-gated), but the machinery that serves a
+# dense bake correctly (`declared_layout`, `Plan::for_bake`, the
+# `dense_ids`/`layout.gather` gather in `metric.rs`) lives entirely behind
+# `feature-regime-v2`. Without it, the runtime silently falls back to treating
+# the dense bake's declared width as a plain POSITIONAL PREFIX — wrong
+# features, no panic, no error, just a quietly-worse score. MEASURED: on a
+# 256x256 value-noise image with a truncate_lsb (single-LSB, near-invisible)
+# distortion, `ZensimProfile::A` scored 86.30-86.34 without this feature
+# against 93.15+ with it — a real, silent mis-score, not test noise. This is
+# the ONLY place in the workspace that builds `zensim` with a feature subset
+# excluding `feature-regime-v2` while depending on a profile whose bake is now
+# dense, which is why the WASM job was the only CI lane to see it. Full 15/15
+# wasm_regression suite reverified green with this feature added.
 zensim = { workspace = true, features = [
     "imgref",
     "classification",
     "deprecated-profiles",
+    "feature-regime-v2",
 ] }
 zensim-regress = { workspace = true, default-features = false }
 

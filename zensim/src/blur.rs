@@ -5988,7 +5988,7 @@ mod tests {
                 // Deterministic, wide dynamic range, no repeats — a value the
                 // ring pulled from the wrong slot cannot coincide with the
                 // right one.
-                let k = (i * 2654435761usize) % 65521;
+                let k = i.wrapping_mul(2654435761usize) % 65521;
                 *v = (k as f32) * (1.0 + 1.0 / 1024.0) - 30000.0;
             }
             for &radius in &[1usize, 2, 5, 8] {
@@ -6031,10 +6031,38 @@ mod tests {
     fn ring_plane(w: usize, h: usize, salt: usize) -> Vec<f32> {
         (0..w * h)
             .map(|i| {
-                let k = ((i + salt) * 2654435761usize) % 65521;
+                let k = (i + salt).wrapping_mul(2654435761usize) % 65521;
                 (k as f32) * (1.0 + 1.0 / 1024.0) - 30000.0
             })
             .collect()
+    }
+
+    /// **The reference arithmetic for the sigma_sq/sigma12 gates below.**
+    /// Genuine fusion (one rounding) vs `a*b+c` (two roundings) is a
+    /// property of the `magetypes` BACKEND the kernel's tier dispatch
+    /// (`incant!`) actually picks: x86 v3/v4/v4x (FMA3) and `neon` (`vfma`)
+    /// are genuinely fused; `scalar` and `wasm128` implement `mul_add` as
+    /// the UNFUSED `a*b+c`
+    /// (`magetypes/src/simd/impls/{scalar,wasm128}.rs`). i686 can only ever
+    /// reach `scalar` — none of the 64-bit-only x86 tiers apply — so a
+    /// reference built from Rust's own (always genuinely fused)
+    /// `f32::mul_add` diverged from the dispatched kernel there by up to 1
+    /// ULP per operation: MEASURED in
+    /// `fused_h_ring_matches_regathered_reference` /
+    /// `h_entries_are_bit_exact_at_a_degenerate_last_column_tile`
+    /// (`-79349770 != -79349760`, `-290626370 != -290626340`), CI hygiene
+    /// 2026-09-06. This mirrors which form the ACTIVE tier actually uses,
+    /// so the reference describes the SAME arithmetic the kernel runs
+    /// rather than an arithmetic the kernel only sometimes performs.
+    /// `cfg!` makes the branch a compile-time constant, so it costs
+    /// nothing and can't itself introduce a runtime CPU-detection mismatch.
+    #[inline(always)]
+    fn ref_fma(a: f32, b: f32, c: f32) -> f32 {
+        if cfg!(any(target_arch = "x86", target_arch = "wasm32")) {
+            a * b + c
+        } else {
+            a.mul_add(b, c)
+        }
     }
 
     /// Per-row scalar reference for the horizontal sliding window. The
@@ -6164,8 +6192,8 @@ mod tests {
                             let (sv, dv) = (src[off + a], dst[off + a]);
                             ss += sv;
                             sd += dv;
-                            ssq = sv.mul_add(sv, dv.mul_add(dv, ssq));
-                            sprod = sv.mul_add(dv, sprod);
+                            ssq = ref_fma(sv, sv, ref_fma(dv, dv, ssq));
+                            sprod = ref_fma(sv, dv, sprod);
                             return;
                         }
                         wm1[off + x] = ss * inv;
@@ -6176,11 +6204,12 @@ mod tests {
                         let (sr, dr) = (src[off + rm], dst[off + rm]);
                         ss = ss + sa - sr;
                         sd = sd + da - dr;
-                        ssq = sa.mul_add(
+                        ssq = ref_fma(
                             sa,
-                            da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, ssq))),
+                            sa,
+                            ref_fma(da, da, ref_fma(-sr, sr, ref_fma(-dr, dr, ssq))),
                         );
-                        sprod = sa.mul_add(da, (-sr).mul_add(dr, sprod));
+                        sprod = ref_fma(sa, da, ref_fma(-sr, dr, sprod));
                     });
                 }
                 for i in 0..n {
@@ -6349,8 +6378,8 @@ mod tests {
                                 if x == usize::MAX {
                                     ss += sa;
                                     sd += da;
-                                    ssq = sa.mul_add(sa, da.mul_add(da, ssq));
-                                    sprod = sa.mul_add(da, sprod);
+                                    ssq = ref_fma(sa, sa, ref_fma(da, da, ssq));
+                                    sprod = ref_fma(sa, da, sprod);
                                     return;
                                 }
                                 l_blur[x] = ss * inv;
@@ -6362,11 +6391,12 @@ mod tests {
                                 let (sr, dr) = (src[off + rm], dst[off + rm]);
                                 ss = ss + sa - sr;
                                 sd = sd + da - dr;
-                                ssq = sa.mul_add(
+                                ssq = ref_fma(
                                     sa,
-                                    da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, ssq))),
+                                    sa,
+                                    ref_fma(da, da, ref_fma(-sr, sr, ref_fma(-dr, dr, ssq))),
                                 );
-                                sprod = sa.mul_add(da, (-sr).mul_add(dr, sprod));
+                                sprod = ref_fma(sa, da, ref_fma(-sr, dr, sprod));
                             });
                             let o = row * w + x0;
                             r_blur[o..o + kn].copy_from_slice(&l_blur[keep..keep + kn]);

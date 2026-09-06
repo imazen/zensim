@@ -1072,7 +1072,7 @@ mod derive_regime_tests {
         assert!(d.reads_pool_block, "f369 is in the IW pool");
 
         // A 944-class bake needs 944, derived rather than typed.
-        let m = Model::from_bytes(&bake(944, |i| i < 156 || i >= 700)).expect("parse");
+        let m = Model::from_bytes(&bake(944, |i| !(156..700).contains(&i))).expect("parse");
         let d = derive_regime(&m).expect("derive");
         assert_eq!(d.regime, 944);
         assert_eq!(d.max_read_id, 943);

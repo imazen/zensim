@@ -641,6 +641,7 @@ pub fn score_features_fd_gradient_with_profile(
     let dense_ids: Option<Vec<u16>> = None;
 
     let mut f32buf: Vec<f32> = Vec::with_capacity(n_inputs.max(n));
+    #[cfg(feature = "feature-regime-v2")]
     let mut gathered: Vec<f64> = Vec::new();
     let mut grad = vec![0.0f64; n];
     for k in 0..n {

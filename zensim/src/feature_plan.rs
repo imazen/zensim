@@ -951,6 +951,41 @@ pub(crate) mod servability_census {
         v
     }
 
+    /// The number of (profile, bake) pairs [`shipped_profiles`] contributes a
+    /// SCORING bake for, under the ACTIVE feature set — the floor
+    /// `every_shipped_bake_resolves_to_its_own_declared_width` and
+    /// `from_block_profile_agrees_with_the_id_space_derivation` check against
+    /// so a census that silently sees nothing still fails loud.
+    ///
+    /// `PreviewV0_1` / `PreviewV0_2` are always in the roster but carry no
+    /// MLP bake (`scoring_bake_bytes()` yields nothing for them), so the
+    /// floor tracks the SAME `#[cfg]` gates as `shipped_profiles` itself —
+    /// `A` (1 bake) behind `deprecated-profiles`, `C`+`CHdr`+`D` (3 bakes)
+    /// behind `candidate-profiles`. A bare constant here is precisely the
+    /// "second list that could drift past a feature flag" this module's own
+    /// doc on `shipped_profiles` warns about: found 2026-09-06 when the CI
+    /// permutation matrix's `--features feature-regime-v2` cell (neither
+    /// extra feature on) hit a hardcoded `>= 5` that only B+BHdr (2 bakes)
+    /// can ever satisfy without them.
+    pub(crate) fn expected_min_bake_count() -> usize {
+        2 // B, BHdr — unconditional
+            + usize::from(cfg!(feature = "deprecated-profiles")) // A
+            + 3 * usize::from(cfg!(feature = "candidate-profiles")) // C, CHdr, D
+    }
+
+    /// How many of [`expected_min_bake_count`]'s bakes are DENSE
+    /// (`zentrain.feature_ids`-declared) under the active feature set.
+    ///
+    /// `B` and `BHdr` are dense unconditionally; `A` and `D` are dense when
+    /// their gating feature is on; `C` / `CHdr` are DELIBERATELY never dense
+    /// — see `profile::mlp_bake_c_purity944`'s doc comment, a registered,
+    /// pending user decision, not an oversight.
+    pub(crate) fn expected_min_dense_count() -> usize {
+        2 // B, BHdr
+            + usize::from(cfg!(feature = "deprecated-profiles")) // A
+            + usize::from(cfg!(feature = "candidate-profiles")) // D only — not C/CHdr
+    }
+
     /// One census row.
     #[derive(Debug)]
     struct Row {
@@ -1083,7 +1118,11 @@ pub(crate) mod servability_census {
                 }
             }
         }
-        assert!(checked >= 5, "the gate must see bakes, saw {checked}");
+        assert!(
+            checked >= expected_min_bake_count(),
+            "the gate must see bakes, saw {checked}, expected >= {}",
+            expected_min_bake_count()
+        );
         assert!(
             disagreements.is_empty(),
             "the two derivations disagree on {} of {checked} bakes:\n  {}",

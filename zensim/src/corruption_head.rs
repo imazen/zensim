@@ -977,7 +977,7 @@ mod tests {
 
         pub(super) fn build(&self) -> Vec<u8> {
             let mut body: Vec<u8> = Vec::new();
-            let mut push = |body: &mut Vec<u8>, data: &[u8]| -> Section {
+            let push = |body: &mut Vec<u8>, data: &[u8]| -> Section {
                 let off = HEADER_LEN + body.len();
                 body.extend_from_slice(data);
                 Section {

@@ -369,3 +369,15 @@ required-features = ["custom-profiles", "candidate-profiles"]
 [[example]]
 name = "feature_invariant_probe"
 required-features = ["training", "feature-regime-v2", "custom-profiles"]
+
+# The cross-libc gate's instrument (F18/F19): dumps every v1-372 feature as
+# to_bits() for a `cargo build --features training --example
+# libc_feature_dump --target <triple>` comparison across libcs — see the
+# file's own doc comment for the exact invocation. Missing this entry meant
+# `cargo test`'s default example auto-discovery tried to build it without
+# `training` and failed (`ZensimConfig`/`compute_zensim_with_config` are
+# training-gated); found via i686 CI, which builds zensim's default
+# features only (2026-09-06).
+[[example]]
+name = "libc_feature_dump"
+required-features = ["training"]

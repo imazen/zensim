@@ -13607,7 +13607,7 @@ pub(crate) mod tests {
     #[test]
     fn era2_band_merge_and_tail_are_structural() {
         let term = |i: usize| -> f32 {
-            let k = (i * 2654435761usize) % 65521;
+            let k = i.wrapping_mul(2654435761usize) % 65521;
             (k as f32) * (1.0 / 65536.0) - 0.5
         };
 
@@ -14859,10 +14859,10 @@ pub(crate) mod tests {
         ] {
             let n = width * height;
             let src: Vec<f32> = (0..n)
-                .map(|i| ((i * 2654435761usize) % 1013) as f32 / 1013.0)
+                .map(|i| (i.wrapping_mul(2654435761usize) % 1013) as f32 / 1013.0)
                 .collect();
             let dst: Vec<f32> = (0..n)
-                .map(|i| ((i * 40503usize + 3) % 1009) as f32 / 1009.0)
+                .map(|i| (i.wrapping_mul(40503usize).wrapping_add(3) % 1009) as f32 / 1009.0)
                 .collect();
             let run = |parallel: bool| -> (Vec<[f64; 3]>, [f64; 3]) {
                 let mut mo = MeanOffsetRows::new(width, height);
@@ -14923,10 +14923,10 @@ pub(crate) mod tests {
             let wide_h = strip_h + 2 * HALO_P;
             let n = width * wide_h;
             let src: Vec<f32> = (0..n)
-                .map(|i| ((i * 2654435761usize) % 977) as f32 / 977.0)
+                .map(|i| (i.wrapping_mul(2654435761usize) % 977) as f32 / 977.0)
                 .collect();
             let dst: Vec<f32> = (0..n)
-                .map(|i| ((i * 40503usize + 11) % 991) as f32 / 991.0)
+                .map(|i| (i.wrapping_mul(40503usize).wrapping_add(11) % 991) as f32 / 991.0)
                 .collect();
             // The precomputed arm's four planes, over the WHOLE wide window.
             let mut h = [vec![0.0f32; n], vec![0.0; n], vec![0.0; n], vec![0.0; n]];
@@ -15022,10 +15022,10 @@ pub(crate) mod tests {
         ] {
             let n = width * height;
             let src: Vec<f32> = (0..n)
-                .map(|i| ((i * 2654435761usize) % 1000) as f32 / 1000.0)
+                .map(|i| (i.wrapping_mul(2654435761usize) % 1000) as f32 / 1000.0)
                 .collect();
             let dst: Vec<f32> = (0..n)
-                .map(|i| ((i * 40503usize + 7) % 1000) as f32 / 1000.0)
+                .map(|i| (i.wrapping_mul(40503usize).wrapping_add(7) % 1000) as f32 / 1000.0)
                 .collect();
             let mut want = [vec![0.0f32; n], vec![0.0; n], vec![0.0; n], vec![0.0; n]];
             {

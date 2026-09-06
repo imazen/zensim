@@ -196,6 +196,7 @@ struct LoadedCommon {
 /// - missing both prefixes     -> `"<path>: missing f0 / feat_0 column"`
 /// - no feature columns        -> `"<path>: no <prefix>N columns found"`
 /// - empty file                -> `"<path>: empty file ..."`
+///
 /// **THE owner of "where are this table's feature columns".**
 ///
 /// Returns `(prefix, arrow index of `<prefix>0`, n_features)` for a table whose
@@ -383,7 +384,6 @@ fn load_parquet_impl(
     // mask (Parquet schema is column-tree shaped, Arrow is flat for
     // primitive types — which is what zensim features always are).
     let arrow_fields = schema.fields();
-    let n_arrow_cols = arrow_fields.len();
 
     // Locate the target column by name.
     let score_arrow_idx = arrow_fields
@@ -764,7 +764,6 @@ pub fn stream_parquet_rows(
     let schema = builder.schema().clone();
     let parquet_schema = builder.parquet_schema().clone();
     let arrow_fields = schema.fields();
-    let n_arrow_cols = arrow_fields.len();
 
     // Target columns by name (same error phrasing as load_parquet).
     let mut target_arrow_idx: Vec<usize> = Vec::with_capacity(target_columns.len());
@@ -1373,7 +1372,6 @@ pub fn load_konjnd_aggregation_pool(
     let schema = builder.schema().clone();
     let parquet_schema = builder.parquet_schema().clone();
     let arrow_fields = schema.fields();
-    let n_arrow_cols = arrow_fields.len();
 
     let ref_arrow_idx = arrow_fields
         .iter()
@@ -1644,7 +1642,6 @@ pub fn load_perpair_sample(
     let schema = builder.schema().clone();
     let parquet_schema = builder.parquet_schema().clone();
     let arrow_fields = schema.fields();
-    let n_arrow_cols = arrow_fields.len();
 
     // Feature block: `f<i>` or `feat_<i>`, consecutive from index 0 (same scan
     // as `load_parquet`, so `n_features` matches).

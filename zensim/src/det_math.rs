@@ -646,6 +646,14 @@ mod tests {
     /// `(x, b, correctly_rounded_bits_of_x_pow_b)`; the exponents are the
     /// score path's own — 0.7 is `score_mapping_b` on every shipped profile,
     /// then the three `approx_*` fits and a spread of head p-norms.
+    ///
+    /// One `x` (`3.14159265358979`) is a domain sample that happens to look
+    /// like pi truncated to 15 digits — it is NOT `std::f64::consts::PI`
+    /// (`3.141592653589793`), and its `correctly_rounded_bits_of_x_pow_b` was
+    /// computed for THIS literal's exact bit pattern by the external Python
+    /// reference. Swapping in the real constant would silently retarget the
+    /// row at a different `x` than the recorded bits describe.
+    #[allow(clippy::approx_constant)]
     const POW_TRUTH: &[(f64, f64, u64)] = &[
         (1e-09, 0.7, 0x3ea0_d12a_61d3_698f),
         (1e-06, 0.7, 0x3f10_8a48_76c1_3123),

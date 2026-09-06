@@ -661,11 +661,20 @@ pub(crate) mod tests {
                 n += 1;
             }
         }
-        assert!(n >= 5, "the census must actually see bakes, saw {n}");
+        use crate::feature_plan::servability_census::{
+            expected_min_bake_count, expected_min_dense_count,
+        };
         assert!(
-            dense >= 4,
-            "A/B/BHdr/D ship DENSE since 2026-09-06 — saw {dense} dense of {n}; if a flip \
-             was reverted, say so here rather than letting this pass quietly"
+            n >= expected_min_bake_count(),
+            "the census must actually see bakes, saw {n}, expected >= {}",
+            expected_min_bake_count()
+        );
+        assert!(
+            dense >= expected_min_dense_count(),
+            "A/B/BHdr/D ship DENSE since 2026-09-06 (of those reachable under the active \
+             features) — saw {dense} dense of {n}, expected >= {}; if a flip was reverted, \
+             say so here rather than letting this pass quietly",
+            expected_min_dense_count()
         );
     }
 }
