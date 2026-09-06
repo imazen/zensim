@@ -198,10 +198,10 @@ fn main() {
         if let Some(t) = repro.get("target_scale").and_then(|v| v.as_f64()) {
             target_scale = t;
         }
-        if seeds.is_empty() {
-            if let Some(s) = repro.get("seed").and_then(|v| v.as_u64()) {
-                seeds.push(s);
-            }
+        if seeds.is_empty()
+            && let Some(s) = repro.get("seed").and_then(|v| v.as_u64())
+        {
+            seeds.push(s);
         }
         // Sampling knobs live only in argv.
         if let Some(argv) = repro.get("argv").and_then(|v| v.as_array()) {

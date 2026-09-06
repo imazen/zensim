@@ -1513,18 +1513,6 @@ fn set_meta_utf8(md: &mut Vec<OwnedMeta>, key: &str, value: Vec<u8>) {
     }
 }
 
-/// THE identity gate. Pruning is only ever allowed to be a storage +
-/// inference optimization, so the pre- and post-prune networks must
-/// score the anchor corpus the same. Two strictnesses:
-///
-/// * **class 1 only** ⇒ demand exact equality of every score. The
-///   dropped rows are exactly zero, so `fma(x, 0, acc) == acc` and the
-///   bits cannot move.
-/// * **class 2 present** ⇒ the constant fold reorders one `f32` sum, so
-///   demand `|Δ| <= --prune-identity-tol` and report the worst case.
-///
-/// Fails loud either way. A pruner that quietly changes predictions is
-
 /// What packing did to the dial's NEGATIVE TAIL — the half of "identity" the
 /// prune gate structurally cannot see (ADD156 ship audit, defect **D4**).
 ///
@@ -1608,6 +1596,17 @@ fn dial_tail_report(
     }
 }
 
+/// THE identity gate. Pruning is only ever allowed to be a storage +
+/// inference optimization, so the pre- and post-prune networks must
+/// score the anchor corpus the same. Two strictnesses:
+///
+/// * **class 1 only** ⇒ demand exact equality of every score. The
+///   dropped rows are exactly zero, so `fma(x, 0, acc) == acc` and the
+///   bits cannot move.
+/// * **class 2 present** ⇒ the constant fold reorders one `f32` sum, so
+///   demand `|Δ| <= --prune-identity-tol` and report the worst case.
+///
+/// Fails loud either way. A pruner that quietly changes predictions is
 /// the exact failure this whole module exists to make impossible.
 fn check_prune_identity(
     plan: &prune::PrunePlan,
@@ -1866,22 +1865,22 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
     // pick one for the caller.
     if let Some((n_flat, n_dedup)) =
         zensim_validate::dial_spline::neg_tail_is_material(&preds, &tgt, 18)
+        && !a.neg_tail
+        && !a.no_neg_tail
     {
-        if !a.neg_tail && !a.no_neg_tail {
-            return Err(format!(
-                "the --neg-tail choice CHANGES this bake's spline ({n_flat} knots without the \
-                 dedup vs {n_dedup} with it) and there is no safe default, so pack refuses to \
-                 guess.\n  \
-                 Without the dedup the bottom segment is FLAT at y=0: every prediction in that \
-                 range maps to exactly 0.0 and the extrapolation below the bottom knot has \
-                 slope 0, so the NEGATIVE TAIL the product contract requires is deleted. \
-                 Measured on ADD156: dial p5 -12.4334 -> 0.0000 and up to -0.021 SROCC \
-                 (LIVE 0.9602 -> 0.9397).\n  \
-                 Pass --neg-tail to preserve the tail (what every shipped packed bake used), \
-                 or --no-neg-tail to accept the flat bottom deliberately (reproduces the \
-                 pre-2026-08-31 default byte-for-byte)."
-            ));
-        }
+        return Err(format!(
+            "the --neg-tail choice CHANGES this bake's spline ({n_flat} knots without the \
+             dedup vs {n_dedup} with it) and there is no safe default, so pack refuses to \
+             guess.\n  \
+             Without the dedup the bottom segment is FLAT at y=0: every prediction in that \
+             range maps to exactly 0.0 and the extrapolation below the bottom knot has \
+             slope 0, so the NEGATIVE TAIL the product contract requires is deleted. \
+             Measured on ADD156: dial p5 -12.4334 -> 0.0000 and up to -0.021 SROCC \
+             (LIVE 0.9602 -> 0.9397).\n  \
+             Pass --neg-tail to preserve the tail (what every shipped packed bake used), \
+             or --no-neg-tail to accept the flat bottom deliberately (reproduces the \
+             pre-2026-08-31 default byte-for-byte)."
+        ));
     }
     let (cx, cy) = fit_spline_knots(&preds, &tgt, 18, a.neg_tail);
     if cx.len() < 2 {
@@ -3094,7 +3093,7 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
             return Err("--ensemble-weights must be finite and >= 0".into());
         }
         let sum: f64 = a.ensemble_weights.iter().sum();
-        if !(sum > 0.0) {
+        if sum.is_nan() || sum <= 0.0 {
             return Err("--ensemble-weights must not sum to zero".into());
         }
         Some(a.ensemble_weights.iter().map(|w| w / sum).collect())
@@ -4435,7 +4434,7 @@ mod tests {
         push_anchor_row_repeated(&mut xaf, &mut ya, &feat, -64.1603, 4);
         assert_eq!(ya, vec![-64.1603; 4]);
         assert_eq!(xaf.len(), 12);
-        for chunk in xaf.chunks_exact(3) {
+        for chunk in xaf.as_chunks::<3>().0 {
             for (a, b) in chunk.iter().zip(feat.iter()) {
                 assert_eq!(a.to_bits(), b.to_bits(), "row copy diverged: {a} vs {b}");
             }

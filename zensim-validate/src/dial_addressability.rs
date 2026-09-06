@@ -3140,7 +3140,7 @@ mod tests {
         let pairs = 1_000.0;
         // Grade the SAME ladder under both readings: `single` charges all 35,
         // `agree` charges only the 20 the references do not corroborate.
-        let mut c1 = |dial: f64, encoder: f64| -> (State, f64) {
+        let c1 = |dial: f64, encoder: f64| -> (State, f64) {
             let mut m = tie(&f);
             m.mono = 1.0 - (dial + encoder) / pairs;
             let v = evaluate(&f.dial_grid_sha256, &f.label, &m, None, None);
@@ -4653,6 +4653,7 @@ mod tests {
     /// A synthetic grid with an EXPLICIT mentor-truth column, distinct from
     /// the candidate's dial — proves a window is chosen from `mentor_f`,
     /// never `dial_f`.
+    #[allow(clippy::type_complexity)]
     fn synth_grid_with_mentor(
         codecs: &[&str],
         n_lad: usize,

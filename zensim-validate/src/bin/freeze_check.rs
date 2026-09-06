@@ -3914,7 +3914,7 @@ mod tests {
             seed_fixture("A_s2", &argv_a, 2, 0.50),
             seed_fixture("B_s1", &argv_b, 1, 0.95),
         ];
-        let rows: Vec<SelectRow> = rows_v.iter().map(|v| select_row(v)).collect();
+        let rows: Vec<SelectRow> = rows_v.iter().map(select_row).collect();
         let refs: Vec<&SelectRow> = rows.iter().collect();
         let groups = group_by_seed(&refs);
         for g in &groups {

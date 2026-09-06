@@ -1462,7 +1462,7 @@ mod tests {
             plan.singleton_strata > 0,
             "fixture must contain excluded singleton cells, else this assertion is              indistinguishable from the naive one"
         );
-        assert!(reachable < 60 && reachable >= 40, "reachable {reachable}");
+        assert!((40..60).contains(&reachable), "reachable {reachable}");
         assert_eq!(cov(&s1).0, reachable, "every pairable row must be reached");
         let reachable_refs: std::collections::BTreeSet<u32> = plan
             .strata

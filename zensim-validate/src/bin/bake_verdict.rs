@@ -1248,7 +1248,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                     .split_once('=')
                     .ok_or_else(|| format!("{which} must be <label>=<path>"))?;
                 if label.trim().is_empty() {
-                    return Err(format!("{which} label must be non-empty").into());
+                    return Err(format!("{which} label must be non-empty"));
                 }
                 let slot = if which == "--negtail-peer-scores" {
                     &mut negtail_peer_scores
@@ -1398,7 +1398,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 ));
             }
             let sum: f64 = w.iter().sum();
-            if !(sum > 0.0) {
+            if sum.is_nan() || sum <= 0.0 {
                 return Err("--ensemble-weights must not sum to zero".to_string());
             }
             Some(w.iter().map(|x| x / sum).collect::<Vec<f64>>())
@@ -2383,6 +2383,7 @@ struct AddrProbes {
     identity: Option<(Vec<(String, f64)>, String)>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dial_panel(
     ens: &Ensemble,
     grid_path: &Path,
@@ -2699,15 +2700,14 @@ fn dial_panel(
                 tot_inv += 1; // strict backwards (diagnostic, all magnitudes)
                 inv_mags.push(-delta);
             }
-            if encoder_inversion_census.is_some() {
-                if let Some(t) = truth.as_ref() {
-                    if t.pair_is_encoder_inversion(img, codec, q0, q1) == Some(true) {
-                        let (ds, db) = t
-                            .pair_deltas(img, codec, q0, q1)
-                            .unwrap_or((f64::NAN, f64::NAN));
-                        census_rows.push((img.clone(), codec.clone(), q0, q1, ds, db));
-                    }
-                }
+            if encoder_inversion_census.is_some()
+                && let Some(t) = truth.as_ref()
+                && t.pair_is_encoder_inversion(img, codec, q0, q1) == Some(true)
+            {
+                let (ds, db) = t
+                    .pair_deltas(img, codec, q0, q1)
+                    .unwrap_or((f64::NAN, f64::NAN));
+                census_rows.push((img.clone(), codec.clone(), q0, q1, ds, db));
             }
             // 2026-09-05 ruling: a material backwards rung on a pair where BOTH
             // reference metrics call the higher setting worse is the ENCODER's,
@@ -4821,6 +4821,7 @@ Run the dedicated q-sweep harness for those._\n",
     // compare one scorer's grid against another's identity, which is not a
     // measurement of anything.
     let peer_grid_label: Option<&str> = args.dial_peer_scores.as_ref().map(|(l, _)| l.as_str());
+    #[allow(clippy::type_complexity)]
     let probe_scores = |path: &PathBuf,
                         what: &str,
                         peer: Option<&(String, PathBuf)>|
@@ -6177,20 +6178,6 @@ mod tests {
 
     use super::*;
 
-    /// A verdict must name its inputs by CONTENT, not by path.
-    ///
-    /// Before 2026-07-15 the header said `- Bake: /mnt/v/output/.../seed7_hf0.bin`
-    /// and nothing else — a path on one machine's scratch volume, no hash, no
-    /// code version. That is not a citable artifact, and it could not answer
-    /// "which corpus?" when two plausibly-named CID22 parquets existed
-    /// (`a1050ace…` vs the canonical `6eea0825…` — measured identical in rows
-    /// and all 372 features, but the report could not TELL you that).
-    ///
-    /// The bake sha is what links a verdict to its manifest (`grep -rl <sha>
-    /// zensim/weights/manifests/`), which is what makes the whole chain —
-    /// number → verdict → bake → recipe → input hashes — close. If this test
-    /// fails, that chain is broken; fix the emission, do not weaken the test.
-    #[test]
     /// The G-ADDR floor registry must hold a row for the grid this binary
     /// defaults to. Without it every default-flag verdict reads NOT MEASURABLE
     /// and the addressability gate is decorative — the exact failure mode the
@@ -6216,6 +6203,19 @@ mod tests {
         );
     }
 
+    /// A verdict must name its inputs by CONTENT, not by path.
+    ///
+    /// Before 2026-07-15 the header said `- Bake: /mnt/v/output/.../seed7_hf0.bin`
+    /// and nothing else — a path on one machine's scratch volume, no hash, no
+    /// code version. That is not a citable artifact, and it could not answer
+    /// "which corpus?" when two plausibly-named CID22 parquets existed
+    /// (`a1050ace…` vs the canonical `6eea0825…` — measured identical in rows
+    /// and all 372 features, but the report could not TELL you that).
+    ///
+    /// The bake sha is what links a verdict to its manifest (`grep -rl <sha>
+    /// zensim/weights/manifests/`), which is what makes the whole chain —
+    /// number → verdict → bake → recipe → input hashes — close. If this test
+    /// fails, that chain is broken; fix the emission, do not weaken the test.
     #[test]
     fn provenance_names_every_input_by_sha256() {
         let dir = std::env::temp_dir().join("zensim_prov_test");
