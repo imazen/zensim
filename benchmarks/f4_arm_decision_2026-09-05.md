@@ -135,6 +135,22 @@ reproducible on this box.** Three consequences, all load-bearing:
    scores.** Its gram, its fit and its rank are therefore identical too — it
    cannot win G1, and it cannot lose it. That is a property of the arm, not an
    inconclusive measurement.
+**Where the two live arms actually move, per family** (CID22, 4,292 rows, max
+|Δ| against rev1; the rev1 feature scale is on the last row for reference):
+
+| arm | basic | peaks | masked | IW |
+|---|--:|--:|--:|--:|
+| `c1` | 1.313e-2 | **4.069e-2** | 1.316e-2 | 1.309e-2 |
+| `lorentz` | 5.05e-8 | 3.58e-7 | 3.06e-8 | 8.26e-8 |
+| `clamp` | 0 | 0 | 0 | 0 |
+| *rev1 max \|f\|* | *3.724* | *1.266* | *0.317* | *0.388* |
+
+On the gold holdout `lorentz` is a **near-no-op** — 1e-7 against feature scales
+of 0.3–3.7, i.e. f32 rounding — while `c1` is a ~1–4 % relative perturbation,
+biggest on the peaks family. On KADID / TID / CSIQ / LIVE `lorentz` grows to
+9.0e-2 / 1.2e-2 / 1.2e-2 / 4.4e-3, so it is not a no-op everywhere; those are
+the corpora with the strongest local mean differences.
+
 3. **The rank contest is `c1` vs `lorentz` vs rev1**, and it is a contest about
    the HEALTHY regime — which is exactly what §1.4's design tension
    (`lib.rs:204`'s deliberate no-`C1` choice vs `bounded_sim`'s Weber
