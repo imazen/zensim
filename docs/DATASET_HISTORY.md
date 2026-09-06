@@ -2586,3 +2586,48 @@ N ambient thread counts, asserts byte-identical bakes (exit 0 = holds, exit 1
 = regression, exit 2 = could not run), and reports the shipped-vs-new gate-grid
 delta when they differ. Record: `benchmarks/corruption_head_theories_2026-09-06.md`
 §11 (addendum to §9).
+
+**Addendum (same day) — three more roots and a bigger decoder finding.** §3.46
+above covers the 372 root. The same wave also produced:
+
+* `/mnt/v/zen/zensim-training/2026-09-06-full-features-944-rev2/` (era
+  `era2r4_rev2`) — the **first rev2 extraction at a width where F5/`freecomp` is
+  reachable**. `f156..371` measured structurally zero across five corpora; its
+  `f0..155` agrees with the 372 root to **1.96e-8** (walk order, not formula), so
+  the two roots must not be column-mixed.
+* `/mnt/v/zen/zensim-training/2026-09-06-full-features-372-rev1-fleet/` (era
+  `v1postc`) — the **CONTROL**: same producer, decoders, image and libc at
+  revision 1, so `rev1-fleet vs postC` isolates the DECODER and `rev1-fleet vs
+  rev2-fleet` isolates the REVISION.
+* `/mnt/v/zen/zensim-training/2026-09-06-safesyn-rev2/` — the 196,086-row rev2
+  training leg, and **the finding that matters most**.
+
+**Both confounds are now PRICED**, with the control root:
+
+* **The CID22 foreign decoder costs ≤ 1e-4 CID22 SROCC** on all three shipped SDR
+  bakes (D +0.8633→+0.8632, B +0.8821→+0.8821, A +0.8655→+0.8654). A provenance
+  and reproducibility defect, **not** a ranking one; annotated, not invalidated.
+* **An unrefitted rev2 flip costs the SDR default exactly 0.00000** across CID22,
+  KonJND, AIC-3, CSIQ, LIVE and TID. A moves slightly up (+0.0003 CID22, +0.0009
+  CSIQ, +0.0008 TID); B moves ≤0.0014 in mixed directions. This says nothing about
+  a REFITTED bake, where the refit lane measured the opposite sign in the D chain.
+
+**⛔ THE TRAINING LEG DOES NOT TRANSFER — the fleet's AVIF decoder is a different
+era.** The fleet safesyn table vs the R6b lane's local one: same pairs, same
+revision, row alignment 0 of 196,086 mismatched on both `ref_basename` and
+`human_score` — yet **51.2 % of cells differ, worst 0.136**. Per container:
+`.jpg` 63.8 % of rows at worst **1.11e-07**, `.jxl` 64.5 % at 1.04e-07, `.webp`
+63.9 % at 8.57e-08 — all rounding — while **`.avif` differs on 99.3 % of its
+34,001 rows at 0.0217**, five orders of magnitude larger. zensim's
+`shared/zen_decode.rs` at `e34f937d` and `zenmetrics-cli/src/decode.rs` at master
+do not resolve to the same AVIF decoder, and zenavif is under a backend-rewrite
+hold. The eval corpora never saw this because their distorted sides ship as
+decoded PNG/BMP. **Which decoder is right is NOT decided** — both are imazen — and
+a fleet training leg needs the AVIF decoder **pinned** to the era of the tables it
+will join, as a declared and checked property of the image rather than an accident
+of which commit it was built from.
+
+**PIPAL in all four roots is FEATURES ONLY and NOT SCOREABLE**: the staged pairs
+TSV is the one of eight with no target column, so there is no `human_score`.
+Deliberately not repaired by deriving an elo, which would risk a normalisation
+that does not match `load_pipal`'s.
