@@ -16,7 +16,8 @@ import statistics
 import sys
 from collections import defaultdict
 
-ARMS = ["A_plain", "B_nonneg", "C_lad05", "D_lad20", "E_plainlad", "F_nonneg32"]
+ARMS = ["A_plain", "B_nonneg", "C_lad05", "D_lad20", "D_lad20m", "E_plainlad",
+        "F_nonneg32", "G_anchorlad", "H_anchorlad"]
 ARM_DESC = {
     "A_plain": "CONTROL — the fastclass2 winner's recipe, unchanged",
     "B_nonneg": "+ --nonneg-distance (architecture only)",
@@ -24,6 +25,9 @@ ARM_DESC = {
     "D_lad20": "+ --nonneg-distance + ladder hinge @ tv-weight 2.0",
     "E_plainlad": "control + ladder hinge @ 0.5 (isolates the LOSS)",
     "F_nonneg32": "B at --hidden 32",
+    "D_lad20m": "D at the anchor arms' band weights — the DATA-isolating control",
+    "G_anchorlad": "plain net + the anchor group's floor-reaching ladders",
+    "H_anchorlad": "--nonneg-distance + the anchor group's floor-reaching ladders",
 }
 CORPORA = ["cid22", "konjnd", "aic3", "tid", "kadid", "csiq", "live", "hfnlproxy",
            "imazen26", "nonphoto"]
@@ -214,7 +218,12 @@ def main():
     for lo, hi, label in [("A_plain", "B_nonneg", "architecture"),
                           ("A_plain", "E_plainlad", "ladder loss alone"),
                           ("B_nonneg", "C_lad05", "ladder on top of the architecture"),
-                          ("A_plain", "C_lad05", "both")]:
+                          ("A_plain", "C_lad05", "both"),
+                          # The DATA axis. D_lad20m is D_lad20 at the anchor arms'
+                          # band weights, so this pair differs ONLY in whether the
+                          # ladder pairs reach the encoders' true floors.
+                          ("D_lad20m", "H_anchorlad", "floor-reaching ladder DATA"),
+                          ("A_plain", "G_anchorlad", "anchor ladders on the plain net")]:
         for corpus in ("cid22", "konjnd", "aic3"):
             da, db = dict(by_arm.get(lo, [])), dict(by_arm.get(hi, []))
             seeds = sorted(set(da) & set(db))
