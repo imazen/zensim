@@ -352,11 +352,7 @@ fn bounded_score_squash(raw_distance: f64, a: f64, b: f64) -> f64 {
 /// extreme distortions (the magnitude below zero is informative —
 /// it distinguishes "slightly wrong" from "completely wrong").
 fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
-    if raw_distance <= 0.0 {
-        100.0
-    } else {
-        100.0 - a * raw_distance.det_powf(b, active_pow_form())
-    }
+    crate::score_math::distance_to_score_mapped(raw_distance, a, b, active_pow_form())
 }
 
 /// Compute score from raw features using custom weights.
@@ -3981,12 +3977,11 @@ pub(crate) fn dispose_mlp_raw(raw: f64, params: &crate::profile::ProfileParams) 
 //   [reducer_w[0..4]] [reducer_b] [p_norm]
 // Total size = (2·n_hidden + 8) × 4 bytes.
 //
-// Constants mirror `zensim-train-core::pool_head` (POOL_P_NORM,
-// POOL_STD_FLOOR). Inlined here to keep zensim's dependency closure
-// minimal (zensim runtime does not depend on zensim-train-core).
+// The pool sigma floor mirrors `zensim-train-core::pool_head::POOL_STD_FLOOR`
+// and is owned once by `crate::score_math::POOL_STD_FLOOR` (it used to be
+// declared here TWICE, once per head, and a third time in `zensim-validate`).
 
 const PER_SAMPLE_ALPHA_HEAD_KEY: &str = "zentrain.per_sample_alpha_head";
-const PER_SAMPLE_ALPHA_POOL_STD_FLOOR: f64 = 0.0026;
 
 /// EXP-CROSS-CODEC-V4 (2026-05-19): tanh-pinned output head metadata
 /// key. Payload is `[scale: f32 LE]` (4 bytes). When present, the
@@ -4015,9 +4010,7 @@ fn parse_tanh_output_head_scale(payload: &[u8]) -> Option<f64> {
 /// at training time and bit-exact with the train-time pin (single-precision sigmoid
 /// pin via clamp [−30, 30] in y_pre/scale, sigmoid in f64).
 fn apply_tanh_output_pin(y_pre: f64, scale: f64) -> f64 {
-    let xc = (y_pre / scale).clamp(-30.0, 30.0);
-    let s = 1.0 / (1.0 + (-xc).det_exp(active_pow_form()));
-    100.0 * s
+    crate::score_math::tanh_output_pin(y_pre, scale, active_pow_form())
 }
 
 /// EXP-CROSS-CODEC-V9 (2026-05-20): post-network PCHIP spline calibration
@@ -4081,57 +4074,8 @@ fn parse_output_calibration_spline(payload: &[u8]) -> Option<OutputCalibrationSp
             return None;
         }
     }
-    let derivs = pchip_compute_derivs(&xs, &ys);
+    let derivs = crate::score_math::pchip_derivs(&xs, &ys);
     Some(OutputCalibrationSpline { xs, ys, derivs })
-}
-
-/// Compute Fritsch–Carlson monotone-preserving derivatives at each
-/// knot. Standard PCHIP recipe: average of adjacent slopes harmonised
-/// to prevent overshoot; endpoint derivatives use the one-sided slope
-/// with a clamp to maintain monotonicity.
-fn pchip_compute_derivs(xs: &[f64], ys: &[f64]) -> Vec<f64> {
-    let n = xs.len();
-    debug_assert_eq!(ys.len(), n);
-    debug_assert!(n >= 2);
-    if n == 2 {
-        let s = (ys[1] - ys[0]) / (xs[1] - xs[0]);
-        return vec![s, s];
-    }
-    // Per-segment slopes h_k = (y_{k+1} - y_k) / (x_{k+1} - x_k).
-    let mut h = Vec::with_capacity(n - 1);
-    let mut s = Vec::with_capacity(n - 1);
-    for k in 0..n - 1 {
-        let hk = xs[k + 1] - xs[k];
-        h.push(hk);
-        s.push((ys[k + 1] - ys[k]) / hk);
-    }
-    let mut d = vec![0.0_f64; n];
-    // Interior: weighted harmonic mean when adjacent slopes share sign,
-    // else 0 (extremum).
-    for k in 1..n - 1 {
-        if s[k - 1] * s[k] <= 0.0 {
-            d[k] = 0.0;
-        } else {
-            let w1 = 2.0 * h[k] + h[k - 1];
-            let w2 = h[k] + 2.0 * h[k - 1];
-            d[k] = (w1 + w2) / (w1 / s[k - 1] + w2 / s[k]);
-        }
-    }
-    // Endpoints — three-point estimate, clamped to preserve mono.
-    d[0] = pchip_endpoint(h[0], h[1], s[0], s[1]);
-    d[n - 1] = pchip_endpoint(h[n - 2], h[n - 3], s[n - 2], s[n - 3]);
-    d
-}
-
-fn pchip_endpoint(h0: f64, h1: f64, s0: f64, s1: f64) -> f64 {
-    let d = ((2.0 * h0 + h1) * s0 - h0 * s1) / (h0 + h1);
-    if d * s0 <= 0.0 {
-        0.0
-    } else if s0 * s1 <= 0.0 && d.abs() > 3.0 * s0.abs() {
-        3.0 * s0
-    } else {
-        d
-    }
 }
 
 /// Evaluate the PCHIP spline at `x`, clamped to `≤ 100` on the UPPER
@@ -4149,50 +4093,14 @@ fn pchip_endpoint(h0: f64, h1: f64, s0: f64, s1: f64) -> f64 {
 /// past the winsor guard can't produce a wild score). The result stays monotone
 /// (min/max with a constant preserves order).
 fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> f64 {
-    let n = spline.xs.len();
-    debug_assert!(n >= 2);
-    let xs = spline.xs.as_slice();
-    let ys = spline.ys.as_slice();
-    let derivs = spline.derivs.as_slice();
-    if !x.is_finite() {
-        return x;
-    }
-    // Lower extrapolation: negative scores are intended for very-dissimilar
-    // inputs, but FLOORED one calibrated-dial-range below the bottom knot as
-    // an OOD safety net. Legitimate content never reaches this path — the
-    // all-quality raw distribution sits at/above xs[0] (measured on 147k
-    // encodes: min raw −1.79 > xs[0] −1.97) — so the floor only ever bounds a
-    // pathological, out-of-distribution raw that slipped past the winsor guard
-    // (e.g. an f155-style feature artifact whose raw −8.63 previously
-    // extrapolated to a wild ~−1131). Monotone: `.max(floor)` preserves rank,
-    // mirroring the `.min(100.0)` upper cap.
-    if x <= xs[0] {
-        let floor = ys[0] - (ys[n - 1] - ys[0]);
-        return (ys[0] + derivs[0] * (x - xs[0])).max(floor);
-    }
-    // Upper extrapolation: clamped at ≤100 (no score exceeds identical).
-    if x >= xs[n - 1] {
-        return (ys[n - 1] + derivs[n - 1] * (x - xs[n - 1])).min(100.0);
-    }
-    // Find the segment via binary search.
-    let mut lo = 0usize;
-    let mut hi = n - 1;
-    while hi - lo > 1 {
-        let mid = (lo + hi) / 2;
-        if xs[mid] <= x {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    let h = xs[hi] - xs[lo];
-    let t = (x - xs[lo]) / h;
-    // Cubic Hermite basis on [0, 1].
-    let h00 = (1.0 + 2.0 * t) * (1.0 - t).powi(2);
-    let h10 = t * (1.0 - t).powi(2);
-    let h01 = t.powi(2) * (3.0 - 2.0 * t);
-    let h11 = t.powi(2) * (t - 1.0);
-    (h00 * ys[lo] + h10 * h * derivs[lo] + h01 * ys[hi] + h11 * h * derivs[hi]).min(100.0)
+    // ONE owner (`crate::score_math::pchip_eval_capped`), reached identically
+    // from `zensim-validate::output_calibration_spline`. The mirror there had
+    // the upper EXTRAPOLATION capped (2026-07-04) but not the INTERIOR, so a
+    // spline declaring a knot above 100 — which the wire format permits —
+    // could be published above 100 by the evaluation tooling while the product
+    // runtime reported exactly 100. LATENT: 0 of the 49 bakes on disk declare
+    // one. Not Hermite overshoot; Fritsch-Carlson forbids that.
+    crate::score_math::pchip_eval_capped(x, &spline.xs, &spline.ys, &spline.derivs)
 }
 
 // ============================================================================
@@ -4415,6 +4323,22 @@ struct PerSampleAlphaMeta {
     p_norm: f32,
 }
 
+impl PerSampleAlphaMeta {
+    /// Borrowed view for [`crate::score_math`], the owner of the arithmetic.
+    /// Free — no allocation, no copy of either weight vector.
+    fn params(&self) -> crate::score_math::PerSampleAlphaParams<'_> {
+        crate::score_math::PerSampleAlphaParams {
+            w_alpha: &self.w_alpha,
+            b_alpha: self.b_alpha,
+            rank_w: &self.rank_w,
+            rank_b: self.rank_b,
+            reducer_w: self.reducer_w,
+            reducer_b: self.reducer_b,
+            p_norm: self.p_norm,
+        }
+    }
+}
+
 /// Parse the `zentrain.per_sample_alpha_head` payload. Returns
 /// `None` if the payload length doesn't match `(2·n_hidden + 8)·4`.
 fn parse_per_sample_alpha_meta(payload: &[u8], n_hidden: usize) -> Option<PerSampleAlphaMeta> {
@@ -4457,50 +4381,13 @@ fn parse_per_sample_alpha_meta(payload: &[u8], n_hidden: usize) -> Option<PerSam
 fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
     debug_assert_eq!(meta.rank_w.len(), h.len());
     debug_assert_eq!(meta.w_alpha.len(), h.len());
-    let n = h.len();
-    debug_assert!(n > 0);
-
-    let mut y_rank = meta.rank_b as f64;
-    let mut alpha_logit = meta.b_alpha as f64;
-    let mut sum = 0.0_f64;
-    let mut max_v = f64::NEG_INFINITY;
-    let mut sum_p = 0.0_f64;
-    let p = meta.p_norm as f64;
-    // F19: read ONCE above the hidden-unit loop, per `det_math`'s own
-    // discipline — a `OnceLock` read is not hoisted for you.
-    let form = active_pow_form();
-    for (j, &hj) in h.iter().enumerate() {
-        let hjf = hj as f64;
-        y_rank += hjf * meta.rank_w[j] as f64;
-        alpha_logit += hjf * meta.w_alpha[j] as f64;
-        sum += hjf;
-        if hjf > max_v {
-            max_v = hjf;
-        }
-        sum_p += hjf.abs().det_powf(p, form);
-    }
-    let nf = n as f64;
-    let mu = sum / nf;
-    let mut var = 0.0_f64;
-    for &hj in h.iter() {
-        let d = hj as f64 - mu;
-        var += d * d;
-    }
-    let sigma = (var / nf).sqrt().max(PER_SAMPLE_ALPHA_POOL_STD_FLOOR);
-    let p_norm_stat = (sum_p / nf).det_powf(1.0 / p, form);
-
-    let y_pool = mu * meta.reducer_w[0] as f64
-        + sigma * meta.reducer_w[1] as f64
-        + max_v * meta.reducer_w[2] as f64
-        + p_norm_stat * meta.reducer_w[3] as f64
-        + meta.reducer_b as f64;
-
-    // sigmoid with clamp (matches trainer's `sigmoid` helper).
-    let alpha = {
-        let xc = alpha_logit.clamp(-20.0, 20.0);
-        1.0 / (1.0 + (-xc).det_exp(form))
-    };
-    alpha * y_rank + (1.0 - alpha) * y_pool
+    debug_assert!(!h.is_empty());
+    // ONE owner (`crate::score_math`), reached identically from here and from
+    // `zensim-validate`'s bake-evaluation runtime. The arithmetic used to live
+    // in both places, bit-exact in PROSE only, with no test binding them — and
+    // F19's `PowForm` made that a live wrong-number risk the moment
+    // `SHIPPED_REVISION` flips. See `score_math`'s module docs.
+    crate::score_math::per_sample_alpha_head(h, &meta.params(), active_pow_form())
 }
 
 // ============================================================================
@@ -4525,12 +4412,9 @@ fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
 //   [reducer_w[0..4]] [reducer_b] [p_norm]
 // Total size = (n_hidden + 8) × 4 bytes.
 //
-// Constants mirror `zensim-train-core::pool_head` (POOL_P_NORM,
-// POOL_STD_FLOOR). Inlined to keep zensim's dependency closure
-// minimal.
+// The pool sigma floor is owned by `crate::score_math::POOL_STD_FLOOR`.
 
 const HYBRID_HEAD_KEY: &str = "zentrain.hybrid_head";
-const HYBRID_HEAD_POOL_STD_FLOOR: f64 = 0.0026;
 
 /// Parsed hybrid-head metadata payload.
 struct HybridHeadMeta {
@@ -4540,6 +4424,21 @@ struct HybridHeadMeta {
     reducer_w: [f32; 4],
     reducer_b: f32,
     p_norm: f32,
+}
+
+impl HybridHeadMeta {
+    /// Borrowed view for [`crate::score_math`] — see
+    /// [`PerSampleAlphaMeta::params`].
+    fn params(&self) -> crate::score_math::HybridHeadParams<'_> {
+        crate::score_math::HybridHeadParams {
+            rank_w: &self.rank_w,
+            rank_b: self.rank_b,
+            alpha_logit: self.alpha_logit,
+            reducer_w: self.reducer_w,
+            reducer_b: self.reducer_b,
+            p_norm: self.p_norm,
+        }
+    }
 }
 
 /// Parse the `zentrain.hybrid_head` payload. Returns `None` if the
@@ -4581,48 +4480,9 @@ fn parse_hybrid_head_meta(payload: &[u8], n_hidden: usize) -> Option<HybridHeadM
 /// `tests/hybrid_head_runtime.rs`).
 fn apply_hybrid_head_runtime(h: &[f32], meta: &HybridHeadMeta) -> f64 {
     debug_assert_eq!(meta.rank_w.len(), h.len());
-    let n = h.len();
-    debug_assert!(n > 0);
-
-    let mut y_rank = meta.rank_b as f64;
-    let mut sum = 0.0_f64;
-    let mut max_v = f64::NEG_INFINITY;
-    let mut sum_p = 0.0_f64;
-    let p = meta.p_norm as f64;
-    // F19: read ONCE above the hidden-unit loop, per `det_math`'s own
-    // discipline — a `OnceLock` read is not hoisted for you.
-    let form = active_pow_form();
-    for (j, &hj) in h.iter().enumerate() {
-        let hjf = hj as f64;
-        y_rank += hjf * meta.rank_w[j] as f64;
-        sum += hjf;
-        if hjf > max_v {
-            max_v = hjf;
-        }
-        sum_p += hjf.abs().det_powf(p, form);
-    }
-    let nf = n as f64;
-    let mu = sum / nf;
-    let mut var = 0.0_f64;
-    for &hj in h.iter() {
-        let d = hj as f64 - mu;
-        var += d * d;
-    }
-    let sigma = (var / nf).sqrt().max(HYBRID_HEAD_POOL_STD_FLOOR);
-    let p_norm_stat = (sum_p / nf).det_powf(1.0 / p, form);
-
-    let y_pool = mu * meta.reducer_w[0] as f64
-        + sigma * meta.reducer_w[1] as f64
-        + max_v * meta.reducer_w[2] as f64
-        + p_norm_stat * meta.reducer_w[3] as f64
-        + meta.reducer_b as f64;
-
-    // sigmoid with clamp (matches trainer's `sigmoid` helper).
-    let alpha = {
-        let xc = (meta.alpha_logit as f64).clamp(-20.0, 20.0);
-        1.0 / (1.0 + (-xc).det_exp(form))
-    };
-    alpha * y_rank + (1.0 - alpha) * y_pool
+    debug_assert!(!h.is_empty());
+    // ONE owner — see `apply_per_sample_alpha_runtime` above.
+    crate::score_math::hybrid_head(h, &meta.params(), active_pow_form())
 }
 
 /// Forward one bake over `features` and return the raw output scalar.

@@ -87,7 +87,7 @@
 //! | score mapping + heads + size axes (`metric.rs`) | `powf`, `exp`, `log2` | **routed here** as of F19 — [`PowForm`], era `scorepow`. The exponents (0.5979, 1.2244, 0.6130, the profile-supplied `b` = 0.7, and a bake's p-norm `p`) are not powers of two, so no `sqrt` derivation exists and the arm is an *algorithm* choice: `libm::{pow, exp, log2}`, one Rust source per target. MEASURED: the score differed across libcs on 1 of 220 cells under BOTH root arms before this, and 0 after |
 //! | scalar PU21, HDR transfer, `HfGainForm::Log1pExcess` | `powf`, `exp`, `log10`, `ln_1p` | **still NOT routed** — see the rows below; F19 deliberately does not reach them |
 //! | `zenpredict::feature_transform` (`signed_cbrt`, `signed_pow`, `soft_clip`, `yeo_johnson`, `log`/`log1p` family, `Sinusoidal`) | `cbrt`, `powf`, `ln`, `ln_1p`, `sin`, `cos` | **NOT routable from here — REGISTERED.** Reached on the PRODUCT path by `metric.rs`'s `predict_transformed`, and LIVE in shipped Profiles A, BHdr and C (their `zentrain.feature_transforms` declare `signed_cbrt` / `yeo_johnson` / `clip_then_log1p`). Profiles **B (the default) and D are clean** — their only transform is `winsor_p99`, which is a clamp. It lives in the `zenanalyze` sibling repo, which this lane must not edit; `zenpredict`'s own `no_std` twins already call `libm::` explicitly, so the fix there is to make that the `std` path too |
-//! | `zensim-validate` `bake_runtime` heads + its `bake_compare` fork | `powf`, `exp` | **NOT routed — REGISTERED, and a BLOCKER on flipping `SHIPPED_REVISION`.** `bake_runtime.rs` documents itself bit-exact with `zensim::metric`'s heads; that is TRUE today (both `PowForm` defaults are `LibmPowf`) and becomes FALSE the moment `scorepow` activates, because `metric.rs`'s heads follow the form and the mirror does not. There is **no test** holding the two together — the claim is prose, and a prior lane recorded delegation as infeasible. Routing it needs a `pub` surface on this module, i.e. a public-API change, which is out of this lane's scope |
+//! | `zensim-validate` `bake_runtime` heads + its `bake_compare` fork | — | **CLOSED 2026-09-06 — the mirror is DELETED, not routed.** It used to read: *"NOT routed — REGISTERED, and a BLOCKER on flipping `SHIPPED_REVISION`… routing it needs a `pub` surface on this module, i.e. a public-API change, which is out of this lane's scope."* That `pub` surface is now this module (`#[doc(hidden)]`, zero SUPPORTED-API delta) plus [`crate::score_math`], and both `zensim::metric` and the validate runtime call the one owner. The prose-only bit-exactness claim was measured and found to be exactly the predicted defect: `bake_verdict --full-json` on six shipped/board bakes × five corpora was **byte-identical under `ZENSIM_POW_FORM=libm` and `=pure`** before, and moves on the two per-sample-α bakes after, with every default-arm verdict byte-identical. Gates: `zensim-validate/tests/{score_owner_parity,no_score_path_libm}.rs`, both mutation-verified. Record: `benchmarks/score_owner_consolidation_2026-09-06.md` |
 //! | `zenstats` panel (`logistic_eval`, `run_lm`, `phi`, MRR `atanh`, `GeomeanSPP` `cbrt`) and `bake_verdict`'s G3 `cbrt` | `exp`, `cbrt`, `atanh` | **NOT routed — VERDICT-ONLY and staying that way.** These shape reported statistics, never a shipped score. Registered so the next audit does not re-derive the classification |
 //! | `output_calibration_spline` / `dial_spline` | — | **already deterministic**: the PCHIP basis is `powi` only, which is a multiply chain. Audited 2026-09-06, zero transcendentals |
 //!
@@ -301,7 +301,7 @@ impl DetRoots for f32 {
 /// not free — it moves revision-1 score bytes — which is why it is an era item
 /// and not a plain fix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum PowForm {
+pub enum PowForm {
     /// `f64::powf` / `f64::exp` / `f64::log2` — the platform libm, and
     /// **libc-dependent** by the same mechanism as [`RootForm::LibmPowf`].
     /// What every published verdict and every stored dial value was read at.
@@ -315,7 +315,7 @@ pub(crate) enum PowForm {
 
 impl PowForm {
     /// The form a registered revision selects.
-    pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
+    pub const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::LibmPowf,
             FormulaRevision::Rev2 => Self::PureRust,
@@ -345,7 +345,7 @@ impl PowForm {
 /// Threading it per-request is the same dispatch change the luma and root
 /// forms need, and it should be done for all three at once or not at all.
 #[inline]
-pub(crate) fn active_pow_form() -> PowForm {
+pub fn active_pow_form() -> PowForm {
     use std::sync::OnceLock;
     static FORM: OnceLock<PowForm> = OnceLock::new();
     *FORM.get_or_init(|| match std::env::var("ZENSIM_POW_FORM").as_deref() {
@@ -362,7 +362,7 @@ pub(crate) fn active_pow_form() -> PowForm {
 /// keeping the call shape means the diff that introduced the owner is a
 /// mechanical substitution that cannot silently reassociate the expression
 /// feeding it.
-pub(crate) trait DetPow: Copy {
+pub trait DetPow: Copy {
     /// `self ^ n`, for the non-dyadic exponents the score mapping uses.
     fn det_powf(self, n: Self, form: PowForm) -> Self;
     /// `e ^ self` — the bounded squash and every head sigmoid.

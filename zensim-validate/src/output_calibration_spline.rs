@@ -7,8 +7,13 @@
 //! Payload layout: `[n_knots: u32 LE, n_knots × (x: f32 LE, y: f32
 //! LE)]`. Knots must be strictly increasing in x; n_knots >= 2.
 //!
-//! Bit-exact with `zensim::metric::apply_output_calibration_spline`
-//! (asserted by integration test in zensim's regression suite).
+//! **Bit-exact with `zensim::metric::apply_output_calibration_spline` BY
+//! CONSTRUCTION** since 2026-09-06: both the derivative solve and the
+//! evaluation delegate to `zensim::score_math`, the one owner. Before that,
+//! the claim on this line was prose with no test behind it, and it was FALSE
+//! in the interior segment — see [`apply`]. What remains local is the wire
+//! format (parse/extract) and [`fit_monotone_spline`], which the product
+//! runtime has no counterpart for.
 
 use zenpredict::Model;
 
@@ -73,102 +78,47 @@ pub fn parse_payload(payload: &[u8]) -> Option<OutputCalibrationSpline> {
             return None;
         }
     }
-    let derivs = pchip_compute_derivs(&xs, &ys);
+    let derivs = zensim::score_math::pchip_derivs(&xs, &ys);
     Some(OutputCalibrationSpline { xs, ys, derivs })
 }
 
-/// Apply the spline at the given y_after_pin score. Linear
-/// extrapolation outside the knot range using the endpoint slope.
+/// Apply the spline at `x`.
+///
+/// **Delegates to [`zensim::score_math::pchip_eval_capped`], the ONE owner** —
+/// the same function `zensim::metric::apply_output_calibration_spline` calls.
+/// The lower extrapolation is floored one calibrated-dial-range below the
+/// bottom knot (negatives stay reachable — the neg-tail is intact); the upper
+/// extrapolation AND the interior are both capped at 100.
+///
+/// # The interior cap was a divergence — REAL in code, LATENT in practice
+///
+/// The 2026-07-04 spline-extrapolation audit fixed the uncapped upper
+/// *extrapolation* here (dial-p95 artifacts of 300-500 on linear bakes) and
+/// stopped one branch short: the *interior* Hermite segment kept no cap while
+/// the product runtime has always had one, so this crate's tooling could
+/// publish a score `Zensim::compute` reports as exactly 100 — the same shape
+/// of defect the audit closed, in the branch it did not reach.
+///
+/// **The reachable trigger is a KNOT whose `y` exceeds 100**, which
+/// [`parse_payload`] permits (it bounds `x` strictly increasing and both
+/// coordinates finite, and bounds `y` not at all). It is **not** Hermite
+/// overshoot: the Fritsch-Carlson rule keeps the interpolant inside its
+/// bracketing knots, which a draft of the gate discovered by building an
+/// "overshoot" fixture and failing its own vacuity guard.
+///
+/// **MEASURED over all 49 bakes on disk** (`zensim/weights`, its `archive/`,
+/// `zensim-experimental/weights`): **0 declare such a knot**, so no published
+/// verdict ever took that branch. Delegating removes the class — there is no
+/// second implementation left to stop short.
+///
+/// **A shared asymmetry, deliberately unchanged**: the lower branch's floor is
+/// `ys[0] − (ys[n−1] − ys[0])`, which is a floor only for an INCREASING
+/// spline. On a decreasing one the `.max` returns exactly 200.0 at
+/// `x == xs[0]` — seven `zensim-experimental` bakes do. Identical in both
+/// implementations, so not an owner divergence; changing it would move product
+/// numbers, and no shipped profile has a decreasing spline.
 pub fn apply(x: f64, spline: &OutputCalibrationSpline) -> f64 {
-    let n = spline.xs.len();
-    debug_assert!(n >= 2);
-    let xs = spline.xs.as_slice();
-    let ys = spline.ys.as_slice();
-    let derivs = spline.derivs.as_slice();
-    if !x.is_finite() {
-        return x;
-    }
-    if x <= xs[0] {
-        // OOD safety net (2026-07-10): parity with zensim/src/metric.rs. Floor
-        // the downward extrapolation one calibrated-dial-range below the bottom
-        // knot. Legitimate content never reaches here (the all-quality raw
-        // distribution sits at/above xs[0]); this only bounds a pathological OOD
-        // raw that slipped past the winsor guard (raw −8.63 previously → a wild
-        // ~−1131). Negatives are still allowed (neg-tail intact) — only the wild
-        // extreme is clamped. Monotone: `.max(floor)` preserves rank.
-        let floor = ys[0] - (ys[n - 1] - ys[0]);
-        return (ys[0] + derivs[0] * (x - xs[0])).max(floor);
-    }
-    if x >= xs[n - 1] {
-        // Parity with the product runtime (zensim/src/metric.rs upper
-        // extrapolation): capped at <=100 — no score exceeds identical.
-        // Uncapped linear here was a REAL divergence (dial p95 artifacts
-        // of 300-500 on linear bakes, found 2026-07-04 by the spline
-        // extrapolation audit); the "bit-exact" doc claim was false above
-        // the top knot. The bottom now carries the OOD floor (see the
-        // `x <= xs[0]` branch above) — negatives are still allowed (neg-tail
-        // resolution intact), only the wild pathological extreme is bounded;
-        // same as product.
-        return (ys[n - 1] + derivs[n - 1] * (x - xs[n - 1])).min(100.0);
-    }
-    let mut lo = 0usize;
-    let mut hi = n - 1;
-    while hi - lo > 1 {
-        let mid = (lo + hi) / 2;
-        if xs[mid] <= x {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    let h = xs[hi] - xs[lo];
-    let t = (x - xs[lo]) / h;
-    let h00 = (1.0 + 2.0 * t) * (1.0 - t).powi(2);
-    let h10 = t * (1.0 - t).powi(2);
-    let h01 = t.powi(2) * (3.0 - 2.0 * t);
-    let h11 = t.powi(2) * (t - 1.0);
-    h00 * ys[lo] + h10 * h * derivs[lo] + h01 * ys[hi] + h11 * h * derivs[hi]
-}
-
-fn pchip_compute_derivs(xs: &[f64], ys: &[f64]) -> Vec<f64> {
-    let n = xs.len();
-    debug_assert_eq!(ys.len(), n);
-    debug_assert!(n >= 2);
-    if n == 2 {
-        let s = (ys[1] - ys[0]) / (xs[1] - xs[0]);
-        return vec![s, s];
-    }
-    let mut h = Vec::with_capacity(n - 1);
-    let mut s = Vec::with_capacity(n - 1);
-    for k in 0..n - 1 {
-        let hk = xs[k + 1] - xs[k];
-        h.push(hk);
-        s.push((ys[k + 1] - ys[k]) / hk);
-    }
-    let mut d = vec![0.0_f64; n];
-    for k in 1..n - 1 {
-        if s[k - 1] * s[k] <= 0.0 {
-            d[k] = 0.0;
-        } else {
-            let w1 = 2.0 * h[k] + h[k - 1];
-            let w2 = h[k] + 2.0 * h[k - 1];
-            d[k] = (w1 + w2) / (w1 / s[k - 1] + w2 / s[k]);
-        }
-    }
-    d[0] = pchip_endpoint(h[0], h[1], s[0], s[1]);
-    d[n - 1] = pchip_endpoint(h[n - 2], h[n - 3], s[n - 2], s[n - 3]);
-    d
-}
-
-fn pchip_endpoint(h0: f64, h1: f64, s0: f64, s1: f64) -> f64 {
-    let d = ((2.0 * h0 + h1) * s0 - h0 * s1) / (h0 + h1);
-    if d * s0 <= 0.0 {
-        0.0
-    } else if s0 * s1 <= 0.0 && d.abs() > 3.0 * s0.abs() {
-        3.0 * s0
-    } else {
-        d
-    }
+    zensim::score_math::pchip_eval_capped(x, &spline.xs, &spline.ys, &spline.derivs)
 }
 
 /// Fit a monotone PCHIP spline mapping `predictions` → `targets`.

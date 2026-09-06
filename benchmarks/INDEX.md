@@ -35,7 +35,30 @@
 > more accurate** (the two arms disagree on 7.911 % of rows; glibc is nearer on 520 of 523).
 > **Registered, not fixed:** `zenpredict::feature_transform` (PRODUCT path, live in Profiles A/BHdr/C;
 > B and D clean) and `zensim-validate::bake_runtime`'s ungated head mirror — a **BLOCKER on flipping
-> `SHIPPED_REVISION`**.
+> `SHIPPED_REVISION`**. ⇒ **The second of those is CLOSED 2026-09-06** — see the entry above
+> (`score_owner_consolidation_2026-09-06.md`); the `zenpredict` one is still open.
+
+> **★★ F19's VALIDATE-SIDE BLOCKER IS CLOSED — THE SCORE PATH HAS ONE OWNER 2026-09-06:**
+> [`score_owner_consolidation_2026-09-06.md`](score_owner_consolidation_2026-09-06.md) — F19's own
+> exposure table registered `zensim-validate::bake_runtime`'s ungated head mirror as **"a BLOCKER on
+> flipping `SHIPPED_REVISION`"**; this deletes the mirror rather than routing a second copy.
+> **The fork was OBSERVED, not argued**: `bake_verdict --full-json` on six shipped/board bakes × five
+> corpora was **byte-identical under `ZENSIM_POW_FORM=libm` and `=pure` on all six** — the evaluation
+> tooling could not see the form the product obeys. AFTER, the two per-sample-α bakes differ across
+> the arms (430 leaves each) and the four head-less bakes correctly do not (`out[0]` → PCHIP, and the
+> PCHIP basis is `powi` only). **All six default-arm verdicts are byte-identical to the pre-change
+> binary's — no published number moved.** New owner `zensim::score_math` (`#[doc(hidden)] pub`, zero
+> supported-API delta): both heads, the tanh pin, the distance→score mapping, `pchip_derivs` +
+> `pchip_eval_capped`, and the one `POOL_STD_FLOOR` that was declared three times. **Deleted the same
+> commit**: metric.rs's five bodies, bake_runtime's head + pin (zero transcendentals left outside its
+> comments), bake_compare's whole fork (−144 lines), the validate PCHIP (−66), and **three
+> byte-identical copies** of `fn apply_post`. **A second divergence found and closed, REAL in code and
+> LATENT in practice**: the validate PCHIP capped its upper extrapolation (the 2026-07-04 audit) but
+> not its INTERIOR — reachable via a knot above 100, which the wire format permits, and **NOT** via
+> Hermite overshoot (a draft gate tried and failed its own vacuity guard; Fritsch-Carlson forbids it).
+> **0 of the 49 bakes on disk declare such a knot**, so no verdict ever took that branch. Two
+> mutation-verified gates (a subprocess digest A/B, and a `no_private_iqa_stats`-shaped source scan).
+> **Still open**: `zenpredict::feature_transform` (sibling repo, live in Profiles A/BHdr/C).
 
 > **★★ REV2 REFIT — THE SHIPPED D CHAIN AT REVISION 2 IS A PROPOSAL THAT FAILS TWO SHIP GATES 2026-09-06:**
 > [`rev2_refit_2026-09-06.md`](rev2_refit_2026-09-06.md) — the REFIT sub-lane of the REV2 WAVE

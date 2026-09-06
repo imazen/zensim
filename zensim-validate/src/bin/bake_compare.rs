@@ -45,6 +45,7 @@ use std::time::Instant;
 
 use zenpredict::{Model, Predictor};
 
+use zensim_validate::bake_runtime;
 use zensim_validate::panel::{Decision, DecisiveOutcome, PanelStats, compute_panel, decisive};
 use zensim_validate::parquet_loader;
 
@@ -266,75 +267,22 @@ fn load_bake(path: &Path, label: &str) -> Result<LoadedBake, String> {
     })
 }
 
-/// Per-sample α head dispatch payload — parsed from the bake's
-/// `zentrain.per_sample_alpha_head` metadata. Layout matches
-/// `zensim-train-core::per_sample_alpha_head::bake_per_sample_alpha_head_v3`.
-type PerSampleAlphaHeadDispatch = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
-
-/// Hybrid-head dispatch payload — parsed from the bake's
-/// `zentrain.hybrid_head` metadata. Layout matches
-/// `zensim-train-core::hybrid_head::bake_hybrid_head_v3`.
+/// Score a corpus through one bake.
 ///
-/// `(rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)`.
-type HybridHeadDispatch = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
-
-/// Read the `zentrain.per_sample_alpha_head` metadata payload, if any.
-fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDispatch> {
-    let md = model.metadata();
-    let entry = md.get("zentrain.per_sample_alpha_head")?;
-    let n_hidden = model.n_outputs();
-    let expected = (2 * n_hidden + 8) * 4;
-    if entry.value.len() != expected {
-        return None;
-    }
-    let mut floats = Vec::with_capacity(2 * n_hidden + 8);
-    for chunk in entry.value.as_chunks::<4>().0.iter() {
-        floats.push(f32::from_le_bytes(*chunk));
-    }
-    let w_alpha = floats[..n_hidden].to_vec();
-    let b_alpha = floats[n_hidden];
-    let rank_w = floats[n_hidden + 1..2 * n_hidden + 1].to_vec();
-    let rank_b = floats[2 * n_hidden + 1];
-    let reducer_w = [
-        floats[2 * n_hidden + 2],
-        floats[2 * n_hidden + 3],
-        floats[2 * n_hidden + 4],
-        floats[2 * n_hidden + 5],
-    ];
-    let reducer_b = floats[2 * n_hidden + 6];
-    let p_norm = floats[2 * n_hidden + 7];
-    Some((
-        w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm,
-    ))
-}
-
-/// Read the `zentrain.hybrid_head` metadata payload, if any.
-fn extract_hybrid_head(model: &Model) -> Option<HybridHeadDispatch> {
-    let md = model.metadata();
-    let entry = md.get("zentrain.hybrid_head")?;
-    let n_hidden = model.n_outputs();
-    let expected = (n_hidden + 8) * 4;
-    if entry.value.len() != expected {
-        return None;
-    }
-    let mut floats = Vec::with_capacity(n_hidden + 8);
-    for chunk in entry.value.as_chunks::<4>().0.iter() {
-        floats.push(f32::from_le_bytes(*chunk));
-    }
-    let rank_w = floats[..n_hidden].to_vec();
-    let rank_b = floats[n_hidden];
-    let alpha_logit = floats[n_hidden + 1];
-    let reducer_w = [
-        floats[n_hidden + 2],
-        floats[n_hidden + 3],
-        floats[n_hidden + 4],
-        floats[n_hidden + 5],
-    ];
-    let reducer_b = floats[n_hidden + 6];
-    let p_norm = floats[n_hidden + 7];
-    Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm))
-}
-
+/// **Owner consolidation (2026-09-06).** This function used to carry its own
+/// copies of `extract_per_sample_alpha_head`, `extract_hybrid_head`, the
+/// positional scratch fill, and ~90 lines of head arithmetic — a fork of
+/// `zensim_validate::bake_runtime`, which is itself now a shape adapter over
+/// `zensim::score_math`. All four are gone; the float math has ONE owner.
+///
+/// **The post-network dispatch is deliberately `(None, None)`** — no tanh pin,
+/// no output spline — which is BYTE-FOR-BYTE what this binary did before. That
+/// is a real difference from `bake_verdict`: SROCC is rank-invariant under a
+/// monotone spline so the correlation columns agree, but Z-RMSE / PLCC / OR
+/// and the band tables do not. Preserved rather than "fixed" here, because
+/// changing it would move this binary's published numbers, which is a
+/// decision, not a cleanup. Passing the pin/spline through is a one-line
+/// change the day someone wants it.
 fn score_corpus(bake: &LoadedBake, feature_rows: &[Vec<f64>]) -> Result<Vec<f64>, String> {
     // Construct a fresh Model + Predictor per corpus. Predictor's
     // scratch buffers are tied to the lifetime of Model, so we
@@ -346,121 +294,29 @@ fn score_corpus(bake: &LoadedBake, feature_rows: &[Vec<f64>]) -> Result<Vec<f64>
         .map_err(|e| format!("parse bake {} during scoring: {e:?}", bake.label))?;
     let has_transforms = model.has_nontrivial_feature_transforms();
     let n_inputs = model.caller_input_width();
-    let per_sample_alpha_head = extract_per_sample_alpha_head(&model);
-    let hybrid_head = extract_hybrid_head(&model);
+    let per_sample_alpha_head = bake_runtime::extract_per_sample_alpha_head(&model);
+    let hybrid_head = bake_runtime::extract_hybrid_head(&model);
+    // Hoisted per bake, never per row. `Positional` for every bake that
+    // shipped before 2026-09-06, so this moves no number; a bake that
+    // DECLARES `zentrain.feature_ids` now gets the ids it asked for instead
+    // of whatever sat at those positions.
+    let gather = bake_runtime::CallerGather::for_model(&model);
     let mut predictor = Predictor::new(&model);
     let mut scratch = vec![0.0f32; n_inputs];
     let scores: Vec<f64> = feature_rows
         .iter()
         .map(|row| {
-            let take = n_inputs.min(row.len());
-            for i in 0..take {
-                scratch[i] = row[i] as f32;
-            }
-            for f in scratch[take..].iter_mut() {
-                *f = 0.0;
-            }
-            let result = if has_transforms {
-                predictor.predict_transformed(&scratch)
-            } else {
-                predictor.predict(&scratch)
-            };
-            match result {
-                Ok(out) => {
-                    if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) =
-                        per_sample_alpha_head.as_ref()
-                    {
-                        let n = out.len() as f64;
-                        if n <= 0.0 || out.len() != rank_w.len() || out.len() != w_alpha.len() {
-                            return f64::NAN;
-                        }
-                        let mut y_rank = *rank_b as f64;
-                        let mut alpha_logit = *b_alpha as f64;
-                        let mut sum = 0.0f64;
-                        let mut max_v = f64::NEG_INFINITY;
-                        let mut sum_p = 0.0f64;
-                        let p = *p_norm as f64;
-                        for (j, &h) in out.iter().enumerate() {
-                            let hf = h as f64;
-                            y_rank += hf * rank_w[j] as f64;
-                            alpha_logit += hf * w_alpha[j] as f64;
-                            sum += hf;
-                            if hf > max_v {
-                                max_v = hf;
-                            }
-                            sum_p += hf.abs().powf(p);
-                        }
-                        let mu = sum / n;
-                        let mut var = 0.0f64;
-                        for &h in out.iter() {
-                            let d = h as f64 - mu;
-                            var += d * d;
-                        }
-                        let sigma = (var / n).sqrt().max(0.0026);
-                        let p_norm_stat = (sum_p / n).powf(1.0 / p);
-                        let y_pool = mu * reducer_w[0] as f64
-                            + sigma * reducer_w[1] as f64
-                            + max_v * reducer_w[2] as f64
-                            + p_norm_stat * reducer_w[3] as f64
-                            + *reducer_b as f64;
-                        let alpha = {
-                            let xc = alpha_logit.clamp(-20.0, 20.0);
-                            1.0 / (1.0 + (-xc).exp())
-                        };
-                        alpha * y_rank + (1.0 - alpha) * y_pool
-                    } else if let Some((
-                        rank_w,
-                        rank_b,
-                        alpha_logit,
-                        reducer_w,
-                        reducer_b,
-                        p_norm,
-                    )) = hybrid_head.as_ref()
-                    {
-                        // Hybrid-head dispatch — out is the hidden vector h,
-                        // α is a learned scalar (not per-sample).
-                        let n = out.len() as f64;
-                        if n <= 0.0 || out.len() != rank_w.len() {
-                            return f64::NAN;
-                        }
-                        let mut y_rank = *rank_b as f64;
-                        let mut sum = 0.0f64;
-                        let mut max_v = f64::NEG_INFINITY;
-                        let mut sum_p = 0.0f64;
-                        let p = *p_norm as f64;
-                        for (j, &h) in out.iter().enumerate() {
-                            let hf = h as f64;
-                            y_rank += hf * rank_w[j] as f64;
-                            sum += hf;
-                            if hf > max_v {
-                                max_v = hf;
-                            }
-                            sum_p += hf.abs().powf(p);
-                        }
-                        let mu = sum / n;
-                        let mut var = 0.0f64;
-                        for &h in out.iter() {
-                            let d = h as f64 - mu;
-                            var += d * d;
-                        }
-                        let sigma = (var / n).sqrt().max(0.0026);
-                        let p_norm_stat = (sum_p / n).powf(1.0 / p);
-                        let y_pool = mu * reducer_w[0] as f64
-                            + sigma * reducer_w[1] as f64
-                            + max_v * reducer_w[2] as f64
-                            + p_norm_stat * reducer_w[3] as f64
-                            + *reducer_b as f64;
-                        let alpha = {
-                            let xc = (*alpha_logit as f64).clamp(-20.0, 20.0);
-                            1.0 / (1.0 + (-xc).exp())
-                        };
-                        alpha * y_rank + (1.0 - alpha) * y_pool
-                    } else {
-                        out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN)
-                    }
-                }
-                Err(_) => f64::NAN,
-            }
+            bake_runtime::score_row(
+                &mut predictor,
+                has_transforms,
+                per_sample_alpha_head.as_ref(),
+                hybrid_head.as_ref(),
+                None,
+                None,
+                &gather,
+                &mut scratch[..],
+                row,
+            )
         })
         .collect();
     Ok(scores)

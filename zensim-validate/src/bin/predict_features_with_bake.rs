@@ -34,7 +34,7 @@ use zenpredict::{Model, Predictor};
 // `zensim_validate::bake_runtime`. The EXP-CROSS-CODEC-V11-E per-codec
 // affine step (alpha + beta * y) is unique to this bin and stays here.
 use zensim_validate::bake_runtime::{
-    HybridHeadDispatch, PerSampleAlphaHeadDispatch, extract_hybrid_head,
+    self, HybridHeadDispatch, PerSampleAlphaHeadDispatch, extract_hybrid_head,
     extract_per_sample_alpha_head, extract_tanh_output_head_scale, score_with_bake_alloc,
 };
 
@@ -104,36 +104,6 @@ fn extract_per_codec_affine(model: &Model, codec_hint: Option<&str>) -> PerCodec
 
 // DEDUP-M (2026-05-26): extract_per_sample_alpha_head, extract_hybrid_head,
 // extract_tanh_output_head_scale now imported from bake_runtime above.
-
-fn apply_post(raw: f64, mode: &str) -> f64 {
-    if raw.is_nan() {
-        return f64::NAN;
-    }
-    match mode {
-        "raw" => raw,
-        // EXP-CROSS-CODEC-V10 (2026-05-20): `extrapolate` returns the
-        // (post-spline, post-pin, post-α-mix) value WITHOUT clamping
-        // to [0, 100]. Identical to `raw` from the perspective of the
-        // post-processing branch but kept as a separate name for clarity:
-        // V10 callers ask for `extrapolate` to make the no-clamp policy
-        // explicit at the call-site.
-        "extrapolate" => raw,
-        "clamp" => raw.clamp(0.0, 100.0),
-        m if m.starts_with("mapped") => {
-            let (a, b) = if let Some(rest) = m.strip_prefix("mapped:") {
-                let mut it = rest.splitn(2, ',');
-                let a: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(18.0);
-                let b: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.7);
-                (a, b)
-            } else {
-                (18.0, 0.7)
-            };
-            let d = raw.max(0.0);
-            (100.0 - a * d.powf(b)).clamp(0.0, 100.0)
-        }
-        _ => raw.clamp(0.0, 100.0),
-    }
-}
 
 /// DEDUP-M (2026-05-26): delegates head/pin/spline dispatch to the shared
 /// `score_with_bake_alloc`, then applies the EXP-CROSS-CODEC-V11-E
@@ -378,7 +348,7 @@ fn main() -> ExitCode {
             &mut scratch,
             row,
         );
-        let score = apply_post(raw, &bake_post);
+        let score = bake_runtime::apply_post_mode(raw, &bake_post);
         if writeln!(out, "{score:.6}").is_err() {
             return ExitCode::FAILURE;
         }

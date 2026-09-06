@@ -161,6 +161,105 @@ introduced:
   retarget the row at a different `x`. `#[allow(clippy::approx_constant)]`,
   scoped to the one `const`, with a comment stating why.
 
+### Changed — the SCORE path gets ONE owner, and F19's registered validate-side BLOCKER is closed (2026-09-06)
+
+F19's own exposure table registered `zensim-validate::bake_runtime`'s ungated
+head mirror as **"a BLOCKER on flipping `SHIPPED_REVISION`"**. This closes it by
+deleting the mirror rather than routing a second copy.
+
+- **MEASURED, the fork observed rather than argued.** `bake_verdict --full-json`
+  on six shipped/board bakes × `cid22,kadid,tid,konjnd,aic3` was
+  **byte-identical under `ZENSIM_POW_FORM=libm` and `=pure` on all six** — the
+  evaluation tooling could not see the form the product runtime obeys. After
+  this change the two per-sample-α bakes (Profile A, `v47_strict_qat_native`)
+  differ across the arms in 430 leaf values each; the four bakes with no head
+  and no tanh pin stay identical, correctly, because their whole score path is
+  `out[0]` → PCHIP spline and the PCHIP basis is `powi` only.
+- **New owner `zensim::score_math`** (`#[doc(hidden)] pub`) — both mixing heads,
+  the tanh output pin, the distance→score mapping, `pchip_derivs` and
+  `pchip_eval_capped`, plus the single `POOL_STD_FLOOR` that was declared three
+  times. Parameters arrive as BORROWED views so `metric.rs`'s private structs
+  and `zensim-validate`'s public tuples both build one for free. The `PowForm`
+  is an explicit argument, not an `active_pow_form()` read inside — `det_math`'s
+  own discipline, and what lets a test drive both arms in one process.
+- **`zensim::det_math` promoted to `#[doc(hidden)] pub`** (`PowForm`,
+  `PowForm::for_revision`, `active_pow_form`, `DetPow`) — the `pub` surface
+  F19's table named as the fix and put out of its own scope. `RootForm` /
+  `DetRoots` stay `pub(crate)`: they are the FEATURE path, and `bake_verdict`
+  reads stored parquet rows rather than extracting.
+- **Deleted in the same commit**, not queued: `metric.rs`'s two head bodies,
+  tanh-pin body, mapping body, `pchip_compute_derivs`, `pchip_endpoint` and
+  spline evaluator (−250 lines); `bake_runtime`'s head + pin arithmetic (**zero
+  transcendentals remain outside its comments**); `bake_compare.rs`'s forked
+  dispatch types, forked extractors, forked scratch fill and ~90 lines of head
+  arithmetic (−144 lines — `score_corpus` is now a `bake_runtime::score_row`
+  loop); `output_calibration_spline.rs`'s PCHIP (−66 lines); and **three
+  byte-identical copies** of `fn apply_post` in `qsweep_eval` /
+  `predict_features_with_bake` / `score_pair_with_bake`, now one
+  `bake_runtime::apply_post_mode`.
+- **No mirror kept**, so the "gated mirror needs a bit-exact test" exception does
+  not apply. What remains in `bake_runtime` is what DEDUP-M2 correctly
+  identified as validate-shaped — metadata parsing, `Predictor` + scratch reuse,
+  `CallerGather`, the NaN short-circuits. Its "delegation INFEASIBLE" header is
+  corrected in place: all four of its reasons are about the ENTRY POINTS and
+  stand; none of them required copying the arithmetic.
+- **Zero supported-API delta** (`docs/public-api/zensim.txt` unchanged); the new
+  items are registered in `docs/public-api/zensim.internal.txt`.
+- **Every published number is unchanged.** All six `--full-json` verdicts are
+  byte-identical to the pre-change binary's on the default arm.
+
+### Fixed — the validate-side PCHIP capped its upper extrapolation but not its interior (2026-09-06)
+
+Found by the consolidation above. The 2026-07-04 spline-extrapolation audit
+capped `zensim-validate`'s upper *extrapolation* at 100 and stopped one branch
+short; `zensim::metric` caps the *interior* too, so `bake_verdict` could publish
+a score the shipped runtime reports as exactly 100.
+
+- **The mechanism is not Hermite overshoot.** A first draft of the gate tried to
+  build an overshoot fixture and failed its own vacuity guard — the
+  Fritsch–Carlson rule keeps the interpolant inside its bracketing knots, now
+  pinned by `pchip_never_leaves_its_bracketing_knots_on_monotone_data`. The
+  reachable trigger is **a knot whose `y` exceeds 100**, which the wire format
+  permits and `parse_payload` does not reject.
+- **LATENT, measured: 0 of the 49 bakes on disk** (`zensim/weights`, its
+  `archive/`, `zensim-experimental/weights`) declare such a knot, so no
+  published verdict moved. Closed by construction now.
+- **Recorded, NOT changed:** the lower branch's
+  `floor = ys[0] − (ys[n−1] − ys[0])` is a floor only for an increasing spline;
+  on a decreasing one the `.max` returns exactly **200.0** at `x == xs[0]` for
+  seven `zensim-experimental` bakes. That behaviour is identical in both
+  implementations, so it is not an owner divergence and changing it would move
+  product numbers. No shipped profile has a decreasing spline.
+
+### Added — two gates that make a score-path re-fork fail (2026-09-06)
+
+- `zensim-validate/tests/score_owner_parity.rs` — 4 tests, 10,000 rows each,
+  **no mounted corpus** (the bake is `include_bytes!`, rows are drawn from its
+  own `scaler_mean ± 3·scale`). The load-bearing one digests every score's
+  `to_bits()` and **re-execs the test binary under `ZENSIM_POW_FORM=pure`**,
+  requiring the digest to change — `active_pow_form()` is a process-wide
+  `OnceLock`, so a subprocess is the only way to see two arms.
+  **Mutation-verified:** re-forking just the tanh pin reproduces the pre-fix
+  digest `b9488573a221d6cb` under BOTH arms and fails the test.
+- `zensim-validate/tests/no_score_path_libm.rs` — the structural anti-refork
+  gate, same shape as `no_private_iqa_stats.rs`: six named score-path files may
+  not call `.powf(`/`.exp(`/`.log2(`/… outside comments and string literals
+  (`powi` deliberately excluded — it lowers to a multiply chain and the PCHIP
+  basis needs it). A second test fails if a listed file is renamed away, so the
+  gate cannot silently shrink. **Mutation-verified.**
+- `zensim::score_math`'s 9 unit tests, including `both_heads_respond_to_the_pow_form`
+  (a form-invariant head fails it) and `the_two_pow_arms_stay_close_on_the_heads`
+  (rel < 1e-12 — the arms are a rounding question, never a semantic one).
+- **A fact worth not re-deriving:** Profile A's per-sample-α head alone is
+  form-INVARIANT on all 10,000 rows, even though `|h|^6` disagrees on 9.80 % of
+  random doubles. Its hidden vector reaches ±2.6e4, so `alpha_logit` saturates
+  the ±20 clamp, `α` is 1.0 to f64 resolution, and the whole `y_pool` term — the
+  only place the p-norm enters — is annihilated by `(1 − α) ≈ 2e-9`. What moves
+  A's score is the tanh pin's `exp`. A `p_norm = 2` head is form-invariant too
+  (`x^2` and `x^0.5` are libm special cases; 0/1,000,000 samples differ).
+
+Record: [`benchmarks/score_owner_consolidation_2026-09-06.md`](benchmarks/score_owner_consolidation_2026-09-06.md).
+
 ### Added — F19: the SCORE path gets the same owner, and revision 2 stops being libc-dependent end to end (2026-09-06)
 
 F18 fixed the FEATURE path and **named this as the exposure it could not
@@ -217,10 +316,13 @@ the features did not fix the score.
 - **Registered, not fixed** (audit in `det_math`'s module table):
   `zenpredict::feature_transform`'s `cbrt`/`powf`/`ln`/`ln_1p` are on the
   PRODUCT path via `predict_transformed` and LIVE in Profiles A, BHdr and C
-  (**B — the default — and D are clean**); it is a sibling repo. And
-  `zensim-validate::bake_runtime`'s head mirror does not follow `PowForm`,
-  which makes it a **BLOCKER on flipping `SHIPPED_REVISION`**. The
-  output-calibration spline is already clean (`powi` only).
+  (**B — the default — and D are clean**); it is a sibling repo — **still open**.
+  And `zensim-validate::bake_runtime`'s head mirror does not follow `PowForm`,
+  which makes it a **BLOCKER on flipping `SHIPPED_REVISION`** — **CLOSED
+  2026-09-06**, see "the SCORE path gets ONE owner" above. The
+  output-calibration spline is `powi` only and so clean of `PowForm`; its
+  validate-side copy had a DIFFERENT divergence (the interior cap), also closed
+  2026-09-06.
   Record: `benchmarks/score_path_libc_determinism_2026-09-06.md`.
 
 ### Added — F18: the pooled 4th/8th roots get ONE owner, and the extractor stops being libc-dependent under revision 2 (2026-09-06)

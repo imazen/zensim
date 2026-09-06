@@ -227,7 +227,16 @@ mod color;
 #[cfg(feature = "corruption-head")]
 #[doc(hidden)]
 pub mod corruption_head;
-mod det_math;
+// **THE one owner of libc-independent arithmetic on the feature and score
+// paths** (F19). `#[doc(hidden)] pub` since 2026-09-06 so `zensim-validate`'s
+// bake-evaluation runtime can route through the SAME form the product runtime
+// does instead of re-implementing `powf`/`exp` beside it — the F19 module's
+// own exposure table named that fork "a BLOCKER on flipping
+// `SHIPPED_REVISION`" and named this `pub` surface as the fix. Internal
+// machinery, not product surface: the SUPPORTED API
+// (`docs/public-api/zensim.txt`) is unchanged by it.
+#[doc(hidden)]
+pub mod det_math;
 mod diffmap;
 mod error;
 mod fused;
@@ -255,6 +264,14 @@ pub mod profile;
 // at the root (where `src/` is real) is the form that resolves.
 mod simd_ops;
 pub mod source;
+// **THE one owner of the SCORE path's arithmetic** — the two mixing heads,
+// the tanh output pin, the distance→score mapping, and the PCHIP output
+// spline. `#[doc(hidden)] pub` for the same reason `det_math` is: the
+// evaluation tooling in `zensim-validate` scores runtime-loaded bake bytes
+// and MUST reach the product's own arithmetic rather than mirror it.
+// Internal machinery, not product surface.
+#[doc(hidden)]
+pub mod score_math;
 pub(crate) mod ssim_form;
 mod streaming;
 #[cfg(test)]

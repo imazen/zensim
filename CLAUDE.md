@@ -85,14 +85,29 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   `zenpredict::feature_transform`'s `cbrt`/`powf`/`ln`/`ln_1p`/`sin`/`cos` are
   on the **PRODUCT** path via `predict_transformed` and are LIVE in Profiles
   **A, BHdr and C** (**B — the default — and D declare only `winsor_p99`, a
-  clamp, and are clean**); it is a sibling repo this lane must not edit; (b)
-  `zensim-validate::bake_runtime` and its `bake_compare` fork re-implement both
-  head runtimes, document themselves bit-exact with `metric.rs`, do **not**
-  follow `PowForm`, and **no test holds them together** — a **BLOCKER on
-  flipping `SHIPPED_REVISION`**, because a verdict would then disagree with the
-  score the product returns. The output-calibration spline is **clean**
-  (`powi` only). Record:
-  `benchmarks/score_path_libc_determinism_2026-09-06.md`; ledger §3.52.
+  clamp, and are clean**); it is a sibling repo this lane must not edit.
+  **(b) IS FIXED 2026-09-06 — the validate-side mirror is DELETED, not routed.**
+  It read: *"`zensim-validate::bake_runtime` and its `bake_compare` fork
+  re-implement both head runtimes, document themselves bit-exact with
+  `metric.rs`, do not follow `PowForm`, and no test holds them together — a
+  BLOCKER on flipping `SHIPPED_REVISION`."* Every word of that was right, and
+  the prediction was **MEASURED before the fix**: `bake_verdict --full-json` on
+  six shipped/board bakes × `cid22,kadid,tid,konjnd,aic3` was **byte-identical
+  under `ZENSIM_POW_FORM=libm` and `=pure` on all six** — the evaluation tooling
+  could not see the form the product obeys. The arithmetic now has ONE owner,
+  `zensim::score_math` (`#[doc(hidden)] pub`, zero supported-API delta), reached
+  by both `zensim::metric` and the validate runtime; `zensim::det_math` is
+  `#[doc(hidden)] pub` too, which is the surface F19 named as the fix and put out
+  of its own scope. **No number moved** — all six default-arm verdicts are
+  byte-identical to the pre-change binary's — and after the fix the two
+  per-sample-α bakes move across the arms (430 leaves each) while the four
+  head-less ones correctly do not. Gates:
+  `zensim-validate/tests/{score_owner_parity,no_score_path_libm}.rs`, both
+  mutation-verified. The output-calibration spline is **clean of `PowForm`**
+  (`powi` only) but its validate-side copy had a DIFFERENT divergence, also
+  closed the same day — see the entry below. Record:
+  `benchmarks/score_path_libc_determinism_2026-09-06.md` +
+  `benchmarks/score_owner_consolidation_2026-09-06.md`; ledger §3.52 + §3.54.
 
 - **⛔ THE FEATURE EXTRACTOR IS LIBC-DEPENDENT ON REVISION 1 — a musl build and
   a glibc build of the SAME COMMIT disagree (found 2026-09-06; owner + era
@@ -771,6 +786,26 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   bakes. Now capped for parity (bottom stays uncapped — neg-tail corruption
   resolution). `parse_round_trip_minimal` had enshrined the divergent value
   (110); expectation corrected to 100 per the product contract.
+  **⚠ THAT FIX STOPPED ONE BRANCH SHORT — the INTERIOR was still uncapped, and
+  it stayed that way for two months (found + closed 2026-09-06).** The product
+  caps the interior Hermite segment too; the validate copy did not, so
+  `bake_verdict` could publish a score `Zensim::compute` reports as exactly 100.
+  **The reachable trigger is a KNOT whose `y` exceeds 100** — the wire format
+  permits one and `parse_payload` does not reject it — and it is **NOT** Hermite
+  overshoot: a draft gate tried to build an overshoot fixture and failed its own
+  vacuity guard, because the Fritsch-Carlson derivative rule keeps the
+  interpolant inside its bracketing knots (now pinned in-tree). **LATENT, and
+  measured: 0 of the 49 bakes on disk** (`zensim/weights`, its `archive/`,
+  `zensim-experimental/weights`) **declare such a knot**, so no published verdict
+  moved. Closed by construction — `output_calibration_spline::apply` and
+  `parse_payload` now delegate to `zensim::score_math::{pchip_eval_capped,
+  pchip_derivs}`, so no second implementation exists to stop short again.
+  **Recorded, NOT changed** (identical in BOTH implementations, so not an owner
+  divergence, and changing it would move product numbers): the lower branch's
+  `floor = ys[0] − (ys[n−1] − ys[0])` is a floor only for an INCREASING spline;
+  on a decreasing one the `.max` returns exactly **200.0** at `x == xs[0]` —
+  seven `zensim-experimental` bakes do. No shipped profile has a decreasing
+  spline. Record: `benchmarks/score_owner_consolidation_2026-09-06.md` §3.
 
 - **konjnd-agg 2-layer w1 gradient "bug" — RESOLVED 2026-05-27 as a
   malformed test, NOT a gradient error.** The
@@ -2773,6 +2808,8 @@ need, **extend the owner**. That is always the move.
 | Train a model / bake | `zensim-validate/src/bin/zensim_mlp_train.rs` | a torch MLP in a script |
 | Evaluate a bake | `bake_verdict` (rank + dial panels) | ad-hoc scoring loops |
 | Edit bake bytes (spline / winsor / gate) | `bake_dial_refit` | numpy PCHIP, `struct.pack` |
+| **The SCORE arithmetic** — both mixing heads, the tanh output pin, the distance→score mapping, PCHIP derivs + eval, `POOL_STD_FLOOR` | **`zensim::score_math`** (`#[doc(hidden)] pub`), routed through `zensim::det_math::PowForm` | a `powf`/`exp` anywhere on a score path — gated by `zensim-validate/tests/no_score_path_libm.rs` |
+| A `--bake-post` mode (`raw`/`extrapolate`/`clamp`/`mapped[:A,B]`) | `bake_runtime::apply_post_mode` | a per-bin `fn apply_post` (there were three, byte-identical) |
 | Serialize / inspect / repack a bake | `zenpredict` CLI (`bake`/`inspect`/`repack`) | any other ZNPR emitter |
 | Build a canonical corpus parquet | `scripts/canonical_corpus/` + `join_safety` | a bespoke join in a probe script |
 | Train/val/test split | `zenmetrics/scripts/picker/origin_split.py` (`split_of()`) | a seeded shuffle (per-rendition → scale leakage) |

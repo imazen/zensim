@@ -17,34 +17,9 @@ use zensim::{ZensimConfig, compute_zensim_with_config};
 // DEDUP-M (2026-05-26): per-row dispatch + extract_* helpers moved to
 // `zensim_validate::bake_runtime`. Bit-exact f32 ±1e-6.
 use zensim_validate::bake_runtime::{
-    extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale,
+    self, extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale,
     score_with_bake_alloc,
 };
-
-fn apply_post(raw: f64, mode: &str) -> f64 {
-    if raw.is_nan() {
-        return f64::NAN;
-    }
-    match mode {
-        "raw" => raw,
-        // EXP-CROSS-CODEC-V10 (2026-05-20): explicit no-clamp mode.
-        "extrapolate" => raw,
-        "clamp" => raw.clamp(0.0, 100.0),
-        m if m.starts_with("mapped") => {
-            let (a, b) = if let Some(rest) = m.strip_prefix("mapped:") {
-                let mut it = rest.splitn(2, ',');
-                let a: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(18.0);
-                let b: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.7);
-                (a, b)
-            } else {
-                (18.0, 0.7)
-            };
-            let d = raw.max(0.0);
-            (100.0 - a * d.powf(b)).clamp(0.0, 100.0)
-        }
-        _ => raw.clamp(0.0, 100.0),
-    }
-}
 
 // DEDUP-M (2026-05-26): `score_with_bake` is now `score_with_bake_alloc`
 // imported from `zensim_validate::bake_runtime`. Bit-exact f32 ±1e-6.
@@ -133,7 +108,7 @@ fn main() -> ExitCode {
         n_inputs,
         &features,
     );
-    let score = apply_post(raw, &bake_post);
+    let score = bake_runtime::apply_post_mode(raw, &bake_post);
     println!("{:.6}", score);
     ExitCode::SUCCESS
 }

@@ -73,7 +73,7 @@ use zenpredict::{Model, Predictor};
 // `zensim_validate::bake_runtime`. Bit-exact, f32 ±1e-6 on representative
 // inputs (see benchmarks/dedup_M_score_row_evidence/).
 use zensim_validate::bake_runtime::{
-    CallerGather, extract_hybrid_head, extract_per_sample_alpha_head,
+    self, CallerGather, extract_hybrid_head, extract_per_sample_alpha_head,
     extract_tanh_output_head_scale, score_row,
 };
 
@@ -219,32 +219,6 @@ fn parse_args() -> Mode {
         manifest: manifest.expect("--manifest REQUIRED (or use --parquet mode)"),
         bakes,
         out,
-    }
-}
-
-fn apply_post(raw: f64, mode: &str) -> f64 {
-    if raw.is_nan() {
-        return f64::NAN;
-    }
-    match mode {
-        "raw" => raw,
-        // EXP-CROSS-CODEC-V10 (2026-05-20): explicit no-clamp mode.
-        "extrapolate" => raw,
-        "clamp" => raw.clamp(0.0, 100.0),
-        m if m.starts_with("mapped") => {
-            // mapped or mapped:A,B
-            let (a, b) = if let Some(rest) = m.strip_prefix("mapped:") {
-                let mut it = rest.splitn(2, ',');
-                let a: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(18.0);
-                let b: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.7);
-                (a, b)
-            } else {
-                (18.0, 0.7)
-            };
-            let d = raw.max(0.0);
-            (100.0 - a * d.powf(b)).clamp(0.0, 100.0)
-        }
-        _ => raw.clamp(0.0, 100.0),
     }
 }
 
@@ -495,7 +469,7 @@ fn evaluate_bake(
                 &mut buf,
                 row,
             );
-            apply_post(raw, post_mode)
+            bake_runtime::apply_post_mode(raw, post_mode)
         })
         .collect();
     assert_eq!(

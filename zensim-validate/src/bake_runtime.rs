@@ -29,84 +29,44 @@
 //! same `clamp(-20.0, 20.0)` / `clamp(-30.0, 30.0)` bounds, the same
 //! NaN-propagation. Bit-exact.
 //!
-//! # DEDUP-M2 (2026-05-26): HONEST-STOP — delegation to canonical zensim helper INFEASIBLE
+//! # ★ 2026-09-06 — the FLOAT MATH now has ONE owner; this module is a SHAPE adapter
 //!
-//! The DEDUP-M2 follow-on chunk attempted to remove this module's ~150 LOC of
-//! per-row dispatch by promoting `zensim::metric::apply_mlp_scoring_with_codec`
-//! to `pub` and having [`score_row`] delegate to it. **Analysis ruled out the
-//! delegation; this module stays as the canonical bake-runtime path.** Reasons:
+//! The paragraph this replaces (DEDUP-M2, 2026-05-26, "HONEST-STOP —
+//! delegation to canonical zensim helper INFEASIBLE") is **correct about the
+//! ENTRY POINTS and wrong as a conclusion about the ARITHMETIC**, and the
+//! distinction cost a real bug. All four of its reasons stand and are why
+//! [`score_row`] still exists: `apply_mlp_scoring_with_codec` takes a
+//! `ZensimResult` built by an image pipeline, its `mlp_bytes` is a
+//! `fn() -> &'static [u8]` a CLI path cannot satisfy without leaking, it runs
+//! the full ensemble/mix/clamp/per-codec pipeline this tooling deliberately
+//! stops short of, and it constructs a fresh `Predictor` per call where this
+//! path hot-loops one across millions of rows. **None of that required
+//! copying the float math**, and copying it is what broke:
 //!
-//! 1. **Type-shape mismatch on inputs.** `apply_mlp_scoring_with_codec` takes
-//!    `(&mut ZensimResult, &ProfileParams, w, h, codec_hint)`. `ZensimResult`
-//!    carries a fully-computed feature vector from a real image-processing
-//!    pipeline and exposes `pub(crate)` mutators (`set_mlp_score`,
-//!    `mark_identical`). The bake-runtime path consumes a **single parquet row
-//!    of f64 features** + a **long-lived `Predictor<'_>` + pre-allocated f32
-//!    scratch** (re-used across ≥10k rows in hot loops like `bake_verdict`).
-//!    Forcing parquet rows through `ZensimResult` would mean fabricating an
-//!    instance per row + leaking `pub` on every mutator — not a localized API
-//!    addition.
+//! F19 (`zensim::det_math`) routed every transcendental on the score path
+//! through a selectable [`zensim::det_math::PowForm`] so a score stops being a
+//! function of which libm the binary linked against. `zensim::metric` follows
+//! the form. This module's copy did not, and no test bound them — the
+//! bit-exactness claim above was PROSE. MEASURED 2026-09-06 on six
+//! shipped/board bakes: `bake_verdict --full-json` was byte-identical under
+//! `ZENSIM_POW_FORM=libm` and `=pure`, i.e. the evaluation tooling was
+//! completely insensitive to the form the product obeys. `det_math`'s own
+//! exposure table called this fork *"a BLOCKER on flipping
+//! `SHIPPED_REVISION`"*.
 //!
-//! 2. **Compile-time vs runtime bake bytes.** `ProfileParams::mlp_bytes` is
-//!    `Option<fn() -> &'static [u8]>` — a function pointer returning a
-//!    `&'static [u8]`. Every shipped profile loads its bake at compile time.
-//!    The bake-runtime path takes runtime-loaded bake bytes from CLI args
-//!    (e.g., `bake_verdict --bake /path/to/some.bin`), which cannot satisfy
-//!    the `fn() -> &'static` signature without leaking the bytes into a
-//!    static slot — an unbounded heap leak per CLI invocation.
-//!
-//! 3. **Scope mismatch on post-processing.** `apply_mlp_scoring_with_codec`
-//!    runs the FULL canonical pipeline: ensemble classifier routing
-//!    (`ensemble_classifier_bytes`), primary/B3 mix (`mlp_bytes_b3 +
-//!    mlp_primary_mix`), `score_mapping_a/b` (`100 − A·d^B`),
-//!    soft/hard/`extrapolate_score` clamping, per-codec post-spline affine
-//!    calibration. [`score_row`] runs ONLY the per-sample-α / hybrid-head /
-//!    tanh-pin / output-spline subset — the bake-eval tooling needs raw
-//!    pre-clamp output for diagnostic dumps, and the ensemble/primary-mix
-//!    knobs live one level up in `ensemble_score_rows`. Forcing the bake-eval
-//!    sites through the full pipeline would lose the diagnostic-dump
-//!    surface area + double-apply the post-spline calibration in
-//!    `predict_features_with_bake`.
-//!
-//! 4. **Predictor reuse is structurally incompatible.** `forward_one_bake_with_codec`
-//!    (called from inside `apply_mlp_scoring_with_codec`) constructs a fresh
-//!    `Predictor::new(&model)` on every call. The bake-runtime path hot-loops
-//!    over parquet rows with a single long-lived `Predictor` — the ~µs
-//!    per-row Predictor construction would dominate wall time on 10k-row
-//!    corpora (KADID, CID22) for the same forward math.
-//!
-//! **The two functions serve different purposes**: `apply_mlp_scoring_with_codec`
-//! is the **encoder-side** full-pipeline ZensimResult mutator (one call per
-//! distorted candidate against a compile-time profile); [`score_row`] is the
-//! **eval-tooling** per-parquet-row helper (millions of calls against a
-//! runtime-loaded bake). Both ARE bit-exact on the shared math (per-sample-α,
-//! hybrid head, tanh-pin, output spline) — verified by the
-//! `cid22_aggregate_srocc_matches_audit_reference` /
-//! `cid22_first_row_matches_bake_verdict_reference` regression gates.
-//!
-//! **Future M3 candidates** (not in M2 scope):
-//!
-//! - **M3a — extract `forward_one_bake_with_codec` into a runtime-bytes API
-//!   on `zensim::mlp` or new `zensim::scoring`**: would accept `&[u8]` bake
-//!   bytes + an owned `Predictor` constructor knob (or a borrowed
-//!   `&mut Predictor`). Then [`score_row`] could delegate the inner forward +
-//!   metadata dispatch and keep its own scratch/Predictor reuse around it.
-//!   Costs ~2-3 days: needs to factor out the bake-metadata cache (currently
-//!   keyed on bake bytes pointer, which assumes `&'static [u8]`), the
-//!   per-codec affine wiring, and the `Predictor::predict_transformed` vs
-//!   `predict` choice. Bit-exact regression gates above MUST stay green.
-//! - **M3b — propose a thin trait `BakeForwardOps`** that abstracts the
-//!   shared math so `apply_mlp_scoring_with_codec` and [`score_row`] both
-//!   delegate to one trait impl, leaving each function's
-//!   bytes-loading/Predictor-reuse policy local. Lower-risk alternative to
-//!   M3a; same regression gate.
-//!
-//! Until M3 lands, this module remains the canonical per-row bake-runtime
-//! dispatch. No `apply_mlp_scoring_with_codec` promotion to `pub`; the
-//! `pub(crate)` boundary continues to protect the encoder-side full pipeline
-//! from being accidentally driven by parquet-row tooling.
+//! So the arithmetic moved to [`zensim::score_math`] — `#[doc(hidden)] pub`,
+//! borrowed parameter views so neither side adopts the other's storage — and
+//! **both** `zensim::metric` and this module call it. What is left here is
+//! exactly the part the DEDUP-M2 analysis identified as genuinely
+//! validate-shaped: metadata parsing into public tuples, `Predictor` +
+//! scratch reuse, the [`CallerGather`] policy, and the NaN short-circuits.
+//! Gate: `zensim-validate/tests/score_owner_parity.rs` (a re-fork fails it) +
+//! `tests/no_score_path_libm.rs` (a re-introduced `powf`/`exp` on these files
+//! fails it).
 
 use zenpredict::{Model, Predictor};
+use zensim::det_math::active_pow_form;
+use zensim::score_math;
 
 use crate::output_calibration_spline::{self, OutputCalibrationSpline};
 
@@ -123,9 +83,6 @@ pub type PerSampleAlphaHeadDispatch = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f
 ///
 /// `(rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)`.
 pub type HybridHeadDispatch = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
-
-/// Pool-stat sigma floor — bit-exact with `zensim::metric` (0.0026).
-const POOL_STD_FLOOR: f64 = 0.0026;
 
 /// Read the `zentrain.tanh_output_head` metadata payload, if any.
 /// Returns the sigmoid pin scale (`f32 LE`, single value) or `None`
@@ -570,86 +527,94 @@ fn apply_head_dispatch(
     per_sample_alpha_head: Option<&PerSampleAlphaHeadDispatch>,
     hybrid_head: Option<&HybridHeadDispatch>,
 ) -> f64 {
+    // F19 / owner consolidation (2026-09-06): the arithmetic is
+    // `zensim::score_math`'s, reached through the SAME entry the product
+    // runtime (`zensim::metric::apply_{per_sample_alpha,hybrid_head}_runtime`)
+    // reaches. This function is now a SHAPE adapter — validate parses the
+    // metadata into public tuples, `metric.rs` into private structs — and
+    // carries no float math of its own.
+    //
+    // Read the form ONCE, per `det_math`'s own discipline.
+    let form = active_pow_form();
     if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) =
         per_sample_alpha_head
     {
-        let n = out.len() as f64;
-        if n <= 0.0 || out.len() != rank_w.len() || out.len() != w_alpha.len() {
-            return f64::NAN;
-        }
-        let mut y_rank = *rank_b as f64;
-        let mut alpha_logit = *b_alpha as f64;
-        let mut sum = 0.0_f64;
-        let mut max_v = f64::NEG_INFINITY;
-        let mut sum_p = 0.0_f64;
-        let p = *p_norm as f64;
-        for (j, &h) in out.iter().enumerate() {
-            let hf = h as f64;
-            y_rank += hf * rank_w[j] as f64;
-            alpha_logit += hf * w_alpha[j] as f64;
-            sum += hf;
-            if hf > max_v {
-                max_v = hf;
-            }
-            sum_p += hf.abs().powf(p);
-        }
-        let mu = sum / n;
-        let mut var = 0.0_f64;
-        for &h in out.iter() {
-            let d = h as f64 - mu;
-            var += d * d;
-        }
-        let sigma = (var / n).sqrt().max(POOL_STD_FLOOR);
-        let p_norm_stat = (sum_p / n).powf(1.0 / p);
-        let y_pool = mu * reducer_w[0] as f64
-            + sigma * reducer_w[1] as f64
-            + max_v * reducer_w[2] as f64
-            + p_norm_stat * reducer_w[3] as f64
-            + *reducer_b as f64;
-        let alpha = {
-            let xc = alpha_logit.clamp(-20.0, 20.0);
-            1.0 / (1.0 + (-xc).exp())
-        };
-        alpha * y_rank + (1.0 - alpha) * y_pool
+        score_math::per_sample_alpha_head(
+            out,
+            &score_math::PerSampleAlphaParams {
+                w_alpha,
+                b_alpha: *b_alpha,
+                rank_w,
+                rank_b: *rank_b,
+                reducer_w: *reducer_w,
+                reducer_b: *reducer_b,
+                p_norm: *p_norm,
+            },
+            form,
+        )
     } else if let Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)) = hybrid_head {
-        let n = out.len() as f64;
-        if n <= 0.0 || out.len() != rank_w.len() {
-            return f64::NAN;
-        }
-        let mut y_rank = *rank_b as f64;
-        let mut sum = 0.0_f64;
-        let mut max_v = f64::NEG_INFINITY;
-        let mut sum_p = 0.0_f64;
-        let p = *p_norm as f64;
-        for (j, &h) in out.iter().enumerate() {
-            let hf = h as f64;
-            y_rank += hf * rank_w[j] as f64;
-            sum += hf;
-            if hf > max_v {
-                max_v = hf;
-            }
-            sum_p += hf.abs().powf(p);
-        }
-        let mu = sum / n;
-        let mut var = 0.0_f64;
-        for &h in out.iter() {
-            let d = h as f64 - mu;
-            var += d * d;
-        }
-        let sigma = (var / n).sqrt().max(POOL_STD_FLOOR);
-        let p_norm_stat = (sum_p / n).powf(1.0 / p);
-        let y_pool = mu * reducer_w[0] as f64
-            + sigma * reducer_w[1] as f64
-            + max_v * reducer_w[2] as f64
-            + p_norm_stat * reducer_w[3] as f64
-            + *reducer_b as f64;
-        let alpha = {
-            let xc = (*alpha_logit as f64).clamp(-20.0, 20.0);
-            1.0 / (1.0 + (-xc).exp())
-        };
-        alpha * y_rank + (1.0 - alpha) * y_pool
+        score_math::hybrid_head(
+            out,
+            &score_math::HybridHeadParams {
+                rank_w,
+                rank_b: *rank_b,
+                alpha_logit: *alpha_logit,
+                reducer_w: *reducer_w,
+                reducer_b: *reducer_b,
+                p_norm: *p_norm,
+            },
+            form,
+        )
     } else {
         out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN)
+    }
+}
+
+/// Apply a `--bake-post` policy to a raw bake score.
+///
+/// **THE one owner** of the four `--bake-post` modes. `qsweep_eval`,
+/// `predict_features_with_bake` and `score_pair_with_bake` each carried a
+/// BYTE-IDENTICAL copy of this function (verified line-for-line before the
+/// merge); all three now call here.
+///
+/// | mode | result |
+/// |---|---|
+/// | `raw` | `raw`, untouched |
+/// | `extrapolate` | `raw`, untouched — a separate name so a caller's no-clamp policy is explicit at the call site (EXP-CROSS-CODEC-V10) |
+/// | `clamp` | `raw.clamp(0, 100)` |
+/// | `mapped` / `mapped:A,B` | `(100 − A·max(raw,0)^B).clamp(0, 100)`, defaults `A=18, B=0.7` |
+/// | anything else | `raw.clamp(0, 100)` |
+///
+/// The `mapped` arm is [`zensim::score_math::distance_to_score_mapped`] — the
+/// product runtime's own mapping, routed through
+/// [`zensim::det_math::PowForm`] — with this path's clamp on top. It is a
+/// bit-exact rewrite of the `100.0 - a * d.powf(b)` the three copies carried:
+/// at `d == 0` the owner short-circuits to exactly `100.0` and `0f64.powf(b)`
+/// is `0.0`, so `100.0 - a*0.0` is the same `100.0`.
+///
+/// NaN in, NaN out, before any mode is consulted.
+pub fn apply_post_mode(raw: f64, mode: &str) -> f64 {
+    if raw.is_nan() {
+        return f64::NAN;
+    }
+    match mode {
+        "raw" => raw,
+        "extrapolate" => raw,
+        "clamp" => raw.clamp(0.0, 100.0),
+        m if m.starts_with("mapped") => {
+            // mapped or mapped:A,B
+            let (a, b) = if let Some(rest) = m.strip_prefix("mapped:") {
+                let mut it = rest.splitn(2, ',');
+                let a: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(18.0);
+                let b: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.7);
+                (a, b)
+            } else {
+                (18.0, 0.7)
+            };
+            let d = raw.max(0.0);
+            score_math::distance_to_score_mapped(d, a, b, active_pow_form()).clamp(0.0, 100.0)
+        }
+        _ => raw.clamp(0.0, 100.0),
     }
 }
 
@@ -663,9 +628,13 @@ fn apply_post_dispatch(
 ) -> f64 {
     let y_after_pin = if let Some(scale) = tanh_pin_scale {
         if !y_pre.is_nan() {
-            let xc = (y_pre / scale).clamp(-30.0, 30.0);
-            let s = 1.0 / (1.0 + (-xc).exp());
-            100.0 * s
+            // Owner: `zensim::score_math::tanh_output_pin`, the same call
+            // `zensim::metric::apply_tanh_output_pin` makes. The NaN
+            // short-circuit stays HERE because it is this path's shape choice,
+            // not arithmetic: the owner propagates NaN by construction, so the
+            // guard changes nothing numerically and is kept only so a NaN row
+            // is visibly skipped rather than run through a squash.
+            score_math::tanh_output_pin(y_pre, scale, active_pow_form())
         } else {
             y_pre
         }

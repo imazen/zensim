@@ -2993,8 +2993,6 @@ there is to make that the `std` path too.
 Record: [`benchmarks/score_path_libc_determinism_2026-09-06.md`](../benchmarks/score_path_libc_determinism_2026-09-06.md).
 Gate: `scripts/verify_cross_libc_features.sh` (`just check-cross-libc`).
 
----
-
 ## §3.53 — the F17 guard on the bake that ACTUALLY SHIPS: READY, and it costs nothing (2026-09-06)
 
 **Ledger ROUND 104.** §3.51 measured the serve-time guard on a **re-fit** of the
@@ -3064,3 +3062,80 @@ Pre-registration: [`PLAN_FEATURE_REV2_2026-09-05.md`](PLAN_FEATURE_REV2_2026-09-
 — **and its §12.8.0 order-honesty note**: that text was pushed after the arm
 bakes and their rank/G-ADDR/perturbation/outlier tables existed, with the four
 criteria copied verbatim from §12.7.1.
+
+---
+
+## §3.54 — the SCORE path's fork is gone; NO stored number moved, and the one divergence it uncovered was latent (2026-09-06)
+
+**Ledger ROUND 105.** §3.52 (F19) landed the score-path owner in `zensim::metric`
+and **registered, without fixing, the second copy** in `zensim-validate`'s
+bake-evaluation runtime — calling it *"a **BLOCKER** on flipping
+`SHIPPED_REVISION`"*. This closes it. **Status: STANDS. Nothing in this entry
+invalidates a table, a bake, or a published verdict** — the point of recording it
+here is the opposite: to say precisely which numbers were checked and found
+unmoved, so a future session does not re-audit them.
+
+**The fork, observed rather than argued.** `bake_verdict --full-json` on six
+shipped/board bakes × `cid22,kadid,tid,konjnd,aic3`, each run twice:
+
+| arm | A | board `v47_strict_qat_native` | B | BHdr | D | board `b_sdr…dense_dial` |
+|---|---|---|---|---|---|---|
+| **before**, `libm` vs `pure` | identical | identical | identical | identical | identical | identical |
+| **after**, `libm` vs `pure` | **differs, 430 leaves** | **differs, 430 leaves** | identical | identical | identical | identical |
+| **before vs after**, default arm | **byte-identical** | **byte-identical** | **byte-identical** | **byte-identical** | **byte-identical** | **byte-identical** |
+
+Row 1 is the defect: the evaluation tooling was insensitive to the form the
+product runtime obeys, so a `SHIPPED_REVISION` flip would have made every
+published verdict describe arithmetic the product does not run. Row 3 is the
+safety proof: **no number moved.**
+
+**Row 2's four "identical" cells are correct and were measured, not assumed.**
+`psa=false hyb=false pin=None` for B / BHdr / D / `board_Bwide`, so their whole
+score path is `out[0]` → PCHIP spline, and the PCHIP basis is `powi` only — a
+multiply chain that never reaches libm. Only Profile A and its wide twin carry
+`zentrain.per_sample_alpha_head` **and** `zentrain.tanh_output_head`
+(`scale = 30.0`), and only they can move.
+
+**★ A fact that will otherwise be re-derived: A's HEAD is form-invariant; its
+PIN is not.** On all 10,000 fixture rows A's per-sample-α head gives
+bit-identical output under both `PowForm` arms, even though `|h|^6` disagrees on
+**9.80 %** of random doubles, `x^(1/6)` on **14.07 %**, and `exp` on **9.74 %**
+(1e6 samples each). Mechanism: A's hidden vector reaches **±2.6e4**, so
+`alpha_logit` saturates the ±20 clamp, `α` is 1.0 to f64 resolution, and the
+entire `y_pool` term — the only place the p-norm enters — is multiplied by
+`(1 − α) ≈ 2e-9` and annihilated. What moves A's score is the **tanh pin's
+`exp`**. Corollary: a head with `p_norm = 2` is form-invariant too, because
+`x^2` and `x^0.5` are libm special cases (0 / 1,000,000 samples differ). So
+"which bakes can this era move" is a property of the head's saturation and its
+p, not of the bake's size or corpus.
+
+**The one divergence uncovered, and why it is LATENT.** The validate-side PCHIP
+evaluator capped its upper *extrapolation* at 100 (the 2026-07-04 audit) and left
+the *interior* uncapped; `zensim::metric` caps both. The reachable trigger is a
+knot whose `y` exceeds 100 — the wire format permits one and `parse_payload` does
+not reject it. It is **not** Hermite overshoot: a draft gate tried to build an
+overshoot fixture and failed its own vacuity guard, because the Fritsch–Carlson
+rule keeps the interpolant inside its bracketing knots (now pinned in-tree).
+**MEASURED over all 49 bakes on disk** (`zensim/weights`, its `archive/`,
+`zensim-experimental/weights`): **0 declare a knot above 100.** No verdict ever
+took that branch.
+
+**Recorded and deliberately NOT changed** (it is not an owner divergence — both
+implementations do it): the lower branch's `floor = ys[0] − (ys[n−1] − ys[0])` is
+a floor only for an *increasing* spline. On a decreasing one it lands above
+`ys[0]` and the `.max` makes it a hard value — seven `zensim-experimental` bakes
+(`v_balanced_v2`, `v_balanced_v3`, `v_balanced_v3_per_codec`,
+`v_compression_v2`, `v_compression_v3`, `v_compression_v3_per_codec`,
+`zensim_b_phone_oled`) return exactly **200.0** at `x == xs[0]`, and
+`v02_372feat_cell5` returns **188.05**. No shipped profile has a decreasing
+spline, so this reaches no product number; changing it would move one.
+
+**Still open, unchanged by this lane:** `zenpredict::feature_transform`'s
+`cbrt`/`powf`/`ln`/`ln_1p` are on the PRODUCT path via `predict_transformed` and
+live in Profiles A, BHdr and C (B — the default — and D are clean). It is in the
+`zenanalyze` sibling repo, which this lane must not edit. It remains a blocker on
+flipping `SHIPPED_REVISION`.
+
+Record: [`benchmarks/score_owner_consolidation_2026-09-06.md`](../benchmarks/score_owner_consolidation_2026-09-06.md).
+Gates: `zensim-validate/tests/{score_owner_parity,no_score_path_libm}.rs`
+(both mutation-verified), `zensim::score_math`'s 9 unit tests.

@@ -9,41 +9,57 @@
 
 ## summary
 #
-#   pub modules                                 3
-#   pub types (struct/enum/trait/alias)         7
-#   pub consts/statics                          3
-#   free functions                             22
-#   inherent methods                           73
-#   struct fields                              24
-#   enum variants                              13
-#   trait roster entries (type × trait)        59
-#   auto-trait-complete types                   6
+#   pub modules                                 6
+#   pub types (struct/enum/trait/alias)        14
+#   pub consts/statics                          7
+#   free functions                             33
+#   inherent methods                          113
+#   struct fields                              66
+#   enum variants                              25
+#   trait roster entries (type × trait)        88
+#   auto-trait-complete types                  12
 #
 # per-module pub lines:
-#   (root)                           21
+#   (root)                           28
 #   __bench_stages                    9
+#   corruption_head                  70
+#   det_math                         13
+#   f64                               3
 #   feature_set_id                    5
 #   feature_v2                       21
 #   fold_engine                       8
 #   profile                           1
 #   research                         76
+#   score_math                       26
 #   source                            4
 
-## items (145 lines)
+## items (264 lines)
 
+pub const fn det_math::PowForm::for_revision(feature_v2::FormulaRevision) -> Self
 pub const ZENTRAIN_FEATURE_IDS_KEY: &str
+pub const corruption_head::FORMAT_VERSION: u16
+pub const corruption_head::MAGIC: [u8; 4]
 pub const research::BASE_REVISION_ERA: &str
 pub const research::BUILD_COMMIT: core::option::Option<&str>
+pub const score_math::POOL_STD_FLOOR: f64
+pub enum corruption_head::CorruptionHeadError
+pub enum det_math::PowForm
 pub enum feature_v2::FormulaRevision
 pub enum fold_engine::ScoringEngine
 pub enum research::ResearchError
 pub enum research::RevisionRef
+pub fn f64::det_exp(self, det_math::PowForm) -> Self
+pub fn f64::det_log2(self, det_math::PowForm) -> Self
+pub fn f64::det_powf(self, Self, det_math::PowForm) -> Self
 pub fn BlurKernel::assert_fields_are_eq(&self)
 pub fn ErrorCategory::assert_fields_are_eq(&self)
 pub fn IwWeightKind::assert_fields_are_eq(&self)
 pub fn UnsupportedFormat::assert_fields_are_eq(&self)
+pub fn Zensim::corruption_head(&self) -> core::option::Option<&corruption_head::CorruptionHead>
+pub fn Zensim::corruption_verdict(&self, &ZensimResult) -> core::option::Option<core::result::Result<corruption_head::CorruptionVerdict, corruption_head::CorruptionHeadError>>
 pub fn Zensim::engine(&self) -> fold_engine::ScoringEngine
 pub fn Zensim::score_pool_mode(&self) -> feature_v2::V1PoolsMode
+pub fn Zensim::with_corruption_head(self, corruption_head::CorruptionHead) -> core::result::Result<Self, corruption_head::CorruptionHeadError>
 pub fn Zensim::with_engine(self, fold_engine::ScoringEngine) -> Self
 pub fn Zensim::with_unread_feature_skipping(self, bool) -> Self
 pub fn ZensimError::assert_fields_are_eq(&self)
@@ -61,7 +77,42 @@ pub fn bench_pu_xyb_dispatch(&[[f32; 3]], &mut [f32], &mut [f32], &mut [f32])
 pub fn bench_pu_xyb_scalar(&[[f32; 3]], &mut [f32], &mut [f32], &mut [f32])
 pub fn compute_zensim_with_config(&[[u8; 3]], &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
 pub fn compute_zensim_with_ref_and_config(&PrecomputedReference, &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
+pub fn corruption_head::CorruptionHead::caller_input_width(&self) -> usize
+pub fn corruption_head::CorruptionHead::check_servable_by(&self, profile::ZensimProfile) -> core::result::Result<(), corruption_head::CorruptionHeadError>
+pub fn corruption_head::CorruptionHead::clone(&self) -> corruption_head::CorruptionHead
+pub fn corruption_head::CorruptionHead::deadband(&self) -> f64
+pub fn corruption_head::CorruptionHead::deadband_score(&self) -> f64
+pub fn corruption_head::CorruptionHead::decision_function(&self, &[f64]) -> core::result::Result<f64, corruption_head::CorruptionHeadError>
+pub fn corruption_head::CorruptionHead::declared_feature_ids(&self) -> &[u16]
+pub fn corruption_head::CorruptionHead::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn corruption_head::CorruptionHead::from_bytes(&[u8]) -> core::result::Result<Self, corruption_head::CorruptionHeadError>
+pub fn corruption_head::CorruptionHead::metadata_json(&self) -> &str
+pub fn corruption_head::CorruptionHead::n_nodes(&self) -> usize
+pub fn corruption_head::CorruptionHead::n_trees(&self) -> usize
+pub fn corruption_head::CorruptionHead::probability(&self, &[f32]) -> core::result::Result<f64, corruption_head::CorruptionHeadError>
+pub fn corruption_head::CorruptionHead::probability_f64(&self, &[f64]) -> core::result::Result<f64, corruption_head::CorruptionHeadError>
+pub fn corruption_head::CorruptionHead::schema_hash(&self) -> u64
+pub fn corruption_head::CorruptionHead::score(&self, &[f32]) -> core::result::Result<f64, corruption_head::CorruptionHeadError>
+pub fn corruption_head::CorruptionHead::score_f64(&self, &[f64]) -> core::result::Result<f64, corruption_head::CorruptionHeadError>
+pub fn corruption_head::CorruptionHead::verdict(&self, &[f64], f64) -> core::result::Result<corruption_head::CorruptionVerdict, corruption_head::CorruptionHeadError>
+pub fn corruption_head::CorruptionHeadError::assert_fields_are_eq(&self)
+pub fn corruption_head::CorruptionHeadError::clone(&self) -> corruption_head::CorruptionHeadError
+pub fn corruption_head::CorruptionHeadError::eq(&self, &corruption_head::CorruptionHeadError) -> bool
+pub fn corruption_head::CorruptionHeadError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn corruption_head::CorruptionVerdict::clone(&self) -> corruption_head::CorruptionVerdict
+pub fn corruption_head::CorruptionVerdict::eq(&self, &corruption_head::CorruptionVerdict) -> bool
+pub fn corruption_head::CorruptionVerdict::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn corruption_head::gate_score(f64, f64, f64) -> f64
 pub fn declared_feature_ids(&zenpredict::model::Model) -> core::option::Option<alloc::vec::Vec<u16>>
+pub fn det_math::DetPow::det_exp(self, det_math::PowForm) -> Self
+pub fn det_math::DetPow::det_log2(self, det_math::PowForm) -> Self
+pub fn det_math::DetPow::det_powf(self, Self, det_math::PowForm) -> Self
+pub fn det_math::PowForm::assert_fields_are_eq(&self)
+pub fn det_math::PowForm::clone(&self) -> det_math::PowForm
+pub fn det_math::PowForm::default() -> det_math::PowForm
+pub fn det_math::PowForm::eq(&self, &det_math::PowForm) -> bool
+pub fn det_math::PowForm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn det_math::active_pow_form() -> det_math::PowForm
 pub fn feature_set_id::ComputeParts::assert_fields_are_eq(&self)
 pub fn feature_set_id::ComputeToken::assert_fields_are_eq(&self)
 pub fn feature_set_id::FeatureSetId::assert_fields_are_eq(&self)
@@ -129,17 +180,76 @@ pub fn research::extract(&research::Request, &impl source::ImageSource, &impl so
 pub fn research::family_slots(feature_set_id::ComputeToken) -> feature_set_id::SlotSet
 pub fn research::full_width() -> usize
 pub fn research::nonzero_structural_fill_slots() -> feature_set_id::SlotSet
+pub fn score_math::HybridHeadParams<'a>::clone(&self) -> score_math::HybridHeadParams<'a>
+pub fn score_math::HybridHeadParams<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn score_math::PerSampleAlphaParams<'a>::clone(&self) -> score_math::PerSampleAlphaParams<'a>
+pub fn score_math::PerSampleAlphaParams<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn score_math::distance_to_score_mapped(f64, f64, f64, det_math::PowForm) -> f64
+pub fn score_math::hybrid_head(&[f32], &score_math::HybridHeadParams<'_>, det_math::PowForm) -> f64
+pub fn score_math::pchip_derivs(&[f64], &[f64]) -> alloc::vec::Vec<f64>
+pub fn score_math::pchip_eval_capped(f64, &[f64], &[f64], &[f64]) -> f64
+pub fn score_math::per_sample_alpha_head(&[f32], &score_math::PerSampleAlphaParams<'_>, det_math::PowForm) -> f64
+pub fn score_math::tanh_output_pin(f64, f64, det_math::PowForm) -> f64
 pub fn source::AlphaMode::assert_fields_are_eq(&self)
 pub fn source::ColorPrimaries::assert_fields_are_eq(&self)
 pub fn source::GamutMapping::assert_fields_are_eq(&self)
 pub fn source::PixelFormat::assert_fields_are_eq(&self)
 pub mod __bench_stages
+pub mod corruption_head
+pub mod det_math
 pub mod fold_engine
 pub mod research
+pub mod score_math
+pub struct corruption_head::CorruptionHead
+pub struct corruption_head::CorruptionVerdict
 pub struct research::Extraction
 pub struct research::FeatureProvenance
 pub struct research::Request
+pub struct score_math::HybridHeadParams<'a>
+pub struct score_math::PerSampleAlphaParams<'a>
+pub trait det_math::DetPow: core::marker::Copy
 pub ZensimProfile::LegacyLinearV0_2
+pub corruption_head::CorruptionHeadError::BadMagic
+pub corruption_head::CorruptionHeadError::BadMagic::got: [u8; 4]
+pub corruption_head::CorruptionHeadError::DeclaredIdOutOfRange
+pub corruption_head::CorruptionHeadError::DeclaredIdOutOfRange::id: u16
+pub corruption_head::CorruptionHeadError::DeclaredIdOutOfRange::pos: usize
+pub corruption_head::CorruptionHeadError::DeclaredIdOutOfRange::width: usize
+pub corruption_head::CorruptionHeadError::FeatureLenMismatch
+pub corruption_head::CorruptionHeadError::FeatureLenMismatch::expected: usize
+pub corruption_head::CorruptionHeadError::FeatureLenMismatch::got: usize
+pub corruption_head::CorruptionHeadError::MalformedTree
+pub corruption_head::CorruptionHeadError::MalformedTree::detail: &'static str
+pub corruption_head::CorruptionHeadError::MalformedTree::tree: u32
+pub corruption_head::CorruptionHeadError::NotServable
+pub corruption_head::CorruptionHeadError::NotServable::detail: alloc::string::String
+pub corruption_head::CorruptionHeadError::NotServable::profile: &'static str
+pub corruption_head::CorruptionHeadError::SchemaHashMismatch
+pub corruption_head::CorruptionHeadError::SchemaHashMismatch::computed: u64
+pub corruption_head::CorruptionHeadError::SchemaHashMismatch::stored: u64
+pub corruption_head::CorruptionHeadError::SectionOutOfRange
+pub corruption_head::CorruptionHeadError::SectionOutOfRange::file_len: usize
+pub corruption_head::CorruptionHeadError::SectionOutOfRange::len: u32
+pub corruption_head::CorruptionHeadError::SectionOutOfRange::name: &'static str
+pub corruption_head::CorruptionHeadError::SectionOutOfRange::offset: u32
+pub corruption_head::CorruptionHeadError::SectionShape
+pub corruption_head::CorruptionHeadError::SectionShape::expected_elems: usize
+pub corruption_head::CorruptionHeadError::SectionShape::len: u32
+pub corruption_head::CorruptionHeadError::SectionShape::name: &'static str
+pub corruption_head::CorruptionHeadError::SectionShape::stride: usize
+pub corruption_head::CorruptionHeadError::Truncated
+pub corruption_head::CorruptionHeadError::Truncated::expected: usize
+pub corruption_head::CorruptionHeadError::Truncated::got: usize
+pub corruption_head::CorruptionHeadError::UnsupportedVersion
+pub corruption_head::CorruptionHeadError::UnsupportedVersion::got: u16
+pub corruption_head::CorruptionHeadError::UnsupportedVersion::supported: u16
+pub corruption_head::CorruptionVerdict::fired: bool
+pub corruption_head::CorruptionVerdict::gated_score: f64
+pub corruption_head::CorruptionVerdict::head_score: f64
+pub corruption_head::CorruptionVerdict::perceptual_score: f64
+pub corruption_head::CorruptionVerdict::probability: f64
+pub det_math::PowForm::LibmPowf
+pub det_math::PowForm::PureRust
 pub feature_v2::FormulaRevision::Rev1
 pub feature_v2::FormulaRevision::Rev2
 pub feature_v2::V2NewFeatureToggles::formula_revision: feature_v2::FormulaRevision
@@ -176,8 +286,21 @@ pub research::ResearchError::RevisionUnregistered::wanted: alloc::string::String
 pub research::ResearchError::UnreadableBake
 pub research::RevisionRef::Current
 pub research::RevisionRef::Named(alloc::string::String)
+pub score_math::HybridHeadParams::alpha_logit: f32
+pub score_math::HybridHeadParams::p_norm: f32
+pub score_math::HybridHeadParams::rank_b: f32
+pub score_math::HybridHeadParams::rank_w: &'a [f32]
+pub score_math::HybridHeadParams::reducer_b: f32
+pub score_math::HybridHeadParams::reducer_w: [f32; 4]
+pub score_math::PerSampleAlphaParams::b_alpha: f32
+pub score_math::PerSampleAlphaParams::p_norm: f32
+pub score_math::PerSampleAlphaParams::rank_b: f32
+pub score_math::PerSampleAlphaParams::rank_w: &'a [f32]
+pub score_math::PerSampleAlphaParams::reducer_b: f32
+pub score_math::PerSampleAlphaParams::reducer_w: [f32; 4]
+pub score_math::PerSampleAlphaParams::w_alpha: &'a [f32]
 
-## trait impls (33 types)
+## trait impls (40 types)
 
 BlurKernel: TrivialClone
 DiffmapOptions: TrivialClone
@@ -189,6 +312,11 @@ IwWeightKind: TrivialClone
 UnsupportedFormat: TrivialClone
 ZensimConfig: TrivialClone
 ZensimError: TrivialClone
+corruption_head::CorruptionHead: Clone, Debug
+corruption_head::CorruptionHeadError: Clone, Debug, Display, Eq, Error, PartialEq
+corruption_head::CorruptionVerdict: Clone, Copy, Debug, PartialEq, TrivialClone
+det_math::PowForm: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+f64: det_math::DetPow
 feature_set_id::ComputeParts: TrivialClone
 feature_set_id::ComputeToken: TrivialClone
 feature_v2::FeatureRegime: TrivialClone
@@ -205,6 +333,8 @@ research::FeatureProvenance: Clone, Debug, Eq, PartialEq
 research::Request: Clone, Debug
 research::ResearchError: Clone, Debug, Display, Error
 research::RevisionRef: Clone, Debug, Eq, PartialEq
+score_math::HybridHeadParams<'a>: Clone, Copy, Debug, TrivialClone
+score_math::PerSampleAlphaParams<'a>: Clone, Copy, Debug, TrivialClone
 source::AlphaMode: TrivialClone
 source::ColorPrimaries: TrivialClone
 source::GamutMapping: TrivialClone
@@ -215,4 +345,4 @@ source::StridedBytes<'a>: TrivialClone
 
 ## auto traits
 
-6 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+12 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
