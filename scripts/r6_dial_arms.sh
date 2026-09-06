@@ -57,6 +57,7 @@ for a in $ARMS; do
         --floor-rule resolvable \
         --gaddr-tail-pins product \
         --gaddr-json "$ROOT/dial/gaddr_${L}.json" \
+        --full-json "$ROOT/dial/verdict_${L}.json" \
         > "$ROOT/dial/${L}.log" 2>&1 || echo "  grade FAILED $L (see $ROOT/dial/${L}.log)"
     printf '[%s] graded %s\n' "$(date -u +%H:%M:%S)" "$L"
   done

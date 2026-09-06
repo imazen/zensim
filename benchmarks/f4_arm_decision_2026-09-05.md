@@ -185,3 +185,33 @@ KonJND and +0.016 AIC-3** against shipped D (0.83466 / 0.61778 / 0.79298 vs
 0.86333 / 0.53670 / 0.77700). The monotone-constrained class is not a small
 perturbation of the lasso class, which is why R6 carries both solvers rather
 than assuming the arm ranking transfers between them.
+
+---
+
+## 9. Handoff to the recalculation lane
+
+What a rev2 fleet wave needs from R6, in the form it needs it:
+
+* **Arm token.** The chosen arm is named ONCE, at
+  `zensim::ssim_form::SsimLumaForm::REV2_LUMA`, and `FormulaRevision::Rev2`
+  resolves through it. A worker selects it with `ZENSIM_FORMULA_REV=2`; the
+  per-arm override `ZENSIM_SSIM_LUMA` is a MEASUREMENT knob and must not appear
+  in a production wave's environment.
+* **Blast radius keys on the FEATURE-SET ID, not the width** (§2). At 372 and at
+  a pools-live 944 (`foldapp2pools`) F4 moves **132** slots; at the campaign's
+  zeroed `ext944` / `ext924` roots it moves **36**. A wave that declares "944 ⇒
+  36" under-declares every pools-live table by 96 slots.
+* **F5 is NOT free** (`feature_rev2_2026-09-05.md` §2.6): flipping revision 2
+  moves 22 of the 33 `GLOBAL_*` slots each of three shipped 944 bakes reads, so
+  Profiles C and CHdr must be re-verdicted in the same wave.
+* **Decoder era is an input.** Every table in this lane decoded through
+  `shared/zen_decode.rs` at `ceb86c2d`; a wave that decodes at a different era is
+  measuring two changes at once, and §3.34 priced decoder era at 73 % of an
+  extractor era.
+* **The `ssim2` arm is the reproduction control.** Any rev2 worker image should
+  be able to reproduce the postC 372 root byte-for-byte with
+  `ZENSIM_FORMULA_REV=1` before it is trusted to produce rev2 tables.
+* **Cost, measured here:** the full 196,086-row safesyn leg extracts in ~12–13
+  min at 254–290 pairs/s on one 26-thread box, including in-process decode of
+  111,068 `.jpg` / 34,001 `.avif` / 26,362 `.jxl` / 24,655 `.webp` bitstreams;
+  the seven eval corpora together take ~30 s.

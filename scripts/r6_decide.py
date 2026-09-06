@@ -144,12 +144,19 @@ def main() -> int:
               f"{'max':>8s} {'p5':>8s} {'ident':>9s} {'>ident':>7s} {'negfrac':>8s}")
         for v in variants:
             for arm in arms:
-                p = dd / f"gaddr_{arm}_{v}.json"
-                if not p.exists():
+                # `--gaddr-json` writes the ADDRESSABILITY block alone (it
+                # carries `measured`/`checks`, but not `mono_pct`/`reach`/the
+                # percentiles, which live in `--full-json`'s `dial` block).
+                # Read the full verdict and fall back to the gaddr file.
+                p = dd / f"verdict_{arm}_{v}.json"
+                g = dd / f"gaddr_{arm}_{v}.json"
+                if not p.exists() and not g.exists():
                     continue
-                j = json.load(open(p))
-                dl = j.get("dial", j)
-                m = (dl.get("addressability") or {}).get("measured", {})
+                dl = json.load(open(p)).get("dial", {}) if p.exists() else {}
+                addr = dl.get("addressability")
+                if addr is None and g.exists():
+                    addr = json.load(open(g))
+                m = (addr or {}).get("measured", {})
                 ident = (m.get("identity") or {})
                 neg = (m.get("negtail") or {})
                 rep["gates"].setdefault("g5", {})[f"{arm}_{v}"] = {
