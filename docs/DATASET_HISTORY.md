@@ -2464,3 +2464,51 @@ survive that flip unmeasured. **Nothing was wired in, no bake replaced, no ZNPR
 emitted** — the winning forms have no wire format (`emit_znpr` writes one identity
 layer from `coef_`; the owner now refuses `--bake-out` for them). Record:
 `benchmarks/corruption_head_theories_2026-09-06.md`.
+
+## §3.46 — the rev2 372 eval root, and the two data defects the fleet gate found (2026-09-06)
+
+**New root:** `/mnt/v/zen/zensim-training/2026-09-06-full-features-372-rev2/` —
+8 corpora, **43,870 rows**, era `v1postc_rev2`, feature-set id
+`basic+peaks+masked+iw@w372/v1postc_rev2#d16a1091`, build_commit `88477e38`.
+Produced by the **zenfleet Feature executor** (run
+`s3://zentrain/jobs/rev2feat372-20260906`, 3,907 jobs, one 24-core box, ~2.5 min),
+not by a local extractor. Mirrored to `s3://zentrain/eval-roots/…` and Tower.
+It is the first eval root at formula revision 2 and the first one whose cid22 leg
+is decoded entirely by imazen codecs.
+
+**Validity:** the SAME binary at `ZENSIM_FORMULA_REV=1` is bit-exact to the postC
+root on csiq / tid / konjnd / live / aic3, and at `=2` it is bit-exact to the R6b
+lane's `satexcess` arm on csiq / tid / konjnd / live / kadid / aic3
+(**6,092,616 cells, 0 differ**), through a different code path from
+`extract_features_372col`. That independently confirms what R6b could only
+derive: at width 372, revision 2 IS the `satexcess` arm.
+
+**Defect 1 — konjnd's staged pairs named the wrong file on 4 of 1,008 rows.**
+The level was derived with round-half-to-EVEN; the stored root used round-half-UP,
+so the four rows whose PJND is exactly `X.5` (`SRC0437` 58.5,
+`SRC0823`/`SRC0904`/`SRC0993` 30.5) pointed at `_030`/`_058` instead of
+`_031`/`_059`. Feature deltas to **0.068** — content, not rounding. Corrected in
+this root; the correction is proved, not asserted (re-extracting the four with the
+half-up file is bit-exact to the stored root).
+
+**Defect 2 — 12.5 % of CID22 is decoded by a NON-IMAZEN decoder, in every root
+before this one.** 536 of cid22's 4,292 rows differ from both the postC root and
+the r6b rev2 root, and they are **exactly** the `.jpg` rows (3,756 png + 536 jpg;
+100 % of jpg differ, 0 % of png), ~360 of 372 slots each, max |Δ| 9.5e-3. Cause:
+the postC root's cid22/kadid/tid/pipal legs come from `zensim-validate
+--extract-only`, which decodes with the third-party `image` crate
+(`zensim-validate/src/main.rs:830, 854, 1720, 1744`). kadid (png) and tid (bmp)
+agree because both decoders give identical pixels there; **JPEG is where they
+part.** `extract_features_372col` was migrated to `zen_decode.rs` on 2026-09-04;
+`zensim-validate` was not. CID22 is the gold human-MOS holdout, so every published
+CID22 number is read partly through a foreign decoder, and the manifests'
+`decoder_era` strings name only `zen_decode.rs`. **The price — what a bake's CID22
+SROCC does across the two decode eras — is NOT measured; it needs one bake scored
+on both tables.**
+
+**Also registered, not landed:** `powf` makes the extractor libc-dependent on 144
+of its 372 slots (`benchmarks/libm_pow_nondeterminism_2026-09-06.md`). The fleet's
+musl build and the dev box's glibc build of the SAME source differ by one ULP on
+~0.024 % of cells; glibc 2.36 and 2.43 are bit-identical. The wave was unblocked by
+building the fleet binary against the base image's own glibc, not by changing any
+arithmetic.
