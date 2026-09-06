@@ -1053,3 +1053,99 @@ artefact that actually ships is REGISTERED, NOT RUN.**
 **Nothing installed.** `ssim_form::SHIPPED_REVISION` is `Rev1`,
 `ZensimProfile::D`, `zensim/weights/` and both registries are untouched. The
 ship candidate goes to the user beside §12.6's era-break trade.
+
+### 12.8 REV2-D-GUARD-SHIPPED — the guard on the bake that ACTUALLY SHIPS
+
+**Lane:** REV2-D-GUARD-SHIPPED. **Record:**
+[`../benchmarks/rev2_d_arms_2026-09-06.md`](../benchmarks/rev2_d_arms_2026-09-06.md)
+§12. **Artefacts:** `/mnt/v/output/zensim/rev2-d-arms-2026-09-06/guard/shipped/`.
+
+**The registered follow-up this executes** is §11a.9's last bullet: *"The SHIPPED
+Profile D reads a DIFFERENT support and is UNMEASURED here … Applying the same
+guard + spline refit to the shipped bake — which needs its own dial anchor and
+its own instruments — is REGISTERED, not run."*
+
+#### 12.8.0 Honesty note on the pre-registration order
+
+**This section was written and pushed AFTER the five arm bakes were built and
+their verdicts, bootstrap, perturbation and outlier tables measured, and BEFORE
+the corruption gate, the served-score check and any board promotion.** It is
+therefore NOT a pre-registration in the sense §12.7 was. What makes the
+difference immaterial is that **the decision rule is §12.7.1's four criteria
+COPIED VERBATIM** — authored 2026-09-06 before the first guard bake of any kind,
+against a bar (revision 1) that here is the shipped bake itself. No criterion was
+authored, reworded or re-scoped with a number in hand. The reader should still
+weight it as a post-hoc write-up of a pre-registered rule, not as a fresh
+pre-registration, and that is why it is said here rather than left to be noticed.
+
+#### 12.8.1 Decision rule — §12.7.1 verbatim, with `revision 1` reading `shipped D`
+
+An arm is an **INSTALL CANDIDATE** iff ALL FOUR hold:
+
+1. **G-ADDR contract 6/6.**
+2. **`A7r` per-codec `repr` ≥ the SHIPPED bake's on EVERY one of the five
+   codecs** on the same instrument.
+3. **Paired-bootstrap CID22 delta vs the shipped bake not worse than zero** —
+   CI including 0, or excluding 0 on the positive side.
+4. **Two-reference inversions PASS** (G3, rate ≤ 0.07).
+
+An install candidate goes to the USER; it is **not installed by this lane**.
+`ZensimProfile::D`, `zensim/weights/`, `ssim_form::SHIPPED_REVISION` and both
+registries are untouched either way.
+
+#### 12.8.2 The chain, recovered from the shipped bake's own embedded repro
+
+`zentrain.repro` inside `d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin`
+names the whole recipe. Two facts read off it and off the artefact shas, not
+assumed:
+
+* the shipped 4,222 B wide bake **IS** `fit-lasso`'s direct output
+  (`did100-2026-09-04/bakes/d_id100_negrich_raw.bin`, sha `921a8f67…`), so
+  **`extend-top` is NOT in this lineage** — its output `NR_id21.bin` carries a
+  different sha;
+* the two anchors are `multiband_anchor_dial100.parquet` (2,000 rows) and
+  `identity_anchor_sg_n21.parquet` (21 rows), both at `--anchor-target ssim2_gpu`.
+
+```
+add-winsor    --in <shipped wide> --slots <spec> --lo-pct 0.1 --hi-pct <Q>
+              --fit-corpus canonical-2026-05-21/train/safesyn.parquet   # the gram's own source, n=196,086
+shared-anchor --anchor multiband_anchor_dial100.parquet
+              --anchor identity_anchor_sg_n21.parquet --target-col ssim2_gpu
+densify       --gate-rows 512
+```
+
+#### 12.8.3 Arms
+
+| arm | guard scope | hi-pct |
+|---|---|--:|
+| **`Sctl`** | none | — | **CONTROL.** The refit path with no guard; must reproduce the shipped verdict. |
+| **`Sg12p999`** | the twelve F17 slots — §11a's RECOMMENDED scope, verbatim | 99.9 |
+| **`Sg2p999`** | **f116, f155 only** — the sole two F17 ids this bake declares | 99.9 |
+| `Sg12p99` | the twelve | 99 |
+| `Sg2p99` | f116, f155 | 99 |
+
+`Sg12` vs `Sg2` is the isolation: the ten unread F17 slots carry exactly-zero
+weight, so the two should be indistinguishable after `densify`. Whether they are
+is measured, not assumed.
+
+#### 12.8.4 Grading — §12.7.4, on the RUNTIME-era instruments
+
+The shipped bake is graded on its own era, not on r6b's: features root
+`2026-09-05-full-features-372-postC`, the FLOOR-DENSE `ladder` dial grid with
+its five per-codec ladders and two AVIF backends, the postC negtail + identity
+probes, `--floor-rule resolvable --gaddr-tail-pins product`, mentor
+`peer_ssim2`. Paired bootstrap B = 2,000, seed 20260905, same index sets, on
+cid22/konjnd/aic3/csiq/live/tid/kadid. Plus: the LIVE outlier ordering on BOTH
+the twelve-slot mask (comparable to §11a.7) and the two-slot mask (what this
+bake's guard can actually reach); the healthy-cell perturbation on the training
+leg and on every eval corpus, at DECLARED and EFFECTIVE (post-densify) scope;
+the corruption gate through `bake_verdict --corruption-head`; and a served-score
+check that the runtime applies the declared transform.
+
+#### 12.8.5 What this lane does NOT do
+
+No install, no re-extraction, no era break, no feature-definition change, no
+perf claim. Confounds inherited: KADID/TID are train==val on this lineage; the
+guard's windows are fitted on the 2026-05-21-era training leg while the eval
+root is post-option-C, so the windows and the rows they clamp are one extraction
+era apart — stated, not measured away.
