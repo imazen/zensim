@@ -824,3 +824,78 @@ the manifests are **untouched by this campaign**.
   the alpha head is a −0.89-CID22 inverted ranker on this recipe, so reaching it
   needs the head's output orientation fixed first). That is the registered next
   step, with its prerequisite named.
+
+## 15. THE FUNDAMENTALS, AS ASKED — what changed and what it is worth
+
+The brief asked to *"improve all fundamental things like model matrix shapes and
+naming as needed"*. Five landed; each is stated with what it actually bought.
+
+| fundamental | what landed | what it bought, measured |
+|---|---|---|
+| **1 — identity** | the contamination localised to **four** slots (`LUMA_MEAN_REF`), new 261 reader slice + registered id, the id100 anchor built for both layouts | contract **5/6 → 6/6 at 944** with CID22 bit-unchanged; and the measurement that the same chain **cannot** work at 372, because there the identity vector is degenerate-identical (§14) — a mechanism nobody had written down |
+| **2 — matrix shapes** | `WR4_HIDDEN`, `WR4_ALPHA_HEAD`, `WR4_SKIP`, `WR4_FULL944`, `WR4_NO_COARSE_DECAY`, all no-op-when-unset | **capacity is not a lever** (H32 ≈ H128 within every seed spread, at 30–47 % fewer bytes); the α head is a **−0.89-CID22 inverted ranker** on this recipe; `--skip-connection` is inert; and `--coarse-decay` is worth +0.0055 KonJND |
+| **3 — naming** | 5 feature sets + 1 root registered, owner-hash-verified; the layout-independence of the hash exercised deliberately | the id machinery **caught the recipe's train/serve skew unprompted**, and named a fresh bake `basic+peaks@w372/…#3fb78648` from its bytes alone |
+| **4 — selection** | the whole endgame chain wired: per-arm A7r grading, `arm_table.py`, `freeze_check --select --seed-group --min-k 2 --floor-basis all`, M3a via its owner | selection ran and **correctly refused** to pick anything while M3a was UNMEASURED — the rule working, not a failure |
+| **5 — ship rule** | the full D gate on the new ladder instrument, both eras, both layouts | a clean **PROPOSE** with three named weights defects, and the serving question answered by measurement at both ends |
+
+**Two defects fixed at their owners** (`--coarse-decay` silently discarded on the
+α head; `pack`'s collapsed-spline error naming a symptom instead of
+anti-correlation) and **two caught in pre-flight** (the 372 lane's
+un-normalised targets, ~100× scale on two of six legs; the M3a run ordered with
+the winner last). Neither pre-flight catch cost a fit.
+
+### Registered, NOT run — with the reason, never as a null
+
+* **`--monotonicity-reg` (arm `MR`)** and the **`--konjnd-aggregation-*` /
+  `--pjnd-passthrough-*` family** — all α-head-only, and the α head is an
+  inverted ranker on this recipe (§11). **Prerequisite: fix the head's output
+  orientation at training time.** `affine_calibrate --beta=-1` cannot stand in;
+  it asserts a scalar final layer and this architecture's is 64-wide.
+* **`--monotone-cbc`** — needs `--tanh-output-head-scale > 0` **and** a
+  per-feature sign mask, and the only mask that exists
+  (`benchmarks/feature_sign_mask_2026-05-26.tsv`) is a **372**-layout artifact.
+* **The H256 width extension** — cancelled on evidence, not skipped: the width
+  axis is flat downward across six set×width pairs, so buying the upward point
+  would have been sunk cost.
+* **A 372-layout re-extraction of `tbig_hf`** — the near-lossless ladder has no
+  372 twin, so the servable lane trains without the one leg the D2/D3 within-ref
+  lever acts on. That is the single most likely source of further KonJND on the
+  servable side.
+
+## 15. THE FUNDAMENTALS, AS ASKED — what changed and what it is worth
+
+The brief asked to *"improve all fundamental things like model matrix shapes and
+naming as needed"*. Five landed; each is stated with what it actually bought.
+
+| fundamental | what landed | what it bought, measured |
+|---|---|---|
+| **1 — identity** | contamination localised to **four** slots (`LUMA_MEAN_REF`), new 261 reader slice + registered id, id100 anchors for both layouts | contract **5/6 → 6/6 at 944** with CID22 bit-unchanged; and the measurement that the same chain **cannot** work at 372, where the identity vector is degenerate-identical (§14) — a mechanism nobody had written down |
+| **2 — matrix shapes** | `WR4_HIDDEN`, `WR4_ALPHA_HEAD`, `WR4_SKIP`, `WR4_FULL944`, `WR4_NO_COARSE_DECAY`, all no-op-when-unset | **capacity is not a lever** (H32 ≈ H128 inside every seed spread, at 30–47 % fewer bytes); the α head is a **−0.89-CID22 inverted ranker** on this recipe; `--skip-connection` is inert; `--coarse-decay` is worth +0.0055 KonJND |
+| **3 — naming** | 5 feature sets + 1 root registered, owner-hash-verified; the hash's layout-independence exercised deliberately | the id machinery **caught the recipe's train/serve skew unprompted**, and named a fresh bake `basic+peaks@w372/…#3fb78648` from its bytes alone |
+| **4 — selection** | the endgame chain wired end to end: per-arm A7r grading, `arm_table.py`, `freeze_check --select --seed-group --min-k 2 --floor-basis all`, M3a through its owner | selection ran and **correctly refused** to pick while M3a was UNMEASURED — the rule working, not a failure |
+| **5 — ship rule** | the full D gate on the new ladder instrument, both eras, both layouts | a clean **PROPOSE** with three named weights defects, and the serving question answered by measurement at both ends |
+
+**Two defects fixed at their owners** (`--coarse-decay` silently discarded on
+the α head; `pack`'s collapsed-spline error naming a symptom rather than
+anti-correlation) and **two caught in pre-flight** (the 372 lane's
+un-normalised targets — ~100× scale on two of six legs, nothing would have
+crashed; and an M3a run ordered with the winner last). Neither pre-flight catch
+cost a fit.
+
+### Registered, NOT run — each with its reason, never as a null
+
+* **`--monotonicity-reg` (arm `MR`)** and the **`--konjnd-aggregation-*` /
+  `--pjnd-passthrough-*`** family — all α-head-only, and the α head is an
+  inverted ranker on this recipe (§11). **Prerequisite: fix the head's output
+  orientation at training time.** `affine_calibrate --beta=-1` cannot stand in;
+  it asserts a scalar final layer and this architecture's is 64-wide.
+* **`--monotone-cbc`** — needs `--tanh-output-head-scale > 0` **and** a
+  per-feature sign mask, and the only mask that exists
+  (`benchmarks/feature_sign_mask_2026-05-26.tsv`) is a **372**-layout artifact
+  while the arm that needs it is 944-layout.
+* **The H256 width extension** — cancelled on evidence rather than skipped: the
+  width axis is flat downward across six set×width pairs, so buying the upward
+  point would have been sunk cost.
+* **A 372-layout `tbig_hf`** — the near-lossless ladder has no 372 twin, so the
+  servable lane trains without the one leg the D2/D3 within-ref lever acts on.
+  That is the most likely source of further KonJND on the servable side.
