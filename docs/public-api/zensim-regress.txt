@@ -196,7 +196,7 @@ pub error::RegressError::Fetch::message: alloc::string::String
 pub error::RegressError::Fetch::url: alloc::string::String
 pub error::RegressError::Io
 pub error::RegressError::Io::path: std::path::PathBuf
-pub error::RegressError::Io::source: std::io::error::Error
+pub error::RegressError::Io::source: core::io::error::Error
 pub error::RegressError::NoActiveChecksums
 pub error::RegressError::NoActiveChecksums::test_name: alloc::string::String
 pub error::RegressError::NoChecksumFile
@@ -272,7 +272,7 @@ pub manifest::ManifestStatus::Novel
 pub struct manifest::ManifestDir
 pub fn manifest::ManifestDir::dir(&self) -> &std::path::Path
 pub fn manifest::ManifestDir::from_env() -> core::option::Option<Self>
-pub fn manifest::ManifestDir::open(impl core::convert::Into<std::path::PathBuf>) -> std::io::error::Result<Self>
+pub fn manifest::ManifestDir::open(impl core::convert::Into<std::path::PathBuf>) -> core::io::error::Result<Self>
 pub fn manifest::ManifestDir::path(&self) -> &std::path::Path
 pub fn manifest::ManifestDir::write_entry(&self, &manifest::ManifestEntry<'_>)
 pub struct manifest::ManifestEntry<'a>
@@ -284,16 +284,16 @@ pub manifest::ManifestEntry::status: manifest::ManifestStatus
 pub manifest::ManifestEntry::test_name: &'a str
 pub manifest::ManifestEntry::tolerance_zdsim: core::option::Option<f64>
 pub struct manifest::ManifestWriter
-pub fn manifest::ManifestWriter::create(impl core::convert::Into<std::path::PathBuf>) -> std::io::error::Result<Self>
+pub fn manifest::ManifestWriter::create(impl core::convert::Into<std::path::PathBuf>) -> core::io::error::Result<Self>
 pub fn manifest::ManifestWriter::from_env() -> core::option::Option<Self>
-pub fn manifest::ManifestWriter::open(impl core::convert::Into<std::path::PathBuf>) -> std::io::error::Result<Self>
+pub fn manifest::ManifestWriter::open(impl core::convert::Into<std::path::PathBuf>) -> core::io::error::Result<Self>
 pub fn manifest::ManifestWriter::path(&self) -> &std::path::Path
 pub fn manifest::ManifestWriter::write_entry(&self, &manifest::ManifestEntry<'_>)
 pub const manifest::MANIFEST_DIR_ENV_VAR: &str
 pub const manifest::MANIFEST_ENV_VAR: &str
 pub trait manifest::ManifestWrite
 pub fn manifest::ManifestWrite::write_entry(&self, &manifest::ManifestEntry<'_>)
-pub fn manifest::combine_manifest_dir(&std::path::Path, &std::path::Path) -> std::io::error::Result<usize>
+pub fn manifest::combine_manifest_dir(&std::path::Path, &std::path::Path) -> core::io::error::Result<usize>
 pub fn manifest::writer_from_env() -> core::option::Option<alloc::boxed::Box<(dyn manifest::ManifestWrite + core::marker::Send + core::marker::Sync)>>
 pub mod oracle
 pub enum oracle::OracleTolerance
@@ -358,10 +358,10 @@ pub report::Platform::manifest_path: std::path::PathBuf
 pub report::Platform::name: alloc::string::String
 pub fn report::format_recommended_line(f64) -> alloc::string::String
 pub fn report::generate_html_report(&[(&str, &[report::ParsedEntry])], &alloc::collections::btree::map::BTreeMap<alloc::string::String, std::path::PathBuf>) -> alloc::string::String
-pub fn report::generate_merged_report(&[report::Platform]) -> core::result::Result<alloc::string::String, std::io::error::Error>
+pub fn report::generate_merged_report(&[report::Platform]) -> core::result::Result<alloc::string::String, core::io::error::Error>
 pub fn report::ideal_amplification(u8) -> u8
-pub fn report::parse_manifest(&std::path::Path) -> core::result::Result<alloc::vec::Vec<report::ParsedEntry>, std::io::error::Error>
-pub fn report::parse_manifest_dir(&std::path::Path) -> core::result::Result<alloc::vec::Vec<report::ParsedEntry>, std::io::error::Error>
+pub fn report::parse_manifest(&std::path::Path) -> core::result::Result<alloc::vec::Vec<report::ParsedEntry>, core::io::error::Error>
+pub fn report::parse_manifest_dir(&std::path::Path) -> core::result::Result<alloc::vec::Vec<report::ParsedEntry>, core::io::error::Error>
 pub fn report::recommend_tolerance(f64) -> core::option::Option<f64>
 pub mod testing
 pub testing::ComparisonMethod::CenterCropped
@@ -463,14 +463,14 @@ pub DimensionMismatchKind::OrientationSwap
 pub enum PngError
 pub PngError::Decode(alloc::string::String)
 pub PngError::Encode(alloc::string::String)
-pub PngError::Io(std::io::error::Error)
+pub PngError::Io(core::io::error::Error)
 pub enum RegressError [also: error]
 pub RegressError::Fetch
 pub RegressError::Fetch::message: alloc::string::String
 pub RegressError::Fetch::url: alloc::string::String
 pub RegressError::Io
 pub RegressError::Io::path: std::path::PathBuf
-pub RegressError::Io::source: std::io::error::Error
+pub RegressError::Io::source: core::io::error::Error
 pub RegressError::NoActiveChecksums
 pub RegressError::NoActiveChecksums::test_name: alloc::string::String
 pub RegressError::NoChecksumFile
@@ -562,7 +562,7 @@ pub fn shrink_tolerance(&testing::RegressionTolerance, &testing::RegressionRepor
 
 Bitmap: Clone, Debug, Eq, PartialEq
 BitmapRef<'a>: Clone, Copy, Debug, From<&'a Bitmap>
-PngError: Debug, Display, Error, From<std::io::error::Error>
+PngError: Debug, Display, Error, From<core::io::error::Error>
 checksums::CheckResult: Clone, Debug, Display
 checksums::ChecksumEntry: Clone, Debug
 checksums::ChecksumsFile: Clone, Debug

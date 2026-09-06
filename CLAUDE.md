@@ -3533,6 +3533,27 @@ the read silently uses the readonly value. Without `set -u`, the
 same script may still appear to work in some shells. Make the
 diagnostic explicit by renaming.
 
+## API Stability
+
+**Run `just api-doc-check` before every push that touches `pub` items.** It
+regenerates the `docs/public-api/{zensim,zensim-regress}{.txt,.features.txt,.internal.txt}`
+snapshots — via the workspace-`exclude`d `apidoc/` package (`zenutils-apidoc`
+crate; see `apidoc/Cargo.toml` for why it's excluded) — and fails if the
+committed files don't match what a fresh regen produces, so a change to the
+public (or `#[doc(hidden)]`) surface always shows up as a reviewed diff next
+to the code change that caused it. `just api-doc` regenerates in place
+(commit the diff); `just api-doc-check` only verifies, same as CI's
+`api-doc-check` job in `.github/workflows/ci.yml` (ubuntu-only, cached via
+`Swatinem/rust-cache@v2`). That CI job did not exist before 2026-09-06 — the
+snapshots could, and did, drift silently with nothing to catch it. The
+rustdoc-JSON nightly is PINNED (`apidoc_toolchain` in the justfile, kept in
+sync with the CI job's `ZEN_API_DOC_TOOLCHAIN`): an unpinned tracking nightly
+churns cross-crate path rendering with zero repo changes (MEASURED
+2026-09-06: the `core::io` re-homing turned `std::io::error::Error` into
+`core::io::error::Error` across 11 lines of `zensim-regress.txt`, a false
+diff). Bump the pin deliberately, in the same commit as a `just api-doc`
+regen.
+
 ## Release Process
 
 `zensim` and `zensim-regress` are released **independently** with **separate semver**. A bump to zensim does not require a bump to zensim-regress, and vice versa. Tag format:

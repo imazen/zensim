@@ -1,19 +1,30 @@
 # zensim dev commands
 
+# The rustdoc-JSON nightly is PINNED (keep in sync with the `api-doc-check`
+# job in .github/workflows/ci.yml): an unpinned tracking nightly churns
+# cross-crate path rendering with zero repo changes — MEASURED 2026-09-06,
+# regenerating zensim-regress.txt against a newer nightly than the one that
+# produced the committed snapshot rewrote 11 lines of `std::io::error::Error`
+# to `core::io::error::Error` (the core::io re-homing), which is exactly the
+# false-diff class this pin exists to prevent. Bump the pin deliberately, in
+# the same commit as a `just api-doc` regen.
+apidoc_toolchain := "nightly-2026-09-02"
+
 # Format + regenerate the public-API surface snapshots (docs/public-api/).
 # The snapshot runner lives in the workspace-excluded apidoc/ package, so it
-# is never built or run by plain `cargo test` or any CI job.
+# is never built or run by plain `cargo test`, nor by any OTHER CI job — only
+# the dedicated `api-doc-check` CI job (which sets ZEN_API_DOC=check) runs it.
 fmt:
     cargo fmt --all
-    cargo test --manifest-path apidoc/Cargo.toml
+    ZEN_API_DOC_TOOLCHAIN={{apidoc_toolchain}} cargo test --manifest-path apidoc/Cargo.toml
 
 # Regenerate the public-API surface snapshots only
 api-doc:
-    cargo test --manifest-path apidoc/Cargo.toml
+    ZEN_API_DOC_TOOLCHAIN={{apidoc_toolchain}} cargo test --manifest-path apidoc/Cargo.toml
 
-# Verify the committed snapshots are current
+# Verify the committed snapshots are current (what CI's api-doc-check job runs)
 api-doc-check:
-    ZEN_API_DOC=check cargo test --manifest-path apidoc/Cargo.toml
+    ZEN_API_DOC=check ZEN_API_DOC_TOOLCHAIN={{apidoc_toolchain}} cargo test --manifest-path apidoc/Cargo.toml
 
 # CI-exact clippy
 clippy:

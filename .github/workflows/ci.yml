@@ -281,6 +281,48 @@ jobs:
             exit 1
           fi
 
+  # Fails when docs/public-api/*.txt (the committed surface snapshots for
+  # zensim + zensim-regress) don't match what a fresh regen produces — API
+  # growth/removal must be a reviewed, committed change (regenerate with
+  # `just api-doc`). Before this job existed, NOTHING ran api-doc-check on
+  # CI (the apidoc/ package is workspace-`exclude`d specifically so plain
+  # `cargo test` and every other job never touch it — see apidoc/Cargo.toml),
+  # so a lane could add/hide/remove public items and the snapshots would
+  # just silently go stale.
+  #
+  # No `cargo-public-api` CLI install here: zenutils-apidoc depends on the
+  # `public-api` crate as a plain Cargo library dependency (version-pinned
+  # in apidoc/Cargo.lock), not the CLI binary — there is nothing separate to
+  # install or pin for that part.
+  #
+  # The rustdoc-JSON nightly IS pinned (ZEN_API_DOC_TOOLCHAIN, kept in sync
+  # with the justfile's `apidoc_toolchain`): an unpinned tracking nightly
+  # churns cross-crate path rendering with zero repo changes — MEASURED
+  # 2026-09-06, regenerating against a newer nightly than the one that
+  # produced the committed snapshot rewrote 11 `std::io::error::Error` /
+  # `std::io::error::Result` lines to `core::io::error::Error` /
+  # `core::io::error::Result` in zensim-regress.txt alone (the core::io
+  # re-homing) — a false diff with no corresponding code change. Bump the
+  # pin deliberately, in the same commit as a `just api-doc` regen.
+  api-doc-check:
+    name: Public API snapshots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Two independent Cargo.lock graphs: the root workspace (what the
+          # apidoc test runs `cargo rustdoc` against, via workspace_dir("..")
+          # — this is the expensive one) and apidoc/'s own tiny dependency
+          # tree (it is `exclude`d from the root workspace, so it resolves
+          # and builds separately).
+          workspaces: |
+            . -> target
+            apidoc -> target
+      - name: Public API snapshots current
+        run: ZEN_API_DOC=check ZEN_API_DOC_TOOLCHAIN=nightly-2026-09-02 cargo test --manifest-path apidoc/Cargo.toml
+
   metric-census:
     name: Metric-column corruption census
     runs-on: ubuntu-latest
