@@ -703,6 +703,20 @@ therefore the pair-draw RNG stream, so these arms are not sample-seed-matched to
 the earlier ones. The comparison is between k=3 means with their spreads, not
 between paired draws.
 
+**The floor window's gradient share, computed before the fit so a null cannot be
+blamed on it afterwards.** The TV sampler draws UNIFORMLY from the pair list and
+scales by the band weight, so what matters is `n × w`:
+
+| band | contents | n | % of draws | w | **% of ladder gradient** |
+|---|---|--:|--:|--:|--:|
+| 0 | primary corpus, low-q | 79,533 | 38.84 | 2.0 | 46.02 |
+| 1 | primary mid-q + anchor non-floor | 62,159 | 30.36 | 0.7 | 12.59 |
+| 2 | primary corpus, high-q | 49,504 | 24.18 | 0.7 | 10.03 |
+| **3** | **anchor FLOOR window** | **13,550** | **6.62** | **8.0** | **31.36** |
+
+**The floor window carries 31.4 % of the ladder gradient.** If A7r does not move
+under that, the failure is not "the hinge never saw the floors".
+
 **Gates: identical to every other arm** — A7r per codec against the mentor bars,
 the full contract, two-reference inversions, rank vs shipped D and vs the 944
 leaders.
