@@ -878,7 +878,32 @@ not.
 **A7r is still 5 of 5**, because "moved a lot" is not "reached the bar": svt is
 0.077 short of 1.0, jpeg 0.077 short of 0.6667, jxl 0.500 short of 0.9615.
 
-*(RESULTS — the anchor arms at k=3, and `H_anchorlad` vs `D_lad20`, pending.)*
+### 5.16 Binary parity — the wave's frozen binaries produce the same weights as the fixed ones
+
+The wave ran on binaries frozen BEFORE the 2026-09-06 review fixes. That the
+fixes are inert for this configuration was an ARGUMENT; here it is a measurement.
+`B_nonneg_s4004` retrained with the current binary:
+
+```
+frozen   941848c9069cd90ddba614ba72a9386fa1d56a3b3d7951b776cb41f74164160e
+current  941848c9069cd90ddba614ba72a9386fa1d56a3b3d7951b776cb41f74164160e
+```
+
+**BYTE-IDENTICAL** (123,020 B each). `for_groups`' new `nonneg_distance` clause
+changes nothing when the recipe's `:both` legs already derive SCORE, and the
+pool/hybrid refusal, the `--leaky-alpha 1.0` mapping, the f32-pin assert and
+`--identity-rows` are all on paths this wave never takes.
+
+**⚠ The first version of this check reported a FALSE FAIL**, and it is worth
+keeping. A raw bake embeds its own argv in `zentrain.repro`, and the two runs
+necessarily write to different `--out` paths — so a raw `sha256` comparison
+**could only ever report FAIL**. The documented equivalence method
+(`bake_dial_refit strip --key zentrain.repro`, then sha) was written down where I
+could have read it first. An equivalence check that can only fail is worse than
+no check, because it looks like evidence.
+
+*(RESULTS — the anchor arms at k=3, `H_anchorlad` vs the band-weight-matched
+`D_lad20m`, W4 and the board, pending.)*
 
 ---
 
