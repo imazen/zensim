@@ -30,7 +30,7 @@ POSTC=/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC
 LADDER=/mnt/v/output/zensim/ladder-2026-09-05/instruments
 PROBES=/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments
 IDANCHOR=/mnt/v/output/zensim/did100-2026-09-04/work/identity_anchor_sg_n21.parquet
-MULTIBAND=$CANON/multiband_anchor_dial100.parquet
+ANCHOR=$INSTR/negrich_plus_identity21_anchor.parquet
 TVPAIRS=$INSTR/ladder_tv_pairs_safesyn.tsv
 COMMON=/mnt/v/output/zensim/rev2-refit-2026-09-06/fastclass/common_args.txt
 SLICE="$WS/scripts/sota944/slice_basic156_peaks.txt"
@@ -83,7 +83,6 @@ cell() {
   local arm="$1" seed="$2" name="${1}_s${2}"
   local raw="$OUT/bakes/${name}.bin"
   local packed="$OUT/bakes/${name}_packed.bin"
-  local sa="$OUT/bakes/${name}_sa.bin"
   local byid="$OUT/bakes/${name}_byid.bin"
 
   if [[ -f "$OUT/verdicts/${name}.fulleval.json" ]]; then say "SKIP $name (already harvested)"; return 0; fi
@@ -97,25 +96,31 @@ cell() {
   "${ZL_RUNHEAVY:-$HOME/work/zen/scripts/run-heavy}" --mem 16G --jobs 8 -- \
      "$BIN/zensim_mlp_train" "${argv[@]}" > "$OUT/logs/${name}.train.log" 2>&1
 
+  # ONE pack step, against the negrich dial anchor CONCATENATED with the 21-row
+  # identity anchor (built by instruments/negrich_plus_identity21_anchor.parquet's
+  # manifest), so `fit_spline_knots` gets a knot at (raw(identity), 100) in the
+  # same pass that quantizes and prunes — QUANTIZE-then-CALIBRATE, preserved.
+  #
+  # `shared-anchor` would be the more elegant place for the identity anchor (it
+  # takes --anchor repeatably) but it asserts a SINGLE-LAYER linear bake, and
+  # these are 228 -> H -> 1 MLPs. Merging the anchors up front is the same fit.
+  #
+  # 21 of 2,021 rows = 1.04 %, which owns fit_spline_knots' >= p99 top bin
+  # exactly as the id100 lane sized it; n = 38 spills into the next bin and
+  # displaces the top real knot.
+  #
+  # Under --nonneg-distance raw(identity) is the ARGMAX by construction, so that
+  # knot is the top one and identity lands at exactly 100. The control gets the
+  # identical chain — its raw(identity) is NOT the argmax, and what that costs
+  # it is the measurement.
   say "PACK $name"
   "$BIN/bake_dial_refit" pack --in "$raw" --out "$packed" --neg-tail \
-      --anchor "$MULTIBAND" --target-col ssim2_gpu \
+      --anchor "$ANCHOR" --target-col ssim2_gpu \
       > "$OUT/logs/${name}.pack.log" 2>&1
-
-  # Re-fit the spline on the packed net against the negrich anchor PLUS the
-  # 21-row identity anchor, so the spline carries a knot at (raw(0), 100).
-  # Under --nonneg-distance raw(0) is the argmax by construction, so that knot
-  # is the TOP one and identity lands at exactly 100. The control gets the
-  # identical chain — its raw(0) is NOT the argmax, and what that costs is the
-  # measurement.
-  say "SHARED-ANCHOR $name"
-  "$BIN/bake_dial_refit" shared-anchor --in "$packed" --out "$sa" \
-      --anchor "$MULTIBAND" --anchor "$IDANCHOR" --target-col ssim2_gpu \
-      > "$OUT/logs/${name}.sa.log" 2>&1
 
   # densify is the ONLY thing that writes `zentrain.feature_ids`.
   say "DENSIFY $name"
-  "$BIN/bake_dial_refit" densify --in "$sa" --out "$byid" --gate-rows 512 \
+  "$BIN/bake_dial_refit" densify --in "$packed" --out "$byid" --gate-rows 512 \
       > "$OUT/logs/${name}.densify.log" 2>&1
 
   say "VERDICT $name"
