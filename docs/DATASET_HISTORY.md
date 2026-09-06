@@ -1950,6 +1950,37 @@ root `canonical-2026-05-21/train`. **The hash is layout-independent by design**,
 so the 228 reader set carries `#3fb78648` at both 372 and 944 — and that
 distinction is precisely what decides servability.
 
+### §3.30a — RESULTS (all 57 cells landed; 3 failed, diagnosed)
+
+* **YES, a 156-plus-cheap model is 944-competitive — on BOTH layouts.** The
+  selected `S372_S228_H128_p` (k=3) reads composite **0.8732** / CID22
+  **0.8896** / KonJND **0.4999** against the era-closed leader bars of 0.8626 /
+  0.8877 / 0.4782, and the 944 lane's own `S228` H32 (0.8666 / 0.8887 / 0.4543)
+  clears composite and CID22 too. The **rulers are verified identical** — 504
+  KonJND refs and 4,292 CID22 pairs for every row — so the era difference
+  changes each model's inputs and not the question.
+* **CAPACITY IS NOT A LEVER.** H32 vs H128 moves composite by −0.0038…+0.0021
+  across six set×width pairs, inside every seed spread, at 30–47 % fewer bytes.
+* **THE COMPUTE CEILING IS BELOW THE RESTRICTED SETS.** `SORACLE` — the same
+  recipe reading all 944 coordinates — reads composite **0.8581**, the lowest
+  non-degenerate cell, and KonJND 0.4191 against `S228`'s 0.4543. **The fast
+  class's KonJND gap is NOT a compute gap**; the campaign's standing hypothesis
+  is falsified by its own registered instrument.
+* **The per-sample-α head is an INVERTED ranker on this recipe** — raw CID22
+  **−0.8921** at depth 2 (a *better* ordering in magnitude than the plain
+  path's +0.8863) — which is why its pack died on a monotone spline it could not
+  fit. `--monotonicity-reg` / `--konjnd-aggregation-*` / `--pjnd-passthrough-*`
+  are all reachable only through that head, so they stay UNMEASURED behind a
+  named prerequisite.
+* **Ship: PROPOSE, not install.** Contract fails C5 (identity dial 90.9368, band
+  [97.5, 100]) and C6 (1,642 of 9,593 cells above identity) — the registered
+  either/or, a **weights** defect, worse here than shipped B's 6.01 % — and A7r
+  fails 5/5 codecs. `ZensimProfile::D`, `zensim/weights/`, `profile.rs` and the
+  manifests are untouched.
+* **W4 NOT MEASURED**: the box was at load 72–79 from other lanes when the
+  campaign reached it, against a protocol whose own mechanised form refuses
+  above 3.0. `scripts/fastclass2_w4_deferred.sh` finishes it on an idle box.
+
 Record: `benchmarks/fastclass2_campaign_2026-09-05.md`, registration
 `docs/PLAN_FASTCLASS2_2026-09-05.md`; ledger ROUND 98.
 

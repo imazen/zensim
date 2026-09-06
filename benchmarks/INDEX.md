@@ -289,7 +289,25 @@ fixed — **`--coarse-decay` was discarded on the per-sample-alpha head** (the o
 rider of the same `apply_post_adam_penalties` had been guarded since it landed) and
 the 372 lane's first draft named the **un-normalised** targets (two groups at ~100x
 the others' scale, nothing would have crashed; caught in pre-flight, 15 fits
-unspent). Five feature sets + one root registered, owner-hash-verified.
+unspent). Five feature sets + one root
+registered, owner-hash-verified. **RESULTS (57 cells, k=3 each):** the answer is
+**YES on both layouts** — the selected `S372_S228_H128_p` reads composite
+**0.8732** / CID22 **0.8896** / KonJND **0.4999** against era-closed leader bars
+of 0.8626 / 0.8877 / 0.4782 (rulers verified identical: 504 KonJND refs, 4,292
+CID22 pairs everywhere), and `freeze_check --select --seed-group --min-k 2` picks
+it independently at **8/8 floors on every seed**. **Capacity is not a lever**
+(H32 ≈ H128 inside every spread at 30-47 % fewer bytes) and **the COMPUTE CEILING
+is BELOW the restricted sets** — `SORACLE`, the same recipe free to read all 944
+coordinates, is the lowest non-degenerate cell at 0.8581 / KonJND 0.4191, which
+falsifies the campaign's own registered "the KonJND gap is a compute gap"
+hypothesis. The α head is an **inverted ranker** (raw CID22 −0.8921, a better
+ordering in magnitude than the plain path's +0.8863) so its pack could not fit a
+monotone spline, and `--monotonicity-reg` stays UNMEASURED behind that
+prerequisite. **Ship: PROPOSE, not install** — C5 (identity dial 90.9368), C6
+(1,642 of 9,593 cells above identity, worse than shipped B's 6.01 %) and A7r
+(5/5 codecs) all fail, every one a weights property. **W4 NOT MEASURED**: box at
+load 72-79 from other lanes; `scripts/fastclass2_w4_deferred.sh` finishes it and
+refuses a busy box.
 
 **Push clobber + the push guard (2026-09-05)**:
 [`push_clobber_2026-09-05.md`](push_clobber_2026-09-05.md) — `origin/main` moved SIDEWAYS twice on 2026-09-04 (jj ops `db7c8ca86b69`, `0edf97e28a91`), dropping nine commits from six lanes with no error and no warning; the per-added-line audit separating the seven that were re-landed or superseded from the one that was genuinely lost (`d3a948ca`, the G-ADDR board coverage — 482 of 498 added lines absent, `cut_gaddr_negtail_probe.py` absent entirely, and the boards on `/mnt/v` already generated with it), the re-land (`2e5cdc8b`, diff byte-for-byte identical to the original), and the owner guard `scripts/safe_push.sh` (fetch → ancestor-assert → set → push → verify; refuses sideways with rc=3 and names every commit it would drop; 4-case self-test incl. the negative control, plus a retrospective control that replays the real clobber).
