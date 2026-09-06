@@ -70,6 +70,9 @@ eval)  R6_ARMS="${2:-$ARMS}" R6_VARIANTS="$VARIANTS" "$REPO/scripts/r6_eval_arms
 dial)  R6_ARM_ENV=ZENSIM_HF_GAIN R6_ARMS="${3:-$ARMS}" R6_VARIANTS="$VARIANTS" \
          "$REPO/scripts/r6_dial_arms.sh" "${2:-grade}" "$ROOT" ;;
 
+cb5)   python3 "$REPO/scripts/r6b_closed_form_control.py" --tables "$ROOT/tables" \
+         --out "$ROOT/cb5_closed_form.json" ;;
+
 delta) python3 "$REPO/scripts/r6b_arm_delta.py" --tables "$ROOT/tables" \
          --arms "$(echo "$NEW_ARMS" | tr ' ' ,)" --out "$ROOT/arm_delta_all.json" ;;
 

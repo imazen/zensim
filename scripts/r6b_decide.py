@@ -85,13 +85,31 @@ def main() -> int:
             for line in r.stdout.splitlines():
                 if " - " in line or line.startswith(("paired bootstrap", "comparison")):
                     print("   " + line)
-                    # A win is a CI-excluding positive delta, as §11.8 defines it.
-                    for arm in cands:
-                        tok = f"{arm}_{v}"
-                        if line.strip().startswith(tok) and "CI" in line.upper():
-                            wins[arm][v].append((c, line.strip()))
-    rep["gates"]["h1_ci_excluding_lines"] = {k: {v: [l for _, l in x] for v, x in d.items()}
-                                             for k, d in wins.items()}
+                # §11.8: a win counts only if the 95 % CI on the DELTA excludes 0.
+                # `wave6_paired_bootstrap.py` prints
+                #   "<series> - <ref>   median  2.5%  97.5%  P(d>0)"
+                # so the test is on its 2.5 % column, read positionally rather
+                # than by grepping for a word the owner never prints.
+                for arm in cands:
+                    tok = f"{arm}_{v} - {BASE}_{v}"
+                    if not line.strip().startswith(tok):
+                        continue
+                    parts = line.strip()[len(tok):].split()
+                    if len(parts) < 4:
+                        continue
+                    try:
+                        med, lo, hi = (float(parts[0]), float(parts[1]), float(parts[2]))
+                    except ValueError:
+                        continue
+                    if lo > 0.0:
+                        wins[arm][v].append((c, {"median": med, "lo": lo, "hi": hi}))
+                    rep.setdefault("deltas", {}).setdefault(v, {}).setdefault(arm, {})[c] = {
+                        "median": med, "ci_lo": lo, "ci_hi": hi,
+                        "win": bool(lo > 0.0), "loss": bool(hi < 0.0)}
+    rep["gates"]["h1_ci_excluding_wins"] = {
+        k: {v: [{"corpus": c, **d} for c, d in x] for v, x in dd.items()}
+        for k, dd in wins.items()
+    }
 
     # ---- CB4 / CB2 / H3 / H5 / H6 -------------------------------------------
     dp = root / "arm_delta_all.json"
@@ -176,9 +194,28 @@ def main() -> int:
             print(f"  1. {arm:10s} {'OUT (' + ','.join(bad) + ')' if bad else 'survives'}")
             if not bad:
                 surviving.append(arm)
+        # §11.9 rule 2 says "a strict majority (>= 2 of 3) of {CID22, KonJND,
+        # AIC-3}" without pinning how the four (slice x solver) variants
+        # aggregate. Read LITERALLY — a majority in at least one variant — and
+        # the stricter reading (a majority in most variants) is printed beside
+        # it so the choice is visible rather than convenient. R6's precedent is
+        # the strict one: `c1` won a majority in 1 of 6 variants there and the
+        # lane still took rule 4.
+        per_variant = {arm: {v: sum(1 for _ in wins[arm][v]) for v in variants}
+                       for arm in cands}
+        print(f"\n  primary-corpus CI-excluding wins per (arm, variant), of 3:")
+        print(f"  {'arm':10s}" + "".join(f"{v:>14s}" for v in variants))
+        for arm in cands:
+            print(f"  {arm:10s}" + "".join(f"{per_variant[arm][v]:>14d}" for v in variants))
         maj = [arm for arm in surviving
-               if sum(1 for v in variants for _ in wins[arm][v]) >= 2]
-        print(f"  2. rank-majority survivors: {maj or 'NONE'}")
+               if any(per_variant[arm][v] >= 2 for v in variants)]
+        maj_strict = [arm for arm in surviving
+                      if sum(per_variant[arm][v] >= 2 for v in variants) * 2 > len(variants)]
+        rep["gates"]["h1_wins_per_variant"] = per_variant
+        rep["gates"]["h1_majority_strict"] = maj_strict
+        print(f"  2. rank-majority survivors (literal, >=1 variant): {maj or 'NONE'}")
+        print(f"     ... under the strict reading (majority of variants):    "
+              f"{maj_strict or 'NONE'}")
         if len(maj) == 1:
             pick, why = maj[0], "rule 2 — sole survivor with a rank majority"
         elif len(maj) > 1:
