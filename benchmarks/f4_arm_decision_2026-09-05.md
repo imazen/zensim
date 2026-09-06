@@ -150,6 +150,15 @@ reproducible on this box.** Three consequences, all load-bearing:
 | `clamp` | 0 | 0 | 0 | 0 |
 | *rev1 max \|f\|* | *3.724* | *1.266* | *0.317* | *0.388* |
 
+**And on the SDR default's ACTUAL 28 inputs** (CID22; the other 24 are not F4
+slots and are bit-identical in every arm by construction):
+
+| arm | max \|Δ\| over all 28 | f14 | f26 | f91 | f93 | worst relative |
+|---|--:|--:|--:|--:|--:|--:|
+| `c1` | 4.77e-3 | 1.76e-3 | 1.01e-5 | 1.29e-3 | 4.77e-3 | **16.9 %** (f93) |
+| `lorentz` | 5.05e-8 | 5.05e-8 | 1.79e-8 | 1.84e-8 | 1.35e-8 | 0.00 % |
+| `clamp` | **0** | 0 | 0 | 0 | 0 | 0.00 % |
+
 On the gold holdout `lorentz` is a **near-no-op** — 1e-7 against feature scales
 of 0.3–3.7, i.e. f32 rounding — while `c1` is a ~1–4 % relative perturbation,
 biggest on the peaks family. On KADID / TID / CSIQ / LIVE `lorentz` grows to
