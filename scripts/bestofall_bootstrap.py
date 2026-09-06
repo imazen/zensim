@@ -28,11 +28,20 @@ from lib import zen_stats  # noqa: E402
 DEFAULT_CORPORA = "cid22,konjnd,aic3,tid,kadid,csiq,live,hfnlproxy"
 
 
+# The target key is per-corpus: `mos` on the MOS corpora, `jnd` on the
+# threshold ones, `ssim2`/`target` elsewhere. Take whichever non-`pred` list the
+# block carries rather than guessing — and refuse if there is more than one.
+TARGET_KEYS = ("mos", "jnd", "ssim2", "target", "human_score", "score")
+
+
 def vectors(d, corpus):
     pp = (d.get("per_pair") or {}).get(corpus)
-    if not pp:
+    if not isinstance(pp, dict):
         return None, None
-    return pp.get("pred"), pp.get("jnd")
+    cand = [k for k in TARGET_KEYS if isinstance(pp.get(k), list)]
+    if len(cand) != 1 or not isinstance(pp.get("pred"), list):
+        return None, None
+    return pp["pred"], pp[cand[0]]
 
 
 def main():
