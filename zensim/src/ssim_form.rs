@@ -550,10 +550,15 @@ mod tests {
     /// merely *like* the crate's `bounded_sim` primitive — it IS it, and this
     /// compares the f32 kernel arm against the f64 owner rather than against a
     /// second transcription.
+    ///
+    /// `crate::feature_v2` only exists under `feature-regime-v2` — this test
+    /// asserts parity with it, so it is unrunnable (not just untestable)
+    /// without that feature.
+    #[cfg(feature = "feature-regime-v2")]
     #[test]
     fn ssim_luma_arm_is_the_crate_s_own_bounded_sim() {
         for (m1, m2, ssq, s12) in cases() {
-            let want_luma =
+            let want_luma: f64 =
                 crate::feature_v2::bounded_sim(m1 as f64, m2 as f64, C_SSIM_LUMA as f64);
             // Reconstruct the arm's luminance factor from its output:
             // d = 1 - luma * (num_s/denom_s).
@@ -575,6 +580,10 @@ mod tests {
 
     /// The constant is DERIVED, and both derivations are pinned so a future
     /// edit has to break an equation rather than a taste.
+    ///
+    /// The second derivation checks agreement with `crate::feature_v2`'s own
+    /// regularizers, which only exist under `feature-regime-v2`.
+    #[cfg(feature = "feature-regime-v2")]
     #[test]
     fn c1_is_derived_from_the_constants_already_present() {
         // 1. The SSIM relation to the C2 already in the kernel: C2 = (K2*L)^2
