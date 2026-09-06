@@ -135,6 +135,11 @@ reproducible on this box.** Three consequences, all load-bearing:
    scores.** Its gram, its fit and its rank are therefore identical too — it
    cannot win G1, and it cannot lose it. That is a property of the arm, not an
    inconclusive measurement.
+3. **The rank contest is `c1` vs `lorentz` vs rev1**, and it is a contest about
+   the HEALTHY regime — which is exactly what §1.4's design tension
+   (`lib.rs:204`'s deliberate no-`C1` choice vs `bounded_sim`'s Weber
+   normalisation) is about.
+
 **Where the two live arms actually move, per family** (CID22, 4,292 rows, max
 |Δ| against rev1; the rev1 feature scale is on the last row for reference):
 
@@ -150,11 +155,6 @@ of 0.3–3.7, i.e. f32 rounding — while `c1` is a ~1–4 % relative perturbati
 biggest on the peaks family. On KADID / TID / CSIQ / LIVE `lorentz` grows to
 9.0e-2 / 1.2e-2 / 1.2e-2 / 4.4e-3, so it is not a no-op everywhere; those are
 the corpora with the strongest local mean differences.
-
-3. **The rank contest is `c1` vs `lorentz` vs rev1**, and it is a contest about
-   the HEALTHY regime — which is exactly what §1.4's design tension
-   (`lib.rs:204`'s deliberate no-`C1` choice vs `bounded_sim`'s Weber
-   normalisation) is about.
 
 ---
 
@@ -225,6 +225,24 @@ What a rev2 fleet wave needs from R6, in the form it needs it:
   a pools-live 944 (`foldapp2pools`) F4 moves **132** slots; at the campaign's
   zeroed `ext944` / `ext924` roots it moves **36**. A wave that declares "944 ⇒
   36" under-declares every pools-live table by 96 slots.
+* **F4's exposure per SHIPPED bake, measured** (`bake_block_profile` read set ∩
+  the 132 measured F4 slots) — so the wave prices the re-verdict rather than
+  guessing at it:
+
+  | shipped bake | reads | F4 slots read | share |
+  |---|--:|--:|--:|
+  | `v47_strict_qat_native` (Profile A) | 285 | **125** | 43.9 % |
+  | `bhdr_linear_shaped_anchored2` | 50 | 20 | 40.0 % |
+  | `bhdr_linear_shaped_cvvdpmix` | 133 | 49 | 36.8 % |
+  | `d_sdr_add156_*` (Profile D, the SDR default) | 28 | **4** | 14.3 % |
+  | `b_sdr_linear_cid80_*` (Profile B) | 95 | 12 | 12.6 % |
+  | `c_sdr_mlp944_*` / `c_sdr_purity944` / `c_hdr_l1t1944` (Profile C) | 667–697 | 36 | 5.2–5.4 % |
+
+  The SDR default is the LEAST exposed of the single-block profiles — 4 slots
+  (`f14, f26, f91, f93`) of its 28 inputs — and Profile A the most. The 944
+  Profile-C family reads exactly the 36 basic slots, which is the zeroed-pool
+  count of §2 and a second, independent confirmation of it.
+
 * **F5 is NOT free** (`feature_rev2_2026-09-05.md` §2.6): flipping revision 2
   moves 22 of the 33 `GLOBAL_*` slots each of three shipped 944 bakes reads, so
   Profiles C and CHdr must be re-verdicted in the same wave.
