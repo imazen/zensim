@@ -1045,7 +1045,43 @@ into a temp directory before touching the shared board — which also surfaced t
 the nine newest cells had no M3a yet (the pass had run before they existed), so
 that was fixed first. All 27 now carry M3a.
 
-*(RESULTS — W4 pending; it is gated behind three consecutive idle samples.)*
+### 5.21 The ship gate on the best candidate — and it fails on TWO independent clauses
+
+`F_nonneg32_s4004` (the best constrained arm) against **shipped D**, paired
+bootstrap, B = 2,000, i.i.d. pair resample:
+
+| corpus | n | candidate | shipped D | Δ | 95 % CI | verdict |
+|---|--:|--:|--:|--:|---|---|
+| **CID22** | 4,292 | 0.88357 | 0.86333 | **+0.02024** | [+0.01680, +0.02365] | **WINS** |
+| **KonJND** | 504 | 0.47451 | 0.53670 | **−0.06219** | [−0.09372, −0.02986] | **LOSES** |
+| AIC-3 | 600 | 0.79272 | 0.77700 | +0.01573 | [+0.00042, +0.03098] | WINS (thin) |
+| CSIQ | 866 | 0.95557 | 0.90167 | +0.05390 | [+0.04473, +0.06398] | WINS |
+| LIVE | 779 | 0.96316 | 0.96029 | +0.00287 | [−0.00232, +0.00825] | tie |
+| **hfnlproxy** | 5,000 | 0.42742 | 0.48477 | **−0.05736** | [−0.07145, −0.04359] | **LOSES** (circular axis) |
+| TID | 3,000 | 0.92853 | 0.82369 | +0.10484 | — | **train==val — not skill** |
+| KADID | 5,000 | 0.92935 | 0.80609 | +0.12325 | — | **train==val — not skill** |
+
+**TID and KADID are training groups in this recipe.** Their +0.10/+0.12 are
+memorization guards, not wins, and must not be counted.
+
+### 6. DECISION — **PROPOSE, do not install**
+
+The pre-registered ship rule (§6) was: install into `ZensimProfile::D` only on a
+full pass with CID22 ≥ 0.86333 CI-clean, **CONTRACT 6/6**, **A7r 5/5**, and **no
+regression axis lost**. It fails on **two independent clauses**:
+
+1. **A7r: 5 of 5 codecs fail**, on every arm, at every hinge weight, with and
+   without the architecture, and with floor-reaching data. The binding clause.
+2. **KonJND is a CI-clean regression** (−0.06219, CI excludes zero). Independent
+   of A7r, "no regression axis lost" is violated.
+
+CID22 (+0.020 CI-clean) and CONTRACT (6/6 on every seed) pass. **Two of four is
+not a ship**, and the rule says a partial pass never is.
+
+**Nothing was installed.** `zensim/weights/` and `ZensimProfile::D` are
+untouched.
+
+*(W4 pending; it is gated behind three consecutive idle samples.)*
 
 ---
 
