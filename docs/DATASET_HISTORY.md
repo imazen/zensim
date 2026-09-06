@@ -2240,3 +2240,41 @@ the next session does not re-derive them:
 
 Harness: `zenmetrics/scripts/jobsys/rev2_bitexact_gate.py` (refuses a sub-64
 image and a misaligned row rather than reporting a number).
+
+### §3.44 — R6's four-arm F4 tables, and the corpus fact that decides the arm (2026-09-05)
+
+**What was built.** Four complete 372-col extractions of the same pixels, one
+per F4 luminance arm (`ZENSIM_SSIM_LUMA` ∈ `{ssim2, c1, lorentz, clamp}`, one
+binary at `ceb86c2d`, no rebuild between arms), at
+`/mnt/v/output/zensim/rev2-2026-09-05/r6/`:
+
+| leg | rows/arm | source |
+|---|--:|---|
+| safesyn | 196,086 | bitstreams (`.jpg` 111,068 / `.avif` 34,001 / `.jxl` 26,362 / `.webp` 24,655), pre-scanned 0 missing |
+| cid22val / kadid / tid / konjnd / aic3 / csiq / live | 20,670 total | `build_eval372_root.sh`'s own datasets |
+| ladder dial grid | 9,593 | the 2026-09-05 floor-dense instrument's pairs list |
+| negative-tail probe | ≤2,000 | the registered `ssim2 < 0` rule on the arm's own safesyn |
+| identity | 400 | self-pairs over 3,277 distinct references |
+
+Each arm's `evalroot/<arm>/` is a drop-in `bake_verdict --features-root`, with a
+`_MANIFEST.json` carrying `build_commit`, the arm token, and the decoder era per
+format. **Six corpora are ABSENT, not copied** (aic4, nonphoto, imazen26, sdr25,
+hfnlproxy, hf_nearlossless, plus pipal): they are byte-copies in the postC root,
+and a copy inside an arm root would be a different arithmetic revision wearing
+that arm's name.
+
+**★ The corpus fact.** `clamp` differs from the shipped form only where
+`(mu1−mu2)² > 1`, so it is a pathology DETECTOR. Across **217,756 rows** it moves
+**0 cells**, and no row anywhere reaches `|f| > 2` — against the 5,814,302 that
+motivated F4, which is a property of `bigcodec_hqdedup_traindigits_2026-07-02`
+(2.3 M rows, **no local pixels**). **No corpus this box has pixels for enters
+F4's pathological regime.**
+
+**Two era facts a wave must carry forward.** (1) F4's blast radius keys on
+`feature_set_id`, not width: `ext944`/`ext924` have `f156..371` all-zero (36
+moved slots) while the 2026-09-05 pools-live ladder grid is 98.7 % nonzero there
+(132). (2) These tables' decoder era is `shared/zen_decode.rs` at `ceb86c2d`;
+§3.34 priced decoder era at 73 % of an extractor era, so a wave that decodes
+elsewhere is measuring two changes at once.
+
+Record: [`../benchmarks/f4_arm_decision_2026-09-05.md`](../benchmarks/f4_arm_decision_2026-09-05.md).
