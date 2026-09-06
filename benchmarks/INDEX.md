@@ -376,9 +376,15 @@ ordering in magnitude than the plain path's +0.8863) so its pack could not fit a
 monotone spline, and `--monotonicity-reg` stays UNMEASURED behind that
 prerequisite. **Ship: PROPOSE, not install** — C5 (identity dial 90.9368), C6
 (1,642 of 9,593 cells above identity, worse than shipped B's 6.01 %) and A7r
-(5/5 codecs) all fail, every one a weights property. **W4 NOT MEASURED**: box at
-load 72-79 from other lanes; `scripts/fastclass2_w4_deferred.sh` finishes it and
-refuses a busy box.
+(5/5 codecs) all fail, every one a weights property. **W4 MEASURED 2026-09-06 and both
+candidates PASS** — 8 cells × 10 starts on an idle box, 0 discarded: `S228` maxes
+at **1.2202** against the registered bar (1.25) and is **faster than `zensim_D` in
+all 8 cells** (max 0.9733), 3.73-3.97× `fast_ssim2` at 1T; the forward pass is
+below the noise floor, and the data confirms the kernel lane's DEFECT 2 (the bar
+arm's `Off` walk is SLOWER than production's `Peaks`, 7.660 vs 6.280 ms). A
+collation defect was fixed at the owner first — a stale glob (header, no rows)
+masking an arm-name regex that captured zenbench's box-drawing prefix and the
+`±0.0` mad, which would have produced a plausible wrong answer.
 
 **Push clobber + the push guard (2026-09-05)**:
 [`push_clobber_2026-09-05.md`](push_clobber_2026-09-05.md) — `origin/main` moved SIDEWAYS twice on 2026-09-04 (jj ops `db7c8ca86b69`, `0edf97e28a91`), dropping nine commits from six lanes with no error and no warning; the per-added-line audit separating the seven that were re-landed or superseded from the one that was genuinely lost (`d3a948ca`, the G-ADDR board coverage — 482 of 498 added lines absent, `cut_gaddr_negtail_probe.py` absent entirely, and the boards on `/mnt/v` already generated with it), the re-land (`2e5cdc8b`, diff byte-for-byte identical to the original), and the owner guard `scripts/safe_push.sh` (fetch → ancestor-assert → set → push → verify; refuses sideways with rc=3 and names every commit it would drop; 4-case self-test incl. the negative control, plus a retrospective control that replays the real clobber).

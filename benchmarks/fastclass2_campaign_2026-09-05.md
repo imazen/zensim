@@ -938,45 +938,109 @@ read 6–8/8 and the α-head cells 1–2/8). Its per-seed M3a is **0.7862 / 0.79
 different spline — and they carry no separate M3a, so the group's k = 3 counts
 distinct SEEDS, not cells.
 
-## 17. W4 — **NOT MEASURED**, and the reason is the box, not the candidate
+## 17. W4 — **MEASURED, and both candidates PASS** (2026-09-06)
 
-W4 was set up at HEAD with the protocol the coordinator specified — ONE binary,
-both candidate arms loaded into the SAME runs so they interleave inside
-zenbench's round-robin, the two bit-identical controls (`fast_ssim2`,
-`zensim_B`) present in every run, `ZEN_S2_EXTRACT_ONLY=1` to split walk from
-forward pass, min over 10 process starts with ASLR on, wall time scaled with
-size, both SIMD tiers (`ZEN_S2_CAP_V3=1` for v3), 576² and 1152², 1T and 8T.
-The bench binary was rebuilt at HEAD first, because the kernel lanes moved the
-156-walk baseline and no number may be carried across builds.
+*(This section replaces the NOT-MEASURED entry written on 2026-09-05, when the
+box was at load 72–79. `scripts/fastclass2_w4_deferred.sh` ran on a genuinely
+idle box — load 3.9 at start, 0.7 after — 06:52Z–07:46Z, all 8 cells, rc = 0.)*
 
-**It could not be collected: the box was at load average 72–79** (other lanes
-running `extract_feature` at 1975 % CPU, `rustc`, `cjxl-rs`, `resample_admiss`).
-`scripts/kernel_fastclass_sweep.sh` — the mechanised form of this protocol —
-**refuses above load 3.0**, and `profile_d_notax_2026-09-01.md` §4 measured a
-*single* concurrent niced `cargo build` swinging the stable `fast_ssim2` arm
-128.9–633.6 ms inside one cell. A number taken now would be contaminated by an
-order of magnitude more load than that.
+### 17.1 A COLLATION DEFECT FIRST — the run was fine, my reducer was not
 
-**The launched run was killed and its partial logs deleted** rather than
-reduced. This is reported as **NOT MEASURED with a named cause**, never as an
-estimate, and never as a pass.
+The first collation emitted a header and **zero rows**. Two defects in
+`w4_report.py`, both mine, and the second is the dangerous one:
 
-**What is known about this candidate's W4 without measuring it**, stated as
-inference and labelled as such:
+1. **The glob was stale.** It matched `w4_t*_s*.log`, but the deferred runner
+   writes `w4_<tier>_t<T>_s<S>.log` — the tier went into the filename and the
+   glob never followed. **Zero files matched**, so the loop body never ran; that
+   is why there was no data *and* no "ALL STARTS DISCARDED" line either.
+2. **The arm-name regex captured the box-drawing prefix.** zenbench's rows read
+   `  ├─ fast_ssim2   24.7 ±0.0ms`, and `^\s*(\S+)` matches `├─`. It then
+   matched `0.0` (out of `±0.0ms`) as the time, because `24.7` is not directly
+   followed by `ms`. Every start would have parsed as `{"├─": 0.0}` — **a
+   plausible-looking wrong answer, which is worse than the empty table defect 1
+   produced.** Only defect 1 masked it.
 
-* Its walk is `V1PoolsMode::Peaks` at the 372 layout — **the walk
-  `ZensimProfile::D` already resolves to**. The 72 peaks are computed
-  unconditionally by `fused_vblur_ssim_inner*` whatever the model reads
-  (`free_features_2026-09-01.md` §2.1 measured the layout cost with every CI
-  straddling 1.0), so the walk delta against shipped D is ~0 by construction.
-* The entire W4 question is therefore the **forward pass**: a `228→128→1` MLP
-  (37,923 B packed) against Profile D's 28-coefficient additive head. That is
-  the quantity `ZEN_S2_EXTRACT_ONLY` isolates and the reason it was in the plan.
+Fixed at the owner: the reducer now parses the **bar-chart** block
+(`  peaks156_no_raw  ████ 6.20ms`), which carries one more significant figure
+than the summary table and has no prefix to confuse with the name, with an
+anchored summary-row fallback.
 
-**To finish it:** `bash ~/tmp/fc2/w4.sh` on an idle box (or
-`scripts/kernel_fastclass_sweep.sh --arms 156,15c --control 15c --sizes
-576,1152 --threads 1,8 --starts 15 --iters 7` for the walk half, which
-self-checks the load and skips rather than emitting a contaminated row).
+### 17.2 The readings are VALID — every control checks out
+
+**80 starts, 0 discarded.** The collection-time validity rule (a start whose
+stable `fast_ssim2` arm reads below a plausible floor for its size is thrown
+away, because a tight-budget zenbench can report a spuriously LOW mean for every
+arm at once and `min()` would select it) rejected nothing: `fast_ssim2` reads
+21.0–24.4 ms at 576² and 85.9–101.1 ms at 1152², and `zensim_B` 2.2–13.5 /
+8.6–49.4 ms — all in family with this repo's own published values.
+
+**Each start is ONE round** (`⚠ only 1 rounds`), so the estimator is min-over-10
+process-starts with ASLR on, and **the control's own min-vs-median spread is the
+cell's noise floor** — printed per cell below, because two cells are noisy:
+
+| cell | `fast_ssim2` min | control spread (med−min)/min |
+|---|--:|--:|
+| native/t1/576 | 24.400 | **2.2 %** |
+| native/t1/1152 | 85.920 | **17.1 %** |
+| native/t8/576 | 22.250 | 10.2 % |
+| native/t8/1152 | 88.820 | **16.6 %** |
+| capv3/t1/576 | 24.390 | 2.6 % |
+| capv3/t1/1152 | 100.970 | 2.1 % |
+| capv3/t8/576 | 21.040 | 15.2 % |
+| capv3/t8/1152 | 101.090 | **1.6 %** |
+
+### 17.3 THE W4 TABLE — min over 10 starts, ms
+
+| cell | `add156_156basic` | **`peaks156_no_raw`** = `S228` | **ratio** | `free156_peaks_raw` = `S156` | ratio | `zensim_D` | `S228`/`D` | `S228` × `fast_ssim2` |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| native/t1/576 | 6.220 | 6.200 | **0.9968** | 6.180 | 0.9936 | 6.720 | **0.9226** | 3.94× |
+| native/t1/1152 | 20.680 | 21.620 | **1.0455** | 21.650 | 1.0469 | 23.610 | **0.9157** | 3.97× |
+| native/t8/576 | 1.650 | 1.300 | **0.7879** | 1.440 | 0.8727 | 1.370 | **0.9489** | 17.12× |
+| native/t8/1152 | 4.950 | 6.040 | **1.2202** | 6.000 | 1.2121 | 6.350 | **0.9512** | 14.71× |
+| capv3/t1/576 | 7.660 | 6.280 | **0.8198** | 8.410 | 1.0979 | 7.160 | **0.8771** | 3.88× |
+| capv3/t1/1152 | 25.640 | 27.090 | **1.0566** | 28.650 | 1.1174 | 28.970 | **0.9351** | 3.73× |
+| capv3/t8/576 | 2.090 | 1.820 | **0.8708** | 2.000 | 0.9569 | 1.870 | **0.9733** | 11.56× |
+| capv3/t8/1152 | 5.630 | 6.480 | **1.1510** | 6.820 | 1.2114 | 6.870 | **0.9432** | 15.60× |
+
+### 17.4 VERDICT
+
+**W4 PASSES for both candidates, at 1T and 8T, on both SIMD tiers.**
+
+* Against the registered `add156_156basic` bar: **`S228` max 1.2202**, `S156`
+  max 1.2121 — both under 1.25 in all 8 cells.
+* Against **`zensim_D`** — Profile D through the *standard production path*,
+  i.e. the walk that actually runs today — **`S228` is FASTER in every single
+  cell** (max ratio **0.9733**, i.e. 2.7–12.3 % faster than shipped D), and
+  1.43–2.15× faster than shipped Profile B.
+* The exam's own W4 clause (*speed ≥ `fast_ssim2` at 1T*) passes with enormous
+  margin: **3.73–3.97×** at 1T, 11.6–17.1× at 8T.
+
+**Three honesty notes.**
+
+1. **The cell nearest the bar is the least resolved.** `native/t8/1152` reads
+   1.2202 in a cell whose control spread is **16.6 %**, so that individual ratio
+   is not established to better than ±17 %. Its well-resolved twin
+   `capv3/t8/1152` (control spread **1.6 %**) reads **1.1510**, comfortably
+   under. The PASS does not rest on the noisy cell.
+2. **The forward pass is below the noise floor** — which is the answer
+   `ZEN_S2_EXTRACT_ONLY` was included to get. At native/t1/576 the extract-only
+   arms are *slower* than their full siblings (add156 6.590 vs 6.220;
+   peaks156 6.470 vs 6.200; free156 6.220 vs 6.180), which is physically
+   impossible and therefore says the `228→128→1` MLP's forward pass costs less
+   than this measurement can see.
+3. **`add156_156basic` is arguably the wrong denominator, and it flatters
+   nobody here.** It builds `V1PoolsMode::Off`, which
+   `fold_engine::pools_mode_for_need` **never returns**
+   (`kernel_fastclass_2026-09-05.md` §4) — and the data shows why it matters:
+   at capv3/t1/576 the `Off` walk reads **7.660 ms** against the `Peaks` walk's
+   6.280, i.e. the bar arm is *slower* than production. `zensim_D` is the
+   production-truthful denominator and is reported beside it.
+   **`S156` also rode the `ZEN_HY_FREE` arm**, whose walk carries the raw
+   moments a 156-slice bake never reads — so its ratios are an over-estimate,
+   stated rather than corrected.
+
+Raw logs `/mnt/v/output/zensim/fastclass2-2026-09-05/speed/w4_*.log`
+(8 cells × 10 starts), table `.../speed/w4_table.txt`.
 
 ## 18. BOARD — 12 cells promoted onto both boards, and one graft the tool correctly REFUSED
 

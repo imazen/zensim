@@ -1977,9 +1977,25 @@ distinction is precisely what decides servability.
   either/or, a **weights** defect, worse here than shipped B's 6.01 % — and A7r
   fails 5/5 codecs. `ZensimProfile::D`, `zensim/weights/`, `profile.rs` and the
   manifests are untouched.
-* **W4 NOT MEASURED**: the box was at load 72–79 from other lanes when the
-  campaign reached it, against a protocol whose own mechanised form refuses
-  above 3.0. `scripts/fastclass2_w4_deferred.sh` finishes it on an idle box.
+* **W4 MEASURED 2026-09-06 (ROUND 99), and both candidates PASS.** On an idle
+  box (load 3.9 → 0.7), 8 cells × 10 starts, **80 starts, 0 discarded**, every
+  control in family. Against the registered `add156_156basic` bar the selected
+  `S228` maxes at **1.2202** and `S156` at **1.2121** (bar 1.25); against
+  **`zensim_D`** — Profile D through the standard production path — **`S228` is
+  faster in all 8 cells** (max 0.9733) and 1.43–2.15× faster than shipped B.
+  The exam's own clause passes at **3.73–3.97× `fast_ssim2`** at 1T.
+  **The forward pass is below the noise floor** (extract-only arms read *slower*
+  than their full siblings), and the cell nearest the bar is the least resolved
+  (native/t8/1152, control spread 16.6 %) while its well-resolved twin reads
+  1.1510. Also confirms the kernel lane's DEFECT 2 from data: the bar arm's
+  `V1PoolsMode::Off` walk is **slower than production's `Peaks`** at
+  capv3/t1/576 (7.660 vs 6.280 ms).
+  **A collation defect was found and fixed at the owner first**: `w4_report.py`
+  globbed a filename pattern that predated the tier suffix (zero files matched,
+  hence a header and no rows) and its arm-name regex captured zenbench's
+  box-drawing prefix and the `±0.0` mad instead of the arm and its time — the
+  second would have produced a plausible wrong answer had the first not masked
+  it.
 
 Record: `benchmarks/fastclass2_campaign_2026-09-05.md`, registration
 `docs/PLAN_FASTCLASS2_2026-09-05.md`; ledger ROUND 98.
