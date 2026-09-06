@@ -637,8 +637,46 @@ one, that is a finding to write down, not a licence to start.
 
 ## RESULTS
 
-*(empty at pre-registration — filled as each phase lands, with the MEASURED
-numbers and any falsified hypothesis called out by name.)*
+Full record: [`benchmarks/best_of_all_2026-09-06.md`](../benchmarks/best_of_all_2026-09-06.md).
+**27 cells (9 arms × k=3), 0 failures.**
+
+**DECISION: PROPOSE, do not install.** The ship rule fails on **two independent
+clauses** — A7r 5/5 fail, and KonJND is a CI-clean regression (−0.06219, interval
+excludes zero). CID22 (+0.020 CI-clean vs shipped D) and CONTRACT (6/6 on every
+seed) pass. Two of four is not a ship. `zensim/weights/` and `ZensimProfile::D`
+are untouched.
+
+**The thesis (§0) is CONFIRMED, with a price.** The dial contract is achievable
+in the weights: C6 goes **1,642 → 0** on every seed *while* `tied` goes
+0.0017 → 0.0000, so the gate record's C2 ⊻ C6 either/or is **dissolved, not
+traded**. The pre-registered constraint cost is **−0.0091 CID22** pooled
+(−0.0052 per-ref), larger than the control's own seed spread on 3 of 4 axes.
+
+**The A7r null is NARROWER than §5.11 first said, and that is the lane's most
+useful result.** A7r is unmoved by architecture, loss and hinge weight — but the
+DATA-isolating A/B (`H_anchorlad` vs the band-weight-matched `D_lad20m`, differing
+*only* in whether the ladder pairs reach the encoders' true floors) moves **4 of
+5 codec floors**: svt **+0.188**, jpeg +0.051, jxl +0.051, webp +0.026. The one
+that does not move is `avif-rav1e` — **the one codec with no anchor ladders**,
+exactly as §9 pre-registered before any fit. Direction right, quantity
+insufficient at 32 references × 4 codecs.
+
+**Hypotheses stated and their fate:**
+
+| pre-registered | outcome |
+|---|---|
+| `score = pin − g(x)` makes C5/C6 structural | **CONFIRMED**, with a condition §2.4 records that this wave does not meet |
+| the architecture does not buy A7r (§2.2) | **CONFIRMED** — and it makes the floors *worse* on 4 of 5 |
+| the ladder hinge addresses A7r | **FALSIFIED** — it repays monotonicity and cuts seed spread 6.3×, and does not move A7r |
+| A7r is a DATA gap, not a loss gap (§9) | **SUPPORTED** on the clean A/B, on every codec with data |
+| the anchor set cannot move rav1e (§9) | **CONFIRMED** — rav1e is the one non-mover |
+| `--identity-rows` is a provable no-op under N1 | **FALSIFIED** by §2.4's condition; the gate could not be written as specified (§5b D-4) |
+
+**Five of my own claims failed under checking and are corrected in place**, each
+with the measurement that overturned it: the unconditional `raw(identity) = pin`;
+a pooled `hfnlproxy` figure labelled per-ref (the two disagree in *direction*); a
+single-seed floor read that k=3 contradicted; a "clean A/B" whose band weights
+differed; and a binary-parity check that could only ever fail.
 
 ---
 
