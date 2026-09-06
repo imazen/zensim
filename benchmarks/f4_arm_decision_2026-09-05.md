@@ -8,7 +8,9 @@ It is the one gate
 the cheap ladder proxy gives **identical** results for all four arms, so the
 choice needed a real monotone-linear fit on real corpora.
 
-Artifacts: `/mnt/v/output/zensim/rev2-2026-09-05/r6/`.
+Artifacts: `/mnt/v/output/zensim/rev2-2026-09-05/r6/` (9.1 GB, `_MANIFEST.json` at
+the root carries `build_commit`, the arm tokens, the decoder era per format, every
+input sha256 and all 24 bake shas; each `evalroot/<arm>/` carries its own).
 Drivers: `scripts/r6_extract_arms.sh`, `r6_pack_arm.py`, `r6_fit_arms.sh`,
 `r6_eval_arms.sh`, `r6_dial_arms.sh`, `r6_build_dial_instruments.py`,
 `r6_arm_delta.py`, `r6_decide.py`, `r6_safesyn_subset.py`.
