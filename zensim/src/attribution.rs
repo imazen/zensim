@@ -519,18 +519,31 @@ impl SlotCoeffs {
         // hf energy: slot 10 (loss) active when varDst < varSrc, slot 12
         // (gain) when varDst > varSrc — never both (`finalize` clamps the
         // other side to 0). d10 = e/Σsrc², d12 = −e/Σsrc²; fold −s_k.
-        let c_hfe = if var_src > 1e-10 {
+        //
+        // The GAIN half differentiates whichever form the SCORE is using — a
+        // density that differentiates a form nobody is running describes a
+        // metric nobody is running. The coefficient comes from the same owner
+        // as the value, in the accumulator's own units, so the shipped arm's
+        // spelling (`1/Σsrc²`) is preserved BIT-for-BIT rather than re-derived
+        // through the pooled means.
+        let c_hfe = if var_src > crate::hf_gain_form::VAR_SRC_FLOOR {
             if var_dst < var_src {
                 -g(10) / acc.hf_sq_src
             } else if var_dst > var_src {
-                g(12) / acc.hf_sq_src
+                g(12)
+                    * crate::hf_gain_form::hf_energy_gain_d_sum_dst_sq(
+                        crate::hf_gain_form::active_gain_form(),
+                        acc.hf_sq_src,
+                        acc.hf_sq_dst,
+                        inv_n,
+                    )
             } else {
                 0.0
             }
         } else {
             0.0
         };
-        let c_hfm = if mad_src > 1e-10 && mad_dst < mad_src {
+        let c_hfm = if mad_src > crate::hf_gain_form::VAR_SRC_FLOOR && mad_dst < mad_src {
             -g(11) / acc.hf_abs_src
         } else {
             0.0
@@ -572,21 +585,13 @@ fn basic13_from_acc(a: &StripChannelAccum, n: f64) -> [f64; 13] {
         (a.edge_det4 * inv).max(0.0).powf(0.25),
         (a.edge_det2 * inv).max(0.0).sqrt(),
         a.mse * inv,
-        if var_src > 1e-10 {
-            (1.0 - var_dst / var_src).max(0.0)
-        } else {
-            0.0
-        },
-        if mad_src > 1e-10 {
-            (1.0 - mad_dst / mad_src).max(0.0)
-        } else {
-            0.0
-        },
-        if var_src > 1e-10 {
-            (var_dst / var_src - 1.0).max(0.0)
-        } else {
-            0.0
-        },
+        crate::hf_gain_form::hf_energy_loss(var_src, var_dst),
+        crate::hf_gain_form::hf_mag_loss(mad_src, mad_dst),
+        crate::hf_gain_form::hf_energy_gain(
+            crate::hf_gain_form::active_gain_form(),
+            var_src,
+            var_dst,
+        ),
     ]
 }
 

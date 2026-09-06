@@ -221,6 +221,10 @@ mod color;
 mod diffmap;
 mod error;
 mod fused;
+/// THE v1 HF-energy ratio family — one owner, and the home of the F17 fix.
+/// Unconditional: `contrast_inc` is a v1 basic slot, so it exists on a
+/// `--no-default-features` build too.
+pub(crate) mod hf_gain_form;
 mod iw_pool;
 pub mod mapping;
 mod metric;

@@ -568,6 +568,8 @@ impl ScaleAccumulators {
         #[cfg_attr(not(feature = "iw-diagnostics"), allow(unused_mut))]
         let mut iw_mean_w = [0.0f64; 3];
 
+        let gain_form = crate::hf_gain_form::active_gain_form();
+
         for c in 0..3 {
             // f64 sums of per-pixel non-negative values CAN go slightly
             // negative under f32→f64 round-off, which would turn the
@@ -585,26 +587,19 @@ impl ScaleAccumulators {
             edge_2nd[c * 2 + 1] = (self.edge_det2[c] * one_over_n).max(0.0).sqrt();
             mse[c] = self.mse[c] * one_over_n;
 
+            // The HF ratio family goes through its ONE owner
+            // (`crate::hf_gain_form`) — the `gain` member is F17 and carries a
+            // runtime-selected arm; the two `loss` members are bounded by
+            // construction and have none. `gain_form` is hoisted out of the
+            // channel loop: it reads a `OnceLock`.
             let var_src = self.hf_sq_src[c] * one_over_n;
             let var_dst = self.hf_sq_dst[c] * one_over_n;
-            hf_energy_loss[c] = if var_src > 1e-10 {
-                (1.0 - var_dst / var_src).max(0.0)
-            } else {
-                0.0
-            };
-            hf_energy_gain[c] = if var_src > 1e-10 {
-                (var_dst / var_src - 1.0).max(0.0)
-            } else {
-                0.0
-            };
+            hf_energy_loss[c] = crate::hf_gain_form::hf_energy_loss(var_src, var_dst);
+            hf_energy_gain[c] = crate::hf_gain_form::hf_energy_gain(gain_form, var_src, var_dst);
 
             let mad_src = self.hf_abs_src[c] * one_over_n;
             let mad_dst = self.hf_abs_dst[c] * one_over_n;
-            hf_mag_loss[c] = if mad_src > 1e-10 {
-                (1.0 - mad_dst / mad_src).max(0.0)
-            } else {
-                0.0
-            };
+            hf_mag_loss[c] = crate::hf_gain_form::hf_mag_loss(mad_src, mad_dst);
 
             // Extended: max and L8
             ssim_max[c] = self.ssim_max[c] as f64;

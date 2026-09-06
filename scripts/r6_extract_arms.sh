@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # R6: extract every 372-col table at one F4 luminance arm.
 #
-# ONE binary, four arms. The arm is chosen at RUNTIME with `ZENSIM_SSIM_LUMA`
-# (`ssim_form::active_luma_form`'s measurement override), never by a rebuild:
+# ONE binary, N arms. The arm is chosen at RUNTIME with a measurement-override
+# env var, never by a rebuild:
 # this repo has measured a rebuild alone moving a 2304^2 timing ~10 %, and a
 # rebuild between arms would put the same class of confound into the FEATURES.
 #
@@ -11,11 +11,20 @@
 # drop-in `--features-root` for `bake_verdict` and the `ssim2` arm is a
 # bit-exact reproduction control against the registered postC root.
 #
+# WHICH knob is being swept is a parameter, so the same driver serves R6 (F4's
+# `ZENSIM_SSIM_LUMA`) and R6b (F17's `ZENSIM_HF_GAIN`) without a second copy:
+#   R6_ARM_ENV     env var the arm is passed in (default ZENSIM_SSIM_LUMA)
+#   R6_ARM_VALUES  space-separated whitelist (default F4's four arms)
+# The whitelist is not decoration: a typo'd arm would otherwise fall through to
+# the shipped form and silently produce a duplicate of the control.
+#
 # Usage: r6_extract_arms.sh <arm> [OUT_ROOT] [--eval-only|--safesyn-only]
 set -euo pipefail
 
-ARM="${1:?usage: r6_extract_arms.sh <ssim2|c1|lorentz|clamp> [OUT] [--eval-only|--safesyn-only]}"
-case "$ARM" in ssim2|c1|lorentz|clamp) ;; *) echo "bad arm: $ARM" >&2; exit 2;; esac
+ARM_ENV="${R6_ARM_ENV:-ZENSIM_SSIM_LUMA}"
+ARM_VALUES="${R6_ARM_VALUES:-ssim2 c1 lorentz clamp}"
+ARM="${1:?usage: r6_extract_arms.sh <arm> [OUT] [--eval-only|--safesyn-only]}"
+case " $ARM_VALUES " in *" $ARM "*) ;; *) echo "bad arm: $ARM (want one of: $ARM_VALUES)" >&2; exit 2;; esac
 OUT="${2:-/mnt/v/output/zensim/rev2-2026-09-05/r6/tables}/$ARM"
 MODE="${3:-all}"
 
@@ -26,7 +35,7 @@ SAFESYN_TSV="${SAFESYN_TSV:-$HOME/tmp/r6/safesyn_full.tsv}"
 for b in "$ZV" "$EX"; do [ -x "$b" ] || { echo "missing binary: $b" >&2; exit 2; }; done
 mkdir -p "$OUT"
 
-export ZENSIM_SSIM_LUMA="$ARM"
+export "$ARM_ENV=$ARM"
 say() { printf '[%s] %s %s\n' "$(date -u +%H:%M:%S)" "$ARM" "$*"; }
 
 zv() { say "$1"; nice -n19 ionice -c3 "$ZV" --dataset "$2" --format "$3" --extract-only \

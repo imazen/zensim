@@ -400,9 +400,9 @@ pub enum FormulaRevision {
     /// table and every published verdict was read at.
     #[default]
     Rev1,
-    /// The 2026-09-05 batched arithmetic-fix era: the audit's F4 and F5 fixes
-    /// landing together, so exactly one era boundary exists rather than one
-    /// per defect.
+    /// The 2026-09-05 batched arithmetic-fix era: the audit's F4, F5 and F17
+    /// fixes landing together, so exactly one era boundary exists rather than
+    /// one per defect — one recalculation, not three.
     Rev2,
 }
 
@@ -413,7 +413,7 @@ impl FormulaRevision {
     pub(crate) const fn era_tokens(self) -> &'static [&'static str] {
         match self {
             Self::Rev1 => &[],
-            Self::Rev2 => &["v1ssimcap", "freecomp"],
+            Self::Rev2 => &["v1ssimcap", "freecomp", "v1hfgain"],
         }
     }
 
@@ -447,7 +447,9 @@ impl FormulaRevision {
     }
 
     /// Every slot id this revision moves, derived from the signal table's own
-    /// [`Revision`] entries — never from a separate list.
+    /// [`Revision`] entries — never from a separate list. The union over
+    /// [`Self::era_tokens`], so a revision that batches three defects returns
+    /// all three defects' slots.
     ///
     /// This is the predicate gate **G3.1** checks against a re-extraction: a
     /// slot that moves and is not returned here is a FAILURE.
@@ -459,6 +461,23 @@ impl FormulaRevision {
             .map(|d| d.id)
             .collect()
     }
+}
+
+/// Every slot id ONE registered era moves.
+///
+/// [`FormulaRevision::moved_slots`] is the union over a revision's eras, which
+/// is what a recalculation needs — but a G3.1 gate is a claim about ONE defect
+/// ("F4 moves these 132"), and once a revision batches three of them the union
+/// can no longer express that claim. Added when `v1hfgain` (F17) joined
+/// revision 2 and the F4 gate's 132 became 144: the gate was asserting an
+/// era-level fact through a revision-level instrument, which was correct only
+/// while the revision had one v1 era in it.
+pub(crate) fn era_moved_slots(era: &str, width: u16, n_scales: usize) -> Vec<u16> {
+    (0..width as usize)
+        .filter_map(|id| def_at(id, n_scales))
+        .filter(|d| d.signal.revisions.iter().any(|r| r.era == era))
+        .map(|d| d.id)
+        .collect()
 }
 
 /// One registered signal: a feature definition before the layout replicates
@@ -615,6 +634,53 @@ const REV_F5_PROPOSED: &[Revision] = &[Revision {
            a bake reads these slots, not after.",
 }];
 
+/// **F17** — the v1 HF-energy GAIN member is unbounded above.
+///
+/// Not in the 2026-09-05 audit's F1..F16 inventory; found by R6 while reading
+/// its own "max over ALL slots" column, and registered here by R6b.
+const DEFECT_F17: Defect = Defect {
+    id: "F17",
+    note: "v1's `contrast_inc` = `max(0, var_dst/var_src - 1)` divides by the \
+           SOURCE term, so its numerator is unbounded by its denominator. Its \
+           two siblings in the same family divide by the source term too, but \
+           their numerators are `max(0, src - dst)`, which the denominator \
+           bounds — measured max exactly 1.000000 for both. The `> 1e-10` gate \
+           is a threshold, not a stabiliser. MEASURED over 216,756 real pairs \
+           on 8 corpora: the twelve `contrast_inc` slots are the TOP TWELVE of \
+           all 372 by maximum (worst 36,465.74) and the thirteenth is 1.972 — \
+           x105,124 the gold holdout's own p99.9 of 0.34687. Unlike F4 it \
+           fires on real corpora, on 0.0198 % of cells. Absorbed by a \
+           bake-side winsor guard on Profiles A and B ONLY: Profile D (the SDR \
+           default) has no transform block at all and reads f116 (max 1,380) \
+           and f155 (max 2,127) raw, and CHdr reads all twelve at `identity`.",
+};
+
+/// The PROPOSED fix for [`DEFECT_F17`] — registered, deliberately NOT applied.
+const REV_F17_PROPOSED: &[Revision] = &[
+    Revision {
+        era: "v1postc",
+        commit: "56bbcda2",
+        status: RevisionStatus::Landed,
+        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
+    },
+    Revision {
+        era: "v1hfgain",
+        commit: "-",
+        status: RevisionStatus::Proposed,
+        note: "F17 fix: bound the HF-energy gain member. The arm is selected \
+               at `hf_gain_form::HfGainForm::REV2_HFGAIN` and decided by \
+               measurement over 216,756 rows \
+               (docs/PLAN_FEATURE_REV2_2026-09-05.md section 11, \
+               benchmarks/feature_rev2_2026-09-05.md section 11). Unlike \
+               `v1ssimcap` this era moves values on EVERY corpus with pixels — \
+               `contrast_inc` is nonzero on 12 % (CID22) to 52 % (KADID) of \
+               cells — so a rev2 flip re-extracts these twelve slots for real. \
+               It rides in revision 2 with F4 and F5 so there is ONE era \
+               boundary and one recalculation. STILL PROPOSED: \
+               `ssim_form::SHIPPED_REVISION` is `Rev1`.",
+    },
+];
+
 /// **F15** — `PJND_FRAGILITY` is nonzero on an identity pair.
 const DEFECT_F15: Defect = Defect {
     id: "F15",
@@ -652,13 +718,15 @@ const fn v1(
     }
 }
 
-/// A v1 signal carrying the F4 defect and its proposed revision.
-const fn v1_defect(
+/// A v1 signal carrying a named defect and its proposed revision.
+const fn v1_with_defect(
     family: ComputeToken,
     block_local: u16,
     name: &'static str,
     statistic: Statistic,
     kernel: KernelId,
+    defect: Defect,
+    revisions: &'static [Revision],
 ) -> SignalDef {
     SignalDef {
         family,
@@ -672,9 +740,28 @@ const fn v1_defect(
         direction: Direction::HigherIsWorse,
         kernel,
         deprecated: false,
-        defect: Some(DEFECT_F4),
-        revisions: REV_F4_PROPOSED,
+        defect: Some(defect),
+        revisions,
     }
+}
+
+/// A v1 signal carrying the F4 defect and its proposed revision.
+const fn v1_defect(
+    family: ComputeToken,
+    block_local: u16,
+    name: &'static str,
+    statistic: Statistic,
+    kernel: KernelId,
+) -> SignalDef {
+    v1_with_defect(
+        family,
+        block_local,
+        name,
+        statistic,
+        kernel,
+        DEFECT_F4,
+        REV_F4_PROPOSED,
+    )
 }
 
 const fn v2sig(
@@ -753,9 +840,22 @@ pub(crate) static BASIC: [SignalDef; 13] = {
         v1(F, 7, "edge_det_4th", L4, K),
         v1(F, 8, "edge_det_2nd", L2, K),
         v1(F, 9, "mse", Mean, K),
+        // The HF-energy ratio family. The two `loss` members are bounded by
+        // construction (their numerator is `max(0, src - dst)`, which their
+        // own denominator bounds); the `gain` member's is `max(0, dst - src)`,
+        // which it does not — that asymmetry IS F17, and it is why only the
+        // third of these three carries a defect.
         v1(F, 10, "var_loss", Ratio, K),
         v1(F, 11, "tex_loss", Ratio, K),
-        v1(F, 12, "contrast_inc", Ratio, K),
+        v1_with_defect(
+            F,
+            12,
+            "contrast_inc",
+            Ratio,
+            K,
+            DEFECT_F17,
+            REV_F17_PROPOSED,
+        ),
     ]
 };
 
@@ -1749,11 +1849,17 @@ mod tests {
     /// The peaks pair is the part no per-block reading would have predicted:
     /// `ssim_max` and `ssim_l8` are local 0 and local 3 of a 6-signal block,
     /// so the moved ids are an every-third-slot comb, not a contiguous run.
+    ///
+    /// ⚠ The instrument changed on 2026-09-05 when F17's `v1hfgain` joined
+    /// revision 2: this asserts an ERA's slot set, so it now reads
+    /// [`super::era_moved_slots`]`("v1ssimcap", …)` rather than
+    /// `Rev2.moved_slots`, whose union is 144. The CLAIM (132, and which 132)
+    /// is unchanged and is still checked exactly — see `era_moved_slots`'s own
+    /// doc for why the revision-level form could no longer express it.
     #[test]
     fn f4_moves_exactly_the_registered_slots() {
-        use super::FormulaRevision;
         use crate::NUM_SCALES;
-        let got = FormulaRevision::Rev2.moved_slots(372, NUM_SCALES);
+        let got = super::era_moved_slots("v1ssimcap", 372, NUM_SCALES);
 
         // Derived independently of the signal table, from the layout the
         // measurement exposed: (block base, per-cell width, local ids).
@@ -1804,23 +1910,62 @@ mod tests {
         assert!(FormulaRevision::Rev1.era_tokens().is_empty());
     }
 
-    /// Revision 2 carries BOTH registered eras, and `freecomp`'s slots are
+    /// **G3.1 for revision 2's `v1hfgain` era** — F17's twelve slots, derived
+    /// from the layout rather than copied from a list.
+    ///
+    /// `contrast_inc` is block-local 12 of the 13-signal basic block, so the
+    /// moved ids are `13·cell + 12` for the twelve (scale, channel) cells.
+    /// Unlike `v1ssimcap`, this set does NOT change with pool state: the basic
+    /// block is present in every registered layout, so a 944 read moves the
+    /// same twelve and only those twelve.
+    #[test]
+    fn f17_moves_exactly_the_twelve_contrast_inc_slots() {
+        use crate::NUM_SCALES;
+        let want: Vec<u16> = (0..NUM_SCALES as u16 * 3).map(|c| c * 13 + 12).collect();
+        assert_eq!(want.len(), 12);
+        for width in [372u16, 944] {
+            let got = super::era_moved_slots("v1hfgain", width, NUM_SCALES);
+            assert_eq!(
+                got, want,
+                "v1hfgain slot set at width {width} disagrees with the layout"
+            );
+        }
+        // The four slots the R6 record names as the corpus-wise worst, and the
+        // two the SDR default reads unguarded.
+        for id in [12u16, 38, 129, 116, 155] {
+            assert!(want.contains(&id), "f{id} missing from the F17 set");
+        }
+        // Its two bounded siblings must NOT be in it — F17 is the asymmetry,
+        // and a fix that moved `var_loss` would be a different, larger change.
+        for id in [10u16, 11, 23, 24] {
+            assert!(!want.contains(&id), "f{id} (a loss member) must not move");
+        }
+    }
+
+    /// Revision 2 carries all THREE registered eras, and `freecomp`'s slots are
     /// reachable only at a width that has an append block — which is exactly
     /// why F5 is free today and stops being free the moment a bake declares
     /// one.
     #[test]
-    fn rev2_carries_both_eras_and_f5_needs_the_append_block() {
+    fn rev2_carries_all_eras_and_f5_needs_the_append_block() {
         use super::FormulaRevision;
         use crate::NUM_SCALES;
         let toks = FormulaRevision::Rev2.era_tokens();
-        assert!(
-            toks.contains(&"v1ssimcap") && toks.contains(&"freecomp"),
-            "{toks:?}"
-        );
+        for want in ["v1ssimcap", "freecomp", "v1hfgain"] {
+            assert!(toks.contains(&want), "{want} missing from {toks:?}");
+        }
 
         let at372 = FormulaRevision::Rev2.moved_slots(372, NUM_SCALES);
         let at944 = FormulaRevision::Rev2.moved_slots(944, NUM_SCALES);
-        assert_eq!(at372.len(), 132, "372 sees only the v1ssimcap slots");
+        // 132 (v1ssimcap) + 12 (v1hfgain); the two sets are disjoint, which is
+        // itself the check that batching three defects did not double-count.
+        assert_eq!(at372.len(), 144, "372 sees the two v1 eras' slots");
+        assert_eq!(
+            super::era_moved_slots("v1ssimcap", 372, NUM_SCALES).len()
+                + super::era_moved_slots("v1hfgain", 372, NUM_SCALES).len(),
+            at372.len(),
+            "the two v1 eras must move disjoint slot sets"
+        );
         assert!(
             at944.len() > at372.len(),
             "944 must additionally reach freecomp's raw-moment slots: {} vs {}",
@@ -2083,6 +2228,24 @@ mod tests {
         );
         // F15: 12 slots.
         assert_eq!(by_id.get("F15").map(Vec::len), Some(12), "F15 slot count");
+        // F17: the twelve `contrast_inc` slots — and ONLY those. The two
+        // bounded members of the same family must stay defect-free, because
+        // the asymmetry is the defect: attaching F17 to `var_loss` would
+        // triple a 12-slot recalculation to fix nothing.
+        assert_eq!(by_id.get("F17").map(Vec::len), Some(12), "F17 slot count");
+        for id in [12usize, 38, 116, 129, 155] {
+            assert!(by_id["F17"].contains(&id), "F17 must cover f{id}");
+        }
+        for id in 0..full_width(NS) {
+            let d = def_at(id, NS).expect("def");
+            if d.signal.name == "var_loss" || d.signal.name == "tex_loss" {
+                assert!(
+                    d.signal.defect.is_none(),
+                    "f{id} ({}) is bounded by construction and must carry no defect",
+                    d.signal.name
+                );
+            }
+        }
     }
 
     /// A PROPOSED revision must not claim to have landed, and every LANDED
@@ -2115,7 +2278,7 @@ mod tests {
             }
         }
         assert!(landed > 0 && proposed > 0, "expected both kinds");
-        // The two proposals the defect audit asked to be modelled.
+        // The three proposals revision 2 batches.
         let eras: std::collections::BTreeSet<&str> = signals()
             .flat_map(|s| s.revisions.iter())
             .filter(|r| r.status == RevisionStatus::Proposed)
@@ -2123,6 +2286,7 @@ mod tests {
             .collect();
         assert!(eras.contains("v1ssimcap"), "F4's proposed revision");
         assert!(eras.contains("freecomp"), "F5's proposed revision");
+        assert!(eras.contains("v1hfgain"), "F17's proposed revision");
     }
 
     /// Every v1 slot carries the option-C revision; nothing else claims it.

@@ -26,15 +26,19 @@
 #
 # Usage: r6_fit_arms.sh <arm> [ROOT]
 set -euo pipefail
-ARM="${1:?usage: r6_fit_arms.sh <ssim2|c1|lorentz|clamp> [ROOT]}"
+ARM="${1:?usage: r6_fit_arms.sh <arm> [ROOT]}"
 ROOT="${2:-/mnt/v/output/zensim/rev2-2026-09-05/r6}"
+# The slice set is a parameter so a later lane can pre-register a different one
+# without copying this file. R6b (F17) uses "156 228": `contrast_inc` is a basic
+# slot, so the 372 slice adds masked + IW columns the defect does not touch.
+SLICES="${R6_SLICES:-156 228 372}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BDR="$REPO/target/release/bake_dial_refit"
 MASK="$REPO/benchmarks/feature_sign_mask_2026-05-26.tsv"
 T="$ROOT/tables/$ARM"
 mkdir -p "$ROOT"/{grams,fits,bakes,slices}
 
-for n in 156 228 372; do
+for n in $SLICES; do
   [ -s "$ROOT/slices/a$n.idx" ] || seq 0 $((n-1)) > "$ROOT/slices/a$n.idx"
 done
 
@@ -44,7 +48,7 @@ say "gram (safesyn, $(wc -l < "$T/safesyn.csv") csv lines)"
 nice -n19 ionice -c3 "$BDR" gram --parquet "$T/safesyn.parquet" \
     --target human_score --space raw --out "$ROOT/grams/${ARM}_safesyn.npz"
 
-for slice in 156 228 372; do
+for slice in $SLICES; do
   for solver in lasso bvls; do
     L="${ARM}_s${slice}_${solver}"
     say "fit $L"

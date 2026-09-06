@@ -26,6 +26,7 @@ EX="$REPO/zensim-bench/target/release/examples/extract_features_372col"
 BV="$REPO/target/release/bake_verdict"
 LADDER_PAIRS="${LADDER_PAIRS:-$HOME/tmp/ladder_instr/ladder/ladder_pairs.tsv}"
 TRUTH=/mnt/v/output/zensim/ladder-2026-09-05/instruments/dialcells_ssim2_ladder.tsv
+ARM_ENV="${R6_ARM_ENV:-ZENSIM_SSIM_LUMA}"
 ARMS="${R6_ARMS:-ssim2 c1 lorentz clamp}"
 VARIANTS="${R6_VARIANTS:-s156_lasso s156_bvls s228_lasso s228_bvls s372_lasso s372_bvls}"
 mkdir -p "$ROOT"/{dial,instruments}
@@ -35,7 +36,7 @@ if [ "$MODE" = extract ]; then
   for a in $ARMS; do
     T="$ROOT/tables/$a"
     printf '[%s] %s ladder\n' "$(date -u +%H:%M:%S)" "$a"
-    ZENSIM_SSIM_LUMA=$a nice -n19 ionice -c3 "$EX" --corpus pairs-tsv \
+    env "$ARM_ENV=$a" nice -n19 ionice -c3 "$EX" --corpus pairs-tsv \
         --path "$LADDER_PAIRS" --out "$T/ladder.csv" >/dev/null
   done
   python3 "$REPO/scripts/r6_build_dial_instruments.py" "$ROOT"

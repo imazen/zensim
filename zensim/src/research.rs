@@ -1026,12 +1026,20 @@ mod tests {
 
     /// **The refusal's slot list IS the registry's declared blast radius.**
     ///
-    /// Under the shipped revision, asking for the era `Rev2` introduces must
-    /// refuse exactly the slots `FormulaRevision::Rev2::moved_slots` names —
-    /// the revision lane's own owner — and no others. A selector that named a
-    /// different set would be refusing the wrong work, in either direction:
-    /// too many (blocking servable slots) or too few (serving a caller the
-    /// wrong era silently).
+    /// Under the shipped revision, asking for an era `Rev2` introduces must
+    /// refuse exactly the slots that ERA moves — the revision lane's own
+    /// owner — and no others. A selector that named a different set would be
+    /// refusing the wrong work, in either direction: too many (blocking
+    /// servable slots) or too few (serving a caller the wrong era silently).
+    ///
+    /// ⚠ The comparison target changed on 2026-09-05 when F17's `v1hfgain`
+    /// joined revision 2. A `RevisionRef::Named` request is ERA-scoped, so it
+    /// is compared against [`feature_defs::era_moved_slots`]; it used to read
+    /// `FormulaRevision::Rev2::moved_slots`, whose union is now 144 and which
+    /// could never have been the right target for a single-era request — it
+    /// was merely equal to one while revision 2 had one v1 era in it. The
+    /// numbers asserted (132 / 36) are unchanged, and the F17 era is asserted
+    /// beside them rather than folded into them.
     ///
     /// MEASURED end-to-end alongside this: with `ZENSIM_FORMULA_REV=2` the
     /// request succeeds and exactly the named columns move — 36 for a
@@ -1058,8 +1066,7 @@ mod tests {
             panic!("wrong error: {err}");
         };
         let declared = SlotSet::from_slots(
-            crate::feature_defs::FormulaRevision::Rev2
-                .moved_slots(372, ns)
+            crate::feature_defs::era_moved_slots("v1ssimcap", 372, ns)
                 .into_iter()
                 .map(usize::from),
         );
@@ -1083,6 +1090,38 @@ mod tests {
             panic!("wrong error: {err}");
         };
         assert_eq!(incompatible.len(), 36, "F4 inside the basic block");
+
+        // The same property for revision 2's OTHER v1 era, F17's `v1hfgain`:
+        // twelve `contrast_inc` slots, all of them inside `basic`, so the
+        // basic-only sub-request refuses the same twelve rather than a subset.
+        let f17 = Request::for_slots(SlotSet::from_ranges([(0, 372)]), 372)
+            .at_revision(RevisionRef::Named("v1hfgain".into()));
+        let ResearchError::RevisionUnavailable { incompatible, .. } =
+            f17.validate().expect_err("Rev1 cannot serve v1hfgain")
+        else {
+            panic!("wrong error kind for v1hfgain");
+        };
+        assert_eq!(
+            incompatible,
+            SlotSet::from_slots(
+                crate::feature_defs::era_moved_slots("v1hfgain", 372, ns)
+                    .into_iter()
+                    .map(usize::from),
+            )
+        );
+        assert_eq!(incompatible.len(), 12, "F17's blast radius at 372");
+        let f17_basic = Request::for_slots(SlotSet::from_ranges([(0, 156)]), 372)
+            .at_revision(RevisionRef::Named("v1hfgain".into()));
+        let ResearchError::RevisionUnavailable { incompatible, .. } =
+            f17_basic.validate().expect_err("still unservable")
+        else {
+            panic!("wrong error kind for the v1hfgain basic request");
+        };
+        assert_eq!(
+            incompatible.len(),
+            12,
+            "every F17 slot is inside the basic block"
+        );
     }
 
     /// A `FeatureSetId` round-trips into a request that reproduces it.

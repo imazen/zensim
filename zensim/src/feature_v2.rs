@@ -5402,25 +5402,17 @@ impl V1BasicSums {
         out[7] = (self.edge_det4 * one_over_n).max(0.0).powf(0.25).abs();
         out[8] = (self.edge_det2 * one_over_n).max(0.0).sqrt().abs();
         out[9] = self.mse * one_over_n;
+        // Same owner as the buffered walk (`crate::hf_gain_form`), which is
+        // what keeps the fold's v1 pools bit-identical to v1's under EVERY
+        // arm rather than only under the shipped one.
+        let gain_form = crate::hf_gain_form::active_gain_form();
         let var_src = self.hf_sq_src * one_over_n;
         let var_dst = self.hf_sq_dst * one_over_n;
-        out[10] = if var_src > 1e-10 {
-            (1.0 - var_dst / var_src).max(0.0)
-        } else {
-            0.0
-        };
-        out[12] = if var_src > 1e-10 {
-            (var_dst / var_src - 1.0).max(0.0)
-        } else {
-            0.0
-        };
+        out[10] = crate::hf_gain_form::hf_energy_loss(var_src, var_dst);
+        out[12] = crate::hf_gain_form::hf_energy_gain(gain_form, var_src, var_dst);
         let mad_src = self.hf_abs_src * one_over_n;
         let mad_dst = self.hf_abs_dst * one_over_n;
-        out[11] = if mad_src > 1e-10 {
-            (1.0 - mad_dst / mad_src).max(0.0)
-        } else {
-            0.0
-        };
+        out[11] = crate::hf_gain_form::hf_mag_loss(mad_src, mad_dst);
     }
 }
 
