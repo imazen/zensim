@@ -2409,6 +2409,21 @@
    "evidence": "benchmarks/libm_pow_nondeterminism_2026-09-06.md; zenmetrics docs/PLAN_REV2_WAVE_2026-09-06.md section 7.1-7.2",
    "fix_path": "x^(1/4) = sqrt(sqrt(x)) and x^(1/8) = sqrt(sqrt(sqrt(x))) are exact, unique for these exponents and libc-independent \u2014 but they move revision-1 bytes, so the fix needs its own registered era in the ssim_form/hf_gain_form shape. REGISTERED, NOT LANDED.",
    "registered": "2026-09-06"
+  },
+  {
+   "id": "corrhead-deploy-passq10-single-anchor-sign-2026-09-06",
+   "kind": "annotated",
+   "fields": [
+    "corruption_deploy",
+    "corruption_head"
+   ],
+   "scope": {
+    "manual": "documentation-only: DEPLOY pass_q10 is not a fulleval field on any board cell (promote_fulleval does not graft corruption_deploy), so no machine predicate can select affected cells. It is quoted in corruption-head records and comparisons, which is where the caveat is needed."
+   },
+   "reason": "DEPLOY `pass_q10` is NOT a measure of head quality \u2014 it is the SIGN of ONE image's q10 dial, decided by a 0.39-point margin. The gate grid is 672 (corruption, q10, q20) triples from a SINGLE reference (gb82_dog): the corruption member varies, but the q10 and q20 members are the SAME two encodes repeated 672 times, so each has exactly one dial value. The DEPLOY rule `if p > T { min(dial, 0) } else { dial }` floors a fired cell at exactly 0, which beats the q10 anchor only while that anchor is ABOVE zero. MEASURED: shipped D reads q10 dial +0.390 (0.39 above the cliff) while an in-era refit D reads -4.964 (below it), and pass_q10 then collapses to the dial-alone value for EVERY head at EVERY threshold \u2014 including an HGB head that reads 100.00 % head-alone: logistic 88.24 % -> 12.50 %, hgb 99.40 % -> 12.50 %, hgb_drop8 98.81 % -> 12.50 %. `pass_q20` is unaffected and is the informative column (91.07 / 99.85 / 99.55 in-era vs 91.37 / 99.85 / 99.70 shipped \u2014 head ranking intact and identical). So a low pass_q10 is NOT a head regression and NOT a revision regression.",
+   "evidence": "refit lane measurement 2026-09-06 on the postC gate grid; the single-source limitation is already named in benchmarks/corruption_head_d_2026-09-05.md",
+   "fix_path": "the fix is on the DEPLOY rule or the grid, not on the head: floor a fired cell at min(dial, anchor_floor) rather than at 0, or add references to the gate grid so the number averages over images instead of turning on one dial's sign. NEITHER IS DONE.",
+   "registered": "2026-09-06"
   }
  ]
 }
