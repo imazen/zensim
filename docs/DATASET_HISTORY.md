@@ -2132,3 +2132,80 @@ Registry: five entries in `benchmarks/eval_annotations.json`
 `nonmonotone-feature-slots-are-by-design-2026-09-05`). Record:
 `docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`. Artifacts + `_MANIFEST.json`:
 `/mnt/v/output/zensim/feature-audit-2026-09-05/`.
+
+### §3.43 — the fleet can recompute features at a named formula revision, and the rev1 output is BIT-EXACT to the postC 372 root (2026-09-06)
+
+The rev2 record's §3 registers WHAT to recalculate and flags that
+`JobKind::Feature` had **no executor** — feature tables were produced through
+`ScoreFile` + a `zensim-foldapp2*` metric name. That vehicle cannot carry a
+formula revision: `ZENSIM_FORMULA_REV=1` and `=2` are different work with
+different output bytes but serialize to the identical `JobKind::ScoreFile`, so
+they collide on ONE content-addressed `JobId` and a rev2 cell would read as
+"already done" off a rev1 ledger. The executor was built into zenfleet rather
+than bypassed (zenmetrics `7740637e`, plan
+`zenmetrics/docs/PLAN_REV2_RECALC_2026-09-06.md`).
+
+**MEASURED — the rev1 correctness gate.** The executor's output at revision 1,
+regime 372, against the stored postC root
+(`/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC/`,
+`build_commit 4fbd8ff8` — the commit the executor's zensim is at), compared as
+`to_bits()` with row alignment verified on `ref_basename` **before** any value
+is read:
+
+| corpus | producer of the stored table | rows | cells | differ |
+|---|---|--:|--:|--:|
+| csiq | `extract_features_372col` | 866 | 322,152 | **0** |
+| tid | `zensim-validate --extract-only` | 3,000 | 1,116,000 | **0** |
+| kadid | `zensim-validate --extract-only` | 10,125 | 3,766,500 | **0** |
+| | | **13,991** | **5,204,652** | **0** |
+
+Covering both producers is not a formality: they differ in **decoder crate AND
+zensim entry point** — `extract_features_372col` uses `zen_decode`
+(zencodec magic-byte detect → the five imazen codecs) with
+`compute_zensim_with_config`, while `zensim-validate --extract-only` uses
+`image::open` with `compute_zensim_with_ref_and_config` (the cached-ref path).
+The fleet executor uses the imazen decoders with the cached-ref path — a third
+combination — and reproduces both bit-exactly. This corroborates, from a
+different lane and a different code path, R6's own C1 control
+(`benchmarks/f4_arm_decision_2026-09-05.md` §1: the `ssim2` arm is `cmp`-clean
+against the postC root's source CSVs at `ceb86c2d`).
+
+**⛔ A GAP THE GATE FOUND: `live` cannot be re-extracted by the fleet today.**
+The stored LIVE table was built from **`.bmp`** (measured: its `ref_basename` is
+`bikes.bmp`, and the alternative `live_r2_pairs_png.tsv` misaligns against it,
+so the PNG list is NOT what produced it). zensim's `zen_decode` handles BMP /
+PNM / farbfeld via `zenbitmaps`; **zenmetrics' `decode_image_to_rgb8` has no BMP
+arm**, so the executor fails loud with "could not detect image format" — which
+is the fail-loud contract behaving correctly, not a silent wrong answer. LIVE is
+779 rows of the 42,470 re-extractable rows in the 372 root (1.8 %). Fix, not
+run: add a `zenbitmaps` BMP arm to `zenmetrics-cli/src/decode.rs`. Note also
+that LIVE's stored row ORDER is not its pairs-TSV order, so it needs a key-based
+join, not the positional compare the other three corpora use.
+
+**The 6 byte-COPY corpora stay excluded from every count above** (aic4,
+nonphoto, imazen26, sdr25, hfnlproxy, hf_nearlossless): they are copies in the
+postC root and are not re-extractable on this box, so a zero delta there is an
+identity, not evidence.
+
+**Wave declaration is BLOCKED, and correctly so.** R6 has not published an F4
+arm (`benchmarks/f4_arm_decision_2026-09-05.md` ends at its §2 correction, with
+no verdict section), so no rev2 job may be declared — its rows would be at an
+arm nobody chose. What is unblocked and done: the executor, its gates, and the
+rev1 bit-exactness proof.
+
+**Two R6 findings that change how the wave must be declared**, folded in here so
+the next session does not re-derive them:
+
+1. **F4's blast radius keys on POOL STATE (`feature_set_id`), not on width**
+   (R6 §2). A zeroed-pool 944 table sees 36 moved slots; the 2026-09-05
+   pools-live 944 instrument sees **132** — as sensitive as 372. A wave that
+   assumes "944 ⇒ 36 slots" under-declares by 96 slots per pools-live table.
+   The declare therefore carries `feature_set_id` per cell and the executor
+   echoes it into every row; it is **declared and echoed, never re-derived**,
+   because `zensim::feature_set_id` is that id's owner.
+2. **Decoder era is an input.** Every emitted row records the decoder that read
+   its pixels, because §3.34 measured decoder era at **73 %** of the
+   extractor-era shift — a confound of comparable size, not a footnote.
+
+Harness: `zenmetrics/scripts/jobsys/rev2_bitexact_gate.py` (refuses a sub-64
+image and a misaligned row rather than reporting a number).
