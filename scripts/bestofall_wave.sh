@@ -149,23 +149,37 @@ cell() {
       --anchor "$ANCHOR" --target-col ssim2_gpu \
       > "$OUT/logs/${name}.pack.log" 2>&1 || return 1
 
-  # densify is the ONLY thing that writes `zentrain.feature_ids`. On a
-  # contiguous-prefix read set (f0..f227) it collapses the caller width to 228
-  # and declares an IDENTITY layout.
-  say "DENSIFY $name"
-  step densify "$byid" "$BIN/bake_dial_refit" densify --in "$packed" --out "$byid" --gate-rows 512 \
-      > "$OUT/logs/${name}.densify.log" 2>&1 || return 1
+  # densify is the ONLY thing that writes `zentrain.feature_ids`, and on a
+  # contiguous-prefix read set (f0..f227) it collapses the caller width 372 ->
+  # 228 and declares an IDENTITY layout.
+  #
+  # ⛔ THAT MAKES IT UNSCOREABLE BY THE PINNED PROBES. `bake_verdict` scores a
+  # probe only when its column count equals the bake's `caller_input_width`, and
+  # every registered negtail/identity probe is 372-wide — so a densified 228-wide
+  # bake reads C3/C4/C5/C6 as NOT MEASURED, which is the entire contract tier and
+  # the entire point of this lane. MEASURED on the first wave cell: contract
+  # "INCOMPLETE (not a pass)" with all four rows unmeasured.
+  #
+  # So the SCORING path uses the packed bake, which keeps the 372 caller width
+  # (144 `Drop` transforms) exactly like the campaign's own published 228 bakes,
+  # and densify runs alongside as a SERVABILITY artifact. Its failure is
+  # reported, not fatal — a bake that cannot densify still has a valid verdict.
+  say "DENSIFY $name (servability artifact — NOT the scored bake)"
+  if ! "$BIN/bake_dial_refit" densify --in "$packed" --out "$byid" --gate-rows 512 \
+       > "$OUT/logs/${name}.densify.log" 2>&1; then
+    say "DENSIFY FAILED $name (non-fatal; see logs)"
+  fi
 
   say "VERDICT $name"
   step verdict "$OUT/verdicts/${name}.fulleval.json" \
-      "$BIN/bake_verdict" --bake "$byid" --features-root "$POSTC" \
+      "$BIN/bake_verdict" --bake "$packed" --features-root "$POSTC" \
       --name "$name" --full-json "$OUT/verdicts/${name}.fulleval.json" \
       --output "$OUT/verdicts/${name}.verdict.md" \
       > "$OUT/logs/${name}.verdict.log" 2>&1 || return 1
 
   say "GADDR $name"
   step gaddr "$OUT/gaddr/gaddr_${name}.json" \
-      "$BIN/bake_verdict" --bake "$byid" --features-root "$POSTC" \
+      "$BIN/bake_verdict" --bake "$packed" --features-root "$POSTC" \
       --dial-grid "$LADDER/dial_grid_372col_ladder.parquet" \
       --gaddr-grid-truth "$LADDER/dialcells_ssim2_ladder.tsv" \
       --floor-rule resolvable --floor-margin 0.5 \

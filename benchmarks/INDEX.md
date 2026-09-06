@@ -4,6 +4,32 @@
 
 > **★ RETROSPECTIVE 2026-07-26:** [`best_per_day_summer_2026.md`](best_per_day_summer_2026.md) — the **best model per calendar day** (2026-05-01 → 07-25), with verified bake paths, recipes, headline metrics, and the summer champions (best CID22 = winner_dial 0.894; best KonJND = cl_tfm 0.761; best HF-NL/dial = Ebothg_scr0.5_dial; shipped B/A/BHdr). Machine-readable twin: `/mnt/v/output/zensim/reports/best_per_day.json`. The one-stop map of every model-experiment day this summer.
 
+> **★★ OUTPUT POLARITY HAD NO OWNER — 1 of 8 loss sites knew which convention was in force, 2026-09-06:**
+> [`best_of_all_2026-09-06.md`](best_of_all_2026-09-06.md) §1. `rank_target_sign` (the DISTANCE-vs-SCORE
+> reconciliation, with a 2026-07-15 measurement behind it: HF per-ref SROCC **+0.6393 → −0.3454** when
+> rank supervision was *added*) existed at ONE site. The pool head, the hybrid head, the per-sample-α
+> head, BOTH plain-path mini-batch helpers, both TV hinges and the α head's monotonicity hinge each
+> carried their own opposite assumption. **That is the mechanism behind the fastclass2 α-head
+> inversion** — reproduced here in a 0.5-second unit test at raw SROCC **−0.9970** (depth 1) and
+> **−0.9986** (depth 2) where the plain path reads +0.99, against the campaign's raw CID22 −0.8921.
+> Owner: `mlp_train::OutputPolarity`. Also closed in the same family: `--minibatch-size>1` / NiN
+> silently DROPPING the absolute term, `--n-hidden-layers`/`--skip-connection` as silent no-ops off
+> the α-head path, and `--leaky-alpha` as a train/serve divergence (`Activation::Relu` was in the wire
+> format and unreachable). **4 of 5 polarity tests FAIL at the parent commit; five rank-only bake
+> sha256s reproduce byte-for-byte.**
+
+> **★★ `--nonneg-distance` — THE DIAL'S IDENTITY AND ABOVE-IDENTITY ROWS MADE STRUCTURAL, 2026-09-06:**
+> [`best_of_all_2026-09-06.md`](best_of_all_2026-09-06.md) §2. The gate record's C2 ⊻ C6 proof says no
+> monotone spline can fix a raw ordering that puts real cells above a perfect copy, so this fixes it in
+> the weights: `raw(x) = pin − g(x)` with `g ≥ 0` and `g(0⃗) = 0` **bit-exactly** (scale-only
+> standardization + zeroed hidden biases + ReLU + output weights `≤ 0` + the output bias frozen at the
+> pin), which makes `raw(0⃗)` the argmax over the whole input space by construction. Expressible in the
+> SHIPPED wire format with **zero** runtime change — which is why softplus / ReLU² / squared-norm were
+> rejected. Gated by `to_bits()` equality at f32/f16/i8 and 120,000 probes over `1e-30`…`1e12`.
+> **Does NOT claim C3/C4 or A7r**, and `g` is CONVEX at one hidden layer. Ladder loss: the owner
+> already existed (`TvRegularizer`), so the new artefact is the pair BUILDER — 175,736 material pairs
+> from 19,259 ladders, positional join verified on all 196,086 rows.
+
 > **★★ F18 — THE EXTRACTOR IS LIBC-DEPENDENT ON REVISION 1; OWNER + ERA LANDED, FLIP NOT TAKEN 2026-09-06:**
 > [`libc_determinism_2026-09-06.md`](libc_determinism_2026-09-06.md) (landing, full feature-path
 > transcendental audit, cross-libc gate) and [`libm_pow_nondeterminism_2026-09-06.md`](libm_pow_nondeterminism_2026-09-06.md)

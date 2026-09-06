@@ -305,6 +305,51 @@ front is the same fit.)*
 **The control gets the identical chain.** Its `raw(0⃗)` is not the argmax, and
 what that costs it is the measurement, not a handicap.
 
+### 5.1 Two structural facts the wave had to be rebuilt around, both MEASURED
+
+**(a) `shared-anchor` is single-layer-only.** The first attempt chained
+`pack` → `shared-anchor` (which takes `--anchor` repeatably, and is where the
+21-row identity anchor naturally belongs) → `densify`. It died with
+`bake_dial_refit expects a single-layer linear bake (got 2 layers)`. Merging the
+two anchors into one parquet up front is the same fit in one pass, and keeps
+QUANTIZE-then-CALIBRATE.
+
+**(b) A DENSIFIED bake cannot be graded by the pinned probes, so the scored bake
+is the PACKED one.** `densify` on a contiguous-prefix read set (`f0..f227`)
+collapses the caller width **372 → 228** and declares an IDENTITY layout. Every
+registered negtail/identity probe is **372-wide**, and `bake_verdict` scores a
+probe only when its column count equals the bake's `caller_input_width` — so the
+densified bake read **C3, C4, C5 and C6 all NOT MEASURED**, i.e. the entire
+contract tier, and the gaddr headline came back
+`contract INCOMPLETE (not a pass)`. That is the whole point of this lane, so the
+scoring path uses `_packed.bin`, which keeps the 372 caller width via 144 `Drop`
+transforms — exactly the shape of the campaign's own published 228 bakes.
+`densify` still runs, as a **servability artifact** whose failure is reported and
+not fatal.
+
+*(The same investigation found and fixed a real `densify` defect on the way: its
+identity gate fed both arms the pre-densify caller-width row, which a
+contiguous-prefix read set cannot accept. Every shipped bake it had been run on
+reads a SCATTERED id set, so the path had never been exercised. Gated with the
+scattered control beside it.)*
+
+### 5.2 The control reproduces the published campaign
+
+First cell, `A_plain_s4004`, against `benchmarks/fastclass2_campaign_2026-09-05.md`:
+
+| | this lane | campaign (s4004) |
+|---|--:|--:|
+| CID22 | 0.8904 | 0.890817 |
+| composite | 0.8728 | 0.873119 |
+| KonJND \|·\| | 0.4947 | 0.495731 |
+| A7r | 5 / 5 fail | 5 / 5 fail |
+| floors (rav1e / svt / jpeg / jxl / webp) | 0.1795 / 0.8205 / 0.5641 / 0.3846 / 0.9744 | identical |
+
+The small rank deltas are the expected consequence of a different pack anchor
+(negrich + identity, unclamped `ssim2_gpu`) against the campaign's clamped
+`target_score`. **The per-codec floors are bit-identical**, which is what says
+the instrument and the ruler are the same ones.
+
 *(RESULTS — filled when the wave lands.)*
 
 ---

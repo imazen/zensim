@@ -48,6 +48,98 @@ on the supported surface, and `#[doc(hidden)] feature_set_id::registered_layout_
 (the candidate clip-width list a layout-free id is reconstructed against; not the
 supported surface).
 
+### Fixed — output polarity had no owner: 1 of 8 loss sites knew which convention was in force (2026-09-06)
+
+`mlp_train` has always had two incompatible readings of what its single scalar
+output means — **DISTANCE** (higher quality → lower raw output; the legacy
+rank-only convention, and what the TV within-ladder hinge assumes in prose) and
+**SCORE** (higher quality → higher raw output; what every absolute term assumes,
+because it regresses the output directly onto `human_score`). `rank_target_sign`
+reconciled them at **one** site. The pool head, the hybrid head, the
+per-sample-α head, both plain-path mini-batch helpers, both TV hinges and the α
+head's monotonicity hinge each carried their own, opposite, hard-coded
+assumption.
+
+MEASURED, reproducing the fastclass2 campaign's α-head defect in a 0.5-second
+unit test: an α-head recipe carrying an absolute term trains a model whose
+ordering is perfect and whose sign is backwards — synthetic raw SROCC
+**−0.9970** at depth 1 and **−0.9986** at depth 2 where the plain path reads
++0.99, against the campaign's measured raw CID22 **−0.8921**. `bake_dial_refit
+pack` then cannot spline it at all, because the output calibration spline is
+monotone increasing by construction (all three campaign seeds died with
+`HARVEST_FAILED`).
+
+- `mlp_train::OutputPolarity::{Distance, Score}` is now THE owner. Derived once
+  by `for_groups`, asked by every site: `rank_target_sign()` for RankNet,
+  `ladder_sign()` for both ordering hinges, which share the single form
+  `max(0, ladder_sign·(y_better − y_worse) + margin)`. The monotonicity hinge
+  reads a new `quality_sign` — which member is better is a property of the human
+  scores, never of the output convention. Every path logs its convention.
+- `run_parallel_minibatch` / `run_minibatch_with_nin` are pure RankNet + PWRC, so
+  `--minibatch-size > 1` or `--norm-in-norm-weight > 0` with an absolute term
+  silently discarded that term. Both now **refuse**.
+- `--n-hidden-layers >= 2` and `--skip-connection` were silent no-ops off the
+  α-head path (`use_2layer` / `use_skip` are read at two lines, both inside
+  `train_mlp_per_sample_alpha_head`). Both now **refuse**.
+- `--leaky-alpha` was a train/serve divergence: every emitter hard-coded
+  `Activation::LeakyRelu` while the runtime applies a hard-coded
+  `LEAKY_RELU_ALPHA`. `hidden_activation_for` derives the byte from the slope
+  and panics on anything unrepresentable. (`Activation::Relu` has been in the
+  wire format all along and was unreachable from this trainer. Noted: the
+  runtime constant is an **f32**, so `LEAKY_RELU_ALPHA as f64` is
+  `0.009999999776482582`, not the f64 literal `0.01` — both accepted.)
+
+Byte-identity control: `tests/legacy_bake_sha.rs` pins five rank-only recipes to
+sha256 digests MEASURED at the parent commit `0c6307a7`; all five reproduce
+byte-for-byte, **including both TV arms**, which is what proves the
+newly-reachable `--tv-margin` is the identical function at its `0.0` default.
+`tests/output_polarity.rs` (6 tests) is the other direction — **4 of 5 fail at
+that same parent commit**. (`fix(trainer): output polarity had no owner`,
+`b0be1c53`)
+
+### Added — `--nonneg-distance`: the dial's identity and above-identity rows become STRUCTURAL (2026-09-06)
+
+`benchmarks/dial_addressability_gate_2026-09-04.md` §10.3 proves that when real
+grid cells out-rank a perfect copy in raw space, **no monotone output spline can
+satisfy both C2 and C6**. It is a weights defect, so the flag fixes it in the
+weights: `raw(x) = pin − g(x)` with `g ≥ 0` and `g(0⃗) = 0` bit-exactly —
+scale-only standardization, hidden biases frozen at 0, ReLU, output weights
+projected `≤ 0`, output bias frozen at `--nonneg-pin`. `raw(0⃗)` is then the
+argmax over the entire input space, by construction, in f32/f16/i8 alike.
+
+Gated by `to_bits()` equality at all three dtypes and by 120,000 probes spanning
+`1e-30`…`1e12` and both signs; the pin is asserted **attained**, so the bound is
+tight rather than merely an upper bound. Refuses `--skip-connection`, any head
+flag, and `--n-hidden-layers >= 2` rather than claim a guarantee it does not
+establish. **Does not claim** C3/C4 or A7r, and `g` is CONVEX at one hidden
+layer — both documented on the flag. (`5d5a001e`)
+
+### Added — `--identity-rows`, and `--tv-margin` reaches the plain path (2026-09-06)
+
+`--identity-rows N` appends N zero-feature rows with an absolute target of the
+pin, as a train-only group appended LAST so it cannot shift the TV pair index
+space. Provably a **no-op** under `--nonneg-distance` (raw(0⃗) is the pin
+bit-exactly ⇒ zero squared error ⇒ zero gradient), and real work without it.
+
+`--tv-margin` was read only on the α-head path; the plain/pool/hybrid hinges were
+a pure `max(0, y_hi − y_lo)`, which is minimized by collapsing every ladder flat
+— and flat ladders are `tied`, which is the dial contract's **C2**. Default 0.0,
+byte-identical. The TV pairs loader also stops dropping out-of-range pairs in
+silence: it counts them, says so, and refuses when every pair was dropped.
+(`4e99f7e1`, `3c05c9a4`)
+
+### Fixed — `bake_dial_refit densify` could not gate a contiguous-prefix read set (2026-09-06)
+
+A bake whose kept layer-0 lines are a contiguous prefix `0..K-1` densifies to the
+IDENTITY layout, so `zensim::declared_feature_ids` returns `None` for it by
+design and its gather is POSITIONAL — it must be fed its own `K`-wide row. The
+identity gate fed BOTH arms the pre-densify caller-width row and died with
+`feature row has 372 values, bake expects 228`. Every shipped bake `densify` had
+been run on reads a SCATTERED id set (shipped D: `6,8,11,14,…,155`), which is why
+the path was never exercised until a 228-slot `f0..f227` MLP hit it. Gated with
+the scattered control in the same test so a future change cannot fix one shape by
+breaking the other. (`ea932f04`, `54cee30d`)
+
 ### Fixed — the pinned-score gate's tolerance was derived on ONE architecture; i686 CI caught it the same day (2026-09-06)
 
 The gate added above set `TOL = 1e-2` from a population of x86-64 builds only
