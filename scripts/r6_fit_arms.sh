@@ -10,7 +10,15 @@
 #   --space raw --target human_score --lam 2e-3 --tau 0 --n-sweeps 400 --tol 1e-10
 # so any difference between two arms is attributable to the luminance form.
 #
-# Two slices (0..155 = the ADD156 / Profile-D lineage, 0..227 = basic+peaks) x
+# Three slices x two solvers. 0..155 is the ADD156 / Profile-D lineage and
+# 0..227 is basic+peaks; 0..371 is added because the plan's R6 line asks for the
+# fit "per feature family" and the masked + IW families are only REACHABLE at
+# 372 width — F4 moves 36 slots of the first slice, 60 of the second and all
+# 132 of the third, so the third is the most exposed instrument of the three.
+# (§7.4 of the pre-registration narrowed this to two slices; the third is added
+# back as a STRENGTHENING and is reported separately from the pre-registered
+# decision, never in place of it.)
+#
 # two solvers (`lasso` = the shipped recipe, `bvls` = the sign-constrained
 # monotone-linear class the user's directive names). The sign mask is held FIXED
 # across arms on purpose: it encodes the structural direction of an error
@@ -26,7 +34,7 @@ MASK="$REPO/benchmarks/feature_sign_mask_2026-05-26.tsv"
 T="$ROOT/tables/$ARM"
 mkdir -p "$ROOT"/{grams,fits,bakes,slices}
 
-for n in 156 228; do
+for n in 156 228 372; do
   [ -s "$ROOT/slices/a$n.idx" ] || seq 0 $((n-1)) > "$ROOT/slices/a$n.idx"
 done
 
@@ -36,7 +44,7 @@ say "gram (safesyn, $(wc -l < "$T/safesyn.csv") csv lines)"
 nice -n19 ionice -c3 "$BDR" gram --parquet "$T/safesyn.parquet" \
     --target human_score --space raw --out "$ROOT/grams/${ARM}_safesyn.npz"
 
-for slice in 156 228; do
+for slice in 156 228 372; do
   for solver in lasso bvls; do
     L="${ARM}_s${slice}_${solver}"
     say "fit $L"

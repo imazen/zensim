@@ -42,7 +42,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default="/mnt/v/output/zensim/rev2-2026-09-05/r6")
     ap.add_argument("--arms", default="ssim2,c1,lorentz,clamp")
-    ap.add_argument("--variants", default="s156_lasso,s156_bvls,s228_lasso,s228_bvls")
+    ap.add_argument("--variants", default="s156_lasso,s156_bvls,s228_lasso,s228_bvls,s372_lasso,s372_bvls")
     ap.add_argument("--b", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=20260905)
     ap.add_argument("--out", default=None)

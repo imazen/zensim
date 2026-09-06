@@ -27,7 +27,7 @@ BV="$REPO/target/release/bake_verdict"
 LADDER_PAIRS="${LADDER_PAIRS:-$HOME/tmp/ladder_instr/ladder/ladder_pairs.tsv}"
 TRUTH=/mnt/v/output/zensim/ladder-2026-09-05/instruments/dialcells_ssim2_ladder.tsv
 ARMS="${R6_ARMS:-ssim2 c1 lorentz clamp}"
-VARIANTS="${R6_VARIANTS:-s156_lasso s156_bvls s228_lasso s228_bvls}"
+VARIANTS="${R6_VARIANTS:-s156_lasso s156_bvls s228_lasso s228_bvls s372_lasso s372_bvls}"
 mkdir -p "$ROOT"/{dial,instruments}
 
 if [ "$MODE" = extract ]; then

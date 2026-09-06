@@ -177,3 +177,11 @@ on the same postC root, scored through the same `bake_verdict`: CID22
 **0.86333**, KonJND **0.53670** (the registered JPEG-504 ruler, which is what
 `bake_verdict` reads for `konjnd`), AIC-3 **0.77700**, CSIQ 0.90167, LIVE
 0.96029, TID 0.82368, KADID 0.80806.
+
+**Side-finding, from a smoke test of the `bvls` path on the REGISTERED (rev1-era)
+gram** — recorded because it is about the solver, not about F4, and it is large:
+sign-constraining the same 156-slice fit trades **−0.029 CID22** for **+0.081
+KonJND and +0.016 AIC-3** against shipped D (0.83466 / 0.61778 / 0.79298 vs
+0.86333 / 0.53670 / 0.77700). The monotone-constrained class is not a small
+perturbation of the lasso class, which is why R6 carries both solvers rather
+than assuming the arm ranking transfers between them.

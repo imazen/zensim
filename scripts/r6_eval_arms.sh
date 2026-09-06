@@ -17,7 +17,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BV="$REPO/target/release/bake_verdict"
 CORPORA="${R6_CORPORA:-cid22 konjnd aic3 csiq live tid kadid}"
 ARMS="${R6_ARMS:-ssim2 c1 lorentz clamp}"
-VARIANTS="${R6_VARIANTS:-s156_lasso s156_bvls s228_lasso s228_bvls}"
+VARIANTS="${R6_VARIANTS:-s156_lasso s156_bvls s228_lasso s228_bvls s372_lasso s372_bvls}"
 mkdir -p "$ROOT"/{verdicts,perpair}
 
 for arm in $ARMS; do
