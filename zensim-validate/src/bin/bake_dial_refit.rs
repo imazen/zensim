@@ -5111,6 +5111,97 @@ mod tests {
         .unwrap()
     }
 
+    /// A bake whose kept layer-0 lines are a CONTIGUOUS PREFIX densifies to the
+    /// IDENTITY layout — `zensim::declared_feature_ids` returns `None` for it by
+    /// design and the gather becomes POSITIONAL — so the identity gate must feed
+    /// it its own narrower row.
+    ///
+    /// Pre-2026-09-06 both gate arms got the pre-densify caller-width row, and
+    /// this failed with `feature row has 4 values, bake expects 2`. Every shipped
+    /// bake `densify` had been run on reads a SCATTERED id set (shipped D:
+    /// 6,8,11,14,…,155), which is why the path was never exercised until a
+    /// 228-slot f0..f227 MLP hit it.
+    ///
+    /// The SCATTERED control is in the same test so a future change cannot fix
+    /// one shape by breaking the other.
+    fn prefix_bake(n_in: usize, live: &[usize]) -> Vec<u8> {
+        // 2 hidden units; a layer-0 row is exactly zero unless its index is live.
+        let n_hidden = 2usize;
+        let mut w0 = vec![0.0f32; n_in * n_hidden];
+        for (k, &i) in live.iter().enumerate() {
+            w0[i * n_hidden] = 0.75 + 0.1 * k as f32;
+            w0[i * n_hidden + 1] = -0.4 - 0.05 * k as f32;
+        }
+        let b0 = vec![0.0f32; n_hidden];
+        let w1 = [0.6f32, 0.3];
+        let b1 = [1.5f32];
+        bake(&BakeRequest {
+            schema_hash: 0,
+            flags: 0,
+            scaler_mean: &vec![0.0f32; n_in],
+            scaler_scale: &vec![1.0f32; n_in],
+            layers: &[
+                BakeLayer {
+                    in_dim: n_in,
+                    out_dim: n_hidden,
+                    activation: Activation::Relu,
+                    dtype: WeightDtype::F32,
+                    weights: &w0,
+                    biases: &b0,
+                },
+                BakeLayer {
+                    in_dim: n_hidden,
+                    out_dim: 1,
+                    activation: Activation::Identity,
+                    dtype: WeightDtype::F32,
+                    weights: &w1,
+                    biases: &b1,
+                },
+            ],
+            feature_bounds: &[],
+            metadata: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn densify_gates_a_contiguous_prefix_read_set() {
+        let dir = std::env::temp_dir().join("zensim_densify_prefix_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (label, live) in [
+            ("prefix", vec![0usize, 1]),      // identity layout after densify
+            ("scattered", vec![1usize, 3]),   // the shape every shipped bake has
+        ] {
+            let src = dir.join(format!("densify_{label}_in.bin"));
+            let dst = dir.join(format!("densify_{label}_out.bin"));
+            std::fs::write(&src, prefix_bake(4, &live)).unwrap();
+            let args = DensifyArgs {
+                input: src.clone(),
+                out: Some(dst.clone()),
+                dry_run: false,
+                gate_rows: 64,
+            };
+            cmd_densify(&args).unwrap_or_else(|e| {
+                panic!("densify must gate a {label} read set; got: {e}")
+            });
+            let out = std::fs::read(&dst).unwrap();
+            let m = Model::from_bytes(&out).unwrap();
+            assert_eq!(
+                m.caller_input_width(),
+                live.len(),
+                "{label}: densified caller width"
+            );
+            assert_eq!(m.n_inputs(), live.len(), "{label}: densified n_inputs");
+        }
+    }
+
     fn assert_strictly_monotone(xs: &[f64], ys: &[f64]) {
         for w in xs.windows(2) {
             assert!(
