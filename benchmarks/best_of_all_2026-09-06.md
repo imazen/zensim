@@ -359,6 +359,27 @@ The small rank deltas are the expected consequence of a different pack anchor
 `target_score`. **The per-codec floors are bit-identical**, which is what says
 the instrument and the ruler are the same ones.
 
+At **k = 3** the control reads CID22 **0.8891 ±0.0042**, KonJND **0.4997
+±0.0117**, composite **0.8729 ±0.0008** — against the campaign's published k=3
+means of 0.889636 / 0.499906 / 0.873156. Contract **4/6** on all three seeds
+(C5 and C6 fail), A7r **5 of 5 fail**, identity 38/38 outside the band, a mean of
+**1,491** cells above identity.
+
+**One thing my chain fixes that the campaign's did not:** C3 and C4 **PASS** on
+the control here (`frac<0` 0.5645, deepest probe −146.04) where the campaign's
+`_id100` cell read 0.3985 / −70.34. That is the negrich (unclamped `ssim2_gpu`)
+anchor doing its job, and it isolates the remaining failures to exactly the two
+rows the architecture targets plus A7r.
+
+**Servability** (`bake_block_profile` on the packed control): layer-0 reads
+**228** caller lines — all 156 of `f0..f155` plus **72** of `f156..f371`, with
+the other 144 exactly zero. The 72 are `f156..f227`, the peaks, which
+`V1PoolsMode::Peaks` — the mode `ZensimProfile::D` already resolves to —
+populates. So the walk is the production D walk and the W4 question is
+structural rather than statistical. *(Note the `uses_f156_371: true` flag: it is
+TRUE here and is NOT the `--regime 944` mis-scoring hazard, which is about the
+masked/IW block `f228..f371` — all 144 of those columns are exactly zero.)*
+
 *(RESULTS — filled when the wave lands.)*
 
 ---
