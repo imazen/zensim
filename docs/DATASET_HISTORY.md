@@ -3389,3 +3389,65 @@ rather than a theorem (registry
 **Nothing shipped.** `zensim/weights/` and `ZensimProfile::D` are untouched; the
 ship rule failed on A7r **and** on a CI-clean KonJND regression (−0.06219).
 
+
+---
+
+## §3.57 — the fair board went stale at 508 fullevals; re-audited and rebuilt, cap fix scoped to two seed-duplicate rows (2026-09-06)
+
+**Ledger ROUND 107.** Board hygiene lane, not a modeling result. The all-rows board
+(`summer_gauntlet.html`) was rebuilt 2026-09-06 10:04 at 508 fullevals by a concurrent
+lane; `summer_gauntlet_fair.html` was not, so it still reflected the 2026-09-05 19:58
+population (97 of 433) and every fulleval promoted since — the 27 `BOA_*` best-of-all
+cells, `D_guard12_p999@dguard2`/`D_shipped@dguard2`, and the `fc2_*` fast-class family —
+was simply missing from the fair board's file.
+
+**Checked before acting, not assumed**: the brief's framing was that these cells
+carried `fair: {}`. They do not — `fair` is never a stored field in a source
+`*.fulleval.json` (confirmed: none of the 508 files on disk has that key at all); it is
+computed at render time by `gauntlet.fairness_of`, which was already correct for these
+cells in the already-rebuilt all-rows board (`BOA_A_plain_s4004` -> `VERIFIED-FAIR,
+k=3`). So the fix was a rebuild of the fair-only board, not a code or classification
+change. Cross-checking the fresh 508-row audit against the *immediate* predecessor
+snapshot (481 rows, generated 02:39 the same day) rather than the much older
+2026-09-04 baseline (479 rows on disk, itself already grown past what its own
+`.md` documents — flagged, not touched) showed the genuinely-new set was smaller than
+the brief assumed: only the 27 `BOA_*` cells were new since 02:39; `D_guard12_p999@dguard2`
+/ `D_shipped@dguard2` and all 12 `fc2_*` cells were already audited, just unrendered.
+
+**Re-issued audit**: `fairness_tiers_2026-09-06.tsv` (508 rows, same mechanism as
+`fair_gauntlet_2026-09-04.md` §2, nothing re-derived) —
+`benchmarks/fairness_tiers_2026-09-06.pointer.md`. `fairness_tiers_2026-09-04.tsv` left
+untouched (sha256 and mtime both verified unchanged before and after this pass).
+
+**The cap fix, scoped as narrowly as the data allowed.** The first fair-only rebuild
+landed at 12,655,576 B — 73 KB over the 12 MiB (12,582,912 B) cap. Per-cell scatter
+measurement (not guesswork) found the entire overage traced to two **curated** rows
+that are seed-duplicates of an already-fully-charted row in the same k-group:
+`LSTAR_s4022_packed` (k=7 sibling of `LSTAR_s4021_packed`, same `seed_group`
+`9facbc8a2223`) and `w11_s4014_e050` (an intermediate checkpoint of the exact same
+seed 4014 as `w11_s4014_final` — the doc's own documented
+`duplicate-promotion-same-seed-2026-09-04` pattern, "one training run promoted
+twice"). Stripped their embedded `per_pair` at the source (mirroring
+`promote_fulleval.py --strip-per-pair`'s own field names, `per_pair_stripped` +
+a note), landing the rebuild at 12,419,271 B (11.85 MiB). Both cells keep every
+scalar stat and their scoreboard row; neither tier nor k changed. **Nothing was
+dropped silently**: the complete pre-strip JSON for both is preserved verbatim at
+`fulleval/_perpair_full_backup/<name>.fulleval.full_backup.json` (these two fullevals
+have no `source_verdict` to fall back on — they were not produced via
+`promote_fulleval.py` — so a physical backup copy was made rather than relying on
+that mechanism; their `bake` files also still exist on disk as a second, independent
+recovery path via re-running `bake_verdict`).
+
+**Verified, not asserted**: `scripts/v_next/gauntlet_gates.sh` PASS/rc=0 on both
+rebuilt boards (fair: 171 of 508, all compare-fragment gates 4a-4e pass; all-rows:
+491 of 508 after the unchanged 17-cell coverage-gate exclusion). `curl` 200 on the
+served fair board via both the LAN gallery URL and localhost, byte-for-byte matching
+the file on disk. A combined `#compare=BOA_F_nonneg32_s4004,D_guard12_p999@dguard2,
+fc2_372_S228_H128_s4004` render check resolves all three with no missing-id banner
+(no literal `S372_S228_H128_p` cell exists; substituted the fast-class family member
+named above, noted rather than silently swapped).
+
+**Nothing modeled, nothing shipped, no registry entry added.** This section exists to
+record the board-hygiene mechanics and the one factual correction to the brief (the
+already-classified cells), per the standing rule that a durable finding goes in the
+ledger in the same pass it's made rather than only in chat.

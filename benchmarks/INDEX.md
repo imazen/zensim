@@ -2,6 +2,20 @@
 
 > **⚠ BANNER 2026-07-18:** this index STOPS at 2026-05-15 — its 'ship a new bake' reading order is obsolete (points at v0_18 methodology). For 2026-06/07 work (five-gate scorecard, RD probe, diffmap coherence, additive-vs-MLP correction, HDR steer screen) start from `docs/TOP_MODELS_COOKBOOK.md` or `ls benchmarks/*2026-0[67]*.md`.
 
+> **BOARD HYGIENE — fair gauntlet re-issued at 508 fullevals, 2026-09-06:**
+> [`fair_gauntlet_2026-09-06.md`](fair_gauntlet_2026-09-06.md). `summer_gauntlet_fair.html` had
+> gone stale (last built 2026-09-05 19:58, 97 of 433) while the all-rows board moved to 508; the
+> fairness mechanism itself (`gauntlet.fairness_of`, unchanged) was re-run over the current
+> population and both boards rebuilt. Fair board now **171 of 508** (27 new `BOA_*` k=3 groups
+> promoted VERIFIED-FAIR; `D_guard12_p999@dguard2`/`D_shipped@dguard2` and the `fc2_*` fast-class
+> cells were already correctly classified pre-508, just unrendered — no cell was ever literally
+> `fair: {}` in a source file). First fair-only build came out 73 KB over the 12 MiB cap; fixed by
+> stripping per-pair scatter from two curated **seed-duplicate** rows only
+> (`LSTAR_s4022_packed`, `w11_s4014_e050` — same k-group as a row already carrying the full chart;
+> full per_pair preserved verbatim in `fulleval/_perpair_full_backup/`), landing at 11.85 MiB.
+> Both boards pass `gauntlet_gates.sh`; served board verified `curl` 200 + a 3-cell
+> `#compare=` render check. `fairness_tiers_2026-09-04.tsv` untouched throughout.
+
 > **★ RETROSPECTIVE 2026-07-26:** [`best_per_day_summer_2026.md`](best_per_day_summer_2026.md) — the **best model per calendar day** (2026-05-01 → 07-25), with verified bake paths, recipes, headline metrics, and the summer champions (best CID22 = winner_dial 0.894; best KonJND = cl_tfm 0.761; best HF-NL/dial = Ebothg_scr0.5_dial; shipped B/A/BHdr). Machine-readable twin: `/mnt/v/output/zensim/reports/best_per_day.json`. The one-stop map of every model-experiment day this summer.
 
 > **★★ OUTPUT POLARITY HAD NO OWNER — 1 of 8 loss sites knew which convention was in force, 2026-09-06:**
