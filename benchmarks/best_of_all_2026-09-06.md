@@ -693,6 +693,35 @@ Both keep **contract 6/6 on every seed**, and the CID22 spread between them
 (0.8796 vs 0.8787) is inside its own seed spread — the hinge weight is not a rank
 lever in this range.
 
+### 5.10 The per-ref panel says something the pooled one hides
+
+Within-image (per-reference) means, k=3 — a different statistic of the same
+predictions, and the one the board's `HF-NL/ref` column and the CID22-per-ref
+selection descriptor use:
+
+| arm | cid22 | aic3 | csiq | live | **hfnlproxy** | **imazen26** | **nonphoto** |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `A_plain` | 0.9603 | 0.9551 | 0.9659 | 0.9632 | 0.6897 | 0.9260 | 0.9257 |
+| `B_nonneg` | 0.9553 | 0.9464 | 0.9550 | 0.9595 | **0.7777** | 0.9371 | 0.9318 |
+| `C_lad05` | 0.9551 | 0.9444 | 0.9655 | 0.9626 | **0.7872** | **0.9472** | **0.9394** |
+| `D_lad20` | 0.9552 | 0.9444 | 0.9640 | 0.9637 | **0.7879** | 0.9459 | 0.9389 |
+| shipped D | — | — | — | — | **0.8306** | — | — |
+
+Three readings the pooled panel does not give:
+
+1. **The constraint costs about half as much within-image as pooled.** CID22
+   per-ref falls 0.9603 → 0.9551 (**−0.0052**) against the pooled −0.0091. The
+   constraint hurts between-image scale more than within-image ordering, which is
+   the ordering a codec dial actually walks.
+2. **`imazen26` and `nonphoto` — the two ssim2 north stars for non-photo content,
+   which are first-class gates — IMPROVE**: 0.9260 → 0.9472 and 0.9257 → 0.9394
+   with the architecture + ladder. Both the constraint and the hinge help there;
+   the pooled panel shows the opposite sign on `nonphoto` (0.9585 → 0.9461).
+3. **The near-lossless gain is real and still short of shipped D.** `hfnlproxy`
+   per-ref goes 0.6897 → 0.7777 (architecture, +0.088) → 0.7872 (ladder, +0.010),
+   against shipped D's **0.8306**. A large move in the right direction on the
+   axis this metric is weakest, that does not close the gap to the incumbent.
+
 *(RESULTS — arms E/F pending.)*
 
 ---
