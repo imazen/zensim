@@ -380,6 +380,47 @@ structural rather than statistical. *(Note the `uses_f156_371: true` flag: it is
 TRUE here and is NOT the `--regime 944` mis-scoring hazard, which is about the
 masked/IW block `f228..f371` — all 144 of those columns are exactly zero.)*
 
+### 5.3 First constrained cell — the architecture delivers, and it delivers exactly what it claimed
+
+`B_nonneg_s4004`, same chain, same instruments, same seed as the control above:
+
+| row | control `A_plain_s4004` | constrained `B_nonneg_s4004` |
+|---|--:|--:|
+| **C1** monotonicity ≥ 0.93 | 0.94868 PASS | **0.93040 PASS** (thin) |
+| **C2** tied ≤ 0.05 | 0.0017 PASS | **0.0000 PASS** |
+| **C3** frac < 0 > 0 | 0.5645 PASS | 0.4540 PASS |
+| **C4** deepest probe < 0 | −146.04 PASS | **−207.42 PASS** |
+| **C5** identity outside band | **38 FAIL** | **0 PASS** |
+| **C6** cells above identity | **1,642 FAIL** | **0 PASS** |
+| headline | contract **FAIL** | **contract PASS (6/6)** |
+| A7r | 5 of 5 fail | 5 of 5 fail |
+| grid max | 94.018 | **100.000** |
+| CID22 | 0.89036 | 0.88161 |
+
+**Three things this is evidence for, and one it is not.**
+
+1. **C5 and C6 are structural, on real data, through the real chain.** The grid
+   max is **exactly 100.000** — the pin survives training, f16 packing,
+   dead-column pruning and the spline refit, which is the empirical form of the
+   `nonneg_distance_holds_after_pack_and_prune` claim the unit tests could not
+   reach.
+2. **The C2 ⊻ C6 either/or is DISSOLVED, not traded.** The gate record's proof
+   says a spline can buy C6 only by capping cells and paying in `tied`. Here C6
+   goes 1,642 → 0 **while `tied` goes 0.0017 → 0.0000**. Nothing was capped;
+   the raw ordering changed.
+3. **The floor got DEEPER, not shallower** (−146.04 → −207.42), so the
+   architecture does not cost the negative tail the negrich anchor buys.
+4. **It does NOT fix A7r** — 5 of 5 codecs still fail, which is what §2.2
+   pre-registered ("A7r is an ORDERING failure at the bottom of ladders … the
+   architecture alone is not" the mechanism). The per-codec floors move in
+   *both* directions (avif-rav1e 0.1795 → 0.2051 and jxl 0.3846 → 0.4231 up;
+   avif-svt 0.8205 → 0.6923, jpeg 0.5641 → 0.3590, webp 0.9744 → 0.7692 down),
+   which is a redistribution, not a fix. The ladder arms are what test that.
+
+**Two honest cautions.** C1 lands at **0.93040** against a 0.93 bar — a pass with
+0.0004 of room, and the control had 0.019. And CID22 falls **0.89036 → 0.88161**
+at this seed. Both are single-seed readings; the k=3 numbers are what count.
+
 *(RESULTS — filled when the wave lands.)*
 
 ---
