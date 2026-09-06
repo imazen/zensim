@@ -53,6 +53,47 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
 
 ## Known Bugs
 
+- **⛔ THE SCORE, NOT ONLY THE FEATURES, IS LIBC-DEPENDENT ON REVISION 1 (F19,
+  measured 2026-09-06; OWNER + ERA LANDED, FLIP NOT TAKEN).** `metric.rs` calls
+  `powf` at exponents that are not powers of two — `score_mapping_b` is **0.7
+  on every shipped profile**, plus `0.5979`/`1.2244`/`0.6130` in the `approx_*`
+  public helpers and a bake's p-norm `p` in both head runtimes — and `exp` in
+  the bounded squash / soft clamp / tanh pin / both α gates, and `log2` in the
+  four `--mlp-size-axes` MLP **inputs**. None of those is correctly rounded, so
+  **a SCORE is a function of which libc the binary linked against.** MEASURED
+  on the 2×2 cross-libc gate (one commit, glibc vs static-musl, 220 procedural
+  cells): revision 1 differs on **1 of 220** scores — and **so does
+  `root=sqrt, pow=libm`**, i.e. **F18's fix left the score exactly as
+  libc-dependent as it found it.** Revision 2 (`root=sqrt, pow=pure`) reads
+  **0/81,840 features and 0/220 scores**. Owner
+  `zensim::det_math::PowForm`/`DetPow`, era **`scorepow`** on
+  `FormulaRevision::Rev2`, override `ZENSIM_POW_FORM=libm|pure`; **INERT BY
+  DEFAULT** (`PowForm::default()` is `LibmPowf`, `SHIPPED_REVISION` is `Rev1`),
+  so no shipped byte moves. Unlike F18 **the arm is CHOSEN, not derived** —
+  `x^0.7` has no correctly-rounded closed form the way `x^(1/4)` does, so the
+  only purchasable property is that every target run the same source
+  (`libm::{pow, exp, log2}`, already in the dep graph, no `fma`; the only arch
+  `select_implementation!` among the three is on `exp` and is gated
+  `x86_no_sse`, which no shipped target selects). Error bound over 6,611 rows of the score's
+  own domain against a 60-digit reference: platform libm **1 ULP**, the port
+  **1 ULP**, `magetypes::nostd_math::powf_f64` **7.2e12 ULP**, a *perfectly
+  rounded* f32 pow **1.4e10 ULP** — so `log2_midp_precise`/`exp2_midp_precise`
+  cannot be reused (f32-and-SIMD-only; even a perfect f32 route underflows the
+  head p-norm tail to `0.0` at `p=6, x=1e-12`). **Same correction as F18: NOT
+  more accurate** — the two arms disagree on 7.911 % of rows and glibc is
+  nearer the truth on 520 of 523. **STILL OPEN, registered not fixed:** (a)
+  `zenpredict::feature_transform`'s `cbrt`/`powf`/`ln`/`ln_1p`/`sin`/`cos` are
+  on the **PRODUCT** path via `predict_transformed` and are LIVE in Profiles
+  **A, BHdr and C** (**B — the default — and D declare only `winsor_p99`, a
+  clamp, and are clean**); it is a sibling repo this lane must not edit; (b)
+  `zensim-validate::bake_runtime` and its `bake_compare` fork re-implement both
+  head runtimes, document themselves bit-exact with `metric.rs`, do **not**
+  follow `PowForm`, and **no test holds them together** — a **BLOCKER on
+  flipping `SHIPPED_REVISION`**, because a verdict would then disagree with the
+  score the product returns. The output-calibration spline is **clean**
+  (`powi` only). Record:
+  `benchmarks/score_path_libc_determinism_2026-09-06.md`; ledger §3.52.
+
 - **⛔ THE FEATURE EXTRACTOR IS LIBC-DEPENDENT ON REVISION 1 — a musl build and
   a glibc build of the SAME COMMIT disagree (found 2026-09-06; owner + era
   landed same day, the FLIP is NOT taken, so revision 1 is still exposed).**

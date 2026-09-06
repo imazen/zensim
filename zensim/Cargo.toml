@@ -147,6 +147,7 @@ feature-regime-v2 = []
 archmage = { workspace = true }
 bytemuck = { workspace = true }
 magetypes = { workspace = true }
+libm = { workspace = true }
 rayon = { workspace = true, optional = true }
 thiserror = { workspace = true }
 linear-srgb = { workspace = true }

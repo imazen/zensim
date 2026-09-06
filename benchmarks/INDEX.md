@@ -14,8 +14,28 @@
 > `ZENSIM_ROOT_FORM=libm|sqrt`; **default unchanged, no shipped byte moves.** Two things supersede
 > the discovery note: the era is **156 slots, not 144** (the v2 `ssim_dev4` pool has the same form),
 > and its "*more accurate*" claim is **FALSIFIED** — glibc's `pow` is nearer the truth in 544 of the
-> 545 cases where the two differ; the case for the fix is determinism, not accuracy. **Still exposed
-> and unfixed: the SCORE** (`metric.rs` `powf(0.5979/1.2244/0.6130/b)`).
+> 545 cases where the two differ; the case for the fix is determinism, not accuracy. **The SCORE was
+> the one thing it left exposed; F19 below closes it.**
+
+> **★★ F19 — THE SCORE PATH TOO; OWNER + ERA LANDED, FLIP NOT TAKEN 2026-09-06:**
+> [`score_path_libc_determinism_2026-09-06.md`](score_path_libc_determinism_2026-09-06.md) — the
+> SCORE half of F18. Owner `zensim::det_math::PowForm` + `DetPow`, era **`scorepow`** on `Rev2`,
+> override `ZENSIM_POW_FORM=libm|pure`; **default unchanged, no shipped byte moves.** 18 call sites in
+> `metric.rs`: both distance→score mappings, the three `approx_*` public helpers, `soft_clamp_score`,
+> the tanh output pin, both head runtimes' p-norms + α gates, and the four `--mlp-size-axes` `log2`
+> MLP inputs. **The gate is now a 2×2 and it MEASURES that the two defects are independent** — with
+> F18's fix applied and nothing else the score still differs across glibc/musl on **1 of 220** cells;
+> revision 2 reads **0/81,840 features and 0/220 scores**. **The arm is CHOSEN, not derived** —
+> `score_mapping_b` is 0.7 on every shipped profile and `x^0.7` has no correctly-rounded closed form,
+> so the property bought is sameness (`libm::{pow, exp, log2}`, already in the dep graph, no `fma`;
+> the one arch dispatch among the three is `exp`'s, gated `x86_no_sse`, unselectable on our targets). Error bound over 6,611 rows vs a 60-digit reference: platform libm **1 ULP**,
+> the port **1 ULP**, `magetypes` lowp f64 **7.2e12 ULP**, a *perfect* f32 pow **1.4e10 ULP** — so
+> the suggested `*_midp_precise` reuse is rejected **on measurement** (it is f32-and-SIMD-only, and
+> even a perfect f32 route underflows the head p-norm tail to zero). **Same correction as F18: not
+> more accurate** (the two arms disagree on 7.911 % of rows; glibc is nearer on 520 of 523).
+> **Registered, not fixed:** `zenpredict::feature_transform` (PRODUCT path, live in Profiles A/BHdr/C;
+> B and D clean) and `zensim-validate::bake_runtime`'s ungated head mirror — a **BLOCKER on flipping
+> `SHIPPED_REVISION`**.
 
 > **★★ REV2 REFIT — THE SHIPPED D CHAIN AT REVISION 2 IS A PROPOSAL THAT FAILS TWO SHIP GATES 2026-09-06:**
 > [`rev2_refit_2026-09-06.md`](rev2_refit_2026-09-06.md) — the REFIT sub-lane of the REV2 WAVE

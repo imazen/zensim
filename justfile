@@ -81,10 +81,15 @@ check-mix:
 # Everything above, in the order a pre-training check should run them.
 check-data: check-provenance check-orientation check-mix
 
-# THE CROSS-LIBC GATE (F18, `zensim::det_math`): build the feature dump for
-# glibc AND static musl from THIS commit and compare `to_bits()` over the
-# 20-cell parity matrix + 200 ladder cells. Revision 1 MUST differ (the
-# negative control) and the deterministic root form MUST be bit-identical.
+# THE CROSS-LIBC GATE (F18 + F19, `zensim::det_math`): build the feature dump
+# for glibc AND static musl from THIS commit and compare `to_bits()` over the
+# 20-cell parity matrix + 200 ladder cells. Sweeps the 2x2 of the two era knobs
+# (`ZENSIM_ROOT_FORM` x `ZENSIM_POW_FORM`) as RUNTIME env vars on the same pair
+# of binaries, so only one thing varies per cell, and gates the FEATURES and the
+# SCORE separately -- they are two independent defects, and the `sqrt`+`libm`
+# cell is what MEASURES that (F18's fix leaves the score exactly as
+# libc-dependent as it found it: 1 of 220). Revision 1 MUST differ on BOTH
+# columns (the negative controls) and revision 2 MUST be bit-identical on both.
 # Needs `rustup target add x86_64-unknown-linux-musl`; no container.
 check-cross-libc:
     ./scripts/verify_cross_libc_features.sh

@@ -37,6 +37,13 @@ zensim-regress = { version = "0.4.0", path = "zensim-regress", default-features 
 # flip, benchmarks/v1_golden_env_triage_2026-08-05.md). Do not lower.
 archmage = { version = "0.9.28", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.28", features = ["avx512"] }
+# The pure-Rust port of musl's libm (rust-lang/libm). NOT a new edge into the
+# dependency closure -- `cargo tree -p zensim -e normal -i libm` already shows
+# it arriving twice (num-traits <- linear-srgb, and zenpredict). Made explicit
+# because `zensim::det_math` now DEPENDS on the property that makes it useful:
+# one Rust source compiled for every target, so `libm::pow` cannot be a
+# function of which libc the binary linked against. See F19.
+libm = { version = "0.2.16", default-features = false }
 bytemuck = { version = "1.25", default-features = false, features = ["derive"] }
 thiserror = "2"
 image = "0.25"

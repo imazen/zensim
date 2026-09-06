@@ -413,7 +413,7 @@ impl FormulaRevision {
     pub(crate) const fn era_tokens(self) -> &'static [&'static str] {
         match self {
             Self::Rev1 => &[],
-            Self::Rev2 => &["v1ssimcap", "freecomp", "v1hfgain", "v1detroot"],
+            Self::Rev2 => &["v1ssimcap", "freecomp", "v1hfgain", "v1detroot", "scorepow"],
         }
     }
 
@@ -726,6 +726,93 @@ const REV_F5_PROPOSED: &[Revision] = &[Revision {
 ///
 /// Not in the 2026-09-05 audit's F1..F16 inventory; found by R6 while reading
 /// its own "max over ALL slots" column, and registered here by R6b.
+/// **F19** — the SCORE path is libc-dependent for the same reason F18's
+/// features were, and [`DEFECT_F18`]'s fix does not reach it.
+///
+/// Named in F18's own record as a known, unmeasured exposure. Measured
+/// 2026-09-06 by extending that lane's cross-libc gate to the score column it
+/// was already dumping.
+///
+/// # ★ THIS DEFECT MOVES NO FEATURE SLOT — deliberately
+///
+/// Every other entry in this registry attaches to a [`SignalDef`], so
+/// [`era_moved_slots`] answers "which slots?" by derivation. F19 attaches to
+/// none, because the score is not a feature: it is
+/// `metric.rs`'s mapping of a raw distance, the MLP head runtimes' p-norm
+/// pooling and sigmoids, and the four `--mlp-size-axes` inputs. Its era is
+/// registered in [`SCORE_PATH_REVISIONS`] instead, and
+/// [`scorepow_moves_no_feature_slot`] pins the emptiness so a later reader
+/// cannot mistake it for an oversight.
+const DEFECT_F19: Defect = Defect {
+    id: "F19",
+    note: "The raw-distance -> score mapping calls `powf` at exponents that \
+           are not powers of two - `score_mapping_b` = 0.7 on EVERY shipped \
+           profile, plus 0.5979 / 1.2244 / 0.6130 in the `approx_*` helpers \
+           and a bake-supplied p-norm `p` in the per-sample-alpha and hybrid \
+           head runtimes - and `exp` in the bounded squash, the soft clamp, \
+           the tanh output pin and both head sigmoids, and `log2` in the four \
+           `--mlp-size-axes` MLP inputs. `powf`, `exp` and `log2` are all \
+           un-correctly-rounded libm entry points, so a SCORE is a function of \
+           which libc the binary linked against. Unlike F18 there is NO \
+           derivation available: no chain of correctly-rounded operations \
+           evaluates x^0.7, so the arm is an ALGORITHM choice and the property \
+           bought is sameness, not accuracy. MEASURED (the F18 gate extended \
+           to its score column, 220 procedural cells): glibc vs static-musl \
+           differ on 1 of 220 scores under BOTH root arms - i.e. fixing the \
+           features did not fix the score - and on 0 of 220 under the pure \
+           arm. Owner: `crate::det_math::PowForm`.",
+};
+
+/// [`DEFECT_F19`]'s era. Registered in [`SCORE_PATH_REVISIONS`], not on any
+/// signal — the score is not a slot.
+const REV_SCOREPOW: Revision = Revision {
+    era: "scorepow",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "F19 fix: evaluate the score path's `powf` / `exp` / `log2` with \
+           `libm::{pow, exp, log2}` - the pure-Rust port of musl's fdlibm - \
+           instead of the platform libm. THE ARM IS CHOSEN, NOT DERIVED, and \
+           that is the difference from `v1detroot`: x^0.7 has no finite \
+           correctly-rounded evaluation, so the only property available is \
+           that every target run THE SAME SOURCE. `libm::pow` carries no \
+           `select_implementation!` and no fma; `libm::exp`/`log2` carry one, \
+           gated `x86_no_sse`, which no target this crate ships for selects. \
+           NOT more accurate than glibc: MEASURED against a 60-digit reference \
+           over the score's own domain, glibc's `pow` is nearer the truth more \
+           often than the port is - the case is determinism and a measured \
+           bound. MIGRATION: this era moves SCORE bytes by a few ULP; it moves \
+           NO stored feature table, because it touches no feature. \
+           `ZENSIM_POW_FORM=libm` reproduces any pre-era score exactly. STILL \
+           PROPOSED: `ssim_form::SHIPPED_REVISION` is `Rev1`, so no shipped \
+           byte moves. BLOCKER ON FLIPPING, registered 2026-09-06: \
+           `zensim-validate`'s `bake_runtime` (and its `bake_compare` fork) \
+           re-implement the per-sample-alpha and hybrid HEAD math and document \
+           themselves bit-exact with `metric.rs`. They do NOT follow \
+           `PowForm`, and no test holds them together - so the claim is true \
+           today (both defaults are `LibmPowf`) and becomes false the instant \
+           this era activates, which would make a VERDICT disagree with the \
+           score the product returns. Routing them needs a `pub` surface on \
+           `det_math`. Same shape, one repo further out and NOT fixable from \
+           here: `zenpredict::feature_transform`'s `cbrt`/`powf`/`ln`/`ln_1p` \
+           are on the PRODUCT path via `predict_transformed` and are LIVE in \
+           Profiles A, BHdr and C (B - the default - and D declare only \
+           `winsor_p99`, a clamp, and are clean).",
+};
+
+/// The registered eras that change a **score** rather than a feature slot.
+///
+/// [`era_moved_slots`] derives a feature era's blast radius from the signal
+/// table. A score era has no slots to derive from, so it needs a home of its
+/// own — and `research.rs`'s `era_is_registered` consults BOTH, which is what
+/// keeps "every active era token is registered" a real invariant instead of
+/// one that a score era would have silently broken.
+pub(crate) const SCORE_PATH_REVISIONS: &[(Defect, Revision)] = &[(DEFECT_F19, REV_SCOREPOW)];
+
+/// Whether `era` names a registered SCORE-path era.
+pub(crate) fn is_score_path_era(era: &str) -> bool {
+    SCORE_PATH_REVISIONS.iter().any(|(_, r)| r.era == era)
+}
+
 const DEFECT_F17: Defect = Defect {
     id: "F17",
     note: "v1's `contrast_inc` = `max(0, var_dst/var_src - 1)` divides by the \
@@ -2108,12 +2195,44 @@ mod tests {
     /// reachable only at a width that has an append block — which is exactly
     /// why F5 is free today and stops being free the moment a bake declares
     /// one.
+    /// **F19's era moves ZERO feature slots, and that is the claim.**
+    ///
+    /// Every other registered era answers "which slots?" by derivation from
+    /// the signal table. `scorepow` answers "none" — it is a SCORE era. This
+    /// pins the emptiness at every registered width so that (a) a future
+    /// reader cannot mistake it for a registration someone forgot to finish,
+    /// and (b) attaching F19 to a signal — which would be wrong, and would
+    /// invalidate stored feature tables for a defect that cannot reach them —
+    /// fails here.
+    #[test]
+    fn scorepow_moves_no_feature_slot() {
+        use crate::NUM_SCALES;
+        for width in [372u16, 720, 924, 944] {
+            assert!(
+                super::era_moved_slots("scorepow", width, NUM_SCALES).is_empty(),
+                "scorepow must move no feature slot at width {width} — it is a \
+                 SCORE era; if this fires, F19 was attached to a SignalDef"
+            );
+        }
+        // But it IS registered, in the other registry — otherwise
+        // `research::era_is_registered` would call revision 2 incoherent.
+        assert!(super::is_score_path_era("scorepow"));
+        assert!(!super::is_score_path_era("v1detroot"));
+        assert_eq!(super::SCORE_PATH_REVISIONS.len(), 1);
+        assert_eq!(super::SCORE_PATH_REVISIONS[0].0.id, "F19");
+        assert_eq!(
+            super::SCORE_PATH_REVISIONS[0].1.status,
+            super::RevisionStatus::Proposed,
+            "SHIPPED_REVISION is Rev1; F19 must stay Proposed"
+        );
+    }
+
     #[test]
     fn rev2_carries_all_eras_and_f5_needs_the_append_block() {
         use super::FormulaRevision;
         use crate::NUM_SCALES;
         let toks = FormulaRevision::Rev2.era_tokens();
-        for want in ["v1ssimcap", "freecomp", "v1hfgain", "v1detroot"] {
+        for want in ["v1ssimcap", "freecomp", "v1hfgain", "v1detroot", "scorepow"] {
             assert!(toks.contains(&want), "{want} missing from {toks:?}");
         }
 

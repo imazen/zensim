@@ -48,6 +48,68 @@ on the supported surface, and `#[doc(hidden)] feature_set_id::registered_layout_
 (the candidate clip-width list a layout-free id is reconstructed against; not the
 supported surface).
 
+### Added — F19: the SCORE path gets the same owner, and revision 2 stops being libc-dependent end to end (2026-09-06)
+
+F18 fixed the FEATURE path and **named this as the exposure it could not
+reach**. MEASURED on the same 2×2 gate: with F18's fix applied and nothing
+else, the score still differs across glibc/musl on **1 of 220** cells — fixing
+the features did not fix the score.
+
+- `zensim::det_math` gains `PowForm::{LibmPowf, PureRust}` and the `DetPow`
+  trait (`det_powf` / `det_exp` / `det_log2`), a SIBLING of `RootForm` — two
+  independent knobs, because the gate has to be able to measure the
+  features-fixed / score-unfixed cell.
+- **The arm is CHOSEN, not derived — and that is the difference from F18.**
+  `score_mapping_b` is `0.7` on every shipped profile; `x^0.7` has no
+  correctly-rounded closed form the way `x^(1/4)` does, so no `sqrt`
+  composition exists and the only available property is that every target run
+  **the same source**: `libm::{pow, exp, log2}`, the pure-Rust port of musl's
+  fdlibm. `libm::pow` and `libm::log2` carry no `select_implementation!` and
+  no `fma`; `exp` carries one, gated `x86_no_sse`, which no target this crate
+  ships for selects. **Not a new dependency** — `cargo tree -e normal -i libm`
+  already showed it arriving twice; the explicit edge is the change.
+- **18 call sites routed** in `metric.rs`: both distance→score mappings, the three
+  `approx_*` public helpers, `soft_clamp_score`, the tanh output pin, the
+  per-sample-α and hybrid head p-norms and α gates, and the four
+  `--mlp-size-axes` `log2` MLP inputs.
+- Registered as `DEFECT_F19` + era **`scorepow`** on `FormulaRevision::Rev2`.
+  It moves **ZERO feature slots** — the score is not a feature — so it lives in
+  a second registry, `feature_defs::SCORE_PATH_REVISIONS`;
+  `research::era_is_registered` now consults BOTH (otherwise "every active era
+  token is registered" would have broken the moment a score era joined a
+  revision), and a test pins the emptiness at four widths.
+- **Inert by default**: `PowForm::default()` is `LibmPowf` and
+  `SHIPPED_REVISION` is still `Rev1`. `ZENSIM_POW_FORM=libm|pure` is a
+  measurement override (equal byte length).
+- **The gate is now a 2×2** (`scripts/verify_cross_libc_features.sh`), one
+  commit built twice, both eras as runtime env vars on the same pair of
+  binaries. Features / **score** differing across glibc-vs-musl:
+  `libm+libm` **21**/81,840 and **1**/220 · `libm+pure` 21 and **0** ·
+  `sqrt+libm` **0** and **1** · `sqrt+pure` (revision 2) **0** and **0**.
+  Four negative controls, all enforced.
+- **Error bound, derived not asserted.** New example `det_pow_probe` +
+  `scripts/det_pow_error_bound.py` price every arm against a 60-digit
+  `decimal` reference over 6,611 rows of the score's own domain: platform libm
+  **max 1 ULP**, `libm` crate **max 1 ULP**, `magetypes::nostd_math::powf_f64`
+  (lowp) **7.2e12 ULP**, a *perfectly rounded* f32 pow **1.4e10 ULP**.
+- **The brief's suggested reuse was rejected on measurement.**
+  `log2_midp_precise`/`exp2_midp_precise` exist only on `f32x4/x8/x16` — no
+  scalar, no f64 — and the f64 scalars that do exist are documented lowp:
+  `log2_f64(1.0)` returns `−1.87e−6` where the answer is exactly `0`. Even a
+  perfect f32 route loses the p-norm tail outright (`p = 6`, `x = 1e−12`
+  underflows f32 to `0.0`; true value `1e−72`).
+- **NOT more accurate, same correction F18 had to make**: the two arms disagree
+  on 523 of 6,611 rows (7.911 %) and the platform libm is nearer the truth on
+  520 of them. The case is determinism and a measured bound.
+- **Registered, not fixed** (audit in `det_math`'s module table):
+  `zenpredict::feature_transform`'s `cbrt`/`powf`/`ln`/`ln_1p` are on the
+  PRODUCT path via `predict_transformed` and LIVE in Profiles A, BHdr and C
+  (**B — the default — and D are clean**); it is a sibling repo. And
+  `zensim-validate::bake_runtime`'s head mirror does not follow `PowForm`,
+  which makes it a **BLOCKER on flipping `SHIPPED_REVISION`**. The
+  output-calibration spline is already clean (`powi` only).
+  Record: `benchmarks/score_path_libc_determinism_2026-09-06.md`.
+
 ### Added — F18: the pooled 4th/8th roots get ONE owner, and the extractor stops being libc-dependent under revision 2 (2026-09-06)
 
 `powf` is not correctly rounded and no standard requires two libcs to agree on

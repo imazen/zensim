@@ -673,7 +673,13 @@ fn proposed_era_of(signal: &'static feature_defs::SignalDef) -> Option<&'static 
 
 /// Is `era` a token any registry entry names?
 fn era_is_registered(era: &str) -> bool {
+    // BOTH registries. A feature era is derivable from the signal table; a
+    // SCORE era (F19's `scorepow`) has no slots to derive from and lives in
+    // `feature_defs::SCORE_PATH_REVISIONS`. Consulting only the first would
+    // have made this invariant fail the moment a score era joined a revision
+    // — which is a registry gap, not a reason to weaken the assertion.
     feature_defs::signals().any(|s| s.revisions.iter().any(|r| r.era == era))
+        || feature_defs::is_score_path_era(era)
 }
 
 /// Era tokens this BUILD is actually computing right now.

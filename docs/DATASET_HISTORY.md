@@ -2546,7 +2546,10 @@ arithmetic.
 >   magetypes' `log2_midp_precise`/`exp2_midp_precise`);
 > * **the SCORE is exposed too and is NOT fixed** — `metric.rs` calls `powf` at
 >   `0.5979 / 1.2244 / 0.6130 / b`, none a power of two, so a dial value is
->   libc-dependent on every profile.
+>   libc-dependent on every profile. **CLOSED the same day by §3.51 (F19, era
+>   `scorepow`), which also MEASURED that this bullet's exposure survives F18
+>   exactly: 1 of 220 scores differ across libcs with `v1detroot` applied and
+>   nothing else.**
 >
 > **⚠ Provenance consequence for anyone flipping rev2:** `v1detroot` invalidates
 > any `ZENSIM_FORMULA_REV=2` table extracted BEFORE 2026-09-06 — the R6b lane has
@@ -2910,3 +2913,82 @@ rank win. `feature_defs::DEFECT_F17`'s exposure table names **f116 and f155**
 for the SHIPPED ADD156 bake — a different support — so applying the same guard +
 refit to the artefact that actually ships (which needs its own dial anchor and
 instruments) is **REGISTERED, NOT RUN**.
+
+## §3.52 — F19: the SCORE path stops being libc-dependent, and the fix is CHOSEN rather than derived (2026-09-06)
+
+**Ledger ROUND 103.** §3.46's F18 entry named the score as a real, unmeasured
+exposure and left it. This closes it, measures it, and states the one structural
+difference that makes it a *different kind* of fix.
+
+**The measurement that motivates it.** The F18 gate was extended from a
+one-knob sweep to a 2×2 — one commit built twice (`x86_64-unknown-linux-gnu`
+dynamic `libm.so.6`; `x86_64-unknown-linux-musl` `static-pie`), both era knobs
+as runtime env vars on the same pair of binaries, 220 procedural cells:
+
+| `ZENSIM_ROOT_FORM` | `ZENSIM_POW_FORM` | features differ | **score differs** |
+|---|---|---:|---:|
+| `libm` | `libm` (revision 1) | 21 / 81,840 | **1** / 220 |
+| `libm` | `pure` | 21 / 81,840 | **0** / 220 |
+| `sqrt` | `libm` | **0** / 81,840 | **1** / 220 |
+| `sqrt` | `pure` (revision 2) | **0** / 81,840 | **0** / 220 |
+
+Row 3 is the load-bearing one: **F18's fix left the score exactly as
+libc-dependent as it found it.** The two defects are independent, which is why
+there are two env vars and not one — and the table measures that rather than
+asserting it.
+
+**Why the arm is chosen, not derived.** `score_mapping_b` is `0.7` on every
+shipped profile. F18's replacement was *unique* because IEEE-754 makes `sqrt`
+correctly rounded, so `x^(1/4) = sqrt(sqrt(x))` is forced. **No such chain
+evaluates `x^0.7`**, so F19's arm is an algorithm choice and the only property
+purchasable is sameness: `libm::{pow, exp, log2}` — the pure-Rust fdlibm port,
+already in the dependency graph twice, with no `fma` anywhere and — checked
+against libm 0.2.16's own source — an arch `select_implementation!` on `exp`
+alone, gated `x86_no_sse`, which no target this crate ships for selects.
+
+**Error bound, derived over the score's own domain** (6,611 rows, priced
+against `decimal` at 60 significant digits — no libm in the reference):
+platform libm **max 1 ULP**, the port **max 1 ULP**,
+`magetypes::nostd_math::powf_f64` **7.2e12 ULP**, a *perfectly rounded* f32 pow
+**1.4e10 ULP**. The brief's suggested reuse of `log2_midp_precise` /
+`exp2_midp_precise` is **not available at this width** — those exist only on
+`f32x4`/`x8`/`x16`, and the f64 scalars that do exist are documented lowp
+(`log2_f64(1.0)` returns `−1.87e−6` where the answer is exactly `0`). Even a
+perfect f32 route destroys the head p-norm tail: at `p = 6`, `x = 1e−12`
+underflows f32 to `0.0` where the true value is `1e−72`.
+
+**★ NOT more accurate — the same correction F18 had to make.** The two arms
+disagree on **523 of 6,611 rows (7.911 %)**, and the platform libm is nearer
+the 60-digit truth on **520** of them, the port on **3**. The case is
+determinism and a bounded error, never accuracy.
+
+**A score era moves no feature slot, and the registry now says so.** Every other
+era answers "which slots?" by derivation from the signal table; `scorepow`
+answers "none". It is registered in `feature_defs::SCORE_PATH_REVISIONS`, and
+`research::era_is_registered` consults **both** registries — otherwise "every
+active era token is registered" would have silently broken the moment a score
+era joined a revision, which is a registry gap and not a reason to weaken the
+assertion.
+
+**⚠ Provenance consequence for anyone flipping rev2**, in addition to
+`v1detroot`'s: `scorepow` moves **SCORE bytes by up to a few ULP** and moves
+**no stored feature table**, because it touches no feature.
+`ZENSIM_POW_FORM=libm` reproduces any pre-era score exactly.
+
+**⛔ BLOCKER on the flip, registered:** `zensim-validate::bake_runtime` (and its
+`bake_compare` fork) re-implement the per-sample-α and hybrid head runtimes and
+document themselves bit-exact with `metric.rs`. They do **not** follow
+`PowForm`, and **no test holds them together** — the claim is prose, and a
+prior lane recorded delegation as infeasible. It is true today (both defaults
+`LibmPowf`) and false the instant `scorepow` activates, which would make a
+VERDICT disagree with the score the product returns. Routing it needs a `pub`
+surface on `det_math`, i.e. a public-API change. **One repo further out and not
+fixable from here:** `zenpredict::feature_transform`'s `cbrt`/`powf`/`ln`/
+`ln_1p`/`sin`/`cos` are on the PRODUCT path via `predict_transformed` and are
+LIVE in Profiles A, BHdr and C — **B (the default) and D declare only
+`winsor_p99`, a clamp, and are clean.** `zenpredict` already has
+`#[cfg(not(feature = "std"))]` twins calling `libm::` explicitly, so the fix
+there is to make that the `std` path too.
+
+Record: [`benchmarks/score_path_libc_determinism_2026-09-06.md`](../benchmarks/score_path_libc_determinism_2026-09-06.md).
+Gate: `scripts/verify_cross_libc_features.sh` (`just check-cross-libc`).

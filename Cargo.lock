@@ -5829,6 +5829,7 @@ dependencies = [
  "fast-ssim2",
  "image",
  "imgref",
+ "libm",
  "linear-srgb",
  "magetypes",
  "rayon",

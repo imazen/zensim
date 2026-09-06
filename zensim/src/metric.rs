@@ -104,6 +104,7 @@
 //! scale count, then mapped to a 0–100 score via:
 //! `score = 100 - a · distance^b` (default a=18.0, b=0.7).
 
+use crate::det_math::{DetPow, active_pow_form};
 use crate::error::ZensimError;
 
 /// Configuration for zensim computation.
@@ -335,10 +336,13 @@ fn bounded_score_squash(raw_distance: f64, a: f64, b: f64) -> f64 {
     if raw_distance <= 0.0 {
         return 100.0;
     }
-    let exponent = (a / 100.0) * raw_distance.powf(b);
+    // F19: one form read for the whole mapping, so the `powf` and the `exp`
+    // can never be evaluated under two different arms.
+    let form = active_pow_form();
+    let exponent = (a / 100.0) * raw_distance.det_powf(b, form);
     // exp(−x) ∈ (0, 1]; ×100 ∈ (0, 100]. Finite for all finite x ≥ 0;
     // for x = +inf, exp(−inf) = 0. Defensive clamp catches NaN only.
-    let s = 100.0 * (-exponent).exp();
+    let s = 100.0 * (-exponent).det_exp(form);
     if s.is_finite() { s } else { 0.0 }
 }
 
@@ -351,7 +355,7 @@ fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
     if raw_distance <= 0.0 {
         100.0
     } else {
-        100.0 - a * raw_distance.powf(b)
+        100.0 - a * raw_distance.det_powf(b, active_pow_form())
     }
 }
 
@@ -1032,7 +1036,7 @@ impl ZensimResult {
         if self.raw_distance <= 0.0 {
             return 100.0;
         }
-        (100.0 - 19.0379 * self.raw_distance.powf(0.5979)).max(-100.0)
+        (100.0 - 19.0379 * self.raw_distance.det_powf(0.5979, active_pow_form())).max(-100.0)
     }
 
     /// Approximate DSSIM value from the raw distance.
@@ -1047,7 +1051,7 @@ impl ZensimResult {
         if self.raw_distance <= 0.0 {
             return 0.0;
         }
-        0.000922 * self.raw_distance.powf(1.2244)
+        0.000922 * self.raw_distance.det_powf(1.2244, active_pow_form())
     }
 
     /// Approximate butteraugli distance from the raw distance.
@@ -1061,7 +1065,7 @@ impl ZensimResult {
         if self.raw_distance <= 0.0 {
             return 0.0;
         }
-        2.365353 * self.raw_distance.powf(0.6130)
+        2.365353 * self.raw_distance.det_powf(0.6130, active_pow_form())
     }
 }
 
@@ -3760,7 +3764,7 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
 /// `ProfileParams::soft_clamp_score` is `true`.
 #[inline]
 fn soft_clamp_score(raw: f64) -> f64 {
-    100.0 / (1.0 + (-(raw - 50.0) / 20.0).exp())
+    100.0 / (1.0 + (-(raw - 50.0) / 20.0).det_exp(active_pow_form()))
 }
 
 /// Replace `result.raw_distance` and `result.score` with the MLP forward
@@ -4011,7 +4015,7 @@ fn parse_tanh_output_head_scale(payload: &[u8]) -> Option<f64> {
 /// pin via clamp [−30, 30] in y_pre/scale, sigmoid in f64).
 fn apply_tanh_output_pin(y_pre: f64, scale: f64) -> f64 {
     let xc = (y_pre / scale).clamp(-30.0, 30.0);
-    let s = 1.0 / (1.0 + (-xc).exp());
+    let s = 1.0 / (1.0 + (-xc).det_exp(active_pow_form()));
     100.0 * s
 }
 
@@ -4461,6 +4465,9 @@ fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
     let mut max_v = f64::NEG_INFINITY;
     let mut sum_p = 0.0_f64;
     let p = meta.p_norm as f64;
+    // F19: read ONCE above the hidden-unit loop, per `det_math`'s own
+    // discipline — a `OnceLock` read is not hoisted for you.
+    let form = active_pow_form();
     for (j, &hj) in h.iter().enumerate() {
         let hjf = hj as f64;
         y_rank += hjf * meta.rank_w[j] as f64;
@@ -4469,7 +4476,7 @@ fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
         if hjf > max_v {
             max_v = hjf;
         }
-        sum_p += hjf.abs().powf(p);
+        sum_p += hjf.abs().det_powf(p, form);
     }
     let nf = n as f64;
     let mu = sum / nf;
@@ -4479,7 +4486,7 @@ fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
         var += d * d;
     }
     let sigma = (var / nf).sqrt().max(PER_SAMPLE_ALPHA_POOL_STD_FLOOR);
-    let p_norm_stat = (sum_p / nf).powf(1.0 / p);
+    let p_norm_stat = (sum_p / nf).det_powf(1.0 / p, form);
 
     let y_pool = mu * meta.reducer_w[0] as f64
         + sigma * meta.reducer_w[1] as f64
@@ -4490,7 +4497,7 @@ fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
     // sigmoid with clamp (matches trainer's `sigmoid` helper).
     let alpha = {
         let xc = alpha_logit.clamp(-20.0, 20.0);
-        1.0 / (1.0 + (-xc).exp())
+        1.0 / (1.0 + (-xc).det_exp(form))
     };
     alpha * y_rank + (1.0 - alpha) * y_pool
 }
@@ -4581,6 +4588,9 @@ fn apply_hybrid_head_runtime(h: &[f32], meta: &HybridHeadMeta) -> f64 {
     let mut max_v = f64::NEG_INFINITY;
     let mut sum_p = 0.0_f64;
     let p = meta.p_norm as f64;
+    // F19: read ONCE above the hidden-unit loop, per `det_math`'s own
+    // discipline — a `OnceLock` read is not hoisted for you.
+    let form = active_pow_form();
     for (j, &hj) in h.iter().enumerate() {
         let hjf = hj as f64;
         y_rank += hjf * meta.rank_w[j] as f64;
@@ -4588,7 +4598,7 @@ fn apply_hybrid_head_runtime(h: &[f32], meta: &HybridHeadMeta) -> f64 {
         if hjf > max_v {
             max_v = hjf;
         }
-        sum_p += hjf.abs().powf(p);
+        sum_p += hjf.abs().det_powf(p, form);
     }
     let nf = n as f64;
     let mu = sum / nf;
@@ -4598,7 +4608,7 @@ fn apply_hybrid_head_runtime(h: &[f32], meta: &HybridHeadMeta) -> f64 {
         var += d * d;
     }
     let sigma = (var / nf).sqrt().max(HYBRID_HEAD_POOL_STD_FLOOR);
-    let p_norm_stat = (sum_p / nf).powf(1.0 / p);
+    let p_norm_stat = (sum_p / nf).det_powf(1.0 / p, form);
 
     let y_pool = mu * meta.reducer_w[0] as f64
         + sigma * meta.reducer_w[1] as f64
@@ -4609,7 +4619,7 @@ fn apply_hybrid_head_runtime(h: &[f32], meta: &HybridHeadMeta) -> f64 {
     // sigmoid with clamp (matches trainer's `sigmoid` helper).
     let alpha = {
         let xc = (meta.alpha_logit as f64).clamp(-20.0, 20.0);
-        1.0 / (1.0 + (-xc).exp())
+        1.0 / (1.0 + (-xc).det_exp(form))
     };
     alpha * y_rank + (1.0 - alpha) * y_pool
 }
@@ -5073,10 +5083,13 @@ fn append_mlp_size_axes(features: &mut Vec<f64>, width: u32, height: u32) {
     let pixels = w * h;
     let min_dim = w.min(h);
     let max_dim = w.max(h);
-    let log2_pixels = pixels.log2();
-    let log2_min = min_dim.log2();
-    let log2_max = max_dim.log2();
-    let log_aspect_signed = (max_dim / min_dim).log2() * if w >= h { 1.0 } else { -1.0 };
+    // F19: these four are MLP INPUTS, so they reach a shipped score through
+    // the forward pass exactly as the mapping exponents do.
+    let form = active_pow_form();
+    let log2_pixels = pixels.det_log2(form);
+    let log2_min = min_dim.det_log2(form);
+    let log2_max = max_dim.det_log2(form);
+    let log_aspect_signed = (max_dim / min_dim).det_log2(form) * if w >= h { 1.0 } else { -1.0 };
     features.extend_from_slice(&[log2_pixels, log2_min, log2_max, log_aspect_signed]);
 }
 
