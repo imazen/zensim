@@ -129,8 +129,12 @@ reproducible on this box.** Three consequences, all load-bearing:
    at the owner, by test: `ssim_form::tests::only_the_legacy_arm_is_unbounded`
    (F4 as a *failing* property of the shipped form) and
    `bounded_arms_keep_d_in_zero_to_two_everywhere`, over a sweep that does reach
-   the pathology. The empirical half of G3 is this table: the shipped population
-   never enters the regime.
+   the pathology. **RUN, not merely cited**, at this lane's tree
+   (`cargo test --release -p zensim --features training,custom-profiles,feature-regime-v2
+   --lib ssim_form`): 7 passed, 0 failed — including
+   `clamp_arm_is_bit_identical_to_legacy_below_the_knee` and
+   `c1_is_derived_from_the_constants_already_present`. The empirical half of G3
+   is this table: the shipped population never enters the regime.
 2. **`clamp`'s features are bit-identical to rev1 on every row R6 fits or
    scores.** Its gram, its fit and its rank are therefore identical too — it
    cannot win G1, and it cannot lose it. That is a property of the arm, not an
