@@ -180,6 +180,65 @@ Evidence: `benchmarks/fastclass2_campaign_2026-09-05.md`,
 `benchmarks/d_peaks_jxl_floor_2026-09-05.md`,
 `benchmarks/ladder_floor_resolution_2026-09-05.md`.
 
+### 1c. THE DIAL CONTRACT CAN BE MADE STRUCTURAL — and what that costs (2026-09-06)
+
+Evidence: [`benchmarks/best_of_all_2026-09-06.md`](../benchmarks/best_of_all_2026-09-06.md).
+Read §1b first — this section is about the OTHER half of the ship decision.
+
+**C5 and C6 are not a fitting problem.** The gate record proves no monotone
+output spline can satisfy both C2 and C6 when real cells out-rank a perfect copy
+in raw space. `zensim_mlp_train --nonneg-distance` fixes it in the weights:
+scale-only standardization, hidden biases frozen at 0, ReLU, output weights
+projected `≤ 0`, output bias frozen at the pin. MEASURED on the 228-slot recipe
+at k=3, against its own control on the identical chain:
+
+| | control | `--nonneg-distance` |
+|---|--:|--:|
+| contract | **4/6** | **6/6 on every seed** |
+| cells above identity | 1,642 / 1,650 / 1,182 | **0 / 0 / 0** |
+| `tied` | 0.0017 | **0.0000** |
+| CID22 (k=3) | 0.8891 ±0.0042 | 0.8800 ±0.0049 |
+
+C6 → 0 **while `tied` goes down**, so the either/or is dissolved rather than
+traded. **Price: −0.0091 CID22, −0.0096 AIC-3, −0.0083 composite** — all larger
+than the control's own seed spread, so the cost is real.
+
+**Three things to know before you use it.**
+
+1. **It buys C5 and C6 only.** Not C3/C4 (that is the negrich anchor), and **not
+   A7r** — the per-codec floors get *worse* on four of five codecs.
+2. **The identity half is CONDITIONAL on zero-preserving feature transforms.**
+   `winsor_p99` with `lo > 0` maps `0 → lo`, and the canonical 372 screen carries
+   28 such guards, so `raw(identity) = 99.6138` rather than the 100.0 pin.
+   `raw(x) ≤ pin` stays structural; **identity being the argmax does not**, and
+   C6 = 0 becomes a measurement on 9,593 cells. C5 survives because the identity
+   ANCHOR rows take the same forward. The trainer warns; making it structural
+   needs `lo = 0` guards or a pin at `t(0⃗)`.
+3. **`g` is CONVEX at one hidden layer**, and the plain path is 1-layer only
+   (`--keep-features` is refused with `--n-hidden-layers >= 2`).
+
+**The ladder hinge repays the C1 cost, and it is a VARIANCE result.**
+`--tv-pairs-file` + `--tv-weight` (the owner; there is no `--ladder-hinge`) over
+material adjacent-setting pairs — pairs the reference metric orders by ≥ 0.5
+ssim2 points, built by `scripts/canonical_corpus/build_ladder_tv_pairs.py`:
+
+| | `mono` (k=3) | spread |
+|---|--:|--:|
+| control | 0.94602 | 0.00436 |
+| `--nonneg-distance` | 0.93245 | 0.00606 |
+| `+ --tv-weight 0.5 --tv-margin 0.25` | 0.94159 | **0.00096** |
+| `+ --tv-weight 2.0` | **0.94648** | 0.00861 |
+
+`w = 2.0` fully repays the monotonicity; `w = 0.5` cuts the seed spread **6.3×**.
+Both improve all five per-codec floors over the architecture alone, both cost
+~0 CID22, and **neither moves A7r**. `--tv-margin` is load-bearing: a pure hinge
+is minimized by collapsing every ladder flat, and flat ladders are `tied` = C2.
+
+**Bottom line for a ship candidate:** the contract is now a *choice* rather than
+a barrier, at a known price. A7r remains what it was before this lane — the
+binding clause, and a weights property no packaging, spline, anchor, recipe or
+ladder supervision measured here has moved.
+
 ## 2. The top models (2026-07-18) and what each is FOR
 
 > **2026-08-05 — Profile `C` shipped (SOTA-944 era; supersedes this table's
