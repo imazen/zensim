@@ -23,6 +23,14 @@ Tolerance is a few ULP: the extractor computes the arm in f64 from the pooled
 moments, and this recomputes it in f64 from the STORED revision-1 value, which
 is one extra decimal round-trip through the CSV. Exact equality is not the
 claim; agreement far below any measurement bar is.
+
+**The liveness half is per ARM, not per (arm, corpus)** — corrected 2026-09-06
+after the first run reported a FAIL that was the control being wrong, not the
+data. `cap` is exact below `g = 1` and AIC-3's largest `contrast_inc` is
+0.61517, so `cap` correctly moves ZERO cells there; a per-corpus "must move
+something" rule calls that a dead switch. What actually proves the switch fired
+is that the arm moves cells SOMEWHERE in the population, and the per-corpus
+assertion is the exact one: the extracted table equals the closed form.
 """
 
 from __future__ import annotations
@@ -58,6 +66,7 @@ def main() -> int:
     idx = np.asarray(F17_SLOTS)
     rep: dict = {"tolerance": TOL, "base_arm": a.base, "arms": {}}
     ok = True
+    live: dict = {}
     print(f"{'corpus':9s} {'arm':10s} {'cells':>10s} {'max|pred-got|':>14s} "
           f"{'moved vs rev1':>14s} {'verdict':>9s}")
     for corpus in a.corpora.split(","):
@@ -75,17 +84,28 @@ def main() -> int:
             got = m[:, idx]
             err = float(np.abs(pred - got).max())
             moved = int((got != g).sum())
-            good = err <= TOL and moved > 0
+            # Per corpus the claim is EXACTNESS. Liveness is pooled, below:
+            # an arm exact below a threshold legitimately moves nothing on a
+            # corpus that never reaches it.
+            good = err <= TOL
             ok &= good
+            live[arm] = live.get(arm, 0) + moved
             rep["arms"].setdefault(arm, {})[corpus] = {
                 "cells": int(g.size), "max_abs_pred_minus_got": err,
                 "moved_cells_vs_rev1": moved, "pass": good}
             print(f"{corpus:9s} {arm:10s} {g.size:10d} {err:14.4g} {moved:14d} "
                   f"{'PASS' if good else 'FAIL':>9s}")
+    print(f"\n{'arm':10s} {'moved cells, POOLED':>20s}   liveness")
+    for arm in CLOSED_FORM:
+        n = live.get(arm, 0)
+        if arm in live:
+            print(f"{arm:10s} {n:20d}   {'PASS' if n > 0 else 'FAIL — switch did not fire'}")
+            ok &= n > 0
     rep["pass"] = ok
+    rep["pooled_moved_cells"] = live
     if not ok:
-        print("\n⛔ CB5 FAILED — an arm either disagrees with its own closed form "
-              "or moved NOTHING (the runtime switch did not fire)")
+        print("\n⛔ CB5 FAILED — an arm disagrees with its own closed form, or moved "
+              "NOTHING anywhere (the runtime switch did not fire)")
     if a.out:
         os.makedirs(os.path.dirname(a.out), exist_ok=True)
         json.dump(rep, open(a.out, "w"), indent=1)
