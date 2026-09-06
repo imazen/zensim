@@ -632,6 +632,16 @@ covers F4 + F5 + F17 as **one** era boundary and one recalculation. Status stays
 F17's 12 slots keyed on `feature_set_id`, and §6's refit list gains **D** and
 **CHdr** as the two profiles with unguarded exposure.
 
+### 11.10a ANSWERED 2026-09-06 — `REV2_HFGAIN = SaturatingExcess`
+
+Rule 2 fired: it is the sole survivor of H3/H4/H5 AND wins a strict majority of
+the primaries with CI-excluding deltas in 2 of the 4 variants. Rule 6's
+prediction held; one of the two arguments behind it (that `bexcess` preserves
+order) was FALSIFIED by measurement and is recorded as such. Full numbers,
+gate table and the reading-ambiguity handled both ways:
+[`../benchmarks/feature_rev2_2026-09-05.md`](../benchmarks/feature_rev2_2026-09-05.md)
+§11.8–§11.10.
+
 ### 11.11 Out of scope, named rather than omitted
 
 The recalculation (§5), the refit/re-verdict (§6), R9 (perf), F12, and row 11 of

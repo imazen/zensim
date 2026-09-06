@@ -11,6 +11,29 @@
 > above ssim2-PU and every HDR944 arm; G-ADDR on HDR is NOT MEASURED). Grading changes + the
 > reversibility proof: [`dial_addressability_gate_2026-09-04.md`](dial_addressability_gate_2026-09-04.md) §17.
 
+> **★★ R6b — THE F17 ARM IS `SaturatingExcess`, AND BOUNDING LIFTS LIVE BY +0.214 2026-09-06:**
+> [`feature_rev2_2026-09-05.md`](feature_rev2_2026-09-05.md) §11 — R6 §9 reported an unbounded
+> feature that is NOT F4 and did not fix it. Registered as **F17** and decided here: five arms of
+> `contrast_inc` = `max(0, var_dst/var_src - 1)` from ONE binary over **216,756 rows**, fitted at
+> 2 slices x 2 solvers = 20 bakes, graded pre-registered
+> ([`../docs/PLAN_FEATURE_REV2_2026-09-05.md`](../docs/PLAN_FEATURE_REV2_2026-09-05.md) §11, pushed
+> at `e09f6e9a` before a table existed). **Its twelve slots are the TOP TWELVE of all 372 by maximum**
+> (36,465.7) **and the thirteenth is 1.972** — a partition, x105,127 the gold holdout's own p99.9 —
+> while its two siblings max at exactly 1.000000, because their numerators their own denominators
+> bound and the gain member's does not. Unlike F4 it fires on five distortion corpora and the training
+> leg. **`REV2_HFGAIN = SaturatingExcess` (`g/(g+1)`)**, the only arm passing H3+H4+H5: `bexcess`
+> **263,195 order inversions** (it reads the MAGNITUDE, so it replaces the statistic instead of
+> bounding it — the plan predicted the opposite and the measurement corrected it), `cap` **67,224 new
+> ties** (F4's `Clamp` analogue, free there and not here), `log1p` unbounded at **10.504**. **LIVE
+> 0.7357 -> 0.9500 (+0.214)**, TID +0.033, KADID +0.021, CID22 +0.0027..+0.0090 CI-excluding — and
+> **KonJND regresses -0.013..-0.080 on EVERY bounded arm**, so that cost is a property of bounding,
+> not of the arm. `FormulaRevision::Rev2` now batches THREE eras (`v1ssimcap` + `freecomp` +
+> `v1hfgain`); F17's twelve slots are the same at **every** pool state, unlike F4's 132-vs-36.
+> **`SHIPPED_REVISION` stays `Rev1`.** Two things the fleet needs: a rev2 flip served to an
+> un-refitted Profile D costs |SROCC| <= 6e-5 and <=0.64 % of pairs past the 0.5-pt dial bar (~4
+> orders below an era shift), and **a FOURTH hand-copy lives in `zenmetrics`
+> (`zensim-gpu/src/pipeline.rs:1305-1310`)** — land it there first or pin the oracle to the CPU walk.
+
 > **★★ R6 — THE F4 ARM IS `Clamp`, AND F4 NEVER FIRES ON REAL PIXELS 2026-09-05:**
 > [`f4_arm_decision_2026-09-05.md`](f4_arm_decision_2026-09-05.md) — four arms of the per-pixel SSIM
 > luminance term extracted from ONE binary over **217,756 rows** (7 human corpora + the full
