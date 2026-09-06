@@ -2366,6 +2366,53 @@ through `bake()`). Don't write a v2→v3 upgrade tool — the right
 fix is "retrain, evaluate on full Mohammadi panel" per the
 principled experiment workflow. Bakes are cheap; ghost data isn't.
 
+## `--regime` IS DERIVED AND PRINTED; a feature-set id has NO layout (2026-09-06)
+
+Records: [`benchmarks/regime_derived_2026-09-06.md`](benchmarks/regime_derived_2026-09-06.md),
+[`benchmarks/layout_free_feature_set_id_2026-09-06.md`](benchmarks/layout_free_feature_set_id_2026-09-06.md),
+[`benchmarks/table_densify_census_2026-09-06.md`](benchmarks/table_densify_census_2026-09-06.md).
+
+**Stop typing `--regime N` to mean a width.** `bake_verdict` derives it from the
+bake (`feature_set::derive_regime` — the narrowest REGISTERED layout that
+carries every id it reads) and prints it on every run. A passed value that
+cannot carry the bake is **refused**, so a bare `bake_verdict --bake <944 bake>`
+now refuses instead of silently scoring at the 372 root. **Shipped `B` at
+`--regime 720` is now refused too** — 720 zeroes `f156..371` and `B` reads 49
+lines there; nothing checked 720 before. Still allowed, deliberately: a WIDER
+regime that carries every id (the board's ext720 era rows), a `…pools` root
+(the block is live there), and `--regime 720` beside an explicit
+`--features-root` (the frozen as-run LOO drivers). The flag survives as a
+**preset** selector — it also picks the corpora list and both grids — so the 195
+`720/924/944` literals in scripts are NOT redundant and were not deleted.
+
+**A feature-set id no longer carries `@w<N>`.** Canonical form is
+`<compute>/<era>#<hash8>`; two ids differing only in the width are EQUAL and
+hash equal. Every `@w<N>` string ever written still parses and still resolves —
+the registry is append-only and indexes the layout-free spelling of every key.
+The width lives on the ARTIFACT (`FeatureSetRef::layout`), and `check` reports
+it only as a SHORTFALL (the consumer needs a wider row than the producer emits);
+a NARROWER consumer is the dense design, not a mismatch.
+
+**Two table findings, both measured, neither fixed here:**
+
+- **An all-zero column is not an absent column.** The postC 372 root declares
+  all 372 populated and still has all-zero columns (`f25` in aic3, `f12` in
+  konjnd, EIGHT in the 50-row `ext_sdr25`) — small-corpus accidents, prune
+  class 3. So `rescore_parquet --densify` takes the populated set from the
+  DECLARATION (`--keep-ids`, mandatory) and uses a full-column scan only as a
+  GATE. **Never infer a table's populated set from its values.**
+- **A 944 table declares 39 ids the walk never writes** (`APPEND_SKIP_B_SCALE0`
+  + `LUMA_MEAN_REF` + the HDR-gated `HL_BIN*`), and both the registry regime and
+  `Plan::emit` say `0-943`. Modelling the placement rules would make `check`
+  refuse any bake reading one — and **shipped `CHdr` reads 8 of them**. Pinned
+  by `a_944_regime_declares_39_ids_the_walk_never_writes`; the fix is a product
+  decision.
+
+**No live table root was rewritten.** A dense-by-id table is one the loaders
+cannot READ yet — they now REFUSE it loudly rather than truncating at the gap,
+which is what a dense table used to get (a `f0..f155, f372..f943` table loaded as
+**156-wide with no error at all**).
+
 ## SHIPPED BAKES DECLARE THE IDS THEY READ — four of six flipped (2026-09-06)
 
 Full record: [`benchmarks/dense_bake_flip_2026-09-06.md`](benchmarks/dense_bake_flip_2026-09-06.md).

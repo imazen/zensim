@@ -105,3 +105,19 @@ deprecated as a width selector, not as a preset.
 this increment vs after: **zero differing fields** over the whole JSON tree.
 CID22 SROCC **0.8821166166351724**, kon504 **|0.5193759178072009|** — unmoved
 across all four increments of this lane.
+
+## 6. Board
+
+The gauntlet was regenerated from the unchanged `fulleval` dir
+(479 bakes) and the result is **BYTE-IDENTICAL to the live board** —
+23,729,925 bytes, sha256 prefix `41d8a8f9d5f6fdeb` on both — so no statistic on
+it moved across any of this lane's four increments.
+`scripts/v_next/gauntlet_gates.sh` passes: `node --check` on every extracted
+script block, the DOM-shim render harness, sortable-table clicks, ECharts mounts
++ both themes + SSR of one option per panel kind, 3,646 registry-annotated cells
+badged, and all 479 fulleval files strict-valid JSON.
+
+Servability census after all four increments: **17 SERVED, 0 REFUSED** through
+the production `Zensim::compute`, plus the five in-lib census tests
+(`every_shipped_profile_is_servable`,
+`from_block_profile_agrees_with_the_id_space_derivation`, …) green.
