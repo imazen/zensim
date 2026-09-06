@@ -707,20 +707,35 @@ selection descriptor use:
 | `D_lad20` | 0.9552 | 0.9444 | 0.9640 | 0.9637 | **0.7879** | 0.9459 | 0.9389 |
 | shipped D | — | — | — | — | **0.8306** | — | — |
 
+**⛔ READ THE LAST THREE COLUMNS AS AGREEMENT-WITH-`ssim2`, NOT AS SKILL.**
+`benchmarks/eval_annotations.json`'s `hfnl-ssim2-self-target-circular-2026-09-01`
+is explicit: **`hfnlproxy`, `imazen26` and `nonphoto` are ssim2-ANCHORED — their
+targets ARE ssim2 scores** — so a number on any of them "is AGREEMENT WITH ssim2,
+never a win over it", and they are excluded from every "beats ssim2" clause of
+the exam. They are first-class *gates* (a candidate must not be worse), and they
+are not evidence of perceptual skill. The registry's non-circular substitute,
+**`hfnl_cid22band`, is ABSENT from every verdict this lane produced** — this
+root's `bake_verdict` does not emit it — so the non-circular near-lossless
+reading for these arms is **NOT MEASURED**, not merely unreported.
+
 Three readings the pooled panel does not give:
 
 1. **The constraint costs about half as much within-image as pooled.** CID22
    per-ref falls 0.9603 → 0.9551 (**−0.0052**) against the pooled −0.0091. The
    constraint hurts between-image scale more than within-image ordering, which is
    the ordering a codec dial actually walks.
-2. **`imazen26` and `nonphoto` — the two ssim2 north stars for non-photo content,
-   which are first-class gates — IMPROVE**: 0.9260 → 0.9472 and 0.9257 → 0.9394
-   with the architecture + ladder. Both the constraint and the hinge help there;
-   the pooled panel shows the opposite sign on `nonphoto` (0.9585 → 0.9461).
-3. **The near-lossless gain is real and still short of shipped D.** `hfnlproxy`
-   per-ref goes 0.6897 → 0.7777 (architecture, +0.088) → 0.7872 (ladder, +0.010),
-   against shipped D's **0.8306**. A large move in the right direction on the
-   axis this metric is weakest, that does not close the gap to the incumbent.
+2. **`imazen26` and `nonphoto` — first-class gates, and CIRCULAR — improve**:
+   0.9260 → 0.9472 and 0.9257 → 0.9394 with the architecture + ladder, and the
+   pooled panel shows the opposite sign on `nonphoto` (0.9585 → 0.9461). Since
+   their targets *are* ssim2, the honest statement is "the constrained arms agree
+   with ssim2 MORE closely within-image, and less closely pooled" — a gate that
+   is not violated, not a perceptual win.
+3. **The near-lossless "gain" is a circular axis and does not close the gap
+   anyway.** `hfnlproxy` per-ref goes 0.6897 → 0.7777 (architecture) → 0.7872
+   (ladder) against shipped D's **0.8306**. Read as agreement-with-ssim2 it says
+   the constrained arms track ssim2 better in the near-lossless zone than the
+   control does and still worse than shipped D. The non-circular version of this
+   question (`hfnl_cid22band`) is **NOT MEASURED** here.
 
 ### 5.11 `E_plainlad` — the attribution control, and it separates the two mechanisms cleanly
 
