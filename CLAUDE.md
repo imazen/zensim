@@ -947,6 +947,98 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   patched-owner ≡ `main` owner ≡ shipped-bake-at-28T parity chain); ledger
   `docs/DATASET_HISTORY.md` §3.48 (Ledger ROUND 100).
 
+## OUTPUT POLARITY HAS ONE OWNER NOW — and four flags stopped being silent no-ops (2026-09-06)
+
+Full record: [`benchmarks/best_of_all_2026-09-06.md`](benchmarks/best_of_all_2026-09-06.md) §1;
+ledger [`docs/DATASET_HISTORY.md`](docs/DATASET_HISTORY.md) §3.56.
+
+**The trainer has two readings of what its single scalar output MEANS, and until
+2026-09-06 exactly one of eight polarity-sensitive loss sites knew which was in
+force.** `Distance` = higher quality → LOWER raw output (the legacy rank-only
+convention, what the synthetic gate asserts, what the TV within-ladder hinge
+assumes in prose). `Score` = higher quality → HIGHER raw output (what every
+absolute/MSE term assumes, because it regresses the output onto `human_score`).
+`rank_target_sign` reconciled them at `mod.rs:2556` **and nowhere else**.
+
+**This is why the fastclass2 campaign's best CID22 ORDERING arrived negative.**
+Its 2-layer α-head arm read `|−0.8921|`, beating the plain path's `+0.8863`,
+with the sign backwards, and `pack` could not spline it (the output calibration
+spline is monotone increasing by construction). The 372 recipe declares `:both`
+on 4 of 6 legs ⇒ the plain path is SCORE-shaped and the α head stayed
+DISTANCE-shaped. Reproduced at raw SROCC **−0.9970** (depth 1) / **−0.9986**
+(depth 2) in `tests/output_polarity.rs`; **4 of 5 of those tests FAIL at
+`0c6307a7`**.
+
+Ask `mlp_train::OutputPolarity` — never re-derive a sign. `rank_target_sign()`
+for RankNet; `ladder_sign()` for BOTH ordering hinges, which now share the one
+form `max(0, ladder_sign·(y_better − y_worse) + margin)`. Which member is better
+is `quality_sign`, a property of the human scores, never of the convention.
+
+**Four flags now REFUSE where they used to lie.** `--minibatch-size > 1` and
+`--norm-in-norm-weight > 0` with an absolute term (the mini-batch helpers are
+pure RankNet + PWRC and DISCARDED that term); `--n-hidden-layers >= 2` and
+`--skip-connection` off the α-head path (`use_2layer`/`use_skip` are read at two
+lines, both inside `train_mlp_per_sample_alpha_head`). A recipe that used either
+combination did not train what it said it trained.
+
+**`--leaky-alpha` was a train/serve divergence** — every emitter hard-coded
+`Activation::LeakyRelu` while the runtime applies a hard-coded
+`zenpredict::LEAKY_RELU_ALPHA`. `hidden_activation_for` now derives the byte and
+panics on anything unrepresentable. Incidental: the runtime constant is an
+**f32**, so `LEAKY_RELU_ALPHA as f64 = 0.009999999776482582`, not the f64 `0.01`
+the trainer defaults to — a ~2.2e-10 gap every LeakyReLU bake has always carried.
+
+**Nothing shipped moved.** `tests/legacy_bake_sha.rs` pins five rank-only
+recipes to digests measured at `0c6307a7`; all five reproduce byte-for-byte,
+including both TV arms — which is what proves the newly-reachable `--tv-margin`
+(previously α-head-only) is the identical function at its `0.0` default.
+
+## `--nonneg-distance` — the dial's C5/C6 made STRUCTURAL, and what it does NOT buy (2026-09-06)
+
+`benchmarks/dial_addressability_gate_2026-09-04.md` §10.3 proves **no monotone
+output spline can satisfy both C2 and C6** when real grid cells out-rank a
+perfect copy in raw space. It is a weights defect. `--nonneg-distance` fixes it
+in the weights:
+
+> `raw(x) = pin − g(x)` with `g ≥ 0` and `g(0⃗) = 0` **bit-exactly** —
+> `scaler_mean := 0⃗`, hidden biases frozen at `0`, **ReLU**, output weights
+> projected `≤ 0`, output bias frozen at `--nonneg-pin`. `raw(0⃗)` is then the
+> **argmax over the entire input space, by construction**, at f32/f16/i8 alike.
+
+Expressible in the SHIPPED wire format with **zero** runtime change, which is why
+softplus / ReLU² / squared-norm were rejected (each needs a new `Activation` or
+head in `zenpredict`, plus a change in every serving consumer).
+
+**MEASURED on the real 228-slot recipe, same seed, same chain as its control:**
+C6 **1,642 → 0** *while* `tied` goes **0.0017 → 0.0000** — the either/or is
+DISSOLVED, not traded; C5 **38 outside → 0**; grid max **exactly 100.000** (so
+the pin survives training, f16 packing, dead-column pruning and the spline
+refit); C4 **−146.04 → −207.42**, so the floor gets deeper. Cost at that seed:
+CID22 **0.89036 → 0.88161**, and C1 falls **0.94868 → 0.93040** against a 0.93
+bar.
+
+**It does NOT buy A7r** (5 of 5 codecs still fail; the per-codec floors move in
+BOTH directions — a redistribution) and it does not buy C3/C4 on its own (those
+are the negrich anchor's). Three rows from one mechanism, not six. And **`g` is
+CONVEX at one hidden layer**, which is a real restriction: the plain path is
+1-hidden-layer only, and `--keep-features` is refused outright with
+`--n-hidden-layers >= 2`.
+
+**Two chain facts that cost this lane a wave each:**
+
+- **`bake_dial_refit shared-anchor` asserts a SINGLE-LAYER linear bake.** An MLP
+  cannot use it, so a second anchor (e.g. the 21-row identity anchor) has to be
+  CONCATENATED into one parquet and passed to `pack --anchor`.
+- **A DENSIFIED bake cannot be graded by the pinned probes.** `densify` on a
+  contiguous-prefix read set (`f0..f227`) collapses the caller width 372 → 228
+  and declares an IDENTITY layout; every registered negtail/identity probe is
+  **372-wide**, and `bake_verdict` scores a probe only when its column count
+  equals `caller_input_width`. So a densified bake reads **C3/C4/C5/C6 all NOT
+  MEASURED** — the entire contract tier. **Score the PACKED bake** (372 caller
+  width via `Drop` transforms) and treat `densify` as a servability artifact.
+  *(Fixing `densify`'s own identity gate for that shape was a separate defect,
+  landed with the scattered-read-set control beside it.)*
+
 ## Canonical training data + indexes (added 2026-05-20)
 
 **The canonical index for all ML data lives at `~/work/zen/DATA_PROVENANCE.md`.**
