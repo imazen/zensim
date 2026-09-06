@@ -639,3 +639,76 @@ one, that is a finding to write down, not a licence to start.
 
 *(empty at pre-registration — filled as each phase lands, with the MEASURED
 numbers and any falsified hypothesis called out by name.)*
+
+---
+
+## 9. ADDENDUM — `G/H_anchorlad`: is A7r a DATA gap rather than a loss gap? (pre-registered 2026-09-06, after the main wave, before any fit)
+
+**The main wave's null.** Architecture, ladder supervision, hinge weight and
+their combination all leave A7r at 5 of 5 (§5.11). The one apparent movement was
+webp touching exactly its bar on one seed of three.
+
+**The hypothesis, stated before running.** *A7r is unmoved by every loss because
+the TRAINING ladders never reach the true floors the instrument grades.* safesyn's
+q grid starts at **q5 and steps by 5** — it has no cells at the encoders' real
+lowest settings, which is precisely the window `--floor-rule resolvable` reads
+(the bottom `K = 3` mentor-resolvable steps). A hinge cannot supervise an
+ordering it is never shown. If that is right, the fix is DATA, not loss.
+
+**The data.** `/mnt/v/output/zensim/ladder-2026-09-05/anchor/out/ladder_anchor_372col_anchor.parquet`
+— the ladder program's own anchor set, VERIFIED here rather than assumed:
+
+| property | measured |
+|---|---|
+| rows / distinct cells | 4,552 / 4,520 (+32 identity rows) |
+| references | **32** |
+| **∩ with the 39 eval-grid references** | **0** — the instrument is never trained on |
+| CID22 overlap (dHash) | nearest is **hamming 18**, against a d ≤ 10 contamination bar |
+| codecs | jpeg 992 · webp 1,312 · jxl 1,320 · avif-svt 896 · identity 32 |
+| ladder depth | **28 / 31 / 41 / 45 steps** per `(ref, codec)` vs safesyn's 16 |
+| settings | the encoders' TRUE lowest (jpeg q0, webp q0, jxl d=25, svt q0) |
+| target | UNCLAMPED ssim2, min **−69.97**, 404 negative rows |
+| features | 372 layout, already extracted — no new extraction |
+
+**⚠ THE ANCHOR SET HAS NO `avif-rav1e`.** That is the hardest A7r codec (bar
+0.6410; the whole wave's best is 0.2564). So this arm structurally CANNOT move
+rav1e, and a rav1e failure afterwards is **not** evidence against the hypothesis.
+Pre-registered so it cannot be read either way after the fact. The testable
+codecs are **jpeg, webp, jxl and avif-svt**.
+
+**Two data hazards, both handled before the fit.** The parquet's `human_score` is
+the RAW ssim2 in `[−69.97, 100]`, not a `[0, 1]` target — loading it as-is under
+`--target-scale 100` would put it on a scale **100×** every other leg and let it
+dominate the loss, which is exactly the trap the fastclass2 pre-flight caught on
+`cid22_train` vs `cid22_train_norm`. A normalized copy (`human_score :=
+ssim2/100`) is built first. And the 32 identity rows are **excluded** from the
+training group: they are zero-feature rows, this arm is about ladder data, and
+leaving them in would make it a confounded `--identity-rows` test.
+
+**The arms.** Ladder hinge at `--tv-weight 2.0` (the weight that fully repaid
+monotonicity in §5.9), TV pairs = safesyn's 175,736 **plus** the anchor's
+adjacent material pairs, with **band 0 = the three lowest resolvable settings per
+ladder** — the same window A7r reads — up-weighted:
+
+- `G_anchorlad` — the PLAIN net + anchor ladders.
+- `H_anchorlad` — `--nonneg-distance` + anchor ladders.
+
+k = 3 at seeds 4004/4005/4006. **`H_anchorlad` vs `D_lad20` is the clean A/B**:
+same architecture, same hinge weight, differing only in the ladder DATA. `G` is
+the plain-net read and has no exactly-matched partner (no plain arm ran at
+`w = 2.0`), which is stated rather than glossed.
+
+**Confound, stated up front:** adding a training group changes the group CDF and
+therefore the pair-draw RNG stream, so these arms are not sample-seed-matched to
+the earlier ones. The comparison is between k=3 means with their spreads, not
+between paired draws.
+
+**Gates: identical to every other arm** — A7r per codec against the mentor bars,
+the full contract, two-reference inversions, rank vs shipped D and vs the 944
+leaders.
+
+**Decision rule, pre-registered.** If the four testable codecs' floors move
+materially toward their bars, this arm goes to the full ship gate and the null in
+§5.11 is a DATA null, not a mechanism null. If they do not move, the null is
+complete across **architecture + loss + data** and the record says exactly that.
+
