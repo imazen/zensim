@@ -111,6 +111,14 @@ arm_extra() {
     G_anchorlad) printf '%s\n' --tv-pairs-file "$TVANCHORED" --tv-weight 2.0 \
                               --tv-margin 0.25 --tv-apply-every 50 --tv-batch 16 \
                               --tv-band-weights 2.0,0.7,0.7,8.0 ;;
+    # D_lad20's band weights are 6.0,2.0,2.0,2.0 and the anchor arms' are
+    # 2.0,0.7,0.7,8.0, so H-vs-D differs in the WEIGHTING as well as the DATA —
+    # not the clean A/B plan §9 claimed. D_lad20m is D's safesyn-only pairs at
+    # the anchor arms' band weights, which isolates the ladder DATA exactly.
+    D_lad20m)   printf '%s\n' --nonneg-distance \
+                              --tv-pairs-file "$TVPAIRS" --tv-weight 2.0 \
+                              --tv-margin 0.25 --tv-apply-every 50 --tv-batch 16 \
+                              --tv-band-weights 2.0,0.7,0.7,8.0 ;;
     H_anchorlad) printf '%s\n' --nonneg-distance \
                               --tv-pairs-file "$TVANCHORED" --tv-weight 2.0 \
                               --tv-margin 0.25 --tv-apply-every 50 --tv-batch 16 \

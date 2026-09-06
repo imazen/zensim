@@ -693,9 +693,22 @@ ladder** — the same window A7r reads — up-weighted:
 - `G_anchorlad` — the PLAIN net + anchor ladders.
 - `H_anchorlad` — `--nonneg-distance` + anchor ladders.
 
-k = 3 at seeds 4004/4005/4006. **`H_anchorlad` vs `D_lad20` is the clean A/B**:
-same architecture, same hinge weight, differing only in the ladder DATA. `G` is
-the plain-net read and has no exactly-matched partner (no plain arm ran at
+k = 3 at seeds 4004/4005/4006.
+
+**⛔ CORRECTION, made before the arms were read: `H_anchorlad` vs `D_lad20` is
+NOT the clean A/B this plan first claimed.** They share the architecture and the
+`--tv-weight`, but their `--tv-band-weights` differ — `D_lad20` is
+`6.0,2.0,2.0,2.0` (71.3 % of its ladder gradient on the primary corpus' low-q
+band) and the anchor arms are `2.0,0.7,0.7,8.0` (46.0 % there, 31.4 % on the
+floor window). So the pair differs in the WEIGHTING as well as the DATA.
+
+**`D_lad20m` is added to fix it**: `D_lad20`'s safesyn-only pairs at the anchor
+arms' band weights. `H_anchorlad` vs **`D_lad20m`** isolates the ladder DATA
+exactly — same architecture, same hinge weight, same band weights, differing
+only in whether the pairs reach the encoders' true floors. That is the
+comparison the hypothesis is tested on.
+
+`G` is the plain-net read and has no exactly-matched partner (no plain arm ran at
 `w = 2.0`), which is stated rather than glossed.
 
 **Confound, stated up front:** adding a training group changes the group CDF and
