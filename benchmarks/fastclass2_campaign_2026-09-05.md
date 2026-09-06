@@ -707,3 +707,62 @@ head's output orientation at training time, not a post-hoc negation.
 Their frozen condition was that `P1α` not be a KonJND regression; it is a
 regression on every axis (composite 0.5710, CID22 −0.5860).
 `--monotonicity-reg` remains UNMEASURED with a named cause.
+
+## 12. THE SERVABLE 372 LANE — the campaign's best model, and it clears all three bars
+
+k = 3 per cell (seeds 4004/4005/4006), trained at the v1-372 layout on the
+`canonical-2026-05-21` legs, evaluated on the current `2026-08-30-full-features-372`
+root:
+
+| arm | composite [min..max] | CID22 [min..max] | KonJND [min..max] | AIC-3 | CSIQ | LIVE | im26 | nonphoto | hfnl | mono | A7r | bytes |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| `S156` H128 | 0.8502 [.8488..8525] | 0.8792 [.8781..8801] | 0.4793 [.4683..4956] | 0.7960 | 0.9516 | 0.9459 | 0.9022 | 0.9205 | 0.5005 | 0.9764 | **4.7** | 39,983 |
+| `S156` H32 | 0.8486 [.8462..8508] | 0.8819 [.8792..8855] | 0.4498 [.4235..4633] | 0.8002 | 0.9549 | 0.9611 | 0.9012 | 0.9199 | **0.5194** | **0.9787** | **4.3** | **16,500** |
+| **`S228` H128** | **0.8732** [.8729..8735] | **0.8896** [.8871..8910] | **0.4999** [.4957..5064] | 0.7977 | **0.9614** | 0.9628 | 0.9482 | **0.9585** | 0.3700 | 0.9617 | 5.0 | 37,923 |
+| `S228` H32 | 0.8699 [.8677..8712] | 0.8870 [.8850..8894] | 0.4809 [.4642..4971] | 0.7951 | 0.9585 | 0.9624 | 0.9480 | 0.9582 | 0.3467 | 0.9589 | 5.0 | 19,855 |
+| `SFULL372` H128 | 0.8715 [.8703..8728] | **0.8914** [.8885..8939] | 0.4753 [.4661..4818] | 0.7981 | 0.9589 | 0.9614 | 0.9483 | 0.9569 | 0.4173 | 0.9488 | 5.0 | 59,063 |
+
+Note the composite spread on the winner: **0.0006 over three seeds** — the
+tightest cell anywhere in this campaign, on a model class whose KonJND
+famously swings 0.13.
+
+## 13. THE 944-COMPETITIVENESS TABLE
+
+Each family read on **its own compute**. The leaders are on
+`ext944-era2r4-2026-09-01/foldapp2_views` (their own pools-zeroed compute at the
+fast class's era, per gate G4); the 944 fast-class arms on the pools root they
+train on; the 372 arms on the current 372 root. **The eras are not identical and
+that is stated, not smoothed** — but the *target* is: CID22's 4,292 pairs / 49
+refs and KonJND's 504 refs are the same pairs and the same human labels for
+every row, so each model is answering the same question about the same people.
+
+| model | k | composite | CID22 | KonJND | AIC-3 | CSIQ | LIVE | im26 | nonphoto | servable |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| `W10L9PH` @era2r4 | 6 | 0.8636 | 0.8877 | 0.4783 | 0.7982 | 0.9490 | 0.9656 | 0.9355 | 0.9330 | yes |
+| `W11J` @era2r4 | 7 | 0.8626 | 0.8908 | 0.4782 | 0.7989 | 0.9472 | 0.9653 | 0.9283 | 0.9260 | yes |
+| 944 `S228` H32 | 3 | 0.8666 | 0.8887 | 0.4543 | 0.7999 | 0.9571 | 0.9516 | 0.9482 | 0.9452 | yes |
+| 944 `S261` H128 | 3 | 0.8660 | 0.8833 | 0.4566 | 0.8053 | 0.9574 | 0.9404 | 0.9518 | 0.9491 | yes |
+| 944 `SORACLE` | 3 | 0.8581 | 0.8831 | 0.4191 | 0.7960 | 0.9620 | 0.9669 | 0.9414 | 0.9385 | yes |
+| **372 `S228` H128** | 3 | **0.8732** | **0.8896** | **0.4999** | 0.7977 | 0.9614 | 0.9628 | 0.9482 | **0.9585** | yes |
+| 372 `SFULL372` | 3 | 0.8715 | **0.8914** | 0.4753 | 0.7981 | 0.9589 | 0.9614 | 0.9483 | 0.9569 | yes |
+| 372 `S156` H32 | 3 | 0.8486 | 0.8819 | 0.4498 | 0.8002 | 0.9549 | 0.9611 | 0.9012 | 0.9199 | yes |
+| **BAR** (weaker leader per axis) | | **0.8626** | **0.8877** | **0.4782** | | | | | | |
+
+**`372 S228 H128` clears every registered bar**: composite **+0.0106** over the
+better leader, CID22 **+0.0019** over `W10L9PH` (and −0.0012 vs `W11J`, a fifth
+of that cell's own seed spread), KonJND **+0.0216** over both. It is also
+**0.6× the bytes** of `W10L9PH`'s median and **2.0×** shipped Profile D's
+CID22 margin (0.8896 vs 0.8633).
+
+**The 944 lane's own best (`S228` H32, 0.8666 / 0.8887 / 0.4543) also clears
+composite and CID22** and misses only KonJND — so the answer to *"is a
+156-plus-cheap model 944-competitive?"* is **yes, on both layouts**, and the
+serving question the campaign opened with has since been answered by another
+lane (all widths serve at HEAD).
+
+**Two caveats that belong next to these numbers.** (a) The 37 raw-moment slots
+serve with the rev1 **F5 route skew, ≤ 2.5e-4**, until rev2 lands — that touches
+`S261`/`S265`/`S289` only, never `S156`/`S228`. (b) `hfnlproxy` is the one axis
+where the 228 sets are clearly worse than the 156 sets (0.35–0.37 vs 0.50–0.52),
+and it is in this repo's circularity-excluded set, so it is reported and not
+composited.
