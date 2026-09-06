@@ -32,6 +32,37 @@ Additions (each lands with its increment): an id-addressed feature accessor, and
 a result's declared feature set. Positional accessors get `#[deprecated]` shims
 for one release. **No crates.io publish in this work.**
 
+### Added — F17: the v1 HF-energy ratio family gets ONE owner and five runtime arms (2026-09-06)
+
+- `zensim::hf_gain_form` (internal) is THE owner of `contrast_inc` /
+  `hf_energy_gain`, its two bounded siblings, the `var_src > 1e-10` gate and the
+  attribution integrand's coefficient — replacing three hand-copies in
+  `streaming.rs`, `feature_v2.rs` and `attribution.rs`. Revision 1 is
+  BIT-IDENTICAL, gated by the owner's own transcription control, the 28
+  golden/parity/width tests, and a fresh extraction of ten corpora legs
+  (30,670 rows) that `cmp`s byte-identical to the prior wave's tables.
+- **The defect (F17), registered and MEASURED, not asserted.** `contrast_inc` =
+  `max(0, var_dst/var_src − 1)` divides by the SOURCE term, so unlike its two
+  siblings — whose numerators their own denominators bound at exactly 1.000000 —
+  it is unbounded above. Over 216,756 real pairs on 8 corpora, its twelve slots
+  are the **top twelve of all 372 by maximum** (worst **36,465.74**) and the
+  thirteenth slot is **1.972**: the population separates with no overlap. That
+  is **×105,127** the gold holdout's own p99.9. Unlike F4 — whose 5.8e6 belongs
+  to a sweep with no local pixels and fires on none of these rows — F17 fires on
+  five distortion corpora and on the training leg.
+- **`FormulaRevision::Rev2` now batches THREE eras** — `v1ssimcap` (F4),
+  `freecomp` (F5) and `v1hfgain` (F17) — so `ZENSIM_FORMULA_REV=2` is still one
+  era boundary and one recalculation. `feature_defs::era_moved_slots` is the new
+  per-era owner the G3.1 gates read, because a revision-level union can no
+  longer express a single defect's blast radius.
+- Blast radius **MEASURED at four walk shapes**, not derived: the same twelve
+  slots at `944full` (pools live), `924` (pools zeroed), `372` and `156` —
+  unlike F4, whose count varies with pool state (132 vs 36).
+- Status is **`Proposed`**: `ssim_form::SHIPPED_REVISION` is `Rev1`, no shipped
+  byte moves, and `ZENSIM_HF_GAIN` is a measurement override only.
+  Record: `benchmarks/feature_rev2_2026-09-05.md` §11. Pre-registration:
+  `docs/PLAN_FEATURE_REV2_2026-09-05.md` §11.
+
 ### Added — a bake can DECLARE the feature ids it reads (2026-09-06)
 
 - **`bake_dial_refit densify`** rewrites a bake to the dense contract:
