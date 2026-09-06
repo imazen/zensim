@@ -3295,7 +3295,7 @@ which is the control.
   reproduces the legacy convention. `tests/legacy_bake_sha.rs` pins five
   rank-only recipes to sha256 digests measured at the parent commit; all five
   reproduce byte-for-byte, **including both TV arms** (which is what proves the
-  newly-reachable `--tv-margin` is the identical function at its `0.0` default).
+  newly-reachable `--tv-margin` is the identical function at its `0.0` default). *(Corrected 2026-09-06, `9059b3cb`: those digests are a SAME-CLASS check — trained bakes are not bit-reproducible across SIMD tiers, so CI could never pass a Zen-4 digest on other platforms; `tests/legacy_bake_sha.rs` now asserts the invariant in-process — the polarity owner resolves every legacy recipe to `Distance`, whose multipliers are the IEEE identity, and each recipe retrains byte-identical to itself — while the pinned digests run only under `ZENSIM_ZEN4_GOLDEN_BAKE_SHA` / `just legacy-bake-zen4-golden`, an explicit opt-in, never a silent skip.)*
 - **No board number is affected.** The α-head arms this explains have no
   fulleval, and no board bake sets `--minibatch-size > 1` or NiN with an
   absolute term.

@@ -122,7 +122,7 @@ monotone increasing by construction (all three campaign seeds died with
 Byte-identity control: `tests/legacy_bake_sha.rs` pins five rank-only recipes to
 sha256 digests MEASURED at the parent commit `0c6307a7`; all five reproduce
 byte-for-byte, **including both TV arms**, which is what proves the
-newly-reachable `--tv-margin` is the identical function at its `0.0` default.
+newly-reachable `--tv-margin` is the identical function at its `0.0` default. *(Corrected 2026-09-06, `9059b3cb`: those digests are a SAME-CLASS check — trained bakes are not bit-reproducible across SIMD tiers, so CI could never pass a Zen-4 digest on other platforms; `tests/legacy_bake_sha.rs` now asserts the invariant in-process — the polarity owner resolves every legacy recipe to `Distance`, whose multipliers are the IEEE identity, and each recipe retrains byte-identical to itself — while the pinned digests run only under `ZENSIM_ZEN4_GOLDEN_BAKE_SHA` / `just legacy-bake-zen4-golden`, an explicit opt-in, never a silent skip.)*
 `tests/output_polarity.rs` (6 tests) is the other direction — **4 of 5 fail at
 that same parent commit**. (`fix(trainer): output polarity had no owner`,
 `b0be1c53`)
