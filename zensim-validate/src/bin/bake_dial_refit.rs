@@ -835,9 +835,16 @@ struct SharedAnchorArgs {
     input: PathBuf,
     #[arg(long)]
     out: PathBuf,
-    /// Anchor parquet (`f0..fN` + `--target-col`).
-    #[arg(long)]
-    anchor: PathBuf,
+    /// Anchor parquet (`f0..fN` + `--target-col`). **REPEATABLE**: rows are
+    /// concatenated in argv order before `fit_spline_knots` bins them, which
+    /// mirrors `fit-lasso --anchor-parquet` and is what lets a refit reuse a
+    /// recipe's whole anchor SET (e.g. a negrich dial anchor plus the 21-row
+    /// id100 identity anchor) instead of only its first file. A single
+    /// `--anchor` is byte-identical to the pre-2026-09-06 behaviour, and the
+    /// concatenation is proved a pure row-append against a physically
+    /// concatenated parquet by `scripts/verify_winsor_scope_identity.sh`.
+    #[arg(long, required = true)]
+    anchor: Vec<PathBuf>,
     #[arg(long, default_value = "target_score")]
     target_col: String,
     #[arg(long, default_value = "f")]
@@ -858,7 +865,14 @@ fn cmd_shared_anchor(a: &SharedAnchorArgs) -> Result<(), String> {
     let n = lin.scaler_mean.len();
     let ops = build_fw_ops(&model, n)?;
 
-    let (feats, tgt) = read_features(&a.anchor, &a.feat_prefix, n, &a.target_col);
+    let mut feats: Vec<Vec<f64>> = Vec::new();
+    let mut tgt: Vec<f64> = Vec::new();
+    for path in &a.anchor {
+        let (f, t) = read_features(path, &a.feat_prefix, n, &a.target_col);
+        eprintln!("  anchor: {} rows from {path:?}", f.len());
+        feats.extend(f);
+        tgt.extend(t);
+    }
     let preds: Vec<f64> = feats.iter().map(|r| forward_raw(r, &ops, &lin)).collect();
     let tgt_scaled: Vec<f64> = tgt.iter().map(|&t| t * a.target_scale).collect();
 
@@ -972,6 +986,123 @@ struct AddWinsorArgs {
     /// the raw-bake byte-repro paths (B lineage) untouched.
     #[arg(long)]
     compose: bool,
+    /// Restrict the guard to these feature indices: comma-separated singles
+    /// and inclusive `lo-hi` ranges (`12,25,104-116`). Unlisted slots emit the
+    /// `identity` token with EMPTY params — the convention
+    /// `fit-lasso --transforms-tsv` already writes for an index its screen
+    /// does not list, so a scoped bake and a screened bake carry the same
+    /// metadata shape. In `--compose` mode an unlisted slot keeps its
+    /// INHERITED token verbatim instead.
+    ///
+    /// Omitting the flag guards every slot and is BYTE-IDENTICAL to the
+    /// pre-2026-09-06 output (gated by
+    /// `winsor_metadata_text_default_scope_is_the_pre_scope_text` and by
+    /// `scripts/verify_winsor_scope_identity.sh`, which re-emits a stored
+    /// pre-change artefact). Added for REV2-D-GUARD (plan section 12.7): the
+    /// serve-time guard has to be scoped to the twelve F17 slots, because the
+    /// all-372 guard is measurably the worst model in that study.
+    #[arg(long)]
+    slots: Option<String>,
+}
+
+/// Parse an `add-winsor --slots` spec into a sorted, deduplicated slot set.
+///
+/// Grammar: comma-separated items, each either a single index or `lo-hi`
+/// (INCLUSIVE, `lo <= hi`). Whitespace around items is ignored and empty items
+/// are skipped, so a trailing comma is legal. Every index must be `< n`, and
+/// the spec must select at least one — a silently-empty scope would emit an
+/// all-identity transform block, i.e. a guard that guards nothing.
+fn parse_slot_spec(spec: &str, n: usize) -> Result<std::collections::BTreeSet<usize>, String> {
+    let mut set = std::collections::BTreeSet::new();
+    for part in spec.split(',') {
+        let p = part.trim();
+        if p.is_empty() {
+            continue;
+        }
+        let (lo, hi) = match p.split_once('-') {
+            Some((l, h)) => {
+                let l: usize = l
+                    .trim()
+                    .parse()
+                    .map_err(|e| format!("--slots: bad range start {l:?}: {e}"))?;
+                let h: usize = h
+                    .trim()
+                    .parse()
+                    .map_err(|e| format!("--slots: bad range end {h:?}: {e}"))?;
+                if l > h {
+                    return Err(format!("--slots: range {p:?} runs backwards"));
+                }
+                (l, h)
+            }
+            None => {
+                let i: usize = p
+                    .parse()
+                    .map_err(|e| format!("--slots: bad index {p:?}: {e}"))?;
+                (i, i)
+            }
+        };
+        if hi >= n {
+            return Err(format!(
+                "--slots: {p:?} reaches index {hi}, but the bake has {n} features"
+            ));
+        }
+        for i in lo..=hi {
+            set.insert(i);
+        }
+    }
+    if set.is_empty() {
+        return Err("--slots selected nothing".into());
+    }
+    Ok(set)
+}
+
+/// Build the `(transforms, params)` metadata TEXT that `add-winsor` writes.
+///
+/// THE owner of that text, split out so the scope rule is unit-testable
+/// without a bake on disk. `scope == None` guards every slot, which is the
+/// pre-2026-09-06 behaviour byte-for-byte; `Some(set)` guards only its
+/// members. `compose_toks` is the inherited token list in `--compose` mode.
+fn winsor_metadata_text(
+    n: usize,
+    lo: &[f64],
+    hi: &[f64],
+    scope: Option<&std::collections::BTreeSet<usize>>,
+    compose_toks: Option<&[String]>,
+) -> (String, String) {
+    let guarded = |j: usize| scope.is_none_or(|s| s.contains(&j));
+    let transforms_txt = match compose_toks {
+        None => (0..n)
+            .map(|j| if guarded(j) { "winsor_p99" } else { "identity" })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Some(toks) => toks
+            .iter()
+            .enumerate()
+            .map(|(j, t)| {
+                if !guarded(j) {
+                    return t.as_str();
+                }
+                match t.as_str() {
+                    "identity" => "winsor_p99",
+                    "log1p" => "winsor_then_log1p",
+                    "signed_cbrt" => "winsor_then_signed_cbrt",
+                    _ => unreachable!("validated by the caller"),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    let params_txt = (0..n)
+        .map(|j| {
+            if guarded(j) {
+                format!("{},{}", lo[j], hi[j])
+            } else {
+                String::new()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (transforms_txt, params_txt)
 }
 
 fn cmd_add_winsor(a: &AddWinsorArgs) -> Result<(), String> {
@@ -1037,23 +1168,24 @@ fn cmd_add_winsor(a: &AddWinsorArgs) -> Result<(), String> {
         hi[j] = h;
     }
 
-    let transforms_txt = match &compose_toks {
-        None => vec!["winsor_p99"; n].join("\n"),
-        Some(toks) => toks
-            .iter()
-            .map(|t| match t.as_str() {
-                "identity" => "winsor_p99",
-                "log1p" => "winsor_then_log1p",
-                "signed_cbrt" => "winsor_then_signed_cbrt",
-                _ => unreachable!("validated above"),
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+    let scope = match a.slots.as_deref() {
+        None => None,
+        Some(spec) => Some(parse_slot_spec(spec, n)?),
     };
-    let params_txt = (0..n)
-        .map(|j| format!("{},{}", lo[j], hi[j]))
-        .collect::<Vec<_>>()
-        .join("\n");
+    if let Some(sc) = &scope {
+        eprintln!(
+            "  --slots: guarding {} of {n} features ({}{})",
+            sc.len(),
+            sc.iter()
+                .take(12)
+                .map(|i| format!("f{i}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+            if sc.len() > 12 { " ..." } else { "" }
+        );
+    }
+    let (transforms_txt, params_txt) =
+        winsor_metadata_text(n, &lo, &hi, scope.as_ref(), compose_toks.as_deref());
     // metadata order: transforms, params, then everything the raw bake had
     // (incl. its spline) verbatim. In compose mode the input's OWN transform
     // entries are superseded by the composed ones — never duplicated.
@@ -1088,8 +1220,12 @@ fn cmd_add_winsor(a: &AddWinsorArgs) -> Result<(), String> {
     let out_bytes = std::fs::read(&a.out).map_err(|e| format!("re-read {:?}: {e}", a.out))?;
     let got = sha256_hex(&out_bytes);
     eprintln!(
-        "winsorized {:?} -> {:?} ({sz} B); {n} winsor-guard transforms (composed when --compose), fit [p{},p{}]\n  sha256 {got}",
-        a.input, a.out, a.lo_pct, a.hi_pct
+        "winsorized {:?} -> {:?} ({sz} B); {} of {n} winsor-guard transforms (composed when --compose), fit [p{},p{}]\n  sha256 {got}",
+        a.input,
+        a.out,
+        scope.as_ref().map_or(n, |s| s.len()),
+        a.lo_pct,
+        a.hi_pct
     );
     if let Some(expect) = &a.expect_sha256 {
         if got.starts_with(expect) {
@@ -5681,5 +5817,132 @@ mod tests {
             .expect("the stamp must parse back");
         assert_eq!(got.to_string(), "basic+peaks+masked+iw@w372/v1pre#d16a1091");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ----------------------------------------------------------------
+    // REV2-D-GUARD (plan section 12.7): `add-winsor --slots`
+    // ----------------------------------------------------------------
+
+    /// The grammar: singles, inclusive ranges, whitespace, a trailing comma,
+    /// and overlap that dedups rather than duplicating.
+    #[test]
+    fn parse_slot_spec_accepts_singles_ranges_and_overlap() {
+        let got = super::parse_slot_spec("12, 25,104-107, 25,", 372).unwrap();
+        assert_eq!(
+            got.iter().copied().collect::<Vec<_>>(),
+            vec![12, 25, 104, 105, 106, 107]
+        );
+        // A range of one is the single form.
+        assert_eq!(
+            super::parse_slot_spec("7-7", 8).unwrap(),
+            super::parse_slot_spec("7", 8).unwrap()
+        );
+    }
+
+    /// Every way of asking for a scope that would silently guard the wrong
+    /// thing has to FAIL, not fall back: an out-of-range index (a 372-slot
+    /// spec against a narrower bake), a backwards range, garbage, and a spec
+    /// that selects nothing (which would emit an all-identity block — a guard
+    /// that guards nothing, indistinguishable in the bytes from no guard).
+    #[test]
+    fn parse_slot_spec_refuses_every_silent_miss() {
+        for (spec, n, needle) in [
+            ("12,372", 372usize, "reaches index 372"),
+            ("155-12", 372, "runs backwards"),
+            ("12,f25", 372, "bad index"),
+            ("10-x", 372, "bad range end"),
+            (",,", 372, "selected nothing"),
+            ("", 372, "selected nothing"),
+        ] {
+            let err = super::parse_slot_spec(spec, n).unwrap_err();
+            assert!(err.contains(needle), "spec {spec:?}: got {err:?}");
+        }
+    }
+
+    /// **The byte-identity gate for the default path.** `scope == None` must
+    /// reproduce the exact text the pre-2026-09-06 code built
+    /// (`vec!["winsor_p99"; n]` and `format!("{},{}", lo, hi)` on every slot),
+    /// because every stored B-lineage and `W-all-carried` artefact was emitted
+    /// through it. The expectation is rebuilt here from the OLD expressions,
+    /// not copied from the new function.
+    #[test]
+    fn winsor_metadata_text_default_scope_is_the_pre_scope_text() {
+        let n = 6;
+        let lo: Vec<f64> = vec![0.0, 0.0, -1.5, 0.0, 0.0, 0.0];
+        let hi: Vec<f64> = vec![28.2832, 0.7888, 6.5337, 16.6382, 0.6613, 10.4446];
+        let want_toks = vec!["winsor_p99"; n].join("\n");
+        let want_params = (0..n)
+            .map(|j| format!("{},{}", lo[j], hi[j]))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (toks, params) = super::winsor_metadata_text(n, &lo, &hi, None, None);
+        assert_eq!(toks, want_toks);
+        assert_eq!(params, want_params);
+    }
+
+    /// A scoped guard writes `winsor_p99` on exactly its members and
+    /// `identity` with EMPTY params everywhere else — the same shape
+    /// `load_transform_screen` produces for an index a screen TSV omits, so a
+    /// scoped bake and a screened bake are metadata-compatible. Line counts
+    /// stay at `n` in both entries (`build_fw_ops` refuses any other count).
+    #[test]
+    fn winsor_metadata_text_scoped_guards_only_its_members() {
+        let n = 5;
+        let lo = vec![0.0; n];
+        let hi = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let scope: std::collections::BTreeSet<usize> = [1usize, 3].into_iter().collect();
+        let (toks, params) = super::winsor_metadata_text(n, &lo, &hi, Some(&scope), None);
+        assert_eq!(
+            toks.split('\n').collect::<Vec<_>>(),
+            vec![
+                "identity",
+                "winsor_p99",
+                "identity",
+                "winsor_p99",
+                "identity"
+            ]
+        );
+        assert_eq!(
+            params.split('\n').collect::<Vec<_>>(),
+            vec!["", "0,2", "", "0,4", ""]
+        );
+        assert_eq!(toks.split('\n').count(), n);
+        assert_eq!(params.split('\n').count(), n);
+    }
+
+    /// `--compose` + `--slots`: a guarded slot gets the COMPOSED token, an
+    /// unguarded one keeps its inherited token VERBATIM (never silently
+    /// downgraded to `identity`, which would drop a real transform).
+    #[test]
+    fn winsor_metadata_text_compose_keeps_unguarded_tokens_verbatim() {
+        let n = 4;
+        let lo = vec![0.0; n];
+        let hi = vec![1.0, 2.0, 3.0, 4.0];
+        let inherited: Vec<String> = ["identity", "log1p", "signed_cbrt", "log1p"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let scope: std::collections::BTreeSet<usize> = [0usize, 1].into_iter().collect();
+        let (toks, params) =
+            super::winsor_metadata_text(n, &lo, &hi, Some(&scope), Some(&inherited));
+        assert_eq!(
+            toks.split('\n').collect::<Vec<_>>(),
+            vec!["winsor_p99", "winsor_then_log1p", "signed_cbrt", "log1p"]
+        );
+        assert_eq!(
+            params.split('\n').collect::<Vec<_>>(),
+            vec!["0,1", "0,2", "", ""]
+        );
+        // Unscoped compose is still the all-composed list.
+        let (toks_all, _) = super::winsor_metadata_text(n, &lo, &hi, None, Some(&inherited));
+        assert_eq!(
+            toks_all.split('\n').collect::<Vec<_>>(),
+            vec![
+                "winsor_p99",
+                "winsor_then_log1p",
+                "winsor_then_signed_cbrt",
+                "winsor_then_log1p"
+            ]
+        );
     }
 }
