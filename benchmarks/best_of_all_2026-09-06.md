@@ -929,8 +929,27 @@ necessarily write to different `--out` paths — so a raw `sha256` comparison
 could have read it first. An equivalence check that can only fail is worse than
 no check, because it looks like evidence.
 
-*(RESULTS — the anchor arms at k=3, `H_anchorlad` vs the band-weight-matched
-`D_lad20m`, W4 and the board, pending.)*
+### 5.17 The anchor arms' two-reference inversions
+
+`--inversion-truth agree`, pnorm3 @ 0.05, 9,593 reference cells, `unknown = 0`
+on every cell:
+
+| arm | `mono_agree` (k=3) | per seed |
+|---|--:|---|
+| shipped D | **0.99469** | — |
+| `peer_ssim2` (mentor) | 0.99160 | — |
+| **`G_anchorlad`** | **0.95838** | 0.96100 / 0.95548 / 0.95867 |
+| `E_plainlad` | 0.95201 | — |
+| `H_anchorlad` | 0.94946 | 0.95123 / 0.94857 / 0.94857 |
+| `D_lad20` | 0.94648 | — |
+| `A_plain` | 0.94602 | — |
+
+`G_anchorlad` is the wave's best on the axis C1 grades, and **every arm is still
+an order of magnitude worse than the shipped dial** (0.95838 → 4.2 % of adjacent
+rungs charged to the dial, against shipped D's 0.53 %). Attribution is never the
+excuse: `unknown = 0` on all 27 cells.
+
+*(RESULTS — the band-weight-matched `D_lad20m`, W4 and the board, pending.)*
 
 ---
 
