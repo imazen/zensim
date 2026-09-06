@@ -306,6 +306,18 @@ pub(crate) mod feature_v2_stream;
 #[cfg(feature = "feature-regime-v2")]
 pub(crate) mod feature_layout;
 
+/// THE metadata key a bake declares its read set under — an ascending decimal
+/// feature-id list, one per line.
+///
+/// Re-exported (doc-hidden, not part of the supported surface) because the key
+/// has exactly ONE owner and the tool that WRITES it lives in a different
+/// crate (`zensim-validate`'s `bake_dial_refit densify`) from the runtime that
+/// READS it (`feature_layout::declared_layout`). A second string literal in
+/// the writer is the duplication this repo's one-owner rule exists to prevent.
+#[cfg(feature = "feature-regime-v2")]
+#[doc(hidden)]
+pub use feature_layout::FEATURE_IDS_KEY as ZENTRAIN_FEATURE_IDS_KEY;
+
 #[cfg(feature = "feature-regime-v2")]
 #[allow(dead_code)]
 pub(crate) mod feature_plan;

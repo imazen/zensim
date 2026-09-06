@@ -131,6 +131,44 @@ control: an undeclared bake of the same width scores differently.
 **Gate B.5 (retired copies)** — the pre-conversion bytes remain on disk with their
 sha256 recorded.
 
+### RESULTS — A and B, 2026-09-06
+
+**Increment A: DONE.** `benchmarks/cruft_inventory_2026-09-06.md`. Gate **A.1
+PASS** — every concept in scope carries a class and a count. The headline
+INVERTS the obvious prior: the production positional layer is thin (**11** width
+literals in `zensim/src`, every one already a `const`; **0** inline) while the
+debt is in tests (**343**), consumers, and 105 `--regime` call sites.
+`wide_bake_v2_read` has **1** production caller and **0** test callers.
+
+**Increment B: the TOOL and the DECLARATION are DONE; the CONVERSION is
+BLOCKED for the 944 class, and the consumer side is NOT YET WIRED.**
+
+| gate | result |
+|---|---|
+| **B.1** prediction identity | **PASS on 9 of 11**, and the 2 exceptions are a NaN class, not a numeric one — 16 of 512 probe rows on `v47_strict_qat_native` and `bhdr_..._anchored2`, every one of them a dropped line whose own value was NaN. `fma(NaN, 0.0, acc)` is NaN, so a zero weight row still poisons the wide bake. Reported with a count, never silently allowed. |
+| **B.2** score identity through `Zensim::compute` | **PASS on 8 of 11** (bit-identical served score on real pixels, `serve_custom_bake --census`). **FAIL on the three append2-bearing bakes** — see §5 of `benchmarks/dense_bake_contract_2026-09-06.md`. Cause MEASURED and it is a PRE-EXISTING defect, not densify's: `Plan::for_bake`'s identity-layout branch derives `append2_dst_activity: true` and its id-space branch derives `false`, and the canonical extractor defaults **false**. Shipped C and CHdr therefore serve on a BANDVIS formula their weights never saw, worth **0.87 / 0.31** zensim points. |
+| **B.3** no `Drop` survives | **PASS** — every densified output has 0 `drop` transforms and `caller_input_width() == n_inputs()`, asserted in the tool before it writes. |
+| **B.4** the declaration is READ | **PASS** — `an_explicit_feature_id_list_resolves_to_that_dense_layout` pins both halves: the declared bake gets the dense layout, and the SAME width with the declaration removed falls back to identity. Plus a strict-parse gate over duplicate / descending / unparseable / empty / out-of-range. |
+| **B.5** retired copies | N/A yet — no shipped bake has been REPLACED. |
+
+**Two blockers, both measured, neither hand-waved:**
+
+1. **The `append2_dst_activity` skew** (above) blocks densifying C and CHdr AND
+   blocks increment D, because both would adopt the honest `false` and move
+   shipped scores. The fix is one line and it is **a user decision**, not a
+   lane's. Registered in `CLAUDE.md` "Known Bugs".
+2. **The consumer side still slices positionally.**
+   `bake_runtime::score_row` — the DEDUP-M canonical dispatch every eval tool
+   inherits — copies `row[..n_inputs]` and zero-pads. `zensim`'s runtime gathers
+   by declared id; `zensim-validate`'s does not. **So a dense bake would be
+   MIS-SCORED by `bake_verdict` and every sibling**, silently, by reading the
+   first `|read set|` POSITIONS instead of the declared IDS. Swapping any shipped
+   bake to dense before that is wired would be a data-corruption bug, so **no
+   shipped bake was replaced.** This is increment B-2 and it is the next step.
+
+The width-floor fix landed in the same pass closes the OTHER half of that hole
+(a corpus narrower than the bake is now refused rather than zero-filled).
+
 ### C. Tables store exactly the ids they hold
 
 A converter **at the canonical owner** (the `pack_*` / extract tool, never a new
@@ -154,6 +192,22 @@ Scope here: the eval roots, the eval instruments (dial/corruption grids), the
 dial anchors, and the fast-class legs. **bigcodec and KADIS are REGISTERED as
 fleet jobs** through the existing `JobKind::Feature` executor, **not run in this
 lane** — they are millions of rows.
+
+### B-2. The consumers gather by id (NEXT — the prerequisite for converting anything)
+
+`bake_runtime::score_row` takes a caller-sized `&mut [f32]` scratch and fills it
+positionally. It must instead take a per-bake row adapter that knows the bake's
+declared layout: identity ⇒ today's copy, byte for byte; dense ⇒ a gather.
+`score_row_minmax` has the same coupling (it indexes `transforms[i]` and `row[i]`
+at layer-0 positions) and needs the same adapter.
+
+**Gate B-2.1** — for every bake that exists today (all identity layouts) the
+scratch fill is byte-identical and `scripts/verify_verdict_identity.sh` reports
+**0 mismatches** on a fixed bake + root.
+**Gate B-2.2** — a dense bake scored through `bake_verdict` agrees BIT-EXACTLY
+with the same bake scored through `Zensim::compute` on the same pixels.
+**Gate B-2.3** — a dense bake reaching an un-migrated scorer REFUSES rather than
+slicing. No positional fallback survives that could quietly serve the wrong ids.
 
 ### D. Delete the superseded derivations
 
@@ -239,8 +293,13 @@ adds it to this list in its own commit first.
 
 ## 4. Sequencing, risk, and what this lane will NOT do
 
-A → B → D are ordered (D needs B's census). C is independent. E and F need B.
-G is last.
+A → B → **B-2** → D are ordered (nothing may be CONVERTED before B-2, and D
+needs B's census). C is independent. E and F need B-2. G is last.
+
+**Both of D's symbols are additionally blocked on the `append2_dst_activity`
+decision**, because collapsing `from_block_profile` into the id-space derivation
+adopts `false` and moves shipped C / CHdr scores. That is the pivotal blocker of
+this whole program and it is one line plus a decision.
 
 **The largest risk is C**, because it rewrites stored artifacts. Mitigated by:
 the source root is never modified, gate C.3 scans every cell of every dropped

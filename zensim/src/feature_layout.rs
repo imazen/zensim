@@ -219,6 +219,15 @@ pub(crate) fn slots_of(id: &FeatureSetId) -> Option<SlotSet> {
 /// [`tests::every_shipped_bake_resolves_to_an_identity_layout`] pins that.
 pub(crate) fn declared_layout(model: &crate::mlp::Model) -> Layout {
     let width = model.caller_input_width();
+    // THE declaration, preferred over every inference: an explicit ascending
+    // id list. A family-token id can only name a FAMILY UNION, so it cannot
+    // express a read set like Profile D's 28 basic slots; `feature_ids` can,
+    // and it is what the cruft purge stamps onto every densified bake.
+    if let Some(slots) = declared_ids(model)
+        && slots.len() == width
+    {
+        return Layout::dense(&slots);
+    }
     let dense = model
         .metadata()
         .get_utf8("zentrain.feature_set_id")
@@ -231,6 +240,49 @@ pub(crate) fn declared_layout(model: &crate::mlp::Model) -> Layout {
         Some(slots) => Layout::dense(&slots),
         None => Layout::identity(width),
     }
+}
+
+/// The bake's EXPLICIT declared read set, from `zentrain.feature_ids`.
+///
+/// Format: ascending decimal feature ids, one per line (whitespace-separated
+/// is accepted so the payload can be written either way). **Strict**: a
+/// duplicate, a descending pair, an unparseable token or an id past the
+/// registry's full width returns `None` and the caller falls back to the
+/// identity layout — a declaration this build cannot reproduce must never be
+/// half-believed, because a wrong id list permutes the vector the bake is
+/// served.
+///
+/// This is a METADATA convention, not a format change: ZNPR v3 metadata is
+/// free-form utf8 key/value, and `zenpredict` is untouched.
+pub(crate) fn declared_ids(model: &crate::mlp::Model) -> Option<SlotSet> {
+    let text = model.metadata().get_utf8(FEATURE_IDS_KEY).ok()?;
+    parse_feature_ids(text, crate::feature_defs::full_width(crate::NUM_SCALES))
+}
+
+/// The metadata key carrying a bake's explicit declared read set.
+pub const FEATURE_IDS_KEY: &str = "zentrain.feature_ids";
+
+/// Parse + VALIDATE an explicit id list. Separated from [`declared_ids`] so
+/// the strictness is testable without building a `Model`.
+pub(crate) fn parse_feature_ids(text: &str, full_width: usize) -> Option<SlotSet> {
+    let mut ids: Vec<usize> = Vec::new();
+    for tok in text.split_ascii_whitespace() {
+        let v: usize = tok.parse().ok()?;
+        if v >= full_width {
+            return None;
+        }
+        if let Some(&last) = ids.last() {
+            // Strictly ascending: rejects both duplicates and disorder, which
+            // is what makes position `j` provably the `j`-th smallest id and
+            // so makes `Layout::dense`'s packing the same mapping the writer
+            // intended.
+            if v <= last {
+                return None;
+            }
+        }
+        ids.push(v);
+    }
+    (!ids.is_empty()).then(|| SlotSet::from_slots(ids))
 }
 
 /// The DENSE reading of an id, and only the dense one.
@@ -417,6 +469,124 @@ mod tests {
             w = arr(&vec![1.0f32; n]),
         );
         zenpredict_bake::bake_from_json_str(&json).expect("synthetic dense bake must build")
+    }
+
+    /// **B.4 (the declaration is READ)** — an explicit `zentrain.feature_ids`
+    /// list resolves to exactly that dense layout, and REMOVING it collapses
+    /// the same bake to the identity layout. That pair is the proof the
+    /// runtime gathers by the declaration rather than by a positional prefix:
+    /// the first assertion alone would pass just as happily if
+    /// `declared_layout` ignored the key and the width happened to match.
+    #[test]
+    fn an_explicit_feature_id_list_resolves_to_that_dense_layout() {
+        // Profile D's shape: a scattered read set inside `basic`, which no
+        // FAMILY-token id can name — the reason the explicit list exists.
+        let ids: Vec<usize> = vec![0, 3, 7, 12, 40, 41, 99, 155];
+        let bytes = ids_bake_bytes(&ids);
+        let m = crate::mlp::Model::from_bytes(&bytes).expect("bake parses");
+        assert_eq!(m.caller_input_width(), ids.len());
+        let l = declared_layout(&m);
+        assert!(!l.is_identity(), "must resolve to a DENSE layout");
+        assert_eq!(l.width(), ids.len());
+        assert_eq!(l.walk_width(), 156, "one past the highest declared id");
+        assert_eq!(l.ids(), SlotSet::from_slots(ids.iter().copied()));
+        for (pos, &id) in ids.iter().enumerate() {
+            assert_eq!(l.slot_at(pos), u16::try_from(id).ok());
+            assert_eq!(l.pos_of(id as u16), Some(pos));
+        }
+
+        // NEGATIVE CONTROL: the same widths, the same weights, no declaration.
+        let plain =
+            crate::mlp::Model::from_bytes(&ids_bake_bytes_no_decl(ids.len())).expect("bake parses");
+        let pl = declared_layout(&plain);
+        assert!(
+            pl.is_identity(),
+            "without the declaration the SAME width must fall back to identity"
+        );
+        assert_ne!(pl.ids(), l.ids(), "the two layouts must differ");
+    }
+
+    /// The parse is STRICT, and each rejection is its own reason. A
+    /// half-believed id list permutes the vector a bake is served, so every
+    /// one of these must fall back to identity rather than guess.
+    #[test]
+    fn the_feature_id_list_parse_refuses_anything_it_cannot_prove() {
+        let full = crate::feature_defs::full_width(crate::NUM_SCALES);
+        assert_eq!(
+            parse_feature_ids("0 1 2 155", full),
+            Some(SlotSet::from_slots([0usize, 1, 2, 155]))
+        );
+        // Newline-separated is the written form; whitespace-separated parses
+        // the same, so the payload can be either.
+        assert_eq!(
+            parse_feature_ids("0\n1\n2\n155\n", full),
+            Some(SlotSet::from_slots([0usize, 1, 2, 155]))
+        );
+        assert_eq!(parse_feature_ids("0 1 1 2", full), None, "duplicate");
+        assert_eq!(parse_feature_ids("0 5 3", full), None, "descending");
+        assert_eq!(parse_feature_ids("0 x 3", full), None, "unparseable");
+        assert_eq!(parse_feature_ids("", full), None, "empty");
+        assert_eq!(parse_feature_ids("-1 3", full), None, "negative");
+        assert_eq!(
+            parse_feature_ids(&format!("0 {full}"), full),
+            None,
+            "past the registry's full width"
+        );
+        assert_eq!(
+            parse_feature_ids(&format!("0 {}", full - 1), full),
+            Some(SlotSet::from_slots([0usize, full - 1])),
+            "the last registered id is in range"
+        );
+    }
+
+    /// A 1-layer bake of `ids.len()` inputs declaring those ids explicitly.
+    fn ids_bake_bytes(ids: &[usize]) -> Vec<u8> {
+        let list = ids
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        bake_bytes_with_metadata(
+            ids.len(),
+            &format!(
+                r#"{{"key": "{FEATURE_IDS_KEY}", "type": "utf8", "text": "{}"}}"#,
+                list.replace('\n', "\\n")
+            ),
+        )
+    }
+
+    fn ids_bake_bytes_no_decl(n: usize) -> Vec<u8> {
+        bake_bytes_with_metadata(n, "")
+    }
+
+    fn bake_bytes_with_metadata(n: usize, md: &str) -> Vec<u8> {
+        let arr = |v: &[f32]| -> String {
+            let mut s = String::from("[");
+            for (k, x) in v.iter().enumerate() {
+                if k > 0 {
+                    s.push(',');
+                }
+                s.push_str(&x.to_string());
+            }
+            s.push(']');
+            s
+        };
+        let json = format!(
+            r#"{{
+                "schema_hash": 1,
+                "scaler_mean": {mean},
+                "scaler_scale": {scale},
+                "metadata": [{md}],
+                "layers": [
+                    {{"in_dim": {n}, "out_dim": 1, "activation": "identity",
+                      "dtype": "f32", "weights": {w}, "biases": [0.0]}}
+                ]
+            }}"#,
+            mean = arr(&vec![0.0f32; n]),
+            scale = arr(&vec![1.0f32; n]),
+            w = arr(&vec![1.0f32; n]),
+        );
+        zenpredict_bake::bake_from_json_str(&json).expect("synthetic bake must build")
     }
 
     /// **G4.2, the bake half** — every bake that ships today resolves to an

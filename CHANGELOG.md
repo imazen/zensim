@@ -2,6 +2,86 @@
 
 ## [Unreleased]
 
+### QUEUED BREAKING CHANGES — the cruft purge (`zensim` 0.3.0, 2026-09-06)
+
+<!-- Batched for one 0.3.0 release. NOTHING here has landed; each item lands
+     with its own increment and its own gate. Authorized by the user ruling of
+     2026-09-06 ("get rid of the cruft and confusion … a 372 layout where the
+     bake skips features and features aren't computed is a bad contract"), and
+     enumerated in `docs/PLAN_CRUFT_PURGE_2026-09-06.md` §3 BEFORE any of it
+     lands, so a delta outside this list is a gate failure. -->
+
+Removals, all currently in the SUPPORTED surface (`docs/public-api/zensim.txt`):
+
+- `feature_v2::FeatureRegime` (6 variants) and `ZensimV2Result::regime()` — a
+  "regime" is a width plus a set of structural zeros, which is the concept being
+  retired. A vector's identity becomes its declared feature-set id. MEASURED: the
+  crate constructs the enum at 2 sites, reads `.regime()` at **0** production
+  sites (13 test assertions), and **never constructs `FeatureRegime::V1` at all**.
+- `feature_v2::V1PoolsMode` (4 variants + `CARRIER_SLOTS`),
+  `feature_v2::V1FreeExtras` (3 variants), the
+  `V2NewFeatureToggles::v1_pools` field and `ZensimV2Result::v1_pools()` —
+  "which pools ran" is a `Plan` property derived from the declared ids, not a
+  caller-set mode. (`V1FreeExtras`'s own field doc already says
+  "TEST/BENCH INSTRUMENTATION — NOT A PRODUCT MODE".)
+- `metric::FeatureView` — `FeatureView::new` GUESSES its tier from the vector's
+  length and returns `None` when the length is ambiguous. Its own v2 successor
+  documents the contrast (`feature_v2.rs:1219-1221`). Deprecate one release.
+
+Additions (each lands with its increment): an id-addressed feature accessor, and
+a result's declared feature set. Positional accessors get `#[deprecated]` shims
+for one release. **No crates.io publish in this work.**
+
+### Added — a bake can DECLARE the feature ids it reads (2026-09-06)
+
+- **`bake_dial_refit densify`** rewrites a bake to the dense contract:
+  `caller_input_width() == n_inputs() == |read set|`, **zero
+  `FeatureTransform::Drop`**, and a `zentrain.feature_ids` metadata entry naming
+  the ids. `zensim::feature_layout::declared_layout` prefers that declaration over
+  the family-token `zentrain.feature_set_id` (which can only name a family UNION,
+  so it cannot express Profile D's 28 scattered `basic` slots) and resolves it to
+  a dense `Layout` the walk GATHERS into. `zentrain.feature_ids` is a metadata
+  convention — ZNPR v3 metadata is free-form utf8 and `zenpredict` is untouched.
+  The parse is strict (strictly ascending, in range); anything else falls back to
+  the identity layout, because a half-believed id list permutes the vector a bake
+  is served. `zensim::ZENTRAIN_FEATURE_IDS_KEY` is the one owner of the key
+  (`#[doc(hidden)]`; the writer and the reader are in different crates).
+- **Two gates, not one.** The DEAD-COLUMN gate scores the ORIGINAL bake with every
+  dropped line zeroed and demands bit-identity with the densified one on every
+  probe row — that isolates "the columns are dead" from "the probe missed it".
+  The identity gate then compares the same input through both. MEASURED on all 11
+  shipped bakes, 512 probe rows each: dead-column gate **11/11**, and served
+  scores through `Zensim::compute` are **bit-identical for 8 of 11**.
+- Measured shape of the debt it removes: Profile **D** declares 372 caller inputs
+  and reads **28**; **C** and **CHdr** declare 944 and carry **277 / 247** `drop`
+  transforms; **0 of 11** shipped bakes carried a declared feature set.
+  Record: `benchmarks/dense_bake_contract_2026-09-06.md`. Inventory:
+  `benchmarks/cruft_inventory_2026-09-06.md`. Plan:
+  `docs/PLAN_CRUFT_PURGE_2026-09-06.md`.
+
+### Fixed — `bake_verdict` no longer scores a corpus NARROWER than the bake (2026-09-06)
+
+- `bake_runtime::score_row` sizes its scratch to the bake's caller width and
+  zero-fills the tail, so a table narrower than the bake scored every row against
+  fabricated zeros and returned a plausible number. Every OTHER grid `bake_verdict`
+  reads was already width-gated and skipped loudly (dial grid, corruption grid,
+  per-pair metric source, corruption head); **corpora were not**, and
+  `render_corpus` never compared `n_features` to `n_inputs`. It now refuses, naming
+  both widths and the shortfall. It is a FLOOR, not an equality — scoring a WIDER
+  table is correct and supported (a 372-input bake reading a 944-wide identity
+  table takes the right `f0..371`); only the narrow direction fabricates data.
+
+### Fixed — `prune.rs` claimed class-1 pruning was NaN-safe; it is not (2026-09-06)
+
+- The doc said class 1 is "bit-identical for *every* input including NaN". MEASURED
+  false by the densify identity gate on the shipped A and BHdr bakes, 16 of 512
+  probe rows each: `zenpredict`'s forward is `fma(src[i], w[i][k], dst[k])` and
+  `fma(NaN, 0.0, acc)` is **NaN**, so an all-zero weight row still POISONS every
+  accumulator when its own input is NaN. Class 1 has the same NaN caveat class 2's
+  doc already carried; only class 2's was written down. Behaviour is unchanged (it
+  only differs on input that was already garbage) — the defect was the false
+  universal claim, and a gate believed it.
+
 ### Decided — R6: the F4 arm is `Clamp`, and F4's pathology occurs in NO corpus this box has pixels for (2026-09-05)
 
 - **`ssim_form::SsimLumaForm::REV2_LUMA` = `Clamp`** (`max(0, 1 - D^2)`), by the

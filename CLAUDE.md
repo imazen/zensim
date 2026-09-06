@@ -328,6 +328,31 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   Record: campaign appendices U + V, `benchmarks/band_minimum_n_2026-08-06.md`,
   `benchmarks/appendixV/`.
 
+- **⛔ SHIPPED PROFILE C AND CHdr SERVE ON A DIFFERENT BANDVIS FORMULA THAN THEY
+  WERE TRAINED ON (found + measured 2026-09-06, OPEN — needs a user decision).**
+  `ComputeSet::from_block_profile` falls back to `everything` for any wide bake it
+  cannot narrow, and `everything` hard-sets **`append2_dst_activity: true`**
+  (`feature_v2.rs:2163`). The canonical 944 extractor defaults it **false** —
+  `zensim/examples/v2_ab_extract.rs:414` reads `ZENSIM_APPEND2_DSTACT` and
+  `scripts/canonical_corpus/extract_944_canonical.sh` never sets it — so every
+  canonical 944 table C and CHdr were trained and evaluated on has the toggle OFF,
+  and the adjudication (`benchmarks/bandvis_dst_activity_2026-08-02.md`, and the
+  BANDVIS memory entry) says extraction stays OFF. The flag selects the `BV_DSTACT`
+  combine (`feature_v2.rs:3689, 3778`), which changes the VALUES of `f924..f943` —
+  slots both bakes read. **MEASURED on one CID22 pair through `Zensim::compute`:
+  C 47.743838 (runtime) vs 48.609764 (train-consistent) = 0.866 zensim points;
+  CHdr 68.980064 vs 68.669243 = 0.311.** Ruled out by measurement, not argument:
+  not the walk width (CHdr's dense walk is also 944 and still moves), not the pools
+  (both C bakes read 0 of the 216 `f156..371` lines), not the gather (the eight
+  non-append2 bakes gather scattered ids and land bit-identical). **Consequence for
+  readers: a Profile C or CHdr number produced by the RUNTIME is not comparable
+  with one produced from a canonical 944 table.** The fix is one line
+  (`everything`'s `true` → `false`) and it MOVES SHIPPED SCORES, so it is a user
+  decision, not a lane's. It also **blocks** densifying C/CHdr and blocks
+  collapsing `from_block_profile` into the id-space derivation — both would adopt
+  the honest `false` and move those scores. Record:
+  `benchmarks/dense_bake_contract_2026-09-06.md` §5.
+
 - **⛔ `bake_dial_refit predict --ensemble` BLENDS IN RAW UNITS; `bake_verdict
   --ensemble` BLENDS IN SCORE UNITS — the two disagree on every k≥2 blend, and
   the teacher tables were built with the wrong one (found + measured
@@ -2851,6 +2876,10 @@ bake_dial_refit add-winsor --in <raw.bin> --out <out.bin> --fit-corpus <parquet>
 # G-RANGE tail gate (below/above-knot raw-pred fraction) + Z-RMSE/OR/SROCC,
 # NO PWRC (OOM-safe). The 3rd eval panel SROCC is blind to.
 bake_dial_refit gate --bake <bin> --corpus <parquet> [--ref-col human_score]
+# DENSE CONTRACT: declare the ids the bake reads, drop the wide caller width
+# and every FeatureTransform::Drop. Two gates (dead-column + identity), both
+# bit-exact; refuses to write on either failure. docs/PLAN_CRUFT_PURGE_2026-09-06
+bake_dial_refit densify --in <bake.bin> --out <dense.bin> [--dry-run] [--gate-rows N]
 # STANDARD non-QAT packing: per-layer zerobias + DEAD-COLUMN PRUNING + dtype,
 # spline refit ON THE PACKED net. Pruning is ON by default (944 -> 667 on the
 # sota944 bakes, bit-identical); --no-prune restores the pre-2026-08-04

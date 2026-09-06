@@ -3524,6 +3524,36 @@ fn render_corpus(
     let mut g = parquet_loader::load_parquet(&path, corpus.display, "human_score", 1.0)
         .map_err(|e| format!("load {} parquet: {e}", corpus.display))?;
     ct.mark("parquet load");
+    // WIDTH FLOOR — the last unguarded silent zero-pad in this binary.
+    //
+    // `bake_runtime::score_row` sizes its scratch to the bake's caller width
+    // and fills `[row.len()..]` with `0.0`. A table NARROWER than the bake
+    // therefore scores every row against zeros for the ids it does not hold,
+    // and returns a plausible number with no warning. Every OTHER grid this
+    // binary reads is width-gated and skipped loudly (the dial grid, the
+    // corruption grid, the per-pair metric source, the corruption head);
+    // corpora were not, and the published wrong numbers came through exactly
+    // this path.
+    //
+    // The check is a FLOOR, not an equality, because scoring a WIDER table is
+    // a supported, correct operation: a 372-input bake reading a 944-wide
+    // identity-layout table takes `f0..371`, which is the right 372 values.
+    // Only the narrow direction fabricates data. Failing here aborts the whole
+    // verdict rather than dropping one corpus, because a verdict that silently
+    // lost a corpus is the same class of quiet wrongness.
+    if g.n_features < ens.n_inputs {
+        return Err(format!(
+            "corpus {} at {} holds {} features but the bake declares {} caller inputs — \
+             scoring it would ZERO-FILL the missing {}. This is a wrong-root read, not a \
+             narrow corpus: pass the features root this bake was trained on (bake_verdict \
+             prints the root era it read), or --regime the width that matches.",
+            corpus.display,
+            path.display(),
+            g.n_features,
+            ens.n_inputs,
+            ens.n_inputs - g.n_features
+        ));
+    }
     let humans = std::mem::take(&mut g.human_scores);
     let ref_ids = g.ref_ids.take();
 

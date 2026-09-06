@@ -140,6 +140,11 @@ enum Cmd {
     /// network (reproduces `pack_and_calibrate.py`, the STANDARD non-QAT
     /// packing path).
     Pack(PackArgs),
+    /// Rewrite a bake to the DENSE feature contract: declare the feature ids
+    /// it reads, carry exactly those inputs, and emit **no**
+    /// `FeatureTransform::Drop`. The cruft-purge owner
+    /// (`docs/PLAN_CRUFT_PURGE_2026-09-06.md` increment B).
+    Densify(DensifyArgs),
     /// Drop a metadata entry (default: the output-calibration spline) and
     /// re-emit everything else verbatim (reproduces
     /// `strip_spline_metadata.py`).
@@ -1398,6 +1403,376 @@ fn pack_layers(
 /// Serialize packed layers + metadata through the canonical serializer,
 /// returning the bytes. `schema_hash` is preserved from the input;
 /// `flags: 0` and `compressed: true` match the Python pipeline verbatim.
+#[derive(Args, Debug)]
+struct DensifyArgs {
+    /// Input bake (any ZNPR v3; f32/f16 layers).
+    #[arg(long = "in")]
+    input: PathBuf,
+    /// Output bake. Omit with `--dry-run` to report only.
+    #[arg(long)]
+    out: Option<PathBuf>,
+    /// Report what would change and run the identity gate, writing nothing.
+    #[arg(long)]
+    dry_run: bool,
+    /// Probe rows for the identity gate (deterministic; default 512).
+    #[arg(long, default_value_t = 512)]
+    gate_rows: usize,
+}
+
+/// **Increment B of the cruft purge** — a bake declares the feature ids it
+/// reads.
+///
+/// USER RULING (2026-09-06): *"a 372 layout where the bake skips features and
+/// features aren't computed is a bad contract"*. Two shapes carry that
+/// contract today and this retires both:
+///
+/// * a bake that has been PRUNED declares a wide `caller_input_width` and puts
+///   [`FeatureTransform::Drop`] on the lines it does not read, so the runtime
+///   must compute and hand over a vector a quarter of which is discarded
+///   (shipped C: 944 declared, 667 read, 277 `drop`);
+/// * a bake that has NOT been pruned declares every position its training
+///   layout had, so the runtime emits structural zeros for families it
+///   correctly never computes (shipped D: 372 declared, **28** read).
+///
+/// After this, `caller_input_width() == n_inputs() == |read set|`, the
+/// `zentrain.feature_ids` metadata names the ids, and
+/// `zensim::feature_layout::declared_layout` resolves it to a dense layout the
+/// walk GATHERS into — so every value on the wire is a computed value.
+///
+/// **Bit-identity, and why it is exact rather than close.** The plan is
+/// restricted to prune class 1 (`prune_constants = false`): a raw line is
+/// removed only when its whole layer-0 row is exactly `0.0`. `zenpredict`'s
+/// forward is a **SAXPY over inputs** — `for i in 0..in_dim { dst[k] +=
+/// fma(src[i], w[i][k], dst[k]) }`, vectorized across the OUTPUT dimension —
+/// so removing an input removes exactly the terms `fma(s, 0.0, acc)` from each
+/// accumulator, in place, leaving the order of every surviving term unchanged.
+/// `fma(s, 0.0, acc) == acc` for every finite `acc`, so the accumulator's bits
+/// do not move. Class 2 (transform-forced constants) is deliberately NOT
+/// enabled here: it folds a contribution into the bias, which is exact in real
+/// arithmetic but reorders one f32 sum.
+///
+/// The gate does not rely on that argument — it MEASURES it, on
+/// `--gate-rows` probe vectors including the adversarial ones (zeros, ±1,
+/// large, subnormal, negative-zero), through the real
+/// `bake_runtime::score_with_bake_alloc` dispatch at full f64 bits.
+fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
+    if a.out.is_none() && !a.dry_run {
+        return Err("densify needs --out (or --dry-run)".into());
+    }
+    let bytes = std::fs::read(&a.input).map_err(|e| format!("read {:?}: {e}", a.input))?;
+    let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
+    if !model.feature_bounds().is_empty()
+        || !model.output_specs().is_empty()
+        || !model.discrete_sets().is_empty()
+        || !model.sparse_overrides().is_empty()
+    {
+        return Err(
+            "bake carries feature_bounds/output_specs/discrete_sets/sparse_overrides — \
+             densify does not round-trip those sections yet (extend emit_packed first)"
+                .into(),
+        );
+    }
+
+    // Layers VERBATIM, each keeping its own dtype — densify is a dispatch
+    // change, never a requantization.
+    let mut layers = verbatim_layers(&model)?;
+    let out_dim = layers[0].out_dim;
+    let l0 = prune::Layer0View {
+        in_dim: layers[0].in_dim,
+        out_dim,
+        weights: &layers[0].weights,
+        biases: &layers[0].biases,
+        is_i8: matches!(layers[0].dtype, WeightDtype::I8),
+    };
+    let plan = prune::plan(&model, &l0, false).map_err(|e| e.to_string())?;
+    let kept = prune::kept_raw_lines(&plan);
+    if kept.len() != plan.n_inputs_after {
+        return Err(format!(
+            "densify internal: {} kept raw lines but plan keeps {} layer-0 columns",
+            kept.len(),
+            plan.n_inputs_after
+        ));
+    }
+    let caller_before = model.caller_input_width();
+    let drops_before = model
+        .feature_transforms()
+        .map(|t| {
+            t.iter()
+                .filter(|x| matches!(x, zenpredict::FeatureTransform::Drop))
+                .count()
+        })
+        .unwrap_or(0);
+    eprintln!(
+        "densify {:?}\n  caller width {caller_before} -> {}  (layer-0 {} -> {})\n           drop transforms {drops_before} -> 0   declared ids: {} (f{}..f{})",
+        a.input,
+        kept.len(),
+        layers[0].in_dim,
+        plan.n_inputs_after,
+        kept.len(),
+        kept.first().copied().unwrap_or(0),
+        kept.last().copied().unwrap_or(0),
+    );
+    if kept.is_empty() {
+        return Err("densify: the bake reads NO input — refusing to emit".into());
+    }
+
+    layers[0].weights = prune::prune_layer0_weights(&plan, &layers[0].weights, out_dim);
+    layers[0].biases = prune::prune_layer0_biases(&plan, &layers[0].biases);
+    layers[0].in_dim = plan.n_inputs_after;
+    let scaler_mean = prune::prune_input_array(&plan, model.scaler_mean());
+    let scaler_scale = prune::prune_input_array(&plan, model.scaler_scale());
+
+    let mut md = clone_metadata(&model);
+    if model.feature_transforms().is_some() {
+        let (t_txt, p_txt) = prune::dense_transform_metadata(&plan);
+        set_meta_utf8(&mut md, FEATURE_TRANSFORMS_KEY, t_txt.into_bytes());
+        set_meta_utf8(&mut md, FEATURE_TRANSFORM_PARAMS_KEY, p_txt.into_bytes());
+    }
+    // A bake with NO transform metadata keeps none: `caller_input_width()`
+    // then falls back to `n_inputs()`, which is already the dense width, and
+    // synthesizing an all-identity list would change the bake's shape for no
+    // gain.
+    set_meta_utf8(
+        &mut md,
+        zensim::ZENTRAIN_FEATURE_IDS_KEY,
+        prune::feature_ids_metadata(&plan).into_bytes(),
+    );
+
+    let out_bytes = emit_packed(
+        model.schema_hash(),
+        &scaler_mean,
+        &scaler_scale,
+        &layers,
+        &md,
+    );
+
+    // ── the identity gate ──────────────────────────────────────────────
+    let dense = Model::from_bytes(&out_bytes).map_err(|e| format!("re-parse densified: {e:?}"))?;
+    if dense.caller_input_width() != kept.len() || dense.n_inputs() != kept.len() {
+        return Err(format!(
+            "densify FAILED its own shape gate: caller_input_width {} / n_inputs {} \
+             but {} ids declared",
+            dense.caller_input_width(),
+            dense.n_inputs(),
+            kept.len()
+        ));
+    }
+    let probes = densify_probe_rows(caller_before, a.gate_rows);
+    let gathered: Vec<Vec<f64>> = probes
+        .iter()
+        .map(|row| kept.iter().map(|&i| row[i]).collect())
+        .collect();
+    let before = forward_scored_raw(&bytes, &probes)?;
+    let after = forward_scored_raw(&out_bytes, &gathered)?;
+
+    // THE gate, and it is the strong form: score the ORIGINAL bake with every
+    // dropped line's value replaced by `0.0`. If the dropped lines truly
+    // contribute nothing, that must be bit-identical to the densified bake on
+    // EVERY row — including the rows where the untouched original returns NaN.
+    // This isolates "the columns are dead" from "the probe happened to avoid
+    // the difference", which a same-input comparison alone cannot do.
+    let keep_mask = {
+        let mut m = vec![false; caller_before];
+        for &i in &kept {
+            m[i] = true;
+        }
+        m
+    };
+    let zeroed: Vec<Vec<f64>> = probes
+        .iter()
+        .map(|row| {
+            row.iter()
+                .enumerate()
+                .map(|(i, &v)| if keep_mask[i] { v } else { 0.0 })
+                .collect()
+        })
+        .collect();
+    let before_zeroed = forward_scored_raw(&bytes, &zeroed)?;
+    for (i, (x, y)) in before_zeroed.iter().zip(after.iter()).enumerate() {
+        if x.to_bits() != y.to_bits() && !(x.is_nan() && y.is_nan()) {
+            return Err(format!(
+                "densify DEAD-COLUMN GATE FAILED at probe row {i}: with the dropped \
+                 lines zeroed the ORIGINAL scores {x:?} (0x{:016x}) but the densified \
+                 bake scores {y:?} (0x{:016x}) — the dropped lines are NOT inert. \
+                 Nothing written.",
+                x.to_bits(),
+                y.to_bits()
+            ));
+        }
+    }
+
+    // The same-input comparison. The ONE divergence class this permits is a
+    // dropped line whose own value was NaN: `fma(NaN, 0.0, acc)` is NaN, so an
+    // all-zero weight row still POISONS the accumulator in the wide bake and
+    // cannot in the dense one. That is a pre-existing property of class-1
+    // pruning (which shipped C and CHdr already went through), it only fires
+    // on input that was already garbage, and `prune.rs`'s doc claiming class 1
+    // is "bit-identical for *every* input including NaN" was WRONG — corrected
+    // there. It is REPORTED with a count, never silently allowed.
+    let mut nan_absorbed = 0usize;
+    let mut nan_absorbed_nonfinite = 0usize;
+    for (i, (x, y)) in before.iter().zip(after.iter()).enumerate() {
+        if x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan()) {
+            continue;
+        }
+        if x.is_nan() {
+            // The un-poisoned result may itself be non-finite (this probe's
+            // +-2e3 domain overflows `yeo_johnson`), which says nothing about
+            // the dropped lines — only that the probe left the bake's domain.
+            // Counted separately so neither class is hidden inside the other.
+            nan_absorbed += 1;
+            if !y.is_finite() {
+                nan_absorbed_nonfinite += 1;
+            }
+            continue;
+        }
+        return Err(format!(
+            "densify IDENTITY GATE FAILED at probe row {i}: {x:?} (0x{:016x}) != {y:?} \
+             (0x{:016x}). Nothing written.",
+            x.to_bits(),
+            y.to_bits()
+        ));
+    }
+    eprintln!(
+        "  identity gate: {} probe rows, predictions BIT-IDENTICAL{}",
+        probes.len(),
+        if nan_absorbed == 0 {
+            String::new()
+        } else {
+            format!(
+                " on {} rows; {nan_absorbed} row(s) ({nan_absorbed_nonfinite} of them \
+                 non-finite after) had a NaN on a DROPPED line only — the wide bake \
+                 returns NaN, the dense one does not. Pre-existing class-1 prune \
+                 semantics; the DEAD-COLUMN gate passed on ALL {} rows.",
+                probes.len() - nan_absorbed,
+                probes.len()
+            )
+        }
+    );
+    eprintln!("  bytes {} -> {}", bytes.len(), out_bytes.len());
+
+    match (&a.out, a.dry_run) {
+        (Some(o), false) => {
+            std::fs::write(o, &out_bytes).map_err(|e| format!("write {o:?}: {e}"))?;
+            eprintln!("  wrote {o:?}");
+        }
+        _ => eprintln!("  --dry-run: nothing written"),
+    }
+    Ok(())
+}
+
+/// Deterministic probe vectors for the densify identity gate: a fixed
+/// adversarial prefix (zeros, ±1, large, subnormal, −0.0) then a SplitMix64
+/// spread, so a failure is reproducible from the row index alone.
+fn densify_probe_rows(width: usize, n: usize) -> Vec<Vec<f64>> {
+    const ADVERSARIAL: [f64; 8] = [
+        0.0,
+        -0.0,
+        1.0,
+        -1.0,
+        1e30,
+        -1e30,
+        f64::MIN_POSITIVE,
+        -f64::MIN_POSITIVE,
+    ];
+    let mut rows = Vec::with_capacity(n.max(ADVERSARIAL.len()));
+    for &v in &ADVERSARIAL {
+        rows.push(vec![v; width]);
+    }
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut next = || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        // A wide but finite spread: feature values in this codebase span
+        // ~1e-6..1e6, and the scaler divides by `scale` afterwards.
+        let u = (z >> 11) as f64 / (1u64 << 53) as f64;
+        (u - 0.5) * 2.0e3
+    };
+    while rows.len() < n {
+        rows.push((0..width).map(|_| next()).collect());
+    }
+    rows
+}
+
+/// A bake's layers copied VERBATIM, each preserving its own dtype.
+///
+/// `pack_layers` forces one dtype across the bake (that is its job); densify
+/// must not requantize, so it has its own reader. `f16 -> f32 -> f16` is
+/// exact in both directions, so re-emitting an f16 layer through the f32
+/// staging buffer is bit-identical.
+fn verbatim_layers(model: &Model) -> Result<Vec<PackLayer>, String> {
+    let mut out = Vec::with_capacity(model.n_layers());
+    for (li, l) in model.layers().enumerate() {
+        let (weights, dtype) = match &l.weights {
+            WeightStorage::F32(w) => (w.to_vec(), WeightDtype::F32),
+            WeightStorage::F16(w) => (
+                w.iter().map(|b| f16_bits_to_f32(*b)).collect(),
+                WeightDtype::F16,
+            ),
+            WeightStorage::I8 { .. } => {
+                return Err(format!(
+                    "densify: layer {li} is i8 — re-emitting it would requantize; \
+                     start from the f32/f16 original"
+                ));
+            }
+        };
+        out.push(PackLayer {
+            in_dim: l.in_dim,
+            out_dim: l.out_dim,
+            activation: l.activation,
+            dtype,
+            weights,
+            biases: l.biases.to_vec(),
+        });
+    }
+    Ok(out)
+}
+
+/// [`forward_scored_6dec`] at FULL f64 bits — the densify identity gate needs
+/// the bits, not a 6-decimal print (which would hide a difference below
+/// 5e-7 and let a non-identical bake ship).
+fn forward_scored_raw(bytes: &[u8], feats: &[Vec<f64>]) -> Result<Vec<f64>, String> {
+    use zensim_validate::bake_runtime::{
+        extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale,
+        score_with_bake_alloc,
+    };
+    let model = Model::from_bytes(bytes).map_err(|e| format!("parse bake: {e:?}"))?;
+    let n_inputs = model.caller_input_width();
+    let has_transforms = model.has_nontrivial_feature_transforms();
+    let psa = extract_per_sample_alpha_head(&model);
+    let hyb = extract_hybrid_head(&model);
+    let pin = extract_tanh_output_head_scale(&model);
+    let sp = spline::extract(&model);
+    let mut predictor = zenpredict::Predictor::new(&model);
+    let mut out = Vec::with_capacity(feats.len());
+    let mut row_f64 = vec![0f64; n_inputs];
+    for row in feats {
+        if row.len() != n_inputs {
+            return Err(format!(
+                "feature row has {} values, bake expects {n_inputs}",
+                row.len()
+            ));
+        }
+        for (d, s) in row_f64.iter_mut().zip(row.iter()) {
+            *d = (*s as f32) as f64;
+        }
+        out.push(score_with_bake_alloc(
+            &mut predictor,
+            has_transforms,
+            psa.as_ref(),
+            hyb.as_ref(),
+            pin,
+            sp.as_ref(),
+            n_inputs,
+            &row_f64,
+        ));
+    }
+    Ok(out)
+}
+
 fn emit_packed(
     schema_hash: u64,
     scaler_mean: &[f32],
@@ -4401,6 +4776,7 @@ fn main() -> ExitCode {
         Cmd::AddWinsor(a) => cmd_add_winsor(a).map(|_| false),
         Cmd::Gate(a) => cmd_gate(a),
         Cmd::Pack(a) => cmd_pack(a).map(|_| false),
+        Cmd::Densify(a) => cmd_densify(a).map(|_| false),
         Cmd::Strip(a) => cmd_strip(a).map(|_| false),
         Cmd::AppendMeta(a) => cmd_append_meta(a).map(|_| false),
         Cmd::FitLasso(a) => cmd_fit_lasso(a).map(|_| false),

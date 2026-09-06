@@ -309,12 +309,24 @@ pub struct Layer0View<'a> {
 /// scaler. **No corpus statistic is an input**, which is what keeps
 /// class-3 columns structurally unreachable.
 ///
-/// `prune_constants = false` restricts the plan to class 1, in which
-/// case the resulting bake is bit-identical for *every* input including
-/// NaN. With class 2 enabled a NaN feature on a forced-constant column
-/// no longer propagates to the output (the unpruned bake returns NaN);
-/// that only changes behaviour on input that was already garbage, but
-/// it is the one respect in which class 2 is weaker than class 1.
+/// `prune_constants = false` restricts the plan to class 1, which is
+/// bit-identical for every input whose dropped lines are FINITE.
+///
+/// **CORRECTED 2026-09-06 (cruft purge, increment B).** This doc used to
+/// claim class 1 was "bit-identical for *every* input including NaN", and
+/// that is FALSE — measured by `bake_dial_refit densify`'s identity gate on
+/// the shipped BHdr and A bakes, 16 of 512 probe rows each. `zenpredict`'s
+/// forward is `dst[k] = fma(src[i], w[i][k], dst[k])`, and `fma(NaN, 0.0,
+/// acc)` is **NaN**: an all-zero weight row still POISONS every accumulator
+/// when its own input is NaN, so removing it turns a NaN prediction into a
+/// finite (or infinite) one. Class 1 and class 2 therefore have the SAME NaN
+/// caveat, and it was only ever written down for class 2. Both only change
+/// behaviour on input that was already garbage — but the claim of universal
+/// bit-identity was wrong and a gate believed it.
+///
+/// With class 2 enabled there is an additional, separate weakening: the
+/// contribution is folded into the bias, which is exact in real arithmetic
+/// but reorders one f32 sum.
 pub fn plan(
     model: &Model,
     l0: &Layer0View<'_>,
@@ -457,6 +469,62 @@ pub fn prune_layer0_biases(plan: &PrunePlan, biases: &[f32]) -> Vec<f32> {
 /// Apply a plan to a per-layer-0-input array (scaler mean or scale).
 pub fn prune_input_array(plan: &PrunePlan, values: &[f32]) -> Vec<f32> {
     plan.keep.iter().map(|&k| values[k]).collect()
+}
+
+/// The RAW caller lines this plan KEEPS, ascending.
+///
+/// Derived from the post-prune transform list rather than from `keep` (which
+/// holds layer-0 COLUMN indices, a different numbering once a bake has already
+/// been pruned once): a raw line survives exactly when its post-prune
+/// transform is not [`FeatureTransform::Drop`]. For an IDENTITY layout — which
+/// is every bake that exists — a raw line index IS a feature id, and that is
+/// what makes this the read set a densified bake declares.
+pub fn kept_raw_lines(plan: &PrunePlan) -> Vec<usize> {
+    plan.transforms
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| !matches!(t, FeatureTransform::Drop))
+        .map(|(raw, _)| raw)
+        .collect()
+}
+
+/// The DENSE form of [`transform_metadata`]: the kept lines only, in ascending
+/// raw order, with **no `drop` entries at all**.
+///
+/// This is what retires the wide-caller-width contract. `transform_metadata`
+/// emits `raw_width` lines with `drop` at the pruned ones, so the bake keeps
+/// declaring a caller width it does not read; this emits `keep.len()` lines, so
+/// `caller_input_width() == n_inputs()` and the runtime is asked for exactly
+/// the values the model consumes.
+pub fn dense_transform_metadata(plan: &PrunePlan) -> (String, String) {
+    let kept = kept_raw_lines(plan);
+    let transforms = kept
+        .iter()
+        .map(|&raw| plan.transforms[raw].as_token())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let params = kept
+        .iter()
+        .map(|&raw| {
+            plan.params[raw]
+                .iter()
+                .map(fmt_param)
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (transforms, params)
+}
+
+/// The `zentrain.feature_ids` payload for a densified bake: the kept raw lines
+/// as ascending decimal ids, one per line.
+pub fn feature_ids_metadata(plan: &PrunePlan) -> String {
+    kept_raw_lines(plan)
+        .iter()
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Serialize the post-prune transforms + params to the two
