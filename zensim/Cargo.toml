@@ -355,3 +355,10 @@ required-features = ["custom-profiles"]
 [[example]]
 name = "serve_custom_bake"
 required-features = ["custom-profiles", "candidate-profiles"]
+
+# The feature-defect audit's measurement half: per-invariant census over
+# engines/widths/threads/SIMD tiers. See the file's own doc comment for the
+# exact invocation.
+[[example]]
+name = "feature_invariant_probe"
+required-features = ["training", "feature-regime-v2", "custom-profiles"]

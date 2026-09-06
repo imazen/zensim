@@ -494,6 +494,10 @@ fn mode_engine_parity(out: &mut dyn Write) {
 // (h) DEGENERATE INPUTS — no NaN, no Inf, on flat / black / white / extreme.
 // ---------------------------------------------------------------------------
 
+// The per-case closure type is exactly as complex as the case list needs
+// (name + a boxed two-image generator); a `type` alias would just move the
+// same signature one hop away.
+#[allow(clippy::type_complexity)]
 fn mode_degenerate(out: &mut dyn Write) {
     writeln!(
         out,
@@ -604,6 +608,9 @@ fn mode_degenerate(out: &mut dyn Write) {
 // (f) MONOTONICITY — per-slot response to a controlled single-axis ladder.
 // ---------------------------------------------------------------------------
 
+// Same shape as `mode_degenerate`'s allow: the boxed per-step closure list is
+// the plain representation of "a named ladder of image transforms".
+#[allow(clippy::type_complexity)]
 fn mode_ladder(out: &mut dyn Write) {
     writeln!(
         out,
@@ -867,8 +874,8 @@ fn mode_depth(out: &mut dyn Write) {
         let to16 = |px: &[[u8; 3]]| -> Vec<u8> {
             let mut v = Vec::with_capacity(px.len() * 8);
             for p in px {
-                for c in 0..3 {
-                    let x = ((p[c] as u16) << 8) | p[c] as u16; // 8->16 replicate
+                for &c in p {
+                    let x = ((c as u16) << 8) | c as u16; // 8->16 replicate
                     v.extend_from_slice(&x.to_le_bytes());
                 }
                 v.extend_from_slice(&0xFFFFu16.to_le_bytes());
@@ -912,8 +919,8 @@ fn mode_depth(out: &mut dyn Write) {
         let tof32 = |px: &[[u8; 3]]| -> Vec<u8> {
             let mut v = Vec::with_capacity(px.len() * 16);
             for p in px {
-                for c in 0..3 {
-                    let u = p[c] as f32 / 255.0;
+                for &c in p {
+                    let u = c as f32 / 255.0;
                     let lin = if u <= 0.04045 {
                         u / 12.92
                     } else {
