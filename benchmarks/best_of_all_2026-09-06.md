@@ -220,6 +220,15 @@ inversions at 0.03526/pair against 0.00727 and 0.00793 elsewhere).
 **Saturation dedup on `size_bytes`, declared as a PROXY** — the ladder
 instrument keys on `encode_sha`, that column does not exist in this sidecar, and
 nothing has verified that q5 and q10 are distinct settings on every codec.
+MEASURED: it collapsed **2 steps out of 196,086 rows**. The plateau worry that
+motivated it — zenjpeg emitting one bitstream for all of q 0..10, which is what
+made the ladder instrument necessary in the first place — barely materializes on
+*this* grid, because safesyn starts at q5 and steps by 5. The check stays,
+because "it did not fire on this corpus" is not "it cannot fire", and 2 is not 0.
+
+Index range verified against the group it indexes: **max index 196,085 < 196,086
+rows**, i.e. zero out-of-range pairs — which is also what the loader's new
+loud-drop counter will confirm at train time rather than assume.
 
 **The two-reference agreement arm is NOT MEASURED, not silently skipped.**
 Butteraugli is present on 196,086/196,086 rows but the columns do not name their
