@@ -134,7 +134,7 @@ fn usage() -> ! {
                 freeze_check --fulleval <f> --profile balanced-2026-08-04 [--tsv]\n\
                              [--annotations <registry.json|none>]\n\
                 freeze_check --select <a.fulleval.json> <b...> [--tsv]\n\
-                             [--seed-group] [--min-k N] [--floor-basis all|mean]\n\
+                             [--seed-group] [--min-k N] [--floor-basis all|mean|legacy]\n\
                 freeze_check --tsv-header | --select-tsv-header | \
                 --seed-group-tsv-header\n\n\
          --select: the REGISTERED k-seed selection rule (campaign appendix\n\
@@ -144,6 +144,20 @@ fn usage() -> ! {
          selectable) — a missing measurement is never scored as zero. sdr25\n\
          is a reported comparator, not part of the rule. Exit 1 if no\n\
          candidate is selectable.\n\
+         G-ADDR CONTRACT VETO (2026-09-06 owner fix, registry\n\
+         select-rule-blind-to-dial-contract-2026-09-06): a candidate (or, \n\
+         under --seed-group, a group with ANY member) that MEASURES a\n\
+         G-ADDR CONTRACT-tier (C1-C6) fail in its own `dial.addressability`\n\
+         block is NOT selectable, however high its floor count or\n\
+         composite — dial addressability is an ABSOLUTE product bar, not a\n\
+         floor a bake can trade off. A NOT MEASURED contract row is never a\n\
+         fail (an absent block, or an all-unmeasured contract tier, both\n\
+         stay eligible — only a MEASURED fail vetoes). Listed under its own\n\
+         \"contract FAIL — not selectable\" heading with the failing rows.\n\
+         Under --floor-basis all (default), A7r's per-codec\n\
+         floor-representability breakdown also becomes one MORE floor per\n\
+         MEASURED codec, folded into the floor count (a codec no\n\
+         representative's instrument touched counts in neither direction).\n\
          --seed-group (2026-09-04, §7.7 fix; opt-in, --select only): without\n\
          it, --select ranks INDIVIDUAL cells and on a class with real seed\n\
          spread will select the lucky draw — literally the best-of-k seed,\n\
@@ -180,14 +194,21 @@ fn usage() -> ! {
          combined-fair k>=2 groups, larger than the 0.0021 separating the top\n\
          four (benchmarks/replication_wave_2026-09-05.md). --min-k 1 turns\n\
          the floor off entirely, for reproducing a historical selection.\n\
-         --floor-basis all|mean (default all): how a GROUP's floor count is\n\
-         computed -- `all` = floors EVERY distinct-seed representative\n\
-         passes (a floor is a certification, and a mean is not one: two\n\
-         members at 8/8 and 6/8 average 7.0 even when they fail DIFFERENT\n\
-         floors, crediting a floor no member reliably clears); `mean` = the\n\
-         k-seed mean, the pre-amendment basis. The mean is reported either\n\
-         way. Neither flag can admit a candidate the pre-amendment rule\n\
-         refused -- both only remove.\n\n\
+         --floor-basis all|mean|legacy (default all): how a GROUP's floor\n\
+         count is computed -- `all` = floors EVERY distinct-seed\n\
+         representative passes (a floor is a certification, and a mean is\n\
+         not one: two members at 8/8 and 6/8 average 7.0 even when they\n\
+         fail DIFFERENT floors, crediting a floor no member reliably\n\
+         clears) PLUS (2026-09-06) the A7r per-codec G-ADDR floors and the\n\
+         CONTRACT veto; `mean` = the k-seed mean, the pre-amendment basis\n\
+         (F1-F8 only, no A7r floors -- the CONTRACT veto still applies,\n\
+         since it is a product-safety gate, not a floor-counting\n\
+         convention); `legacy` = byte-for-byte the PRE-2026-09-06 `all`\n\
+         (F1-F8 only, NO CONTRACT veto, NO A7r floors) -- an audit/\n\
+         reproduction escape hatch ONLY, never for a real selection. The\n\
+         mean is reported either way. No basis can admit a candidate the\n\
+         pre-amendment rule refused -- all three only remove (`legacy`\n\
+         aside, which exists purely to reproduce the pre-fix defect).\n\n\
          default (no --profile): the §5 freeze bar (unchanged).\n\
          --bar sets/overrides a cross-bake numeric bar for: csiq, live\n\
          (§5 only; their §5 bars are \"≥ best 924-arm\" — externally chosen, so\n\
@@ -1239,6 +1260,18 @@ struct SelectRow {
     /// and must stay terse and stable, the label is for a reader and says
     /// which half of a split pair is which.
     seed_text: String,
+    /// G-ADDR CONTRACT-tier measured fails (2026-09-06 owner fix; see the
+    /// module note above `gaddr_contract_fails`) — never recomputed, read
+    /// straight from this fulleval's own `dial.addressability.checks[]`.
+    /// Empty ⇒ no measured contract fail (an absent block, or every
+    /// contract row NOT MEASURED, both count as empty: only a MEASURED
+    /// fail disqualifies). Any non-empty entry is an absolute
+    /// selectability veto — see [`gaddr_vetoes`].
+    gaddr_contract_fails: Vec<(String, String)>,
+    /// `A7r` per-codec floor states from this fulleval's own G-ADDR
+    /// verdict — `(codec, Some(pass)/None=not measured)`. See
+    /// [`gaddr_effective_counts`].
+    gaddr_codec: Vec<(String, Option<bool>)>,
 }
 
 /// Human-readable form of [`seed_identity`] for the per-seed detail table.
@@ -1268,17 +1301,171 @@ fn m3a_cell(s: M3aState) -> String {
     }
 }
 
-/// Rank a pool: floor count DESC, then `selection_composite` DESC. Rows
-/// without a `selection_composite` sort last within their floor tier (they
-/// carry no comparable number) — they are listed, never selected.
-fn rank_pool(rows: &mut [&SelectRow]) {
+/// Rank a pool: floor count DESC (under `basis` — see [`gaddr_effective_counts`]),
+/// then `selection_composite` DESC. Rows without a `selection_composite` sort
+/// last within their floor tier (they carry no comparable number) — they are
+/// listed, never selected.
+fn rank_pool(rows: &mut [&SelectRow], basis: FloorBasis) {
     rows.sort_by(|a, b| {
-        b.n_pass.cmp(&a.n_pass).then_with(|| {
-            b.selection_composite
-                .partial_cmp(&a.selection_composite)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        gaddr_effective_counts(b, basis)
+            .0
+            .cmp(&gaddr_effective_counts(a, basis).0)
+            .then_with(|| {
+                b.selection_composite
+                    .partial_cmp(&a.selection_composite)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
     });
+}
+
+// ── G-ADDR CONTRACT pre-filter for `--select` (2026-09-06 owner fix) ───────
+//
+// `benchmarks/best_of_all_2026-09-06.md` + registry entry
+// `select-rule-blind-to-dial-contract-2026-09-06` measured that
+// `freeze_check --select --seed-group --min-k 2 --floor-basis all` picked
+// `A_plain`, a CONTROL arm at 4/6 G-ADDR CONTRACT rows, over arms that took
+// the contract to 6/6 on every seed — because the PRIMARY key (the balanced
+// profile's F1-F8 floor count) and the TIE-BREAK composite are both
+// completely blind to `dial.addressability`: G-ADDR's CONTRACT tier (C1-C6)
+// is an ABSOLUTE product bar ("dial addressability is a HARD ship gate",
+// user rule 2026-09-04 — see `benchmarks/dial_addressability_gate_2026-09-04.md`),
+// not a floor a bake can trade off against CID22 or coherence.
+//
+// This reads the fulleval's OWN G-ADDR verdict — `dial.addressability`, the
+// exact JSON `dial_addressability::to_json` embeds (`bake_verdict.rs`) —
+// and NEVER recomputes it. Two effects, both additive (they can only REMOVE
+// a candidate from selection, never admit one the pre-fix rule refused):
+//
+//   1. A MEASURED CONTRACT-tier fail is an absolute selectability VETO,
+//      independent of floor count or composite (`gaddr_vetoes`).
+//   2. `A7r`'s per-codec floor-representability breakdown
+//      (`dial.addressability.measured.codec_floor[]`) becomes one MORE
+//      floor per MEASURED codec, folded into `--floor-basis all`'s count
+//      (`gaddr_effective_counts`) — a codec this instrument never touched
+//      (`state: "not_measured"`) is reported but counted in neither
+//      direction, matching the registered rule that an absent axis can
+//      certify nothing.
+//
+// `--floor-basis legacy` reproduces the PRE-2026-09-06 rule byte-for-byte
+// (no veto, no A7r floors) — the audit/reproduction escape hatch, same
+// role as `--min-k 1` for the replication floor. `--floor-basis mean`
+// keeps its existing, unrelated meaning (the k-seed MEAN floor count) —
+// unaffected by A7r — but the CONTRACT veto still applies under it: the
+// veto is a product-safety gate, not a floor-counting convention, and only
+// the explicit `legacy` reproduction mode may bypass it.
+
+/// One G-ADDR CONTRACT-tier row this candidate's OWN verdict MEASURABLY
+/// failed — `(id, note)`. A `NOT MEASURED` contract row is never in this
+/// list (only a `state: "fail"` row disqualifies — an unmeasured axis is
+/// reported, never scored as a defect, same rule as an unmeasured M3a). An
+/// absent `dial.addressability` block (no G-ADDR ever ran) returns empty,
+/// for the same reason: absence is not evidence of failure.
+fn gaddr_contract_fails(v: &serde_json::Value) -> Vec<(String, String)> {
+    let checks = match v
+        .get("dial")
+        .and_then(|d| d.get("addressability"))
+        .and_then(|a| a.get("checks"))
+        .and_then(|c| c.as_array())
+    {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+    checks
+        .iter()
+        .filter(|r| r.get("tier").and_then(|x| x.as_str()) == Some("contract"))
+        .filter(|r| r.get("state").and_then(|x| x.as_str()) == Some("fail"))
+        .map(|r| {
+            (
+                r.get("id")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("?")
+                    .to_string(),
+                r.get("note")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            )
+        })
+        .collect()
+}
+
+/// The `A7r` per-codec floor states this candidate's OWN G-ADDR verdict
+/// measured, read from `dial.addressability.measured.codec_floor[]` —
+/// `(codec, Some(true)=pass / Some(false)=fail / None=NOT MEASURED)`. Never
+/// recomputed. A codec this instrument never touched is returned (so a
+/// reader can see it was skipped) but is excluded from every count by
+/// [`gaddr_measured_floor_counts`].
+fn gaddr_codec_states(v: &serde_json::Value) -> Vec<(String, Option<bool>)> {
+    let rows = match v
+        .get("dial")
+        .and_then(|d| d.get("addressability"))
+        .and_then(|a| a.get("measured"))
+        .and_then(|m| m.get("codec_floor"))
+        .and_then(|c| c.as_array())
+    {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+    rows.iter()
+        .filter_map(|r| {
+            let codec = r.get("codec")?.as_str()?.to_string();
+            let state = match r.get("state").and_then(|x| x.as_str()) {
+                Some("pass") => Some(true),
+                Some("fail") => Some(false),
+                // "not_measured", or a malformed/missing state: NEVER a
+                // fail — excluded from counting, not scored as one.
+                _ => None,
+            };
+            Some((codec, state))
+        })
+        .collect()
+}
+
+/// The MEASURED (non-NOT-MEASURED) `A7r` per-codec floors as `(pass,
+/// total)` — `total` excludes NOT MEASURED codecs entirely, per the
+/// registered rule that a codec this instrument never touched cannot
+/// certify or condemn a candidate on it.
+fn gaddr_measured_floor_counts(codec: &[(String, Option<bool>)]) -> (usize, usize) {
+    let measured: Vec<bool> = codec.iter().filter_map(|(_, s)| *s).collect();
+    (measured.iter().filter(|&&p| p).count(), measured.len())
+}
+
+/// Effective `(pass, total)` floor count for RANKING under `basis`.
+/// `Legacy` is the pre-2026-09-06 rule byte-for-byte: F1-F8 only. `AllReps`
+/// (the default, CLI `all`) folds in the `A7r` per-codec floors this
+/// candidate's OWN instrument measured. `Mean` is UNCHANGED — F1-F8 only,
+/// preserving its documented role as the k-seed-mean reproduction basis.
+fn gaddr_effective_counts(r: &SelectRow, basis: FloorBasis) -> (usize, usize) {
+    match basis {
+        FloorBasis::Legacy | FloorBasis::Mean => (r.n_pass, r.n_floors),
+        FloorBasis::AllReps => {
+            let (p, t) = gaddr_measured_floor_counts(&r.gaddr_codec);
+            (r.n_pass + p, r.n_floors + t)
+        }
+    }
+}
+
+/// `true` when this candidate's OWN G-ADDR verdict measured a CONTRACT-tier
+/// fail — an absolute selectability veto, independent of floor count or
+/// composite. `Legacy` never vetoes (the byte-for-byte reproduction
+/// escape hatch); every other basis does.
+fn gaddr_vetoes(r: &SelectRow, basis: FloorBasis) -> bool {
+    basis != FloorBasis::Legacy && !r.gaddr_contract_fails.is_empty()
+}
+
+/// One line per measured CONTRACT fail, for the "not selectable" callouts.
+fn gaddr_fail_reason(fails: &[(String, String)]) -> String {
+    fails
+        .iter()
+        .map(|(id, note)| {
+            if note.is_empty() {
+                id.clone()
+            } else {
+                format!("{id}: {note}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 // ── `--select --seed-group`: the k-seed AGGREGATE selection rule
@@ -1516,11 +1703,24 @@ fn seed_identity(v: &serde_json::Value) -> Option<String> {
 /// the PRIMARY key, exactly as the per-cell rule uses `n_pass`.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 enum FloorBasis {
-    /// **Default.** Floors that EVERY distinct-seed representative passes.
+    /// **Default.** Floors that EVERY distinct-seed representative passes,
+    /// PLUS (2026-09-06) the `A7r` per-codec G-ADDR floors this candidate's
+    /// own instrument measured — see [`gaddr_effective_counts`]. Also the
+    /// basis under which the G-ADDR CONTRACT-tier veto applies
+    /// ([`gaddr_vetoes`]).
     AllReps,
     /// The k-seed mean floor count — the pre-amendment basis, kept so a
-    /// historical seed-grouped table can be reproduced.
+    /// historical seed-grouped table can be reproduced. F1-F8 ONLY (no
+    /// `A7r` floors folded in — unaffected by the 2026-09-06 fix). The
+    /// G-ADDR CONTRACT veto STILL applies here: it is a product-safety
+    /// gate, not a floor-counting convention, so only `legacy` bypasses it.
     Mean,
+    /// **Reproduction escape hatch (2026-09-06).** Byte-for-byte the
+    /// pre-fix `all`: F1-F8 only, no `A7r` floors, no G-ADDR CONTRACT
+    /// veto. Use this ONLY to reproduce a historical selection for audit —
+    /// it reinstates the exact defect
+    /// `select-rule-blind-to-dial-contract-2026-09-06` registered.
+    Legacy,
 }
 
 /// Why a group is not selectable, in the order the rule applies. `None` = it
@@ -1530,6 +1730,24 @@ fn group_unselectable_reason(
     basis: FloorBasis,
     min_k: usize,
 ) -> Option<String> {
+    // The G-ADDR CONTRACT tier is an ABSOLUTE product bar (user rule
+    // 2026-09-04: "dial addressability is a HARD ship gate"), checked FIRST
+    // so it is never shadowed by a replication-floor or M3a reason — a
+    // reader must see the more severe violation. Any MEMBER (not just a
+    // distinct-seed representative) measuring a contract fail disqualifies
+    // the whole group: a duplicate-promotion cell that failed contract is
+    // still disqualifying evidence about the recipe.
+    if basis != FloorBasis::Legacy && !g.gaddr_contract_fails.is_empty() {
+        let ids: std::collections::BTreeSet<&str> = g
+            .gaddr_contract_fails
+            .iter()
+            .map(|(_, id, _)| id.as_str())
+            .collect();
+        return Some(format!(
+            "CONTRACT FAIL — not selectable ({})",
+            ids.into_iter().collect::<Vec<_>>().join(",")
+        ));
+    }
     if g.k_seeds < min_k {
         return Some(if g.ungroupable {
             format!("UNGROUPABLE (k={} < min-k {min_k})", g.k_seeds)
@@ -1591,14 +1809,39 @@ struct SeedGroupRow<'a> {
     /// Cells that share a seed with another cell in this group (clause 3's
     /// duplicate promotions), excluded from `reps`.
     n_duplicate_cells: usize,
+    /// Every MEMBER cell's (not just reps') G-ADDR CONTRACT-tier measured
+    /// fails, as `(member_name, id, note)` — the union over the WHOLE
+    /// group. Non-empty ⇒ the group is vetoed (2026-09-06 owner fix); see
+    /// [`group_unselectable_reason`]. Members, not reps: a duplicate
+    /// promotion that measured a contract fail is still disqualifying
+    /// evidence about the recipe.
+    gaddr_contract_fails: Vec<(String, String, String)>,
+    /// `A7r` per-codec floors credited under the SAME all-reps discipline
+    /// as `n_pass_all`/`floors_all`: a codec counts in the denominator
+    /// only when EVERY representative MEASURED it (pass or fail, never
+    /// NOT MEASURED), and in the numerator only when additionally every
+    /// representative PASSED it. [`FloorBasis::AllReps`]'s primary key
+    /// folds this in; [`FloorBasis::Mean`]/[`FloorBasis::Legacy`] ignore it.
+    gaddr_codec_pass_all: usize,
+    gaddr_codec_total_all: usize,
+    /// Mean per-representative `A7r` pass/measured counts — REPORTED only
+    /// (mirrors `mean_n_pass`'s role: the right number for display, never
+    /// a floor certification).
+    gaddr_codec_mean_pass: f64,
+    gaddr_codec_mean_total: f64,
 }
 
 impl SeedGroupRow<'_> {
     /// The group's floor count under `basis` — the PRIMARY ranking key.
+    /// `Legacy` reproduces the pre-2026-09-06 `all` byte-for-byte (F1-F8
+    /// intersection only); `AllReps` (today's `all`) additionally folds in
+    /// the `A7r` per-codec floors every representative measured and
+    /// passed; `Mean` is unaffected (F1-F8 mean only).
     fn floor_count(&self, basis: FloorBasis) -> f64 {
         match basis {
-            FloorBasis::AllReps => self.n_pass_all as f64,
+            FloorBasis::AllReps => (self.n_pass_all + self.gaddr_codec_pass_all) as f64,
             FloorBasis::Mean => self.mean_n_pass,
+            FloorBasis::Legacy => self.n_pass_all as f64,
         }
     }
 }
@@ -1724,6 +1967,54 @@ fn group_by_seed<'a>(rows: &[&'a SelectRow]) -> Vec<SeedGroupRow<'a>> {
                 ))
             };
             let unreplicated = k_seeds < 2;
+
+            // G-ADDR (2026-09-06 owner fix): the union of every MEMBER's
+            // measured contract fails (not just reps — a duplicate
+            // promotion that failed contract is still disqualifying
+            // evidence), plus the all-reps-discipline per-codec floor
+            // count over `reps` (mirroring `floors_all`/`n_pass_all`
+            // exactly: a codec counts only when EVERY rep measured it,
+            // and passes only when EVERY rep passed it).
+            let gaddr_contract_fails: Vec<(String, String, String)> = members
+                .iter()
+                .flat_map(|m| {
+                    m.gaddr_contract_fails
+                        .iter()
+                        .map(move |(id, note)| (m.name.clone(), id.clone(), note.clone()))
+                })
+                .collect();
+            let mut gaddr_measured: std::collections::BTreeMap<&str, usize> =
+                std::collections::BTreeMap::new();
+            let mut gaddr_passed: std::collections::BTreeMap<&str, usize> =
+                std::collections::BTreeMap::new();
+            for m in &reps {
+                for (codec, state) in &m.gaddr_codec {
+                    if let Some(pass) = state {
+                        *gaddr_measured.entry(codec.as_str()).or_insert(0) += 1;
+                        if *pass {
+                            *gaddr_passed.entry(codec.as_str()).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+            let n_reps = reps.len();
+            let gaddr_codec_total_all = gaddr_measured.values().filter(|&&c| c == n_reps).count();
+            let gaddr_codec_pass_all = gaddr_measured
+                .iter()
+                .filter(|&(_, &c)| c == n_reps)
+                .filter(|&(codec, _)| gaddr_passed.get(codec).copied().unwrap_or(0) == n_reps)
+                .count();
+            let gaddr_codec_mean_pass = mean_opt(reps.iter().map(|m| {
+                let (p, t) = gaddr_measured_floor_counts(&m.gaddr_codec);
+                if t > 0 { Some(p as f64) } else { None }
+            }))
+            .unwrap_or(0.0);
+            let gaddr_codec_mean_total = mean_opt(reps.iter().map(|m| {
+                let (_, t) = gaddr_measured_floor_counts(&m.gaddr_codec);
+                if t > 0 { Some(t as f64) } else { None }
+            }))
+            .unwrap_or(0.0);
+
             SeedGroupRow {
                 key,
                 members,
@@ -1740,6 +2031,11 @@ fn group_by_seed<'a>(rows: &[&'a SelectRow]) -> Vec<SeedGroupRow<'a>> {
                 unreplicated,
                 ungroupable,
                 n_duplicate_cells,
+                gaddr_contract_fails,
+                gaddr_codec_pass_all,
+                gaddr_codec_total_all,
+                gaddr_codec_mean_pass,
+                gaddr_codec_mean_total,
             }
         })
         .collect()
@@ -2046,6 +2342,8 @@ fn run_select(
             group_key: seed_group_key(&v),
             seed_id: seed_identity(&v),
             seed_text: seed_label(&v),
+            gaddr_contract_fails: gaddr_contract_fails(&v),
+            gaddr_codec: gaddr_codec_states(&v),
         });
     }
 
@@ -2056,7 +2354,7 @@ fn run_select(
         rows.iter().partition(|r| r.m3a == M3aState::NotComputable);
     let mut single = single;
     let mut ens = ens;
-    rank_pool(&mut single);
+    rank_pool(&mut single, basis);
     ens.sort_by(|a, b| {
         b.n_pass.cmp(&a.n_pass).then_with(|| {
             b.composite
@@ -2077,7 +2375,9 @@ fn run_select(
     println!("|---:|---|---|---:|---:|---|---:|---:|---|");
     let mut winner: Option<&SelectRow> = None;
     for (i, r) in single.iter().enumerate() {
-        let selectable = r.m3a != M3aState::Unmeasured && r.n_pass > 0;
+        let (eff_pass, eff_floors) = gaddr_effective_counts(r, basis);
+        let vetoed = gaddr_vetoes(r, basis);
+        let selectable = r.m3a != M3aState::Unmeasured && eff_pass > 0 && !vetoed;
         if selectable && winner.is_none() {
             winner = Some(r);
         }
@@ -2086,13 +2386,19 @@ fn run_select(
             i + 1,
             r.name,
             r.class,
-            r.n_pass,
-            r.n_floors,
+            eff_pass,
+            eff_floors,
             num(r.composite),
             m3a_cell(r.m3a),
             num(r.selection_composite),
             num(r.sdr25),
-            if selectable { "yes" } else { "NO" }
+            if vetoed {
+                "NO — CONTRACT FAIL".to_string()
+            } else if selectable {
+                "yes".to_string()
+            } else {
+                "NO".to_string()
+            }
         );
     }
     if !ens.is_empty() {
@@ -2141,29 +2447,57 @@ fn run_select(
         }
     }
 
+    // ── G-ADDR CONTRACT veto callout (2026-09-06 owner fix) ─────────────
+    // A CONTRACT row is an ABSOLUTE product bar (dial addressability, user
+    // rule 2026-09-04) — a bake that fails one is never selectable, however
+    // high its floor count or composite. `--floor-basis legacy` reproduces
+    // the pre-2026-09-06 rule that could not see this at all.
+    let contract_vetoed: Vec<&&SelectRow> =
+        single.iter().filter(|r| gaddr_vetoes(r, basis)).collect();
+    if !contract_vetoed.is_empty() {
+        println!(
+            "\n## NOT SELECTABLE — {} candidate(s): contract FAIL — not selectable\n\n\
+             Each measured a G-ADDR CONTRACT-tier (C1-C6) fail in its OWN \
+             `dial.addressability` block — an absolute selectability veto, \
+             independent of floor count or `selection_composite`. \
+             `--floor-basis legacy` reproduces the pre-2026-09-06 rule that \
+             ignored this (registry: select-rule-blind-to-dial-contract-2026-09-06).\n",
+            contract_vetoed.len()
+        );
+        for r in &contract_vetoed {
+            println!(
+                "    - `{}`: contract FAIL — not selectable ({})",
+                r.name,
+                gaddr_fail_reason(&r.gaddr_contract_fails)
+            );
+        }
+    }
+
     // The per-cell table answers "the best CELL". Under the replication floor
     // that is NOT the selection (a cell has no k), so it is labelled as what
     // it is; `**SELECTED:`** is emitted once, by whichever section is the
     // authoritative one. At `--min-k 1` the historical strings are unchanged.
     match (winner, floor_active) {
-        (Some(w), false) => println!(
-            "\n**SELECTED: `{}`** — {}/{} floors, selection_composite {}.",
-            w.name,
-            w.n_pass,
-            w.n_floors,
-            num(w.selection_composite)
-        ),
-        (Some(w), true) => println!(
-            "\n**BEST CELL: `{}`** — {}/{} floors, selection_composite {}. \
-             NOT the selection: a cell has no `k`, and the registered \
-             replication floor (--min-k {}) selects a RECIPE. See the \
-             seed-grouped section below.",
-            w.name,
-            w.n_pass,
-            w.n_floors,
-            num(w.selection_composite),
-            min_k
-        ),
+        (Some(w), false) => {
+            let (p, t) = gaddr_effective_counts(w, basis);
+            println!(
+                "\n**SELECTED: `{}`** — {p}/{t} floors, selection_composite {}.",
+                w.name,
+                num(w.selection_composite)
+            )
+        }
+        (Some(w), true) => {
+            let (p, t) = gaddr_effective_counts(w, basis);
+            println!(
+                "\n**BEST CELL: `{}`** — {p}/{t} floors, selection_composite {}. \
+                 NOT the selection: a cell has no `k`, and the registered \
+                 replication floor (--min-k {}) selects a RECIPE. See the \
+                 seed-grouped section below.",
+                w.name,
+                num(w.selection_composite),
+                min_k
+            )
+        }
         (None, _) => {
             println!("\n**NO SELECTABLE CANDIDATE** (every row is UNMEASURED or 0-floor).")
         }
@@ -2172,14 +2506,16 @@ fn run_select(
     if tsv {
         eprintln!("{SELECT_TSV_COLS}");
         let emit = |pool: &str, i: usize, r: &SelectRow| {
-            let selectable = r.m3a != M3aState::Unmeasured && r.n_pass > 0;
+            let (eff_pass, _) = gaddr_effective_counts(r, basis);
+            let selectable =
+                r.m3a != M3aState::Unmeasured && eff_pass > 0 && !gaddr_vetoes(r, basis);
             let n = |x: Option<f64>| x.map_or("-".into(), |v| format!("{v:.6}"));
             eprintln!(
                 "{}\t{pool}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 i + 1,
                 r.name,
                 r.class,
-                r.n_pass,
+                eff_pass,
                 n(r.composite),
                 match r.m3a {
                     M3aState::Measured(x) => format!("{x:.6}"),
@@ -2220,8 +2556,13 @@ fn run_select(
             None => "—".into(),
         };
         let basis_str = match basis {
-            FloorBasis::AllReps => "all-reps (floors EVERY seed passes)",
-            FloorBasis::Mean => "mean (k-seed mean floor count)",
+            FloorBasis::AllReps => {
+                "all-reps (floors EVERY seed passes, incl. A7r per-codec G-ADDR floors)"
+            }
+            FloorBasis::Mean => "mean (k-seed mean floor count; F1-F8 only, no A7r)",
+            FloorBasis::Legacy => {
+                "legacy (pre-2026-09-06 reproduction: F1-F8 only, NO G-ADDR CONTRACT veto)"
+            }
         };
 
         println!(
@@ -2256,7 +2597,18 @@ fn run_select(
              different subset of pairs — objectively different coverage, not noise around one \
              underlying number. The spread column and the per-seed table below are the rest of \
              the answer. Each bake's own `zentrain.sample_coverage` metadata is the per-seed \
-             record of what that run actually touched.\n",
+             record of what that run actually touched.\n\n\
+             **G-ADDR CONTRACT VETO (2026-09-06 owner fix, registry \
+             select-rule-blind-to-dial-contract-2026-09-06).** A group where ANY member \
+             measured a G-ADDR CONTRACT-tier (C1-C6) fail in its own `dial.addressability` \
+             block is NOT selectable, however high its floor count or composite — dial \
+             addressability is an ABSOLUTE product bar (user rule 2026-09-04), not a floor \
+             a bake can trade off. Under `--floor-basis all` this also folds `A7r`'s \
+             per-codec representability into the floor count itself (one more floor per \
+             MEASURED codec; a codec no member's instrument touched counts in neither \
+             direction). `--floor-basis mean` keeps the veto but not the extra floors; \
+             `--floor-basis legacy` reproduces the pre-fix rule byte-for-byte (no veto, no \
+             extra floors) for reproducing a historical selection.\n",
             min_k, min_k, basis_str
         );
 
@@ -2270,22 +2622,38 @@ fn run_select(
 
         let header = || {
             println!(
-                "| rank | group | k | cells | floors_all | mean_floors | mean_bal_comp | \
-                 mean_m3a | mean_sel_comp | sel_comp spread (min\u{2013}max) | split floors | \
-                 state | selectable |"
+                "| rank | group | k | cells | floors_all | mean_floors | gaddr (A7r \
+                 all-reps / mean) | mean_bal_comp | mean_m3a | mean_sel_comp | sel_comp spread \
+                 (min\u{2013}max) | split floors | state | selectable |"
             );
-            println!("|---:|---|---:|---:|---:|---:|---:|---|---:|---|---|---|---|");
+            println!("|---:|---|---:|---:|---:|---:|---|---:|---|---:|---|---|---|---|");
         };
         let row = |i: usize, g: &SeedGroupRow<'_>| {
             let why = group_unselectable_reason(g, basis, min_k);
+            // A7r contribution this group's OWN G-ADDR data supports — shown
+            // regardless of `basis` (report-only when `basis` doesn't fold
+            // it into `floor_count`, e.g. `mean`/`legacy`), so a reader can
+            // always see what `--floor-basis all` WOULD add.
+            let gaddr_str = if g.gaddr_codec_total_all == 0 && g.gaddr_codec_mean_total == 0.0 {
+                "\u{2014} (not measured)".to_string()
+            } else {
+                format!(
+                    "{}/{} (mean {:.2}/{:.2})",
+                    g.gaddr_codec_pass_all,
+                    g.gaddr_codec_total_all,
+                    g.gaddr_codec_mean_pass,
+                    g.gaddr_codec_mean_total
+                )
+            };
             println!(
-                "| {} | {} | {} | {} | {} | {:.2} | {} | {} | {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {} | {:.2} | {} | {} | {} | {} | {} | {} | {} | {} |",
                 i + 1,
                 g.key,
                 g.k_seeds,
                 g.members.len(),
                 g.n_pass_all,
                 g.mean_n_pass,
+                gaddr_str,
                 num(g.mean_composite),
                 m3a_cell(g.m3a),
                 num(g.mean_selection_composite),
@@ -2390,6 +2758,21 @@ fn run_select(
                         )
                     }
                 );
+                if w.gaddr_codec_total_all > 0 || w.gaddr_codec_mean_total > 0.0 {
+                    println!(
+                        "\nA7r per-codec G-ADDR floors (all-reps / mean): {}/{} \
+                         (mean {:.2}/{:.2}){}",
+                        w.gaddr_codec_pass_all,
+                        w.gaddr_codec_total_all,
+                        w.gaddr_codec_mean_pass,
+                        w.gaddr_codec_mean_total,
+                        if basis == FloorBasis::AllReps {
+                            " — folded into the floor count above"
+                        } else {
+                            " — reported only; not folded in under this --floor-basis"
+                        }
+                    );
+                }
                 println!(
                     "\nIts {} member cell(s): {}",
                     w.members.len(),
@@ -2510,9 +2893,11 @@ fn main() {
                 basis = match args.next().as_deref() {
                     Some("all") => FloorBasis::AllReps,
                     Some("mean") => FloorBasis::Mean,
+                    Some("legacy") => FloorBasis::Legacy,
                     other => {
                         eprintln!(
-                            "freeze_check: --floor-basis takes `all` or `mean` (got {other:?})"
+                            "freeze_check: --floor-basis takes `all`, `mean` or `legacy` \
+                             (got {other:?})"
                         );
                         std::process::exit(2);
                     }
@@ -3461,6 +3846,8 @@ mod tests {
             group_key: seed_group_key(v),
             seed_id: seed_identity(v),
             seed_text: seed_label(v),
+            gaddr_contract_fails: gaddr_contract_fails(v),
+            gaddr_codec: gaddr_codec_states(v),
         }
     }
 
@@ -3546,7 +3933,7 @@ mod tests {
             "fixture must have the LOSER ahead on the tie-break, else the test is vacuous"
         );
         let mut pool = vec![&a, &b];
-        rank_pool(&mut pool);
+        rank_pool(&mut pool, FloorBasis::AllReps);
         assert_eq!(
             pool[0].name, "LO_M3A",
             "floor count is PRIMARY — coherence must not override a failed floor"
@@ -3570,7 +3957,7 @@ mod tests {
             "margin {margin} must be exactly W_M3A·ΔM3a"
         );
         let mut pool = vec![&rb, &ra];
-        rank_pool(&mut pool);
+        rank_pool(&mut pool, FloorBasis::AllReps);
         assert_eq!(pool[0].name, "A");
     }
 
@@ -3659,7 +4046,7 @@ mod tests {
         // 1) THE DEFECT, reproduced: the plain per-cell rule (unchanged by
         //    this fix) selects CONTROL's lucky seed 4004, not ARM.
         let mut per_cell: Vec<&SelectRow> = rows.iter().collect();
-        rank_pool(&mut per_cell);
+        rank_pool(&mut per_cell, FloorBasis::AllReps);
         assert_eq!(
             per_cell[0].name, "FC_C0_s4004",
             "the lucky per-cell winner must be CONTROL's seed 4004 — if this \
@@ -3936,6 +4323,311 @@ mod tests {
                 "the strict basis can never credit MORE floors than the mean"
             );
         }
+    }
+
+    // ── G-ADDR CONTRACT pre-filter (2026-09-06 owner fix, registry
+    // select-rule-blind-to-dial-contract-2026-09-06) ────────────────────
+
+    /// A synthetic `dial.addressability` block, mirroring EXACTLY the JSON
+    /// shape `dial_addressability::to_json` emits (never a second
+    /// implementation of the verdict — just its shape, for a fixture).
+    /// `fail_ids` become CONTRACT-tier `state: "fail"` rows among the six
+    /// canonical `C1..C6` (the rest `pass`); `codec_states` becomes the
+    /// `A7r` per-codec breakdown, `(codec, Some(true)=pass /
+    /// Some(false)=fail / None=not_measured)`.
+    fn gaddr_fixture(
+        fail_ids: &[&str],
+        codec_states: &[(&str, Option<bool>)],
+    ) -> serde_json::Value {
+        let contract_ids = ["C1", "C2", "C3", "C4", "C5", "C6"];
+        let checks: Vec<serde_json::Value> = contract_ids
+            .iter()
+            .map(|id| {
+                let state = if fail_ids.contains(id) {
+                    "fail"
+                } else {
+                    "pass"
+                };
+                json!({"id": id, "tier": "contract", "state": state,
+                       "note": format!("{id} {state} (fixture)")})
+            })
+            .collect();
+        let codec_floor: Vec<serde_json::Value> = codec_states
+            .iter()
+            .map(|(codec, state)| {
+                let s = match state {
+                    Some(true) => "pass",
+                    Some(false) => "fail",
+                    None => "not_measured",
+                };
+                json!({"codec": codec, "state": s})
+            })
+            .collect();
+        json!({
+            "dial": {
+                "addressability": {
+                    "contract": if fail_ids.is_empty() { "PASS" } else { "FAIL" },
+                    "checks": checks,
+                    "measured": { "codec_floor": codec_floor },
+                }
+            }
+        })
+    }
+
+    /// **FAILING-FIRST (2026-09-06 owner fix).** Reproduces the best-of-all
+    /// wave's measured shape (`benchmarks/best_of_all_2026-09-06.md`,
+    /// registry `select-rule-blind-to-dial-contract-2026-09-06`): a
+    /// CONTROL seed group whose every seed MEASURES a G-ADDR CONTRACT-tier
+    /// fail (C5/C6 — the exact rows `A_plain` failed), but which has the
+    /// HIGHEST composite/M3a of the two groups; a PASS group whose every
+    /// seed is CONTRACT-clean (6/6) but scores lower on composite/M3a.
+    /// Before this fix, `run_select`/`group_by_seed` never read
+    /// `dial.addressability` at all, so PRIMARY (floor count — tied, both
+    /// groups pass all 8 balanced floors) and TIE-BREAK
+    /// (`selection_composite`) both picked CONTROL. After the fix: PASS is
+    /// selected, and CONTROL is reported NOT selectable with its failing
+    /// contract rows named.
+    #[test]
+    fn gaddr_contract_veto_blocks_a_higher_composite_seed_group() {
+        let control_argv = ["zensim_mlp_train", "--epochs", "40", "--hidden", "24"];
+        let pass_argv = ["zensim_mlp_train", "--epochs", "40", "--hidden", "48"];
+        let control_rows: Vec<serde_json::Value> = [(4004u64, 0.95), (4005, 0.90), (4006, 0.92)]
+            .iter()
+            .map(|&(seed, m3a)| {
+                let mut v = seed_fixture(&format!("CONTROL_s{seed}"), &control_argv, seed, m3a);
+                merge(&mut v, &gaddr_fixture(&["C5", "C6"], &[]));
+                v
+            })
+            .collect();
+        let pass_rows: Vec<serde_json::Value> = [(4004u64, 0.60), (4005, 0.62), (4006, 0.58)]
+            .iter()
+            .map(|&(seed, m3a)| {
+                let mut v = seed_fixture(&format!("PASS_s{seed}"), &pass_argv, seed, m3a);
+                merge(&mut v, &gaddr_fixture(&[], &[]));
+                v
+            })
+            .collect();
+        let rows: Vec<SelectRow> = control_rows
+            .iter()
+            .chain(pass_rows.iter())
+            .map(select_row)
+            .collect();
+        let refs: Vec<&SelectRow> = rows.iter().collect();
+        let mut groups = group_by_seed(&refs);
+        assert_eq!(groups.len(), 2, "two distinct recipes ⇒ two groups");
+
+        let control = groups
+            .iter()
+            .find(|g| g.members[0].name.starts_with("CONTROL"))
+            .expect("control group must exist")
+            .key
+            .clone();
+        let passg = groups
+            .iter()
+            .find(|g| g.members[0].name.starts_with("PASS"))
+            .expect("pass group must exist")
+            .key
+            .clone();
+        let by_key = |gs: &[SeedGroupRow<'_>], k: &str| -> usize {
+            gs.iter().position(|g| g.key == k).unwrap()
+        };
+
+        // Fixture sanity — else the test is vacuous.
+        {
+            let c = &groups[by_key(&groups, &control)];
+            let p = &groups[by_key(&groups, &passg)];
+            assert!(
+                !c.gaddr_contract_fails.is_empty(),
+                "CONTROL must measure a contract fail"
+            );
+            assert!(
+                p.gaddr_contract_fails.is_empty(),
+                "PASS must be contract-clean"
+            );
+            assert_eq!(
+                c.floor_count(FloorBasis::AllReps),
+                p.floor_count(FloorBasis::AllReps),
+                "both groups tie 8/8 on the balanced floors — this test isolates the veto, \
+                 not a floor-count difference"
+            );
+            assert!(
+                c.mean_selection_composite.unwrap() > p.mean_selection_composite.unwrap(),
+                "CONTROL must lead on the tie-break pre-veto, else the fix has nothing to fix"
+            );
+        }
+
+        // THE FIX: under the default (AllReps) basis, ranking still puts
+        // CONTROL first (floor count + composite are unchanged), but the
+        // SELECTABLE winner must skip it — exactly the pattern the
+        // ungrouped `winner`-search in `run_select` already uses.
+        rank_seed_groups(&mut groups, FloorBasis::AllReps);
+        assert_eq!(
+            groups[0].key, control,
+            "sanity: CONTROL still RANKS first — the fix is a selectability veto, not a re-sort"
+        );
+        let winner = groups
+            .iter()
+            .find(|g| group_unselectable_reason(g, FloorBasis::AllReps, 2).is_none())
+            .expect("a selectable group must exist");
+        assert_eq!(
+            winner.key, passg,
+            "PASS must be SELECTED — CONTROL is vetoed"
+        );
+
+        let control_g = &groups[by_key(&groups, &control)];
+        let reason = group_unselectable_reason(control_g, FloorBasis::AllReps, 2)
+            .expect("CONTROL must be reported NOT selectable");
+        assert!(
+            reason.contains("CONTRACT FAIL"),
+            "reason must name the veto: {reason}"
+        );
+        assert!(
+            reason.contains("not selectable"),
+            "reason must say why: {reason}"
+        );
+        assert!(
+            reason.contains("C5") && reason.contains("C6"),
+            "the failing rows must be NAMED, not just a bare veto: {reason}"
+        );
+        let pass_g = &groups[by_key(&groups, &passg)];
+        assert_eq!(
+            group_unselectable_reason(pass_g, FloorBasis::AllReps, 2),
+            None,
+            "PASS must be selectable"
+        );
+
+        // `--floor-basis legacy` reproduces the PRE-FIX rule byte-for-byte:
+        // no veto, CONTROL is selectable again (the audit/reproduction
+        // escape hatch — never for a real selection).
+        assert_eq!(
+            group_unselectable_reason(control_g, FloorBasis::Legacy, 2),
+            None,
+            "legacy must NOT veto — it reproduces the pre-2026-09-06 defect on purpose"
+        );
+
+        // `--floor-basis mean` keeps the veto (a product-safety gate, not a
+        // floor-counting convention) even though it doesn't fold in A7r.
+        assert!(
+            group_unselectable_reason(control_g, FloorBasis::Mean, 2).is_some(),
+            "mean must still veto a measured contract fail"
+        );
+    }
+
+    /// The ungrouped ("single") path applies the SAME veto: a row with a
+    /// measured contract fail is never `selectable`, regardless of its
+    /// floor count, under every basis except `legacy`.
+    #[test]
+    fn gaddr_contract_veto_excludes_an_ungrouped_row() {
+        let mut clean = passing_fixture();
+        merge(&mut clean, &json!({"name": "CLEAN"}));
+        merge(&mut clean, &gaddr_fixture(&[], &[]));
+        let mut failing = passing_fixture();
+        merge(
+            &mut failing,
+            &json!({"name": "FAILING", "m3a_coherence": 0.99}),
+        );
+        merge(&mut failing, &gaddr_fixture(&["C3", "C4"], &[]));
+
+        let rc = select_row(&clean);
+        let rf = select_row(&failing);
+        assert!(!gaddr_vetoes(&rc, FloorBasis::AllReps));
+        assert!(gaddr_vetoes(&rf, FloorBasis::AllReps));
+        assert!(gaddr_vetoes(&rf, FloorBasis::Mean));
+        assert!(
+            !gaddr_vetoes(&rf, FloorBasis::Legacy),
+            "legacy never vetoes"
+        );
+
+        // A vetoed row must not become `winner` even when it ranks first.
+        let mut pool = vec![&rf, &rc];
+        rank_pool(&mut pool, FloorBasis::AllReps);
+        assert_eq!(
+            pool[0].name, "FAILING",
+            "sanity: it still RANKS first (higher M3a)"
+        );
+        let selectable = |r: &SelectRow, basis: FloorBasis| {
+            r.m3a != M3aState::Unmeasured
+                && gaddr_effective_counts(r, basis).0 > 0
+                && !gaddr_vetoes(r, basis)
+        };
+        assert!(
+            !selectable(&rf, FloorBasis::AllReps),
+            "FAILING must not be selectable"
+        );
+        assert!(
+            selectable(&rc, FloorBasis::AllReps),
+            "CLEAN must be selectable"
+        );
+        assert!(
+            selectable(&rf, FloorBasis::Legacy),
+            "legacy: FAILING selectable again"
+        );
+    }
+
+    /// `A7r`'s per-codec breakdown becomes one MORE floor per MEASURED
+    /// codec under `--floor-basis all`; a `not_measured` codec is excluded
+    /// from BOTH numerator and denominator; `mean`/`legacy` are unaffected.
+    #[test]
+    fn gaddr_a7r_folds_into_all_reps_floor_count_but_not_mean_or_legacy() {
+        let mut v = passing_fixture();
+        merge(&mut v, &json!({"name": "A7R_MIX"}));
+        // 2 MEASURED codecs (1 pass, 1 fail) + 1 NOT MEASURED.
+        merge(
+            &mut v,
+            &gaddr_fixture(
+                &[],
+                &[("jpeg", Some(true)), ("webp", Some(false)), ("avif", None)],
+            ),
+        );
+        let r = select_row(&v);
+        assert_eq!(r.n_pass, 8, "fixture passes all 8 balanced floors");
+        assert_eq!(r.n_floors, 8);
+
+        let (p_legacy, t_legacy) = gaddr_effective_counts(&r, FloorBasis::Legacy);
+        assert_eq!((p_legacy, t_legacy), (8, 8), "legacy: A7r never folded in");
+        let (p_mean, t_mean) = gaddr_effective_counts(&r, FloorBasis::Mean);
+        assert_eq!((p_mean, t_mean), (8, 8), "mean: A7r never folded in");
+        let (p_all, t_all) = gaddr_effective_counts(&r, FloorBasis::AllReps);
+        assert_eq!(
+            (p_all, t_all),
+            (9, 10),
+            "all: +1 pass / +2 measured (jpeg pass, webp fail) — avif (not_measured) excluded \
+             from both"
+        );
+    }
+
+    /// The group-level A7r credit uses the SAME all-reps discipline as the
+    /// F1-F8 intersection: a codec counts in the denominator only when
+    /// EVERY representative measured it, and in the numerator only when
+    /// additionally every representative PASSED it.
+    #[test]
+    fn seed_group_a7r_credited_only_when_every_rep_measures_and_passes_it() {
+        let argv = ["zensim_mlp_train", "--epochs", "40"];
+        // Seed A: jpeg pass, webp pass. Seed B: jpeg pass, webp NOT MEASURED.
+        let mut a = seed_fixture("A7G_s1", &argv, 1, 0.90);
+        merge(
+            &mut a,
+            &gaddr_fixture(&[], &[("jpeg", Some(true)), ("webp", Some(true))]),
+        );
+        let mut b = seed_fixture("A7G_s2", &argv, 2, 0.90);
+        merge(
+            &mut b,
+            &gaddr_fixture(&[], &[("jpeg", Some(true)), ("webp", None)]),
+        );
+        let rows: Vec<SelectRow> = [&a, &b].iter().map(|v| select_row(v)).collect();
+        let refs: Vec<&SelectRow> = rows.iter().collect();
+        let groups = group_by_seed(&refs);
+        let g = &groups[0];
+        assert_eq!(
+            g.gaddr_codec_total_all, 1,
+            "only jpeg was measured by BOTH reps"
+        );
+        assert_eq!(g.gaddr_codec_pass_all, 1, "and both reps passed it");
+        assert_eq!(
+            g.floor_count(FloorBasis::AllReps) as usize,
+            g.n_pass_all + 1,
+            "the group's floor count gains exactly the jpeg credit"
+        );
     }
 
     /// **Clause 3, the board's measured finding**: two cells with the same
@@ -4324,7 +5016,7 @@ mod tests {
         merge(&mut b, &json!({"name": "B", "m3a_coherence": 0.70}));
         let (ra, rb) = (select_row(&a), select_row(&b));
         let mut before = vec![&rb, &ra];
-        rank_pool(&mut before);
+        rank_pool(&mut before, FloorBasis::AllReps);
         let winner_before = before[0].name.clone();
 
         // group_by_seed/rank_seed_groups are simply never called when
@@ -4332,7 +5024,7 @@ mod tests {
         // `run_select`) — this pins that the PLAIN rule's result is
         // unaffected by the mere EXISTENCE of the seed-group feature.
         let mut after = vec![&rb, &ra];
-        rank_pool(&mut after);
+        rank_pool(&mut after, FloorBasis::AllReps);
         assert_eq!(after[0].name, winner_before);
     }
 
@@ -4389,7 +5081,7 @@ mod tests {
             "UN must lead on balanced_composite, else the test is vacuous"
         );
         let mut pool = vec![&ru, &ro];
-        rank_pool(&mut pool);
+        rank_pool(&mut pool, FloorBasis::AllReps);
         assert_eq!(
             pool[0].name, "OK",
             "an UNMEASURED candidate must not outrank a measured one in its tier"
