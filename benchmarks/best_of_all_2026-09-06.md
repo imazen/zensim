@@ -1008,7 +1008,44 @@ re-staged behind two gates instead of one: the endgame chain must report DONE
 samples**. M3a is bursty, so a single sample between cells looks idle and is not
 — which is precisely how the first attempt got through.
 
-*(RESULTS — W4 and the board, pending.)*
+### 5.20 The board — 27 cells promoted, dashboard regenerated, gates green
+
+All 27 cells promoted under the **`BOA_`** prefix (0 failures), which
+`gauntlet.family_of` files as **`constrained MLP (228)`** rather than letting
+`A_plain`/`B_nonneg` shadow into the 944 campaigns' `arm A` / `arm B` toggle
+groups. Dashboard regenerated: **508 of 508 bakes, 24,931 KB**.
+
+`scripts/v_next/gauntlet_gates.sh` → **rc = 0**:
+
+```
+SSR check OK: band, dial, heat, scatter, trade options render through ECharts
+badge check OK: 4253 registry-annotated scoreboard cells carry ⚠
+render OK: 491 bakes, 15 sections, 22 tables, 1127 rows, 8 svgs
+failure panel OK: 6 rows (6 measured, 0 NOT MEASURED), 140 findings
+gate 3: 508 fulleval file(s) are strict-valid JSON
+```
+
+The cells carry **rank verdicts only** — see §5.20a on why the G-ADDR block is
+deliberately not on them.
+
+### 5.20a Why the board cells carry no G-ADDR block
+
+`promote_fulleval.py --graft-gaddr` **refused**, and correctly:
+
+```
+dial.mono_pct differs between the board (0.9666512274201019) and the G-ADDR read
+(0.961003081500372) — the read was NOT taken on the board's dial grid; refusing
+```
+
+This lane's G-ADDR is measured on the floor-dense **ladder** instrument; the
+board's dial column is the **canonical** grid across all 481 pre-existing cells.
+Grafting would have put two instruments in one column and made every cross-cell
+dial comparison on the board silently wrong. Caught by validating the promotion
+into a temp directory before touching the shared board — which also surfaced that
+the nine newest cells had no M3a yet (the pass had run before they existed), so
+that was fixed first. All 27 now carry M3a.
+
+*(RESULTS — W4 pending; it is gated behind three consecutive idle samples.)*
 
 ---
 
