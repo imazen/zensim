@@ -116,6 +116,33 @@ for f in sorted(glob.glob(os.path.join(out, "gates", "*.inv.json"))):
 PY2
 }
 
+do_binparity() {
+  # The wave ran on binaries frozen BEFORE the 2026-09-06 review fixes. Every
+  # fix is argued to be inert for this configuration (the arms already derive
+  # SCORE from their `:both` legs; the pool/hybrid and alpha=1.0 and f32-pin
+  # paths are unused; --identity-rows defaults to 0). ARGUED is not MEASURED —
+  # retrain one cell with the CURRENT binary and compare bake sha256.
+  local name="${1:-B_nonneg_s4004}"
+  local arm="${name%_s*}" seed="${name##*_s}"
+  local cur="$WS/target/release/zensim_mlp_train"
+  [[ -x "$cur" ]] || { say "binparity SKIP — no current binary at $cur"; return 3; }
+  say "binparity: retraining $name with the CURRENT binary"
+  ZL_BIN="$WS/target/release" ZL_OUT="$OUT/binparity" \
+    "$WS/scripts/bestofall_wave.sh" cell "$arm" "$seed" \
+    > "$OUT/logs/binparity_${name}.log" 2>&1 || true
+  local a="$OUT/bakes/${name}.bin" b="$OUT/binparity/bakes/${name}.bin"
+  if [[ -s "$a" && -s "$b" ]]; then
+    local sa sb; sa=$(sha256sum "$a" | cut -d' ' -f1); sb=$(sha256sum "$b" | cut -d' ' -f1)
+    if [[ "$sa" == "$sb" ]]; then
+      say "binparity PASS — $name is BYTE-IDENTICAL across the review fixes ($sa)"
+    else
+      say "binparity FAIL — $name MOVED: frozen $sa vs current $sb"
+    fi
+  else
+    say "binparity INCONCLUSIVE — missing $a or $b"
+  fi
+}
+
 do_board() {
   # Promote the wave's cells onto the summer gauntlet. `promote_fulleval.py`
   # RELABELS and annotates; it recomputes nothing, and every stat block is
@@ -152,6 +179,7 @@ case "${1:-all}" in
   m3a)   do_m3a ;;
   inversions) do_inversions ;;
   board) do_board ;;
+  binparity) shift; do_binparity "$@" ;;
   report) do_report ;;
   select) do_select ;;
   bootstrap) shift; do_bootstrap "$@" ;;
