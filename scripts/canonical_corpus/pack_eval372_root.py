@@ -32,6 +32,23 @@ WORK = sys.argv[2] if len(sys.argv) > 2 else os.path.expanduser("~/tmp/eval372ro
 # 2026-09-05 post-option-C root against the 2026-05-15 root would report a drift
 # that is two era steps wide and attribute it to one.
 OLD = sys.argv[3] if len(sys.argv) > 3 else "/mnt/v/zen/zensim-training/2026-05-15-full-features"
+# --- env-driven knobs (added 2026-09-05 for the R6 F4-arm lane) ---------------
+# `EVAL372_NO_STORED=1` turns every `stored` job into an explicit ABSENT entry
+# instead of a copy. A copy is the right call for a root that only changes the
+# EXTRACTOR era (the copied table is still the best available read of that
+# corpus); it is the WRONG call for a root that changes the FORMULA, because
+# then the copied table is a different arithmetic revision sitting inside a root
+# that claims to be one arm. Absent-not-copied is the honest shape there, and
+# `bake_verdict` already reports a missing corpus as missing.
+# `EVAL372_SKIP=a,b` skips named corpora the same way (e.g. an expensive corpus
+# outside a probe's decision set).
+# `EVAL372_MANIFEST_EXTRA='{"k": ...}'` merges arbitrary keys into the manifest
+# root, so a caller can stamp what IT knows -- the arm token, the decoder era --
+# without this file growing one env var per field.
+NO_STORED = os.environ.get("EVAL372_NO_STORED", "") not in ("", "0")
+SKIP = {c for c in os.environ.get("EVAL372_SKIP", "").split(",") if c}
+MANIFEST_EXTRA = json.loads(os.environ.get("EVAL372_MANIFEST_EXTRA", "{}"))
+
 # The registered feature-set id this root PRODUCES (docs/FEATURE_SET_IDS.md).
 # Written into `_MANIFEST.json` as the `feature_set_id` key, which is the FIRST
 # and only ASSERTED source `zensim_validate::feature_set::root_feature_set_ref`
@@ -219,10 +236,21 @@ def main():
     }
     if FEATURE_SET_ID:
         man["feature_set_id"] = FEATURE_SET_ID
+    man.update(MANIFEST_EXTRA)
     for corpus, fn, src in JOBS:
         dst = os.path.join(OUT, fn)
         rep = {"filename": fn, "source": src}
         stored = os.path.join(OLD, fn)
+        if corpus in SKIP or (NO_STORED and src == "stored"):
+            rep["era"] = "ABSENT — not produced for this root"
+            rep["reason"] = ("caller-skipped (EVAL372_SKIP)" if corpus in SKIP
+                             else "not re-extractable on this box, and a copy from another "
+                                  "era would silently mix eras inside this root "
+                                  "(EVAL372_NO_STORED)")
+            rep["rows"] = 0
+            man["corpora"][corpus] = rep
+            print(f"{corpus:16s} ABSENT   {rep['reason'][:52]}")
+            continue
         if src.startswith("fresh:"):
             csv_path = os.path.join(WORK, src.split(":", 1)[1] + ".csv")
             t = read_fresh_csv(csv_path)
@@ -260,7 +288,7 @@ def main():
          if os.path.exists(p)),
         os.path.join(OLD, "konjnd_jpeg504_372_2026-08-29.parquet"),
     )
-    if os.path.exists(kon_stored_504):
+    if os.path.exists(kon_stored_504) and "konjnd" not in SKIP:
         st = pq.read_table(kon_stored_504).to_pydict()
         want = [(norm(r), round(float(h), 9))
                 for r, h in zip(st["ref_basename"], st["human_score"])]
