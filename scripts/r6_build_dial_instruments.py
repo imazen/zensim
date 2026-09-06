@@ -27,7 +27,10 @@ import pyarrow.parquet as pq
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "canonical_corpus"))
 from pack_eval372_root import read_fresh_csv, sha256  # noqa: E402
 
-BASE_ARM = "ssim2"
+# The revision-1 arm, whose safesyn table picks the negative-tail row SET for
+# every arm. A parameter so R6b (whose control arm is `ratio`) reuses this
+# builder rather than copying it.
+BASE_ARM = os.environ.get("R6_BASE_ARM", "ssim2")
 LADDER_GRID = ("/mnt/v/output/zensim/ladder-2026-09-05/instruments/"
                "dial_grid_372col_ladder.parquet")
 NEGTAIL_N = 2000

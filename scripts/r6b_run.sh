@@ -67,8 +67,15 @@ fit)   for a in ${2:-$ARMS}; do "$REPO/scripts/r6_fit_arms.sh" "$a" "$ROOT"; don
 
 eval)  R6_ARMS="${2:-$ARMS}" R6_VARIANTS="$VARIANTS" "$REPO/scripts/r6_eval_arms.sh" "$ROOT" ;;
 
-dial)  R6_ARM_ENV=ZENSIM_HF_GAIN R6_ARMS="${3:-$ARMS}" R6_VARIANTS="$VARIANTS" \
-         "$REPO/scripts/r6_dial_arms.sh" "${2:-grade}" "$ROOT" ;;
+# `instruments` builds the three G5/H7 probes from tables this lane already
+# extracted (the `extras` step covers the ladder), so `r6_dial_arms.sh extract`
+# — which would re-extract it — is not used here.
+instruments)
+  R6_BASE_ARM=ratio R6_ARMS="${2:-$ARMS}" \
+    python3 "$REPO/scripts/r6_build_dial_instruments.py" "$ROOT" ;;
+
+dial)  R6_ARM_ENV=ZENSIM_HF_GAIN R6_BASE_ARM=ratio R6_ARMS="${3:-$ARMS}" \
+         R6_VARIANTS="$VARIANTS" "$REPO/scripts/r6_dial_arms.sh" "${2:-grade}" "$ROOT" ;;
 
 cb5)   python3 "$REPO/scripts/r6b_closed_form_control.py" --tables "$ROOT/tables" \
          --out "$ROOT/cb5_closed_form.json" ;;
