@@ -4,6 +4,19 @@
 
 > **★ RETROSPECTIVE 2026-07-26:** [`best_per_day_summer_2026.md`](best_per_day_summer_2026.md) — the **best model per calendar day** (2026-05-01 → 07-25), with verified bake paths, recipes, headline metrics, and the summer champions (best CID22 = winner_dial 0.894; best KonJND = cl_tfm 0.761; best HF-NL/dial = Ebothg_scr0.5_dial; shipped B/A/BHdr). Machine-readable twin: `/mnt/v/output/zensim/reports/best_per_day.json`. The one-stop map of every model-experiment day this summer.
 
+> **★★ F18 — THE EXTRACTOR IS LIBC-DEPENDENT ON REVISION 1; OWNER + ERA LANDED, FLIP NOT TAKEN 2026-09-06:**
+> [`libc_determinism_2026-09-06.md`](libc_determinism_2026-09-06.md) (landing, full feature-path
+> transcendental audit, cross-libc gate) and [`libm_pow_nondeterminism_2026-09-06.md`](libm_pow_nondeterminism_2026-09-06.md)
+> (the REV2 WAVE's discovery + measurement). `powf` is not correctly rounded and two libcs need not
+> agree, so the pooled `(Σx⁴/n)^¼` / `(Σx⁸/n)^⅛` slots made a feature a function of WHICH LIBM the
+> binary linked against — musl-vs-glibc, same source: **77/322,152 csiq cells**, every delta one ULP.
+> Owner `zensim/src/det_math.rs` (`RootForm` + `DetRoots`), era **`v1detroot`** on `Rev2`, override
+> `ZENSIM_ROOT_FORM=libm|sqrt`; **default unchanged, no shipped byte moves.** Two things supersede
+> the discovery note: the era is **156 slots, not 144** (the v2 `ssim_dev4` pool has the same form),
+> and its "*more accurate*" claim is **FALSIFIED** — glibc's `pow` is nearer the truth in 544 of the
+> 545 cases where the two differ; the case for the fix is determinism, not accuracy. **Still exposed
+> and unfixed: the SCORE** (`metric.rs` `powf(0.5979/1.2244/0.6130/b)`).
+
 > **★★ REV2 REFIT — THE SHIPPED D CHAIN AT REVISION 2 IS A PROPOSAL THAT FAILS TWO SHIP GATES 2026-09-06:**
 > [`rev2_refit_2026-09-06.md`](rev2_refit_2026-09-06.md) — the REFIT sub-lane of the REV2 WAVE
 > (`zenmetrics/docs/PLAN_REV2_WAVE_2026-09-06.md` §4-5). Controls first: this tree reproduces the

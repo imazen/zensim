@@ -47,6 +47,7 @@
 //! blockiness, edge-width-change) — see `idx` module and
 //! `compute_channel_scale_v2`'s per-pixel loop.
 
+use crate::det_math::DetRoots;
 use crate::error::ZensimError;
 use crate::source::ImageSource;
 
@@ -997,7 +998,9 @@ impl OnlineMoments {
             return (0.0, 0.0, 0.0);
         }
         let dev2 = (self.m2 / self.n).max(0.0).sqrt();
-        let dev4 = (self.m4 / self.n).max(0.0).powf(0.25);
+        let dev4 = (self.m4 / self.n)
+            .max(0.0)
+            .quarter_root(crate::det_math::active_root_form());
         (self.mean, dev2, dev4)
     }
 }
@@ -5310,23 +5313,48 @@ impl V1BasicSums {
         debug_assert_eq!(masked.len(), 6);
         debug_assert_eq!(iw.len(), 6);
         let one_over_n = 1.0 / n as f64;
+        // Hoisted out of the nine root calls below: it reads a `OnceLock`,
+        // which LLVM cannot hoist for you. Same discipline as `gain_form`.
+        let root_form = crate::det_math::active_root_form();
         peaks[0] = f64::from(self.ssim_max);
         peaks[1] = f64::from(self.edge_art_max);
         peaks[2] = f64::from(self.edge_det_max);
-        peaks[3] = (self.ssim_d8 * one_over_n).max(0.0).powf(0.125);
-        peaks[4] = (self.edge_art8 * one_over_n).max(0.0).powf(0.125);
-        peaks[5] = (self.edge_det8 * one_over_n).max(0.0).powf(0.125);
+        peaks[3] = (self.ssim_d8 * one_over_n).max(0.0).eighth_root(root_form);
+        peaks[4] = (self.edge_art8 * one_over_n)
+            .max(0.0)
+            .eighth_root(root_form);
+        peaks[5] = (self.edge_det8 * one_over_n)
+            .max(0.0)
+            .eighth_root(root_form);
         masked[0] = (self.masked_ssim_d * one_over_n).abs();
-        masked[1] = (self.masked_ssim_d4 * one_over_n).max(0.0).powf(0.25).abs();
+        masked[1] = (self.masked_ssim_d4 * one_over_n)
+            .max(0.0)
+            .quarter_root(root_form)
+            .abs();
         masked[2] = (self.masked_ssim_d2 * one_over_n).max(0.0).sqrt().abs();
-        masked[3] = (self.masked_art4 * one_over_n).max(0.0).powf(0.25).abs();
-        masked[4] = (self.masked_det4 * one_over_n).max(0.0).powf(0.25).abs();
+        masked[3] = (self.masked_art4 * one_over_n)
+            .max(0.0)
+            .quarter_root(root_form)
+            .abs();
+        masked[4] = (self.masked_det4 * one_over_n)
+            .max(0.0)
+            .quarter_root(root_form)
+            .abs();
         masked[5] = self.masked_mse * one_over_n;
         iw[0] = (self.iw_ssim_d * one_over_n).abs();
-        iw[1] = (self.iw_ssim_d4 * one_over_n).max(0.0).powf(0.25).abs();
+        iw[1] = (self.iw_ssim_d4 * one_over_n)
+            .max(0.0)
+            .quarter_root(root_form)
+            .abs();
         iw[2] = (self.iw_ssim_d2 * one_over_n).max(0.0).sqrt().abs();
-        iw[3] = (self.iw_art4 * one_over_n).max(0.0).powf(0.25).abs();
-        iw[4] = (self.iw_det4 * one_over_n).max(0.0).powf(0.25).abs();
+        iw[3] = (self.iw_art4 * one_over_n)
+            .max(0.0)
+            .quarter_root(root_form)
+            .abs();
+        iw[4] = (self.iw_det4 * one_over_n)
+            .max(0.0)
+            .quarter_root(root_form)
+            .abs();
         iw[5] = self.iw_mse * one_over_n;
     }
 
@@ -5396,14 +5424,24 @@ impl V1BasicSums {
     fn finalize_into(&self, n: usize, out: &mut [f64]) {
         debug_assert_eq!(out.len(), 13);
         let one_over_n = 1.0 / n as f64;
+        let root_form = crate::det_math::active_root_form();
         out[0] = (self.ssim_d * one_over_n).abs();
-        out[1] = (self.ssim_d4 * one_over_n).max(0.0).powf(0.25).abs();
+        out[1] = (self.ssim_d4 * one_over_n)
+            .max(0.0)
+            .quarter_root(root_form)
+            .abs();
         out[2] = (self.ssim_d2 * one_over_n).max(0.0).sqrt().abs();
         out[3] = (self.edge_art * one_over_n).abs();
-        out[4] = (self.edge_art4 * one_over_n).max(0.0).powf(0.25).abs();
+        out[4] = (self.edge_art4 * one_over_n)
+            .max(0.0)
+            .quarter_root(root_form)
+            .abs();
         out[5] = (self.edge_art2 * one_over_n).max(0.0).sqrt().abs();
         out[6] = (self.edge_det * one_over_n).abs();
-        out[7] = (self.edge_det4 * one_over_n).max(0.0).powf(0.25).abs();
+        out[7] = (self.edge_det4 * one_over_n)
+            .max(0.0)
+            .quarter_root(root_form)
+            .abs();
         out[8] = (self.edge_det2 * one_over_n).max(0.0).sqrt().abs();
         out[9] = self.mse * one_over_n;
         // Same owner as the buffered walk (`crate::hf_gain_form`), which is
@@ -6333,7 +6371,7 @@ fn finish_channel_scale(
     let m4 =
         (raw4 - 4.0 * mean_d * raw3 + 6.0 * mean_d * mean_d * raw2 - 3.0 * mean_d.powi(4)).max(0.0);
     let dev2 = m2.sqrt();
-    let dev4 = m4.powf(0.25);
+    let dev4 = m4.quarter_root(crate::det_math::active_root_form());
 
     // Phase-6 (§A.16): defensive bounds clamp on the FINAL feature value
     // (called once per channel-scale, O(1) not O(pixels) — cheap). Not
@@ -9968,7 +10006,7 @@ fn derive_v2app_coeffs(
     c.dev_raw2 = raw2;
     c.dev_raw3 = raw3;
     c.dev_f2 = m2.sqrt();
-    c.dev_f4 = m4.powf(0.25);
+    c.dev_f4 = m4.quarter_root(crate::det_math::active_root_form());
     c.s_dev2 = gv2(idx::SSIM_DEV2);
     c.s_dev4 = gv2(idx::SSIM_DEV4);
 

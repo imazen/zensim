@@ -227,6 +227,7 @@ mod color;
 #[cfg(feature = "corruption-head")]
 #[doc(hidden)]
 pub mod corruption_head;
+mod det_math;
 mod diffmap;
 mod error;
 mod fused;

@@ -48,6 +48,46 @@ on the supported surface, and `#[doc(hidden)] feature_set_id::registered_layout_
 (the candidate clip-width list a layout-free id is reconstructed against; not the
 supported surface).
 
+### Added — F18: the pooled 4th/8th roots get ONE owner, and the extractor stops being libc-dependent under revision 2 (2026-09-06)
+
+`powf` is not correctly rounded and no standard requires two libcs to agree on
+it, so `(Σx⁴/n).powf(0.25)` and `(Σx⁸/n).powf(0.125)` made a feature a function
+of **which libm the binary linked against** — MEASURED at 77/322,152 csiq cells
+between a static-musl and a glibc build of the same source, which is why the
+fleet's Feature executor had to be rebuilt against glibc.
+
+- New owner `zensim::det_math` — `RootForm::{LibmPowf, NestedSqrt}` and the
+  `DetRoots` trait. `NestedSqrt` is `sqrt∘sqrt` / `sqrt∘sqrt∘sqrt`: IEEE-754
+  requires `sqrt` to be correctly rounded, so the composition is bit-identical
+  on every libc. **For these two exponents the replacement is unique; there is
+  no arm to select.**
+- Registered as `DEFECT_F18` + era **`v1detroot`** on `FormulaRevision::Rev2`,
+  derived from each slot's own `Statistic` (`L4`/`L8`) rather than a second
+  list. **156 slots**, not the 144 the discovery record priced — the v2
+  `ssim_dev4` pool has the same form in three more finalizers.
+- **Inert by default**: `RootForm::default()` is `LibmPowf` and
+  `ssim_form::SHIPPED_REVISION` is still `Rev1`, so no shipped byte moves.
+  `ZENSIM_ROOT_FORM=libm|sqrt` is a measurement override (equal byte length).
+- New example `libc_feature_dump` + `scripts/verify_cross_libc_features.sh`
+  (`just check-cross-libc`) — the cross-libc gate: the 20-cell parity matrix +
+  a 200-cell distortion ladder, procedurally generated so two builds are
+  provably fed identical bytes, dumped as `to_bits()`. **MEASURED on 81,840
+  feature values: revision 1 differs on 21 across glibc/musl, the deterministic
+  arm on 0.** The script fails if revision 1 shows no difference, so a zero is
+  never vacuous. All 20 libc-divergent slots fall inside the 144 the era moves.
+- `det_math::tests` pins the deterministic form BIT-EXACTLY on a fixed input
+  set (it can be pinned only because it is libm-free) and bounds the two arms'
+  disagreement at ≤1 ULP without pinning any libm's answers.
+- **Correction of record:** the discovery note claimed the composition is *more
+  accurate* than `pow`. Falsified — `sqrt∘sqrt` rounds twice; over 4,000
+  log-uniform doubles glibc's `pow` is nearer the true value in 544 of the 545
+  cases where they differ. The case for the fix is determinism and a bounded
+  error.
+- **Named, not fixed:** `metric.rs`'s score mapping calls `powf` at exponents
+  that are not powers of two, so the DIAL VALUE remains libc-dependent on every
+  profile. Records: `benchmarks/libc_determinism_2026-09-06.md`,
+  `benchmarks/libm_pow_nondeterminism_2026-09-06.md`.
+
 ### Changed — `--regime` is a DERIVED, printed value; the flag is deprecated as a width selector (2026-09-06)
 
 - **`feature_set::derive_regime`** is the one owner: the narrowest registered

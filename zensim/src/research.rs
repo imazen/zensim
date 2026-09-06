@@ -403,6 +403,19 @@ pub struct FeatureProvenance {
     pub revision_commit: &'static str,
     /// A registered PROPOSED revision that has NOT been applied, if any.
     /// Present means "a fix is designed and priced", never "a fix is in".
+    ///
+    /// It reports the FIRST registered-but-unapplied era on this signal.
+    ///
+    /// **It under-reports a slot that is in two proposed eras**, and 48 slots
+    /// now are: every SSIM-derived `L4`/`L8` pool is in `v1ssimcap` (F4, the
+    /// unbounded luminance term) AND `v1detroot` (F18, the libc-dependent
+    /// pooled root). This field reports `"v1ssimcap"` for them and says
+    /// nothing about the second. Widening it to a list would change the
+    /// public API, which this crate's snapshot gate forbids, so the
+    /// limitation is recorded rather than papered over: the COMPLETE answer
+    /// is `feature_defs::era_moved_slots(<era>, …)`, which reads the whole
+    /// revision list, and `registered_defects_cover_exactly_the_audited_slots`
+    /// holds it against the statistic it is derived from.
     pub proposed_revision: Option<&'static str>,
     /// A live defect id from `docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`.
     pub defect: Option<&'static str>,
@@ -1154,6 +1167,30 @@ mod tests {
             12,
             "every F17 slot is inside the basic block"
         );
+
+        // And for revision 2's THIRD v1 era, F18's `v1detroot` — the pooled
+        // 4th/8th roots that made the extractor libc-dependent. 144 at the
+        // 372 layout (basic 36 + peaks 36 + masked 36 + IW 36); the extra 12
+        // this era moves are the v2 `ssim_dev4` cells, which do not exist at
+        // 372. It OVERLAPS `v1ssimcap` on the 48 SSIM L4/L8 slots, which is
+        // why each era is checked against its own `era_moved_slots` and never
+        // against the revision's union.
+        let f18 = Request::for_slots(SlotSet::from_ranges([(0, 372)]), 372)
+            .at_revision(RevisionRef::Named("v1detroot".into()));
+        let ResearchError::RevisionUnavailable { incompatible, .. } =
+            f18.validate().expect_err("Rev1 cannot serve v1detroot")
+        else {
+            panic!("wrong error kind for v1detroot");
+        };
+        assert_eq!(
+            incompatible,
+            SlotSet::from_slots(
+                crate::feature_defs::era_moved_slots("v1detroot", 372, ns)
+                    .into_iter()
+                    .map(usize::from),
+            )
+        );
+        assert_eq!(incompatible.len(), 144, "F18's blast radius at 372");
     }
 
     /// A `FeatureSetId` round-trips into a request that reproduces it.

@@ -35,6 +35,8 @@
 //! the standalone helpers below are kept for offline experimentation
 //! and for the legacy non-streaming code path.
 
+use crate::det_math::DetRoots;
+
 /// Choice of per-pixel info-content estimator.
 // dead_code: the non-default estimators are research knobs selected through
 // `IwWeightConfig` by offline/training experiments (see
@@ -452,7 +454,7 @@ impl WeightedPool {
         if den < 1e-12 {
             0.0
         } else {
-            (num / den).powf(0.25)
+            (num / den).quarter_root(crate::det_math::active_root_form())
         }
     }
 }

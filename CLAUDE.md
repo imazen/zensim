@@ -53,6 +53,67 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
 
 ## Known Bugs
 
+- **⛔ THE FEATURE EXTRACTOR IS LIBC-DEPENDENT ON REVISION 1 — a musl build and
+  a glibc build of the SAME COMMIT disagree (found 2026-09-06; owner + era
+  landed same day, the FLIP is NOT taken, so revision 1 is still exposed).**
+  `powf` is not correctly rounded and no standard makes two libcs agree on it,
+  so `(Σx⁴/n).powf(0.25)` and `(Σx⁸/n).powf(0.125)` make a feature a function
+  of **which libm the binary linked against**. MEASURED: static-musl vs glibc,
+  same source, **77/322,152 csiq cells (0.0239 %)** and **328/1,116,000 tid
+  cells**, every delta exactly one ULP at f64; a libm-free probe closed the
+  mechanism (`x ** 0.25` over 400,000 doubles: 276 disagreements glibc↔musl,
+  **0** between two glibc versions). **This is why the fleet's Feature executor
+  had to be rebuilt against glibc (`exec-featrev2glibc-88477e38`).**
+  - **What is in tree:** one owner `zensim/src/det_math.rs`
+    (`RootForm::{LibmPowf, NestedSqrt}` + the `DetRoots` trait), defect
+    `DEFECT_F18`, era **`v1detroot`** on `FormulaRevision::Rev2`, measurement
+    override **`ZENSIM_ROOT_FORM=libm|sqrt`** (same byte length, deliberately).
+    `RootForm`'s default is `LibmPowf` and `SHIPPED_REVISION` is `Rev1`, so
+    **no shipped byte moves**.
+  - **The era is 156 slots, NOT the 144 the discovery record priced** — the
+    `(M4/n)^0.25` form is also the **v2 `ssim_dev4`** slot, in three more
+    finalizers that record's v1-block table did not reach. Registry answer is
+    derived from each slot's own `Statistic` (`L4`/`L8`), never a second list.
+  - **⚠ Flipping rev2 now invalidates any `ZENSIM_FORMULA_REV=2` table
+    extracted BEFORE 2026-09-06** (the R6b lane has some).
+    `ZENSIM_ROOT_FORM=libm` reproduces those exactly from a new binary.
+  - **The rest of the SDR feature path is ALREADY libc-free, by reading the
+    sites** (stronger than the corpus inference the discovery record used):
+    sRGB→linear is `linear_srgb`'s LUT, the opsin cube root is
+    `color::cbrtf_fast` (bit-trick + Halley, `mul_add` only) and magetypes'
+    `cbrt_midp`, the SIMD PU-XYB path is magetypes'
+    `log2_midp_precise`/`exp2_midp_precise`, and every other v1 pool is `sqrt`
+    (IEEE-required correctly rounded). `powi` never reaches libm.
+  - **STILL EXPOSED AND UNFIXED: the SCORE.** `metric.rs`'s raw-distance →
+    score mapping calls `powf` at `0.5979 / 1.2244 / 0.6130 / b` — none a power
+    of two — so **the dial value is libc-dependent on every profile**. No
+    `sqrt` composition exists for those exponents. The cross-libc dump
+    instrument emits the score beside the features so it stays measurable.
+  - **⚠ CORRECTION to the discovery record:** it says the composition is
+    "*more* accurate than one `pow` call". **FALSE** — `sqrt∘sqrt` rounds
+    twice. Over 4,000 log-uniform doubles vs a 60-digit reference the two agree
+    on 3,455; of the 545 that differ (always exactly 1 ULP) **glibc's `pow` is
+    nearer the truth in 544 and the composition in 1**. The case for the fix is
+    **determinism and a bounded error**, not accuracy.
+  - **THE GATE PASSES, MEASURED 2026-09-06** (`just check-cross-libc` /
+    `scripts/verify_cross_libc_features.sh`): one commit built for `-gnu`
+    (dynamically linked `libm.so.6`) and `-musl` (`static-pie`), 220 cells ×
+    372 features = 81,840 values over the 20-cell parity matrix + a 200-cell
+    procedural distortion ladder. **Revision 1: 21 differing (0.0257 %, inside
+    the fleet corpora's own 0.0239-0.0294 % band). Deterministic arm: 0.**
+    The script FAILS if revision 1 shows no difference — a zero proves nothing
+    from an instrument that is not demonstrably sensitive. Toggling the arm on
+    ONE binary moves 4,097/81,840 rows over **exactly 144 slots**, and all 20
+    libc-divergent slots are inside them, so the era covers the exposure
+    exactly. **The score differs on 1 of 220 cells in BOTH arms** — the
+    unfixed `metric.rs` exposure, now measured rather than suspected. Pinning
+    test: `det_math::tests` (bit-exact values, independently re-derived with
+    60-digit `Decimal.sqrt`). Records:
+    [`benchmarks/libc_determinism_2026-09-06.md`](benchmarks/libc_determinism_2026-09-06.md)
+    (landing + audit + gate),
+    [`benchmarks/libm_pow_nondeterminism_2026-09-06.md`](benchmarks/libm_pow_nondeterminism_2026-09-06.md)
+    (discovery).
+
 - **★ FEATURE REVISION 2 IS LANDED AND INERT — `ssim_form::SHIPPED_REVISION`
   is still `Rev1`, and flipping it is gated (2026-09-05).** Both of the
   audit's arithmetic defects now have fixes in tree behind

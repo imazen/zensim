@@ -413,7 +413,7 @@ impl FormulaRevision {
     pub(crate) const fn era_tokens(self) -> &'static [&'static str] {
         match self {
             Self::Rev1 => &[],
-            Self::Rev2 => &["v1ssimcap", "freecomp", "v1hfgain"],
+            Self::Rev2 => &["v1ssimcap", "freecomp", "v1hfgain", "v1detroot"],
         }
     }
 
@@ -593,23 +593,111 @@ const REV_F4_PROPOSED: &[Revision] = &[
         status: RevisionStatus::Landed,
         note: "option C: v1 stopped pooling mirror-padded phantom columns.",
     },
-    Revision {
-        era: "v1ssimcap",
-        commit: "-",
-        status: RevisionStatus::Proposed,
-        note: "F4 fix: bound the per-pixel dissimilarity's luminance term. The \
-               ARM IS DECIDED — `SsimLumaForm::Clamp`, i.e. `max(0, 1 - D^2)` \
-               — by measurement over 217,756 rows \
-               (benchmarks/f4_arm_decision_2026-09-05.md). Clamp is \
-               BIT-IDENTICAL to revision 1 wherever `D^2 <= 1`, and no corpus \
-               with local pixels reaches past that, so this era moves NOTHING \
-               on content resembling the shipped corpora; the 5.8e6 outlier \
-               that motivates it lives in the bigcodec sweep. STILL PROPOSED, \
-               not landed: `ssim_form::SHIPPED_REVISION` is `Rev1` until the \
-               recalculation and refit land, and Proposed is what `shipped \
-               bytes are unchanged` means.",
-    },
+    REV_F4_ENTRY,
 ];
+
+/// **F18** — the pooled 4th/8th roots make the extractor LIBC-DEPENDENT.
+///
+/// Not in the 2026-09-05 audit's F1..F17 inventory; found 2026-09-06 by the
+/// rev2 fleet wave's own rev1 correctness gate, which is the only reason
+/// anyone was looking — nothing weaker than `to_bits()` equality would have
+/// seen it.
+const DEFECT_F18: Defect = Defect {
+    id: "F18",
+    note: "`powf` is not correctly rounded and no standard requires two libcs \
+           to agree on it, so `(sum x^4/n).powf(0.25)` and \
+           `(sum x^8/n).powf(0.125)` make a feature a function of WHICH LIBM \
+           the binary linked against. MEASURED: a static-musl build of the \
+           same source differs from a glibc build on 77/322,152 csiq cells \
+           (0.0239 %) and 328/1,116,000 tid cells (0.0294 %), every delta \
+           exactly one ULP at f64; inside the basic block the differing \
+           positions are exactly `= 1, 4, 7 (mod 13)`, i.e. only the \
+           `.powf(0.25)` slots. Mechanism closed by a probe with nothing to do \
+           with zensim: `x ** 0.25` over 400,000 doubles disagrees on 276 \
+           between glibc 2.43 and musl and on 0 between two glibc versions. \
+           Consequence: the fleet had to build its Feature executor against \
+           glibc to reproduce the dev box bit-for-bit. Every OTHER pooled v1 \
+           slot uses `sqrt`, which IEEE-754 requires to be correctly rounded \
+           and which is a hardware instruction, so it is libc-independent by \
+           construction - these are the whole exposure. Record: \
+           benchmarks/libm_pow_nondeterminism_2026-09-06.md.",
+};
+
+/// The PROPOSED fix for [`DEFECT_F18`] on a v1 slot that carries NO other
+/// defect — registered, deliberately NOT applied.
+const REV_DETROOT_PROPOSED: &[Revision] = &[
+    Revision {
+        era: "v1postc",
+        commit: "56bbcda2",
+        status: RevisionStatus::Landed,
+        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
+    },
+    REV_DETROOT,
+];
+
+/// The PROPOSED fix for [`DEFECT_F18`] on a slot that ALSO carries F4 — the
+/// SSIM-derived `L4`/`L8` pools, which are in both eras.
+const REV_F4_AND_DETROOT: &[Revision] = &[
+    Revision {
+        era: "v1postc",
+        commit: "56bbcda2",
+        status: RevisionStatus::Landed,
+        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
+    },
+    REV_F4_ENTRY,
+    REV_DETROOT,
+];
+
+/// [`DEFECT_F18`]'s fix on a v2-era slot (`ssim_dev4`), which option C never
+/// touched.
+const REV_V2_DETROOT: &[Revision] = &[REV_DETROOT];
+
+/// The one text of the `v1detroot` era, so the three lists above cannot drift.
+const REV_DETROOT: Revision = Revision {
+    era: "v1detroot",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "F18 fix: evaluate the pooled 4th/8th roots as `sqrt.sqrt` and \
+           `sqrt.sqrt.sqrt`. THE ARM IS DERIVED, NOT CHOSEN - IEEE-754 \
+           requires `sqrt` to be correctly rounded, so for these two \
+           exponents the replacement is unique, bit-identical on every libc, \
+           and cheaper. NOT more accurate: `sqrt.sqrt` double-rounds where \
+           `powf` rounds once, and MEASURED over 4,000 log-uniform doubles \
+           against a 60-digit reference the two agree on 3,455 while glibc's \
+           `pow` is nearer the truth in 544 of the 545 that differ - so the \
+           case is determinism and a BOUNDED error, not accuracy (the \
+           discovery record's contrary claim is falsified in \
+           benchmarks/libc_determinism_2026-09-06.md section 3). Owner: \
+           `crate::det_math::RootForm`. Its cost is that it moves revision-1 \
+           bytes by up to one ULP - which is why it is an era item and not a \
+           plain fix. It rides in revision 2 with F4, F5 and F17 so \
+           there is ONE era boundary and one recalculation. MIGRATION: this \
+           era invalidates any `ZENSIM_FORMULA_REV=2` table extracted BEFORE \
+           it was registered (the R6b lane has some); \
+           `ZENSIM_ROOT_FORM=libm` reproduces those exactly. STILL PROPOSED: \
+           `ssim_form::SHIPPED_REVISION` is `Rev1`, so no shipped byte moves.",
+};
+
+/// **The one text of the `v1ssimcap` era.** Both [`REV_F4_PROPOSED`] (a slot
+/// in F4 alone) and [`REV_F4_AND_DETROOT`] (a slot in F4 *and* F18) name this
+/// constant, so the two lists cannot state the same era differently — the
+/// exact drift a second copy of the text would invite.
+const REV_F4_ENTRY: Revision = Revision {
+    era: "v1ssimcap",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "F4 fix: bound the per-pixel dissimilarity's luminance term. The \
+           ARM IS DECIDED — `SsimLumaForm::Clamp`, i.e. `max(0, 1 - D^2)` \
+           — by measurement over 217,756 rows \
+           (benchmarks/f4_arm_decision_2026-09-05.md). Clamp is \
+           BIT-IDENTICAL to revision 1 wherever `D^2 <= 1`, and no corpus \
+           with local pixels reaches past that, so this era moves NOTHING \
+           on content resembling the shipped corpora; the 5.8e6 outlier \
+           that motivates it lives in the bigcodec sweep. STILL PROPOSED, \
+           not landed: `ssim_form::SHIPPED_REVISION` is `Rev1` until the \
+           recalculation and refit land, and Proposed is what `shipped \
+           bytes are unchanged` means.",
+};
 
 /// **F5** — the free-40 raw-moment route-parity skew.
 const DEFECT_F5: Defect = Defect {
@@ -695,6 +783,18 @@ const DEFECT_F15: Defect = Defect {
            other 15 nonzero slots are correctly reference-only.",
 };
 
+/// **THE one owner of "does this slot use a pooled 4th/8th root?"** — derived
+/// from the slot's own [`Statistic`], never from a hand-kept list.
+///
+/// `L4` is `(sum x^4/n)^(1/4)` and `L8` is `(sum x^8/n)^(1/8)`; every other v1
+/// statistic is a mean, a max, a ratio or an `L2` (`sqrt`, correctly rounded
+/// by IEEE-754). So the registry's answer to "which slots does `v1detroot`
+/// move?" is a property of the statistic and cannot drift away from the
+/// kernels — which is the failure mode a second list would have.
+const fn uses_pooled_root(statistic: Statistic) -> bool {
+    matches!(statistic, Statistic::L4 | Statistic::L8)
+}
+
 const fn v1(
     family: ComputeToken,
     block_local: u16,
@@ -717,8 +817,22 @@ const fn v1(
         direction: Direction::HigherIsWorse,
         kernel,
         deprecated: false,
-        defect: None,
-        revisions: REV_OPTION_C,
+        // F18: an `L4`/`L8` slot with no other defect carries the libc
+        // exposure alone. F4 slots are handled by `v1_defect`, which keeps
+        // `Defect::F4` (the larger one) in the single `defect` field and
+        // records F18 through the revision list — `SignalDef` holds ONE
+        // defect, so a slot in two defects names the bigger and registers
+        // both eras.
+        defect: if uses_pooled_root(statistic) {
+            Some(DEFECT_F18)
+        } else {
+            None
+        },
+        revisions: if uses_pooled_root(statistic) {
+            REV_DETROOT_PROPOSED
+        } else {
+            REV_OPTION_C
+        },
     }
 }
 
@@ -764,7 +878,15 @@ const fn v1_defect(
         statistic,
         kernel,
         DEFECT_F4,
-        REV_F4_PROPOSED,
+        // An SSIM-derived `L4`/`L8` pool is in BOTH `v1ssimcap` (F4) and
+        // `v1detroot` (F18): the same slot, two independent arithmetic
+        // problems. The eras therefore OVERLAP, which is why
+        // `rev2_carries_all_eras_*` checks a union and not a sum.
+        if uses_pooled_root(statistic) {
+            REV_F4_AND_DETROOT
+        } else {
+            REV_F4_PROPOSED
+        },
     )
 }
 
@@ -790,8 +912,25 @@ const fn v2sig(
         direction,
         kernel,
         deprecated: false,
-        defect,
-        revisions: NO_REV,
+        // F18 reaches the v2 block too: `ssim_dev4` is `(M4/n)^(1/4)`, the
+        // same `powf(0.25)` in three finalizers (`OnlineMoments::finish`, the
+        // dense kernel, the append kernel). The caller's explicit `defect`
+        // wins when it has one — a v2 slot with a named defect keeps it.
+        defect: match defect {
+            Some(d) => Some(d),
+            None => {
+                if uses_pooled_root(statistic) {
+                    Some(DEFECT_F18)
+                } else {
+                    None
+                }
+            }
+        },
+        revisions: if uses_pooled_root(statistic) {
+            REV_V2_DETROOT
+        } else {
+            NO_REV
+        },
     }
 }
 
@@ -1974,21 +2113,53 @@ mod tests {
         use super::FormulaRevision;
         use crate::NUM_SCALES;
         let toks = FormulaRevision::Rev2.era_tokens();
-        for want in ["v1ssimcap", "freecomp", "v1hfgain"] {
+        for want in ["v1ssimcap", "freecomp", "v1hfgain", "v1detroot"] {
             assert!(toks.contains(&want), "{want} missing from {toks:?}");
         }
 
         let at372 = FormulaRevision::Rev2.moved_slots(372, NUM_SCALES);
         let at944 = FormulaRevision::Rev2.moved_slots(944, NUM_SCALES);
-        // 132 (v1ssimcap) + 12 (v1hfgain); the two sets are disjoint, which is
-        // itself the check that batching three defects did not double-count.
-        assert_eq!(at372.len(), 144, "372 sees the two v1 eras' slots");
+        // THREE v1 eras at 372, and they are NOT disjoint: `v1detroot` (F18,
+        // the libc-dependent pooled roots) OVERLAPS `v1ssimcap` (F4) on every
+        // SSIM-derived `L4`/`L8` slot — the same slot, two independent
+        // arithmetic problems. So a revision's `moved_slots` is a UNION, and
+        // the sum-of-eras identity this test used to assert would now
+        // double-count. The inclusion-exclusion below is the replacement, and
+        // it is a strictly stronger claim: it pins each era's size AND the
+        // exact size of the one overlap.
+        let cap = super::era_moved_slots("v1ssimcap", 372, NUM_SCALES);
+        let gain = super::era_moved_slots("v1hfgain", 372, NUM_SCALES);
+        let root = super::era_moved_slots("v1detroot", 372, NUM_SCALES);
         assert_eq!(
-            super::era_moved_slots("v1ssimcap", 372, NUM_SCALES).len()
-                + super::era_moved_slots("v1hfgain", 372, NUM_SCALES).len(),
-            at372.len(),
-            "the two v1 eras must move disjoint slot sets"
+            cap.len(),
+            132,
+            "v1ssimcap: basic 36 + peaks 24 + masked 36 + IW 36"
         );
+        assert_eq!(gain.len(), 12, "v1hfgain: the twelve `contrast_inc` slots");
+        assert_eq!(
+            root.len(),
+            144,
+            "v1detroot: the L4/L8 pools — basic 36 + peaks 36 + masked 36 + IW 36"
+        );
+        let overlap = cap.iter().filter(|id| root.contains(id)).count();
+        assert_eq!(
+            overlap, 48,
+            "the four SSIM L4/L8 signals (basic ssim_4th, peaks ssim_l8, masked \
+             ssim_4th, IW ssim_4th) x 12 (scale, channel) cells"
+        );
+        assert_eq!(
+            gain.iter()
+                .filter(|id| cap.contains(id) || root.contains(id))
+                .count(),
+            0,
+            "v1hfgain is a Ratio family and must not touch either pooled-root era"
+        );
+        assert_eq!(
+            at372.len(),
+            cap.len() + gain.len() + root.len() - overlap,
+            "moved_slots must be the UNION of its eras, not the sum"
+        );
+        assert_eq!(at372.len(), 240, "132 + 12 + 144 - 48");
         assert!(
             at944.len() > at372.len(),
             "944 must additionally reach freecomp's raw-moment slots: {} vs {}",
@@ -2251,6 +2422,36 @@ mod tests {
         );
         // F15: 12 slots.
         assert_eq!(by_id.get("F15").map(Vec::len), Some(12), "F15 slot count");
+        // F18: the pooled 4th/8th roots. `SignalDef` holds ONE `defect`, so
+        // the 48 SSIM `L4`/`L8` slots that are in BOTH eras name F4 (the
+        // larger problem) here and carry F18 only through their revision
+        // list — which is why this count is 108 and not 156. The
+        // era-complete answer is `era_moved_slots("v1detroot", …)`, checked
+        // immediately below against the statistic it is derived from.
+        assert_eq!(by_id.get("F18").map(Vec::len), Some(108), "F18 slot count");
+        let detroot: std::collections::BTreeSet<usize> = (0..full_width(NS))
+            .filter(|&id| {
+                def_at(id, NS)
+                    .expect("def")
+                    .signal
+                    .revisions
+                    .iter()
+                    .any(|r| r.era == "v1detroot")
+            })
+            .collect();
+        let l4l8: std::collections::BTreeSet<usize> = (0..full_width(NS))
+            .filter(|&id| super::uses_pooled_root(def_at(id, NS).expect("def").signal.statistic))
+            .collect();
+        assert_eq!(
+            detroot, l4l8,
+            "the `v1detroot` era must be EXACTLY the L4/L8 slots — derived from \
+             the statistic, never from a second list"
+        );
+        assert_eq!(detroot.len(), 156, "144 v1 L4/L8 + 12 v2 `ssim_dev4`");
+        assert!(
+            by_id["F18"].iter().all(|id| detroot.contains(id)),
+            "every F18-labelled slot must be inside the era it belongs to"
+        );
         // F17: the twelve `contrast_inc` slots — and ONLY those. The two
         // bounded members of the same family must stay defect-free, because
         // the asymmetry is the defect: attaching F17 to `var_loss` would

@@ -100,6 +100,7 @@
 
 use crate::ZensimError;
 use crate::blur::fused_blur_h_ssim;
+use crate::det_math::DetRoots;
 use crate::fused::{StripChannelAccum, fused_vblur_features_ssim};
 use crate::metric::{
     FEATURES_PER_CHANNEL_BASIC, MIN_PYRAMID_DIM, check_within_max_pixels, config_from_params,
@@ -574,15 +575,16 @@ fn basic13_from_acc(a: &StripChannelAccum, n: f64) -> [f64; 13] {
     let var_dst = a.hf_sq_dst * inv;
     let mad_src = a.hf_abs_src * inv;
     let mad_dst = a.hf_abs_dst * inv;
+    let root_form = crate::det_math::active_root_form();
     [
         a.ssim_d * inv,
-        (a.ssim_d4 * inv).max(0.0).powf(0.25),
+        (a.ssim_d4 * inv).max(0.0).quarter_root(root_form),
         (a.ssim_d2 * inv).max(0.0).sqrt(),
         a.edge_art * inv,
-        (a.edge_art4 * inv).max(0.0).powf(0.25),
+        (a.edge_art4 * inv).max(0.0).quarter_root(root_form),
         (a.edge_art2 * inv).max(0.0).sqrt(),
         a.edge_det * inv,
-        (a.edge_det4 * inv).max(0.0).powf(0.25),
+        (a.edge_det4 * inv).max(0.0).quarter_root(root_form),
         (a.edge_det2 * inv).max(0.0).sqrt(),
         a.mse * inv,
         crate::hf_gain_form::hf_energy_loss(var_src, var_dst),

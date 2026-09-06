@@ -2530,6 +2530,28 @@ musl build and the dev box's glibc build of the SAME source differ by one ULP on
 building the fleet binary against the base image's own glibc, not by changing any
 arithmetic.
 
+> **UPDATED 2026-09-06 — the OWNER and the ERA landed the same day; the FLIP did
+> not** (`benchmarks/libc_determinism_2026-09-06.md`). `zensim::det_math`
+> (`RootForm::{LibmPowf, NestedSqrt}` + `DetRoots`), defect `DEFECT_F18`, era
+> **`v1detroot`** on `FormulaRevision::Rev2`, override `ZENSIM_ROOT_FORM=libm|sqrt`.
+> `SHIPPED_REVISION` is still `Rev1` and the default form is still `LibmPowf`, so
+> **no stored table and no shipped byte moves, and the glibc-rebuild workaround
+> above is still the operative one for revision-1 extractions.** Three corrections
+> to the sentence above, all measured:
+> * **the era is 156 slots, not 144** — `(M4/n)^0.25` is also the v2 `ssim_dev4`
+>   pool, in three finalizers the discovery record's v1-block table did not reach;
+> * **the rest of the feature path was already libm-free**, established by reading
+>   the sites rather than inferring from one corpus (sRGB→linear is `linear_srgb`'s
+>   LUT, the opsin cube root is `cbrtf_fast`/`cbrt_midp`, the SIMD PU-XYB path is
+>   magetypes' `log2_midp_precise`/`exp2_midp_precise`);
+> * **the SCORE is exposed too and is NOT fixed** — `metric.rs` calls `powf` at
+>   `0.5979 / 1.2244 / 0.6130 / b`, none a power of two, so a dial value is
+>   libc-dependent on every profile.
+>
+> **⚠ Provenance consequence for anyone flipping rev2:** `v1detroot` invalidates
+> any `ZENSIM_FORMULA_REV=2` table extracted BEFORE 2026-09-06 — the R6b lane has
+> some. Reproduce those from a new binary with `ZENSIM_ROOT_FORM=libm`.
+
 
 ### §3.48 — the corruption head's BLAS/OpenMP thread-count nondeterminism is fixed at the owner (2026-09-06)
 

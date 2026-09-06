@@ -13,6 +13,7 @@ use crate::color::{
     composite_srgb8_rgba_to_linear, composite_srgb16_rgba_to_linear,
     linear_to_positive_xyb_planar_into, srgb_to_positive_xyb_planar_into,
 };
+use crate::det_math::DetRoots;
 use crate::diffmap::PixelFeatureWeights;
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
@@ -569,6 +570,11 @@ impl ScaleAccumulators {
         let mut iw_mean_w = [0.0f64; 3];
 
         let gain_form = crate::hf_gain_form::active_gain_form();
+        // The pooled 4th/8th roots go through their ONE owner
+        // (`crate::det_math`) — F18, the libc-dependent `powf`. Hoisted out
+        // of the channel loop for the same reason `gain_form` is: it reads a
+        // `OnceLock`.
+        let root_form = crate::det_math::active_root_form();
 
         for c in 0..3 {
             // f64 sums of per-pixel non-negative values CAN go slightly
@@ -577,12 +583,18 @@ impl ScaleAccumulators {
             // matches GPU zensim_gpu defensive clamp and prevents NaN
             // propagation into the MLP feature vector.
             ssim[c * 2] = self.ssim_d[c] * one_over_n;
-            ssim[c * 2 + 1] = (self.ssim_d4[c] * one_over_n).max(0.0).powf(0.25);
+            ssim[c * 2 + 1] = (self.ssim_d4[c] * one_over_n)
+                .max(0.0)
+                .quarter_root(root_form);
             ssim_2nd[c] = (self.ssim_d2[c] * one_over_n).max(0.0).sqrt();
             edge[c * 4] = self.edge_art[c] * one_over_n;
-            edge[c * 4 + 1] = (self.edge_art4[c] * one_over_n).max(0.0).powf(0.25);
+            edge[c * 4 + 1] = (self.edge_art4[c] * one_over_n)
+                .max(0.0)
+                .quarter_root(root_form);
             edge[c * 4 + 2] = self.edge_det[c] * one_over_n;
-            edge[c * 4 + 3] = (self.edge_det4[c] * one_over_n).max(0.0).powf(0.25);
+            edge[c * 4 + 3] = (self.edge_det4[c] * one_over_n)
+                .max(0.0)
+                .quarter_root(root_form);
             edge_2nd[c * 2] = (self.edge_art2[c] * one_over_n).max(0.0).sqrt();
             edge_2nd[c * 2 + 1] = (self.edge_det2[c] * one_over_n).max(0.0).sqrt();
             mse[c] = self.mse[c] * one_over_n;
@@ -605,25 +617,43 @@ impl ScaleAccumulators {
             ssim_max[c] = self.ssim_max[c] as f64;
             art_max[c] = self.edge_art_max[c] as f64;
             det_max[c] = self.edge_det_max[c] as f64;
-            ssim_l8[c] = (self.ssim_d8[c] * one_over_n).max(0.0).powf(0.125);
-            art_l8[c] = (self.edge_art8[c] * one_over_n).max(0.0).powf(0.125);
-            det_l8[c] = (self.edge_det8[c] * one_over_n).max(0.0).powf(0.125);
+            ssim_l8[c] = (self.ssim_d8[c] * one_over_n)
+                .max(0.0)
+                .eighth_root(root_form);
+            art_l8[c] = (self.edge_art8[c] * one_over_n)
+                .max(0.0)
+                .eighth_root(root_form);
+            det_l8[c] = (self.edge_det8[c] * one_over_n)
+                .max(0.0)
+                .eighth_root(root_form);
 
             // Extended: masked features (normalize by N, matching full-image path)
             masked_ssim[c * 3] = self.masked_ssim_d[c] * one_over_n;
-            masked_ssim[c * 3 + 1] = (self.masked_ssim_d4[c] * one_over_n).max(0.0).powf(0.25);
+            masked_ssim[c * 3 + 1] = (self.masked_ssim_d4[c] * one_over_n)
+                .max(0.0)
+                .quarter_root(root_form);
             masked_ssim[c * 3 + 2] = (self.masked_ssim_d2[c] * one_over_n).max(0.0).sqrt();
-            masked_art_4th[c] = (self.masked_art4[c] * one_over_n).max(0.0).powf(0.25);
-            masked_det_4th[c] = (self.masked_det4[c] * one_over_n).max(0.0).powf(0.25);
+            masked_art_4th[c] = (self.masked_art4[c] * one_over_n)
+                .max(0.0)
+                .quarter_root(root_form);
+            masked_det_4th[c] = (self.masked_det4[c] * one_over_n)
+                .max(0.0)
+                .quarter_root(root_form);
             masked_mse[c] = self.masked_mse[c] * one_over_n;
 
             // IW (information-content-weighted) features. Same wire
             // shape as masked_*; weight direction inverted upstream.
             iw_ssim[c * 3] = self.iw_ssim_d[c] * one_over_n;
-            iw_ssim[c * 3 + 1] = (self.iw_ssim_d4[c] * one_over_n).max(0.0).powf(0.25);
+            iw_ssim[c * 3 + 1] = (self.iw_ssim_d4[c] * one_over_n)
+                .max(0.0)
+                .quarter_root(root_form);
             iw_ssim[c * 3 + 2] = (self.iw_ssim_d2[c] * one_over_n).max(0.0).sqrt();
-            iw_art_4th[c] = (self.iw_art4[c] * one_over_n).max(0.0).powf(0.25);
-            iw_det_4th[c] = (self.iw_det4[c] * one_over_n).max(0.0).powf(0.25);
+            iw_art_4th[c] = (self.iw_art4[c] * one_over_n)
+                .max(0.0)
+                .quarter_root(root_form);
+            iw_det_4th[c] = (self.iw_det4[c] * one_over_n)
+                .max(0.0)
+                .quarter_root(root_form);
             iw_mse[c] = self.iw_mse[c] * one_over_n;
             // Diagnostic (NOT a feature): the factor every iw_* above
             // carries because they are pooled by 1/n rather than 1/Σw.
