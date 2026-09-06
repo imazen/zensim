@@ -760,6 +760,20 @@ composite and CID22** and misses only KonJND — so the answer to *"is a
 serving question the campaign opened with has since been answered by another
 lane (all widths serve at HEAD).
 
+**The rulers are VERIFIED identical, which is what makes the comparison fair
+despite the era difference.** Read from each fulleval's own `rank` block:
+
+| model | KonJND n | CID22 n |
+|---|--:|--:|
+| 372 `S228` H128 | **504** | **4292** |
+| 944 `S228` H32 | **504** | **4292** |
+| `W11J` @era2r4 | **504** | **4292** |
+
+Same 504 KonJND references, same 4,292 CID22 pairs across 49 held-out
+references, same human labels. The models differ in what they are allowed to
+LOOK at; they are graded by the same people on the same images. An era
+difference changes a model's inputs — it cannot change the ruler.
+
 **Two caveats that belong next to these numbers.** (a) The 37 raw-moment slots
 serve with the rev1 **F5 route skew, ≤ 2.5e-4**, until rev2 lands — that touches
 `S261`/`S265`/`S289` only, never `S156`/`S228`. (b) `hfnlproxy` is the one axis
