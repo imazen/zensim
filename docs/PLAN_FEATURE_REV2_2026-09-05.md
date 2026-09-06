@@ -1149,3 +1149,53 @@ perf claim. Confounds inherited: KADID/TID are train==val on this lineage; the
 guard's windows are fitted on the 2026-05-21-era training leg while the eval
 root is post-option-C, so the windows and the rows they clamp are one extraction
 era apart — stated, not measured away.
+
+#### 12.8.6 RESULTS — ANSWERED 2026-09-06. **READY**: an install candidate that costs nothing
+
+Full record: [`../benchmarks/rev2_d_arms_2026-09-06.md`](../benchmarks/rev2_d_arms_2026-09-06.md)
+§12. Artefacts + `_MANIFEST.json`:
+`/mnt/v/output/zensim/rev2-d-arms-2026-09-06/guard/shipped/`.
+
+**The support question is answered.** The shipped bake declares exactly
+**{f116, f155}** of the twelve F17 ids — `DEFECT_F17`'s own exposure table,
+confirmed from `zentrain.feature_ids` rather than from the note. The r6b re-fit
+read **f77** and nothing else, so the two lineages share NO F17 slot and §11a's
+numbers could not have stood in for these.
+
+**Control first.** `Sctl` — the refit chain with no guard — **reproduces the
+shipped verdict**: identical SROCC on all seven corpora, paired-bootstrap delta
+`+0.00000` with CI `[0, 0]` on all seven, identical contract, floors, negtail,
+identity, dial and inversion rate. Its spline differs from `fit-lasso`'s in 10
+of 19 knots (max 4 ulps on `x`, **0** on `y`), worth max `6.8e-5` score-pt over
+20,166 rows. Every delta is the guard.
+
+**`Sg12` and `Sg2` are BYTE-IDENTICAL after `densify`** — the ten unread F17
+slots carry exactly-zero weight, so §11a's recommended twelve-slot scope applied
+to this bake IS the two-slot guard. Measured, not assumed.
+
+**All four criteria pass, at both percentiles.** Contract **6/6**; every
+per-codec `A7r` floor **exactly** the shipped bake's on all five codecs; CID22
+an exact tie with CI `[+0.00000, +0.00000]`; inversions **0.0053** unchanged.
+Identity 100.000000, 0 of 9,593 cells above identity, corruption gate (ZCTH tree
+head, 672 triples) `pass_q10 = pass_q20 = 1.0000` — all identical to shipped.
+
+> **INSTALL CANDIDATE: `d_sdr_add156_id100_negrich_guard12_2026-09-06.bin`**
+> (1,523 B, sha256 `c2db9e29ac97ad6f01f844628500b670ecab323d972169128d3b24daaf044aa8`).
+> Winsor `[p0.1, p99.9]` on the twelve `contrast_inc` slots, of which f116 and
+> f155 survive `densify`, applied at SERVE time to the shipped weights with the
+> spline refit on the guarded net. It perturbs **0 of 4,292 CID22 rows**, 0 of
+> KonJND, 0 of AIC-3, and 262 of 196,086 training rows. The install recipe —
+> including the **`dense_bake_flip_gate` change it forces**, which must be
+> re-pointed and not weakened — is record §12.11. **NOT INSTALLED.**
+
+**Two honest limits.** (1) The guard is a rank NO-OP, not a win, and it is a
+small LOSS on the outlier ordering (−0.00987 on the 17 LIVE rows it fires on,
+n far too small to lean on); the case for it is a bounded input at a measured
+cost of zero. (2) The windows are fitted on the bake's own training leg
+(`canonical-2026-05-21`) while the eval root is post-option-C — one extraction
+era apart, and not fixable today because the postC root carries no safesyn leg.
+
+**A stale claim corrected:** `rev2_refit_2026-09-06.md` §8.6b says `can_bake`
+*"admits only `logistic`"*. Read from source, it returns
+`name in ("logistic", "hgb")` (widened 2026-09-06, `hgb` emitting **ZCTH v1**),
+and `bake_verdict` loads a ZCTH tree head. The tree head IS servable.
