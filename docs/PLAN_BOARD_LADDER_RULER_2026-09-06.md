@@ -208,3 +208,34 @@ legacy` keeps its existing meaning (no veto, no A7r floors) unchanged.
   reproduces the pre-ruling window on the ladder.
 * Nothing in `zensim/weights/` is opened for writing. No gate bar is changed.
 
+
+---
+
+## 9. RESULTS (appended 2026-09-06, after execution)
+
+Full record: [`benchmarks/board_ladder_ruler_2026-09-06.md`](../benchmarks/board_ladder_ruler_2026-09-06.md).
+Nothing in §1–§8 was edited.
+
+* **All 9 acceptance gates PASS.** 450 of 508 cells graded on a ladder instrument;
+  58 NOT MEASURED, each with a recorded reason (34 era mismatch, 21 off-width, 2 peer
+  metrics with no reference table, 1 bake not on disk). 0 `dial` blocks changed.
+* **Pre-registered expectation §6.1 was right, once decomposed.** The badge count
+  goes 63 → 75, but **21 of the +22 are NEWLY-GRADED cells that had no dial ruler at
+  all**; there is exactly **1 true up-flip** and **10 true down-flips**, i.e. a ruler
+  effect of **−9**. On the 93 as-run cells the count goes 46 → 42, reproducing gate
+  doc §17.7's 47 → 43 on a different code path.
+* **§6.2 confirmed:** `peer_ssim2` passes the CONTRACT tier and all five A7r codecs.
+* **§6.3 needs a correction, and it is registered.** §9 of the ladder record measured
+  shipped D failing jpeg — but under the **`distinct`** rule. Under the **operative
+  `resolvable`** rule the ADD156/D lineage passes **all five codecs**, and is the only
+  bake family on the board that does.
+* **§6.4 confirmed:** 34 of the 415 944-class cells are era-refused; the other 381 are
+  admitted because 359 are provably immune (`uses_f156_371 == false`) and 22 are
+  already pools-era.
+* **§6.5: the `--select` pick does NOT move** — `11e243eb0b86`
+  (`fc2_372_S228_H128_s4004/5/6`) under all three `--gaddr-block` modes. 10 fair cells
+  change selectability, all `NO → yes`, because their C2 genuinely passes on the
+  operative instrument.
+* **One finding not anticipated:** the switch is **directional per row, not uniformly
+  stricter** — C1 (monotonicity over adjacent settings) gets harder on a floor-dense
+  grid while C2 (ceiling-clamp share) gets easier.

@@ -2480,6 +2480,52 @@
    "evidence": "benchmarks/select_gaddr_prefilter_2026-09-06.md",
    "date": "2026-09-06",
    "fix_path": "none — this IS the fix. Re-run any historical --select report that matters with the new default (--floor-basis all) rather than trusting a pre-2026-09-06 selection."
+  },
+  {
+   "id": "dial-addressability-canonical-instrument-2026-09-06",
+   "kind": "annotated",
+   "fields": [
+    "dial.addressability",
+    "dial.min",
+    "dial.max",
+    "dial_gaddr_source"
+   ],
+   "scope": {
+    "present": "dial.addressability"
+   },
+   "reason": "This block is the CANONICAL-grid read and is NO LONGER the board's operative dial ruler. Since 2026-09-06 the operative instrument is the 2026-09-05 FLOOR-DENSE LADDER (`dial_ladder`): 9,593 distinct settings over FIVE codec families (both AVIF backends) against this grid's 4,424 over four, and the only instrument on which the operative `resolvable` A7r rule has a registered per-codec bar, on which jpeg's floor bar is REAL (0.5385/0.6667, against this grid's vacuous 0.0000 -- zenjpeg emits ONE bitstream for q 0..10, so its three lowest 'settings' here are one setting sampled three times), and on which the two-reference inversion rule is measurable at all (the canonical grids carry butteraugli-max only; the rule needs pnorm3). Every dial-addressability number published before 2026-09-06 -- including every A7r fraction, every per-codec floor state, and the NOT-SHIPPABLE badge derived from it -- is scoped to THIS instrument. Read a cell's two blocks DOWN, never across: a ladder fraction and a canonical fraction are different quantities on different cells. The block is NOT wrong and was NOT rewritten; it is a reading of a retired-era ruler.",
+   "evidence": "docs/PLAN_BOARD_LADDER_RULER_2026-09-06.md; benchmarks/board_ladder_ruler_2026-09-06.md; benchmarks/ladder_instrument_2026-09-05.md SS1/SS5/SS9; benchmarks/dial_addressability_gate_2026-09-04.md SS19",
+   "date": "2026-09-06",
+   "fix_path": "read `dial_ladder` instead (450 of 508 board cells carry one). A cell with no `dial_ladder` has no ladder-instrument reading and its canonical block is all there is -- state that, never silently compare it with a ladder-graded cell."
+  },
+  {
+   "id": "dial-ladder-not-measured-off-instrument-2026-09-06",
+   "kind": "absent-not-failed",
+   "fields": [
+    "dial_ladder"
+   ],
+   "scope": {
+    "missing": "dial_ladder"
+   },
+   "reason": "58 of 508 board cells have NO ladder-instrument reading, each for a RECORDED reason and none of them a failure: 34 are an ERA MISMATCH (the bake READS f156-371, which its own 944 instrument zeroes -- slot-set 026c0aba, 689 populated -- and the ladder-944 populates -- b6811ae0, 905 populated -- so grading it there would multiply live columns by weights that never took a gradient); 21 have a caller width the 2026-09-05 ladder was never built at (8x156, 8x720, 4x924, 1x504); 2 are reference metrics (peer_cvvdp, peer_iwssim) with no per-cell reference table on this instrument; and 1 (D_shipped@dguard2) names a bake inside a sibling jj workspace that no longer exists on disk. Absence is NOT MEASURED, never a pass and never a fail. Per-cell reasons: /mnt/v/output/zensim/ladder-board-2026-09-06/ladder_board_summary.tsv.",
+   "evidence": "scripts/gaddr_board_ladder.py; benchmarks/board_ladder_ruler_2026-09-06.md SS3",
+   "date": "2026-09-06",
+   "fix_path": "for the 34 era-mismatched cells, a pools-era ladder read requires either a ladder instrument built in their own feature set or a bake whose f156-371 weights are exactly zero; for the 21 off-width cells, a ladder instrument at that width; for D_shipped@dguard2, restore or re-point the bake."
+  },
+  {
+   "id": "a7r-floor-rule-operative-resolvable-not-distinct-2026-09-06",
+   "kind": "annotated",
+   "fields": [
+    "dial_ladder.measured.codec_floor",
+    "dial.addressability.measured.codec_floor"
+   ],
+   "scope": {
+    "present": "dial_ladder"
+   },
+   "reason": "A7r's per-codec fractions on the board are cut under the OPERATIVE `resolvable` rule (margin 0.5), whose mentor bars are avif-rav1e 0.6410 / avif-svt 1.0000 / jpeg 0.6667 / jxl 0.9615 / webp 1.0000 -- NOT the `distinct` bars (0.5385 / 1.0000 / 0.5385 / 0.9231 / 1.0000) that benchmarks/ladder_instrument_2026-09-05.md SS9-SS9.4 tabulates. The two are different quantities on the same cells and the difference changes verdicts: under `distinct` that record measured shipped Profile D FAILING jpeg by one ladder (0.5128 vs 0.5385); under `resolvable` the same ADD156/D lineage passes all five codecs (0.6667 / 1.0000 / 0.6667 / 1.0000 / 1.0000). Always read the `floor_rule` field beside the fraction.",
+   "evidence": "benchmarks/ladder_floor_resolution_2026-09-05.md; benchmarks/board_ladder_ruler_2026-09-06.md SS5; the registry's own grid_floor_representability rows carry both rules",
+   "date": "2026-09-06",
+   "fix_path": "none -- permanent caveat. Reproduce the `distinct` window with `scripts/gaddr_board_ladder.py grade --floor-rule distinct`."
   }
  ]
 }
