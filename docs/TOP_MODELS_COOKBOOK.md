@@ -159,6 +159,16 @@ anchor chain takes the contract 5/6 → 6/6 with rank bit-unchanged.
   non-degenerate cell measured (composite 0.8581, KonJND 0.4191 against the 228
   slice's 0.4543). So a KonJND gap in this class is **not** a compute gap, and
   widening the feature set is not the fix.
+* **And it is not slower.** Measured 2026-09-06, 8 cells × 10 starts on an idle
+  box: that candidate is **faster than `zensim_D` — Profile D through the
+  standard production path — in every cell** (max ratio 0.9733) and 3.73–3.97×
+  `fast_ssim2` at 1T. Its forward pass is **below the measurement's noise
+  floor**. So a fast-class MLP of this shape costs nothing against the shipped
+  additive head; do not trade rank away for a speed worry that is not there.
+* **Beware the W4 bar arm.** `add156_156basic` builds `V1PoolsMode::Off`, which
+  `fold_engine::pools_mode_for_need` never returns — and it is measurably
+  **slower** than the `Peaks` walk production actually runs (7.660 vs 6.280 ms
+  at capv3/1T/576²). Report against `zensim_D` as well as against the bar.
 * **The per-sample-α head inverts on this recipe** (raw CID22 −0.8921 at depth
   2 — a *better* ordering than the plain path, backwards), which is why its pack
   cannot fit a monotone spline. Everything gated behind that head
