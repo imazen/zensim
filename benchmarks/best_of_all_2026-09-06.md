@@ -440,6 +440,40 @@ masked/IW block `f228..f371` — all 144 of those columns are exactly zero.)*
 0.0004 of room, and the control had 0.019. And CID22 falls **0.89036 → 0.88161**
 at this seed. Both are single-seed readings; the k=3 numbers are what count.
 
+### 5.4 The instrument is validated against the shipped reference, end to end
+
+Shipped D put through the **identical** invocation this wave's arms use — same
+packed-bake path, same postC root, same floor-dense ladder grid, same pnorm3
+reference truth, same postC probes:
+
+```
+shipped D :: SHIPPABLE (regression PASS + contract PASS)
+  C1=pass(0.9946870683243013)  C2=pass(0.0)  C3=pass(0.9145)
+  C4=pass(-213.14861297607422) C5=pass(0.0)  C6=pass(0.0)  A7r=pass(0.0)
+  floors: rav1e 0.6667 · svt 1.0 · jpeg 0.6667 · jxl 1.0 · webp 1.0
+  inversion mono_agree=0.99469 single=0.99309 enc_attr=15 unknown=0
+```
+
+Every one of those reproduces `benchmarks/rev2_d_arms_2026-09-06.md` §12.3 and
+the mentor bars in `benchmarks/dial_addressability_floor_2026-09-04.json`. So the
+gate readings in this document are the same readings the shipped record was made
+with — verified rather than assumed, which is the only reason a candidate's
+numbers here mean anything.
+
+**The two-reference inversion bars, for reading the arms against:**
+
+| scorer | `mono_agree` | dial-attributed rate | encoder-attributed rungs |
+|---|--:|--:|--:|
+| shipped D | **0.99469** | 0.53 % | 15 |
+| `peer_ssim2` (the mentor) | 0.99160 | 0.84 % | 26 |
+| this lane's control `A_plain` (k=3) | 0.94868 / 0.94506 / 0.94432 | ~5.4 % | 15 / 16 / 15 |
+| `B_nonneg_s4004` | 0.93040 | 6.96 % | 13 |
+
+C1's bar is 0.93, so both pass it — but both are an order of magnitude worse
+than the shipped dial on the axis C1 measures, and **the architecture makes it
+worse, not better** (0.94868 → 0.93040 at the matched seed). That is the gap the
+ladder arms exist to close, and it is the honest reading of the cost so far.
+
 *(RESULTS — filled when the wave lands.)*
 
 ---
