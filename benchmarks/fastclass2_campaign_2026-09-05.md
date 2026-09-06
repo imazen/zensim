@@ -977,3 +977,38 @@ inference and labelled as such:
 `scripts/kernel_fastclass_sweep.sh --arms 156,15c --control 15c --sizes
 576,1152 --threads 1,8 --starts 15 --iters 7` for the walk half, which
 self-checks the load and skips rather than emitting a contaminated row).
+
+## 18. BOARD — 12 cells promoted onto both boards, and one graft the tool correctly REFUSED
+
+`promote_fulleval.py` (which relabels and annotates and recomputes no statistic)
+published 12 cells: `fc2_372_S228_H128_s400{4,5,6}` (the selected candidate),
+`fc2_372_S156_H32_s400{4,5,6}`, `fc2_944_S228_H32_s400{4,5,6}` and
+`fc2_944_ORACLE_s400{4,5,6}` (the compute-ceiling instrument). Both boards
+regenerated and both gate runs pass:
+
+* `summer_gauntlet_fair.html` — **142 of 479** bakes (VERIFIED-FAIR tier),
+  10,628 KB, under the 12 MB cap. All 12 new cells are in the FAIR tier.
+* `summer_gauntlet.html` — 479 of 479, 23,173 KB (over cap, per the
+  pre-existing documented policy).
+* `gauntlet_gates.sh` on both: `node --check` clean, DOM-shim render OK
+  (142 bakes / 15 sections / 21 tables / 422 rows / 8 svgs), failure panel 6/6
+  measured, compare-URL checks pass, `gate 3: 479 fulleval file(s) are
+  strict-valid JSON`.
+
+**`--graft-gaddr` refused every cell, and it was right to.** This campaign's
+G-ADDR reads are on the **floor-dense ladder** instrument; the board cells' dial
+blocks come from the canonical grid every other board row uses, and the tool
+compares the two before grafting:
+
+```
+graft-gaddr: fc2_372_S228_H128_s4006.fulleval.json: dial.mono_pct differs
+between the board (0.9659564613246874) and the G-ADDR read (0.9535649771543938)
+— the read was NOT taken on the board's dial grid; refusing
+```
+
+Re-verdicting the cells on the ladder grid to make the graft legal would put
+them on a *different* dial instrument from every neighbour, which is worse than
+having no G-ADDR badge. **So the board cells carry their canonical-grid dial and
+no G-ADDR block; the ladder grading lives in §14 of this record.** The refusal
+is the mechanism working — the same class of protection that made §3.2's
+wrong-regime reads visible.
