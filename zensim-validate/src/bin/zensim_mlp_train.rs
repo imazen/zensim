@@ -3787,7 +3787,7 @@ fn main() {
             args.nonneg_pin,
             args.target_scale,
             if args.nonneg_distance {
-                " — REDUNDANT under --nonneg-distance: raw(0) is the pin bit-exactly,                  so this group's squared error and gradient are exactly zero"
+                " — REDUNDANT under --nonneg-distance: raw(0) is the pin bit-exactly, so this group's squared error and gradient are exactly zero"
             } else {
                 ""
             }
