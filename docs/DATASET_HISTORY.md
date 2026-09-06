@@ -3353,3 +3353,39 @@ pinned probes. Every registered negtail/identity probe is 372-wide and
 all NOT MEASURED** — the entire contract tier. Score the PACKED bake (372 caller
 width via `Drop` transforms) and treat `densify` as a servability artifact.
 
+### The best-of-all wave's answer (appended 2026-09-06)
+
+27 cells, 9 arms, k=3, 0 failures. Record:
+[`benchmarks/best_of_all_2026-09-06.md`](../benchmarks/best_of_all_2026-09-06.md).
+
+**The dial contract is achievable in the weights, at a measured price.** C6 goes
+**1,642 → 0 on every seed while `tied` goes 0.0017 → 0.0000**, so the gate
+record's C2 ⊻ C6 either/or is dissolved rather than traded. Cost: **−0.0091
+CID22** pooled, **−0.0052** per-ref — the constraint hurts between-image scale
+more than the within-image ordering a dial walks.
+
+**A7r's null is narrower than a loss/architecture sweep suggests, and this is the
+part to carry forward.** It is unmoved by architecture, ladder loss and hinge
+weight. It **does** respond to floor-reaching training DATA: the isolating A/B
+(same architecture, hinge weight and band weights; differing only in whether the
+ladder pairs reach the encoders' true lowest settings) moves **4 of 5 codec
+floors** — `avif-svt` **+0.188**, `jpeg` +0.051, `jxl` +0.051, `webp` +0.026 —
+and the single non-mover is **`avif-rav1e`, the one codec the anchor set contains
+no ladders for**, which was pre-registered as a structural limit before the fit.
+None reaches its bar. **Direction right, quantity insufficient** at 32 references
+× 4 codecs; the named next lever is a larger, **rav1e-inclusive** anchor set.
+
+**Two rulings a future session needs.** `freeze_check --select` **cannot see the
+dial contract** — its floor set is
+`{bandtail, breadth, cid22, dial, dialrange, hfnl, konjnd, nonphoto}`, so it chose
+the CONTROL over four arms that take the contract from 4/6 to 6/6, on a CID22
+hair (registry `select-rule-blind-to-dial-contract-2026-09-06`). And
+`--nonneg-distance`'s identity pin is **conditional on zero-preserving feature
+transforms**; the canonical 372 screen's 28 positive-`lo` winsor guards break it
+(`raw(identity) = 99.6138`, not 100.0), so C6 = 0 is a measurement on 9,593 cells
+rather than a theorem (registry
+`nonneg-identity-pin-conditional-on-transforms-2026-09-06`).
+
+**Nothing shipped.** `zensim/weights/` and `ZensimProfile::D` are untouched; the
+ship rule failed on A7r **and** on a CI-clean KonJND regression (−0.06219).
+
