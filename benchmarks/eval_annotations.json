@@ -2451,7 +2451,7 @@
    "reason": "THE REGISTERED SELECTION RULE CANNOT SEE THE DIAL CONTRACT. `freeze_check --select`'s PRIMARY key is the profile floor count, and the `balanced-2026-08-04` floor set is {bandtail, breadth, cid22, dial, dialrange, hfnl, konjnd, nonphoto} — C5, C6 and A7r are NOT in it. MEASURED 2026-09-06 on the best-of-all wave (18 cells, k=3 x 6 arms): `--select --seed-group --min-k 2 --floor-basis all` chose `A_plain`, the CONTROL, at 8/8 floors, over four arms that take the G-ADDR contract from 4/6 to **6/6 on every seed**. The single floor every constrained arm misses is `cid22` — the architecture's measured -0.0091 CID22 cost is just enough to drop under that floor — while those same arms are STRICTLY BETTER on the `dial` floor the rule does score (mono 0.97128 vs 0.96457, tied 0.00000 vs 0.00718) and on `hfnl` (0.78433 vs 0.68263). So a model that fixes the dial contract scores identically to one that does not and loses on a CID22 hair. Read a `--select` verdict as 'best on the balanced profile', never as 'best ship candidate', until the floor set absorbs the contract.",
    "evidence": "benchmarks/best_of_all_2026-09-06.md 5.14; /mnt/v/output/zensim/best-of-all-2026-09-06/gates/select.txt",
    "date": "2026-09-06",
-   "fix_path": "add C5/C6/A7r (or a single `contract` floor) to the balanced profile's floor set, then re-run --select; until then the contract must be read beside the selection, not from it"
+   "fix_path": "FIXED 2026-09-06 (see benchmarks/select_gaddr_prefilter_2026-09-06.md and the superseding entry select-rule-contract-prefilter-fixed-2026-09-06): `freeze_check --select` now hard-vetoes any candidate/seed-group with a MEASURED G-ADDR CONTRACT-tier (C1-C6) fail, and folds A7r's per-codec floor-representability into `--floor-basis all`'s floor count. `--floor-basis legacy` reproduces this entry's original (pre-fix) rule byte-for-byte, for reproduction only."
   },
   {
    "id": "nonneg-identity-pin-conditional-on-transforms-2026-09-06",
@@ -2466,6 +2466,20 @@
    "evidence": "benchmarks/best_of_all_2026-09-06.md 2.4; commit 06fba7b4",
    "date": "2026-09-06",
    "fix_path": "re-screen the transforms as zero-preserving (lo = 0), or pin the architecture at t(0-vector) instead of the zero vector; either makes the identity half structural again"
+  },
+  {
+   "id": "select-rule-contract-prefilter-fixed-2026-09-06",
+   "kind": "annotated",
+   "fields": [
+    "gates"
+   ],
+   "scope": {
+    "manual": "documentation-only: applies to every `freeze_check --select` verdict produced from this commit onward. The floor set is a property of the PROFILE, not of any fulleval field, so no machine predicate can select affected cells."
+   },
+   "reason": "SUPERSEDES select-rule-blind-to-dial-contract-2026-09-06 (never edited in place; the registry is append-only). `freeze_check --select` now reads the candidate's OWN `dial.addressability` block (never recomputed) and applies TWO additive changes: (1) a MEASURED G-ADDR CONTRACT-tier (C1-C6) fail is an absolute selectability VETO, independent of floor count or `selection_composite` — a seed group is vetoed when ANY member measures a fail; a NOT MEASURED contract row is never a fail (absence is not evidence of failure, same rule as an unmeasured M3a); (2) `A7r`'s per-codec floor-representability breakdown becomes one MORE floor per MEASURED codec under `--floor-basis all` (a `not_measured` codec counts in neither direction). `--floor-basis legacy` reproduces the pre-fix rule byte-for-byte (audit/reproduction only); `--floor-basis mean` keeps the veto (a product-safety gate, not a floor-counting convention) but not the A7r extension. Re-ran `--select --seed-group --min-k 2 --floor-basis all` over the best-of-all wave's 27 verdicts: a demonstration merge of each cell's sibling ladder-instrument gaddr JSON (the board's own `dial.addressability` carries no usable contract reading for this wave — a DATA-availability fact, not a defect) flips the pick from `A_plain` (contract 4/6) to `F_nonneg32` (contract 6/6), with all 9 A_plain/E_plainlad/G_anchorlad cells reported NOT SELECTABLE. Re-ran over the 125-cell VERIFIED-FAIR board: the current #1 winner is unchanged (already contract-clean), and 9 lower-ranked recipes (of 50 that carry a measured contract fail among the 125) flip from selectable to NOT SELECTABLE. Failing-first test `gaddr_contract_veto_blocks_a_higher_composite_seed_group` (verified to fail with the veto stubbed out); 39/39 freeze_check tests green.",
+   "evidence": "benchmarks/select_gaddr_prefilter_2026-09-06.md",
+   "date": "2026-09-06",
+   "fix_path": "none — this IS the fix. Re-run any historical --select report that matters with the new default (--floor-basis all) rather than trusting a pre-2026-09-06 selection."
   }
  ]
 }

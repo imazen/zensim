@@ -1165,6 +1165,19 @@ Commits `555b1a48`..`aa5576f4`. Bakes: `/mnt/v/output/zensim/bakes/coherent-089/
   penalized; UNMEASURED is listed but **not selectable**. M3a comes free with
   `harvest_bakes.sh` (27 cells, **66 s/bake** measured); a missing one drops a `.NO_M3A`
   marker. Registered: campaign appendix E.4; workflow: `docs/WAVE_PLAYBOOK.md` step 6.
+  **⚠ AMENDED 2026-09-06 (owner fix, `benchmarks/select_gaddr_prefilter_2026-09-06.md`,
+  registry `select-rule-blind-to-dial-contract-2026-09-06`): PRIMARY + TIE-BREAK were BOTH
+  blind to the G-ADDR dial-addressability CONTRACT tier** — measured on the best-of-all wave
+  picking a CONTROL arm at G-ADDR contract 4/6 over arms at 6/6, because a floor count and a
+  composite have no way to see `dial.addressability` at all. Fixed: a candidate (or, under
+  `--seed-group`, any group with one member) that MEASURES a G-ADDR CONTRACT-tier (C1-C6)
+  fail is now an ABSOLUTE selectability veto, independent of floor count or composite —
+  dial addressability is a HARD ship gate (user rule 2026-09-04), not one more floor a high
+  CID22 can outvote. `--floor-basis all` (default) also folds `A7r`'s per-codec
+  representability into the floor count itself; `--floor-basis legacy` reproduces the
+  pre-2026-09-06 rule byte-for-byte (audit/reproduction only, never for a real selection).
+  Failing-first test + before/after re-runs (best-of-all wave + the 125-cell VERIFIED-FAIR
+  board) in the linked doc.
 - Corruption ordering breaks at 924 in ALL arms (0.03-0.17 vs 0.214@720); occlusion blamed
   DET/ART_DEV2 but **masked RETRAIN does not recover (occlusion≠ablation)** — distributional;
   mitigate with the corruption HEAD (negrich_924), not the dial.

@@ -48,6 +48,36 @@ on the supported surface, and `#[doc(hidden)] feature_set_id::registered_layout_
 (the candidate clip-width list a layout-free id is reconstructed against; not the
 supported surface).
 
+### Fixed — `freeze_check --select`'s PRIMARY/TIE-BREAK were blind to the G-ADDR dial-addressability CONTRACT tier (2026-09-06)
+
+The best-of-all wave measured `--select --seed-group --min-k 2 --floor-basis all` picking
+`A_plain` (G-ADDR CONTRACT 4/6, fails C5+C6) over five arms at 6/6, because the profile floor
+count and `selection_composite` tie-break have no way to see `dial.addressability` at all
+(registry `select-rule-blind-to-dial-contract-2026-09-06`).
+
+- A candidate (or, under `--seed-group`, any group with one member) that MEASURES a G-ADDR
+  CONTRACT-tier (`C1`-`C6`) fail is now an absolute selectability VETO, independent of floor
+  count or composite — dial addressability is a HARD ship gate (user rule 2026-09-04), not a
+  floor a high CID22 can outvote. A `NOT MEASURED` contract row is never a fail. Vetoed
+  candidates are listed under their own "contract FAIL — not selectable" heading, naming the
+  failing rows.
+- `A7r`'s per-codec floor-representability breakdown becomes one MORE floor per MEASURED
+  codec, folded into `--floor-basis all`'s count (a `not_measured` codec counts in neither
+  direction); the seed-group credit uses the SAME all-reps discipline as the existing F1-F8
+  intersection.
+- New `--floor-basis legacy` reproduces the pre-2026-09-06 `all` rule byte-for-byte — an
+  audit/reproduction escape hatch, never for a real selection. `--floor-basis mean` keeps the
+  veto (a product-safety gate, not a floor-counting convention) but not the `A7r` extension.
+
+Failing-first test `gaddr_contract_veto_blocks_a_higher_composite_seed_group` (verified to
+fail with the veto stubbed out); 4 new tests, 35 pre-existing unchanged, 39/39 green. Re-ran
+over the best-of-all wave (demonstration merge of the ladder-instrument G-ADDR data: pick
+flips `A_plain` → `F_nonneg32`, contract 4/6 → 6/6) and the 125-cell VERIFIED-FAIR board (9
+lower-ranked recipes flip `selectable: yes` → `NOT SELECTABLE`; the current #1 winner was
+already contract-clean, so it is unchanged). Full record:
+`benchmarks/select_gaddr_prefilter_2026-09-06.md`. (`fix(select): G-ADDR CONTRACT tier is a
+hard pre-filter in freeze_check --select`, `dc9af13a`)
+
 ### Fixed — output polarity had no owner: 1 of 8 loss sites knew which convention was in force (2026-09-06)
 
 `mlp_train` has always had two incompatible readings of what its single scalar

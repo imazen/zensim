@@ -36,6 +36,32 @@ Operational notes (learned the hard way — see `benchmarks/rd_probe_results_202
   numbers improve (fewer passes) after re-seeding, but equal-quality byte comparisons are
   unaffected (same tables for every candidate).
 
+## G-DIAL vs G-ADDR — and the cross-bake selection rule (2026-09-06)
+
+**G-DIAL asks "monotone calibrated dial on the standard grid?"; it does NOT ask "does the
+dial reach the floor and ceiling a codec loop needs?"** That second question is G-ADDR
+(`bake_verdict`'s dial-addressability gate, owner `zensim-validate/src/dial_addressability.rs`;
+full spec `benchmarks/dial_addressability_gate_2026-09-04.md`): a REGRESSION tier (bars = the
+reference metric's own end-of-range behaviour) and an absolute CONTRACT tier (C1-C6 —
+identity in-band, nothing scores above a perfect copy, the negative tail works, per-codec
+floors resolve). **Per user rule 2026-09-04, dial addressability is a HARD ship gate — "any
+model that limits dial range cannot ship" — independent of this scorecard's five gates.** A
+bake can pass G-RANK/G-DIAL/G-STEER/G-RD/G-TARGET and still fail G-ADDR's CONTRACT tier (the
+shipped SDR dial itself fails two of six contract rows).
+
+**This scorecard exams ONE bake at a time; `freeze_check --select` is the rule that compares
+MANY.** Until 2026-09-06, `--select`'s PRIMARY (profile floor count) and TIE-BREAK
+(`selection_composite`) were completely blind to `dial.addressability` — measured on the
+best-of-all wave picking a CONTROL arm at G-ADDR contract 4/6 over arms at 6/6, because
+neither key can see a contract failure. **Fixed at the owner**: a candidate (or seed group)
+that MEASURES a G-ADDR CONTRACT-tier fail is now an absolute selectability veto in
+`--select`, and `A7r`'s per-codec floor-representability folds into `--floor-basis all`'s
+floor count. `--floor-basis legacy` reproduces the pre-fix rule byte-for-byte, audit only.
+Full record + before/after re-runs: `benchmarks/select_gaddr_prefilter_2026-09-06.md`. **A
+ship candidate takes BOTH exams** — this scorecard's five gates, AND a clean (or at least
+non-vetoing) G-ADDR CONTRACT tier — and `--select` now enforces the second automatically
+instead of silently ignoring it.
+
 ## Tuning with the scorecard (not just picking)
 
 G-RD/G-TARGET are objectives, not only gates: recipe/blend iterations can be selected by

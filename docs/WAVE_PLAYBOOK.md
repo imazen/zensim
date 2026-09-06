@@ -164,6 +164,22 @@ ranking script):
 - **TIE-BREAK: `balanced_composite + 0.15 · M3a`.** Registered in the sota944
   campaign doc appendix E.4. 0.15 is the same weight class
   `balanced_composite` already gives csiq/live/band-tail.
+- **G-ADDR CONTRACT PRE-FILTER (2026-09-06 owner fix, `benchmarks/select_gaddr_prefilter_2026-09-06.md`,
+  registry `select-rule-blind-to-dial-contract-2026-09-06`).** PRIMARY and TIE-BREAK are BOTH
+  blind to `dial.addressability` — the best-of-all wave measured this pick `A_plain`
+  (G-ADDR CONTRACT 4/6, fails C5+C6) over five arms at 6/6, because a floor count and a
+  composite have no way to see a contract failure. Fixed at the owner: any candidate (or,
+  under `--seed-group`, any GROUP with one member) that MEASURES a G-ADDR CONTRACT-tier
+  (C1-C6) fail is now an absolute selectability VETO, independent of floor count or
+  composite — listed under its own "contract FAIL — not selectable" heading, never silently
+  ranked in. `--floor-basis all` (default) also folds `A7r`'s per-codec floor-representability
+  into the floor count itself (one more floor per MEASURED codec — a `not_measured` codec
+  counts in neither direction). `--floor-basis legacy` reproduces the PRE-2026-09-06 rule
+  byte-for-byte (no veto, no A7r floors) — an audit/reproduction escape hatch ONLY, never for
+  a real selection; `--floor-basis mean` keeps the veto (a product-safety gate, not a
+  floor-counting convention) but not the A7r extension. **Dial addressability is a HARD ship
+  gate (user rule 2026-09-04) — a `--select` pick that fails it was never a valid selection,
+  regardless of how it scored on rank + dial + coherence.**
 - **Why M3a is in the rule at all:** the coherence study (n = 50,
   pre-registered) measured that **42.3 % of 944-class M3a variance is seed
   noise at fixed recipe** — at fixed data, recipe and width, `C_co3a` k = 6
@@ -196,15 +212,20 @@ ranked in its own section, with the reason printed, and **never selected**.
   never hidden) and `**SELECTED:**` names a **RECIPE**, not a cell — naming the
   group's best member would be the very best-of-k pick the floor removes. The
   per-cell table is unchanged and now says `**BEST CELL:**`.
-- **Floor basis `all` (default): floors EVERY seed passes.** A group is
-  credited a floor only when every distinct-seed representative clears it, and
-  the report names the `split floors` (passed by some seeds, not all). A floor
-  is a certification and a mean is not one — two members at 8/8 and 6/8 average
+- **Floor basis `all` (default): floors EVERY seed passes, PLUS (2026-09-06) the
+  `A7r` per-codec G-ADDR floors and the CONTRACT veto.** A group is credited a
+  floor only when every distinct-seed representative clears it, and the report
+  names the `split floors` (passed by some seeds, not all). A floor is a
+  certification and a mean is not one — two members at 8/8 and 6/8 average
   7.0 even when they fail *different* floors. `--floor-basis mean` restores the
-  k-seed mean count; the mean is reported either way.
+  k-seed mean count (F1-F8 only — the CONTRACT veto still applies); the mean
+  is reported either way.
 - **Reproducing a historical selection:** `--min-k 1 --floor-basis mean` is the
   pre-amendment rule exactly (verified: same 34 rows, same order, same values,
-  same winner on the 113 combined-fair cells).
+  same winner on the 113 combined-fair cells). `--floor-basis legacy`
+  additionally reproduces the pre-2026-09-06 G-ADDR-blind rule byte-for-byte
+  (no CONTRACT veto, no A7r floors) — an audit escape hatch, never for a real
+  selection.
 - **The remedy for an UNREPLICATED front-runner is another seed, not a lower
   floor.** Re-run the same recipe with a new seed and re-harvest.
 
