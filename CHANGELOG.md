@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### Fixed — `--coarse-decay` was a silent no-op on the per-sample-α head (2026-09-05)
+
+- `--coarse-decay` / `--coarse-l2-mult` are applied by
+  `apply_post_adam_penalties`, which is called at seven sites, **all** inside
+  `train_mlp_strategy`'s plain loop; `train_mlp_per_sample_alpha_head` never
+  calls it. `--group-l1`, the other rider of the same function, had been guarded
+  against exactly this since it landed. A run that set `--coarse-decay` **with**
+  `--per-sample-alpha-head` therefore produced a bake byte-identical to one that
+  never set it, while its embedded `zentrain.repro` argv claimed the
+  regularizer. Now `coarse_decay_unsupported_flag` fails loud on `--pool-head`,
+  `--hybrid-head`, `--per-sample-alpha-head` and `--gpu-runtime`; the default
+  plain-path case is pinned as still allowed by a test, because every
+  fast-class and 944-class recipe in this repo passes `--coarse-decay 1e-5`
+  there (`benchmarks/fastclass2_campaign_2026-09-05.md` §4).
+
+### Changed — `bake_dial_refit pack` names the CAUSE of a collapsed spline (2026-09-05)
+
+- A one-knot spline fit almost never means "the anchor is too small"; it means
+  the packed network is **anti-correlated** with the anchor, and the output
+  spline is monotone increasing by construction. `pack`'s error now reports the
+  Pearson correlation and says so, with distinct branches for `r < 0` (the model
+  ranks backwards — score the RAW bake; if `|SROCC|` is healthy only the sign is
+  wrong), `r ≥ 0` (a degenerate prediction range) and undefined `r`. Verified to
+  reproduce the pack's own printed `corr = −0.8350` on the bake that motivated
+  it (`benchmarks/fastclass2_campaign_2026-09-05.md` §11).
+
+### Added — `zensim/examples/serve_custom_bake.rs` (2026-09-05)
+
+- Loads an arbitrary ZNPR through `ZensimProfile::Custom` and scores a real pair
+  through the **production** `Zensim::compute`, so "is this candidate servable?"
+  is a measurement rather than an inference from reading `profile.rs`. Requires
+  `custom-profiles,candidate-profiles`.
+
+### Added — feature-set registrations for the fast class (2026-09-05)
+
+- `basic+peaks@w944/era2r4` (228, `3fb78648`),
+  `basic+peaks+moments@w944/era2r4#0b476506` (261 — the identity-clean READER
+  subset of its own producer, sharing its handle and differing in hash, which is
+  the designed "the name is a handle, the hash is the identity" case),
+  `basic@w944/era2r4#3ffe8670`, `basic+peaks@w372/v1pre`, `basic@w372/v1pre`,
+  and the root `canonical-2026-05-21/train`. New reader slice
+  `scripts/sota944/slice_basic156_free_nolumaref.txt` (261 = 265 minus the four
+  `LUMA_MEAN_REF` slots, the only reference-absolute statistics in the free set
+  and the whole of the fast class's identity contamination above 4.8e-3).
+
 ### Added — the FEATURE SYSTEM: a definition registry, an extraction plan, and universal servability (2026-09-05, user directive)
 
 - **USER DIRECTIVE, verbatim:** *"can you refactor all of that into something to
