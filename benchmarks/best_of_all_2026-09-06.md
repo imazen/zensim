@@ -822,7 +822,43 @@ not, and loses on a CID22 hair. That is not a defect in this lane's arms — it 
 a **gap in the selection rule**, and it is worth registering: the rule was written
 before the G-ADDR contract existed as a gate, and it never absorbed it.
 
-*(RESULTS — the anchor-ladder arm, plan §9, pending.)*
+### 5.15 First anchor-ladder cell — the floors DO respond to floor-reaching data
+
+`G_anchorlad_s4004` (plain net + the anchor group's floor-reaching ladders,
+`--tv-weight 2.0`, band 3 = the floor window at 31.4 % of the ladder gradient):
+
+| | `A_plain_s4004` | `E_plainlad_s4004` (ladder, no anchor) | **`G_anchorlad_s4004`** |
+|---|--:|--:|--:|
+| `mono` | 0.94868 | 0.95431 | **0.96100** |
+| C6 (cells above identity) | 1,642 | 1,539 | **102** |
+| avif-rav1e | 0.1538 | 0.2564 | 0.1538 |
+| avif-svt | 0.8205 | 0.7436 | **0.9231** |
+| jpeg | 0.5641 | 0.6154 | 0.5897 |
+| jxl | 0.3846 | 0.4231 | **0.4615** |
+| webp | 0.9744 | 0.9744 | 0.9487 |
+| CID22 | 0.89036 | — | 0.88474 |
+
+**The hypothesis has real support.** Floor-reaching training ladders move the
+things §5.11 said were immovable:
+
+- **`mono` reaches 0.96100** — the best in the entire wave, above every ladder
+  arm and every constrained arm.
+- **C6 falls 1,642 → 102** on a net with NO architectural constraint. A 94 %
+  reduction from data alone, where the loss alone managed 6 %.
+- **avif-svt 0.8205 → 0.9231** against a 1.0000 bar, and **jxl 0.3846 → 0.4615**
+  against 0.9615.
+- CID22 costs only **0.0056**.
+
+**And the pre-registered limit holds exactly as written.** `avif-rav1e` is
+**0.1538 — bit-identical to the control**, because the anchor set contains no
+rav1e ladders. §9 said this arm structurally cannot move rav1e and that a rav1e
+failure would not be evidence against the hypothesis; it did not move, and it is
+not.
+
+**A7r is still 5 of 5**, because "moved a lot" is not "reached the bar": svt is
+0.077 short of 1.0, jpeg 0.077 short of 0.6667, jxl 0.500 short of 0.9615.
+
+*(RESULTS — the anchor arms at k=3, and `H_anchorlad` vs `D_lad20`, pending.)*
 
 ---
 
