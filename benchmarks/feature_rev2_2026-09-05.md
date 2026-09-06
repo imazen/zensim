@@ -269,3 +269,142 @@ A rev2 wave needs a new **tag** on the canonical package.
   "byte-identical" is not "same speed".
 * The recalculation (§3) and the refit/re-verdict at rev2.
 * **F12** (the `mu` scalar-tail ulp split) — untouched.
+
+---
+
+# 11. F17 — an unbounded feature that FIRES on real corpora
+
+*(Numbered 11 to match the pre-registration it answers,
+[`../docs/PLAN_FEATURE_REV2_2026-09-05.md`](../docs/PLAN_FEATURE_REV2_2026-09-05.md)
+§11, rather than following this document's own §4. Sections 0–4 above are F4 and
+F5; nothing here revises them.)*
+
+R6 §9 of [`f4_arm_decision_2026-09-05.md`](f4_arm_decision_2026-09-05.md)
+reported, and deliberately did not fix, a slot family that is unbounded by
+exactly F4's mechanism and is **not** F4. This lane registers it as **F17**,
+gives it an owner, and decides its form by the R6 protocol.
+
+## 11.1 The defect, and why only one member of three has it
+
+```text
+var_loss     = max(0, 1 - var_dst/var_src)    numerator max(0, src-dst) <= denominator  ⇒ [0, 1]
+tex_loss     = max(0, 1 - mad_dst/mad_src)    same, L1                                  ⇒ [0, 1]
+contrast_inc = max(0, var_dst/var_src - 1)    numerator max(0, dst-src) UNBOUNDED by it
+```
+
+All three divide by the **source** term. That bounds the two `loss` members
+structurally and bounds nothing for the `gain` member. The `var_src > 1e-10`
+gate is a **threshold, not a stabiliser**: it decides *whether* to divide, never
+*what* to divide by. A flat source past the gate against a distorted region
+carrying real HF is all it takes.
+
+The crate already owns the repaired idea one block over — v2's `HF_GAIN` is
+`bounded_excess_pair(hf_dst², hf_src², C_HF)` for the same quantity in the same
+units. **F17 is not a missing idea; it is one block that did not use it.** Three
+hand-copies carried it (`streaming.rs` buffered finalize, `feature_v2.rs` fold
+finalize, `attribution.rs` finalize mirror), which is the "a form with N owners
+cannot be revised" position `ssim_form` exists to end;
+[`zensim/src/hf_gain_form.rs`](../zensim/src/hf_gain_form.rs) is now the owner.
+
+## 11.2 Blast radius and severity — MEASURED on 216,756 real pairs
+
+Twelve slots at every registered width (`basic` block-local 12 × 4 scales × 3
+channels): **f12 f25 f38 f51 f64 f77 f90 f103 f116 f129 f142 f155**. Unlike F4,
+the count does not vary with pool state — `contrast_inc` is a basic slot and
+every layout keeps the basic block.
+
+Scanning all 372 slots of R6's revision-1 tables
+(`scripts/r6b_audit_slots.py`, artefacts under `…/r6b/slot_audit_rev1.tsv`):
+
+| leg | n | max `var_loss` | max `tex_loss` | max `contrast_inc` | rows with a cell > 100 |
+|---|--:|--:|--:|--:|--:|
+| safesyn | 196,086 | 1.000000 | 1.000000 | **36,465.74** | 63 |
+| LIVE | 779 | 0.999329 | 0.981655 | **3,598.21** | 60 |
+| TID | 3,000 | 1.000000 | 0.999999 | **927.91** | 73 |
+| KADID | 10,125 | 1.000000 | 1.000000 | **618.28** | 88 |
+| CSIQ | 866 | 1.000000 | 0.999999 | **163.13** | 5 |
+| KonJND | 1,008 | 1.000000 | 0.999601 | 6.24 | 0 |
+| CID22 | 4,292 | 0.972878 | 0.845740 | 3.72 | 0 |
+| AIC-3 | 600 | 0.768070 | 0.640974 | 0.62 | 0 |
+
+**The twelve `contrast_inc` slots are the top twelve of all 372 by maximum. The
+thirteenth is `peaks_ssim_max_s0_Y` at 1.972.** The population separates with no
+overlap — this is not a tail judgement, it is a partition. Against the gold
+photographic holdout's own p99.9 over those slots (CID22, **0.34687**) the worst
+value is **×105,124**.
+
+Pooled over 2,601,072 `contrast_inc` cells: **2.59 %** exceed 1, 0.30 % exceed
+10, **0.0198 %** exceed 100, 0.0012 % exceed 1,000. Nonzero on 12.1 % (CID22) to
+52.1 % (KADID) of cells.
+
+**F17 is not F4's shape.** F4's 5,814,302 belongs to a bigcodec sweep with no
+local pixels and moves **zero** of these 216,756 rows; F17 fires on five
+distortion corpora and on the training leg. On every corpus this box has pixels
+for, *the unbounded value that actually occurs is F17's.*
+
+A useful consequence, verified rather than assumed: the ratio
+`r = var_dst/var_src` is EXACTLY recoverable from any stored revision-1 table as
+`1 + contrast_inc − var_loss`, because one of the two is always zero —
+**0 of 2,601,072 cells have both positive**. Three of the five arms are
+therefore auditable on tables that already exist (§11.6, CB5).
+
+## 11.3 Per-bake exposure — and the mitigation misses the SDR default again
+
+`bake_block_profile`'s read set ∩ the twelve slots, with each bake's transform
+classified from its own `zentrain.feature_transforms`
+(`scripts/r6b_exposure.py`):
+
+| shipped bake | reads | F17 read | BOUNDED | COMPRESSING | RAW | worst measured max on a non-bounded slot |
+|---|--:|--:|--:|--:|--:|--:|
+| **D** `d_sdr_add156_id100_negrich` (the SDR default) | 28 | 2 | 0 | 0 | **2** | **2,127** (f155; f116 = 1,380) |
+| **CHdr** `c_hdr_l1t1944` | 697 | 12 | 0 | 0 | **12** | **36,466** |
+| **C** `c_sdr_purity944` | 667 | 12 | 10 | 1 | 1 | 3,430 (f38 `signed_cbrt`), 43.3 (f25 raw) |
+| **BHdr** `bhdr_linear_shaped_cvvdpmix` | 133 | 6 | 4 | 2 | 0 | 36,466 (f129 `yeo_johnson`) |
+| **A** `v47_strict_qat_native` | 285 | 7 | **7** | 0 | 0 | — |
+| **B** `b_sdr_linear_cid80_inclwinsor` | 95 | 6 | **6** | 0 | 0 | — |
+
+R6 found that F4's "the winsor guard already clamps it" mitigation covers
+Profile B only. **F17 repeats it and is worse:** A and B are fully guarded on
+their F17 slots, **D and CHdr are not guarded at all**, and D — today's SDR
+default — carries no `feature_transforms` block whatsoever. It reads two slots
+whose measured maxima on real corpora are 1,380 and 2,127 into a 28-input
+monotone linear head, unclamped.
+
+**So a bake-side transform cannot be the answer to F17.** It is exactly what is
+already deployed, and exactly what the default does not have. (`signed_cbrt` and
+`yeo_johnson` compress — 3,430 → 15.1 under a cube root — but neither bounds.)
+
+## 11.4 Sibling audit — the whole feature surface, once
+
+| # | site | form | bounded? | measured max | joins the fix? |
+|---|---|---|---|--:|---|
+| 1 | v1 `contrast_inc` ×3 copies | `max(0, a/b − 1)` | **NO** | **36,465.74** | **YES — F17** |
+| 2 | v1 `var_loss` | `max(0, 1 − a/b)` | yes, `[0,1]` | 1.000000 | no |
+| 3 | v1 `tex_loss` | `max(0, 1 − a/b)` L1 | yes, `[0,1]` | 1.000000 | no |
+| 4 | v2 `HF_GAIN` / `HF_LOSS` / `HF_MAG_LOSS` | `bounded_excess(·,·,C_HF)` + `clamp01` | yes | n/a at 372 | no — it is the MODEL |
+| 5 | v2 `GMS`, `EDGE_WIDTH_CHANGE` | `1 − bounded_sim(·,·,C)` | yes, `[0,1)` | n/a at 372 | no |
+| 6 | v2 `RINGING` | `saturate·saturate·(1−saturate)` | yes, `[0,1)` | n/a at 372 | no |
+| 7 | v2 `BANDING` | `bounded_excess·(1−saturate)` | yes, `[0,1)` | n/a at 372 | no |
+| 8 | v2, remaining 23 slots | `clamp01` / `clamp02` / `saturate` | yes | n/a at 372 | no |
+| 9 | append 17 slots (`GLOBAL_*`, `LUM_*`, …) | `clamp01` / `clamp(0,2)` / `saturate` | yes | n/a at 372 | no |
+| 10 | CSFW `W_GLOBAL_*` | `saturate` / `bounded_excess_pair` + `clamp01` | yes | n/a at 372 | no |
+| 11 | CSFW `gvar{1,2}_w = Σws²/Σw − wmean²` | F5's cancellation form, **output bounded** | output yes | n/a at 372 | **no — reported** |
+| 12 | v1 peaks `ssim_max` / `ssim_l8` | F4's per-pixel `d`, pooled | F4's problem | 1.972 | no — F4 owns it |
+| 13 | diffmap `f = n/Σw` (masked/IW) | guarded `Σw > 1e-12` | not a feature | — | no |
+
+Rows 4–11 are bounded **by construction** — every one goes through `clamp01`,
+`clamp02`, `saturate`, `bounded_excess` or `bounded_sim`. Row 1 is the only
+place in the crate that spells `max(0, a/b − 1)` where `bounded_excess(a, b, c)`
+is the family's own owner for the same quantity, and the only slot in the
+372-wide surface that exceeds a photographic p99.9 by more than 100× — it
+exceeds it by 105,124×, while every other slot tops out at 1.972.
+
+**Row 11, reported and NOT fixed, with the reason stated so it is not mistaken
+for an oversight.** `finish_csfw` carries the identical
+catastrophic-cancellation form F5 names (`Σws²/Σw − wmean²`), and revision 2's
+`paired_global_contrast` remedy is wired to `global_stats_from_raw_moments`
+ONLY — it does not reach the CSFW twin. But CSFW's output passes through
+`bounded_excess_pair` + `clamp01`, so it is a PRECISION defect with a bounded
+output rather than an unboundedness defect, and it has no second route to be
+skewed against, so F5's parity framing does not apply. Registered here as an
+open observation for the F5 lane; no arm, no gate in R6b.
