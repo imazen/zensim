@@ -797,6 +797,7 @@ postC negative-tail probe:
 | **C6** no cell out-scores identity | 0 | **1,642 of 9,593 (17.1 %)** | **FAIL** |
 | **A7r** floor representability | 0 codecs below mentor | **5 of 5** (avif-rav1e 0.1795, avif-svt 0.8205, jpeg 0.5641, jxl 0.3846, webp 0.9744) | **FAIL** |
 | rank ≥ today's D on CID22 | ≥ 0.8633 | **0.8896** | **PASS** (+0.0263) |
+| **W4** speed (§17, measured 2026-09-06) | ≤ 1.25× the 156 walk, 1T **and** 8T | **1.2202** max vs the bar arm; **0.9733** max vs `zensim_D` | **PASS** |
 
 **C5 and C6 are the registered either/or, and it is a WEIGHTS defect.** At 372
 the identity feature vector is **exactly zero** (measured: 0 of 372 slots
@@ -819,10 +820,12 @@ and still does not pass.
 
 ### INSTALL DECISION: **PROPOSE. Do not install.**
 
-The registered ship rule (plan §8) requires **all four** clauses; clause 1
-(contract 6/6 **and** resolvable floors on all 5 codecs) fails on three rows,
-every one of them a weights property that no packaging step can reach. Clause 2
-passes by a wide margin. `ZensimProfile::D`, `zensim/weights/`, `profile.rs` and
+The registered ship rule (plan §8) requires **all four** clauses. **Clauses 2
+and 3 now both pass** — rank by +0.0263 CID22 over shipped D, and W4 with the
+candidate measured *faster than shipped D in all 8 cells* (§17). **Clause 1
+fails on three rows**, every one of them a weights property that no packaging
+step can reach, so the decision is unchanged and is now unambiguous about
+where the blocker is: it is not rank, and it is not speed. `ZensimProfile::D`, `zensim/weights/`, `profile.rs` and
 the manifests are **untouched by this campaign**.
 
 **What is being proposed instead**, with everything needed to act on it:
@@ -830,7 +833,9 @@ the manifests are **untouched by this campaign**.
 * **`S372_S228_H128_p`** — 372-layout, 228-slice, `--hidden 128`, 37,923 B
   packed, servable through `Zensim::compute` today. Rank: composite 0.8732 /
   CID22 0.8896 / KonJND 0.4999 at k=3, clearing all three era-closed 944-leader
-  bars and beating shipped D's CID22 by **+0.0263**.
+  bars and beating shipped D's CID22 by **+0.0263** — **and it is faster than
+  shipped D on every measured cell** (§17), so the proposal costs nothing on
+  either of the two axes a reviewer would check first.
 * **The blocker is one quantity with two faces** — `raw(0⃗)` is not the model's
   maximum, which is C5+C6, and the bottom of each codec ladder is mis-ordered,
   which is A7r. Both are ordering properties of the weights.
