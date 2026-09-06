@@ -878,6 +878,33 @@ not.
 **A7r is still 5 of 5**, because "moved a lot" is not "reached the bar": svt is
 0.077 short of 1.0, jpeg 0.077 short of 0.6667, jxl 0.500 short of 0.9615.
 
+#### ⛔ At k = 3 the floor picture is MIXED, and the single-seed read above was too generous
+
+`G_anchorlad` over all three seeds, against the two arms it should be compared to:
+
+| | `mono` | spread | C6 (mean) | rav1e | svt | jpeg | jxl | webp |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| `A_plain` | 0.94602 | 0.00436 | 1,491 | 0.1538 | 0.7778 | 0.5470 | 0.4231 | 0.9658 |
+| `E_plainlad` | 0.95201 | 0.00383 | 513 | 0.2051 | 0.7607 | 0.5812 | 0.3974 | 0.9658 |
+| **`G_anchorlad`** | **0.95838** | 0.00553 | **145** | **0.1197** | **0.8974** | 0.5385 | 0.4359 | 0.9402 |
+
+**What survives k=3:** `mono` is the wave's best (0.95838) and **C6 falls
+1,491 → 145 — a 90 % reduction from DATA alone, on a net with no architectural
+constraint**, where the ladder loss alone managed 66 %. Those are the strong,
+replicated results.
+
+**What does NOT survive:** the floors are **mixed, not uniformly better**. Only
+`avif-svt` moves materially (**+0.1196**); `jxl` moves +0.0128; and **`rav1e`
+(−0.0341), `jpeg` (−0.0085) and `webp` (−0.0256) all REGRESS.** The s4004 cell
+above showed jpeg and webp up; over three seeds they are down. Single-seed floor
+readings on this class are not reliable, and I published one before checking.
+
+**`avif-svt` is the codec with the deepest anchor coverage relative to its own
+difficulty**, and it is the only one that moved — but `jpeg` has *more* anchor
+cells (992 vs 896) and did not. So "more floor data ⇒ better floor" is **not**
+what the data says; something codec-specific is in the way, and this arm does not
+identify it.
+
 ### 5.16 Binary parity — the wave's frozen binaries produce the same weights as the fixed ones
 
 The wave ran on binaries frozen BEFORE the 2026-09-06 review fixes. That the
