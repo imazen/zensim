@@ -7057,6 +7057,12 @@ fn stream_windows_shared<'w, S: ImageSource, D: ImageSource>(
 /// reflect-padded copy into the scratch, which is exactly what
 /// [`stream_windows_shared`] then reads back. Byte-identical to what phase A
 /// does — it is the same two calls, lifted.
+///
+/// Its only call site is inside a `#[cfg(feature = "threads")]` block, so a
+/// `threads`-off build (e.g. the `feature-regime-v2`-alone CI permutation)
+/// has no caller for it; `cfg_attr` scopes the allow to exactly that case
+/// rather than silencing dead-code detection when `threads` IS on.
+#[cfg_attr(not(feature = "threads"), allow(dead_code))]
 fn stream_gather_windows<S: ImageSource, D: ImageSource>(
     producer: &crate::feature_v2_stream::StripPlaneProducer<'_, S, D>,
     info: &crate::feature_v2_stream::StripInfo,
