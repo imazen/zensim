@@ -1056,7 +1056,7 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// deprecated [`ZensimProfile::A`] variant it backs).
 #[cfg(feature = "deprecated-profiles")]
 pub(crate) fn mlp_bake_a_v47_qat() -> &'static [u8] {
-    include_bytes!("../weights/v47_strict_qat_native_2026-05-27.bin")
+    include_bytes!("../weights/v47_strict_qat_native_byid_2026-09-06.bin")
 }
 
 /// Generation-A profile params (external `ZensimProfile::A`). Backing
@@ -1156,7 +1156,7 @@ static PROFILE_LEGACY_LINEAR_V0_2: ProfileParams = ProfileParams {
 ///    Identity=100 is guaranteed by the `is_identical` short-circuit, not the
 ///    spline top. See benchmarks/provenance "best-of-both dial probe".
 pub(crate) fn linear_bake_b_cid80() -> &'static [u8] {
-    include_bytes!("../weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin")
+    include_bytes!("../weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin")
 }
 
 /// `ZensimProfile::BHdr` bake bytes — `hdrmix-lasso0.0003-shaped`
@@ -1172,7 +1172,7 @@ pub(crate) fn linear_bake_b_cid80() -> &'static [u8] {
 /// SDR-anchored (the prior bake's was HDR-anchored). Full audit + numbers:
 /// `benchmarks/bhdr_improvement_split_lineage_2026-07-12.md` §7.
 pub(crate) fn linear_bake_bhdr_shaped() -> &'static [u8] {
-    include_bytes!("../weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin")
+    include_bytes!("../weights/bhdr_linear_shaped_cvvdpmix_byid_2026-09-06.bin")
 }
 
 /// Generation-B SDR profile params. Same 372-feature front end as
@@ -1249,6 +1249,34 @@ static PROFILE_B_HDR: ProfileParams = ProfileParams {
 /// and `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`. The pinning test
 /// `profile_c_tests::weight_sha256_pinned` fails loud on any silent
 /// byte swap of this file.
+/// ⛔ **NOT DENSIFIED — a registered, PENDING USER DECISION, not an oversight.**
+///
+/// Increment 2A of the cruft purge converted `A`, `B`, `BHdr` and `D` to the
+/// dense feature-id contract with a bit-identical served score. `C` and `CHdr`
+/// were deliberately left on the wide 944 declaration with their 247-277
+/// [`zenpredict::FeatureTransform::Drop`] entries, because for THIS pair the
+/// conversion is not score-neutral:
+///
+/// `Plan::for_bake` derives COMPUTE two different ways. Its identity-layout
+/// branch falls back to `everything`, which hard-sets `append2_dst_activity:
+/// true`; its id-space branch derives `false`. **The canonical extractor that
+/// built these bakes' training tables defaults `false`** (`v2_ab_extract.rs`
+/// reads `ZENSIM_APPEND2_DSTACT`, and `extract_944_canonical.sh` never sets
+/// it), and `CLAUDE.md`'s own BANDVIS adjudication says the same. So the
+/// SHIPPED runtime already computes a BANDVIS formula these weights never saw
+/// — MEASURED at **0.866** zensim points on `C` and **0.311** on `CHdr` for
+/// one CID22 pair.
+///
+/// That is a pre-existing train/serve skew that densify EXPOSED rather than
+/// caused, and both ways out change a shipped number: fixing `everything`
+/// moves `C`/`CHdr` to their train-consistent values, and teaching the dense
+/// derivation to reproduce `true` perpetuates the skew in a new place.
+/// Choosing is the user's, so **nothing here — the bytes, the served toggle,
+/// the declaration — is touched until that decision lands.**
+/// Measurement: `benchmarks/dense_bake_contract_2026-09-06.md` §5. The
+/// executable form of this note is
+/// `dense_bake_flip_gate::flipped_bakes_are_dense_and_the_c_pair_is_deliberately_not`,
+/// which FAILS if either bake is densified while the decision is open.
 #[cfg(feature = "candidate-profiles")]
 pub(crate) fn mlp_bake_c_purity944() -> &'static [u8] {
     include_bytes!("../weights/c_sdr_purity944_2026-08-29.bin")
@@ -1294,6 +1322,34 @@ static PROFILE_C: ProfileParams = ProfileParams {
 /// FROZEN 2026-08-29 (user-directed HDR Profile-C freeze). 944 caller /
 /// 697 internal (dead-column pruned). Pinned by
 /// `profile_c_tests::chdr_weight_sha256_pinned`.
+/// ⛔ **NOT DENSIFIED — a registered, PENDING USER DECISION, not an oversight.**
+///
+/// Increment 2A of the cruft purge converted `A`, `B`, `BHdr` and `D` to the
+/// dense feature-id contract with a bit-identical served score. `C` and `CHdr`
+/// were deliberately left on the wide 944 declaration with their 247-277
+/// [`zenpredict::FeatureTransform::Drop`] entries, because for THIS pair the
+/// conversion is not score-neutral:
+///
+/// `Plan::for_bake` derives COMPUTE two different ways. Its identity-layout
+/// branch falls back to `everything`, which hard-sets `append2_dst_activity:
+/// true`; its id-space branch derives `false`. **The canonical extractor that
+/// built these bakes' training tables defaults `false`** (`v2_ab_extract.rs`
+/// reads `ZENSIM_APPEND2_DSTACT`, and `extract_944_canonical.sh` never sets
+/// it), and `CLAUDE.md`'s own BANDVIS adjudication says the same. So the
+/// SHIPPED runtime already computes a BANDVIS formula these weights never saw
+/// — MEASURED at **0.866** zensim points on `C` and **0.311** on `CHdr` for
+/// one CID22 pair.
+///
+/// That is a pre-existing train/serve skew that densify EXPOSED rather than
+/// caused, and both ways out change a shipped number: fixing `everything`
+/// moves `C`/`CHdr` to their train-consistent values, and teaching the dense
+/// derivation to reproduce `true` perpetuates the skew in a new place.
+/// Choosing is the user's, so **nothing here — the bytes, the served toggle,
+/// the declaration — is touched until that decision lands.**
+/// Measurement: `benchmarks/dense_bake_contract_2026-09-06.md` §5. The
+/// executable form of this note is
+/// `dense_bake_flip_gate::flipped_bakes_are_dense_and_the_c_pair_is_deliberately_not`,
+/// which FAILS if either bake is densified while the decision is open.
 #[cfg(feature = "candidate-profiles")]
 pub(crate) fn mlp_bake_chdr_l1t1944() -> &'static [u8] {
     include_bytes!("../weights/c_hdr_l1t1944_2026-08-29.bin")
@@ -1343,7 +1399,7 @@ static PROFILE_C_HDR: ProfileParams = ProfileParams {
 /// erases the spline fix, so it ships unpacked, exactly like `B`).
 #[cfg(feature = "candidate-profiles")]
 pub(crate) fn mlp_bake_d_add156() -> &'static [u8] {
-    include_bytes!("../weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin")
+    include_bytes!("../weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin")
 }
 
 /// Generation-D fast profile params — the same runtime shape as `B`
@@ -2371,31 +2427,73 @@ mod profile_c_tests {
     /// tail; forward pass byte-identical to the era-1 predecessor — see
     /// `benchmarks/d_id100_2026-09-04.md` and
     /// `benchmarks/d_ship_flip_2026-09-05.md`).
+    ///
+    /// **Re-pinned 2026-09-06** to the DENSE form of the same weights
+    /// (`d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin`, 1,420 B). The
+    /// wide predecessor's digest is pinned too, in the same test, because the
+    /// dense-flip gate scores against those exact bytes — so a silent swap of
+    /// EITHER file fails here rather than quietly weakening that gate.
     #[test]
     fn d_weight_sha256_pinned() {
         use sha2::{Digest, Sha256};
+        let sha = |bytes: &[u8]| -> String {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        };
         let bytes = mlp_bake_d_add156();
-        assert_eq!(bytes.len(), 4_222, "D weight byte length changed");
-        let mut hasher = Sha256::new();
-        hasher.update(bytes);
-        let digest = hasher.finalize();
-        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(bytes.len(), 1_420, "D weight byte length changed");
         assert_eq!(
-            hex, "921a8f677a225b01dd1030f805f8429e6e6100325e50e87d2c56bfd32a1acad1",
-            "D weight bytes do not match the pinned ADD156 id100+negrich-dial sha256"
+            sha(bytes),
+            "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6",
+            "D weight bytes do not match the pinned dense ADD156 id100+negrich-dial sha256"
+        );
+        // The RETIRED wide bytes the flip gate compares against.
+        let wide: &[u8] =
+            include_bytes!("../weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin");
+        assert_eq!(wide.len(), 4_222, "retired wide D byte length changed");
+        assert_eq!(
+            sha(wide),
+            "921a8f677a225b01dd1030f805f8429e6e6100325e50e87d2c56bfd32a1acad1",
+            "the retired wide D bytes moved — the dense-flip identity gate compares against them"
         );
     }
 
-    /// Unlike `C`/`CHdr`, `D` is DENSE over the standard v1 372-feature
-    /// layout — not dead-column-pruned (packing this bake would erase its
-    /// spline-top fix, see the `D` variant doc), so caller width and
-    /// internal layer-0 width are equal.
+    /// `D` declares the 28 feature ids it reads and asks for exactly that many
+    /// caller inputs — the dense contract.
+    ///
+    /// Until 2026-09-06 this test was `d_bake_loads_caller_width_372_dense`
+    /// and pinned `caller_input_width() == n_inputs() == 372`, where "dense"
+    /// meant *"not dead-column-pruned"* — a 372-wide layer 0 of which 344 rows
+    /// were exactly zero. That is the shape the user ruling names: the runtime
+    /// had to emit 372 positions so the bake could ignore 344 of them, and a
+    /// consumer could not tell those zeros from measured ones. "Dense" now
+    /// means what it says.
     #[test]
-    fn d_bake_loads_caller_width_372_dense() {
+    fn d_bake_declares_its_28_ids_and_asks_for_exactly_those() {
         let model =
             crate::mlp::Model::from_bytes(mlp_bake_d_add156()).expect("shipped D bake must parse");
-        assert_eq!(model.caller_input_width(), 372, "caller-facing width");
-        assert_eq!(model.n_inputs(), 372, "D is unpruned: no Drop columns");
+        let ids = crate::declared_feature_ids(&model).expect("D declares its feature ids");
+        assert_eq!(ids.len(), 28, "ADD156 reads 28 lines of the basic block");
+        assert_eq!((ids[0], ids[27]), (6, 155), "ids span f6..f155");
+        assert!(
+            ids.windows(2).all(|w| w[0] < w[1]),
+            "the declaration is strictly ascending"
+        );
+        assert_eq!(
+            model.caller_input_width(),
+            28,
+            "caller-facing width == |ids|"
+        );
+        assert_eq!(
+            model.n_inputs(),
+            28,
+            "no Drop columns: the two widths are one number"
+        );
         assert_eq!(model.n_outputs(), 1);
     }
 
@@ -2474,6 +2572,285 @@ mod profile_c_tests {
                 "step {step}: ladder must be monotone non-increasing, got {score} after {prev}"
             );
             prev = score;
+        }
+    }
+}
+
+/// **The dense-bake flip gate** — increment 2A of the cruft purge
+/// ([`docs/PLAN_CRUFT_PURGE_2026-09-06.md`], gates B.2 / B.3 / B.5).
+///
+/// USER RULING (2026-09-06): *"a 372 layout where the bake skips features and
+/// features aren't computed is a bad contract"*. Four shipped bakes — `A`,
+/// `B`, `BHdr` and the default `D` — now declare the feature IDS they read
+/// (`zentrain.feature_ids`) instead of a 372-wide layout most of whose
+/// positions they discard. The retired wide bytes stay committed beside them,
+/// which is what lets this module hold the flip to a BIT-IDENTICAL score
+/// rather than to a printed number.
+///
+/// Each test is two halves and neither alone would be worth having:
+///
+/// * a **negative control** — the shipped profile's bake bytes must NOT equal
+///   the retired wide bytes. Without it the identity assertion passes
+///   vacuously the moment someone reverts a path, and a green suite would be
+///   reporting that a flip which did not happen was safe.
+/// * the **identity assertion** — the shipped profile and a twin built from
+///   the same [`ProfileParams`] over the WIDE bytes must return bit-identical
+///   `score`, `raw_distance` and `mean_offset` on the whole
+///   `tests/common/parity_cells.rs` geometry matrix.
+///
+/// `C` and `CHdr` are deliberately absent. They are not train/serve
+/// consistent: `Plan::for_bake`'s identity-layout branch derives
+/// `append2_dst_activity: true` (the `everything` fallback) while the
+/// canonical extractor that made their training tables defaults it **false**,
+/// so densifying them adopts the honest `false` and MOVES a shipped score by
+/// 0.866 (`C`) / 0.311 (`CHdr`) zensim points. That is a measured, registered
+/// USER DECISION — `benchmarks/dense_bake_contract_2026-09-06.md` §5 — and
+/// not a lane's to make, so their bakes and their served toggle are untouched.
+#[cfg(all(test, feature = "custom-profiles", feature = "feature-regime-v2"))]
+mod dense_bake_flip_gate {
+    use crate::{RgbSlice, Zensim, ZensimProfile};
+
+    use super::ProfileParams;
+
+    // ONE owner for the geometry matrix and for the pixel generators: the
+    // files under `tests/common/` already own both, and `include!` reuses
+    // those exact bytes. A second hand-typed geometry list is precisely the
+    // drift `parity_cells.rs` was extracted to stop — two suites both claiming
+    // "every geometry" while the union of what they cover silently shrinks.
+    use crate::{test_generators as gens, test_parity_cells as cells};
+
+    /// The RETIRED wide bytes for each flipped profile, still committed.
+    /// `include_bytes!` rather than a filesystem read so the gate cannot be
+    /// disarmed by a missing file at test time.
+    #[cfg(feature = "deprecated-profiles")]
+    const WIDE_A: &[u8] = include_bytes!("../weights/v47_strict_qat_native_2026-05-27.bin");
+    const WIDE_B: &[u8] =
+        include_bytes!("../weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin");
+    const WIDE_BHDR: &[u8] =
+        include_bytes!("../weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin");
+    #[cfg(feature = "candidate-profiles")]
+    const WIDE_D: &[u8] =
+        include_bytes!("../weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin");
+
+    #[cfg(feature = "deprecated-profiles")]
+    fn wide_a() -> &'static [u8] {
+        WIDE_A
+    }
+    fn wide_b() -> &'static [u8] {
+        WIDE_B
+    }
+    fn wide_bhdr() -> &'static [u8] {
+        WIDE_BHDR
+    }
+    #[cfg(feature = "candidate-profiles")]
+    fn wide_d() -> &'static [u8] {
+        WIDE_D
+    }
+
+    /// `base` with a different bake. Every field is listed explicitly rather
+    /// than reached with `..`, so adding a `ProfileParams` field is a compile
+    /// error here instead of a silently un-mirrored twin.
+    fn with_bake(base: &ProfileParams, mlp: fn() -> &'static [u8]) -> ProfileParams {
+        ProfileParams {
+            weights: base.weights,
+            blur_radius: base.blur_radius,
+            blur_passes: base.blur_passes,
+            num_scales: base.num_scales,
+            bounded_squash: base.bounded_squash,
+            score_mapping_a: base.score_mapping_a,
+            score_mapping_b: base.score_mapping_b,
+            skip_score_mapping: base.skip_score_mapping,
+            mlp_bytes: Some(mlp),
+            mlp_bytes_b3: base.mlp_bytes_b3,
+            mlp_primary_mix: base.mlp_primary_mix,
+            extended_features: base.extended_features,
+            compute_iw_features: base.compute_iw_features,
+            soft_clamp_score: base.soft_clamp_score,
+            extrapolate_score: base.extrapolate_score,
+            ensemble_classifier_bytes: base.ensemble_classifier_bytes,
+            mlp_bytes_compression: base.mlp_bytes_compression,
+        }
+    }
+
+    /// One geometry: score both arms and compare the three shipped scalars at
+    /// `to_bits()`. `mean_offset` is included because it is the one scalar a
+    /// gather could move without moving the score.
+    fn assert_same_on_cells(shipped: ZensimProfile, wide: ZensimProfile, label: &str) {
+        let zs = Zensim::new(shipped);
+        let zw = Zensim::new(wide);
+        for &(w, h) in cells::CELLS {
+            let r = gens::gen_value_noise(w, h, 0xC0FFEE);
+            let d = gens::distort_block_artifacts(&r, w, h);
+            let rs = RgbSlice::new(&r, w, h);
+            let ds = RgbSlice::new(&d, w, h);
+            let a = zs
+                .compute(&rs, &ds)
+                .unwrap_or_else(|e| panic!("{label} dense {w}x{h}: {e}"));
+            let b = zw
+                .compute(&rs, &ds)
+                .unwrap_or_else(|e| panic!("{label} wide {w}x{h}: {e}"));
+            assert_eq!(
+                a.score().to_bits(),
+                b.score().to_bits(),
+                "{label} {w}x{h}: score {} (dense) != {} (wide)",
+                a.score(),
+                b.score()
+            );
+            assert_eq!(
+                a.raw_distance().to_bits(),
+                b.raw_distance().to_bits(),
+                "{label} {w}x{h}: raw_distance {} != {}",
+                a.raw_distance(),
+                b.raw_distance()
+            );
+            assert_eq!(
+                a.mean_offset().map(f64::to_bits),
+                b.mean_offset().map(f64::to_bits),
+                "{label} {w}x{h}: mean_offset {:?} != {:?}",
+                a.mean_offset(),
+                b.mean_offset()
+            );
+        }
+    }
+
+    /// The negative control shared by every case: the flip must have HAPPENED.
+    /// A dense bake is strictly narrower than the wide one it replaces, so
+    /// equal lengths mean the `include_bytes!` path was reverted and every
+    /// identity assertion below it is vacuous.
+    fn assert_flipped(shipped: &ProfileParams, wide: &'static [u8], label: &str) {
+        let f = shipped.mlp_bytes.expect("shipped profile has an MLP bake");
+        let dense = f();
+        assert_ne!(
+            dense.len(),
+            wide.len(),
+            "{label}: shipped bake is byte-length-identical to the RETIRED wide bake — the \
+             dense flip did not happen and the identity assertions are vacuous"
+        );
+        assert!(
+            dense.len() < wide.len(),
+            "{label}: dense bake ({} B) is not smaller than the wide one ({} B)",
+            dense.len(),
+            wide.len()
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "candidate-profiles")]
+    fn profile_d_dense_bake_scores_bit_identically_to_its_retired_wide_bake() {
+        assert_flipped(&super::PROFILE_D, WIDE_D, "D");
+        let twin: &'static ProfileParams =
+            Box::leak(Box::new(with_bake(&super::PROFILE_D, wide_d)));
+        assert_same_on_cells(
+            ZensimProfile::D,
+            ZensimProfile::Custom {
+                name: "D-wide-twin",
+                params: twin,
+            },
+            "D",
+        );
+    }
+
+    #[test]
+    fn profile_b_dense_bake_scores_bit_identically_to_its_retired_wide_bake() {
+        assert_flipped(&super::PROFILE_B, WIDE_B, "B");
+        let twin: &'static ProfileParams =
+            Box::leak(Box::new(with_bake(&super::PROFILE_B, wide_b)));
+        assert_same_on_cells(
+            ZensimProfile::B,
+            ZensimProfile::Custom {
+                name: "B-wide-twin",
+                params: twin,
+            },
+            "B",
+        );
+    }
+
+    #[test]
+    fn profile_bhdr_dense_bake_scores_bit_identically_to_its_retired_wide_bake() {
+        assert_flipped(&super::PROFILE_B_HDR, WIDE_BHDR, "BHdr");
+        let twin: &'static ProfileParams =
+            Box::leak(Box::new(with_bake(&super::PROFILE_B_HDR, wide_bhdr)));
+        assert_same_on_cells(
+            ZensimProfile::BHdr,
+            ZensimProfile::Custom {
+                name: "BHdr-wide-twin",
+                params: twin,
+            },
+            "BHdr",
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "deprecated-profiles")]
+    #[allow(deprecated)]
+    fn profile_a_dense_bake_scores_bit_identically_to_its_retired_wide_bake() {
+        assert_flipped(&super::PROFILE_A, WIDE_A, "A");
+        let twin: &'static ProfileParams =
+            Box::leak(Box::new(with_bake(&super::PROFILE_A, wide_a)));
+        assert_same_on_cells(
+            ZensimProfile::A,
+            ZensimProfile::Custom {
+                name: "A-wide-twin",
+                params: twin,
+            },
+            "A",
+        );
+    }
+
+    /// Gate B.3, held at the SHIPPED artifacts rather than at densify's own
+    /// output: every flipped bake declares ids, carries no `Drop`, and has
+    /// `caller_input_width() == n_inputs()`. `C` / `CHdr` are asserted to
+    /// still be the WIDE 944 shape, so this test also records — as an
+    /// executable fact rather than a comment — that the append2 decision is
+    /// still pending.
+    #[test]
+    #[cfg(all(feature = "candidate-profiles", feature = "deprecated-profiles"))]
+    fn flipped_bakes_are_dense_and_the_c_pair_is_deliberately_not() {
+        #[allow(deprecated)]
+        let dense: [(&str, &ProfileParams); 4] = [
+            ("A", &super::PROFILE_A),
+            ("B", &super::PROFILE_B),
+            ("BHdr", &super::PROFILE_B_HDR),
+            ("D", &super::PROFILE_D),
+        ];
+        for (label, p) in dense {
+            let bytes = p.mlp_bytes.expect("bake")();
+            let m = crate::mlp::Model::from_bytes(bytes)
+                .unwrap_or_else(|e| panic!("{label}: parse: {e:?}"));
+            let ids = crate::declared_feature_ids(&m)
+                .unwrap_or_else(|| panic!("{label}: shipped bake declares no feature ids"));
+            assert_eq!(
+                ids.len(),
+                m.n_inputs(),
+                "{label}: declares {} ids for {} inputs",
+                ids.len(),
+                m.n_inputs()
+            );
+            assert_eq!(
+                m.caller_input_width(),
+                m.n_inputs(),
+                "{label}: caller width {} != n_inputs {} — a dense bake asks for exactly what \
+                 it reads",
+                m.caller_input_width(),
+                m.n_inputs()
+            );
+        }
+        for (label, p) in [("C", &super::PROFILE_C), ("CHdr", &super::PROFILE_C_HDR)] {
+            let bytes = p.mlp_bytes.expect("bake")();
+            let m = crate::mlp::Model::from_bytes(bytes)
+                .unwrap_or_else(|e| panic!("{label}: parse: {e:?}"));
+            assert_eq!(
+                m.caller_input_width(),
+                944,
+                "{label}: expected the UNCONVERTED 944 shape — the append2_dst_activity \
+                 decision (benchmarks/dense_bake_contract_2026-09-06.md §5) is still pending, \
+                 so converting this pair would move a shipped score"
+            );
+            assert!(
+                crate::declared_feature_ids(&m).is_none(),
+                "{label}: declares feature ids — it was densified while the append2 decision \
+                 was still open"
+            );
         }
     }
 }

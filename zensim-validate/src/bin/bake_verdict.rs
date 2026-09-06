@@ -5893,19 +5893,37 @@ Run the dedicated q-sweep harness for those._\n",
             per_pair.insert(r.name.to_string(), json!({ "pred": pred, key: tgt }));
         }
         // KADIS multi-metric per_pair. Read a bounded window (≤40k rows) then
-        // stride to the cap for source diversity; score the bake's first
-        // n_inputs features (the frozen v1 block for a 372 bake).
+        // stride to the cap for source diversity.
+        //
+        // **The rows are handed over CALLER-LAID-OUT, never pre-sliced.** This
+        // site used to do `sample.feature_rows[i][..n_inputs]` and admit on
+        // `sample.n_features >= n_inputs`, which is the same read-POSITIONS-as-
+        // IDS defect the grid gates carried (cruft-purge B-2): for a bake that
+        // declares `zentrain.feature_ids`, `n_inputs` is its PACKED width, so
+        // the slice hands `Ensemble::score_rows` the first 28 columns of a
+        // 372-column table and the gather inside then reads ids `f6..f155` out
+        // of them. MEASURED on shipped D: 4,920 of 4,928 per-pair predictions
+        // wrong, silently, in a `--full-json` block the dashboard's scatter
+        // matrix renders. Slicing was ALSO redundant for an identity bake —
+        // `CallerGather::Positional::fill` already copies exactly
+        // `min(n_inputs, row.len())` and zero-fills the tail — so removing it
+        // is byte-identical there, which `verify_verdict_identity.sh` gates.
         if let Some(job) = perpair_job {
             let perpair_load = job
                 .join()
                 .unwrap_or_else(|_| Err("per-pair loader thread panicked".to_string()));
             pt.mark("--full-json kadis per-pair (join background load)");
+            // ONE gather per run: the same value the grid gates resolved at
+            // load time, not a second derivation that could drift from it.
+            let perpair_gather = &gather_for_grids;
             match perpair_load {
-                Ok(sample) if sample.n_features >= n_inputs => {
+                Ok(sample)
+                    if perpair_gather.accepts_prefix_row_width(sample.n_features, n_inputs) =>
+                {
                     let idx = stride(sample.feature_rows.len(), args.perpair_cap);
                     let rows: Vec<Vec<f64>> = idx
                         .iter()
-                        .map(|&i| sample.feature_rows[i][..n_inputs].to_vec())
+                        .map(|&i| sample.feature_rows[i].clone())
                         .collect();
                     let pred = ens.score_rows(&rows);
                     let mut obj = Map::new();
@@ -5919,8 +5937,15 @@ Run the dedicated q-sweep harness for those._\n",
                     per_pair.insert("kadis".to_string(), Value::Object(obj));
                 }
                 Ok(sample) => eprintln!(
-                    "bake_verdict --full-json: perpair-metrics has {} features, bake needs {} — skipping kadis per_pair",
-                    sample.n_features, n_inputs
+                    "bake_verdict --full-json: perpair-metrics has {} features, bake needs {} \
+                     ({}) — skipping kadis per_pair",
+                    sample.n_features,
+                    n_inputs,
+                    if perpair_gather.is_dense() {
+                        "dense: the row must reach the highest declared id"
+                    } else {
+                        "identity: the row needs at least n_inputs columns"
+                    }
                 ),
                 Err(e) => {
                     eprintln!("bake_verdict --full-json: perpair-metrics load failed: {e}")

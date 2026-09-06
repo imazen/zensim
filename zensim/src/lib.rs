@@ -236,10 +236,23 @@ mod metric;
 pub(crate) mod mlp;
 mod pool;
 pub mod profile;
+// **Shared test fixtures, declared once at the crate root.** The geometry
+// matrix and the pixel generators are OWNED by `tests/common/*` — the
+// integration suites' owner — and are reached from in-crate tests through
+// `#[path]` rather than retyped. A `#[path]` on a NESTED inline module cannot
+// be used here: rustc resolves it under `src/<parent mod>/`, a directory that
+// does not exist, so the `..` components fail to canonicalise. Declaring them
+// at the root (where `src/` is real) is the form that resolves.
 mod simd_ops;
 pub mod source;
 pub(crate) mod ssim_form;
 mod streaming;
+#[cfg(test)]
+#[path = "../tests/common/generators.rs"]
+pub(crate) mod test_generators;
+#[cfg(test)]
+#[path = "../tests/common/parity_cells.rs"]
+pub(crate) mod test_parity_cells;
 // HDR foundation: transfer functions + display model (code values → absolute
 // luminance). Still foundation-only — the PU entry points take already-linear
 // cd/m², so code-value decoding stays with the caller until a code-value

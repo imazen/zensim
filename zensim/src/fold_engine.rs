@@ -306,16 +306,18 @@ fn caller_col_spans(model: &crate::mlp::Model, in_dim: usize) -> Option<Vec<(usi
 /// re-parsing bytes it was never given. Handles pruned and expanded bakes
 /// through [`caller_col_spans`].
 pub(crate) fn bake_pool_need_from_model(model: &crate::mlp::Model) -> V1PoolNeed {
-    let Some(live) = caller_line_reads(model) else {
+    // The read set as FEATURE IDS, through the one owner. This used to fold
+    // `caller_line_reads` (layer-0 POSITIONS) directly against the family
+    // bounds — sound only while position == id, i.e. only for an identity
+    // layout. Under the dense contract shipped `B` has 95 live positions
+    // `0..94` carrying ids `f3..f369`, and the positional fold reported
+    // `{peaks: false, masked: false, iw: false}` for a bake that reads 49
+    // lines above `f227`. That is a SKIP decision, so the wrong answer here
+    // deletes pools the bake then gathers as structural zeros.
+    let Some(slots) = crate::feature_plan::bake_read_slots(model) else {
         return V1PoolNeed::ALL;
     };
-    // Any caller line at or beyond a family's start that carries a nonzero
-    // weight marks that family read. A bake narrower than a family's start
-    // cannot read it.
-    let reads = |lo: usize, hi: usize| -> bool {
-        let hi = hi.min(live.len());
-        lo < hi && live[lo..hi].iter().any(|&b| b)
-    };
+    let reads = |lo: usize, hi: usize| -> bool { (lo..hi).any(|s| slots.contains(s)) };
     V1PoolNeed {
         peaks: reads(V1_PEAKS.0, V1_PEAKS.1),
         masked: reads(V1_MASKED.0, V1_MASKED.1),
@@ -972,6 +974,78 @@ mod skip_policy_tests {
     /// this test is its own standalone, narrowly-named regression gate for
     /// the gated-vs-default-build claim specifically, with the scored-region
     /// boundary stated and justified rather than left implicit.
+    /// **A DENSE bake's pool need is read in ID space, not position space.**
+    ///
+    /// `caller_line_reads` returns layer-0 POSITIONS, and until 2026-09-06
+    /// every bake was identity-laid-out so a position WAS an id. The dense
+    /// contract breaks that: a bake declaring 3 ids in `f156`/`f228`/`f300`
+    /// has live positions `0,1,2`, and folding those against the family
+    /// bounds says it touches no pool at all — a SKIP decision, so the wrong
+    /// answer deletes the pools the bake then gathers as structural zeros.
+    ///
+    /// MEASURED on the real artifact when shipped `B` went dense: the
+    /// positional fold reported `{peaks:false, masked:false, iw:false}` for a
+    /// bake that reads 49 lines above `f227`.
+    ///
+    /// The NEGATIVE CONTROL is the same bake read the old way — if a
+    /// positional fold of these ids also said "all three pools", the test
+    /// would prove nothing.
+    #[test]
+    fn a_dense_bake_reports_the_pools_its_declared_ids_land_in() {
+        let bytes = crate::feature_layout::tests::ids_bake_bytes(&[156, 228, 300]);
+        let m = crate::mlp::Model::from_bytes(&bytes).expect("synthetic dense bake parses");
+        assert_eq!(m.caller_input_width(), 3, "3 declared ids, 3 caller inputs");
+        assert_eq!(
+            bake_pool_need_from_model(&m),
+            V1PoolNeed {
+                peaks: true,
+                masked: true,
+                iw: true
+            }
+        );
+        // Negative control: the raw positional fold this replaced.
+        let live = caller_line_reads(&m).expect("layer 0 tiles");
+        let positional = |lo: usize, hi: usize| -> bool {
+            let hi = hi.min(live.len());
+            lo < hi && live[lo..hi].iter().any(|&b| b)
+        };
+        assert!(
+            !positional(V1_PEAKS.0, V1_PEAKS.1)
+                && !positional(V1_MASKED.0, V1_MASKED.1)
+                && !positional(V1_IW.0, V1_IW.1),
+            "the positional fold must say NO pools here, else this test proves nothing"
+        );
+    }
+
+    /// **The `Off` is never served policy applies to the ID-SPACE branch too.**
+    ///
+    /// `pools_mode_for_need` documents (with a measured footprint argument)
+    /// that `Off` is never the right answer for a SERVED v1 walk: it costs the
+    /// same arithmetic as `Peaks` and grows the hot set by disabling the
+    /// band-local self-blur. `from_block_profile` routes through that owner;
+    /// `Plan::derive_with_layout` derives from touched families and will
+    /// happily return `Off`. Nothing reached that branch until shipped `D`
+    /// declared its 28 basic ids — at which point D's emitted vector went from
+    /// real values at `f156..227` to zeros, score unmoved, footprint worse.
+    #[test]
+    fn a_dense_basic_only_bake_is_served_peaks_not_off() {
+        let ids: Vec<usize> = (0..8).map(|i| i * 3).collect();
+        let bytes = crate::feature_layout::tests::ids_bake_bytes(&ids);
+        let m = crate::mlp::Model::from_bytes(&bytes).expect("synthetic dense bake parses");
+        // The raw id-space derivation, with no policy applied: `Off`.
+        let layout = crate::feature_layout::declared_layout(&m);
+        let want = crate::feature_plan::bake_read_slots(&m).expect("read set");
+        let raw = crate::feature_plan::Plan::derive_with_layout(&want, layout).expect("plan");
+        assert_eq!(
+            raw.compute.v1_pools,
+            V1PoolsMode::Off,
+            "the unfiltered id-space derivation must say Off, else the policy below is untested"
+        );
+        // The SERVING plan promotes it.
+        let served = crate::feature_plan::Plan::for_bake(&m).expect("serving plan");
+        assert_eq!(served.compute.v1_pools, V1PoolsMode::Peaks);
+    }
+
     #[cfg(feature = "candidate-profiles")]
     #[test]
     fn default_build_profile_d_matches_feature_gated_off_buffered_walk() {

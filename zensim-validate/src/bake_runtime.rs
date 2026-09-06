@@ -403,6 +403,30 @@ impl CallerGather {
         }
     }
 
+    /// Can a PREFIX-tolerant source of `n_features` columns feed this bake?
+    ///
+    /// Two admission rules exist because two DIFFERENT historical rules exist,
+    /// and collapsing them would move numbers in both directions.
+    /// [`accepts_row_width`](Self::accepts_row_width) is the GRID rule: an
+    /// exact `==`, because a dial/corruption grid that is not the bake's own
+    /// width is a different instrument and admitting it silently would publish
+    /// a panel about the wrong thing. This is the rule for a source whose
+    /// contract has always been *"take the leading `n_inputs` columns"* — the
+    /// kadis multi-metric per-pair table, which is 720 columns wide and feeds
+    /// 372-input bakes by prefix. Using the grid rule there dropped the whole
+    /// per-pair block from every identity bake's verdict (measured while
+    /// wiring the dense gather, hence this split).
+    ///
+    /// The DENSE arm is the same for both: a declared bake needs the row to
+    /// REACH its highest declared id, because it indexes by id and its own
+    /// packed width says nothing about where those ids live.
+    pub fn accepts_prefix_row_width(&self, n_features: usize, n_inputs: usize) -> bool {
+        match self {
+            CallerGather::Positional => n_features >= n_inputs,
+            CallerGather::ByFeatureId(_) => self.accepts_row_width(n_features, n_inputs),
+        }
+    }
+
     /// Fill `dst` (already sized to the bake's caller width) from `row`.
     pub fn fill(&self, dst: &mut [f32], row: &[f64]) {
         match self {
@@ -854,6 +878,37 @@ mod tests {
         assert!(
             !dense.accepts_row_width(3, 3),
             "its own packed width does NOT reach"
+        );
+    }
+
+    /// The PREFIX rule is `>=` for identity bakes — the kadis per-pair source
+    /// is 720 columns and has always fed 372-input bakes by prefix — while
+    /// the GRID rule above stays `==`. The dense arm is the same reach test in
+    /// both. Without this split, wiring the dense gather at the per-pair site
+    /// silently dropped the block from every identity bake's verdict.
+    #[test]
+    fn prefix_admission_is_ge_for_identity_and_reach_for_dense() {
+        let pos = CallerGather::Positional;
+        assert!(pos.accepts_prefix_row_width(372, 372));
+        assert!(
+            pos.accepts_prefix_row_width(720, 372),
+            "the kadis-720 source feeds a 372 bake by prefix"
+        );
+        assert!(!pos.accepts_prefix_row_width(300, 372), "too short");
+        // The two rules genuinely disagree — if they ever agree everywhere,
+        // one of them is dead and this split is unjustified.
+        assert_ne!(
+            pos.accepts_prefix_row_width(720, 372),
+            pos.accepts_row_width(720, 372)
+        );
+
+        let dense = CallerGather::ByFeatureId(vec![3, 10, 369]);
+        assert!(dense.accepts_prefix_row_width(720, 3));
+        assert!(dense.accepts_prefix_row_width(370, 3));
+        assert!(!dense.accepts_prefix_row_width(369, 3));
+        assert!(
+            !dense.accepts_prefix_row_width(3, 3),
+            "a dense bake's own packed width never reaches its ids"
         );
     }
 

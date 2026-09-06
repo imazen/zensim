@@ -1,0 +1,94 @@
+# Manifest for `d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin` — the DENSE-DECLARED form of
+# `ZensimProfile::D`'s bake. Schema: zensim/weights/manifests/README.md
+#
+# This bake is NOT a retrain. It is `d_sdr_add156_id100_negrich_dial_2026-09-05.bin`
+# rewritten to the dense feature-id contract by `bake_dial_refit densify`, and
+# its prediction is BIT-IDENTICAL to its source on every real input. The source
+# is NOT deleted: it stays in `zensim/weights/` as the retired wide artifact
+# every pre-2026-09-06 `D` number was read on, and this repo's in-crate gate
+# (`zensim/src/profile.rs::dense_bake_flip_gate`) `include_bytes!`es BOTH and
+# holds them to `to_bits()` equality, so the source is load-bearing, not archival.
+#
+# WHY (USER RULING, 2026-09-06, verbatim): *"get rid of the cruft and confusion,
+# the technical debt here is a huge problem for research and production serving
+# imo. a 372 layout where the bake skips features and features aren't computed
+# is a bad contract"*. The source declared a 372-wide caller layout and read
+# 28 of those lines; the runtime had to emit 372 positions — 344 of them
+# either structurally zero or discarded — so a consumer could not tell "this
+# feature was measured as 0" from "this position exists because the layout says
+# so". This bake declares the ids it reads and the scorers GATHER them.
+
+[bake]
+name               = "zensim-d"
+file               = "../d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin"
+sha256             = "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6"
+file_bytes         = 1420
+n_inputs           = 28
+caller_input_width = 28          # EQUAL to n_inputs — that is the contract
+declared_ids       = 28          # `zentrain.feature_ids`, ascending, f6..f155
+drop_transforms    = 0            # a dense bake carries none, by construction
+date               = "2026-09-06"
+derived_from       = "../d_sdr_add156_id100_negrich_dial_2026-09-05.bin"
+derived_from_sha256 = "921a8f677a225b01dd1030f805f8429e6e6100325e50e87d2c56bfd32a1acad1"
+derived_from_bytes = 4222
+
+[derivation]
+# ONE command, through the owner. No hand-edited bytes, no Python.
+tool    = "bake_dial_refit densify"
+command = """
+bake_dial_refit densify \
+    --in  zensim/weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin \
+    --out zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin \
+    --gate-rows 512
+"""
+# densify permutes and packs layer-0 rows, the scaler mean/scale, the feature
+# transforms and their params, the bounds and the sparse overrides to the read
+# set, then stamps `zentrain.feature_ids`. Only prune CLASS 1 is used (a layer-0
+# row that is exactly 0.0), which is why the result is bit-exact rather than
+# close: `zenpredict`'s forward is a SAXPY over inputs, so dropping a zero row
+# removes exactly the terms `fma(s, 0.0, acc)` in place and leaves every
+# surviving term's order untouched.
+
+[gates]
+# Run by the tool itself, before it writes.
+dead_column_gate   = """
+PASS on all 512 probe rows — the SOURCE scored with every
+dropped line forced to 0.0 is bit-identical to the dense
+bake, which separates 'the columns are dead' from 'the
+probe avoided the difference'.
+"""
+identity_gate      = "512/512 probe rows BIT-IDENTICAL"
+shape_gate         = "caller_input_width == n_inputs == 28; 0 Drop transforms"
+
+# Run in this repo, on the SHIPPED artifact rather than on the tool's output.
+score_identity     = """
+zensim/src/profile.rs::dense_bake_flip_gate — `Zensim::compute`
+over the 20-cell `tests/common/parity_cells.rs` geometry
+matrix returns bit-identical score / raw_distance /
+mean_offset for this bake and for its retired wide twin.
+Carries a NEGATIVE CONTROL: reverting the include_bytes!
+path fails the suite (verified 2026-09-06).
+"""
+verdict_identity   = """
+bake_verdict --full-json on the default (current-extractor)
+372 root, wide vs dense: every STATISTIC bit-identical
+(rank, dial, corruption, composite, gates, m3, per_pair);
+the only differing fields are the bake's own identity block
+(path, sha256, n_inputs, model.*, feature_set.*).
+Artifacts: /mnt/v/output/zensim/purge-2026-09-06/inc2/.
+"""
+
+[known_gaps]
+# The declaration is `zentrain.feature_ids` (an explicit ascending id list), NOT
+# `zentrain.feature_set_id`. A family-token id can only name a family UNION, so
+# it cannot express a scattered read set — Profile D reads 28 slots scattered
+# through `basic`. The two are complementary and the id list is the one the
+# runtime gathers by.
+#
+# The EXTRACTOR ERA is still `unknown` in the derived feature-set reference: no
+# shipped bake records which extractor built its training tables. That is
+# unchanged by this conversion and is tracked separately.
+
+[record]
+doc = "benchmarks/dense_bake_flip_2026-09-06.md"
+plan = "docs/PLAN_CRUFT_PURGE_2026-09-06.md"   # increment 2A

@@ -63,6 +63,53 @@ for one release. **No crates.io publish in this work.**
   Record: `benchmarks/feature_rev2_2026-09-05.md` §11. Pre-registration:
   `docs/PLAN_FEATURE_REV2_2026-09-05.md` §11.
 
+### Changed — four shipped profiles now SERVE a dense, id-declared bake (2026-09-06)
+
+- **`A`, `B`, `BHdr` and the default `D` ship densified bakes** (`*_byid_2026-09-06.bin`):
+  `caller_input_width() == n_inputs() == |declared ids|`, zero `Drop` transforms,
+  and `zentrain.feature_ids` naming the ids. `D` goes 372 declared → **28**,
+  `B` → 95, `BHdr` → 133, `A` → 285. **No score moves**: `Zensim::compute` is
+  bit-identical (score / `raw_distance` / `mean_offset`) to the retired wide bake
+  on the whole 20-cell parity-geometry matrix, and `bake_verdict --full-json`
+  agrees on every STATISTIC (0 differing fields of 31–33k; only the bake's own
+  identity block moves). Independent control: shipped `B` still reads CID22
+  **0.8821166166351724** / kon504 **|0.5193759178072009|**, the values recorded
+  before this lane existed. The wide bytes stay committed and are `include_bytes!`ed
+  by the gate, which carries a RUN negative control. **`C` / `CHdr` are NOT
+  converted** — a pre-existing `append2_dst_activity` train/serve skew makes their
+  conversion move a shipped score by 0.866 / 0.311 points, which is a pending user
+  decision. Record: `benchmarks/dense_bake_flip_2026-09-06.md`.
+- **No public-API delta.** The bake bytes, the profile wiring and the gate are all
+  internal; `docs/public-api/zensim.txt`'s supported surface is unchanged.
+
+### Fixed — four more sites read POSITIONS as feature IDS (2026-09-06)
+
+- `fold_engine::bake_pool_need_from_model` folded layer-0 POSITIONS against the v1
+  family bounds. Dense `B`'s live positions are `0..94` carrying ids `f3..f369`, so
+  it reported `{peaks:false, masked:false, iw:false}` for a bake that reads 49 lines
+  above `f227` — a SKIP decision, so the wrong answer deletes pools the bake then
+  gathers as structural zeros. Now routed through `feature_plan::bake_read_slots`,
+  which maps through `zensim::declared_feature_ids` and is THE owner of "which ids
+  does this bake read".
+- `Plan::for_bake`'s id-space branch bypassed the `Off`-is-never-served footprint
+  policy `fold_engine::pools_mode_for_need` owns, so dense `D`'s emitted vector went
+  from real values at `f156..227` to zeros. The promotion is applied to both branches.
+- `score_features_fd_gradient_with_profile` (the jxl H3 magnitude-steering entry)
+  took `prep_bake_input_f32`'s positional-prefix branch instead of gathering:
+  against the sequential recipe, component 0 read **−748.7** where the correct value
+  is 0.0.
+- Both feature-vector entries silently zero-filled a SHORT row —
+  `score_features_with_profile(B, &vec![0.1; 156])` SUCCEEDED, gathering `B`'s ids
+  out of a row that stops at `f155`. Now a named refusal, with a positive control at
+  the reach width.
+- `bake_verdict`'s `--full-json` kadis multi-metric per-pair block sliced
+  `feature_rows[i][..n_inputs]` before the canonical dispatch: **4,920 of 4,928
+  predictions wrong** on shipped `D`, in a block the gauntlet's scatter matrix
+  renders. `CallerGather::accepts_prefix_row_width` splits the PREFIX admission rule
+  (`>=`, which the 720-column kadis source has always used to feed 372-input bakes)
+  from the GRID rule (`==`); collapsing them dropped the block from every identity
+  bake's verdict, and a test asserts the two rules disagree.
+
 ### Added — a bake can DECLARE the feature ids it reads (2026-09-06)
 
 - **`bake_dial_refit densify`** rewrites a bake to the dense contract:

@@ -246,7 +246,15 @@ impl Request {
             crate::mlp::Model::from_bytes(bytes).map_err(|_| ResearchError::UnreadableBake)?;
         let want =
             crate::feature_plan::bake_read_slots(&model).ok_or(ResearchError::UnreadableBake)?;
-        let layout_width = model.caller_input_width();
+        // `want` is in ID space. For an identity bake the caller width IS the
+        // walk width, but a DENSE bake's caller width is its packed size — 28
+        // for shipped `D`, whose ids reach `f155` — so clipping to it would
+        // silently delete every id above the packed count and hand back a
+        // request for a fraction of what the bake reads. The layout's
+        // `walk_width` (one past the highest id it carries) is the width that
+        // makes the clip a no-op for both kinds.
+        let layout = crate::feature_layout::declared_layout(&model);
+        let layout_width = layout.walk_width();
         Ok(Request {
             want: want.clipped_to(layout_width),
             layout_width,

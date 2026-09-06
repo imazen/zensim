@@ -11,8 +11,8 @@
 #
 #   pub modules                                 3
 #   pub types (struct/enum/trait/alias)         7
-#   pub consts/statics                          2
-#   free functions                             20
+#   pub consts/statics                          3
+#   free functions                             21
 #   inherent methods                           73
 #   struct fields                              24
 #   enum variants                              13
@@ -20,7 +20,7 @@
 #   auto-trait-complete types                   6
 #
 # per-module pub lines:
-#   (root)                           19
+#   (root)                           21
 #   __bench_stages                    9
 #   feature_set_id                    4
 #   feature_v2                       21
@@ -29,8 +29,9 @@
 #   research                         76
 #   source                            4
 
-## items (142 lines)
+## items (144 lines)
 
+pub const ZENTRAIN_FEATURE_IDS_KEY: &str
 pub const research::BASE_REVISION_ERA: &str
 pub const research::BUILD_COMMIT: core::option::Option<&str>
 pub enum feature_v2::FormulaRevision
@@ -60,6 +61,7 @@ pub fn bench_pu_xyb_dispatch(&[[f32; 3]], &mut [f32], &mut [f32], &mut [f32])
 pub fn bench_pu_xyb_scalar(&[[f32; 3]], &mut [f32], &mut [f32], &mut [f32])
 pub fn compute_zensim_with_config(&[[u8; 3]], &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
 pub fn compute_zensim_with_ref_and_config(&PrecomputedReference, &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
+pub fn declared_feature_ids(&zenpredict::model::Model) -> core::option::Option<alloc::vec::Vec<u16>>
 pub fn feature_set_id::ComputeParts::assert_fields_are_eq(&self)
 pub fn feature_set_id::ComputeToken::assert_fields_are_eq(&self)
 pub fn feature_set_id::FeatureSetId::assert_fields_are_eq(&self)

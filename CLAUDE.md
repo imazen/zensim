@@ -570,8 +570,13 @@ Quick paths:
   anchor's own 2,000 rows re-read today — which is what makes the era term and
   the content term separable. MEASURED: era **+3.9/+4.8/+3.9** (CID22/KonJND/
   AIC-3) vs content **−0.4/−1.0/−0.2**, rank identical to 5 dp on all five
-  corpora, all gates pass, but dial reach falls 96.85 → 85.74. **`zensim/weights/`
-  is UNCHANGED; `ZensimProfile::B` still resolves to the 2026-07-07 bake.**
+  corpora, all gates pass, but dial reach falls 96.85 → 85.74. **This proposal
+  changed no shipped weight: `ZensimProfile::B` still resolves to the 2026-07-07
+  LINEAGE.** *(Corrected 2026-09-06: B's shipped FILE is now
+  `b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin` — the same
+  2026-07-07 weights rewritten to the dense feature-id contract, bit-identical
+  score, see the dense-flip section below. The anchor proposal is still
+  unadopted; only the wire shape moved.)*
   Record: `benchmarks/imazen26_anchor_2026-09-04.md`, ledger §3.35. NOTE
   `extend-top` alone CANNOT fix an era skew — it keeps in-distribution knots
   verbatim and only extends above the top knot, which CID22 never reaches; use
@@ -2360,6 +2365,48 @@ re-testing: **retrain** under the current trainer (which emits v3
 through `bake()`). Don't write a v2→v3 upgrade tool — the right
 fix is "retrain, evaluate on full Mohammadi panel" per the
 principled experiment workflow. Bakes are cheap; ghost data isn't.
+
+## SHIPPED BAKES DECLARE THE IDS THEY READ — four of six flipped (2026-09-06)
+
+Full record: [`benchmarks/dense_bake_flip_2026-09-06.md`](benchmarks/dense_bake_flip_2026-09-06.md).
+Contract + tool: [`benchmarks/dense_bake_contract_2026-09-06.md`](benchmarks/dense_bake_contract_2026-09-06.md).
+Plan: [`docs/PLAN_CRUFT_PURGE_2026-09-06.md`](docs/PLAN_CRUFT_PURGE_2026-09-06.md).
+
+USER RULING (2026-09-06, verbatim): *"get rid of the cruft and confusion … a 372
+layout where the bake skips features and features aren't computed is a bad
+contract"*.
+
+**`A`, `B`, `BHdr` and the default `D` now ship `*_byid_2026-09-06.bin`** —
+`caller_input_width() == n_inputs() == |declared ids|`, **zero `Drop`**
+transforms, `zentrain.feature_ids` naming the ids, and the scorers GATHER.
+`D` reads **28** ids (`f6..f155`) where it used to declare 372; `B` 95, `BHdr`
+133, `A` 285. **No number moved** — `Zensim::compute` is bit-identical on the
+20-cell parity matrix and `bake_verdict --full-json` on 31–33k fields shows
+**0** statistic diffs; shipped B still reads CID22 **0.8821166166351724**.
+The wide bytes stay committed and the gate `include_bytes!`es both.
+
+**Three things to know before citing or changing a bake:**
+
+- **A bake's `n_inputs` is no longer its caller width's stand-in.** For a dense
+  bake `n_inputs` is the PACKED width. **Never slice a feature row to
+  `n_inputs`** — build a `CallerGather` (`bake_runtime::CallerGather::for_model`,
+  the one owner, resolving through `zensim::declared_feature_ids`) and let it
+  fill. That defect shipped once already: the `--full-json` kadis per-pair block
+  sliced positionally and got **4,920 of 4,928 predictions wrong** on shipped D,
+  silently, in a block the gauntlet renders.
+- **Two admission rules exist and they are not interchangeable.**
+  `accepts_row_width` is the GRID rule (exact `==`); `accepts_prefix_row_width`
+  is for sources whose contract is "take the leading `n_inputs` columns" (the
+  720-column kadis per-pair table feeding a 372-input bake). Using the grid rule
+  on a prefix source silently DROPS the block — a coverage loss, not a wrong
+  number, and just as bad in a published verdict.
+- **`C` and `CHdr` are deliberately NOT converted, and it is a pending USER
+  decision, not a backlog item.** They serve on `append2_dst_activity: true`
+  (the `everything` fallback) while their training extraction ran it **false**,
+  so the honest conversion moves a shipped score by **0.866** (`C`) / **0.311**
+  (`CHdr`) zensim points. Do not touch their bytes or their served toggle.
+  `dense_bake_flip_gate::flipped_bakes_are_dense_and_the_c_pair_is_deliberately_not`
+  fails if either is densified while the decision is open.
 
 ## FEATURE SETS ARE NAMED, NOT COUNTED (2026-09-05, user directive)
 

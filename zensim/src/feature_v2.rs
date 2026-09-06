@@ -14012,10 +14012,16 @@ pub(crate) mod tests {
         let bytes: Vec<&'static [u8]> = params.scoring_bake_bytes().collect();
         assert_eq!(bytes.len(), 1, "D forwards exactly one bake");
         let model = crate::mlp::Model::from_bytes(bytes[0]).expect("shipped D bake parses");
+        // Since the 2026-09-06 dense flip `D` declares the 28 ids it reads and
+        // asks for exactly 28 caller inputs (it used to declare the whole
+        // 372-wide v1 layout with 344 all-zero layer-0 rows). What this test
+        // is about is unchanged: the derived COMPUTE must still be the cheap
+        // v1 walk with no v2-era block, and `Peaks` rather than the
+        // footprint-inferior `Off`.
         assert_eq!(
             model.caller_input_width(),
-            372,
-            "ADD156 is dense over the v1 372-layout width, not pruned"
+            28,
+            "ADD156 declares the 28 basic ids it reads"
         );
         let cs = ComputeSet::from_block_profile(&model);
         assert_eq!(

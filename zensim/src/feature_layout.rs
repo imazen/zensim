@@ -312,7 +312,7 @@ fn dense_slots_of(id: &FeatureSetId) -> Option<SlotSet> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::feature_set_id::ComputeToken;
 
@@ -540,7 +540,7 @@ mod tests {
     }
 
     /// A 1-layer bake of `ids.len()` inputs declaring those ids explicitly.
-    fn ids_bake_bytes(ids: &[usize]) -> Vec<u8> {
+    pub(crate) fn ids_bake_bytes(ids: &[usize]) -> Vec<u8> {
         let list = ids
             .iter()
             .map(|i| i.to_string())
@@ -589,32 +589,65 @@ mod tests {
         zenpredict_bake::bake_from_json_str(&json).expect("synthetic bake must build")
     }
 
-    /// **G4.2, the bake half** — every bake that ships today resolves to an
-    /// IDENTITY layout, so the declaration path cannot move a shipped byte.
+    /// **G4.2, the bake half** — every shipped bake resolves to a layout whose
+    /// width is EXACTLY its declared caller width, dense or identity.
     ///
-    /// The normal case is a bake whose `zentrain.feature_set_id` names FEWER
-    /// slots than its declared width (a `944`-with-structural-zeros producer
-    /// names 265 at width 944); the filter refuses to read that as a dense
-    /// layout, which is the whole safety argument.
+    /// This asserted `is_identity()` for every bake until 2026-09-06, when
+    /// `A` / `B` / `BHdr` / `D` were flipped to the dense contract
+    /// (`benchmarks/dense_bake_flip_2026-09-06.md`). The invariant that
+    /// actually protects a served vector is not "identity" — it is that the
+    /// layout the runtime resolves and the width the bake asks for are the
+    /// same number, so a bake is never handed a vector shaped for something
+    /// else. That holds for both kinds and is what is asserted now.
+    ///
+    /// The safety argument the old name pointed at is kept as its own
+    /// assertion: a DENSE layout is only ever read from an explicit
+    /// `zentrain.feature_ids` list, never inferred from a
+    /// `zentrain.feature_set_id` that happens to name fewer slots than the
+    /// declared width (a `944`-with-structural-zeros producer names 265 at
+    /// width 944, and reading that as dense would permute the vector).
     #[test]
-    fn every_shipped_bake_resolves_to_an_identity_layout() {
+    fn every_shipped_bake_resolves_to_its_own_declared_width() {
         let mut n = 0usize;
+        let mut dense = 0usize;
         for (name, p) in crate::feature_plan::servability_census::shipped_profiles() {
             for bytes in p.params().scoring_bake_bytes() {
                 let Ok(m) = crate::mlp::Model::from_bytes(bytes) else {
                     continue;
                 };
                 let l = declared_layout(&m);
-                assert!(
-                    l.is_identity(),
-                    "{name}: a shipped bake resolved to a NON-identity layout \
-                     ({}), which would change the vector it is served",
-                    l.name()
+                assert_eq!(
+                    l.width(),
+                    m.caller_input_width(),
+                    "{name}: layout {} is {} wide but the bake asks for {}",
+                    l.name(),
+                    l.width(),
+                    m.caller_input_width()
                 );
-                assert_eq!(l.width(), m.caller_input_width());
+                if !l.is_identity() {
+                    dense += 1;
+                    // A dense layout must come from the explicit id list.
+                    assert!(
+                        crate::declared_feature_ids(&m).is_some(),
+                        "{name}: resolved to the dense layout {} without an explicit \
+                         `zentrain.feature_ids` declaration — a dense layout inferred \
+                         from anything else would permute the vector it is served",
+                        l.name()
+                    );
+                    assert_eq!(
+                        l.width(),
+                        m.n_inputs(),
+                        "{name}: a dense bake's layout, caller width and n_inputs are one number"
+                    );
+                }
                 n += 1;
             }
         }
         assert!(n >= 5, "the census must actually see bakes, saw {n}");
+        assert!(
+            dense >= 4,
+            "A/B/BHdr/D ship DENSE since 2026-09-06 — saw {dense} dense of {n}; if a flip \
+             was reverted, say so here rather than letting this pass quietly"
+        );
     }
 }

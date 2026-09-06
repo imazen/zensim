@@ -286,15 +286,15 @@ impl Plan {
         let ns = crate::NUM_SCALES;
         let layout_width = model.caller_input_width();
         let layout = crate::feature_layout::declared_layout(model);
-        let want_positions = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
-        // The bake reads POSITIONS; the plan speaks IDS. For every layout
-        // that exists today they are the same numbers, and for a dense one
-        // they are not — so translate through the layout instead of assuming.
-        let want = SlotSet::from_slots(
-            want_positions
-                .iter_slots()
-                .filter_map(|pos| layout.slot_at(pos).map(usize::from)),
-        );
+        // The bake reads POSITIONS and the plan speaks IDS; for every identity
+        // layout they are the same numbers and for a dense one they are not.
+        // The translation lives in [`bake_read_slots`], which is THE owner of
+        // "which ids does this bake read" — it used to happen here, which made
+        // the owner return positions under an ids-shaped name and left
+        // `fold_engine::bake_pool_need_from_model` folding raw positions
+        // against the v1 family bounds (measured wrong on shipped B the moment
+        // it went dense). One translation, one place.
+        let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
         // COMPUTE. `ComputeSet::from_block_profile` is the existing, tested
         // derivation and stays THE answer for an identity layout — which is
         // every bake that ships, so no served bake changes.
@@ -317,6 +317,30 @@ impl Plan {
             Plan::normalized(ComputeSet::from_block_profile(model), layout)
         } else {
             Plan::derive_with_layout(&want, layout)?
+        };
+        // **The SERVING-plan footprint policy, applied to both branches.**
+        // `fold_engine::pools_mode_for_need` owns the rule that `Off` is never
+        // the right answer for a served v1 walk: `Off` and `Peaks` compute the
+        // same sums (the peak accumulators are the fused V-blur's
+        // unconditional L8/max tier), but `Off` hands the band no scratch,
+        // which disables the band-local self-blur and falls back to phase A's
+        // four STRIP-wide H planes — a LARGER hot set for no arithmetic
+        // saving. `from_block_profile` routes through that owner; the id-space
+        // branch derives `v1_pools` from the touched families and does not.
+        //
+        // Before the dense flip nothing reached the second branch, so the
+        // divergence was invisible. MEASURED the moment shipped `D` declared
+        // its 28 basic ids: the id-space plan chose `Off`, and D's emitted
+        // vector went from real values at `f156..227` to zeros — the
+        // footprint regression the policy exists to prevent, with the score
+        // unmoved either way. Promoting here restores byte-identical
+        // behaviour and puts the policy back in one place.
+        let plan = if plan.compute.v1_basic && plan.compute.v1_pools == V1PoolsMode::Off {
+            let mut promoted = plan.compute;
+            promoted.v1_pools = V1PoolsMode::Peaks;
+            Plan::normalized(promoted, plan.layout)
+        } else {
+            plan
         };
         if !plan.emit.covers(&want) {
             return Err(PlanError::Uncomputable {
@@ -525,7 +549,7 @@ fn free_union(a: V1FreeExtras, b: V1FreeExtras) -> V1FreeExtras {
     if rank(a) >= rank(b) { a } else { b }
 }
 
-/// The caller lines a bake structurally reads, as a [`SlotSet`].
+/// **THE owner of "which FEATURE IDS does this bake read".**
 ///
 /// The in-crate twin of `zensim_validate::block_profile::used_caller_lines`,
 /// and NOT a duplicate of it: both are thin callers of
@@ -533,14 +557,35 @@ fn free_union(a: V1FreeExtras, b: V1FreeExtras) -> V1FreeExtras {
 /// caller-space fold. zensim cannot depend on zensim-validate (the dependency
 /// runs the other way), so the narrow primitive lives in the lower crate and
 /// the validate-side function keeps its richer per-line norms.
+///
+/// **`caller_line_reads` returns layer-0 POSITIONS, and a position is only a
+/// feature id under the identity layout.** That equality held for every bake
+/// that shipped before 2026-09-06 and is exactly the assumption the dense
+/// contract breaks: shipped `B` declares 95 ids spanning `f3..f369`, so its
+/// live positions are `0..94` and reading them as ids says it touches nothing
+/// above `f94` — which would tell the walk to skip the masked and IW pools
+/// `B` demonstrably reads. Mapping through
+/// [`crate::declared_feature_ids`] — the ONE owner of the declaration — is
+/// what makes this function answer the question its name asks. An
+/// identity-layout bake maps `i -> i`, so nothing shipped before the dense
+/// contract moves.
 pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
     let reads = crate::fold_engine::caller_line_reads(model)?;
+    let declared = crate::declared_feature_ids(model);
     Some(SlotSet::from_slots(
         reads
             .iter()
             .enumerate()
             .filter(|(_, live)| **live)
-            .map(|(i, _)| i),
+            .map(|(i, _)| match &declared {
+                // A declared bake's position `i` carries feature id `ids[i]`.
+                // A position past the declaration is a shape bug upstream; map
+                // it to itself rather than dropping it, so a malformed bake
+                // over-reports what it reads instead of under-reporting (the
+                // safe direction for a SKIP decision).
+                Some(ids) => ids.get(i).map_or(i, |&id| usize::from(id)),
+                None => i,
+            }),
     ))
 }
 
@@ -550,6 +595,28 @@ mod tests {
 
     fn slots(r: impl IntoIterator<Item = (usize, usize)>) -> SlotSet {
         SlotSet::from_ranges(r)
+    }
+
+    #[test]
+    #[ignore]
+    fn zz_probe_moments() {
+        let m = crate::feature_defs::family_slots(
+            crate::feature_set_id::ComputeToken::Moments,
+            crate::NUM_SCALES,
+        );
+        println!("moments slots: {m}");
+        let free = SlotSet::from_ranges([(0, 228)]).union(&m).clipped_to(944);
+        println!("free set len {} : {free}", free.len());
+        let in228_300: Vec<usize> = free
+            .iter_slots()
+            .filter(|s| (228..300).contains(s))
+            .collect();
+        let in300_372: Vec<usize> = free
+            .iter_slots()
+            .filter(|s| (300..372).contains(s))
+            .collect();
+        println!("in masked range: {in228_300:?}");
+        println!("in iw range: {in300_372:?}");
     }
 
     /// **G1.7** — the v1 request plans to exactly today's v1 walk.
@@ -981,14 +1048,10 @@ pub(crate) mod servability_census {
                     continue;
                 };
                 let layout = crate::feature_layout::declared_layout(&m);
-                let Some(want_pos) = bake_read_slots(&m) else {
+                // `bake_read_slots` already answers in ID space.
+                let Some(want) = bake_read_slots(&m) else {
                     continue;
                 };
-                let want = SlotSet::from_slots(
-                    want_pos
-                        .iter_slots()
-                        .filter_map(|pos| layout.slot_at(pos).map(usize::from)),
-                );
                 let legacy = Plan::normalized(ComputeSet::from_block_profile(&m), layout.clone());
                 let derived = Plan::derive_with_layout(&want, layout);
                 checked += 1;
