@@ -71,6 +71,51 @@ do_bootstrap() {
   done
 }
 
+do_inversions() {
+  # The TWO-REFERENCE inversion reading lives in `dial.inversion_truth`, which is
+  # emitted only by a --full-json run that was ALSO given --reference-truth. The
+  # wave's rank verdict has no reference table (it falls back to `single` and
+  # SAYS SO — "NOT MEASURABLE … FALLING BACK to `single`"), and the wave's G-ADDR
+  # run has the table but writes only --gaddr-json. So capture it here: same
+  # ladder instrument, same pnorm3 table, ~2 s per bake.
+  local L=/mnt/v/output/zensim/ladder-2026-09-05/instruments
+  local P=/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments
+  for f in "$OUT"/verdicts/*.fulleval.json; do
+    local name; name=$(basename "$f" .fulleval.json)
+    [[ "$name" == _* ]] && continue
+    local bake="$OUT/bakes/${name}_packed.bin"
+    [[ -s "$bake" ]] || continue
+    [[ -s "$OUT/gates/${name}.inv.json" ]] && { say "inversions SKIP $name"; continue; }
+    say "inversions $name"
+    "$BIN/bake_verdict" --bake "$bake" \
+      --features-root /mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC \
+      --corpora cid22 \
+      --dial-grid "$L/dial_grid_372col_ladder.parquet" \
+      --gaddr-grid-truth "$L/dialcells_ssim2_ladder.tsv" \
+      --floor-rule resolvable --floor-margin 0.5 \
+      --reference-truth "$L/reference_truth_ladder_pnorm3.tsv:pnorm3" \
+      --inversion-truth agree \
+      --negtail-probe "$P/negtail_probe_372_postC_2026-09-05.parquet" \
+      --identity-probe "$P/identity_probe_372_postC_2026-09-05.parquet" \
+      --name "${name}@inv" --full-json "$OUT/gates/${name}.inv.json" \
+      --output /dev/null >> "$OUT/logs/${name}.inv.log" 2>&1 \
+      || say "inversions FAILED $name"
+  done
+  python3 - "$OUT" <<'PY2'
+import json, glob, os, sys
+out = sys.argv[1]
+print(f"{'cell':<22} {'mono_agree':>11} {'mono_single':>12} {'enc_attr':>9} {'unknown':>8}")
+for f in sorted(glob.glob(os.path.join(out, "gates", "*.inv.json"))):
+    d = json.load(open(f))
+    it = (d.get("dial") or {}).get("inversion_truth") or {}
+    name = os.path.basename(f)[: -len(".inv.json")]
+    print(f"{name:<22} {it.get('mono_dial', float('nan')):>11.5f} "
+          f"{it.get('mono_single', float('nan')):>12.5f} "
+          f"{it.get('n_encoder_attributed', '—'):>9} "
+          f"{it.get('n_attribution_unknown', '—'):>8}   {it.get('effective')}")
+PY2
+}
+
 do_select() {
   say "freeze_check --select --seed-group --min-k 2 --floor-basis all"
   "$BIN/freeze_check" --select "$OUT"/verdicts/*.fulleval.json \
@@ -81,12 +126,14 @@ do_select() {
 
 case "${1:-all}" in
   m3a)   do_m3a ;;
+  inversions) do_inversions ;;
   report) do_report ;;
   select) do_select ;;
   bootstrap) shift; do_bootstrap "$@" ;;
-  gates) do_report; do_select ;;
+  gates) do_report; do_inversions; do_select ;;
   all)
     do_report
+    do_inversions
     do_m3a
     do_select
     ;;
