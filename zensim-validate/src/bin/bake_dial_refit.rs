@@ -1559,13 +1559,13 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
             kept.len()
         ));
     }
+    // BOTH arms are fed the SAME caller-width row. That is the real end-to-end
+    // semantics as of increment B-2: the densified bake declares its ids and
+    // `bake_runtime::CallerGather` gathers them out of the caller's
+    // identity-laid-out vector, so pre-gathering here would double-gather.
     let probes = densify_probe_rows(caller_before, a.gate_rows);
-    let gathered: Vec<Vec<f64>> = probes
-        .iter()
-        .map(|row| kept.iter().map(|&i| row[i]).collect())
-        .collect();
     let before = forward_scored_raw(&bytes, &probes)?;
-    let after = forward_scored_raw(&out_bytes, &gathered)?;
+    let after = forward_scored_raw(&out_bytes, &probes)?;
 
     // THE gate, and it is the strong form: score the ORIGINAL bake with every
     // dropped line's value replaced by `0.0`. If the dropped lines truly
@@ -1590,6 +1590,7 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
         })
         .collect();
     let before_zeroed = forward_scored_raw(&bytes, &zeroed)?;
+    let _ = &kept;
     for (i, (x, y)) in before_zeroed.iter().zip(after.iter()).enumerate() {
         if x.to_bits() != y.to_bits() && !(x.is_nan() && y.is_nan()) {
             return Err(format!(
@@ -1748,19 +1749,22 @@ fn forward_scored_raw(bytes: &[u8], feats: &[Vec<f64>]) -> Result<Vec<f64>, Stri
     let hyb = extract_hybrid_head(&model);
     let pin = extract_tanh_output_head_scale(&model);
     let sp = spline::extract(&model);
+    // A DENSE bake declares ids into a caller-width row that is WIDER than its
+    // own input count; `score_with_bake_alloc` gathers. So the row length that
+    // must match is the DECLARING width, not `n_inputs`.
+    let dense = zensim_validate::bake_runtime::CallerGather::for_model(&model).is_dense();
     let mut predictor = zenpredict::Predictor::new(&model);
     let mut out = Vec::with_capacity(feats.len());
-    let mut row_f64 = vec![0f64; n_inputs];
+    let mut row_f64: Vec<f64> = Vec::new();
     for row in feats {
-        if row.len() != n_inputs {
+        if !dense && row.len() != n_inputs {
             return Err(format!(
                 "feature row has {} values, bake expects {n_inputs}",
                 row.len()
             ));
         }
-        for (d, s) in row_f64.iter_mut().zip(row.iter()) {
-            *d = (*s as f32) as f64;
-        }
+        row_f64.clear();
+        row_f64.extend(row.iter().map(|s| (*s as f32) as f64));
         out.push(score_with_bake_alloc(
             &mut predictor,
             has_transforms,

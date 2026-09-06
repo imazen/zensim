@@ -4225,6 +4225,12 @@ fn main() -> ExitCode {
     // that read different feature regimes is the column-mixing failure mode
     // this repo bans outright, so it fails loud rather than truncating.
     let n_inputs = models[0].caller_input_width();
+    // The declared layout of the anchor member, resolved once. Used by every
+    // GRID gate below (dial / corruption / G-ADDR probes / ramp) so a dense
+    // bake is admitted on the grids it can actually read instead of being
+    // skipped for having a packed width. Identity bakes keep the exact
+    // `n_features == n_inputs` rule they had.
+    let gather_for_grids = CallerGather::for_model(&models[0]);
     if let Some((p, m)) = members
         .iter()
         .zip(models.iter())
@@ -5048,7 +5054,7 @@ Run the dedicated q-sweep harness for those._\n",
                 );
                 None
             }
-            (None, None) if g.n_features == n_inputs => {
+            (None, None) if gather_for_grids.accepts_row_width(g.n_features, n_inputs) => {
                 let scores = ens.score_rows(&g.feature_rows);
                 Some((g.label, scores, sha, g.truth_ssim2))
             }
@@ -5206,7 +5212,7 @@ Run the dedicated q-sweep harness for those._\n",
     // ── Severity-ramp monotonicity (distortion dial) — opt-in ──────────
     if let Some(ramp_path) = &args.ramp_grid {
         match parquet_loader::load_ramp_grid(ramp_path) {
-            Ok(grid) if grid.n_features == n_inputs => {
+            Ok(grid) if gather_for_grids.accepts_row_width(grid.n_features, n_inputs) => {
                 let dial = ens.score_rows(&grid.feature_rows);
                 let images: Vec<String> =
                     grid.image.iter().map(|p| basename(Path::new(p))).collect();
@@ -5288,7 +5294,7 @@ Run the dedicated q-sweep harness for those._\n",
                 // scores; `None` when the dial could not read this grid, which
                 // is exactly when the composition is undefined.
                 let mut dial_scores: Option<Vec<f64>> = None;
-                if grid.n_features == n_inputs {
+                if gather_for_grids.accepts_row_width(grid.n_features, n_inputs) {
                     let dial = ens.score_rows(&grid.feature_rows);
                     let stats = eval_report::corruption_gate(&grid.label, &dial);
                     dial_scores = Some(dial);

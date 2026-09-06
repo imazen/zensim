@@ -85,6 +85,32 @@ for one release. **No crates.io publish in this work.**
   bake and its wide twin to the same bits with a NEGATIVE CONTROL proving a
   positional slice of the same dense bake does NOT agree.
 
+### Fixed — two more sites that read POSITIONS as feature IDS (2026-09-06)
+
+Both found by running a densified shipped B through `bake_verdict` and diffing
+the full JSON, not by reading the code. Both are byte-neutral for every bake
+that exists (all identity layouts).
+
+- **The grid admission gates skipped a dense bake entirely.** Every grid test
+  was `grid.n_features == n_inputs`, which for a dense bake compares a 372-wide
+  grid against its PACKED width and skips — the whole corruption panel vanished
+  from the verdict. A silent **coverage** loss, not a wrong number, and just as
+  bad in a published table. `CallerGather::accepts_row_width` keeps the exact
+  `==` rule for identity bakes and asks a dense bake's row to REACH its highest
+  declared id.
+- **`feature_set::bake_feature_set_ref` derived the id from POSITIONS.** It
+  reads `block_profile::used_caller_lines` (layer-0 positions), identical to
+  feature ids for every identity-layout bake — which is why it was sound for
+  four months. On a dense B it named `basic@w95` / slots `0-94` for a bake that
+  reads `f3..f369` across FOUR families. Mapped through the declaration it now
+  reads `basic+peaks+masked+iw@w95#9403d2a7` — the same compute tokens and the
+  same slots hash as the wide bake, differing only in the `@w` layout token,
+  which is the argument for the layout-free id form the purge plan registers.
+
+MEASURED after both: a densified shipped B's verdict is **bit-identical to the
+wide bake's on every numeric field outside the bake's own identity block** —
+`CID22 0.8821166166351724`, `kon504 |0.5193759178072009|`.
+
 ### Fixed — `bake_verdict` no longer scores a corpus NARROWER than the bake (2026-09-06)
 
 - `bake_runtime::score_row` sizes its scratch to the bake's caller width and

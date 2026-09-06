@@ -215,15 +215,37 @@ pub fn check(consumer: &FeatureSetRef, producer: &FeatureSetRef) -> Vec<Mismatch
 /// the pruned internal width and is a third, different number.
 pub fn bake_feature_set_ref(model: &Model, era: &str) -> Result<FeatureSetRef, String> {
     let used = crate::block_profile::used_caller_lines(model)?;
-    let slots = SlotSet::from_slots(used);
     let width = model.caller_input_width();
+    // `used_caller_lines` returns POSITIONS. For every identity-layout bake a
+    // position IS a feature id, which is why this was sound for four months.
+    // For a bake that DECLARES a dense read set it is not: under `dense95`,
+    // position 3 is whatever id the bake declared third, and deriving the id
+    // from positions would name `basic@w95` (slots `0-94`) for a bake that
+    // actually reads `f3..f369` across four families. Translate through the
+    // declaration when there is one — the same `zensim::declared_feature_ids`
+    // owner the runtime and the scorers read.
+    let (slots, source) = match zensim::declared_feature_ids(model) {
+        Some(ids) => (
+            SlotSet::from_slots(
+                used.iter()
+                    .filter_map(|&pos| ids.get(pos).map(|&id| usize::from(id))),
+            ),
+            "derived from bake bytes (used caller lines, mapped through the \
+             bake's declared feature ids)"
+                .to_string(),
+        ),
+        None => (
+            SlotSet::from_slots(used),
+            "derived from bake bytes (structurally-used caller lines)".to_string(),
+        ),
+    };
     let compute = compute_parts_for_slots(&slots);
     let id = FeatureSetId::from_slots(compute, width, era, &slots)
         .ok_or_else(|| format!("invalid era token {era:?} (charset [a-z0-9_]+)"))?;
     Ok(FeatureSetRef {
         id,
         slots,
-        source: "derived from bake bytes (structurally-used caller lines)".to_string(),
+        source,
         inferred: false,
     })
 }

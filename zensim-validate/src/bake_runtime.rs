@@ -384,6 +384,25 @@ impl CallerGather {
         matches!(self, CallerGather::ByFeatureId(_))
     }
 
+    /// Can a grid or corpus of `n_features` columns feed this bake?
+    ///
+    /// **Positional keeps the EXACT rule every grid gate used before this type
+    /// existed — `n_features == n_inputs`** — so no identity bake's grid is
+    /// admitted or skipped differently. A DENSE bake reads ids out of a wider
+    /// caller-laid-out row, so its requirement is that the row REACHES its
+    /// highest declared id; a `==` test against its packed width would skip
+    /// every real grid it can actually score, which is a silent coverage loss
+    /// rather than a wrong number, and just as bad in a published verdict.
+    pub fn accepts_row_width(&self, n_features: usize, n_inputs: usize) -> bool {
+        match self {
+            CallerGather::Positional => n_features == n_inputs,
+            CallerGather::ByFeatureId(ids) => ids
+                .iter()
+                .max()
+                .is_some_and(|&hi| n_features > usize::from(hi)),
+        }
+    }
+
     /// Fill `dst` (already sized to the bake's caller width) from `row`.
     pub fn fill(&self, dst: &mut [f32], row: &[f64]) {
         match self {
@@ -807,6 +826,34 @@ mod tests {
             sw.to_bits(),
             sn.to_bits(),
             "a positional slice of a dense bake must differ, else the test proves nothing"
+        );
+    }
+
+    /// `accepts_row_width` must keep the EXACT pre-existing grid rule for
+    /// identity bakes (`==`), and admit a dense bake on any row that REACHES
+    /// its highest declared id. Getting the dense side wrong is a silent
+    /// COVERAGE loss in a published verdict, not a wrong number — measured:
+    /// a dense shipped B skipped the whole corruption grid under the old `==`.
+    #[test]
+    fn grid_admission_keeps_the_old_rule_for_identity_and_reaches_for_dense() {
+        let pos = CallerGather::Positional;
+        assert!(pos.accepts_row_width(372, 372));
+        assert!(!pos.accepts_row_width(944, 372), "the old rule is EQUALITY");
+        assert!(!pos.accepts_row_width(300, 372));
+
+        let dense = CallerGather::ByFeatureId(vec![3, 10, 369]);
+        assert!(dense.accepts_row_width(372, 3), "reaches f369");
+        assert!(dense.accepts_row_width(944, 3));
+        // 370 columns are indices 0..=369, so f369 IS present — the boundary
+        // is `n_features > hi`, and 369 columns (0..=368) is the short case.
+        assert!(
+            dense.accepts_row_width(370, 3),
+            "370 columns reach f369 exactly"
+        );
+        assert!(!dense.accepts_row_width(369, 3), "369 columns stop at f368");
+        assert!(
+            !dense.accepts_row_width(3, 3),
+            "its own packed width does NOT reach"
         );
     }
 

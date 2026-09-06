@@ -140,3 +140,56 @@ as a registered blocker. The other nine bakes — including shipped **A**, **B**
 * **Not the pools.** Both C bakes read 0 of the 216 `f156..371` lines.
 * **Not the gather.** The eight non-append2 bakes gather 28–285 scattered ids out of
   a 372-wide walk and land bit-identical.
+
+
+---
+
+## 6. B-2 — the consumers, and the two more sites that read POSITIONS as IDS
+
+`zensim`'s runtime gathered a declared bake's ids from the start of this work.
+`zensim-validate` did not, and finding out took a real end-to-end run rather
+than a reading of the code.
+
+**`bake_runtime::CallerGather`** (`Positional` | `ByFeatureId`) is now built once
+per bake and threaded through `score_row`, `score_row_minmax`,
+`score_with_bake_alloc` and all six scoring bins, resolving through
+`zensim::declared_feature_ids` — the one owner both sides read.
+
+**MEASURED, on a densified shipped B (95 declared ids, `f3..f369`) against the
+same bake wide, `bake_verdict --full-json` on the default 372 root:** the RANK
+panel is **bit-identical** — `CID22 0.8821166166351724`, `kon504
+|0.5193759178072009|`, the same values `CLAUDE.md` recorded for that bake before
+this lane existed. Every numeric field outside the bake's own identity block
+agrees.
+
+Getting there took two more fixes, both the same bug class and both found by
+running the comparison rather than by reading:
+
+1. **The grid gates skipped the dense bake entirely.** Every grid admission test
+   was `grid.n_features == n_inputs`, which for a dense bake compares a 372-wide
+   grid against its PACKED width (95) and skips. The whole corruption panel
+   vanished from the verdict — a silent **coverage** loss, not a wrong number,
+   and just as bad in a published table. `CallerGather::accepts_row_width` keeps
+   the exact `==` rule for identity bakes (so no existing grid is admitted or
+   skipped differently) and asks a dense bake's row to REACH its highest
+   declared id.
+2. **`feature_set::bake_feature_set_ref` derived the id from POSITIONS.** It
+   reads `block_profile::used_caller_lines`, which returns layer-0 positions —
+   identical to feature ids for every identity-layout bake, which is why it was
+   sound for four months. On the dense B it named
+   `basic@w95/unknown#7cf7bb72`, slots `0-94`, for a bake that actually reads
+   `f3..f369` across FOUR families. Mapped through the declaration, it now reads
+   `basic+peaks+masked+iw@w95/unknown#9403d2a7` — **the same compute tokens and
+   the same slots hash `#9403d2a7` as the wide bake**, differing only in the
+   `@w` layout component. That residue is precisely the argument for the
+   layout-free id form the purge plan registers (§ increment E): with a dense
+   wire the layout token carries no information the hash does not.
+
+**Still not converted, and this is why.** A dense bake reading a WIDE table now
+reports `LayoutDiffers` from `feature_set::check` — correctly, because the
+layouts do differ until the tables go dense too. Combined with the
+`append2_dst_activity` blocker (§5), which makes C and CHdr unconvertible at
+all, converting only four of the six shipped profiles would leave the shipped
+set inconsistent. The tool, the contract, the consumer gather and the proof are
+landed; the conversion is one coherent increment that should move all six at
+once, and it needs the user's decision first.
