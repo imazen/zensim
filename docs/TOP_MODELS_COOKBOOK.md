@@ -144,6 +144,27 @@ not zero and the contamination above 5e-3 is exactly four slots
 (`LUMA_MEAN_REF` f926/931/936/941, 0.45–0.64 % of layer-0 mass); the `id100`
 anchor chain takes the contract 5/6 → 6/6 with rank bit-unchanged.
 
+**THREE MEASURED FACTS ABOUT THE FAST CLASS ITSELF (2026-09-05 results).**
+
+* **A 156-plus-peaks model IS 944-competitive.** `S372_S228_H128_p` at k = 3 —
+  372 layout, 228 slice, `--hidden 128`, 37,923 B — reads composite **0.8732** /
+  CID22 **0.8896** / KonJND **0.4999** against era-closed 944-leader bars of
+  0.8626 / 0.8877 / 0.4782, on verified-identical rulers (504 KonJND refs, 4,292
+  CID22 pairs). Do not assume the fast class is behind on rank; it is not.
+* **CAPACITY IS NOT A LEVER — start at `--hidden 32`.** Across six set×width
+  pairs, H32 vs H128 moves composite by −0.0038…+0.0021, inside every seed
+  spread, at **30–47 % fewer bytes**. The default 128 buys nothing measurable.
+* **MORE COMPUTE MAKES THIS RECIPE WORSE.** The same recipe with no
+  `--keep-features`, free to read all 944 coordinates, is the *lowest*
+  non-degenerate cell measured (composite 0.8581, KonJND 0.4191 against the 228
+  slice's 0.4543). So a KonJND gap in this class is **not** a compute gap, and
+  widening the feature set is not the fix.
+* **The per-sample-α head inverts on this recipe** (raw CID22 −0.8921 at depth
+  2 — a *better* ordering than the plain path, backwards), which is why its pack
+  cannot fit a monotone spline. Everything gated behind that head
+  (`--monotonicity-reg`, `--konjnd-aggregation-*`, `--pjnd-passthrough-*`,
+  `--monotone-cbc`) needs the head's output orientation fixed first.
+
 Evidence: `benchmarks/fastclass2_campaign_2026-09-05.md`,
 `benchmarks/kernel_fastclass_2026-09-05.md`,
 `benchmarks/d_peaks_jxl_floor_2026-09-05.md`,
