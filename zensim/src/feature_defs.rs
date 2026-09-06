@@ -395,7 +395,7 @@ pub(crate) struct Revision {
 /// so "which slots does this revision move?" stays a lookup over the signal
 /// table rather than a second list that can drift.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
-pub(crate) enum FormulaRevision {
+pub enum FormulaRevision {
     /// Everything shipped through era `v1postc` — the semantics every stored
     /// table and every published verdict was read at.
     #[default]
@@ -2256,6 +2256,7 @@ mod owner_gates {
         use feature_v2::{ComputeSet, V1FreeExtras, V1PoolsMode};
         let width = full_width(NS);
         let off = ComputeSet {
+            formula_revision: crate::ssim_form::active_revision(),
             v1_basic: false,
             v1_pools: V1PoolsMode::Off,
             v2_blocks: false,

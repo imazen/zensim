@@ -589,7 +589,23 @@ pub(crate) fn score_plan(
         // wrong: measured, and the reason `dense_layout_round_trip` exists.
         widest = widest.max(p.walk_width());
         union = Some(match union {
-            Some(u) => u.union(&p),
+            Some(u) => {
+                // **REVISION IS PER BAKE, and one walk computes one era.** A
+                // profile whose bakes declare different formula revisions
+                // cannot be served from a single extraction; unioning them
+                // would silently serve one bake the other's arithmetic, which
+                // is exactly what the per-bake declaration exists to prevent.
+                // Returning `None` sends the profile down the unplanned path,
+                // which computes the process's revision for every bake and is
+                // today's behaviour — and the loud half lives in
+                // `mixed_revision_profiles_are_refused_by_the_planner`, which
+                // pins that a mixed profile does NOT get a plan rather than
+                // getting a quietly wrong one.
+                if !u.revisions_agree(&p) {
+                    return None;
+                }
+                u.union(&p)
+            }
             None => p,
         });
     }

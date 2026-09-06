@@ -196,6 +196,10 @@ impl Plan {
         };
 
         let requested = ComputeSet {
+            // A slot-set request carries no bake, so it takes the process's
+            // revision. A BAKE-driven plan takes the bake's own — see
+            // `Plan::for_bake`.
+            formula_revision: crate::ssim_form::active_revision(),
             v1_basic: touches(ComputeToken::Basic) || v1_pools != V1PoolsMode::Off,
             v1_pools,
             v2_blocks,
@@ -328,6 +332,7 @@ impl Plan {
     /// caller expressed as a bare `Option<V1PoolsMode>`.
     pub(crate) fn v1(pools: V1PoolsMode, layout_width: usize) -> Plan {
         let compute = ComputeSet {
+            formula_revision: crate::ssim_form::active_revision(),
             v1_basic: true,
             v1_pools: pools,
             v2_blocks: false,
@@ -373,6 +378,10 @@ impl Plan {
         let c = &self.compute;
         let layout = LayoutBlocks::for_width(self.layout.walk_width(), ns);
         crate::feature_v2::V2NewFeatureToggles {
+            // THE revision this walk computes. Forwarded from the plan, so a
+            // bake's declared revision reaches the finaliser rather than the
+            // process-wide default.
+            formula_revision: c.formula_revision,
             gradient_features: c.gradient,
             transducer_bank: c.transducer_bank,
             blockiness: c.blockiness,
@@ -402,6 +411,22 @@ impl Plan {
         }
     }
 
+    /// The formula revision this plan computes.
+    pub(crate) fn formula_revision(&self) -> crate::feature_defs::FormulaRevision {
+        self.compute.formula_revision
+    }
+
+    /// Do two plans compute the SAME arithmetic era?
+    ///
+    /// One walk computes one revision, so a profile whose bakes disagree
+    /// cannot be served from a single extraction — and serving both from the
+    /// winner's revision would silently re-price the loser's inputs, which is
+    /// exactly the failure the per-bake declaration exists to prevent. The
+    /// scoring path checks this and refuses.
+    pub(crate) fn revisions_agree(&self, other: &Plan) -> bool {
+        self.compute.formula_revision == other.compute.formula_revision
+    }
+
     /// Does this plan populate every slot of `want`?
     pub(crate) fn covers(&self, want: &SlotSet) -> bool {
         self.emit.covers(want)
@@ -417,6 +442,14 @@ impl Plan {
         let layout_width = self.layout.walk_width().max(other.layout.walk_width());
         let (a, b) = (&self.compute, &other.compute);
         let compute = ComputeSet {
+            // **A union of two DIFFERENT revisions is not a plan.** One walk
+            // computes ONE arithmetic era, so a profile whose bakes declare
+            // different revisions cannot be served from one extraction. The
+            // union takes the LEFT side's revision and `Plan::revisions_agree`
+            // is the predicate a caller must check first — checking here would
+            // mean either a silent pick or a `Result` on an infallible
+            // operation, and both hide the question.
+            formula_revision: a.formula_revision,
             v1_basic: a.v1_basic || b.v1_basic,
             v1_pools: pools_union(a.v1_pools, b.v1_pools),
             v2_blocks: a.v2_blocks || b.v2_blocks,
@@ -879,6 +912,49 @@ pub(crate) mod servability_census {
             declared_width,
             outcome,
         }
+    }
+
+    /// **Per-bake revision, and the one place its limitation is
+    /// load-bearing.** A profile whose bakes declare DIFFERENT formula
+    /// revisions gets NO plan, because one walk computes one arithmetic era —
+    /// unioning them would silently serve one bake the other's arithmetic,
+    /// which is the failure the per-bake declaration exists to prevent.
+    ///
+    /// Every shipped profile is single-revision today (no bake carries a
+    /// `zentrain.formula_revision` stamp, so all resolve to the shipped
+    /// revision), so this gate asserts both halves: the real profiles agree,
+    /// and `revisions_agree` actually distinguishes when they would not.
+    #[test]
+    fn mixed_revision_profiles_get_no_plan() {
+        use crate::feature_defs::FormulaRevision;
+        // Every shipped profile's bakes agree on a revision.
+        for (name, p) in shipped_profiles() {
+            let revs: Vec<FormulaRevision> = p
+                .params()
+                .scoring_bake_bytes()
+                .filter_map(|b| crate::mlp::Model::from_bytes(b).ok())
+                .map(|m| crate::feature_v2::bake_formula_revision(&m))
+                .collect();
+            assert!(
+                revs.windows(2).all(|w| w[0] == w[1]),
+                "{name}: bakes declare different revisions {revs:?} — this \
+                 profile cannot be served from one extraction"
+            );
+        }
+        // And the predicate is not vacuously true: two plans at different
+        // revisions must NOT agree.
+        let mut a = Plan::derive(&SlotSet::from_ranges([(0, 372)]), 372).expect("plan");
+        let b = Plan::derive(&SlotSet::from_ranges([(0, 372)]), 372).expect("plan");
+        assert!(a.revisions_agree(&b), "same revision must agree");
+        a.compute.formula_revision = match a.compute.formula_revision {
+            FormulaRevision::Rev1 => FormulaRevision::Rev2,
+            FormulaRevision::Rev2 => FormulaRevision::Rev1,
+        };
+        assert!(
+            !a.revisions_agree(&b),
+            "different revisions must NOT agree — otherwise the refusal in \
+             `fold_engine::score_plan` can never fire"
+        );
     }
 
     /// **Phase 5 evidence** — `ComputeSet::from_block_profile` and the

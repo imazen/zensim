@@ -147,6 +147,65 @@ Record: `benchmarks/feature_system_phase4_2026-09-05.md`.
   retiring 944-with-structural-zeros is a decision about NEW artifacts. Every
   legacy width remains a declared layout over the same ids.
 
+#### Phase 5 — consumer migration, and revision as a PER-BAKE declaration (2026-09-05)
+
+Record: `benchmarks/feature_system_phase5_2026-09-05.md`.
+
+- **REVISION IS A PER-BAKE DECLARATION, not a process switch** — forced by a
+  measurement, and the more important half of this phase. The revision lane's
+  F5 fix is not free: `bake_block_profile` shows all three shipped 944 bakes
+  (`c_sdr_mlp944_corrmix`, `c_hdr_l1t1944`, `c_sdr_purity944`) reading the
+  full `GLOBAL_DMEAN`/`CGAIN`/`CLOSS` set, 33 slots each, so a GLOBAL
+  `SHIPPED_REVISION` flip would move **22 of 33 inputs per bake** and silently
+  re-price all of them. Now: `V2NewFeatureToggles::formula_revision` +
+  `ComputeSet::formula_revision` carry the revision through the walk (default
+  = `ssim_form::active_revision()`, so every existing construction is
+  byte-identical and `ZENSIM_FORMULA_REV` still pins the process);
+  `feature_v2::bake_formula_revision` reads a bake's
+  `zentrain.formula_revision` (absent = the shipped revision, an unrecognised
+  value never guessed at silently); `Plan::revisions_agree` +
+  `fold_engine::score_plan` refuse a mixed-revision profile, because one walk
+  computes one arithmetic era; `bake_verdict` refuses a bake/build revision
+  mismatch naming both. **MEASURED**: two revisions coexist in one process,
+  differing on **11 slots**, all `GLOBAL_CGAIN`/`GLOBAL_CLOSS`, with
+  `GLOBAL_DMEAN` never moving — narrower than `paired_global_contrast`'s name
+  suggests and correct, since the fix is to the paired CONTRAST estimate. The
+  default toggles reproduce `Rev1` bit-for-bit. **This is what lets `Rev2`
+  ship without touching Profile C until C is refit.** Honest scope: only F5's
+  half is per-request — `ssim_form::active_luma_form` is a `OnceLock` inside
+  the SIMD kernels and making it per-request is a kernel-dispatch change this
+  lane does not own; the toggle's own doc says so.
+- **`--regime N` prints its DERIVED meaning**, resolved through the default
+  root's own `_MANIFEST.json` regime and the registry rather than hard-coded
+  — `--regime 372 means regime v1-372 = basic+peaks+masked+iw@w372 (372
+  slots, #d16a1091)` — and says the meaning is **NOT ESTABLISHED** rather
+  than guessing when the root declares no regime the registry knows.
+- **`bake_verdict` refuses `SlotsNotPopulated` by DEFAULT** — the general form
+  of the `--regime 944` silent-mis-scoring bug, at every block and every
+  regime rather than the one hand-specialised block `folded_root_conflict`
+  covers. Restricted, deliberately, to the case where BOTH feature-set ids are
+  STORED: an inferred id is "evidence about the artifact's NAME, never about
+  its BYTES" (`FEATURE_SET_IDS.md` §2.3), so refusing on one would be refusing
+  on a guess. `--allow-unpopulated-slots` is the opt-out, mirroring
+  `--cross-regime`; the older guard is KEPT because it fires on inferred roots
+  where this one will not.
+- **Gates.** **G5.1**: a fixed bake on a fixed root gives a verdict
+  **byte-identical apart from the wall-time line**, before and after the whole
+  phase. **G5.2**: reproduced — `--regime 944` on shipped B refuses, naming
+  the 49 caller lines in `f156-371`.
+- **⚠ PUBLIC-API DELTA, REGISTERED (one line).** `V2NewFeatureToggles` gains a
+  public field, `formula_revision: FormulaRevision`. Every other item in this
+  phase and in phases 2 and 4 is `pub(crate)` or `#[doc(hidden)]`; this one is
+  on the SUPPORTED surface (`docs/public-api/zensim.txt`, +1 line) because the
+  struct is a `pub` request type callers construct. **Additive**, and every
+  in-tree caller already uses `..V2NewFeatureToggles::default()` — the struct
+  is not `#[non_exhaustive]`, so an EXHAUSTIVE external struct literal would
+  break. The same is true of every field this struct has gained
+  (`append_block`, `append2_block`, `csfw_block`, `free_extras`, `v1_pools`),
+  so the established contract is "construct with `..default()`"; recorded here
+  rather than assumed. `FormulaRevision` itself reaches consumers only through
+  a `#[doc(hidden)]` re-export.
+
 ### Fixed
 
 - **Three defects found by building the layout, all the same shape: code that

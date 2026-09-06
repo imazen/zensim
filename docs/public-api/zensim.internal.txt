@@ -10,29 +10,30 @@
 ## summary
 #
 #   pub modules                                 3
-#   pub types (struct/enum/trait/alias)         6
+#   pub types (struct/enum/trait/alias)         7
 #   pub consts/statics                          2
-#   free functions                             18
-#   inherent methods                           65
-#   struct fields                              23
-#   enum variants                              11
-#   trait roster entries (type × trait)        49
-#   auto-trait-complete types                   5
+#   free functions                             20
+#   inherent methods                           73
+#   struct fields                              24
+#   enum variants                              13
+#   trait roster entries (type × trait)        59
+#   auto-trait-complete types                   6
 #
 # per-module pub lines:
 #   (root)                           19
 #   __bench_stages                    9
 #   feature_set_id                    4
-#   feature_v2                        7
+#   feature_v2                       21
 #   fold_engine                       8
 #   profile                           1
 #   research                         76
 #   source                            4
 
-## items (128 lines)
+## items (142 lines)
 
 pub const research::BASE_REVISION_ERA: &str
 pub const research::BUILD_COMMIT: core::option::Option<&str>
+pub enum feature_v2::FormulaRevision
 pub enum fold_engine::ScoringEngine
 pub enum research::ResearchError
 pub enum research::RevisionRef
@@ -64,10 +65,20 @@ pub fn feature_set_id::ComputeToken::assert_fields_are_eq(&self)
 pub fn feature_set_id::FeatureSetId::assert_fields_are_eq(&self)
 pub fn feature_set_id::SlotSet::assert_fields_are_eq(&self)
 pub fn feature_v2::FeatureRegime::assert_fields_are_eq(&self)
+pub fn feature_v2::FormulaRevision::assert_fields_are_eq(&self)
+pub fn feature_v2::FormulaRevision::clone(&self) -> feature_v2::FormulaRevision
+pub fn feature_v2::FormulaRevision::cmp(&self, &feature_v2::FormulaRevision) -> core::cmp::Ordering
+pub fn feature_v2::FormulaRevision::default() -> feature_v2::FormulaRevision
+pub fn feature_v2::FormulaRevision::eq(&self, &feature_v2::FormulaRevision) -> bool
+pub fn feature_v2::FormulaRevision::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn feature_v2::FormulaRevision::hash<__H: core::hash::Hasher>(&self, &mut __H)
+pub fn feature_v2::FormulaRevision::partial_cmp(&self, &feature_v2::FormulaRevision) -> core::option::Option<core::cmp::Ordering>
 pub fn feature_v2::V1FreeExtras::assert_fields_are_eq(&self)
 pub fn feature_v2::V1PoolsMode::assert_fields_are_eq(&self)
 pub fn feature_v2::V2NewFeatureToggles::feature_set_id(&self, usize, usize, &str) -> core::option::Option<feature_set_id::FeatureSetId>
 pub fn feature_v2::V2NewFeatureToggles::populated_slots(&self, usize, usize) -> feature_set_id::SlotSet
+pub fn feature_v2::active_formula_revision() -> feature_v2::FormulaRevision
+pub fn feature_v2::bake_formula_revision_public(&zenpredict::model::Model) -> feature_v2::FormulaRevision
 pub fn fold_engine::ScoringEngine::assert_fields_are_eq(&self)
 pub fn fold_engine::ScoringEngine::clone(&self) -> fold_engine::ScoringEngine
 pub fn fold_engine::ScoringEngine::default() -> fold_engine::ScoringEngine
@@ -126,6 +137,9 @@ pub struct research::Extraction
 pub struct research::FeatureProvenance
 pub struct research::Request
 pub ZensimProfile::LegacyLinearV0_2
+pub feature_v2::FormulaRevision::Rev1
+pub feature_v2::FormulaRevision::Rev2
+pub feature_v2::V2NewFeatureToggles::formula_revision: feature_v2::FormulaRevision
 pub feature_v2::V2NewFeatureToggles::free_extras: feature_v2::V1FreeExtras
 pub feature_v2::V2NewFeatureToggles::v1_only: bool
 pub fold_engine::ScoringEngine::Buffered
@@ -160,7 +174,7 @@ pub research::ResearchError::UnreadableBake
 pub research::RevisionRef::Current
 pub research::RevisionRef::Named(alloc::string::String)
 
-## trait impls (32 types)
+## trait impls (33 types)
 
 BlurKernel: TrivialClone
 DiffmapOptions: TrivialClone
@@ -176,6 +190,7 @@ feature_set_id::ComputeParts: TrivialClone
 feature_set_id::ComputeToken: TrivialClone
 feature_v2::FeatureRegime: TrivialClone
 feature_v2::FeatureViewV2<'a>: TrivialClone
+feature_v2::FormulaRevision: Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, TrivialClone
 feature_v2::HdrEncoding: TrivialClone
 feature_v2::V1FreeExtras: TrivialClone
 feature_v2::V1PoolsMode: TrivialClone
@@ -197,4 +212,4 @@ source::StridedBytes<'a>: TrivialClone
 
 ## auto traits
 
-5 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+6 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

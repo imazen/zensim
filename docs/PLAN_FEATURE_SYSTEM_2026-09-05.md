@@ -345,6 +345,43 @@ alias resolver (it already prints its resolved id).
   unreachable: the plan refuses rather than under-computing. Reproduced against
   the recorded instance (shipped B, CID22 0.3862 vs its true 0.8764).
 
+### RESULTS — phase 5 LANDED 2026-09-05
+
+Record: [`benchmarks/feature_system_phase5_2026-09-05.md`](../benchmarks/feature_system_phase5_2026-09-05.md).
+
+| gate | result |
+|---|---|
+| **G5.1** | **PASS.** A fixed bake on a fixed root gives a verdict **byte-identical apart from the wall-time line**, before and after the whole phase. `--regime N` now also PRINTS its derived meaning, resolved through the default root's own manifest and the registry (`--regime 372 means regime v1-372 = basic+peaks+masked+iw@w372 (372 slots, #d16a1091)`) — and says NOT ESTABLISHED rather than guessing when it cannot be derived. |
+| **G5.2** | **PASS**, reproduced: `--regime 944` on shipped B refuses, naming the 49 caller lines in `f156-371` the folded root feeds as structural zeros. That is the pre-existing hand-specialised guard; the GENERAL form (`feature_set::check`'s `SlotsNotPopulated`, every block at every regime) now refuses by default too — restricted to the case where BOTH ids are STORED, because an inferred id is evidence about a name and not about bytes. |
+
+**Scope change forced by the revision lane's measurement, and it is the more
+important half of this phase.** F5's fix is not free: all three shipped 944
+bakes read the full `GLOBAL_DMEAN/CGAIN/CLOSS` set (33 slots each), so a
+GLOBAL `SHIPPED_REVISION` flip would move **22 of 33 inputs per bake**. So
+**revision became a PER-BAKE declaration**: `V2NewFeatureToggles::
+formula_revision` + `ComputeSet::formula_revision` carry it through the walk,
+`feature_v2::bake_formula_revision` reads a bake's `zentrain.formula_revision`
+stamp (absent = the shipped revision), `Plan::revisions_agree` +
+`score_plan` refuse a mixed-revision profile (one walk computes one era), and
+`bake_verdict` refuses a bake/build revision mismatch naming both.
+
+MEASURED: two revisions coexist in one process, differing on **11 slots**, all
+`GLOBAL_CGAIN`/`GLOBAL_CLOSS`, with `GLOBAL_DMEAN` never moving — narrower
+than `paired_global_contrast`'s name suggests and correct, since the fix is to
+the paired CONTRAST estimate. The default toggles reproduce `Rev1`
+bit-for-bit, so nothing that scores today changes. **This is what lets `Rev2`
+ship without touching Profile C until C is refit.**
+
+**Honest scope:** only F5's half of `Rev2` is per-request. Its luma-form half
+(`ssim_form::active_luma_form`) is a `OnceLock` inside the SIMD kernels, and
+making that per-request is a kernel-dispatch change this lane does not own.
+And `ComputeSet::from_block_profile` is NOT yet collapsed into
+`Plan::derive_with_layout` — the unit evidence holds
+(`from_block_profile_agrees_with_the_id_space_derivation`) and phase 4 already
+routes dense layouts through the id-space form, but retiring it (and
+`wide_bake_v2_read` with it) needs the 445-bake census re-run as evidence, not
+just a unit gate. Not done, not claimed.
+
 ---
 
 ## Sequencing and risk

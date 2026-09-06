@@ -1370,6 +1370,15 @@ pub enum HdrEncoding {
     },
 }
 
+/// Which FORMULA REVISION an extraction computes — re-exported so
+/// [`V2NewFeatureToggles::formula_revision`] is nameable by the callers that
+/// set it.
+///
+/// `#[doc(hidden)]`: the revision axis is research/extraction machinery, not
+/// product surface. A default build's `Zensim::compute` resolves it per bake
+/// and never asks a caller.
+#[doc(hidden)]
+pub use crate::feature_defs::FormulaRevision;
 /// Runtime toggles for the phase-2 new-feature GROUPS (A.10 candidates),
 /// grouped by shared per-pixel computation rather than 1:1 with feature
 /// slots (per `docs/FEATURE_V2_SPEC_2026-07-18.md` §A.12's per-group
@@ -1480,6 +1489,30 @@ pub struct V2NewFeatureToggles {
     /// MEASURED (zenbench paired, `benches/fold_pools_bench.rs`): the full
     /// block is NOT free — +25-32% @576², +34-40% @1152² over the zeroed
     /// fold; see the campaign ledger for the carriers-only cost.
+    /// **Which FORMULA REVISION this extraction computes.**
+    ///
+    /// The revision axis is a PER-REQUEST property, not a process-global one,
+    /// and the reason is a measurement: `bake_block_profile` shows all three
+    /// shipped 944 bakes (`c_sdr_mlp944_corrmix`, `c_hdr_l1t1944`,
+    /// `c_sdr_purity944`) reading the full `GLOBAL_DMEAN`/`CGAIN`/`CLOSS` set
+    /// — 33 slots each — so a GLOBAL flip to `Rev2` would move 22 of 33
+    /// inputs per bake and silently re-price every one of them. A bake must
+    /// be able to declare the revision it was trained against and get it,
+    /// while a bake refit at a later revision coexists in the same process.
+    ///
+    /// Defaults to [`crate::ssim_form::active_revision`], so every existing
+    /// construction is byte-identical AND `ZENSIM_FORMULA_REV` keeps working
+    /// as the whole-process pin.
+    ///
+    /// **Honest scope: this carries the F5 axis, not F4's.** `Rev2`'s
+    /// `paired_global_contrast` is a FINALISER parameter, so it threads
+    /// per-walk for free. Its luma-form half (`ssim_form::active_luma_form`)
+    /// is a `OnceLock` read inside the SIMD kernels, and making THAT
+    /// per-request is a change to the kernel dispatch this lane does not own.
+    /// So a per-bake `Rev2` gets rev2's global-contrast arithmetic and the
+    /// process's luma form; `feature_plan` refuses rather than pretending
+    /// otherwise when the two disagree.
+    pub formula_revision: crate::feature_defs::FormulaRevision,
     pub v1_pools: V1PoolsMode,
     /// **TEST/BENCH INSTRUMENTATION — NOT A PRODUCT MODE** (`#[doc(hidden)]`
     /// 2026-08-30 by user decision: 944 with all pools live is
@@ -1751,6 +1784,7 @@ impl Default for V2NewFeatureToggles {
             append2_block: false,
             csfw_block: false,
             append2_dst_activity: false,
+            formula_revision: crate::ssim_form::active_revision(),
             v1_pools: V1PoolsMode::Off,
             v1_only: false,
             free_extras: V1FreeExtras::Off,
@@ -1876,6 +1910,9 @@ struct ScratchV2Strip {
 /// taken unilaterally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ComputeSet {
+    /// The formula revision this request computes — see
+    /// [`V2NewFeatureToggles::formula_revision`].
+    pub formula_revision: crate::feature_defs::FormulaRevision,
     /// The v1 basic fold (`f0..155`). Always on today; a field so that a
     /// v2-only request is expressible rather than impossible.
     pub v1_basic: bool,
@@ -1898,6 +1935,56 @@ pub(crate) struct ComputeSet {
     pub free_extras: V1FreeExtras,
 }
 
+/// **The revision a BAKE declares**, from its `zentrain.formula_revision`
+/// metadata, defaulting to [`crate::ssim_form::SHIPPED_REVISION`] when it
+/// carries none.
+///
+/// Per-bake rather than per-process because the alternative was measured to
+/// be unshippable: `bake_block_profile` shows all three shipped 944 bakes
+/// reading the full `GLOBAL_DMEAN`/`CGAIN`/`CLOSS` set (33 slots each), so a
+/// global flip to `Rev2` would move 22 of 33 inputs per bake and silently
+/// re-price all of them. A bake declares the revision it was trained against
+/// and is served it; a bake refit later declares the newer one; both coexist.
+///
+/// An UNRECOGNISED value is not a guess: it falls back to the shipped
+/// revision and the caller reports it (`feature_plan` refuses on a mismatch),
+/// because serving unknown semantics silently is the failure this whole
+/// design exists to stop.
+pub(crate) fn bake_formula_revision(
+    model: &crate::mlp::Model,
+) -> crate::feature_defs::FormulaRevision {
+    use crate::feature_defs::FormulaRevision;
+    match model
+        .metadata()
+        .get_utf8("zentrain.formula_revision")
+        .ok()
+        .map(str::trim)
+    {
+        Some("1") | Some("rev1") | Some("Rev1") => FormulaRevision::Rev1,
+        Some("2") | Some("rev2") | Some("Rev2") => FormulaRevision::Rev2,
+        _ => crate::ssim_form::SHIPPED_REVISION,
+    }
+}
+
+/// [`bake_formula_revision`], for consumers outside the crate (the verdict
+/// tool's per-bake revision gate).
+///
+/// `#[doc(hidden)]`: revision plumbing, not product surface.
+#[doc(hidden)]
+pub fn bake_formula_revision_public(model: &zenpredict::Model) -> FormulaRevision {
+    bake_formula_revision(model)
+}
+
+/// The formula revision THIS BUILD computes by default — the shipped one,
+/// or whatever `ZENSIM_FORMULA_REV` pins.
+///
+/// `#[doc(hidden)]`: as above.
+#[doc(hidden)]
+#[must_use]
+pub fn active_formula_revision() -> FormulaRevision {
+    crate::ssim_form::active_revision()
+}
+
 impl ComputeSet {
     /// The ONE derivation from the public request type. Every `&&
     /// v2_blocks` here was previously written out at a call site; the
@@ -1909,6 +1996,7 @@ impl ComputeSet {
         let append = t.append_block && v2_blocks;
         let append2 = t.append2_block && v2_blocks;
         Self {
+            formula_revision: t.formula_revision,
             v1_basic: true,
             v1_pools: t.v1_pools,
             v2_blocks,
@@ -2062,6 +2150,7 @@ impl ComputeSet {
             * (crate::metric::FEATURES_PER_CHANNEL_EXTENDED
                 + crate::metric::FEATURES_PER_CHANNEL_IW);
         let everything = Self {
+            formula_revision: bake_formula_revision(model),
             v1_basic: true,
             v1_pools: V1PoolsMode::Full,
             v2_blocks: true,
@@ -2082,6 +2171,7 @@ impl ComputeSet {
         let v1_pools = crate::fold_engine::pools_mode_for_need(need);
         if model.caller_input_width() <= v1_total {
             return Self {
+                formula_revision: bake_formula_revision(model),
                 v1_basic: true,
                 v1_pools,
                 v2_blocks: false,
@@ -2099,6 +2189,7 @@ impl ComputeSet {
         match crate::fold_engine::wide_bake_v2_read(model, v1_total) {
             None => everything,
             Some(free_extras) => Self {
+                formula_revision: bake_formula_revision(model),
                 v1_basic: true,
                 v1_pools,
                 v2_blocks: false,
@@ -5023,7 +5114,7 @@ fn finish_append(
         app.sum_dd,
         app.sum_ds,
         n_f,
-        crate::ssim_form::active_revision().paired_global_contrast(),
+        toggles.formula_revision.paired_global_contrast(),
     );
     out[idx_append::GLOBAL_DMEAN] = g_dmean;
     out[idx_append::GLOBAL_CGAIN] = clamp01(g_cgain);
@@ -5241,7 +5332,11 @@ impl V1BasicSums {
     /// append2's `LUMA_MEAN_REF` (Y-channel only, the same
     /// `saturate(mean ref, C_LUM_T).clamp(0,1)` the append2 finalize applies
     /// to the append kernel's `sum_s`).
-    fn finalize_free(&self, n: usize) -> ([f64; 3], f64) {
+    fn finalize_free(
+        &self,
+        n: usize,
+        rev: crate::feature_defs::FormulaRevision,
+    ) -> ([f64; 3], f64) {
         let n_f = n as f64;
         let (dmean, cgain, closs) = global_stats_from_raw_moments(
             self.sum_s,
@@ -5251,7 +5346,7 @@ impl V1BasicSums {
             self.sum_dd,
             self.sum_ds,
             n_f,
-            crate::ssim_form::active_revision().paired_global_contrast(),
+            rev.paired_global_contrast(),
         );
         (
             [dmean, cgain.clamp(0.0, 1.0), closs.clamp(0.0, 1.0)],
@@ -9054,7 +9149,8 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 // variant is requested (caught by
                 // `class_c_extras_are_pure_addition_to_the_free_walk`).
                 if toggles.free_extras != V1FreeExtras::Off {
-                    let (globals, luma_mean) = acc.v1[scale].finalize_free(n);
+                    let (globals, luma_mean) =
+                        acc.v1[scale].finalize_free(n, toggles.formula_revision);
                     // `GLOBAL_*` live in the append block. The 944 walk skips
                     // the (B, scale 0) append cell entirely
                     // (`APPEND_SKIP_B_SCALE0`), so this must skip it too or
@@ -13574,6 +13670,7 @@ pub(crate) mod tests {
         for bits in 0u32..256 {
             for pm in pools {
                 let t = V2NewFeatureToggles {
+                    formula_revision: crate::ssim_form::active_revision(),
                     gradient_features: bits & 1 != 0,
                     transducer_bank: bits & 2 != 0,
                     blockiness: bits & 4 != 0,

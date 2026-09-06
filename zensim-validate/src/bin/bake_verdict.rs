@@ -952,6 +952,16 @@ struct Args {
     perpair_metrics: PathBuf,
     /// Max rows sampled per corpus for the `per_pair` block (default 5000).
     perpair_cap: usize,
+    /// `--allow-unpopulated-slots`: override the DEFAULT refusal when a bake
+    /// reads slots the table does not populate AND both feature-set ids are
+    /// stored rather than inferred.
+    ///
+    /// The refusal it lifts is not about names: it fires only when both sides
+    /// carry a recorded id, i.e. when "this table lacks those columns" is a
+    /// measurement. Pass this to state that feeding structural fill to those
+    /// columns is intentional — an ablation, say — and expect the numbers to
+    /// be about the fill, not about the model.
+    allow_unpopulated_slots: bool,
     /// `--cross-regime`: override the wrong-regime refusal. By default a bake
     /// that structurally uses f156-371 is REFUSED at the `--regime 944` root,
     /// because the folded ext944 extraction feeds that block as structural
@@ -1101,6 +1111,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut regime_944 = false;
     let mut print_features_root = false;
     let mut cross_regime = false;
+    let mut allow_unpopulated_slots = false;
     let mut require_feature_set_match = false;
     let mut features_root_set = false;
     let mut dial_grid_set = std::env::var("ZENSIM_DIAL_GRID").is_ok();
@@ -1337,6 +1348,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--cross-regime" => {
                 cross_regime = true;
             }
+            "--allow-unpopulated-slots" => {
+                allow_unpopulated_slots = true;
+            }
             "--ensemble" => {
                 let v = args
                     .next()
@@ -1568,6 +1582,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         perpair_metrics,
         perpair_cap,
         cross_regime,
+        allow_unpopulated_slots,
         require_feature_set_match,
     })
 }
@@ -4244,6 +4259,63 @@ fn main() -> ExitCode {
     // mode is not yet the default.
     {
         use zensim_validate::feature_set;
+        // **G5.1 — `--regime N` is a DERIVED, PRINTED alias, not a hidden
+        // switch.** The flag selects defaults (root, grids, corpora, label);
+        // what it MEANS is a slot set, and until now that meaning lived only
+        // in the defaults it picked. Resolving it through the registry and
+        // printing it makes the alias auditable — and makes a mismatch
+        // between "what the flag says" and "what the root is" visible in the
+        // same three lines as everything else.
+        let regime_name = if args.regime_944 {
+            "944"
+        } else if args.regime_720 {
+            "720"
+        } else {
+            "372"
+        };
+        // The flag's meaning is DERIVED, not asserted: it selects a default
+        // root, that root's `_MANIFEST.json` declares an extraction regime,
+        // and the registry says which slot set that regime is. Reading the
+        // chain rather than hard-coding `372 -> v1-372` keeps the printed
+        // claim tied to the artifact on disk — if the default root's manifest
+        // changes, so does this line.
+        let default_root: &Path = match regime_name {
+            "944" => Path::new(DEFAULT_FEATURES_ROOT_944),
+            "720" => Path::new(DEFAULT_FEATURES_ROOT_720),
+            _ => Path::new(zensim_validate::eval_roots::DEFAULT_FEATURES_ROOT_372),
+        };
+        let declared = root_declared_regime(default_root);
+        // A root manifest's `"regime"` is by convention `<key> (human prose)`
+        // — the 372 root declares `v1-372 (extended+iw, num_scales=4, ...)`
+        // — so the registry key is the leading token. Both forms are tried
+        // rather than assuming, and a root with no manifest `regime` at all
+        // (the 944 campaign root today) reports NOT ESTABLISHED rather than
+        // being guessed at from its path.
+        let key = declared
+            .as_deref()
+            .map(|r| r.split([' ', '(']).next().unwrap_or(r).trim().to_string());
+        match key
+            .as_deref()
+            .and_then(|k| feature_set::registry().regime(k).map(|x| (k, x)))
+            .or_else(|| {
+                declared
+                    .as_deref()
+                    .and_then(|r| feature_set::registry().regime(r).map(|x| (r, x)))
+            }) {
+            Some((r, (parts, width, slots))) => eprintln!(
+                "bake_verdict: --regime {regime_name} means regime {r} = {parts}@w{width} \
+                 ({} slots, #{}) — derived from {}'s manifest, not hard-coded",
+                slots.len(),
+                zensim::feature_set_id::hex8(slots.hash8()),
+                default_root.display()
+            ),
+            None => eprintln!(
+                "bake_verdict: --regime {regime_name} — its default root declares regime {} and \
+                 the registry has no entry for it, so the flag's meaning in COLUMNS is NOT \
+                 established (never read that as a match)",
+                declared.as_deref().unwrap_or("<none>")
+            ),
+        }
         let root_ref = feature_set::root_feature_set_ref(&args.features_root);
         match &root_ref {
             Some(r) => eprintln!(
@@ -4279,13 +4351,75 @@ fn main() -> ExitCode {
                         b.id,
                         p.display()
                     );
+                    // **PER-BAKE REVISION.** A bake declares the formula
+                    // revision it was trained against
+                    // (`zentrain.formula_revision`; absent = the shipped
+                    // one), and this build computes one revision per walk. A
+                    // bake asking for a revision this build is not computing
+                    // would be scored on arithmetic it never saw — measured
+                    // as 22 of 33 inputs per shipped 944 bake for the F5 fix
+                    // — so it is REFUSED rather than reported.
+                    let bake_rev = zensim::feature_v2::bake_formula_revision_public(m);
+                    let build_rev = zensim::feature_v2::active_formula_revision();
+                    if bake_rev != build_rev {
+                        eprintln!(
+                            "bake_verdict: REFUSING — {} declares formula revision {bake_rev:?} \
+                             and this build computes {build_rev:?}. The arithmetic differs on \
+                             the slots that revision moves, so every number would be about a \
+                             formula the bake was not trained on. Re-run with \
+                             ZENSIM_FORMULA_REV set to match, or score a bake of this build's \
+                             revision.",
+                            p.display()
+                        );
+                        return ExitCode::from(2);
+                    }
                     if let Some(r) = &root_ref {
                         for mm in feature_set::check(&b, r) {
                             let loud = mm.kind != feature_set::MismatchKind::EraUnknown;
+                            // **G5.2 — the `--regime 944` silent-mis-scoring
+                            // bug, closed at the root rather than at one
+                            // block.** `SlotsNotPopulated` is not a
+                            // disagreement about NAMES; it is the statement
+                            // that the bake reads columns this table does not
+                            // contain, so every number below it would be
+                            // computed from structural fill. That is the
+                            // recorded instance (shipped B, CID22 **0.3862**
+                            // against its true **0.8764**), and it is not a
+                            // judgement call.
+                            //
+                            // It refuses by DEFAULT — but only when BOTH ids
+                            // are stored rather than inferred. An INFERRED id
+                            // is "evidence about the artifact's NAME, never
+                            // about its BYTES" (`FEATURE_SET_IDS.md` §2.3), so
+                            // refusing on one would be refusing on a guess,
+                            // and most roots on disk today are inferred. When
+                            // either side is inferred this stays a report, and
+                            // `--require-feature-set-match` still escalates it
+                            // as before.
+                            //
+                            // The pre-existing `folded_root_conflict` guard
+                            // above is this same check hand-specialised to ONE
+                            // block at ONE regime; it is kept because it fires
+                            // on INFERRED roots too, where this one will not.
+                            let unpopulated =
+                                mm.kind == feature_set::MismatchKind::SlotsNotPopulated;
+                            let both_stored = !b.inferred && !r.inferred;
                             eprintln!(
                                 "bake_verdict: feature-set {} — {mm}",
                                 if loud { "MISMATCH" } else { "note" }
                             );
+                            if unpopulated && both_stored && !args.allow_unpopulated_slots {
+                                eprintln!(
+                                    "bake_verdict: REFUSING — the bake reads slots this table \
+                                     does not populate, and BOTH ids are stored (not inferred), \
+                                     so this is a measured fact rather than a guess about names. \
+                                     Every number from this pairing would be computed from \
+                                     structural fill. Score at the matching root, or pass \
+                                     --allow-unpopulated-slots to state that feeding fill to \
+                                     those columns is intentional."
+                                );
+                                return ExitCode::from(2);
+                            }
                             refuse |= args.require_feature_set_match;
                         }
                     } else {
@@ -6576,6 +6710,25 @@ mod tests {
             };
             assert!(e.contains(needle), "expected {needle:?} in {e:?}");
         }
+    }
+
+    /// **G5.2's flag half** — the unpopulated-slots refusal is ON by default
+    /// and is opt-OUT, mirroring `--cross-regime`.
+    ///
+    /// The refusal itself is narrower than the flag name suggests, and
+    /// deliberately so: it fires only when BOTH feature-set ids are STORED,
+    /// because an inferred id is evidence about a name and not about bytes.
+    /// Refusing on a guess would break every root on disk that has no
+    /// recorded id, which is most of them.
+    #[test]
+    fn allow_unpopulated_slots_defaults_off_and_parses_on() {
+        let a = parse(&["--bake", "x.bin"]);
+        assert!(
+            !a.allow_unpopulated_slots,
+            "the refusal must be the default"
+        );
+        let a = parse(&["--bake", "x.bin", "--allow-unpopulated-slots"]);
+        assert!(a.allow_unpopulated_slots);
     }
 
     /// C2 wrong-regime guard (appendix W): the refusal is the DEFAULT and the
