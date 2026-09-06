@@ -637,16 +637,34 @@ is 0 on all nine cells, so nothing is being charged to "we could not tell".
 
 ### 5.8 One near-lossless reading, and the correction to it
 
-`hfnlproxy` (per-ref) moves **0.3700 → 0.4773 → 0.5022** across control →
-architecture → ladder, i.e. **+0.13 over the control** on the axis this metric is
-weakest and the product cares about most.
+`hfnlproxy` **pooled** `srocc_signed` moves **0.3700 → 0.4773 → 0.5022** across
+control → architecture → ladder, i.e. **+0.13 over the control** on the axis this
+metric is weakest and the product cares about most.
 
-**But it is NOT a win over shipped D.** The paired bootstrap on the sampled
+**Two corrections to that reading, both from checking rather than from
+inspection.**
+
+**(a) It is not a win over shipped D.** The paired bootstrap on the sampled
 per-pair block (n = 5,000, B = 2,000) reads `C_lad05_s4004` **0.48691** against
-shipped D's **0.48477**: `+0.00213, CI [−0.01100, +0.01522]` — a **tie**. The
-k=3 mean of 0.5022 against D's 0.4921 is a single-seed-vs-single-value comparison
-that the interval does not support. Recorded because I read it as a win first and
-the test said otherwise.
+shipped D's **0.48477**: `+0.00213, CI [−0.01100, +0.01522]` — a **tie**. The k=3
+mean of 0.5022 against D's 0.4921 is a mean-vs-point comparison the interval does
+not support.
+
+**(b) It is the POOLED statistic, and the per-ref one disagrees in DIRECTION.**
+I first wrote "(per-ref)"; it is `srocc_signed`, pooled over all 11,356 rows. The
+per-ref mean — which is the axis `CLAUDE.md`'s scoreboard column "HF-NL/ref"
+reports — reads:
+
+| | pooled `srocc_signed` | **per-ref mean** |
+|---|--:|--:|
+| `A_plain_s4004` | 0.33013 | 0.68263 |
+| `C_lad05_s4004` | 0.49667 | 0.78798 |
+| shipped D | 0.49210 | **0.83062** |
+
+So on the pooled axis the ladder arm ties shipped D; **on the per-ref axis it
+loses to it by 0.043**. Both are true of the same predictions, and a
+near-lossless claim that does not name its statistic is not a claim. Recorded
+because I labelled it wrong first.
 
 `C_lad05_s4004` vs shipped D on the rest: CID22 **+0.01620 WIN**
 [+0.01259, +0.01982]; KonJND −0.02590 **tie**; AIC-3 +0.00974 tie; LIVE +0.00349
