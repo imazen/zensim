@@ -3730,6 +3730,61 @@ fn main() {
         std::process::exit(1);
     }
 
+    // `--nonneg-distance` establishes `raw(identity) == pin` in STANDARDIZED
+    // space: the caller's zero vector standardizes to zero only if every active
+    // feature transform maps 0 to 0. `winsor_p99` with `lo > 0` does not — it
+    // returns `lo` — and the canonical 372 screen carries 28 such guards.
+    //
+    // MEASURED 2026-09-06 on this wave's own `B_nonneg_s4004`:
+    // `raw(identity) = 99.6138` against a pin of 100.0. The consequences are
+    // exact and worth stating rather than discovering:
+    //   * `raw(x) <= pin` for every input STILL holds (the projection gives it).
+    //   * `raw(identity) == pin` does NOT. Identity sits below the ceiling.
+    //   * so identity is no longer the ARGMAX, and an input that turns every
+    //     hidden unit off would out-score it. Whether any real cell does is then
+    //     a MEASUREMENT, not a theorem.
+    // The dial is still pinned at 100 for identity, because the identity ANCHOR
+    // rows go through the same forward and the spline maps that same raw to 100.
+    // This is a warning and not a refusal: the property the gate grades (C5/C6)
+    // was measured to hold on 9,593 real cells with these transforms active.
+    if args.nonneg_distance
+        && let Some(ts) = &feature_transforms
+    {
+        let pp = feature_transform_params.as_ref();
+        let mut movers: Vec<usize> = Vec::new();
+        let mut worst = 0.0f32;
+        for (i, t) in ts.iter().enumerate() {
+            if *t == zenpredict::FeatureTransform::Identity {
+                continue;
+            }
+            let p = pp.map(|v| v[i].as_slice()).unwrap_or(&[][..]);
+            let at_zero = t.apply_with_params(0.0f32, p);
+            if at_zero != 0.0 {
+                movers.push(i);
+                if at_zero.abs() > worst.abs() {
+                    worst = at_zero;
+                }
+            }
+        }
+        if !movers.is_empty() {
+            eprintln!(
+                "WARNING: --nonneg-distance — {} of {} active feature transforms do NOT \
+                 map 0 to 0 (worst t(0) = {}). The caller's identity vector therefore \
+                 does NOT standardize to zero, so `raw(identity) == pin` is NOT \
+                 structural for this recipe: identity sits BELOW the ceiling and is not \
+                 the argmax. `raw(x) <= pin` still holds for every input. Whether any \
+                 real cell attains the pin and out-scores identity becomes a \
+                 MEASUREMENT (C6), not a theorem. First movers: {:?}",
+                movers.len(),
+                ts.iter()
+                    .filter(|t| **t != zenpredict::FeatureTransform::Identity)
+                    .count(),
+                worst,
+                &movers[..movers.len().min(8)]
+            );
+        }
+    }
+
     // Build TrainingGroups. This MOVES the raw feature rows under a mutable
     // borrow of `loaded`: the trainer releases each row as it standardizes
     // it (see `TrainingGroup::features`), which is what keeps a lane's RSS
@@ -3742,7 +3797,15 @@ fn main() {
     // target is the pin. Built here, appended LAST, so it cannot shift the TV
     // pair index space. Held in locals that outlive `groups`.
     let (identity_scores, identity_rows_flat): (Vec<f64>, Vec<f64>) = if args.identity_rows > 0 {
-        let target_unit = args.nonneg_pin / args.target_scale;
+        // The pin is ALREADY in the trainer's target units. Every loader
+        // MULTIPLIES its target column by `--target-scale`
+        // (`parquet_loader.rs`), so `human_scores` live in 0..100 and the MSE
+        // term compares `y - mos` in RAW units. Dividing here (the first draft
+        // did) made the identity rows carry target 1.0 against a raw pin of
+        // 100.0 — a residual of 99 and a squared error of 9,801, i.e. the exact
+        // opposite of the no-op the flag claims to be. Found by review
+        // 2026-09-06; no wave arm set the flag, so nothing measured moved.
+        let target_unit = args.nonneg_pin;
         (
             vec![target_unit; args.identity_rows],
             vec![0.0f64; args.identity_rows * n_features],
@@ -3781,17 +3844,31 @@ fn main() {
     if args.identity_rows > 0 {
         println!(
             "[identity-rows] appending {} zero-feature rows with absolute target {} \
-             (pin {} / target-scale {}){}",
+             (= the pin, in the trainer's own 0..{} target units){}",
             args.identity_rows,
-            args.nonneg_pin / args.target_scale,
             args.nonneg_pin,
             args.target_scale,
             if args.nonneg_distance {
-                " — REDUNDANT under --nonneg-distance: raw(0) is the pin bit-exactly, so this group's squared error and gradient are exactly zero"
+                " — REDUNDANT under --nonneg-distance when no feature transform moves zero: raw(identity) is then the pin and this group's squared error is exactly zero"
             } else {
                 ""
             }
         );
+        // The group carries `GroupLossMode::Mse`, and `OutputPolarity::for_groups`
+        // returns Score the moment ANY group does. So on an otherwise rank-only
+        // recipe this flag is not a guard, it is the run's POLARITY SWITCH — the
+        // whole model's raw output sign inverts relative to the identical run
+        // without it. Say so rather than let it happen quietly. (Review
+        // 2026-09-06.)
+        if !args.nonneg_distance && args.mse_weight <= 0.0 {
+            eprintln!(
+                "WARNING: --identity-rows adds an `mse` group, which makes this run \
+                 SCORE-shaped — but --mse-weight is 0, so the absolute term never \
+                 fires and the rows contribute NO gradient. Their only effects are \
+                 the polarity flip, the pair draws they take from the group CDF, and \
+                 a shifted feature scaler. Pass --mse-weight > 0, or drop the flag."
+            );
+        }
         groups.push(TrainingGroup {
             name: "identity_rows".to_string(),
             human_scores: &identity_scores,

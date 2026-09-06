@@ -66,9 +66,13 @@ scores, never of the output convention*. `Distance` is the default, so every
 rank-only recipe is byte-identical, and every path now logs the convention it
 trained under.
 
-**Negative control (the important half).** At `main@origin` `0c6307a7`, running
-the same test file: **4 of 5 FAIL**. The 5th — "rank-only recipes are
-DISTANCE-shaped on every path" — passes there and here, which is the point.
+**Negative control (the important half).** The test file imports
+`OutputPolarity`, a type this change introduces, so it does not compile at the
+parent — the control was run as a **stripped variant** with that import and the
+owner-table test removed, leaving five tests. Of those five, **4 FAIL at
+`main@origin` `0c6307a7`**. The 5th — "rank-only recipes are DISTANCE-shaped on
+every path" — passes there and here, which is the point. *(The shipped file's own
+header said "Five of these arms fail"; corrected to 4 of 5.)*
 
 ### 1.2 `run_parallel_minibatch` / `run_minibatch_with_nin` silently dropped the absolute term
 
@@ -179,6 +183,61 @@ And at one hidden layer `g` is a non-negative combination of `ReLU(linear)`,
 i.e. **CONVEX** in the standardized features. That is a real restriction, and
 the plain path is 1-hidden-layer only. It is documented on the flag rather than
 left to be rediscovered from a rank number, and the wave measures what it costs.
+
+---
+
+## 2.4 ⛔ CORRECTION — "by construction" is CONDITIONAL, and this wave does not meet the condition
+
+**Found by adversarial review 2026-09-06, then MEASURED. Every "by
+construction" claim above about *identity* is narrower than it was written.**
+
+`--nonneg-distance` establishes its guarantee in **standardized** space. The
+chain is `caller row → feature transforms → scaler → layer 0`, and the scaler is
+the only step the flag controls. So `raw(identity) = pin` requires that **every
+active feature transform maps 0 to 0** — and `winsor_p99` with `lo > 0` does
+not: it returns `lo`.
+
+**The canonical 372 transform screen this wave uses carries 28 such guards**
+(`winsor_p99:100:1.46128e-06,…`, `:134:0.000331953,…`, `:95:0.000610845,…`, …),
+streamed verbatim into every arm. MEASURED on `B_nonneg_s4004` by forwarding the
+pinned 38-row all-zero identity probe through the packed bake:
+
+```
+B_nonneg_s4004   raw(identity) = 99.61380004882813     (pin = 100.0)
+B_nonneg_s4005   raw(identity) = 99.564697265625
+A_plain_s4004    raw(identity) = 17.807016372680664    (no constraint — for scale)
+```
+
+**What survives, exactly:**
+
+| claim | status |
+|---|---|
+| `raw(x) ≤ pin` for **every** input | **STILL STRUCTURAL** — the `w₂ ≤ 0` projection with `h ≥ 0` gives it, and it does not depend on the transforms |
+| `raw(identity) = pin` bit-exactly | **NOT structural here.** Identity sits **0.386 below** the ceiling |
+| identity is the **argmax** | **NOT structural here.** An input that turns every hidden unit off would reach the pin and out-score identity |
+| **C5** (identity dial in band) | **still passes, and for a good reason** — the identity ANCHOR rows go through the *same* forward, so `fit_spline_knots` maps that same raw to exactly 100. The dial pin is intact |
+| **C6** (no cell above identity) | **passes as a MEASUREMENT on 9,593 real grid cells across three seeds — not as a theorem** |
+
+So the §5.3/§5.5 result stands as measured, and the mechanism claim does not
+stand as *proved* for this configuration. C6 = 0 on every seed is strong
+evidence that no real codec output reaches the pin; it is not the same statement
+as "no input can".
+
+**Landed with the correction:** the trainer now emits a loud warning naming the
+count of non-zero-preserving transforms, the worst `t(0)`, and the exact
+consequence — so the next run cannot make this claim without seeing the caveat.
+It is a **warning, not a refusal**: the property the gate grades was measured to
+hold with these transforms active, and refusing would have invalidated a wave
+whose answer is good.
+
+**To make it structural**, one of: drop the positive-`lo` winsor guards under
+`--nonneg-distance`; re-screen the transforms as zero-preserving (`lo = 0`); or
+pin the architecture at `t(0⃗)` instead of `0⃗`. All three are real work and
+none was done here.
+
+*(This is also why the plan's `identity_rows_are_a_no_op_under_nonneg_distance`
+gate was never written: under these transforms the premise is FALSE — the
+identity rows would carry a real, non-zero residual. See §5b D-4.)*
 
 ---
 

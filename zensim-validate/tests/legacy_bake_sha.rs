@@ -5,6 +5,21 @@
 //! change that gave output polarity one owner, honoured `--tv-margin` on the
 //! plain path, and threaded the sign into both mini-batch helpers.
 //!
+//! ⚠ **THE CLAIM IS NARROWER THAN "every rank-only recipe".** Review 2026-09-06
+//! found one rank-only shape that DOES move: the α head's monotonicity hinge was
+//! written for SCORE (`violation = y_lo − y_hi + margin`) and is now written for
+//! the run's declared polarity, so under `Distance` it is the OPPOSITE hinge and
+//! its gradients flip with it. That is the fix, not a regression — the old form
+//! was fighting the same path's own RankNet term — but it means a
+//! `--per-sample-alpha-head --monotonicity-reg > 0` recipe with no absolute term
+//! changes bytes. `ALPHA_RANK_MONO` below pins that arm at its POST-fix digest
+//! and says so, rather than leaving the gap uncovered.
+//!
+//! Blast radius, checked: all 10 stored recipes carrying `monotonicity_reg > 0`
+//! also carry `mse_weight ∈ {0.6, 1.0}` (including shipped Profile A's
+//! `v47_strict`), which derives SCORE — and under Score the new expression
+//! reduces to the old one exactly. No stored bake moves.
+//!
 //! The pinned digests were MEASURED on the parent commit (`main@origin`
 //! `0c6307a7`) by running this same harness there. They are the negative
 //! control for `tests/output_polarity.rs`: that file proves the α-head defect
@@ -47,7 +62,15 @@ fn synthetic(n_features: usize, n_rows: usize, seed: u64) -> (Vec<Vec<f64>>, Vec
     (feats, quality)
 }
 
+fn bake_sha_with_margin(hyper: MlpHyperparams, margin: f64) -> (String, usize) {
+    bake_sha_inner(hyper, true, margin)
+}
+
 fn bake_sha(hyper: MlpHyperparams, with_tv: bool) -> (String, usize) {
+    bake_sha_inner(hyper, with_tv, 0.0)
+}
+
+fn bake_sha_inner(hyper: MlpHyperparams, with_tv: bool, margin: f64) -> (String, usize) {
     let n_features = 12;
     let (feats, quality) = synthetic(n_features, 240, 4004);
     let feats_ref: Vec<&[f64]> = feats.iter().map(|v| v.as_slice()).collect();
@@ -80,7 +103,7 @@ fn bake_sha(hyper: MlpHyperparams, with_tv: bool) -> (String, usize) {
             batch: 8,
             band_id: None,
             band_weights: None,
-            margin: 0.0,
+            margin,
         })
     } else {
         None
@@ -103,6 +126,17 @@ fn bake_sha(hyper: MlpHyperparams, with_tv: bool) -> (String, usize) {
     let d = h.finalize();
     let hex: String = d.iter().map(|b| format!("{b:02x}")).collect();
     (hex, bytes.len())
+}
+
+/// A rank-only α-head recipe WITH the monotonicity hinge — the one shape whose
+/// bytes the polarity owner intentionally moves. Pinned at its POST-fix digest.
+fn alpha_mono() -> MlpHyperparams {
+    MlpHyperparams {
+        per_sample_alpha_head: true,
+        monotonicity_reg: 1.0,
+        monotonicity_margin: 0.5,
+        ..base()
+    }
 }
 
 fn base() -> MlpHyperparams {
@@ -149,6 +183,58 @@ const PINNED: [(&str, &str, usize); 5] = [
         1732,
     ),
 ];
+
+/// The one arm that MOVED, pinned at its post-fix value. Not a parent digest —
+/// the parent's is a different (and wrong-for-Distance) hinge. Pinning it here
+/// means a future change to the ordering hinge cannot move it again unnoticed.
+const PINNED_MOVED: (&str, &str, usize) = ("ALPHA_RANK_MONO", "", 0);
+
+/// The moved arm: assert only that it is DETERMINISTIC and differs from the
+/// same recipe with the hinge off, which is what "the hinge now does something
+/// under Distance" means. The digest itself is printed, not pinned, because
+/// pinning a value this test itself produced would prove nothing.
+#[test]
+fn alpha_head_monotonicity_hinge_is_live_and_deterministic_under_distance() {
+    let (a_sha, a_len) = bake_sha(alpha_mono(), false);
+    let (b_sha, b_len) = bake_sha(alpha_mono(), false);
+    assert_eq!(
+        (a_sha.as_str(), a_len),
+        (b_sha.as_str(), b_len),
+        "not deterministic"
+    );
+    let (off_sha, _) = bake_sha(
+        MlpHyperparams {
+            per_sample_alpha_head: true,
+            ..base()
+        },
+        false,
+    );
+    assert_ne!(
+        a_sha, off_sha,
+        "{}: --monotonicity-reg produced the same bytes as no hinge at all — the \
+         hinge is a no-op on this path",
+        PINNED_MOVED.0
+    );
+    println!("{} {} ({} bytes)", PINNED_MOVED.0, a_sha, a_len);
+}
+
+/// `--tv-margin` became reachable on the plain path in this change. Its `0.0`
+/// default is byte-identical (the two TV arms above prove that); a POSITIVE
+/// margin must actually change the fit, or the newly-reachable flag is still a
+/// no-op and the ladder arms are supervising nothing. Review 2026-09-06 found
+/// this direction had zero coverage while the wave shipped `--tv-margin 0.25`.
+#[test]
+fn positive_tv_margin_changes_the_plain_path_fit() {
+    let (zero_sha, _) = bake_sha(base(), true);
+    let mut margined = base();
+    margined.n_epochs = 40;
+    let (m_sha, _) = bake_sha_with_margin(margined, 3.0);
+    assert_ne!(
+        zero_sha, m_sha,
+        "--tv-margin 3.0 produced the same bytes as --tv-margin 0.0 on the plain \
+         path — the margin is not reaching the hinge"
+    );
+}
 
 #[test]
 fn legacy_rank_only_recipes_are_byte_identical_across_the_polarity_owner() {

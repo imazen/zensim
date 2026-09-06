@@ -5173,11 +5173,17 @@ mod tests {
 
     #[test]
     fn densify_gates_a_contiguous_prefix_read_set() {
-        let dir = std::env::temp_dir().join("zensim_densify_prefix_test");
+        // `~/tmp`, not `std::env::temp_dir()`: CLAUDE.md bans `/tmp` for ALL
+        // scratch (2026-07-15, after a mid-session wipe destroyed a whole parity
+        // harness). Two older tests in this file predate the ban; this one does
+        // not get to copy them. (Review 2026-09-06.)
+        let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+            .join("tmp")
+            .join("zensim_densify_prefix_test");
         std::fs::create_dir_all(&dir).unwrap();
         for (label, live) in [
-            ("prefix", vec![0usize, 1]),      // identity layout after densify
-            ("scattered", vec![1usize, 3]),   // the shape every shipped bake has
+            ("prefix", vec![0usize, 1]),    // identity layout after densify
+            ("scattered", vec![1usize, 3]), // the shape every shipped bake has
         ] {
             let src = dir.join(format!("densify_{label}_in.bin"));
             let dst = dir.join(format!("densify_{label}_out.bin"));
@@ -5188,9 +5194,8 @@ mod tests {
                 dry_run: false,
                 gate_rows: 64,
             };
-            cmd_densify(&args).unwrap_or_else(|e| {
-                panic!("densify must gate a {label} read set; got: {e}")
-            });
+            cmd_densify(&args)
+                .unwrap_or_else(|e| panic!("densify must gate a {label} read set; got: {e}"));
             let out = std::fs::read(&dst).unwrap();
             let m = Model::from_bytes(&out).unwrap();
             assert_eq!(

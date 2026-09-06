@@ -22,7 +22,11 @@ import os
 import random
 import sys
 
-sys.path.insert(0, os.path.expanduser("~/work/zen/zensim/scripts"))
+# Repo-relative, like every other driver in this lane. The first draft
+# hardcoded `~/work/zen/zensim/scripts` — the PRIMARY checkout — from a script
+# that runs in a sibling workspace, so a lane-local change to the stat owner
+# would have been invisible to the lane's own bootstrap. (Review 2026-09-06.)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
 from lib import zen_stats  # noqa: E402
 
 DEFAULT_CORPORA = "cid22,konjnd,aic3,tid,kadid,csiq,live,hfnlproxy"

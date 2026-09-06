@@ -23,8 +23,7 @@
 use zenpredict::{Activation, Model, Predictor, WeightDtype};
 use zensim_validate::bake_runtime::score_with_bake_alloc;
 use zensim_validate::mlp_train::{
-    FeatureRows, GroupLossMode, MlpHyperparams, TrainingGroup, ValidationPolicy,
-    train_mlp_strategy,
+    FeatureRows, GroupLossMode, MlpHyperparams, TrainingGroup, ValidationPolicy, train_mlp_strategy,
 };
 
 const N_FEATURES: usize = 14;
@@ -54,7 +53,11 @@ fn train_nonneg(dtype: WeightDtype, pin: f64, nonneg: bool) -> Vec<u8> {
         // Distortion-shaped inputs: non-negative magnitudes, like the real
         // feature block, so the fit is representative rather than adversarial.
         let x: Vec<f64> = (0..N_FEATURES).map(|_| next().abs()).collect();
-        let y: f64 = -x.iter().zip(w.iter()).map(|(a, b)| a * b.abs()).sum::<f64>();
+        let y: f64 = -x
+            .iter()
+            .zip(w.iter())
+            .map(|(a, b)| a * b.abs())
+            .sum::<f64>();
         feats.push(x);
         quality.push(y);
     }
@@ -133,7 +136,8 @@ fn nonneg_distance_output_is_exactly_the_pin_on_the_zero_vector() {
 /// A non-pinned pin is still exact — the constant is data, not a magic number.
 #[test]
 fn nonneg_distance_pin_is_exact_at_a_non_default_value() {
-    let bytes: &'static [u8] = Box::leak(train_nonneg(WeightDtype::F32, 42.5, true).into_boxed_slice());
+    let bytes: &'static [u8] =
+        Box::leak(train_nonneg(WeightDtype::F32, 42.5, true).into_boxed_slice());
     let got = score(bytes, &vec![0.0f64; N_FEATURES]);
     assert_eq!(got.to_bits(), 42.5f64.to_bits(), "got {got}");
 }
@@ -147,7 +151,8 @@ fn nonneg_distance_pin_is_exact_at_a_non_default_value() {
 /// this one.
 #[test]
 fn nonneg_distance_output_never_exceeds_the_pin() {
-    let bytes: &'static [u8] = Box::leak(train_nonneg(WeightDtype::F32, PIN, true).into_boxed_slice());
+    let bytes: &'static [u8] =
+        Box::leak(train_nonneg(WeightDtype::F32, PIN, true).into_boxed_slice());
     let model = Model::from_bytes(bytes).expect("bake loads");
     let n = model.caller_input_width();
     let mut p = Predictor::new(&model);
@@ -167,6 +172,13 @@ fn nonneg_distance_output_never_exceeds_the_pin() {
                 }
             }
             n_checked += 1;
+            // `!(y > PIN)` alone passes vacuously for NaN, so say what is
+            // required of a non-finite result explicitly. (Review 2026-09-06.)
+            assert!(
+                y.is_finite(),
+                "raw({x:?}) = {y} is not finite — the guarantee is only meaningful \
+                 on a finite output"
+            );
             assert!(
                 !(y > PIN),
                 "raw({x:?}) = {y} exceeds the pin {PIN} — the C6 guarantee is not held"
@@ -196,7 +208,8 @@ fn nonneg_distance_output_never_exceeds_the_pin() {
 /// slope, so the trained and served functions differed with no warning.
 #[test]
 fn leaky_alpha_zero_bakes_relu_and_the_default_bakes_leaky_relu() {
-    let relu: &'static [u8] = Box::leak(train_nonneg(WeightDtype::F32, PIN, true).into_boxed_slice());
+    let relu: &'static [u8] =
+        Box::leak(train_nonneg(WeightDtype::F32, PIN, true).into_boxed_slice());
     let m = Model::from_bytes(relu).expect("loads");
     assert_eq!(
         m.layer(0).activation,

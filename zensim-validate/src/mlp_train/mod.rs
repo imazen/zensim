@@ -1847,9 +1847,14 @@ impl OutputPolarity {
     /// this type exists to close.
     pub fn for_groups(groups: &[TrainingGroup<'_>], hyperparams: &MlpHyperparams) -> Self {
         let group_absolute = groups.iter().any(|g| g.loss_mode.has_mse());
-        let alpha_head_absolute =
-            hyperparams.per_sample_alpha_head && hyperparams.mse_weight > 0.0;
-        if group_absolute || alpha_head_absolute {
+        let alpha_head_absolute = hyperparams.per_sample_alpha_head && hyperparams.mse_weight > 0.0;
+        // `--nonneg-distance` is SCORE-shaped BY CONSTRUCTION: `raw(identity)` is
+        // the structural MAXIMUM, so "better quality → higher raw output" is not a
+        // choice the loss gets to make. Deriving `Distance` there would train
+        // RankNet to push better inputs BELOW a ceiling they cannot escape.
+        // (Review 2026-09-06; the wave was safe only because 4 of its 6 legs
+        // declare `:both`.)
+        if group_absolute || alpha_head_absolute || hyperparams.nonneg_distance {
             Self::Score
         } else {
             Self::Distance
@@ -2091,7 +2096,9 @@ pub fn train_mlp_strategy(
              exists to establish. Drop one of the two."
         );
         assert!(
-            !(hyperparams.pool_head || hyperparams.hybrid_head || hyperparams.per_sample_alpha_head),
+            !(hyperparams.pool_head
+                || hyperparams.hybrid_head
+                || hyperparams.per_sample_alpha_head),
             "--nonneg-distance is implemented on the plain n_features → n_hidden → 1 \
              path only. The pool/hybrid/alpha heads reduce through additional \
              parameters (reducer_w, rank_w, the alpha gate) whose sign constraints \
@@ -2110,6 +2117,20 @@ pub fn train_mlp_strategy(
             "--nonneg-pin must be finite; got {}",
             hyperparams.nonneg_pin
         );
+        // The pin is baked through `as f32`. A value that does not round-trip
+        // makes `raw(identity) == pin` true in the trainer and FALSE at the f64
+        // comparison every gate uses — the "bit-exactly" claim would quietly
+        // become "to within an f32 rounding". Refuse, as an unrepresentable
+        // `--leaky-alpha` is refused. (Review 2026-09-06.)
+        assert!(
+            hyperparams.nonneg_pin as f32 as f64 == hyperparams.nonneg_pin,
+            "--nonneg-pin {} does not round-trip through f32 (bakes as {}). The pin \
+             is stored as an f32 bias, so a value like this makes `raw(identity) == \
+             pin` false at f64 and quietly downgrades the guarantee. Use an \
+             f32-exact value.",
+            hyperparams.nonneg_pin,
+            hyperparams.nonneg_pin as f32 as f64
+        );
         nonneg_hp = MlpHyperparams {
             leaky_alpha: 0.0,
             ..hyperparams.clone()
@@ -2118,6 +2139,25 @@ pub fn train_mlp_strategy(
     } else {
         hyperparams
     };
+
+    // The pool and hybrid heads implement NO absolute term — they read
+    // `g.loss_mode` only to log it. Before the polarity owner that was merely a
+    // silent discard; with it, a `:mse`/`:both` group would flip their RankNet
+    // and ladder signs on the strength of a flag they throw away, inverting the
+    // bake against its own parent with nothing to anchor it. Refuse, which is
+    // this dispatcher's established answer to the class. (Review 2026-09-06.)
+    if (hyperparams.pool_head || hyperparams.hybrid_head)
+        && groups.iter().any(|g| g.loss_mode.has_mse())
+    {
+        panic!(
+            "--pool-head / --hybrid-head implement no absolute term — they read a \
+             group's loss mode only to log it. A `:mse`/`:both` group would flip \
+             this run's output polarity (and with it the RankNet target and the TV \
+             ladder hinge) on the strength of a term that never fires, inverting \
+             the bake with nothing to anchor it. Drop the head flag, or make the \
+             groups `:rank`."
+        );
+    }
 
     let head_flags = (hyperparams.pool_head as u8)
         + (hyperparams.hybrid_head as u8)
@@ -2342,9 +2382,7 @@ pub fn train_mlp_strategy(
              be silently discarded and the bake would be byte-identical to a run that \
              never asked for it. Use --minibatch-size 1 with --norm-in-norm-weight 0, \
              or drop the absolute term.",
-            hyperparams.minibatch_size,
-            hyperparams.parallel_batch,
-            hyperparams.norm_in_norm_weight,
+            hyperparams.minibatch_size, hyperparams.parallel_batch, hyperparams.norm_in_norm_weight,
         );
     }
 
@@ -2988,7 +3026,7 @@ pub fn train_mlp_strategy(
             if k == 1 || steps_since_adam >= k as u64 {
                 adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                 apply_post_adam_penalties(&mut w1, n_hidden, lr);
-                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+                nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                 steps_since_adam = 0;
             }
 
@@ -3093,7 +3131,7 @@ pub fn train_mlp_strategy(
                         if tv_steps_since_adam > 0 {
                             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                             apply_post_adam_penalties(&mut w1, n_hidden, lr);
-                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+                            nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                         }
                         tv_steps_since_adam = 0;
                     }
@@ -3108,7 +3146,7 @@ pub fn train_mlp_strategy(
         if k > 1 && !parallel && steps_since_adam > 0 {
             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
             apply_post_adam_penalties(&mut w1, n_hidden, lr);
-                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+            nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
         }
         // T8.2 final-flush for parallel buffer: handle the partial
         // batch at epoch end if pairs_per_epoch % K != 0. Buffer is
@@ -3178,7 +3216,7 @@ pub fn train_mlp_strategy(
                 if steps_added > 0 {
                     adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                     apply_post_adam_penalties(&mut w1, n_hidden, lr);
-                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+                    nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                 }
             }
         }
@@ -5738,6 +5776,14 @@ fn hidden_activation_for(leaky_alpha: f64) -> Activation {
     const LEAKY_F64: f64 = 0.01;
     if leaky_alpha == 0.0 {
         Activation::Relu
+    } else if (leaky_alpha - 1.0).abs() < 1e-9 {
+        // A unit slope IS the identity activation, and
+        // `zensim_train_core::per_sample_alpha_head::activation_for_leaky` has
+        // mapped it that way since before this function existed. Two owners
+        // disagreeing about one value is worse than either answer; this one
+        // defers. (Review 2026-09-06 — the first draft PANICKED here, on a value
+        // the alpha-head path supports.)
+        Activation::Identity
     } else if leaky_alpha == LEAKY_F64 || leaky_alpha == zenpredict::LEAKY_RELU_ALPHA as f64 {
         Activation::LeakyRelu
     } else {
@@ -8684,44 +8730,43 @@ fn train_mlp_per_sample_alpha_head(
             };
             total_loss += mse_loss_pair;
 
-            let (dl_dya_mono, dl_dyb_mono, mono_loss_pair) =
-                if hyperparams.monotonicity_reg > 0.0 && quality_sign != 0.0 {
-                    // Which member is BETTER is a property of the human scores,
-                    // never of the output convention — so this reads
-                    // `quality_sign`, not the polarity-signed `target`. Before
-                    // 2026-09-06 it read `target`, which was the bare signum,
-                    // and then applied a hard-coded SCORE-shaped violation on a
-                    // path whose RankNet term was DISTANCE-shaped: the two terms
-                    // pulled against each other. The hinge now takes the run's
-                    // declared direction like every other ordering hinge.
-                    let target_gap = (mos_a - mos_b).abs();
-                    if target_gap > hyperparams.monotonicity_margin {
-                        let (y_hi, y_lo, sign_hi_is_a) = if quality_sign > 0.0 {
-                            (ya, yb, true)
+            let (dl_dya_mono, dl_dyb_mono, mono_loss_pair) = if hyperparams.monotonicity_reg > 0.0
+                && quality_sign != 0.0
+            {
+                // Which member is BETTER is a property of the human scores,
+                // never of the output convention — so this reads
+                // `quality_sign`, not the polarity-signed `target`. Before
+                // 2026-09-06 it read `target`, which was the bare signum,
+                // and then applied a hard-coded SCORE-shaped violation on a
+                // path whose RankNet term was DISTANCE-shaped: the two terms
+                // pulled against each other. The hinge now takes the run's
+                // declared direction like every other ordering hinge.
+                let target_gap = (mos_a - mos_b).abs();
+                if target_gap > hyperparams.monotonicity_margin {
+                    let (y_hi, y_lo, sign_hi_is_a) = if quality_sign > 0.0 {
+                        (ya, yb, true)
+                    } else {
+                        (yb, ya, false)
+                    };
+                    let violation = ladder_sign * (y_hi - y_lo) + hyperparams.monotonicity_margin;
+                    if violation > 0.0 {
+                        let l = hyperparams.monotonicity_reg * violation * violation;
+                        let g_hi = 2.0 * ladder_sign * hyperparams.monotonicity_reg * violation;
+                        let g_lo = -2.0 * ladder_sign * hyperparams.monotonicity_reg * violation;
+                        if sign_hi_is_a {
+                            (g_hi, g_lo, l)
                         } else {
-                            (yb, ya, false)
-                        };
-                        let violation =
-                            ladder_sign * (y_hi - y_lo) + hyperparams.monotonicity_margin;
-                        if violation > 0.0 {
-                            let l = hyperparams.monotonicity_reg * violation * violation;
-                            let g_hi = 2.0 * ladder_sign * hyperparams.monotonicity_reg * violation;
-                            let g_lo =
-                                -2.0 * ladder_sign * hyperparams.monotonicity_reg * violation;
-                            if sign_hi_is_a {
-                                (g_hi, g_lo, l)
-                            } else {
-                                (g_lo, g_hi, l)
-                            }
-                        } else {
-                            (0.0, 0.0, 0.0)
+                            (g_lo, g_hi, l)
                         }
                     } else {
                         (0.0, 0.0, 0.0)
                     }
                 } else {
                     (0.0, 0.0, 0.0)
-                };
+                }
+            } else {
+                (0.0, 0.0, 0.0)
+            };
             total_loss += mono_loss_pair;
 
             if nin_on {

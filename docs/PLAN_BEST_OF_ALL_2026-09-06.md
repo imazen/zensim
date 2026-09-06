@@ -468,6 +468,28 @@ so a full H32 replication would double the wave to re-measure a known null. The
 constraint cost is read at MATCHED capacity (H128 vs H128), which is what the
 confound control was for; `F_nonneg32` is a bytes/speed variant, not a control.
 
+**D-4 — the pre-registered `identity_rows_are_a_no_op_under_nonneg_distance`
+gate was NOT written, and cannot be written as specified.** §3.4 called it "the
+test" and "a genuine proof of the architecture's central claim". Under this
+wave's transform screen the premise is FALSE — `raw(identity) = 99.6138`, not the
+pin, so identity rows carry a real residual and are not a no-op. Writing a test
+that asserted otherwise would have encoded the overclaim. The flag's two actual
+defects (a `target_scale` division that made the target 1.0 against a raw pin of
+100, and an `Mse` group that silently flips the run's polarity) were found by
+review instead, and both are fixed. See §2.4 of the record.
+
+**D-5 — A1's scope was cut.** §4/A1 pre-registered threading the owner to "the
+six RankNet sites, the two TV hinges, the monotonicity hinge, **and the α-head
+absolute/anchor/pjnd/konjnd-aggregation/triplet terms**." The last clause was not
+done: the anchor MSE, PJND passthrough, konjnd-aggregation, cross-codec
+rank-preserve, ListMLE and ordered-probit triplet terms still carry their own
+hard-coded assumptions. `for_groups` does not derive `Score` from any of their
+weights, so a recipe with `--anchor-loss-weight` and no MSE still mixes a
+score-shaped absolute term with a distance-shaped rank term. **Latent, not live**
+— all 10 stored α-head recipes carrying those terms also carry `mse_weight > 0`,
+which derives `Score` — but it is a scope cut and it belongs here rather than in
+a footnote.
+
 Not deviations, but worth stating because the plan implied otherwise:
 
 - **`--ladder-hinge` is `--tv-weight`.** The plan already said this; the wave

@@ -1003,11 +1003,25 @@ in the weights:
 > `raw(x) = pin − g(x)` with `g ≥ 0` and `g(0⃗) = 0` **bit-exactly** —
 > `scaler_mean := 0⃗`, hidden biases frozen at `0`, **ReLU**, output weights
 > projected `≤ 0`, output bias frozen at `--nonneg-pin`. `raw(0⃗)` is then the
-> **argmax over the entire input space, by construction**, at f32/f16/i8 alike.
+> **argmax over the entire input space** at f32/f16/i8 alike — **provided every
+> active feature transform maps 0 to 0** (see the correction below).
 
 Expressible in the SHIPPED wire format with **zero** runtime change, which is why
 softplus / ReLU² / squared-norm were rejected (each needs a new `Activation` or
 head in `zenpredict`, plus a change in every serving consumer).
+
+**⛔ CONDITIONAL, and this wave does not meet the condition.** The guarantee
+lives in STANDARDIZED space, and the chain is `caller row → feature transforms →
+scaler → layer 0`. `raw(identity) = pin` therefore requires **every active
+feature transform to map 0 to 0**, and `winsor_p99` with `lo > 0` returns `lo`.
+The canonical 372 screen carries **28** such guards. MEASURED: `B_nonneg_s4004`
+reads `raw(identity) = 99.6138` against a pin of 100.0. So `raw(x) ≤ pin` ∀x is
+still structural (the projection gives it), but **identity is NOT the argmax
+here** and C6 = 0 is a MEASUREMENT on 9,593 cells rather than a theorem. C5 still
+passes because the identity ANCHOR rows take the same forward, so the spline maps
+that same raw to exactly 100. The trainer now WARNS, naming the count and the
+worst `t(0)`; making it structural needs zero-preserving transforms or a pin at
+`t(0⃗)`, neither of which was done.
 
 **MEASURED on the real 228-slot recipe, same seed, same chain as its control:**
 C6 **1,642 → 0** *while* `tied` goes **0.0017 → 0.0000** — the either/or is

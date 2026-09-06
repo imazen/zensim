@@ -109,7 +109,16 @@ argmax over the entire input space, by construction, in f32/f16/i8 alike.
 
 Gated by `to_bits()` equality at all three dtypes and by 120,000 probes spanning
 `1e-30`…`1e12` and both signs; the pin is asserted **attained**, so the bound is
-tight rather than merely an upper bound. Refuses `--skip-connection`, any head
+tight rather than merely an upper bound.
+
+⛔ **The identity half is CONDITIONAL on zero-preserving feature transforms**
+(found by review, then MEASURED). `winsor_p99` with `lo > 0` maps `0 → lo`, and
+the canonical 372 screen carries 28 such guards, so on that recipe
+`raw(identity) = 99.6138` against a pin of 100.0: `raw(x) ≤ pin` ∀x stays
+structural, but identity is **not the argmax** and "no cell above identity"
+becomes a measurement rather than a theorem. C5 still passes because the identity
+ANCHOR rows take the same forward and the spline pins that raw at 100. The
+trainer WARNS with the count and the worst `t(0)`. Refuses `--skip-connection`, any head
 flag, and `--n-hidden-layers >= 2` rather than claim a guarantee it does not
 establish. **Does not claim** C3/C4 or A7r, and `g` is CONVEX at one hidden
 layer — both documented on the flag. (`5d5a001e`)
@@ -118,8 +127,13 @@ layer — both documented on the flag. (`5d5a001e`)
 
 `--identity-rows N` appends N zero-feature rows with an absolute target of the
 pin, as a train-only group appended LAST so it cannot shift the TV pair index
-space. Provably a **no-op** under `--nonneg-distance` (raw(0⃗) is the pin
-bit-exactly ⇒ zero squared error ⇒ zero gradient), and real work without it.
+space. A no-op under `--nonneg-distance` **only when no active transform moves
+zero** — the same condition as above. Two defects found by review and fixed
+before any use: the target was divided by `--target-scale` when the trainer's
+targets are already scaled (giving 1.0 against a raw pin of 100.0, a squared
+error of 9,801 — the opposite of a no-op), and the group's `Mse` loss mode makes
+an otherwise rank-only run SCORE-shaped, which is now warned about explicitly.
+No wave arm set the flag, so nothing measured moved.
 
 `--tv-margin` was read only on the α-head path; the plain/pool/hybrid hinges were
 a pure `max(0, y_hi − y_lo)`, which is minimized by collapsing every ladder flat

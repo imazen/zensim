@@ -3317,8 +3317,14 @@ which is the control.
 
 `--nonneg-distance` makes the dial's identity (C5) and no-cell-above-identity
 (C6) rows STRUCTURAL: `raw(x) = pin − g(x)` with `g ≥ 0` and `g(0⃗) = 0`
-bit-exactly, so `raw(0⃗)` is the argmax over the whole input space by
-construction. It exists because
+bit-exactly, so `raw(0⃗)` is the argmax over the whole input space — **provided
+every active feature transform maps 0 to 0.** The canonical 372 screen's 28
+positive-`lo` `winsor_p99` guards do not (they map `0 → lo`), and MEASURED on
+this wave `raw(identity) = 99.6138` against a pin of 100.0. `raw(x) ≤ pin` ∀x
+stays structural; identity being the argmax does not, so C6 = 0 is a measurement
+on 9,593 cells across three seeds rather than a theorem. C5 passes regardless,
+because the identity ANCHOR rows take the same forward and the spline maps that
+raw to exactly 100. It exists because
 `benchmarks/dial_addressability_gate_2026-09-04.md` §10.3 proves **no monotone
 output spline can satisfy both C2 and C6** when real cells out-rank a perfect
 copy in raw space — a weights defect, so it is fixed in the weights. It is

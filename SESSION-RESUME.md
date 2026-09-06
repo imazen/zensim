@@ -15,8 +15,11 @@ ledger [`docs/DATASET_HISTORY.md`](docs/DATASET_HISTORY.md) §3.56.
 
 - **`--nonneg-distance` makes C5 and C6 structural.** `raw(x) = pin − g(x)` with
   `g ≥ 0` and `g(0⃗) = 0` bit-exactly ⇒ `raw(0⃗)` is the argmax over the whole
-  input space, by construction, in the SHIPPED wire format with **zero** runtime
-  change. MEASURED on the 228-slot recipe against its own control: **C6
+  input space in the SHIPPED wire format with **zero** runtime change — **provided
+  every active feature transform maps 0 to 0**, which the canonical 372 screen's
+  28 positive-`lo` winsor guards do NOT (MEASURED: `raw(identity) = 99.6138` vs a
+  pin of 100.0, so C6 = 0 is a measurement on 9,593 cells, not a theorem; C5 still
+  passes because the identity anchor takes the same forward). MEASURED on the 228-slot recipe against its own control: **C6
   1,642 → 0 WHILE `tied` goes 0.0017 → 0.0000** (the gate record's C2 ⊻ C6
   either/or is DISSOLVED, not traded), C5 38 → 0, grid max **exactly 100.000**.
   Cost at that seed: CID22 −0.0088, C1 0.94868 → 0.93040 against a 0.93 bar.

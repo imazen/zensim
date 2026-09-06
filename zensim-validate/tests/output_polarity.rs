@@ -19,7 +19,10 @@
 //! bake back through the same runtime `bake_verdict` scores with, and asserts the
 //! SIGN of `corr(raw_output, quality)`.
 //!
-//! Five of these arms fail on the parent commit.
+//! Four of the five arms that compile at the parent commit fail there. (This
+//! file imports `OutputPolarity`, which the parent does not have, so the control
+//! was run as a stripped variant with that import and `output_polarity_owner_
+//! maps_conventions_to_signs` removed.)
 
 use zenpredict::{Model, Predictor};
 use zensim_validate::bake_runtime::{
@@ -68,37 +71,18 @@ fn synthetic(n_features: usize, n_rows: usize, seed: u64) -> (Vec<Vec<f64>>, Vec
     (feats, quality)
 }
 
+/// SROCC through THE owner (`zenstats`, re-exported as `zensim_validate::panel`).
+///
+/// The first draft hand-rolled a midrank Spearman here. That is the eleventh
+/// private copy in this crate and exactly what the repo's NO-DUPLICATE-
+/// IMPLEMENTATIONS rule names — "a second **Rust** site is just as much a
+/// duplicate as a Python one" — in a lane whose whole framing is single
+/// ownership. Caught by review 2026-09-06.
 fn spearman(a: &[f64], b: &[f64]) -> f64 {
-    fn ranks(v: &[f64]) -> Vec<f64> {
-        let mut idx: Vec<usize> = (0..v.len()).collect();
-        idx.sort_by(|&i, &j| v[i].partial_cmp(&v[j]).unwrap());
-        let mut r = vec![0.0; v.len()];
-        let mut i = 0;
-        while i < idx.len() {
-            let mut j = i;
-            while j + 1 < idx.len() && v[idx[j + 1]] == v[idx[i]] {
-                j += 1;
-            }
-            let avg = ((i + j) as f64) / 2.0 + 1.0;
-            for &k in &idx[i..=j] {
-                r[k] = avg;
-            }
-            i = j + 1;
-        }
-        r
-    }
-    let (ra, rb) = (ranks(a), ranks(b));
-    let n = ra.len() as f64;
-    let (ma, mb) = (ra.iter().sum::<f64>() / n, rb.iter().sum::<f64>() / n);
-    let mut num = 0.0;
-    let (mut da, mut db) = (0.0, 0.0);
-    for i in 0..ra.len() {
-        let (x, y) = (ra[i] - ma, rb[i] - mb);
-        num += x * y;
-        da += x * x;
-        db += y * y;
-    }
-    num / (da.sqrt() * db.sqrt())
+    // `compute_panel().srocc` is `.abs()` by the panel's documented
+    // polarity-tolerant convention — useless here, since the SIGN is the whole
+    // measurement. `zenstats::panel::spearman` is the signed owner.
+    zensim_validate::panel::spearman(a, b)
 }
 
 /// Train one arm and return `corr(raw_output, quality)` read back through the
