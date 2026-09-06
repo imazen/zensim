@@ -314,6 +314,25 @@ front is the same fit.)*
 **The control gets the identical chain.** Its `raw(0⃗)` is not the argmax, and
 what that costs it is the measurement, not a handicap.
 
+**Every arm's feature-set id is `basic+peaks/v1pre#3fb78648`** — the id already
+registered for this compute set — and every arm carries the same, COMMON-MODE
+era note against the eval table:
+
+```
+feature-set — bake   basic+peaks/v1pre#3fb78648
+feature-set — table  basic+peaks+masked+iw@w372/v1postc#d16a1091
+feature-set MISMATCH — EraDiffers: bake trained on era v1pre, table is era
+  v1postc — the shift is model-specific, so the number cannot be corrected
+  across the boundary, only re-verdicted
+```
+
+That is train-on-`canonical-2026-05-21` / eval-on-`postC`, which is the
+campaign's own split and is stated rather than hidden (the flip lane bounds the
+372 era rank skew at ≤ 7e-4). It applies **identically to the control and every
+arm**, so it cannot move a within-wave comparison — but it does mean none of
+these absolute numbers is directly comparable to a bake trained in the postC
+era.
+
 ### 5.1 Two structural facts the wave had to be rebuilt around, both MEASURED
 
 **(a) `shared-anchor` is single-layer-only.** The first attempt chained
