@@ -27,12 +27,22 @@ ARM_DESC = {
 }
 CORPORA = ["cid22", "konjnd", "aic3", "tid", "kadid", "csiq", "live", "hfnlproxy",
            "imazen26", "nonphoto"]
-# Shipped D era-2, read on the postC root + floor-dense ladder instruments
-# (benchmarks/rev2_d_arms_2026-09-06.md section 12.3).
+# Shipped D era-2 (`zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin`),
+# MEASURED BY THIS LANE on the postC root with the SAME `bake_verdict`
+# invocation the wave's arms use — not transcribed. Its rank values reproduce
+# `benchmarks/rev2_d_arms_2026-09-06.md` §12.3 to six digits, which is what says
+# the reference is the same one.
+#
+# ⚠ The COMPOSITE does NOT match that record's 0.8064387598449834, and should
+# not: `product_composite` is a function of the corpus SET a run scored, and
+# that record's run used a different one. Comparing a candidate against the
+# number below is apples-to-apples; comparing it against 0.8064 is not.
 SHIPPED_D = {
-    "cid22": 0.86333, "konjnd": 0.536704, "aic3": 0.776996,
-    "csiq": 0.901669, "live": 0.960289, "tid": 0.823692, "kadid": 0.808064,
-    "composite": 0.8064387598449834,
+    "cid22": 0.8633299325973021, "konjnd": 0.5367043689366323,
+    "aic3": 0.7769958141384993, "csiq": 0.9016689158701747,
+    "live": 0.9602891256047629, "tid": 0.823691890065306,
+    "kadid": 0.8080635746122159, "hfnlproxy": 0.4920983413616811,
+    "composite": 0.8244399655192828,
 }
 MENTOR_FLOORS = {
     "avif-rav1e": 0.6410256410256411, "avif-svt": 1.0,
@@ -134,9 +144,11 @@ def main():
           f"| {min(cstate) if cstate else '—'}–{max(cstate) if cstate else '—'}/6 "
           f"| {fmt(agg(a7r)[0], 1)} | {fmt(agg(c5)[0], 1)} | {fmt(agg(c6)[0], 1)} |")
     w("")
-    w(f"Shipped D (era-2, postC + ladder): CID22 **{SHIPPED_D['cid22']}**, "
-      f"KonJND |{SHIPPED_D['konjnd']}|, AIC-3 {SHIPPED_D['aic3']}, "
-      f"composite {SHIPPED_D['composite']}, contract **6/6**, A7r **0**.\n")
+    w(f"Shipped D (era-2), MEASURED BY THIS LANE on the same root and the same "
+      f"invocation: CID22 **{SHIPPED_D['cid22']:.5f}**, KonJND "
+      f"|{SHIPPED_D['konjnd']:.5f}|, AIC-3 {SHIPPED_D['aic3']:.5f}, composite "
+      f"{SHIPPED_D['composite']:.5f}. Its published contract is **6/6** and its "
+      f"A7r **0 of 5**.\n")
 
     w("## Per-codec resolvable floors (bar = the mentor's own value; a codec passes at ≥ bar)\n")
     hdr = "| arm | " + " | ".join(MENTOR_FLOORS) + " |"
