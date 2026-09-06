@@ -1088,3 +1088,47 @@ untouched.
 ## 6. RESULTS
 
 *(pending)*
+
+## W4 — speed, MEASURED (2026-09-06, idle box)
+
+Re-run after the contaminated start was killed (that attempt began at load 8.43 and its
+partial logs were deleted). This run started at load 0.85 and held it: **8 cells x 12
+starts, 0 discarded, 0 bad**, and the stable reference arm `fast_ssim2` reads 22.5-103.1 ms
+across cells — far above the ~0-1.6 ms floor that marks the zenbench wall-budget
+degeneration documented in CLAUDE.md, so every reading in the table is valid. The two
+bit-identical control arms (`free156_extract_only` / `free156_peaks_raw`) agree EXACTLY at
+4 of 8 cells and within 0.8 % elsewhere, which is the measurement's own noise floor.
+
+Full table: `/mnt/v/output/zensim/best-of-all-2026-09-06/speed/w4_table.txt`.
+
+The ship candidate serves the **basic+peaks 228** slice, whose walk is `peaks156_no_raw`.
+min-of-12-starts, ms:
+
+| cell | peaks156_no_raw | zensim_D | zensim_B | fast_ssim2 | cand vs D | cand vs ssim2 |
+|---|--:|--:|--:|--:|--:|--:|
+| native t1 576   |  4.900 |  5.800 | 11.100 |  22.500 | 0.845x | **4.59x faster** |
+| native t1 1152  | 21.600 | 23.700 | 41.900 | 101.600 | 0.911x | **4.70x** |
+| native t8 576   |  1.300 |  1.400 |  2.000 |  22.800 | 0.929x | **17.54x** |
+| native t8 1152  |  6.000 |  6.400 |  8.500 |  89.900 | 0.938x | **14.98x** |
+| capv3  t1 576   |  6.200 |  6.800 | 10.800 |  23.800 | 0.912x | 3.84x |
+| capv3  t1 1152  | 27.100 | 29.100 | 49.200 | 101.400 | 0.931x | 3.74x |
+| capv3  t8 576   |  1.600 |  1.700 |  2.800 |  23.500 | 0.941x | 14.69x |
+| capv3  t8 1152  |  7.000 |  6.900 |  9.400 |  86.900 | 1.014x | 12.41x |
+
+**W4 PASSES.** The constrained model's walk costs **0.85-1.01x shipped D** — at or below D
+in 7 of 8 cells, with the single 1.014x cell inside the control arms' own 0.8 % noise — and
+is **3.7-17.5x faster than fast_ssim2**. The constraint bought its dial properties at no
+extraction cost, because `--nonneg-distance` changes the head, not the walk.
+
+## Rank vs the three replicated 944 leaders (paired bootstrap, CID22, B=2000)
+
+| reference | ref CID22 | delta | 95 % CI | verdict |
+|---|--:|--:|---|---|
+| CTL_A_LSTAR_s4021_legacy_packed | 0.89304 | −0.00947 | [−0.01243, −0.00642] | **A LOSES** |
+| LSTAR3__S__i4041_p5001_packed   | 0.88618 | −0.00261 | [−0.00537, +0.00023] | tie |
+| W11J__S__i4013_p5001_packed     | 0.88053 | +0.00305 | [+0.00049, +0.00562] | **A WINS** |
+
+A 228-slot model lands **inside the 944 leader band** — beating one, tying one, and losing
+to the top one by ~0.009 CID22. Caveat carried from the tool: fullevals hold no per-pair
+reference id, so these are i.i.d. pair resamples and the intervals are a FLOOR on the
+uncertainty, narrower than a reference-clustered interval would be.
