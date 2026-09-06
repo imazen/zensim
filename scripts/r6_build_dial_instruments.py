@@ -54,22 +54,48 @@ def main() -> int:
         # The dial grid's CELL IDENTITY (image_id / codec / q / codec_param /
         # param_kind) is a property of the instrument, not of the arm, so it is
         # carried over from the registered ladder grid verbatim and only the
-        # features are replaced. The join is POSITIONAL because the pairs TSV
-        # the extraction reads IS the grid's own row order — and it is GATED on
-        # ref_basename == image_id row for row, exactly the gate the ladder
-        # manifest records, so a re-ordered pairs list fails loudly instead of
-        # silently labelling every cell with the wrong codec.
+        # features are replaced.
+        #
+        # The join is BY `row_id`, not positional. The ladder pairs TSV carries
+        # `row_id` = the grid's row index, and it is NOT in ascending order:
+        # the pairs list is grouped by IMAGE while the grid is grouped by CODEC,
+        # so they agree for the first 51 rows and then diverge. A positional
+        # join was tried first and its gate caught this — 9,287 of 9,593 rows
+        # would have been labelled with the wrong cell. Keeping a real gate on
+        # a join you believe is trivially correct is what made that a five-minute
+        # fix instead of a silently wrong dial panel.
+        #
+        # The gate is now STRONGER than the positional one it replaces: every
+        # row must agree with `grid[row_id]` on BOTH `image_id` AND
+        # `codec_param`, so a permuted, truncated or mis-keyed pairs list all
+        # fail loudly.
         lad = read_fresh_csv(os.path.join(t, "ladder.csv"))
         ref = pq.read_table(LADDER_GRID)
         if lad.num_rows != ref.num_rows:
             raise SystemExit(f"{arm}/ladder: {lad.num_rows} extracted rows vs "
                              f"{ref.num_rows} in the registered grid")
-        want = ref.column("image_id").to_pylist()
-        got = [os.path.splitext(x)[0] for x in lad.column("ref_basename").to_pylist()]
-        bad = [i for i, (x, y) in enumerate(zip(got, want)) if x != y]
+        rid = [int(x) for x in lad.column("row_id").to_pylist()]
+        if sorted(rid) != list(range(ref.num_rows)):
+            raise SystemExit(f"{arm}/ladder: row_id is not a permutation of "
+                             f"0..{ref.num_rows - 1}")
+        gimg = ref.column("image_id").to_pylist()
+        gparam = [float(x) for x in ref.column("codec_param").to_pylist()]
+        mimg = [os.path.splitext(x)[0] for x in lad.column("ref_basename").to_pylist()]
+        mparam = [float(x) for x in lad.column("human_score").to_pylist()]
+        bad = [i for i, r in enumerate(rid)
+               if gimg[r] != mimg[i] or abs(gparam[r] - mparam[i]) > 1e-9]
         if bad:
-            raise SystemExit(f"{arm}/ladder: image_id mismatch on {len(bad)} rows "
-                             f"(first at {bad[0]}: {got[bad[0]]!r} vs {want[bad[0]]!r})")
+            i = bad[0]
+            raise SystemExit(
+                f"{arm}/ladder: grid[row_id] disagrees on {len(bad)} rows "
+                f"(first at {i}: row_id {rid[i]} -> grid "
+                f"({gimg[rid[i]]!r}, {gparam[rid[i]]}) vs extracted "
+                f"({mimg[i]!r}, {mparam[i]}))")
+        # scatter: extracted row i carries the features of grid row rid[i]
+        order = [0] * ref.num_rows
+        for i, r in enumerate(rid):
+            order[r] = i
+        lad = lad.take(pa.array(order))
         cols = {n: ref.column(n) for n in ("image_id", "codec", "q",
                                           "codec_param", "param_kind")}
         for i in range(372):

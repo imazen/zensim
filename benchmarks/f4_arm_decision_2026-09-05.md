@@ -169,6 +169,25 @@ biggest on the peaks family. On KADID / TID / CSIQ / LIVE `lorentz` grows to
 9.0e-2 / 1.2e-2 / 1.2e-2 / 4.4e-3, so it is not a no-op everywhere; those are
 the corpora with the strongest local mean differences.
 
+**A fourth control, unplanned and free.** The `ssim2` arm's re-extracted LADDER
+grid comes out at sha256 `4c3874a78c469e15…` — **the registered ladder grid's
+own sha256**, byte for byte (`ladder-2026-09-05/instruments/
+_MANIFEST_ladder.json`). So the rev1 arm reproduces a second independently-built
+instrument exactly, on top of the seven eval CSVs of §1.
+
+**And the join that produced it caught a real bug.** The first version of the
+grid rebuild joined the extraction to the registered grid POSITIONALLY, on the
+reasonable belief that the pairs list the ladder was built from IS the grid's row
+order. It is not: the pairs list is grouped by IMAGE and the grid by CODEC, so
+they agree for 51 rows and then diverge, and **9,287 of 9,593 cells would have
+been labelled with the wrong codec and quality**. The gate — `image_id` equality,
+row for row — failed loudly instead. The join is now BY `row_id` (which the pairs
+TSV carries, and which is the grid's row index) and the gate is strictly
+stronger: every row must agree with `grid[row_id]` on `image_id` AND
+`codec_param`, so a permuted, truncated or mis-keyed list all fail. *Keeping a
+real gate on a join you believe is trivially correct is what made this a
+five-minute fix instead of a silently wrong dial panel.*
+
 ---
 
 ## 4. The fits — one owner, one recipe, one thing varied
