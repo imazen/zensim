@@ -647,3 +647,169 @@ gate table and the reading-ambiguity handled both ways:
 The recalculation (§5), the refit/re-verdict (§6), R9 (perf), F12, and row 11 of
 §11.4 (the CSFW cancellation twin, handed to the F5 lane). `SHIPPED_REVISION`
 stays `Rev1`.
+
+---
+
+## 12. REV2-D — the D-class F17 arm study. PRE-REGISTERED 2026-09-06, pushed before any fit
+
+**Lane:** REV2-D. **Record:** [`../benchmarks/rev2_d_arms_2026-09-06.md`](../benchmarks/rev2_d_arms_2026-09-06.md).
+
+### 12.0 The question, and why §11.10a does not answer it
+
+§11.10a set `REV2_HFGAIN = SaturatingExcess` from R6b's own fits — `--lam 2e-3`
+against a ×100 target, **147 active coefficients**, CID22 **+0.00272**
+CI-excluding. [`../benchmarks/rev2_refit_2026-09-06.md`](../benchmarks/rev2_refit_2026-09-06.md)
+§3 then ran the **shipped D chain** — the same λ against a [0, 1] target, **28
+active coefficients**, its own two anchors — on the same tables and measured the
+**same arm losing 0.00456**, also CI-excluding, plus a per-codec floor
+(`avif-rav1e`) going PASS → FAIL. §9 of that record names the cause:
+**F17's benefit is model-class-dependent.**
+
+The USER DIRECTIVE that authorised the rev2 work is *"we should fix arithmetic
+defects aggressively before shipping, and perhaps change feature definitions and
+formulas to make monotone linear models better."* So **the bound is mandatory
+and is not up for re-litigation here.** What is open is the **FORM**, and it was
+chosen by measurement on ONE model class. This lane measures every form on the
+class that actually ships.
+
+A structural fact measured before this section was written, from
+`bake_block_profile` on the REFIT lane's own bakes, which is what makes the
+question sharp: **the two arms do not read the same slots.** Against the twelve
+F17 ids {12, 25, 38, 51, 64, 77, 90, 103, 116, 129, 142, 155} —
+
+| bake | active coeffs | F17 slots read | which |
+|---|--:|--:|---|
+| `D_ratio_s156` (revision 1) | 28 | **1** | f77 |
+| `D_satexcess_s156` (revision 2) | 33 | **5** | f12, f38, f64, f129, f155 |
+| `D_ratio_s228` (revision 1) | 27 | **1** | f77 |
+| `D_satexcess_s228` (revision 2) | 39 | **7** | f12, f25, f38, f51, f64, f129, f155 |
+
+Bounding the statistic does not merely rescale an input the model already had:
+**it changes which inputs L1 keeps.** So "rev1 vs rev2 in the D chain" is a
+comparison of two different sparse supports, and a per-arm sweep is the only way
+to see whether the loss belongs to *bounding* or to *this particular bound*.
+
+### 12.1 Decision rule — fixed before any number exists
+
+**Step 0 — recommendability.** An arm may only be RECOMMENDED if it passes
+R6b's structural gates H3 (declared bound holds), H4 (identity ⇒ zero) and H5
+(no inversions, no new ties) — §11.9's gate table. Today that is `satexcess`
+alone (`log1p` fails H3, `bexcess` fails H5 with 263,195 inversions, `cap` fails
+H5 with 67,224 new ties). Every arm is still RUN and REPORTED; a
+structurally-failing arm that dominates on rank and floors is a FINDING for the
+user, never an install.
+
+**Step 1 — eligibility.** ELIGIBLE = arms that keep **G-ADDR contract 6/6** AND
+whose `A7r` per-codec `repr` is **≥ the revision-1 in-era arm's on every one of
+the five codecs**. (The bar is the rev1 in-era arm, not the mentor, because this
+is a regression question: the brief's words are "floors ≥ rev1's on every
+codec". The mentor bar is reported beside it and decides the gate's own
+PASS/FAIL, which is reported unchanged.)
+
+**Step 2 — preference.** Among eligible arms prefer the one whose paired-
+bootstrap **CID22** delta against the revision-1 in-era arm is not worse than
+zero — CI including 0, or CI excluding 0 on the positive side. Ties broken by
+(a) CI-excluding wins minus losses over {CID22, KonJND, AIC-3, CSIQ, LIVE};
+**TID and KADID are train==val integrity guards and are never ranking signal**;
+then (b) the smaller H6 healthy-cell perturbation already measured in §11.9
+(`cap` 0 < `log1p` 0.04907 < `satexcess` 0.08931 < `bexcess` 0.34410).
+
+**Step 3 — no eligible arm.** Report the smallest CID22 loss among the arms
+holding contract 6/6 and state plainly that the bound costs rank in this model
+class. Do not relax a gate to manufacture a winner.
+
+**Step 4 — one feature definition, not two.** The registry definition stays
+`satexcess` for the wide-lasso class **unless a single arm wins for BOTH
+classes**. A per-class revision is NOT allowed — one feature has one definition.
+If the classes disagree, this lane presents the trade with numbers and **the
+user rules**. Nothing is installed either way.
+
+### 12.2 What is run
+
+Five arms — `ratio` (= revision 1, the control), `cap`, `log1p`, `bexcess`,
+`satexcess` — × two slices (`a156.idx`, `a228.idx`) = **10 bakes**, through the
+shipped-D chain verbatim:
+
+```
+bake_dial_refit gram      --parquet <r6b>/tables/<arm>/safesyn.parquet \
+                          --target human_score --target-scale 0.01 --space raw
+bake_dial_refit fit-lasso --space raw --target human_score --lam 2e-3 --tau 0 \
+                          --n-sweeps 400 --tol 1e-10 --slice-file a{156,228}.idx \
+                          --anchor-parquet <r6b>/tables/<arm>/anchor.parquet \
+                          --anchor-parquet identity_anchor_<arm>_n21.parquet \
+                          --anchor-target human_score --embed-repro
+bake_dial_refit extend-top                       # byte no-op in this lineage, re-verified per arm
+bake_dial_refit densify   --gate-rows 512        # identity gate BIT-identical, per arm
+```
+
+**The winsor control — bounding the MODEL's input instead of the feature.**
+Two variants, both on the **revision-1** (`ratio`) tables, so no era break is
+involved at all:
+
+* **`W-all`** — `add-winsor` at its shipped defaults ([p0.1, p99.9] fit on the
+  training leg, every slot). This is the recipe shipped Profile B carries
+  (`b_sdr_linear_cid80_inclwinsor`), applied to the D lineage.
+* **`W-f17`** — winsor [p0.1, p99.9] on the **twelve F17 slots only**, identity
+  everywhere else, applied at gram-build time (`gram --transforms-tsv --space
+  shaped`) and declared into the bake (`fit-lasso --transforms-tsv`), so the fit
+  space and the f32 runtime see the identical clamp. This is the variant that
+  isolates F17; `W-all` also clamps 20-odd non-F17 inputs and is reported as the
+  shipped-recipe comparator, not as the isolation.
+
+Both are graded identically to the arms. **If a winsor variant matches the best
+arm on rank AND on floors, that is a finding the user needs** — a bounded model
+with no era break, no recalculation, and no re-extraction — and it will be
+stated beside, not instead of, the arithmetic-correctness argument for fixing
+the feature (§11.1: the crate owns `bounded_excess` one block over and F17 is
+the one site that did not use it).
+
+**Grading, identical for every arm, each read on its OWN era root:**
+
+| axis | how |
+|---|---|
+| RANK | `bake_verdict` on cid22, konjnd, aic3, csiq, live, tid, kadid + **paired bootstrap** vs the rev1 in-era arm (B = 2,000, seed 20260905, same resampled index sets, through `panel --batch`) |
+| G-ADDR | `--floor-rule resolvable --gaddr-tail-pins product`, contract C1–C6 + A7r per codec, on the arm's OWN `<arm>_ladder.parquet` / `<arm>_negtail.parquet` / `<arm>_identity.parquet` |
+| floors | A7r `repr` per codec, against BOTH the live mentor fraction (the gate's own bar) and the rev1 in-era arm (step 1's bar) |
+| inversions | `--reference-truth reference_truth_ladder_pnorm3.tsv:pnorm3 --inversion-truth agree` |
+| identity | the arm's own identity table through the bake |
+| **outlier ordering** | the LIVE rows carrying a revision-1 `contrast_inc` cell **> 100** (R6b: 60 of 779). Per arm, the SROCC on that subset and on its complement — *does each arm fix the ordering where the pathology actually fires?* |
+
+### 12.3 Controls, run first, reported first
+
+| # | control | pass condition |
+|---|---|---|
+| **C-A** | this lane's `ratio` chain reproduces the REFIT lane's | `D_ratio_s{156,228}_byid.bin` byte-identical modulo the embedded `zentrain.repro` (which carries the tool's absolute path), AND CID22/KonJND read **0.86367 / 0.56141** (s156) and **0.87263 / 0.58220** (s228) EXACTLY |
+| **C-B** | this lane's `satexcess` chain reproduces the REFIT lane's | `D_satexcess_s156_byid.bin` likewise; CID22 **0.85911** |
+| **C-C** | identity anchors | the 21-row anchor cut from every arm's own `identity.parquet` is byte-identical across all five arms (all-zero at every arm — R6b CB3) |
+| **C-D** | `extend-top` is a byte no-op | in → out sha equal, every arm, both slices |
+| **C-E** | `densify` identity gate | BIT-identical on 512 probe rows, every arm, both slices |
+
+**If C-A fails, this lane's chain is not the REFIT lane's and every number below
+is void.** It is reported as a failure, not worked around.
+
+### 12.4 Confounds inherited, stated not discovered
+
+* **CID22 decoder**: 12.5 % of the CID22 distorted side in the r6b lineage is
+  `.jpg` decoded by the third-party `image` crate. Every arm here carries the
+  SAME one, so the comparison is single-confound; the REFIT lane §6 priced it at
+  **2e-5** CID22 SROCC against a 4.56e-3 effect.
+* **Tables**: R6b's are the only rev2 extraction of these legs that exists. No
+  re-extraction is run here.
+* **KonJND** is the 504-row JPEG ruler on these roots, not the 1,008-row cut.
+* **KADID / TID** are train==val on this lineage and are printed as integrity
+  guards only.
+
+### 12.5 What this lane does NOT do
+
+No install. `ssim_form::SHIPPED_REVISION` untouched, `ZensimProfile::D`
+untouched, `zensim/weights/` untouched, `benchmarks/feature_sets_registry.json`
+untouched, and the G-ADDR floor registry **NOT appended** — the arm probes are
+not the wave's canonical rev2 instruments and pinning bars to them would pin
+bars to instruments about to be superseded. No fast-class retrain and no
+corruption-head refit: the REFIT lane measured the tree CANDIDATE invariant to
+the revision to nine decimals (§8.6r).
+
+### 12.6 RESULTS
+
+*(filled by the record; this heading exists so the pre-registration and the
+answer live at one anchor.)*
