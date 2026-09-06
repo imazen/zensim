@@ -913,3 +913,67 @@ cost a fit.
 * **A 372-layout `tbig_hf`** — the near-lossless ladder has no 372 twin, so the
   servable lane trains without the one leg the D2/D3 within-ref lever acts on.
   That is the most likely source of further KonJND on the servable side.
+
+## 16. SELECTION — the owner's rule picks the same candidate the tables do
+
+`freeze_check --select --seed-group --min-k 2 --floor-basis all` over both lanes'
+fullevals, once M3a was measured through its own owner
+(`run_full_eval.sh ZENSIM_M3_ONLY=1` → `m3a_sweep.sh --grid full`):
+
+```
+**SELECTED: `11e243eb0b86`** — a RECIPE, k=3, 8 floors passed by every seed
+(mean 8.00/8), mean selection_composite 0.9853 (per-seed spread 0.9835–0.9866).
+Floors every seed clears: bandtail, breadth, cid22, dial, dialrange, hfnl,
+konjnd, nonphoto
+Its 6 member cell(s): S372_S228_H128_p_s4004, …_s4004_id100, …_s4005,
+…_s4005_id100, …_s4006, …_s4006_id100
+```
+
+`S372_S228_H128_p` — **the same candidate §12/§13 identified on rank alone**, now
+picked by the registered rule from the owner's own inputs, at **8/8 floors on
+every seed**, which no other group in either lane reaches (the 372 `S156` groups
+read 6–8/8 and the α-head cells 1–2/8). Its per-seed M3a is **0.7862 / 0.7920**
+(the third landed during the run). The `_id100` siblings group with their base by
+`seed_group_key`, which is correct — they are the same training run with a
+different spline — and they carry no separate M3a, so the group's k = 3 counts
+distinct SEEDS, not cells.
+
+## 17. W4 — **NOT MEASURED**, and the reason is the box, not the candidate
+
+W4 was set up at HEAD with the protocol the coordinator specified — ONE binary,
+both candidate arms loaded into the SAME runs so they interleave inside
+zenbench's round-robin, the two bit-identical controls (`fast_ssim2`,
+`zensim_B`) present in every run, `ZEN_S2_EXTRACT_ONLY=1` to split walk from
+forward pass, min over 10 process starts with ASLR on, wall time scaled with
+size, both SIMD tiers (`ZEN_S2_CAP_V3=1` for v3), 576² and 1152², 1T and 8T.
+The bench binary was rebuilt at HEAD first, because the kernel lanes moved the
+156-walk baseline and no number may be carried across builds.
+
+**It could not be collected: the box was at load average 72–79** (other lanes
+running `extract_feature` at 1975 % CPU, `rustc`, `cjxl-rs`, `resample_admiss`).
+`scripts/kernel_fastclass_sweep.sh` — the mechanised form of this protocol —
+**refuses above load 3.0**, and `profile_d_notax_2026-09-01.md` §4 measured a
+*single* concurrent niced `cargo build` swinging the stable `fast_ssim2` arm
+128.9–633.6 ms inside one cell. A number taken now would be contaminated by an
+order of magnitude more load than that.
+
+**The launched run was killed and its partial logs deleted** rather than
+reduced. This is reported as **NOT MEASURED with a named cause**, never as an
+estimate, and never as a pass.
+
+**What is known about this candidate's W4 without measuring it**, stated as
+inference and labelled as such:
+
+* Its walk is `V1PoolsMode::Peaks` at the 372 layout — **the walk
+  `ZensimProfile::D` already resolves to**. The 72 peaks are computed
+  unconditionally by `fused_vblur_ssim_inner*` whatever the model reads
+  (`free_features_2026-09-01.md` §2.1 measured the layout cost with every CI
+  straddling 1.0), so the walk delta against shipped D is ~0 by construction.
+* The entire W4 question is therefore the **forward pass**: a `228→128→1` MLP
+  (37,923 B packed) against Profile D's 28-coefficient additive head. That is
+  the quantity `ZEN_S2_EXTRACT_ONLY` isolates and the reason it was in the plan.
+
+**To finish it:** `bash ~/tmp/fc2/w4.sh` on an idle box (or
+`scripts/kernel_fastclass_sweep.sh --arms 156,15c --control 15c --sizes
+576,1152 --threads 1,8 --starts 15 --iters 7` for the walk half, which
+self-checks the load and skips rather than emitting a contaminated row).
