@@ -1884,8 +1884,53 @@ fn cmd_pack(a: &PackArgs) -> Result<(), String> {
     }
     let (cx, cy) = fit_spline_knots(&preds, &tgt, 18, a.neg_tail);
     if cx.len() < 2 {
+        // A one-knot fit almost never means "the anchor is too small"; it means
+        // `fit_spline_knots` could not find an INCREASING map, because the
+        // packed network's predictions run the wrong way against the anchor's
+        // targets. The output spline is monotone by construction, so it cannot
+        // express a decreasing relationship and collapses.
+        //
+        // Naming the correlation turns a mystifying failure into a diagnosis.
+        // MEASURED 2026-09-05 (benchmarks/fastclass2_campaign_2026-09-05.md
+        // §11): a `--per-sample-alpha-head --n-hidden-layers 2` bake packed at
+        // corr = -0.8350 and died here on all three seeds, while
+        // `bake_verdict` read the same RAW bake without complaint at CID22
+        // -0.8921 — an excellent ranker with a backwards sign. The old message
+        // sent that lane looking at the anchor.
+        let n = preds.len().min(tgt.len());
+        let corr = if n >= 2 {
+            let (mp, mt) = (
+                preds[..n].iter().sum::<f64>() / n as f64,
+                tgt[..n].iter().sum::<f64>() / n as f64,
+            );
+            let (mut sxy, mut sxx, mut syy) = (0.0f64, 0.0f64, 0.0f64);
+            for i in 0..n {
+                let (dx, dy) = (preds[i] - mp, tgt[i] - mt);
+                sxy += dx * dy;
+                sxx += dx * dx;
+                syy += dy * dy;
+            }
+            if sxx > 0.0 && syy > 0.0 {
+                Some(sxy / (sxx.sqrt() * syy.sqrt()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let diag = match corr {
+            Some(c) if c < 0.0 => format!(
+                "\n  CAUSE: the packed network is ANTI-CORRELATED with the anchor                  (Pearson r = {c:.4} over {n} rows). The output calibration spline is                  MONOTONE INCREASING by construction, so it cannot express a decreasing                  map and `fit_spline_knots` collapses to one knot. This is a property of                  the WEIGHTS, not of the anchor: the model ranks backwards. Score the RAW                  (pre-pack) bake with `bake_verdict` — if |SROCC| is healthy, the ordering                  skill is there and only the SIGN is wrong. Fixing it means fixing the                  head's output orientation at training time; `affine_calibrate --beta=-1`                  handles only a bake whose FINAL layer is scalar."
+            ),
+            Some(c) => format!(
+                "\n  The packed network correlates with the anchor at r = {c:.4} over {n}                  rows, so the collapse is not a sign problem — suspect a degenerate                  prediction range (all rows mapping to one percentile bin)."
+            ),
+            None => format!(
+                "\n  Correlation is undefined over {n} rows (a constant prediction or a                  constant target), so the network or the anchor column is degenerate."
+            ),
+        };
         return Err(format!(
-            "packed-network spline fit produced only {} knots (<2)",
+            "packed-network spline fit produced only {} knots (<2){diag}",
             cx.len()
         ));
     }

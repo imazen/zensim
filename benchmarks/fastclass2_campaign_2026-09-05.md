@@ -666,3 +666,44 @@ fit queue drains — never concurrently, which would corrupt both.
 floor gate does not discriminate between slices at all — which, against §8's
 372 result (156 → 228 costs three codecs there), says the 944 MLP class fails it
 for a reason of its own.
+
+## 11. THE a2 FAILURE, DIAGNOSED AT THE OWNER — an inverted ranker, not an unreadable bake
+
+Three cells failed to score: `F2_S265_H128_a2_s400{4,5,6}` — the 2-layer α-head
+arm. **The bake shape is NOT the problem.** `bake_verdict` reads the RAW a2
+bake without complaint (`n_layers=3`, `heads.per_sample_alpha=true`) and scores
+it:
+
+| bake | CID22 | KonJND |
+|---|--:|--:|
+| `F2_S265_H128_a2_s4004` **raw** | **−0.8921** | 0.4416 |
+| `F2_S265_H128_a1_s4004` **raw** | −0.6056 | — |
+| `F2_S265_H128_p` (plain control, k=3) | +0.8863 | 0.4322 |
+
+**The 2-layer α-head model is the campaign's single best CID22 *ordering*
+— |−0.8921| exceeds the plain path's +0.8863 — with the sign backwards.**
+
+The failure is at `bake_dial_refit pack`: `packed tanh-pin range [−38.3881,
+14.1919] corr=−0.8350` → `spline fit produced only 1 knots (<2)`. The output
+calibration spline is **monotone increasing by construction**, so it cannot
+express a decreasing map and `fit_spline_knots` collapses. That is a property of
+the WEIGHTS, and the old error message named a symptom ("1 knots") that sent
+this lane looking at the anchor.
+
+**Owner fix landed:** `pack`'s failure now computes the Pearson correlation
+between the packed predictions and the anchor targets and says so —
+verified to reproduce the pack's own `−0.8350` on this exact bake, with the
+branch for `r ≥ 0` (a degenerate prediction range) and for undefined `r`
+(a constant column) written alongside.
+
+**A second owner limitation, found trying to rescue it:** `affine_calibrate
+--beta=-1` — the obvious sign fix — **panics** on this architecture
+(`assertion left == right failed: calibration assumes scalar output; got 64`,
+`affine_calibrate.rs:69`), because the 2-layer α head's final layer is the
+`n_hidden/2 = 64`-wide passthrough. Reported, not fixed: the right repair is the
+head's output orientation at training time, not a post-hoc negation.
+
+**So arms C2/C3 do not run, and that is a precondition failing, not a null.**
+Their frozen condition was that `P1α` not be a KonJND regression; it is a
+regression on every axis (composite 0.5710, CID22 −0.5860).
+`--monotonicity-reg` remains UNMEASURED with a named cause.
