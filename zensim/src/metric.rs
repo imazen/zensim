@@ -3463,7 +3463,7 @@ fn compute_with_config_core(
             // it, or a wide bake is refused on a PERFECT COPY — the one pair
             // every metric must handle. The extra slots are zeros either way;
             // what changes is the length.
-            return identical_result_at(config, plan.map_or(0, |p| p.layout_width));
+            return identical_result_at(config, plan.map_or(0, |p| p.walk_width()));
         }
         #[cfg(not(feature = "feature-regime-v2"))]
         return identical_result(config);
@@ -3489,7 +3489,7 @@ fn compute_with_config_core(
         // `--no-default-features` build (caught by zensim-experimental, which
         // builds zensim without this feature).
         let plan_needs_fold =
-            plan.is_some_and(|p| p.layout_width > crate::fold_engine::v1_feature_width(config));
+            plan.is_some_and(|p| p.walk_width() > crate::fold_engine::v1_feature_width(config));
         if (use_fold || plan_needs_fold)
             && stop.is_none()
             && crate::fold_engine::is_fold_backable(config)
@@ -4778,6 +4778,26 @@ fn forward_one_bake_with_codec(
         )
     };
     let mut f32_features: Vec<f32> = Vec::new();
+    // LAYOUT. A bake declaring a DENSE feature set reads its ids at packed
+    // positions, so the caller's identity-laid-out vector must be GATHERED
+    // rather than sliced. `declared_layout` returns the identity layout for
+    // every bake that exists today — no id, an unreproducible id, or (the
+    // normal case) a `zentrain.feature_set_id` whose slot count differs from
+    // the declared width all resolve to identity — so this branch is not
+    // taken by any shipped or board bake, and `prep_bake_input_f32` sees
+    // exactly what it saw before. Gated by
+    // `feature_layout::tests::every_shipped_bake_resolves_to_an_identity_layout`
+    // and, end to end, by `dense_layout_round_trip`.
+    #[cfg(feature = "feature-regime-v2")]
+    {
+        let layout = crate::feature_layout::declared_layout(&model);
+        if !layout.is_identity() {
+            let mut gathered: Vec<f64> = Vec::new();
+            layout.gather(features, &mut gathered);
+            prep_bake_input_f32(&gathered, n_inputs, width, height, &mut f32_features)?;
+            return dispatch(&mut predictor, &f32_features);
+        }
+    }
     prep_bake_input_f32(features, n_inputs, width, height, &mut f32_features)?;
     dispatch(&mut predictor, &f32_features)
 }

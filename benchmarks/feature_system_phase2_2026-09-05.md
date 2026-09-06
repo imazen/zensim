@@ -103,6 +103,13 @@ ZENSIM_AB_MODE=research ZENSIM_RESEARCH_SET=everything
 for **both** (1,119,084 bytes; `cmp` clean). Artifacts:
 `/mnt/v/output/zensim/featsys-2026-09-05/`.
 
+> **The sha is ERA-STAMPED, the claim is not.** That digest was taken at
+> `aaeb0212`, before the revision lane's F5 fix (`c433c7b7`) moved the free
+> raw-moment slots. The FINDING here is that the two arms are byte-identical
+> **to each other**, which is a property of the code and survives any era
+> change; the digest identifies which extraction era produced the pair. Do not
+> compare it against a table extracted after `c433c7b7`.
+
 ### G2.2 — thread invariance
 
 `research_output_is_thread_invariant`: `Request::everything()` with
@@ -135,6 +142,12 @@ Cost: 523 `expensive`, 372 `cheap`, 61 `free`. Form: 916 `difference`, 28
 `v1postc` 372, `base` 584. *(F4 reads 132, not the audit's original 72 — the
 revision lane corrected its blast radius by measurement in `8078830b`, and the
 provenance reads the corrected registry rather than a copied number.)*
+
+> **This census is a reading of the registry at `aaeb0212`.** The revision
+> lane moves it — F5 was still `Proposed` when this was taken and landed as a
+> fix in `c433c7b7`. The provenance is generated from the registry on every
+> run, so a fresh manifest is always current; the table above is the snapshot,
+> not the definition.
 
 ### G2.4 — provenance is CHECKED, and it found a defect
 

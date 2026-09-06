@@ -283,6 +283,24 @@ none of which are true today:
    "no more 944-with-zeros as the wire format" reachable without breaking the
    944 that exists.
 
+> **LANDED 2026-09-05 (phase 4)**, as `zensim::feature_layout::Layout`
+> (`pub(crate)`; no new public type). One correction to the sketch above: a
+> layout needs TWO widths, not one. `Layout::width()` is what it emits;
+> **`Layout::walk_width()`** is one past the highest id it carries, i.e. how
+> wide the walk must be for the layout to be fillable. They are the same
+> number for every identity layout — every artifact that exists — and differ
+> for a dense one: `dense265` over `basic+peaks+moments` is 265 wide and still
+> needs a walk that reaches **f941**. Conflating them was the cause of two of
+> the three defects phase 4 found, so `Plan::walk_width()` is now the one
+> owner of that question and the scoring path sizes by it.
+>
+> The other defect is the general form of the hazard this section describes:
+> **code that treats a POSITION as an ID**. `ComputeSet::from_block_profile`
+> reads a bake's live layer-0 columns as v1 slot indices, which is correct for
+> an identity layout and wrong by construction for a dense one — under
+> `dense265`, position 228 is a raw-moment id, not a masked one. Record:
+> [`../benchmarks/feature_system_phase4_2026-09-05.md`](../benchmarks/feature_system_phase4_2026-09-05.md).
+
 The `Layout` type is what the code already gropes at with the
 `layout_append` / `append_on` pair at `feature_v2.rs:8815` — LAYOUT (is the
 block present in this width) is *already* separated from COMPUTE (is it being

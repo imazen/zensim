@@ -29,6 +29,7 @@
 //! refused LOUDLY, by [`PlanError`], naming the slots — never served as
 //! silent zeros.
 
+use crate::feature_layout::Layout;
 use crate::feature_set_id::{ComputeToken, SlotSet};
 use crate::feature_v2::{ComputeSet, V1FreeExtras, V1PoolsMode};
 
@@ -77,16 +78,46 @@ impl core::fmt::Display for PlanError {
 pub(crate) struct Plan {
     /// Which kernels/blocks run.
     pub compute: ComputeSet,
-    /// The emitted vector width — the LAYOUT, not the compute set. A
-    /// `v1_only` request at 944 is still a 944-wide row with `f372..` at the
-    /// structural `0.0`.
-    pub layout_width: usize,
-    /// The slots this plan populates. Everything else in the layout is a
-    /// structural zero.
+    /// **The LAYOUT** — the declared id→position mapping of the emitted
+    /// vector, not merely its width. A `v1_only` request at `w944` is still a
+    /// 944-wide row with `f372..` at the structural `0.0`; a `dense265`
+    /// request over the same compute set is 265 wide with no gaps and the
+    /// SAME ids.
+    ///
+    /// Was a bare `layout_width: usize` through phase 1, which recorded WHY
+    /// (every registered layout was the identity mapping, so a map had no
+    /// consumer). [`Layout::dense`] is that consumer.
+    pub layout: Layout,
+    /// The FEATURE IDS this plan populates — id space, not position space.
+    /// Everything else in the layout is a structural fill.
     pub emit: SlotSet,
 }
 
 impl Plan {
+    /// The emitted vector width — the LAYOUT's width.
+    pub(crate) fn layout_width(&self) -> usize {
+        self.layout.width()
+    }
+
+    /// The IDENTITY width the walk must emit for this plan's layout to be
+    /// fillable: one past the highest id the layout carries.
+    ///
+    /// Equal to [`Self::layout_width`] for every identity layout — i.e. for
+    /// every artifact that exists today — and strictly larger for a dense
+    /// one: `dense265` over `basic+peaks+moments` is 265 wide and still needs
+    /// a walk that reaches f941.
+    ///
+    /// **The scoring path must size its feature vector by THIS, not by
+    /// `layout_width`.** The vector it produces is identity-laid-out (the
+    /// linear tail reads the v1 prefix positionally); the LAYOUT is applied
+    /// at the bake boundary, by `metric::forward_one_bake_with_codec`. Sizing
+    /// by the layout width instead truncates the walk before the gather can
+    /// reach the ids above it — measured, and the reason
+    /// `dense_layout_round_trip` exists.
+    pub(crate) fn walk_width(&self) -> usize {
+        self.layout.walk_width()
+    }
+
     /// Plan for an explicit slot request at an explicit layout width.
     ///
     /// The derivation is one rule applied per family: a family runs iff the
@@ -96,7 +127,19 @@ impl Plan {
     /// owning kernel, which is what makes `basic+peaks+moments` a cheap plan
     /// rather than a full 944 walk.
     pub(crate) fn derive(want: &SlotSet, layout_width: usize) -> Result<Plan, PlanError> {
+        Plan::derive_with_layout(want, Layout::identity(layout_width))
+    }
+
+    /// Plan for an explicit slot request into an explicit [`Layout`] — the
+    /// general form. [`Plan::derive`] is this with an identity layout, which
+    /// is every artifact that exists today.
+    pub(crate) fn derive_with_layout(want: &SlotSet, layout: Layout) -> Result<Plan, PlanError> {
         let ns = crate::NUM_SCALES;
+        // COMPUTE is decided in ID space against the layout's WALK width (one
+        // past the highest id it carries), never against its emitted width —
+        // a `dense265` layout over `basic+peaks+moments` is 265 wide and
+        // still needs a walk that reaches f941.
+        let layout_width = layout.walk_width();
         let want = want.clipped_to(layout_width);
         let touches = |t: ComputeToken| -> bool {
             !crate::feature_defs::family_slots(t, ns)
@@ -166,7 +209,7 @@ impl Plan {
             csfw,
             free_extras,
         };
-        let plan = Plan::normalized(requested, layout_width);
+        let plan = Plan::normalized(requested, layout);
         if !plan.emit.covers(&want) {
             return Err(PlanError::Uncomputable {
                 missing: plan.emit.missing_from(&want),
@@ -208,18 +251,23 @@ impl Plan {
     /// is REGISTERED, not built: it needs a walk change, and this lane's
     /// scope is dispatch. Today the honest answer is that the walk computes
     /// every block its declared width reaches, and the plan now says so.
-    fn normalized(requested: ComputeSet, layout_width: usize) -> Plan {
+    fn normalized(requested: ComputeSet, layout: Layout) -> Plan {
         let ns = crate::NUM_SCALES;
         let probe = Plan {
             compute: requested,
-            layout_width,
+            layout: layout.clone(),
             emit: SlotSet::from_slots([]),
         };
         let compute = ComputeSet::from_toggles(probe.toggles());
-        let emit = compute.populated_slots(ns, layout_width);
+        // `emit` is in ID space and is intersected with what the LAYOUT
+        // carries: a dense layout that omits an id the walk computes does not
+        // emit it, and saying otherwise would make `covers` lie.
+        let emit = compute
+            .populated_slots(ns, layout.walk_width())
+            .intersect(&layout.ids());
         Plan {
             compute,
-            layout_width,
+            layout,
             emit,
         }
     }
@@ -233,9 +281,39 @@ impl Plan {
     pub(crate) fn for_bake(model: &crate::mlp::Model) -> Result<Plan, PlanError> {
         let ns = crate::NUM_SCALES;
         let layout_width = model.caller_input_width();
-        let plan = Plan::normalized(ComputeSet::from_block_profile(model), layout_width);
-        let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
-        let want = want.clipped_to(layout_width);
+        let layout = crate::feature_layout::declared_layout(model);
+        let want_positions = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
+        // The bake reads POSITIONS; the plan speaks IDS. For every layout
+        // that exists today they are the same numbers, and for a dense one
+        // they are not — so translate through the layout instead of assuming.
+        let want = SlotSet::from_slots(
+            want_positions
+                .iter_slots()
+                .filter_map(|pos| layout.slot_at(pos).map(usize::from)),
+        );
+        // COMPUTE. `ComputeSet::from_block_profile` is the existing, tested
+        // derivation and stays THE answer for an identity layout — which is
+        // every bake that ships, so no served bake changes.
+        //
+        // It cannot serve a DENSE one, and the reason is structural rather
+        // than a bug in it: it reads the bake's live layer-0 columns as v1
+        // SLOT INDICES (`caller_input_width() <= v1_total` ⇒ the v1 branch,
+        // then `bake_pool_need_from_model` on the same positions). Under a
+        // dense layout position 228 is a raw-moment id, not a masked one, so
+        // that reading is wrong by construction. MEASURED: a `dense265` bake
+        // over `basic+peaks+moments` derived `v1_pools: Full, free_extras:
+        // Off`, whose `emit` does not cover the moment ids, so
+        // `Plan::for_bake` REFUSED its own bake and the profile silently fell
+        // back to a 228-wide walk.
+        //
+        // So a non-identity layout is derived in ID space instead. Phase 5
+        // unifies the two once `from_block_profile_agrees_with_the_id_space_
+        // derivation` has held across the whole bake census.
+        let plan = if layout.is_identity() {
+            Plan::normalized(ComputeSet::from_block_profile(model), layout)
+        } else {
+            Plan::derive_with_layout(&want, layout)?
+        };
         if !plan.emit.covers(&want) {
             return Err(PlanError::Uncomputable {
                 missing: plan.emit.missing_from(&want),
@@ -263,7 +341,21 @@ impl Plan {
             csfw: false,
             free_extras: V1FreeExtras::Off,
         };
-        Plan::normalized(compute, layout_width)
+        Plan::normalized(compute, Layout::identity(layout_width))
+    }
+
+    /// The same COMPUTE, re-laid-out as the identity layout of at least
+    /// `width`.
+    ///
+    /// The scoring path needs this because the linear tail reads the v1
+    /// prefix: a plan narrower than that must widen, and widening a plan is a
+    /// LAYOUT change, not a number to patch in place. Rebuilt through
+    /// [`Plan::normalized`] so `compute` and `emit` stay the fixed point.
+    pub(crate) fn widened_to_identity(plan: &Plan, width: usize) -> Plan {
+        Plan::normalized(
+            plan.compute,
+            Layout::identity(plan.layout.width().max(width)),
+        )
     }
 
     /// The extraction request this plan resolves to.
@@ -279,7 +371,7 @@ impl Plan {
     pub(crate) fn toggles(&self) -> crate::feature_v2::V2NewFeatureToggles {
         let ns = crate::NUM_SCALES;
         let c = &self.compute;
-        let layout = LayoutBlocks::for_width(self.layout_width, ns);
+        let layout = LayoutBlocks::for_width(self.layout.walk_width(), ns);
         crate::feature_v2::V2NewFeatureToggles {
             gradient_features: c.gradient,
             transducer_bank: c.transducer_bank,
@@ -322,7 +414,7 @@ impl Plan {
     /// any one bake's.
     pub(crate) fn union(&self, other: &Plan) -> Plan {
         let ns = crate::NUM_SCALES;
-        let layout_width = self.layout_width.max(other.layout_width);
+        let layout_width = self.layout.walk_width().max(other.layout.walk_width());
         let (a, b) = (&self.compute, &other.compute);
         let compute = ComputeSet {
             v1_basic: a.v1_basic || b.v1_basic,
@@ -341,7 +433,11 @@ impl Plan {
             free_extras: free_union(a.free_extras, b.free_extras),
         };
         let _ = ns;
-        Plan::normalized(compute, layout_width)
+        // The union is only ever taken over a profile's own bakes, which are
+        // all identity-laid-out today; a union of two DENSE layouts has no
+        // caller and no meaning (whose positions would it use?), so it takes
+        // the identity layout at the wider walk width.
+        Plan::normalized(compute, Layout::identity(layout_width))
     }
 }
 
@@ -432,7 +528,7 @@ mod tests {
         assert!(!p.compute.v2_blocks);
         assert!(!p.compute.append);
         assert_eq!(p.compute.free_extras, V1FreeExtras::Off);
-        assert_eq!(p.layout_width, 372);
+        assert_eq!(p.layout_width(), 372);
         assert_eq!(p.emit, slots([(0, 372)]));
     }
 
@@ -458,7 +554,7 @@ mod tests {
         assert!(!p.compute.append, "the append kernel must not run");
         assert_eq!(p.compute.free_extras, V1FreeExtras::RawMoments);
         assert_eq!(p.compute.v1_pools, V1PoolsMode::Peaks);
-        assert_eq!(p.layout_width, 944);
+        assert_eq!(p.layout_width(), 944);
         assert!(p.covers(&want), "plan must cover what was asked for");
         // 156 basic + 72 peaks + 37 raw-moment slots.
         assert_eq!(p.emit.len(), 265);
@@ -522,7 +618,7 @@ mod tests {
         let b = Plan::derive(&slots([(0, 372)]), 372).expect("plan");
         let u = a.union(&b);
         assert_eq!(u.compute.v1_pools, V1PoolsMode::Full);
-        assert_eq!(u.layout_width, 372);
+        assert_eq!(u.layout_width(), 372);
         assert!(u.covers(&slots([(0, 372)])));
         // A wide cheap plan unioned with a narrow one keeps the wide layout.
         let ns = crate::NUM_SCALES;
@@ -535,7 +631,7 @@ mod tests {
         )
         .expect("plan");
         let u2 = a.union(&wide);
-        assert_eq!(u2.layout_width, 944);
+        assert_eq!(u2.layout_width(), 944);
         assert_eq!(u2.compute.free_extras, V1FreeExtras::RawMoments);
     }
 }
@@ -581,7 +677,7 @@ mod toggle_gates {
         ];
         for (want, width) in cases {
             let p = Plan::derive(&want, width).expect("plan");
-            let again = Plan::normalized(p.compute, width);
+            let again = Plan::normalized(p.compute, Layout::identity(width));
             assert_eq!(
                 again.compute, p.compute,
                 "normalization moved on the second pass at width {width}"
@@ -700,7 +796,7 @@ mod toggle_gates {
 /// `zensim/examples/serve_custom_bake.rs --census`, which drives the same
 /// `Zensim::compute` entry.
 #[cfg(test)]
-mod servability_census {
+pub(crate) mod servability_census {
     use super::*;
     use crate::feature_set_id::ComputeToken as T;
     use crate::{RgbSlice, Zensim, ZensimProfile};
@@ -727,7 +823,12 @@ mod servability_census {
     }
 
     /// Every profile this build ships, with its name.
-    fn shipped_profiles() -> Vec<(&'static str, ZensimProfile)> {
+    ///
+    /// `pub(crate)` so the layout census (`feature_layout::tests`) enumerates
+    /// the SAME roster rather than keeping a second list that could drift
+    /// past a feature flag — the roster is `#[cfg]`-dependent, which is
+    /// exactly the kind of list a copy gets wrong.
+    pub(crate) fn shipped_profiles() -> Vec<(&'static str, ZensimProfile)> {
         let mut v: Vec<(&'static str, ZensimProfile)> = vec![
             ("B", ZensimProfile::B),
             ("BHdr", ZensimProfile::BHdr),
@@ -778,6 +879,78 @@ mod servability_census {
             declared_width,
             outcome,
         }
+    }
+
+    /// **Phase 5 evidence** — `ComputeSet::from_block_profile` and the
+    /// ID-SPACE derivation (`Plan::derive_with_layout`) agree on every bake
+    /// this build ships.
+    ///
+    /// `for_bake` still routes identity layouts through `from_block_profile`,
+    /// because that is the tested derivation and keeping it keeps the 445-bake
+    /// census on the SAME code rather than an equivalent one. This gate is
+    /// what would let phase 5 collapse the two: while it holds, the id-space
+    /// derivation is a drop-in, and `fold_engine::wide_bake_v2_read` (which
+    /// exists only to serve `from_block_profile`'s wide branch) loses its last
+    /// caller.
+    ///
+    /// Reported per bake on failure, so a disagreement names WHICH bake and
+    /// on which axis rather than just failing.
+    #[test]
+    fn from_block_profile_agrees_with_the_id_space_derivation() {
+        let mut checked = 0usize;
+        let mut disagreements = Vec::new();
+        for (name, p) in shipped_profiles() {
+            for bytes in p.params().scoring_bake_bytes() {
+                let Ok(m) = crate::mlp::Model::from_bytes(bytes) else {
+                    continue;
+                };
+                let layout = crate::feature_layout::declared_layout(&m);
+                let Some(want_pos) = bake_read_slots(&m) else {
+                    continue;
+                };
+                let want = SlotSet::from_slots(
+                    want_pos
+                        .iter_slots()
+                        .filter_map(|pos| layout.slot_at(pos).map(usize::from)),
+                );
+                let legacy = Plan::normalized(ComputeSet::from_block_profile(&m), layout.clone());
+                let derived = Plan::derive_with_layout(&want, layout);
+                checked += 1;
+                match derived {
+                    Ok(d) => {
+                        // The derived plan may be a STRICT SUBSET of the
+                        // legacy one (it computes only what the bake reads);
+                        // what it may never be is short of the read set, and
+                        // its emit must be contained in the legacy emit.
+                        if !d.emit.covers(&want) {
+                            disagreements.push(format!(
+                                "{name}: id-space derivation does not cover the read set \
+                                 (missing {})",
+                                d.emit.missing_from(&want)
+                            ));
+                        }
+                        if !legacy.emit.covers(&d.emit) {
+                            disagreements.push(format!(
+                                "{name}: id-space emit is NOT a subset of from_block_profile's \
+                                 (extra {})",
+                                d.emit.missing_from(&legacy.emit)
+                            ));
+                        }
+                    }
+                    Err(e) => disagreements.push(format!(
+                        "{name}: id-space derivation REFUSED a bake from_block_profile \
+                         serves: {e}"
+                    )),
+                }
+            }
+        }
+        assert!(checked >= 5, "the gate must see bakes, saw {checked}");
+        assert!(
+            disagreements.is_empty(),
+            "the two derivations disagree on {} of {checked} bakes:\n  {}",
+            disagreements.len(),
+            disagreements.join("\n  ")
+        );
     }
 
     /// **THE contract gate.** Every shipped profile serves a non-identical
@@ -953,7 +1126,7 @@ mod servability_census {
         for (label, want, n) in [("265 (+moments)", m, 265usize), ("289 (+classC)", c, 289)] {
             let p = Plan::derive(&want, 944).unwrap_or_else(|e| panic!("{label}: {e}"));
             assert_eq!(p.emit.len(), n, "{label}: populated slot count");
-            assert_eq!(p.layout_width, 944, "{label}: layout width");
+            assert_eq!(p.layout_width(), 944, "{label}: layout width");
             assert!(!p.compute.append, "{label}: append kernel must stay off");
             assert!(!p.compute.v2_blocks, "{label}: v2 blocks must stay off");
             assert!(p.covers(&want), "{label}: plan must cover the request");

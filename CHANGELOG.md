@@ -110,8 +110,74 @@ Record: `benchmarks/feature_system_phase2_2026-09-05.md`.
   production reduction; what distinguishes the engines is the PLAN and the
   OUTPUT.
 
+#### Phase 4 — dense LAYOUTS and the wire format (2026-09-05)
+
+Record: `benchmarks/feature_system_phase4_2026-09-05.md`.
+
+- **`zensim::feature_layout::Layout`** — a declared id→position mapping.
+  `identity(width)` / `dense(&SlotSet)` / `width` / **`walk_width`** /
+  `slot_at` / `pos_of` / `ids` / `is_identity` / `gather`, plus `slots_of`,
+  `dense_slots_of` and `declared_layout`. `pub(crate)` — **no new public
+  type**; `research::Request::dense()` and `Extraction::{layout_name,
+  position_of}` extend the already-`#[doc(hidden)]` research surface, and
+  `docs/public-api/zensim.txt` is unchanged. Phase 1 landed this as a bare
+  `layout_width` and recorded why (every layout was the identity mapping, so a
+  map had no consumer); `Layout::dense` is that consumer.
+- **A layout needs TWO widths.** `width()` is what it emits; `walk_width()` is
+  one past the highest id it carries. Equal for every identity layout — every
+  artifact that exists — and different for a dense one: `dense265` over
+  `basic+peaks+moments` is 265 wide and still needs a walk that reaches
+  **f941**. `Plan::walk_width()` is the one owner, and the scoring path sizes
+  by it.
+- **`ZENSIM_RESEARCH_DENSE=1`** on the extractor writes a dense table whose
+  `_MANIFEST.json` records the layout, its name, whether it is the identity,
+  and the id at every position — so a dense table is self-describing rather
+  than requiring the reader to know the packing rule.
+- **Gates.** **G4.1** proved three ways: values (a `dense265` extraction is
+  bit-identical to its `w944` twin on all 265 carried ids); **through a real
+  ZNPR v3 bake** (two synthetic bakes with per-id checksum weights score
+  BIT-IDENTICALLY through `Zensim::compute` at 3 geometries, with a negative
+  control — an *undeclared* 265-input bake, served the identity prefix —
+  scoring differently); and on real tables (265 vs 944 columns, **0 mismatches
+  over 1,060 cells**, same producer slot hash `#4fcef1d6`). **G4.2**: all
+  seven legacy widths are identity mappings and **every shipped bake resolves
+  to an identity layout**, gated with a positive control proving
+  `declared_layout` CAN return dense. **G4.3**: no new public type.
+- **Nothing has been converted.** The wire format is now *expressible*;
+  retiring 944-with-structural-zeros is a decision about NEW artifacts. Every
+  legacy width remains a declared layout over the same ids.
+
 ### Fixed
 
+- **Three defects found by building the layout, all the same shape: code that
+  treats a POSITION as an ID** (2026-09-05, phase 4; none reachable before a
+  dense layout existed). (1) `fold_engine::compute_fold_backed` sized its
+  vector by `plan.layout_width()`, so a dense plan's walk was cut at 372 and
+  the gather read `f720..f941` off the end — now `Plan::walk_width()`.
+  (2) `score_plan` compared `caller_input_width()`, so a 265-input dense bake
+  took the "narrow, nothing to plan" shortcut and had its ids gathered out of
+  a 372-wide vector — now the walk width. (3) `ComputeSet::from_block_profile`
+  reads live layer-0 columns as v1 SLOT indices, which is correct for an
+  identity layout and wrong by construction for a dense one (position 228 is a
+  raw-moment id, not a masked one): MEASURED, it derived `v1_pools: Full,
+  free_extras: Off`, whose `emit` does not cover the moment ids, so
+  **`Plan::for_bake` refused its own bake** and the profile silently fell back
+  to a 228-wide walk. Non-identity layouts now derive in ID space; identity
+  layouts keep `from_block_profile`, so **no served bake changes**.
+  `from_block_profile_agrees_with_the_id_space_derivation` is the standing
+  evidence for collapsing the two.
+- **A dense producer id hashed the wrong slot set — caught before it could
+  permute a served vector.** `ComputeSet::feature_set_id` derives its hash
+  from `populated_slots` clipped to the width it is handed, and for a dense
+  layout that width is the PACKED count, so it emitted
+  `basic+peaks+moments@w265/era2r4#3fb78648` for a set whose real hash is
+  `#4fcef1d6`. `declared_layout` would then have ACCEPTED that wrong
+  reconstruction (it also has 265 members) and permuted the bake's input. The
+  id now takes its tokens from the walk-width call and its hash from
+  `plan.emit`; `dense_slots_of` is the strict reading the layout decision
+  uses, separate from `slots_of`'s two-reading form; and
+  `Request::for_set` stopped carrying a third copy of the reconstruction (it
+  clipped to `layout_width` unconditionally and refused every dense id).
 - **`Plan` described walks that cannot exist — found by phase 2's perturbation
   probe.** `V2NewFeatureToggles` has exactly ONE layout/compute separation
   (`v1_only`); `ComputeSet::from_toggles` derives `append`/`append2`/`csfw`

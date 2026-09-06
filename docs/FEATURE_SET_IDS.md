@@ -323,6 +323,22 @@ table's own manifest rather than an archaeology problem. Owner:
 `zensim::research`; record:
 [`../benchmarks/feature_system_phase2_2026-09-05.md`](../benchmarks/feature_system_phase2_2026-09-05.md).
 
+**A DENSE id and its sparse twin differ only in the declared WIDTH** (landed
+2026-09-05, phase 4). `basic+peaks+moments@w944/era2r4#4fcef1d6` and
+`basic+peaks+moments@w265/era2r4#4fcef1d6` name the SAME 265 slots and carry
+the same values; the first lays them out at their own indices with 679
+structural fills, the second packs them. So **the width means two different
+things depending on the layout, and the HASH is what decides which** — for a
+sparse id the width is also the clip, for a dense one it is the packed count,
+and clipping a family union to 265 would reconstruct a completely different
+set. `zensim::feature_layout::slots_of` tries both readings and lets the
+recorded hash pick; `dense_slots_of` is the strict form the runtime's layout
+decision uses, because a sparse id whose reconstruction happens to have as
+many members as a bake's width must NOT be read as a dense layout — that would
+permute the vector the bake is served. MEASURED as a real hazard: the first
+dense producer id read `#3fb78648` (the hash of the wrongly-clipped set)
+before the id was made to hash `plan.emit`.
+
 **And a structural fill is NOT always `0.0`.** MEASURED 2026-09-05: of the 572
 positions a `v1_only` 944 walk leaves uncomputed, 560 read `0.0` and **twelve
 read `1.0`** — exactly the `v2_pjnd_fragility` slots carrying defect **F15**,

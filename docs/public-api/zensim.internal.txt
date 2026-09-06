@@ -13,7 +13,7 @@
 #   pub types (struct/enum/trait/alias)         6
 #   pub consts/statics                          2
 #   free functions                             18
-#   inherent methods                           62
+#   inherent methods                           65
 #   struct fields                              23
 #   enum variants                              11
 #   trait roster entries (type × trait)        49
@@ -26,10 +26,10 @@
 #   feature_v2                        7
 #   fold_engine                       8
 #   profile                           1
-#   research                         73
+#   research                         76
 #   source                            4
 
-## items (125 lines)
+## items (128 lines)
 
 pub const research::BASE_REVISION_ERA: &str
 pub const research::BUILD_COMMIT: core::option::Option<&str>
@@ -80,9 +80,11 @@ pub fn research::Extraction::emitted(&self) -> &feature_set_id::SlotSet
 pub fn research::Extraction::feature_set_id(&self) -> core::option::Option<&feature_set_id::FeatureSetId>
 pub fn research::Extraction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn research::Extraction::into_values(self) -> alloc::vec::Vec<f64>
+pub fn research::Extraction::layout_name(&self) -> &str
 pub fn research::Extraction::layout_width(&self) -> usize
 pub fn research::Extraction::manifest_json(&self) -> alloc::string::String
 pub fn research::Extraction::n_scales(&self) -> usize
+pub fn research::Extraction::position_of(&self, u16) -> core::option::Option<usize>
 pub fn research::Extraction::provenance(&self) -> &[research::FeatureProvenance]
 pub fn research::Extraction::revision(&self) -> &research::RevisionRef
 pub fn research::Extraction::values(&self) -> &[f64]
@@ -92,6 +94,7 @@ pub fn research::FeatureProvenance::eq(&self, &research::FeatureProvenance) -> b
 pub fn research::FeatureProvenance::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn research::Request::at_revision(self, research::RevisionRef) -> research::Request
 pub fn research::Request::clone(&self) -> research::Request
+pub fn research::Request::dense(self) -> research::Request
 pub fn research::Request::everything() -> research::Request
 pub fn research::Request::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn research::Request::for_bake_bytes(&[u8]) -> core::result::Result<research::Request, research::ResearchError>

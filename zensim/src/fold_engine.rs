@@ -155,10 +155,13 @@ pub(crate) fn compute_fold_backed(
     )?;
     // The fold emits its regime's width with `f372..` structurally zero. Keep
     // whichever is WIDER: the config's v1 width (a prefix, which the linear
-    // tail reads) or the plan's declared layout (which a wide bake reads).
-    // Without a plan this is exactly today's `truncate(v1_feature_width)`.
+    // tail reads) or the plan's WALK width (which a wide bake reads, and
+    // which a DENSE layout's gather reads FROM — never the layout's own
+    // packed width, which would truncate the walk before the gather could
+    // reach the ids above it). Without a plan this is exactly today's
+    // `truncate(v1_feature_width)`.
     let keep = plan
-        .map_or(0, |p| p.layout_width)
+        .map_or(0, |p| p.walk_width())
         .max(v1_feature_width(config));
     features.truncate(keep);
 
@@ -574,10 +577,17 @@ pub(crate) fn score_plan(
             // reports it on its own terms. Assume the widest safe plan.
             return None;
         };
-        widest = widest.max(model.caller_input_width());
         let Ok(p) = Plan::for_bake(&model) else {
             return None;
         };
+        // The WALK width, not `caller_input_width()`. They are equal for
+        // every identity-laid-out bake — i.e. every bake that exists today —
+        // and differ for a DENSE one, whose 265 declared inputs still need a
+        // walk that reaches f941. Comparing the caller width here sent a
+        // dense bake down the "narrow, nothing to plan" shortcut below and
+        // then gathered its ids out of a 372-wide vector, which is silently
+        // wrong: measured, and the reason `dense_layout_round_trip` exists.
+        widest = widest.max(p.walk_width());
         union = Some(match union {
             Some(u) => u.union(&p),
             None => p,
@@ -598,12 +608,15 @@ pub(crate) fn score_plan(
         plan.compute.v1_pools = crate::feature_v2::V1PoolsMode::Full;
         plan.emit = plan
             .compute
-            .populated_slots(crate::NUM_SCALES, plan.layout_width);
+            .populated_slots(crate::NUM_SCALES, plan.layout_width());
     }
     // The emitted vector must be at least as wide as the linear tail reads.
-    if plan.layout_width < v1_width {
-        plan.layout_width = v1_width;
-        plan.emit = plan.compute.populated_slots(crate::NUM_SCALES, v1_width);
+    if plan.walk_width() < v1_width {
+        // Widen the LAYOUT, not just a number: the linear tail reads the v1
+        // prefix, so a plan narrower than it must be re-laid-out at that
+        // width. Rebuilt through the constructor so `compute` and `emit`
+        // stay the normalized fixed point rather than being patched in place.
+        plan = crate::feature_plan::Plan::widened_to_identity(&plan, v1_width);
     }
     Some(plan)
 }

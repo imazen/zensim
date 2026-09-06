@@ -298,6 +298,14 @@ pub(crate) mod feature_v2_stream;
 // servability census; the runtime reaches a plan through `Plan::for_bake`.
 // NARROW when a runtime caller takes an explicit slot request (phase 2's
 // research engine is the first).
+// **Layer 2 — the LAYOUT** (phase 4 of the feature-system refactor): a
+// declared mapping from feature ids to positions in an emitted vector. Phase 1
+// landed this as a bare `layout_width` and recorded WHY (every registered
+// layout was the identity mapping, so a full map had no consumer that could
+// distinguish it from the width). `Layout::dense` is that consumer.
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) mod feature_layout;
+
 #[cfg(feature = "feature-regime-v2")]
 #[allow(dead_code)]
 pub(crate) mod feature_plan;

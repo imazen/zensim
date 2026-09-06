@@ -65,6 +65,10 @@
 //!
 //! # a specific era's semantics — refused, naming slots, if unreproducible
 //! ZENSIM_AB_MODE=research ZENSIM_RESEARCH_REVISION=v1postc ...
+//!
+//! # a DENSE table: the same ids, packed, with no structural-fill columns
+//! ZENSIM_AB_MODE=research ZENSIM_RESEARCH_SET=basic+peaks+moments \
+//!   ZENSIM_RESEARCH_WIDTH=944 ZENSIM_RESEARCH_DENSE=1 ...
 //! ```
 
 #[path = "support/zen_io.rs"]
@@ -264,6 +268,14 @@ fn research_request_from_env() -> zensim::research::Request {
     }
     if let Ok(rev) = std::env::var("ZENSIM_RESEARCH_REVISION") {
         req = req.at_revision(RevisionRef::Named(rev));
+    }
+    // ZENSIM_RESEARCH_DENSE=1: emit into a DENSE layout — the requested ids
+    // packed with no gaps — instead of the declared width's worth of mostly
+    // structural fill. The manifest records which layout was used and where
+    // each id landed, so a dense table is self-describing rather than
+    // needing the reader to know the packing rule.
+    if std::env::var("ZENSIM_RESEARCH_DENSE").as_deref() == Ok("1") {
+        req = req.dense();
     }
     req
 }

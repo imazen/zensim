@@ -168,6 +168,7 @@ pub struct Request {
     revision: RevisionRef,
     era_label: String,
     parallel: bool,
+    dense: bool,
 }
 
 impl Request {
@@ -182,6 +183,7 @@ impl Request {
             revision: RevisionRef::Current,
             era_label: crate::feature_set_id::ERA_UNKNOWN.to_string(),
             parallel: false,
+            dense: false,
         }
     }
 
@@ -194,6 +196,7 @@ impl Request {
             revision: RevisionRef::Current,
             era_label: crate::feature_set_id::ERA_UNKNOWN.to_string(),
             parallel: false,
+            dense: false,
         }
     }
 
@@ -205,25 +208,34 @@ impl Request {
     /// a set this build cannot reproduce, and saying so is the point of the
     /// identity layer.
     pub fn for_set(id: &FeatureSetId) -> Result<Request, ResearchError> {
-        let ns = crate::NUM_SCALES;
-        let mut want = SlotSet::from_slots([]);
-        for t in id.compute().iter() {
-            want = want.union(&feature_defs::family_slots(t, ns));
-        }
-        let want = want.clipped_to(id.layout_width());
-        if want.hash8() != id.slots_hash() {
+        // ONE owner for "which slots does this id name" —
+        // `feature_layout::slots_of`, which tries both the sparse and the
+        // dense reading and lets the recorded hash decide. Reconstructing it
+        // here as well is exactly the drift the no-duplicate rule stops: the
+        // first draft did, clipped to `layout_width` unconditionally, and so
+        // refused every DENSE id.
+        let Some(want) = crate::feature_layout::slots_of(id) else {
             return Err(ResearchError::Plan(format!(
-                "feature-set id {id} reconstructs to slot hash {} — this build \
-                 cannot reproduce the set it names",
-                crate::feature_set_id::hex8(want.hash8())
+                "feature-set id {id} names a slot set this build cannot \
+                 reproduce — neither the sparse reading (clip to its declared \
+                 width) nor the dense one (packed, clipped to the registry) \
+                 hashes to {}",
+                crate::feature_set_id::hex8(id.slots_hash())
             )));
-        }
+        };
+        // A dense id names FEWER positions than the highest id it carries,
+        // and reproducing it means emitting into that dense layout — not into
+        // an identity layout of its packed width, which would be a different
+        // table entirely.
+        let dense = want.len() == id.layout_width()
+            && want.iter_slots().last() != Some(id.layout_width() - 1);
         Ok(Request {
             want,
             layout_width: id.layout_width(),
             revision: RevisionRef::Current,
             era_label: id.era().to_string(),
             parallel: false,
+            dense,
         })
     }
 
@@ -241,7 +253,22 @@ impl Request {
             revision: RevisionRef::Current,
             era_label: crate::feature_set_id::ERA_UNKNOWN.to_string(),
             parallel: false,
+            dense: false,
         })
+    }
+
+    /// Emit into a **DENSE** layout: the requested ids packed in ascending
+    /// order with no gaps, so the vector is `want.len()` wide instead of the
+    /// declared width's worth of mostly-structural-fill.
+    ///
+    /// This is what retires "944-with-structural-zeros as the wire format"
+    /// for NEW artifacts. It changes no existing one: every stored table and
+    /// every shipped bake is in a legacy IDENTITY layout, which remains a
+    /// declared layout over the same ids.
+    #[must_use]
+    pub fn dense(mut self) -> Request {
+        self.dense = true;
+        self
     }
 
     /// Ask for a specific era's semantics.
@@ -281,6 +308,15 @@ impl Request {
         self.layout_width
     }
 
+    /// The [`Layout`](crate::feature_layout::Layout) this request emits into.
+    fn layout(&self) -> crate::feature_layout::Layout {
+        if self.dense {
+            crate::feature_layout::Layout::dense(&self.want)
+        } else {
+            crate::feature_layout::Layout::identity(self.layout_width)
+        }
+    }
+
     /// Check the request WITHOUT touching an image: can it be planned, and
     /// can this build reproduce the revision it names?
     ///
@@ -297,7 +333,7 @@ impl Request {
     /// [`ResearchError::Plan`] / [`ResearchError::RevisionUnavailable`] /
     /// [`ResearchError::RevisionUnregistered`], exactly as [`extract`] would.
     pub fn validate(&self) -> Result<SlotSet, ResearchError> {
-        let plan = Plan::derive(&self.want, self.layout_width)?;
+        let plan = Plan::derive_with_layout(&self.want, self.layout())?;
         check_revision(self, &plan.emit)?;
         Ok(plan.emit)
     }
@@ -353,7 +389,7 @@ pub struct FeatureProvenance {
 pub struct Extraction {
     values: Vec<f64>,
     provenance: Vec<FeatureProvenance>,
-    layout_width: usize,
+    layout: crate::feature_layout::Layout,
     n_scales: usize,
     emitted: SlotSet,
     feature_set_id: Option<FeatureSetId>,
@@ -383,7 +419,24 @@ impl Extraction {
     /// The declared layout width.
     #[must_use]
     pub fn layout_width(&self) -> usize {
-        self.layout_width
+        self.layout.width()
+    }
+
+    /// The layout's stable name — `w944`, `dense265`.
+    #[must_use]
+    pub fn layout_name(&self) -> &str {
+        self.layout.name()
+    }
+
+    /// Where feature `id` sits in this extraction's vector, or `None` when
+    /// the layout does not carry it.
+    ///
+    /// The reverse index a manifest reader wants: *"which column is f353?"*
+    /// is the identity under every legacy width and is NOT under a dense one,
+    /// which is exactly why asking is better than assuming.
+    #[must_use]
+    pub fn position_of(&self, id: u16) -> Option<usize> {
+        self.layout.pos_of(id)
     }
 
     /// Pyramid scale count.
@@ -427,7 +480,12 @@ impl Extraction {
     pub fn manifest_json(&self) -> String {
         let mut s = String::with_capacity(256 * self.provenance.len() + 512);
         s.push_str("{\n");
-        s.push_str(&format!("  \"layout_width\": {},\n", self.layout_width));
+        s.push_str(&format!(
+            "  \"layout\": \"{}\",\n  \"layout_width\": {},\n  \"layout_is_identity\": {},\n",
+            self.layout.name(),
+            self.layout.width(),
+            self.layout.is_identity()
+        ));
         s.push_str(&format!("  \"n_scales\": {},\n", self.n_scales));
         s.push_str(&format!(
             "  \"feature_set_id\": {},\n",
@@ -637,11 +695,17 @@ fn check_revision(req: &Request, emit: &SlotSet) -> Result<(), ResearchError> {
     })
 }
 
-/// Provenance for every position of a plan's layout.
+/// Provenance for every POSITION of a plan's layout.
+///
+/// Position and id are the same number under every layout that exists today
+/// (all five legacy widths are identity mappings) and are NOT the same number
+/// under a dense one — so the id comes from `layout.slot_at(pos)`, never from
+/// the position, and `populated` is asked of the id.
 fn provenance_for(plan: &Plan, n_scales: usize) -> Vec<FeatureProvenance> {
-    (0..plan.layout_width)
+    (0..plan.layout_width())
         .map(|pos| {
-            let d = feature_defs::def_at(pos, n_scales);
+            let id = plan.layout.slot_at(pos).map(usize::from);
+            let d = id.and_then(|id| feature_defs::def_at(id, n_scales));
             match d {
                 Some(d) => FeatureProvenance {
                     id: d.id,
@@ -650,7 +714,8 @@ fn provenance_for(plan: &Plan, n_scales: usize) -> Vec<FeatureProvenance> {
                     scale: d.scale,
                     channel: d.channel.as_str(),
                     statistic: d.signal.statistic.as_str(),
-                    cost: feature_defs::cost_of(pos, n_scales)
+                    cost: id
+                        .and_then(|id| feature_defs::cost_of(id, n_scales))
                         .unwrap_or(CostClass::Expensive)
                         .as_str(),
                     tranche: d.signal.tranche.as_str(),
@@ -662,14 +727,17 @@ fn provenance_for(plan: &Plan, n_scales: usize) -> Vec<FeatureProvenance> {
                     proposed_revision: proposed_era_of(d.signal),
                     defect: d.signal.defect.map(|x| x.id),
                     deprecated: d.signal.deprecated,
-                    populated: plan.emit.contains(pos),
+                    populated: id.is_some_and(|id| plan.emit.contains(id)),
                 },
                 // Past the registry: an UNREGISTERED position. Reported as
                 // such rather than omitted, so a width that outruns the
                 // registry is visible in the manifest instead of silent.
                 None => FeatureProvenance {
-                    id: u16::try_from(pos).unwrap_or(u16::MAX),
-                    name: format!("unregistered_f{pos}"),
+                    id: id.and_then(|i| u16::try_from(i).ok()).unwrap_or(u16::MAX),
+                    name: match id {
+                        Some(i) => format!("unregistered_f{i}"),
+                        None => format!("declared_gap_at_{pos}"),
+                    },
                     family: "unregistered",
                     scale: 0,
                     channel: Channel::Scalar.as_str(),
@@ -708,7 +776,7 @@ pub fn extract(
     distorted: &impl ImageSource,
 ) -> Result<Extraction, ResearchError> {
     let ns = crate::NUM_SCALES;
-    let plan = Plan::derive(&req.want, req.layout_width)?;
+    let plan = Plan::derive_with_layout(&req.want, req.layout())?;
     check_revision(req, &plan.emit)?;
 
     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(req.parallel);
@@ -718,23 +786,46 @@ pub fn extract(
         .compute_folded720_features_streaming(source, distorted, toggles, &mut scratch)
         .map_err(ResearchError::Compute)?;
 
-    let mut values = result.into_features();
-    // The walk emits its own layout width. A request for a NARROWER layout
-    // than the walk's block chain reaches gets the prefix; a wider one is
-    // padded with the structural zeros the layout declares. Both are the
-    // layout being honoured, not data being lost — `plan.emit` already says
-    // which positions carry a computed value.
-    values.resize(plan.layout_width, 0.0);
+    // GATHER into the declared LAYOUT. The walk emits at its own identity
+    // width; the layout says which id lives at which position, so a narrower
+    // declared layout takes the prefix, a wider one gets the structural fill
+    // it declares, and a DENSE one is packed. `plan.emit` remains the
+    // authority on which positions carry a computed number — the byte at an
+    // unpopulated position is its finaliser's degenerate value, which is not
+    // always `0.0` (see `nonzero_structural_fill_slots`).
+    let walk = result.into_features();
+    let mut values = Vec::new();
+    plan.layout.gather(&walk, &mut values);
 
     let provenance = provenance_for(&plan, ns);
+    // The producer id: COMPUTE tokens from the plan, LAYOUT width from the
+    // layout, and the slot hash from what was actually POPULATED.
+    //
+    // The two-step exists because `ComputeSet::feature_set_id` derives the
+    // hash from `populated_slots` clipped to the width it is handed, and for
+    // a DENSE layout that width is the PACKED count — clipping the family
+    // union to 265 reconstructs a completely different set. MEASURED: the
+    // first version emitted `basic+peaks+moments@w265#3fb78648` where the
+    // set's real hash is `#4fcef1d6`, and worse, `declared_layout` would then
+    // have accepted the wrong reconstruction because it also has 265 members.
+    // So the tokens come from the walk-width call and the hash comes from
+    // `plan.emit`, which is already in id space.
     let feature_set_id = plan
         .compute
-        .feature_set_id(ns, plan.layout_width, &req.era_label);
+        .feature_set_id(ns, plan.walk_width(), &req.era_label)
+        .and_then(|id| {
+            FeatureSetId::new(
+                id.compute(),
+                plan.layout_width(),
+                &req.era_label,
+                plan.emit.hash8(),
+            )
+        });
 
     Ok(Extraction {
         values,
         provenance,
-        layout_width: plan.layout_width,
+        layout: plan.layout,
         n_scales: ns,
         emitted: plan.emit,
         feature_set_id,
@@ -1106,6 +1197,125 @@ mod tests {
             );
             assert_eq!(e.provenance()[pos].defect, Some("F15"));
         }
+    }
+
+    /// **G4.1 — a dense layout and its `w944` equivalent carry the SAME
+    /// VALUES**, position-for-position through the layout's own index.
+    ///
+    /// This is what makes "retire 944-with-structural-zeros as the wire
+    /// format" a rename rather than a re-extraction: a `dense265` table is
+    /// the `w944` table with its 679 structural fills removed, and the
+    /// layout says where each surviving id went.
+    #[test]
+    fn a_dense_layout_carries_the_same_values_as_its_sparse_equivalent() {
+        let (w, h) = (128usize, 128usize);
+        let (s, d) = pair(w, h);
+        let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));
+        let want = SlotSet::from_ranges([(0, 228)])
+            .union(&family_slots(ComputeToken::Moments))
+            .clipped_to(944);
+
+        let sparse =
+            extract(&Request::for_slots(want.clone(), 944), &rs, &rd).expect("the w944 arm");
+        let dense = extract(&Request::for_slots(want.clone(), 944).dense(), &rs, &rd)
+            .expect("the dense arm");
+
+        assert_eq!(sparse.layout_width(), 944);
+        assert_eq!(sparse.layout_name(), "w944");
+        assert_eq!(dense.layout_width(), 265, "the dense arm has no gaps");
+        assert_eq!(dense.layout_name(), "dense265");
+        // The two arms populate the SAME ids.
+        assert_eq!(sparse.emitted(), dense.emitted());
+        assert_eq!(dense.emitted().len(), 265);
+
+        // Every carried id holds the bit-identical value in both arms, found
+        // through each layout's own index rather than by assuming positions.
+        for id in want.iter_slots() {
+            let sp = sparse.position_of(id as u16).expect("sparse position");
+            let dp = dense.position_of(id as u16).expect("dense position");
+            assert_eq!(sp, id, "the w944 layout is the identity");
+            assert_eq!(
+                sparse.values()[sp].to_bits(),
+                dense.values()[dp].to_bits(),
+                "f{id} differs between the w944 and dense265 layouts \
+                 (positions {sp} vs {dp})"
+            );
+        }
+        // And the dense arm carries NOTHING else: 265 values, 265 ids.
+        assert_eq!(dense.values().len(), 265);
+        assert_eq!(dense.provenance().len(), 265);
+        assert!(
+            dense.provenance().iter().all(|p| p.populated),
+            "a dense layout over a plan's own emit set has no structural fill"
+        );
+        // The 679 positions the sparse arm carries and the dense one drops
+        // are exactly the ones the plan never populated.
+        let dropped = 944 - 265;
+        assert_eq!(
+            sparse.provenance().iter().filter(|p| !p.populated).count(),
+            dropped
+        );
+    }
+
+    /// The producer id a DENSE extraction reports names the same slot HASH as
+    /// its sparse twin, differing only in the declared width — which is the
+    /// identity layer working as designed, and is what makes
+    /// `feature_layout::slots_of` able to read the dense interpretation back.
+    #[test]
+    fn the_dense_producer_id_carries_the_same_slot_hash_as_the_sparse_one() {
+        let (w, h) = (64usize, 64usize);
+        let (s, d) = pair(w, h);
+        let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));
+        let want = SlotSet::from_ranges([(0, 228)])
+            .union(&family_slots(ComputeToken::Moments))
+            .clipped_to(944);
+        let sparse = extract(
+            &Request::for_slots(want.clone(), 944).with_era_label("era2r4"),
+            &rs,
+            &rd,
+        )
+        .expect("sparse");
+        let dense = extract(
+            &Request::for_slots(want.clone(), 944)
+                .dense()
+                .with_era_label("era2r4"),
+            &rs,
+            &rd,
+        )
+        .expect("dense");
+        let (a, b) = (
+            sparse.feature_set_id().expect("sparse id"),
+            dense.feature_set_id().expect("dense id"),
+        );
+        assert_eq!(a.slots_hash(), b.slots_hash(), "same slots, same hash");
+        assert_eq!(a.slots_hash(), want.hash8());
+        assert_eq!(a.layout_width(), 944);
+        assert_eq!(b.layout_width(), 265);
+        assert_eq!(a.compute(), b.compute());
+        // And the dense id reads BACK to the same slot set — the property
+        // `declared_layout` depends on.
+        assert_eq!(
+            crate::feature_layout::slots_of(b).as_ref(),
+            Some(&want),
+            "the dense id must reconstruct its own slot set"
+        );
+    }
+
+    /// A dense layout still plans the CHEAP walk — packing the output does
+    /// not change what runs.
+    #[test]
+    fn a_dense_layout_does_not_change_the_compute_set() {
+        let want = SlotSet::from_ranges([(0, 228)])
+            .union(&family_slots(ComputeToken::Moments))
+            .clipped_to(944);
+        let a = Request::for_slots(want.clone(), 944)
+            .validate()
+            .expect("sparse");
+        let b = Request::for_slots(want, 944)
+            .dense()
+            .validate()
+            .expect("dense");
+        assert_eq!(a, b, "the same ids are emitted either way");
     }
 
     /// Every provenance name is unique across the full width — the property
