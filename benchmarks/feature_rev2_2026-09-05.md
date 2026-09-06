@@ -392,6 +392,17 @@ already deployed, and exactly what the default does not have. (`signed_cbrt` and
 | 12 | v1 peaks `ssim_max` / `ssim_l8` | F4's per-pixel `d`, pooled | F4's problem | 1.972 | no — F4 owns it |
 | 13 | diffmap `f = n/Σw` (masked/IW) | guarded `Σw > 1e-12` | not a feature | — | no |
 
+**A FOURTH hand-copy is outside this repo.**
+`zenmetrics/crates/zensim-gpu/src/pipeline.rs:1305-1310` carries the same
+expression (`let r = sums[11]/sums[10]; ((1.0-r).max(0.0), (r-1.0).max(0.0))`)
+behind the same `> 1e-10` gate, for the GPU oracle's own basic block. NOT
+touched from here — it is a different repo — and reported because the
+consequence is concrete: a rev2 extractor and the GPU oracle would disagree on
+`basic` local 12 at every (scale, channel), which `zensim-gpu`'s own
+`cpu_gpu_feature_sweep` / `cpu_parity` / `extended_parity` gates name as
+`hf_energy_gain` and would catch. A rev2 wave using the GPU oracle needs the
+matching change landed there first, or the oracle pinned to the CPU walk.
+
 Rows 4–11 are bounded **by construction** — every one goes through `clamp01`,
 `clamp02`, `saturate`, `bounded_excess` or `bounded_sim`. Row 1 is the only
 place in the crate that spells `max(0, a/b − 1)` where `bounded_excess(a, b, c)`

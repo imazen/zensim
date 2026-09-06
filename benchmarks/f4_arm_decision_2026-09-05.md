@@ -490,6 +490,18 @@ What a rev2 fleet wave needs from R6, in the form it needs it:
   recalculation), and the per-arm override `ZENSIM_HF_GAIN` is a MEASUREMENT
   knob that must not appear in a production wave's environment.
 
+  **⛔ A FOURTH hand-copy lives in ANOTHER REPO and a rev2 flip diverges from
+  it.** `zenmetrics/crates/zensim-gpu/src/pipeline.rs:1305-1310` computes the
+  same three slots from its own reduced sums —
+  `let r = sums[11]/sums[10]; ((1.0-r).max(0.0), (r-1.0).max(0.0))` — behind the
+  same `var_src > 1e-10` gate. It is NOT touched from here (it is a different
+  repo), and it is reported rather than filed away: a rev2 extractor and the GPU
+  oracle would disagree on `basic` local 12 at every (scale, channel), i.e.
+  exactly the twelve, which `zensim-gpu`'s own `cpu_gpu_feature_sweep` /
+  `cpu_parity` / `extended_parity` gates name as `hf_energy_gain` and would
+  catch. **A rev2 wave that uses the GPU oracle must land the matching change
+  there first**, or pin the oracle to the CPU walk.
+
   **The re-verdict list grows by the same two profiles the exposure table
   misses.** Unlike F4, F17 fires on every corpus this box has pixels for, so
   every bake reading one of the twelve moves: **D** (the SDR default, 2 slots,
