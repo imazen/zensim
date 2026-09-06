@@ -516,6 +516,20 @@ address A7r; this is stronger than "does not help" — the constraint **costs**
 floor representability on four of five codecs. Whatever the ladder arms do, that
 is the baseline they have to climb out of.
 
+### 5.6 The ladder hinge is live and self-verified
+
+`C_lad05_s4004`'s training log, which is the loader's own report and not a claim:
+
+```
+Loaded 175736 TV pairs from ".../ladder_tv_pairs_safesyn.tsv"
+  (weight 0.5, every 50, batch 16, bands=true, band_weights=Some([1.5, 0.5, 0.5, 0.5]))
+```
+
+All 175,736 pairs loaded, **zero** out of range (the loud-drop counter added in
+this lane prints nothing when the count is zero, and refuses outright when it is
+total), bands active with the measured low-q emphasis. The index space and the
+`--group` order agree.
+
 *(RESULTS — ladder arms pending.)*
 
 ---
