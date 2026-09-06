@@ -114,6 +114,14 @@ That number came from `bigcodec_hqdedup_traindigits_2026-07-02.parquet`, a
 other sighting is 3 rows in 10,000 of `nonphoto` val (max ~72), which is a
 byte-copy with no pixels either.
 
+**The registry's 132 is independently confirmed, on real corpora.** The
+moved-slot set here is MEASURED (`r6_arm_delta.py` never reads the registry),
+and it matches the registered blast radius family for family — **basic 36,
+peaks 24, masked 36, IW 36** — with the peaks slots landing on the
+every-third-slot comb (`f156, f159, f162, …`) that §1.4 predicted and that no
+per-block reading of the symptom would have produced. The 2026-09-05 widening
+from 72 to 132 was right.
+
 **So the F4 outlier is a property of the bigcodec population and is not
 reproducible on this box.** Three consequences, all load-bearing:
 
