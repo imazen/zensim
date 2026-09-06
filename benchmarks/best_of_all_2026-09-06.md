@@ -768,7 +768,61 @@ consistent with the fastclass2 campaign's own finding that 35 recipe-axis cells
 cleared it zero times, and it extends that null to two mechanisms the campaign
 did not test.
 
-*(RESULTS — arm F pending.)*
+### 5.12 `F_nonneg32` — the H32 variant is the best constrained arm on rank
+
+| arm | CID22 | spread | composite | contract | M3a (k=3) |
+|---|--:|--:|--:|:--:|--:|
+| `A_plain` | 0.8891 | 0.0042 | 0.8729 | 4/6 | 0.7823 |
+| `B_nonneg` (H128) | 0.8800 | 0.0049 | 0.8646 | **6/6** | 0.8016 |
+| `F_nonneg32` (H32) | **0.8824** | **0.0036** | 0.8655 | **6/6** | **0.8212** |
+
+Halving the hidden width **costs nothing and buys the best constrained CID22,
+the tightest spread, and the best M3a in the wave** — consistent with the
+campaign's measured "capacity is not a lever" and with its H32 byte savings
+(30–47 % smaller). If a constrained model ever ships, it should be the H32 one.
+
+### 5.13 M3a — every constrained arm IMPROVES diffmap coherence
+
+| arm | M3a (k=3) |
+|---|--:|
+| `A_plain` | 0.7823 |
+| `E_plainlad` (ladder only) | 0.7996 |
+| `B_nonneg` | 0.8016 |
+| `D_lad20` | 0.8113 |
+| `C_lad05` | 0.8191 |
+| `F_nonneg32` | **0.8212** |
+
+The constraint and the hinge both help G-STEER, and they compose: the control is
+last and the constrained+H32 arm is first, **+0.039** over it. All are `silver`
+(≥ 0.78); none reaches `gold` (≥ 0.85). Nothing here was aimed at M3a, so this is
+a free by-product rather than a claim.
+
+### 5.14 ⛔ THE REGISTERED SELECTION RULE PICKS THE CONTROL — because it cannot see the contract
+
+`freeze_check --select --seed-group --min-k 2 --floor-basis all` over all 18
+cells:
+
+```
+SELECTED: 8ad90f29c3a8 — a RECIPE, k=3, 8 floors passed by every seed
+  mean selection_composite 0.9850 (spread 0.9833–0.9862)
+  members: A_plain_s4004, A_plain_s4005, A_plain_s4006
+```
+
+**The control wins, and the reason is precise: the one floor every constrained
+arm misses is `cid22`.** `B_nonneg_s4004` reads 7/8 with `split floors: cid22` —
+the −0.0091 constraint cost is just enough to drop under the profile's CID22
+floor. Every other floor passes, *including* `dial`, where it is strictly better
+than the control (mono 0.97128 vs 0.96457, `tied` 0.00000 vs 0.00718) and on
+`hfnl` (0.78433 vs 0.68263).
+
+**The rule's floor set is `bandtail, breadth, cid22, dial, dialrange, hfnl,
+konjnd, nonphoto`. C5, C6 and A7r are not in it.** So a model that takes the dial
+contract from 4/6 to **6/6 on every seed** is scored identically to one that does
+not, and loses on a CID22 hair. That is not a defect in this lane's arms — it is
+a **gap in the selection rule**, and it is worth registering: the rule was written
+before the G-ADDR contract existed as a gate, and it never absorbed it.
+
+*(RESULTS — the anchor-ladder arm, plan §9, pending.)*
 
 ---
 
