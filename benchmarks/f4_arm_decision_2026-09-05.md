@@ -283,3 +283,33 @@ What a rev2 fleet wave needs from R6, in the form it needs it:
   min at 254–290 pairs/s on one 26-thread box, including in-process decode of
   111,068 `.jpg` / 34,001 `.avif` / 26,362 `.jxl` / 24,655 `.webp` bitstreams;
   the seven eval corpora together take ~30 s.
+
+---
+
+## 5. ★ The clamp prediction, tested end to end and CONFIRMED
+
+§3 predicted, before the training leg finished extracting, that `clamp` would
+reproduce revision 1 exactly on every row R6 touches. It does, at three
+independent levels:
+
+* **Features.** `clamp`'s 196,086-row safesyn table is `cmp`-clean against the
+  `ssim2` arm's — byte-identical, not merely close.
+* **Fits.** All **six** `clamp` bakes are **byte-identical** to their `ssim2`
+  siblings, sha for sha:
+
+  | variant | `ssim2` = `clamp` sha256 (16) | `lorentz` | `c1` |
+  |---|---|---|---|
+  | `s156_lasso` | `badb848d56f7a9f8` | `17db43011d163e70` | `84d43133a62d637f` |
+  | `s156_bvls`  | `2209be8faec73ed1` | `f69f24daf7113497` | `f50a77afca58e976` |
+  | `s228_lasso` | `7e0348d473dad5dd` | `4f812895cf9f6a4c` | `c6f06ed892a01f1e` |
+  | `s228_bvls`  | `9639920ebf535eae` | `1f05e94c903cdf7d` | `304bb826824c2dc1` |
+  | `s372_lasso` | `e567dc1670ace071` | `a02845f9da9a9648` | `c664545ce25ba348` |
+  | `s372_bvls`  | `68bca6a6b054a582` | `4269fb684e195565` | `bb08afc0bbb2ccf9` |
+
+  The whole chain — features → Gram → lasso/BVLS solve → output spline → f16
+  pack → ZNPR bytes — is reproduced exactly, through four independent stages
+  that each had the opportunity to diverge.
+* **Rank.** Byte-identical bakes on byte-identical features give byte-identical
+  predictions, so `clamp`'s G1 delta against revision 1 is **exactly 0** with a
+  degenerate CI. It cannot win G1 and it cannot lose it — a property of the
+  arm, not an inconclusive measurement.
