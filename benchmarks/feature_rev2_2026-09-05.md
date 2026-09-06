@@ -331,7 +331,7 @@ Scanning all 372 slots of R6's revision-1 tables
 thirteenth is `peaks_ssim_max_s0_Y` at 1.972.** The population separates with no
 overlap — this is not a tail judgement, it is a partition. Against the gold
 photographic holdout's own p99.9 over those slots (CID22, **0.34687**) the worst
-value is **×105,124**.
+value is **×105,127**.
 
 Pooled over 2,601,072 `contrast_inc` cells: **2.59 %** exceed 1, 0.30 % exceed
 10, **0.0198 %** exceed 100, 0.0012 % exceed 1,000. Nonzero on 12.1 % (CID22) to
@@ -408,7 +408,7 @@ Rows 4–11 are bounded **by construction** — every one goes through `clamp01`
 place in the crate that spells `max(0, a/b − 1)` where `bounded_excess(a, b, c)`
 is the family's own owner for the same quantity, and the only slot in the
 372-wide surface that exceeds a photographic p99.9 by more than 100× — it
-exceeds it by 105,124×, while every other slot tops out at 1.972.
+exceeds it by 105,127×, while every other slot tops out at 1.972.
 
 **Row 11, reported and NOT fixed, with the reason stated so it is not mistaken
 for an oversight.** `finish_csfw` carries the identical
@@ -508,6 +508,6 @@ worth stating rather than leaving implicit:
   `bexcess` (0.33870) — puts two eliminated arms first, which is exactly why
   §11.9 orders rule 1 before rule 4 and said so before the numbers existed.
 * `satexcess`'s H6 max is not a free parameter: `g − g/(g+1) = g²/(1+g)`, which
-  at the CB2 bar `g = 0.34687` is **0.089332**. The measured max over every leg
+  at the CB2 bar `g = 0.34687` is **0.0893343**. The measured max over every leg
   is 0.08930. The healthy-cell perturbation is pinned by where the pathology
   bar was drawn, not by the corpus.

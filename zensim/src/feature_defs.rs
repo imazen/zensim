@@ -648,7 +648,7 @@ const DEFECT_F17: Defect = Defect {
            is a threshold, not a stabiliser. MEASURED over 216,756 real pairs \
            on 8 corpora: the twelve `contrast_inc` slots are the TOP TWELVE of \
            all 372 by maximum (worst 36,465.74) and the thirteenth is 1.972 — \
-           x105,124 the gold holdout's own p99.9 of 0.34687. Unlike F4 it \
+           x105,127 the gold holdout's own p99.9 of 0.34687. Unlike F4 it \
            fires on real corpora, on 0.0198 % of cells. Absorbed by a \
            bake-side winsor guard on Profiles A and B ONLY: Profile D (the SDR \
            default) has no transform block at all and reads f116 (max 1,380) \

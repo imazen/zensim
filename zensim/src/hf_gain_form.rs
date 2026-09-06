@@ -28,7 +28,7 @@
 //! slots are the **top twelve of all 372 by maximum**, worst **36,465.74**, and
 //! the thirteenth slot is **1.972**. The population separates with no overlap.
 //! Against the gold photographic holdout's own p99.9 over those slots
-//! (CID22, 0.34687) the worst value is **×105,124**. Its two siblings max at
+//! (CID22, 0.34687) the worst value is **×105,127**. Its two siblings max at
 //! exactly `1.000000`, as the algebra above says they must.
 //!
 //! This is **not** F4's shape. F4's 5.8e6 lives in a bigcodec sweep with no

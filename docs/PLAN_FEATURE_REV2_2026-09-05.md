@@ -457,7 +457,7 @@ one of the 372 slots (`/mnt/v/output/zensim/rev2-2026-09-05/r6b/slot_audit_rev1.
 **The twelve `contrast_inc` slots are the top twelve of all 372 by maximum, and
 the thirteenth (`peaks_ssim_max_s0_Y`) is 1.972.** The population separates with
 no overlap. Against the gold photographic holdout's own p99.9 over these slots
-(CID22, **0.34687**) the worst value is **×105,124**. Pooled over 2,601,072
+(CID22, **0.34687**) the worst value is **×105,127**. Pooled over 2,601,072
 `contrast_inc` cells: 2.59 % exceed 1, 0.30 % exceed 10, **0.0198 % exceed 100**,
 0.0012 % exceed 1,000. Nonzero on 12.1 % (CID22) to 52.1 % (KADID) of cells.
 
@@ -515,7 +515,7 @@ Every other candidate was checked, empirically at 372 and structurally beyond it
 | 13 | diffmap `f = n/Σw` (masked/IW) | guarded `Σw > 1e-12` | not a feature | — | no |
 
 Only row 1 exceeds the photographic p99.9 by more than 100× — it exceeds it by
-**105,124×**, and every other slot in the crate's 372-wide surface tops out at
+**105,127×**, and every other slot in the crate's 372-wide surface tops out at
 1.972. **Row 1 is the only one that joins the fix.**
 
 **Row 11 is reported, not fixed, and the reason is stated so it is not mistaken
