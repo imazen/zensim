@@ -667,16 +667,20 @@ const REV_F17_PROPOSED: &[Revision] = &[
         era: "v1hfgain",
         commit: "-",
         status: RevisionStatus::Proposed,
-        note: "F17 fix: bound the HF-energy gain member. The arm is selected \
-               at `hf_gain_form::HfGainForm::REV2_HFGAIN` and decided by \
-               measurement over 216,756 rows \
+        note: "F17 fix: bound the HF-energy gain member. THE ARM IS DECIDED — \
+               `HfGainForm::SaturatingExcess`, i.e. `g/(g+1)` — by measurement \
+               over 216,756 rows, and it is the ONLY arm passing H3+H4+H5 \
                (docs/PLAN_FEATURE_REV2_2026-09-05.md section 11, \
                benchmarks/feature_rev2_2026-09-05.md section 11). Unlike \
                `v1ssimcap` this era moves values on EVERY corpus with pixels — \
                `contrast_inc` is nonzero on 12 % (CID22) to 52 % (KADID) of \
                cells — so a rev2 flip re-extracts these twelve slots for real. \
-               It rides in revision 2 with F4 and F5 so there is ONE era \
-               boundary and one recalculation. STILL PROPOSED: \
+               MEASURED benefit and cost: LIVE 0.7357 -> 0.9500 (+0.214), TID \
+               +0.033, KADID +0.021, CID22 +0.0027..+0.0090 CI-excluding; and \
+               KonJND REGRESSES -0.013..-0.080 on EVERY arm, which makes it a \
+               property of bounding rather than of this arm. It rides in \
+               revision 2 with F4 and F5 so there is ONE era boundary and one \
+               recalculation. STILL PROPOSED: \
                `ssim_form::SHIPPED_REVISION` is `Rev1`.",
     },
 ];

@@ -471,7 +471,7 @@ Two structural facts that survive the measurement:
 
 | # | control | result |
 |---|---|---|
-| **CB1** | this lane's revision-1 arm reproduces R6's `ssim2` tables | **BYTE-IDENTICAL on all ten legs** (7 eval + anchor + identity + ladder), 30,670 rows, by `cmp`. `1aa3a419` touched `feature_v2.rs` and `fold_engine.rs` between the two waves and is value-inert. |
+| **CB1** | this lane's revision-1 arm reproduces R6's `ssim2` tables | **BYTE-IDENTICAL on all ten legs** (7 eval + anchor + identity + ladder), 30,670 rows, by `cmp` — and, once the wave finished, **all four of its BAKES reproduce R6's `ssim2` bakes sha for sha** (`badb848d…` / `2209be8f…` / `7e0348d4…` / `9639920e…`), end to end from a fresh 196,086-row safesyn extraction through gram, lasso AND bvls solve, spline and ZNPR bytes. `1aa3a419` touched `feature_v2.rs` and `fold_engine.rs` between the two waves and is value-inert. |
 | **CB2** | pathology detector | a cell is pathological above the gold holdout's p99.9 (**0.34687**); flagged rows per leg: CID22 40, KADID 5,538, TID 1,760, KonJND 19, AIC-3 6, CSIQ 332, LIVE 235. |
 | **CB3** | identity ⇒ zero | the 400 self-pairs give the all-zero 372 vector at every arm. |
 | **CB4** | containment | every arm differs from revision 1 in **exactly** the twelve F17 columns and nowhere else, on every leg. |
@@ -549,3 +549,90 @@ slot** under the append-only numbering discipline (`log1p(g)` at `f944+`, say),
 which is a feature ADDITION with its own gates — not a reason to keep an
 unbounded slot in the shipped set. Nothing here proposes it; it is named so the
 next lane does not have to rediscover the trade first.
+
+**The full H2 picture, and it is the headline the point estimates buried.**
+Bounding does not merely trade CID22 for KonJND — on the corpora where F17
+actually fires it is a large, one-signed improvement:
+
+| variant | CSIQ | **LIVE** | TID | KADID |
+|---|--:|--:|--:|--:|
+| s156_lasso | −0.00232 | **+0.21433** | +0.03266 | +0.02129 |
+| s228_lasso | −0.00334 | **+0.15424** | +0.03956 | +0.03095 |
+| s156_bvls | +0.00268 | −0.00917 | +0.02012 | +0.05176 |
+| s228_bvls | +0.00638 | −0.00010 | +0.04385 | +0.06678 |
+
+**LIVE goes 0.7357 → 0.9500.** LIVE holds 122 of 779 rows with a `contrast_inc`
+cell above 100 and a p99.9 of 1,088 — the unbounded slot was not a cosmetic
+outlier there, it was wrecking the fit. (KADID and TID are the train==val
+integrity guards and are never ranking signal; they move the same way.)
+
+## 11.9 The gates, and the decision
+
+**H1 — paired bootstrap** (B = 2,000, seed 20260905, same resampled index sets,
+through `panel --batch`; a win requires the 95 % CI on the delta to exclude 0):
+
+| variant | CID22 | KonJND | AIC-3 |
+|---|--:|--:|--:|
+| s156_lasso | **+0.00272** [+0.00064, +0.00495] | **−0.02883** [−0.04316, −0.01333] | **+0.00317** [+0.00132, +0.00522] |
+| s156_bvls | **+0.00789** [+0.00578, +0.01008] | **−0.07962** [−0.10343, −0.05725] | +0.00081 [−0.00209, +0.00395] |
+| s228_lasso | **+0.00433** [+0.00248, +0.00636] | −0.01329 [−0.02647, +0.00129] | **+0.00238** [+0.00026, +0.00456] |
+| s228_bvls | **+0.00902** [+0.00669, +0.01145] | **−0.06840** [−0.09422, −0.04533] | +0.00102 [−0.00190, +0.00392] |
+
+**Gate table, over all eight legs (216,756 rows, 2,601,072 `contrast_inc` cells):**
+
+| arm | CB4 | H3 max | bound | H3 | H5 inv | H5 new ties | H5 | H6 cells | H6 max \|Δ\| | H6 >1e-4 |
+|---|:--:|--:|--:|:--:|--:|--:|:--:|--:|--:|--:|
+| revision 1 | — | **36,465.7** | none | — | — | — | — | — | — | — |
+| `bexcess` | ok | 0.99687 | 1.0 | PASS | **263,195** | 0 | **FAIL** | 292,128 | 0.34410 | 271,318 |
+| `log1p` | ok | **10.504** | **none** | **FAIL** | 0 | 0 | PASS | 292,128 | 0.04907 | 104,537 |
+| **`satexcess`** | **ok** | **0.99997** | 1.0 | **PASS** | **0** | **0** | **PASS** | 292,128 | 0.08931 | 117,650 |
+| `cap` | ok | 1.00000 | 1.0 | PASS | 0 | **67,224** | **FAIL** | **0** | **0** | **0** |
+
+**H7 — dial, each arm on its own in-era ladder + probes.** No arm regresses it.
+`satexcess` against revision 1: monotonicity within **0.0011** (0.9840 vs 0.9848
+at `s156_lasso`), tied rate **0.0000–0.0001**, negative-tail fraction within
+0.022 and BETTER on `s228_bvls` (0.7215 vs 0.7000), at a **reach cost of
+2.2–11.8 points** (221.79 vs 223.98; 189.45 vs 201.29) — the one real dial cost,
+and it is the saturation doing exactly what it is for.
+
+**⇒ `REV2_HFGAIN = SaturatingExcess`, by rule 2 — sole survivor with a rank
+majority.** Step by step, as §11.9 fixed it before the numbers existed:
+
+1. `bexcess` OUT (H5), `log1p` OUT (H3), `cap` OUT (H5). **`satexcess`
+   survives — the only arm passing H3, H4 and H5.**
+2. It wins a strict majority (≥ 2 of 3) of the primaries with CI-excluding
+   deltas in **2 of the 4 variants** (`s156_lasso`, `s228_lasso`: CID22 and
+   AIC-3). Rule 2 fires and the prior in rule 5 never has to.
+3. **Reported both ways, because §11.9 did not pin how the four variants
+   aggregate:** under the STRICTER reading — a majority in a majority of
+   variants — NO arm qualifies and the branch would be rule 4, which selects
+   the surviving arm with the smallest H6 perturbation. That is `satexcess`
+   too, because it is the only survivor. **The reading does not change the
+   answer**, which is why both are printed rather than one chosen.
+4. §11.9 rule 6 predicted `satexcess` in advance, for its first-order agreement
+   and its family symmetry. Confirmed — and one of its two supporting arguments
+   (that `bexcess` preserves order) was **falsified** on the way, which is
+   recorded in §11.5 rather than quietly dropped.
+
+**What is NOT claimed.** The KonJND regression is real, CI-excluding on 3 of 4
+variants, and **not** attributable to this arm — every bounded arm shows it
+(§11.8). The fix ships with that cost recorded, per the user directive that
+authorised the lane, and `SHIPPED_REVISION` stays `Rev1` until the
+recalculation and refit land.
+
+## 11.10 Handoff
+
+Everything a rev2 wave needs is in
+[`f4_arm_decision_2026-09-05.md`](f4_arm_decision_2026-09-05.md) §10's F17
+addendum: the three-era declaration, the twelve slots (the same twelve at every
+pool state), the two profiles with unguarded exposure, and the fourth hand-copy
+in `zenmetrics`. One thing this lane adds that the F4 handoff could not:
+**flipping the extractor without refitting is cheap for the SDR default** —
+shipped Profile D scores within |6e-5| SROCC and moves ≤0.64 % of pairs past the
+0.5-point dial bar (`scripts/r6b_serve_skew.py`), roughly four orders below the
+−4.98 extractor-era and −3.658 decoder-era shifts on record. That does **not**
+transfer to CHdr, which reads all twelve slots at `identity`.
+
+Artefacts: `/mnt/v/output/zensim/rev2-2026-09-05/r6b/` (five arms × 11 legs,
+20 bakes, per-pair dumps, dial JSON, `decide.json`, `_MANIFEST.json`).
+Reproduce: `scripts/r6b_run.sh {extras,arms,cb5,delta,pack,fit,instruments,eval,dial,decide}`.

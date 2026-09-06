@@ -2344,3 +2344,80 @@ RESULT: BIT-EXACT — 0 of 289788 cells differ
 of the postC root's non-byte-copy producers this box can re-extract: 14,770
 rows, 5,494,440 cells, 0 differ. No arithmetic changed — this is entirely
 fleet-side (decode dispatch) + data-side (staging, and a row-order finding).
+
+### §3.46 — F17: the audit's "one live arithmetic defect" was not the one that fires (2026-09-06)
+
+**Thought-why.** R6 chose F4's bounded luminance arm and, chasing its own
+"max over ALL slots" column, reported an unbounded feature that is not F4 and
+did not fix it. The rev2 lane's remaining job looked like recalculation.
+
+**Actual-why.** `contrast_inc` = `max(0, var_dst/var_src − 1)` is unbounded by
+exactly F4's mechanism, and on every corpus this box has pixels for **it is the
+unbounded value that actually occurs**. MEASURED over 216,756 real pairs on
+eight corpora, all 372 slots: its twelve slots are the **top twelve by maximum**
+(worst **36,465.74**, safesyn) and the thirteenth slot in the whole vector is
+**1.972**. The separation is a partition, not a tail judgement. Against the gold
+holdout's own p99.9 over those slots (CID22, 0.34687) that is **×105,127**. F4's
+5,814,302 belongs to a bigcodec sweep with no local pixels and moves **zero** of
+these rows.
+
+The family's other two members — `var_loss`, `tex_loss` — max at exactly
+**1.000000**, because their numerators are `max(0, src − dst)` and their own
+denominators bound them. The `var_src > 1e-10` guard is a threshold, not a
+stabiliser.
+
+**Data consequences.**
+
+* **`FormulaRevision::Rev2` now batches THREE eras** — `v1ssimcap` (F4),
+  `freecomp` (F5), `v1hfgain` (F17). One era boundary, one recalculation. A wave
+  declaring only the first two under-declares every table by twelve slots.
+* **Blast radius: the same twelve at every shape**, MEASURED at `944full`
+  (pools live), `924` (pools zeroed), `372` and `156` — unlike F4, whose count
+  is 132 at 372 / pools-live 944 and 36 at the zeroed roots. Combined v1-side:
+  **144** at 372 and pools-live 944, **48** at `ext944`/`ext924`.
+* **Exposure, per shipped bake, from each bake's OWN transform block:** A and B
+  are winsor-guarded on their F17 slots; **D — today's SDR default — has no
+  transform block at all** and reads f116 (measured max 1,380) and f155 (2,127)
+  raw into a 28-input linear head; **CHdr reads all twelve at `identity`**; C has
+  10 of 12 guarded; BHdr 4 of 6. A bake-side transform is therefore not the
+  answer to F17: it is what is already deployed and what the default lacks.
+* **Serving a rev1 bake rev2 features is ~4 orders cheaper than an era shift.**
+  Shipped Profile D, NOT refitted, on the most disruptive arm: SROCC moves
+  |≤6e-5| on all seven corpora and the dial moves mean −0.0003 (CID22) to −0.012
+  (LIVE), worst pair −0.935, with 0.00–0.64 % of pairs past the 0.5-pt
+  materiality bar — against −4.98 (extractor era) and −3.658 (decoder era) on
+  record for shipped B. Does NOT transfer to CHdr, which reads all twelve raw.
+* **⛔ A FOURTH hand-copy is in another repo.** `zenmetrics/crates/zensim-gpu/
+  src/pipeline.rs:1305-1310` carries the same expression. A rev2 wave using the
+  GPU oracle must land the matching change there first, or pin the oracle to the
+  CPU walk. Its own `cpu_gpu_feature_sweep` / `cpu_parity` / `extended_parity`
+  gates would catch the divergence.
+
+**The arm is DECIDED: `HfGainForm::SaturatingExcess` = `g/(g+1)`**, by the rule
+pre-registered before any table was extracted. Five arms, one binary, 216,756
+rows, two slices x two solvers. It is the ONLY arm passing the structural gates
+— `bexcess` fails order-preservation with **263,195** inversions (it reads the
+MAGNITUDE, not the ratio), `cap` fails it with **67,224** new ties (F4's `Clamp`
+analogue, free there and not here), `log1p` has no structural bound and reads
+**10.504** — and it also wins a strict majority of {CID22, KonJND, AIC-3} with
+CI-excluding paired-bootstrap deltas in 2 of 4 variants.
+
+**What it buys, MEASURED: LIVE 0.7357 -> 0.9500 (+0.214)**, TID +0.033, KADID
++0.021, CID22 +0.0027..+0.0090, AIC-3 +0.0009..+0.0032. LIVE holds 122 of 779
+rows with a cell above 100 — the unbounded slot was wrecking the fit there, not
+decorating it.
+
+**What it costs, MEASURED and NOT attributable to the arm: KonJND regresses
+-0.013..-0.080**, CI-excluding on 3 of 4 variants — and every bounded arm shows
+the same sign, so the near-threshold corpus is using the unbounded magnitude and
+no bounded form returns it. If that axis matters it is an APPEND slot under the
+append-only numbering, never a reason to keep an unbounded one. The dial does
+not regress (monotonicity within 0.0011, tied 0.0000-0.0001, negative-tail
+fraction within 0.022 and better on one variant) at a reach cost of 2.2-11.8
+points.
+
+**Nothing was rewritten.** `ssim_form::SHIPPED_REVISION` is `Rev1`, the F17
+revision is `Proposed`, and every stored table and published verdict is
+unaffected. The revision-1 control arm reproduces the prior wave's tables on all
+ten legs AND its four bakes sha for sha, end to end. The lane's tables, 20
+bakes and `_MANIFEST.json` are at `/mnt/v/output/zensim/rev2-2026-09-05/r6b/`.

@@ -207,6 +207,52 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   independence. Full inventory of all 27 defects with status and gates:
   `docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md`.
 
+- **⛔ `contrast_inc` (v1 basic local 12, twelve slots) IS UNBOUNDED, and it is
+  the unbounded value that ACTUALLY OCCURS — not F4 (found + measured
+  2026-09-06, registered as F17, fix PROPOSED not landed).**
+  `max(0, var_dst/var_src − 1)` divides by the SOURCE term, so unlike its two
+  siblings — `var_loss` and `tex_loss`, whose numerators their own denominators
+  bound at exactly **1.000000** — its numerator is not bounded by anything. The
+  `var_src > 1e-10` guard is a threshold, not a stabiliser. MEASURED over
+  **216,756 real pairs on 8 corpora, all 372 slots**: the twelve `contrast_inc`
+  slots (**f12 f25 f38 f51 f64 f77 f90 f103 f116 f129 f142 f155**) are the **TOP
+  TWELVE by maximum** (worst **36,465.74** safesyn, 3,598 LIVE, 928 TID, 618
+  KADID) and the thirteenth slot in the whole vector is **1.972** — a partition,
+  not a tail. That is **×105,127** the gold holdout's own p99.9 (CID22, 0.34687).
+  **Unlike F4** (whose 5.8e6 lives in a bigcodec sweep with no local pixels and
+  fires on ZERO of these rows), F17 fires on five distortion corpora and the
+  training leg, on 2.59 % of cells above 1 and 0.0198 % above 100.
+  **What this means for numbers you read:** the "winsor already clamps it"
+  mitigation covers **Profiles A and B only**. **Profile D — today's SDR default
+  — carries NO `feature_transforms` block at all** and reads f116 (max 1,380)
+  and f155 (max 2,127) raw into a 28-input linear head; **CHdr reads all twelve
+  at `identity`**; C has 10 of 12 winsor-guarded, BHdr 4 of 6. So a bake-side
+  transform is not the answer — it is what is already deployed and what the
+  default lacks. Blast radius is the **same twelve at every layout** (MEASURED at
+  `944full`/`924`/`372`/`156`), unlike F4's 132-vs-36 pool-state split.
+  **A FOURTH hand-copy is in another repo** —
+  `zenmetrics/crates/zensim-gpu/src/pipeline.rs:1305-1310` — so a rev2 wave using
+  the GPU oracle must land the matching change there first or pin the oracle to
+  the CPU walk. **Serving a rev1 bake rev2 features is cheap for D**: SROCC
+  |Δ| ≤ 6e-5, dial mean −0.0003…−0.012 and ≤0.64 % of pairs past the 0.5-pt bar
+  — ~4 orders below the −4.98 extractor-era and −3.658 decoder-era shifts. **THE ARM IS DECIDED — `HfGainForm::SaturatingExcess` =
+  `g/(g+1)`** (216,756 rows, five arms from one binary, two slices x two
+  solvers): the only arm passing the structural gates (`bexcess` 263,195
+  order inversions because it reads the MAGNITUDE not the ratio; `cap` 67,224
+  new ties; `log1p` unbounded at 10.504), and it wins CID22 + AIC-3 with
+  CI-excluding deltas in 2 of 4 variants. **MEASURED: LIVE 0.7357 -> 0.9500
+  (+0.214)**, TID +0.033, KADID +0.021 — and **KonJND REGRESSES
+  -0.013..-0.080 on EVERY bounded arm**, so that cost is a property of
+  bounding, not of the arm; recovering it would be an APPEND slot, never a
+  reason to keep an unbounded one. Dial does not regress (mono within 0.0011,
+  tied 0.0000-0.0001) at a reach cost of 2.2-11.8. Owner
+  (one place, five runtime arms, revision-1 BIT-IDENTICAL):
+  `zensim/src/hf_gain_form.rs`. Registry: `F17` + the `v1hfgain` era on
+  `FormulaRevision::Rev2` (which now batches **three** eras — a wave declaring
+  only `v1ssimcap` + `freecomp` under-declares every table by twelve slots).
+  Record: `benchmarks/feature_rev2_2026-09-05.md` §11; pre-registration:
+  `docs/PLAN_FEATURE_REV2_2026-09-05.md` §11.
+
 - **⛔ THE STORED 372-COL masked/IW BLOCK IS PRE-FIX AND THREAD-DEPENDENT — THE
   RUNTIME PROFILE B IS NOT THE EVALUATED PROFILE B (found + measured 2026-08-30,
   OPEN as a DATA issue; the extractor is correct and is NOT to be changed).**

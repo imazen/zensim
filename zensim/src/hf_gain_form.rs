@@ -145,13 +145,59 @@ impl HfGainForm {
         }
     }
 
-    /// The arm revision 2 ships. Named ONCE so the R6b probe and the kernels
-    /// cannot disagree about what "rev2" means for this family.
+    /// The arm revision 2 ships — **`SaturatingExcess`, DECIDED BY MEASUREMENT**
+    /// (`benchmarks/feature_rev2_2026-09-05.md` §11, R6b).
     ///
-    /// **Placeholder until §11.9's rule is applied to the measurements** —
-    /// while it reads [`Self::RatioExcess`], selecting revision 2 is inert for
-    /// this family and `hf_gain_form` changes nothing anywhere.
-    pub(crate) const REV2_HFGAIN: Self = Self::RatioExcess;
+    /// Named ONCE so the R6b probe and the kernels cannot disagree about what
+    /// "rev2" means for this family.
+    ///
+    /// # How the pre-registered rule selected it
+    ///
+    /// Five arms were extracted from ONE binary over 216,756 rows (the seven
+    /// human eval corpora + the full 196,086-row safesyn training leg), fitted
+    /// through the shipped Profile-D recipe at two slices × two solvers, and
+    /// graded on the gates `docs/PLAN_FEATURE_REV2_2026-09-05.md` §11.8 fixed
+    /// before any of it ran. Rule 1 (H3/H4/H5) left exactly one arm standing:
+    ///
+    /// * [`Self::Log1pExcess`] fails **H3** — log growth is a compression, not
+    ///   a bound, and it measures **10.504** where the other arms cannot exceed
+    ///   1. Carried precisely so that cost is measured rather than assumed.
+    /// * [`Self::BoundedExcess`] fails **H5** with **263,195** adjacent-pair
+    ///   inversions: it reads the MAGNITUDE of `var_src`, so it does not bound
+    ///   the shipped statistic, it replaces it with a scale-dependent one.
+    /// * [`Self::CappedExcess`] fails **H5** with **67,224** new ties — F4's
+    ///   `Clamp` analogue, which was free there (0 moved cells) and is not here
+    ///   (2.59 % of cells exceed `g = 1`).
+    /// * `SaturatingExcess` passes all three: max **0.99997** against its
+    ///   declared bound of 1, **0** inversions, **0** new ties.
+    ///
+    /// Rule 2 then fired on its own terms — it is the sole survivor AND wins a
+    /// strict majority of {CID22, KonJND, AIC-3} with CI-excluding paired
+    /// bootstrap deltas in 2 of the 4 variants (CID22 **+0.0027…+0.0090**,
+    /// AIC-3 **+0.0009…+0.0032**). Its two constant-free derivations survived
+    /// the measurement: it agrees with revision 1 to FIRST order in `g`, and
+    /// `g/(g+1) = max(0, 1 − var_src/var_dst)` makes the family symmetric by
+    /// changing only the member that is broken.
+    ///
+    /// # What it buys, and what it costs — both measured
+    ///
+    /// **LIVE goes 0.7357 → 0.9500** (+0.214) and 0.7960 → 0.9503 on the
+    /// `lasso` variants, with TID +0.033/+0.040 and KADID +0.021/+0.031: the
+    /// unbounded slot was actively wrecking the fit on the corpora where it
+    /// fires (LIVE holds 122 of 779 rows above 100).
+    ///
+    /// **KonJND regresses, on every arm and every variant**
+    /// (`satexcess` −0.013…−0.080, CI-excluding on 3 of 4). Two structurally
+    /// different bounded maps produce the same sign, so this is a property of
+    /// BOUNDING `contrast_inc`, not of this arm's shape: the near-threshold
+    /// corpus is using the unbounded magnitude and no bounded form returns it.
+    /// If that axis is worth recovering it is an APPEND slot under the
+    /// append-only numbering, not a reason to keep an unbounded one.
+    ///
+    /// The dial (H7) does not regress: monotonicity within 0.0011 of revision 1,
+    /// tied rate 0.0000–0.0001, negative-tail fraction within 0.022 (and
+    /// BETTER on `s228_bvls`), at a reach cost of 2.2–11.8 points.
+    pub(crate) const REV2_HFGAIN: Self = Self::SaturatingExcess;
 
     /// Whether the arm has a **structural** upper bound (gate H3).
     ///
