@@ -774,6 +774,54 @@ impl CorruptionHead {
     }
 }
 
+/// The head's answer for one comparison, and the score after the gate.
+///
+/// A struct rather than a bare `f64` because all three parts are load-bearing
+/// and reporting only the gated score hides WHY it moved: `fired` is the
+/// deadband decision the record quotes, `probability` is the calibrated value,
+/// and `gated_score` is what a product would show.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CorruptionVerdict {
+    /// `P(corrupt)` after the logistic and the isotonic calibration.
+    pub probability: f64,
+    /// The head's score in the dial's units, `100 * (1 - probability)`.
+    pub head_score: f64,
+    /// Whether the deadband fired (`probability > head.deadband()`).
+    pub fired: bool,
+    /// The perceptual score before the gate — unchanged, kept so a caller can
+    /// see the delta without re-reading the result.
+    pub perceptual_score: f64,
+    /// [`gate_score`] applied: `min(perceptual, 0)` when fired, else
+    /// `perceptual`.
+    pub gated_score: f64,
+}
+
+impl CorruptionHead {
+    /// The full verdict for one caller-width feature row and the perceptual
+    /// score that row produced.
+    ///
+    /// # Errors
+    ///
+    /// [`CorruptionHeadError::FeatureLenMismatch`] when the row is not the
+    /// declared caller width.
+    pub fn verdict(
+        &self,
+        features: &[f64],
+        perceptual_score: f64,
+    ) -> Result<CorruptionVerdict, CorruptionHeadError> {
+        let probability = self.probability_f64(features)?;
+        let head_score = 100.0 * (1.0 - probability);
+        let deadband_score = self.deadband_score();
+        Ok(CorruptionVerdict {
+            probability,
+            head_score,
+            fired: head_score < deadband_score,
+            perceptual_score,
+            gated_score: gate_score(perceptual_score, head_score, deadband_score),
+        })
+    }
+}
+
 /// sklearn's isotonic evaluation, reproduced arithmetic-for-arithmetic:
 /// clip the query to the knot range, then **`np.interp`**.
 ///
@@ -869,23 +917,23 @@ mod tests {
 
     /// A hand-assembled ZCTH file, so the reader is tested against bytes
     /// rather than against the exporter that produced them.
-    struct Builder {
-        caller_input_width: u32,
-        declared_ids: Vec<u16>,
-        mean: Vec<f64>,
-        scale: Vec<f64>,
-        clip: f32,
-        baseline: f64,
-        deadband_t: f64,
-        tree_offsets: Vec<u32>,
-        nodes: Vec<Node>,
-        iso_x: Vec<f64>,
-        iso_y: Vec<f64>,
-        meta: &'static str,
+    pub(super) struct Builder {
+        pub(super) caller_input_width: u32,
+        pub(super) declared_ids: Vec<u16>,
+        pub(super) mean: Vec<f64>,
+        pub(super) scale: Vec<f64>,
+        pub(super) clip: f32,
+        pub(super) baseline: f64,
+        pub(super) deadband_t: f64,
+        pub(super) tree_offsets: Vec<u32>,
+        pub(super) nodes: Vec<Node>,
+        pub(super) iso_x: Vec<f64>,
+        pub(super) iso_y: Vec<f64>,
+        pub(super) meta: &'static str,
     }
 
     impl Builder {
-        fn single_stump(feature_id: u16, threshold: f64, lo: f64, hi: f64) -> Self {
+        pub(super) fn single_stump(feature_id: u16, threshold: f64, lo: f64, hi: f64) -> Self {
             Self {
                 caller_input_width: 8,
                 declared_ids: vec![feature_id],
@@ -927,7 +975,7 @@ mod tests {
             }
         }
 
-        fn build(&self) -> Vec<u8> {
+        pub(super) fn build(&self) -> Vec<u8> {
             let mut body: Vec<u8> = Vec::new();
             let mut push = |body: &mut Vec<u8>, data: &[u8]| -> Section {
                 let off = HEADER_LEN + body.len();
@@ -1167,5 +1215,303 @@ mod tests {
             .expect("parse");
         assert_eq!(head.deadband(), 0.9);
         assert_eq!(head.deadband_score(), 100.0 * (1.0 - 0.9));
+    }
+}
+
+/// G5 of `docs/PLAN_CORRHEAD_SERVING_2026-09-06.md`: attaching a head must
+/// never widen the walk. Separate module because it needs the plan machinery,
+/// which only exists under `feature-regime-v2`.
+#[cfg(all(test, feature = "feature-regime-v2"))]
+mod servability_tests {
+    use super::tests::Builder;
+    use super::*;
+    use crate::profile::ZensimProfile;
+
+    /// A head over `ids`, in `width`-wide caller space, whose one stump reads
+    /// the first declared id. Enough structure to exercise the plan check —
+    /// which cares about the DECLARATION, not about what the trees do with it.
+    fn head_over(width: u32, ids: Vec<u16>) -> CorruptionHead {
+        let n = ids.len();
+        let mut b = Builder::single_stump(ids[0], 0.5, -1.0, 1.0);
+        b.caller_input_width = width;
+        b.declared_ids = ids;
+        b.mean = vec![0.0; n];
+        b.scale = vec![1.0; n];
+        CorruptionHead::from_bytes(&b.build()).expect("parse")
+    }
+
+    /// The whole reason the theory lane chose `f0..f227`: that slice is FREE at
+    /// D's `V1PoolsMode::Peaks` walk, so the head costs D nothing beyond its
+    /// own forward pass.
+    #[test]
+    fn the_basic_plus_peaks_slice_is_servable_by_profile_d() {
+        let head = head_over(372, (0u16..228).collect());
+        head.check_servable_by(ZensimProfile::D)
+            .expect("f0..f227 must be servable by D");
+    }
+
+    /// The NEGATIVE CONTROL, and the one that makes the gate mean something: a
+    /// head reaching into the masked/IW block would force `V1PoolsMode::Full`
+    /// and silently make D as expensive as B. It is refused, and the refusal
+    /// names the slots rather than saying "mismatch".
+    #[test]
+    fn a_head_reaching_into_the_masked_iw_block_is_refused_by_profile_d() {
+        let head = head_over(372, vec![0, 1, 300]);
+        match head.check_servable_by(ZensimProfile::D) {
+            Err(CorruptionHeadError::NotServable { profile, detail }) => {
+                assert_eq!(profile, ZensimProfile::D.name());
+                assert!(
+                    detail.contains("300"),
+                    "the refusal must name the offending slot, got: {detail}"
+                );
+            }
+            other => panic!("expected NotServable, got {other:?}"),
+        }
+    }
+
+    /// The check is about the DECLARED ids, so the caller-space width the head
+    /// was baked at cannot change the answer. Same read set at 944 as at 372.
+    #[test]
+    fn the_verdict_does_not_depend_on_the_baked_caller_width() {
+        let narrow = head_over(372, (0u16..228).collect());
+        let wide = head_over(944, (0u16..228).collect());
+        assert_eq!(
+            narrow.check_servable_by(ZensimProfile::D).is_ok(),
+            wide.check_servable_by(ZensimProfile::D).is_ok()
+        );
+        assert!(wide.check_servable_by(ZensimProfile::D).is_ok());
+    }
+}
+
+/// G7 of `docs/PLAN_CORRHEAD_SERVING_2026-09-06.md`: a `Zensim` with a head
+/// attached ranks a structurally-corrupted image BELOW its honest anchor,
+/// where the dial alone ranked it above.
+#[cfg(all(test, feature = "feature-regime-v2", feature = "candidate-profiles"))]
+mod wiring_tests {
+    use super::tests::Builder;
+    use super::wiring_fixtures as fx;
+    use super::*;
+    use crate::profile::ZensimProfile;
+
+    const W: usize = 128;
+    const H: usize = 128;
+
+    fn score(z: &crate::Zensim, r: &[[u8; 3]], d: &[[u8; 3]]) -> crate::ZensimResult {
+        z.compute(
+            &crate::source::RgbSlice::new(r, W, H),
+            &crate::source::RgbSlice::new(d, W, H),
+        )
+        .expect("compute")
+    }
+
+    /// An ORACLE head over one feature: a real ZCTH file, parsed by the real
+    /// reader, whose single stump separates the two rows it is shown.
+    ///
+    /// It is a FIXTURE, and saying so matters: this test gates the WIRING —
+    /// that attaching a head reaches `gate_score` and flips the ordering — not
+    /// the trained model's skill. The trained model's skill is gated
+    /// end-to-end on the real gate grid by
+    /// `scripts/verify_corrhead_serving.sh` (G4), which reproduces the theory
+    /// lane's 671-of-672 through this same evaluator.
+    fn oracle_head(fires_on: &[f64], not_on: &[f64]) -> CorruptionHead {
+        // The most separating declared line, chosen by measurement rather than
+        // by assumption about which feature a broken top row moves.
+        let (j, _) = (0..228)
+            .map(|j| (j, (fires_on[j] - not_on[j]).abs()))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("a most-separating line");
+        let mid = 0.5 * (fires_on[j] + not_on[j]);
+        // Leaf values are raw log-odds: +10 -> P = 0.99995 (fires at 0.9),
+        // -10 -> P = 4.5e-5 (does not).
+        let (lo, hi) = if fires_on[j] > not_on[j] {
+            (-10.0, 10.0)
+        } else {
+            (10.0, -10.0)
+        };
+        let mut b = Builder::single_stump(u16::try_from(j).expect("id fits"), mid, lo, hi);
+        b.caller_input_width = 372;
+        CorruptionHead::from_bytes(&b.build()).expect("parse")
+    }
+
+    #[test]
+    fn an_attached_head_flips_an_ordering_the_dial_gets_wrong() {
+        let refimg = fx::reference(W, H);
+        // The honest anchor is a plain 3x3 blur — a heavy but HONEST loss,
+        // and (measured) a POSITIVE dial score, which is what a q20 encode
+        // looks like. That matters: the composition floors a flagged row to
+        // `min(score, 0)`, so it can only sort a corruption below an anchor
+        // whose own score is above zero.
+        let honest = fx::honest_blur_quantize(&refimg, W, H, true, 1);
+        // `edge_duplicate_top_row` — the record's WORST family for the linear
+        // head (17.2 % recall) and, measured here, one D's dial calls nearly
+        // perfect.
+        let corrupt = fx::duplicate_top_row(&refimg, W, H);
+
+        let plain = crate::Zensim::new(ZensimProfile::D);
+        let r_honest = score(&plain, &refimg, &honest);
+        let r_corrupt = score(&plain, &refimg, &corrupt);
+
+        // The PREMISE, asserted rather than assumed: the dial alone gets this
+        // backwards. If this ever stops being true the test must be re-thought,
+        // not quietly relaxed — so it fails loudly here.
+        assert!(
+            r_corrupt.score() > r_honest.score(),
+            "premise: D's dial should rank the corruption ABOVE the honest \
+             anchor (that is why a head exists). corrupt {:.4}, honest {:.4}",
+            r_corrupt.score(),
+            r_honest.score()
+        );
+        assert!(
+            r_honest.score() > 0.0,
+            "the honest anchor must score above zero for the floor to be able \
+             to sort below it; got {:.4}",
+            r_honest.score()
+        );
+
+        let head = oracle_head(r_corrupt.features(), r_honest.features());
+        let z = crate::Zensim::new(ZensimProfile::D)
+            .with_corruption_head(head)
+            .expect("f0..f227 is servable by D");
+
+        let v_corrupt = z
+            .corruption_verdict(&r_corrupt)
+            .expect("head attached")
+            .expect("372-wide row");
+        let v_honest = z
+            .corruption_verdict(&r_honest)
+            .expect("head attached")
+            .expect("372-wide row");
+
+        assert!(v_corrupt.fired, "the head must flag the corruption");
+        assert!(!v_honest.fired, "the head must NOT flag the honest anchor");
+        assert!(
+            v_corrupt.gated_score < v_honest.gated_score,
+            "with the head attached the corruption must rank BELOW the honest \
+             anchor: gated corrupt {:.4} vs honest {:.4}",
+            v_corrupt.gated_score,
+            v_honest.gated_score
+        );
+        // And the ungated score is untouched — attaching a head changes no
+        // score any existing caller can observe.
+        assert_eq!(v_corrupt.perceptual_score, r_corrupt.score());
+        assert_eq!(v_honest.gated_score, r_honest.score());
+    }
+
+    #[test]
+    fn no_head_attached_means_no_verdict_never_a_silently_ungated_one() {
+        let refimg = fx::reference(W, H);
+        let honest = fx::honest_blur_quantize(&refimg, W, H, true, 1);
+        let z = crate::Zensim::new(ZensimProfile::D);
+        let r = score(&z, &refimg, &honest);
+        assert!(z.corruption_verdict(&r).is_none());
+        assert!(z.corruption_head().is_none());
+    }
+
+    /// What makes a 372-wide head attachable at all: every shipped profile
+    /// emits 372 features, and `D` — which turns `skip_unread_pools` on by
+    /// itself — still POPULATES the peaks block `f156..228` that the head
+    /// reads, zeroing only the masked/IW pools above it.
+    ///
+    /// This is the availability half of "the `f0..f227` slice is free at D".
+    /// The plan check (`check_servable_by`) says the walk COMPUTES those
+    /// slots; this says the result VECTOR carries them.
+    #[test]
+    fn every_shipped_profile_emits_372_and_d_keeps_the_peaks_block() {
+        let refimg = fx::reference(W, H);
+        let honest = fx::honest_blur_quantize(&refimg, W, H, true, 1);
+        for p in [ZensimProfile::B, ZensimProfile::D] {
+            let z = crate::Zensim::new(p);
+            let r = score(&z, &refimg, &honest);
+            let f = r.features();
+            assert_eq!(f.len(), 372, "{p:?} feature width");
+            assert!(
+                f[156..228].iter().any(|v| *v != 0.0),
+                "{p:?} must populate the peaks block the head reads"
+            );
+        }
+        // D zeroes the pool block above the head's slice — that is the
+        // optimization, and it is why the head was scoped to f0..f227.
+        let z = crate::Zensim::new(ZensimProfile::D);
+        let f = score(&z, &refimg, &honest).features().to_vec();
+        assert!(
+            f[228..].iter().all(|v| *v == 0.0),
+            "D should skip the masked/IW pools"
+        );
+    }
+}
+
+/// Deterministic image fixtures for the runtime wiring test and its probes.
+/// Built in code so the test depends on no corpus and no `/mnt/v` path.
+#[cfg(test)]
+mod wiring_fixtures {
+    /// A structured synthetic reference: a coloured gradient with a
+    /// high-frequency checker and a couple of hard edges, so the metric has
+    /// real structure to measure rather than a flat field.
+    pub(super) fn reference(w: usize, h: usize) -> Vec<[u8; 3]> {
+        let mut v = vec![[0u8; 3]; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let checker = if (x / 4 + y / 4) % 2 == 0 { 40u8 } else { 0 };
+                let edge = if x > w / 3 && x < w / 2 && y > h / 4 {
+                    70u8
+                } else {
+                    0
+                };
+                v[y * w + x] = [
+                    ((x * 255 / w) as u8).saturating_add(checker),
+                    ((y * 255 / h) as u8).saturating_add(edge),
+                    (((x + y) * 255 / (w + h)) as u8).saturating_add(checker / 2),
+                ];
+            }
+        }
+        v
+    }
+
+    /// An HONEST heavy degradation: a 3x3 box blur plus coarse quantization —
+    /// the shape a very-low-quality encode has. Nothing structural is broken.
+    pub(super) fn honest_blur_quantize(
+        src: &[[u8; 3]],
+        w: usize,
+        h: usize,
+        blur: bool,
+        qstep: u8,
+    ) -> Vec<[u8; 3]> {
+        let mut v = vec![[0u8; 3]; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = [0u32; 3];
+                let mut n = 0u32;
+                let r = i32::from(blur);
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                        if nx >= 0 && ny >= 0 && (nx as usize) < w && (ny as usize) < h {
+                            let p = src[ny as usize * w + nx as usize];
+                            for c in 0..3 {
+                                acc[c] += u32::from(p[c]);
+                            }
+                            n += 1;
+                        }
+                    }
+                }
+                for c in 0..3 {
+                    let m = (acc[c] / n) as u8;
+                    v[y * w + x][c] = if qstep > 1 { (m / qstep) * qstep } else { m };
+                }
+            }
+        }
+        v
+    }
+
+    /// `edge_duplicate_top_row` — the record's worst family for the linear
+    /// head (17.2 % recall).
+    pub(super) fn duplicate_top_row(src: &[[u8; 3]], w: usize, h: usize) -> Vec<[u8; 3]> {
+        let mut v = src.to_vec();
+        if h >= 2 {
+            for x in 0..w {
+                v[w + x] = v[x];
+            }
+        }
+        v
     }
 }

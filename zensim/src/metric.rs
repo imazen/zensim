@@ -1292,6 +1292,15 @@ pub struct Zensim {
     /// since 2026-09-01; inert dead field under `--no-default-features`).
     #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
     pub(crate) skip_unread_pools: bool,
+    /// An optional companion CORRUPTION HEAD
+    /// (`docs/PLAN_CORRHEAD_SERVING_2026-09-06.md`). `None` by default and on
+    /// every existing path: `compute` does not read it, so attaching one
+    /// changes no score any current caller can observe. The gate is asked for
+    /// explicitly, through [`Zensim::corruption_verdict`].
+    ///
+    /// `Arc` so `Zensim` stays `Clone` without copying a ~200 KB ensemble.
+    #[cfg(feature = "corruption-head")]
+    corruption_head: Option<std::sync::Arc<crate::corruption_head::CorruptionHead>>,
 }
 
 /// Shared cancellation token stored on [`Zensim`]. Wraps the caller's
@@ -1345,7 +1354,79 @@ impl Zensim {
             stop: None,
             fold_engine: fast_by_default,
             skip_unread_pools: fast_by_default,
+            #[cfg(feature = "corruption-head")]
+            corruption_head: None,
         }
+    }
+
+    /// Attach a companion CORRUPTION HEAD.
+    ///
+    /// `#[doc(hidden)]` + feature-gated, and **PROPOSED, not approved** — the
+    /// exact signatures are registered for the user's sign-off in
+    /// `docs/PLAN_CORRHEAD_SERVING_2026-09-06.md` section 3.1. Until then this
+    /// is not a supported surface.
+    ///
+    /// Attaching a head is deliberately NOT the same as turning the gate on:
+    /// [`Self::compute`] does not read the head, so no existing caller can
+    /// observe a different score. The gate is asked for explicitly, by
+    /// [`Self::corruption_verdict`]. That split is what lets the head ship
+    /// before the composition is a product decision.
+    ///
+    /// # Errors
+    ///
+    /// [`CorruptionHeadError::NotServable`] when the head reads a feature slot
+    /// this profile's extraction plan does not populate. Attaching a head must
+    /// never widen the walk, so this is a refusal rather than a silent
+    /// upgrade — MEASURED for the shipped profiles by
+    /// `corruption_head::servability_tests`.
+    #[cfg(feature = "corruption-head")]
+    #[doc(hidden)]
+    pub fn with_corruption_head(
+        mut self,
+        head: crate::corruption_head::CorruptionHead,
+    ) -> Result<Self, crate::corruption_head::CorruptionHeadError> {
+        #[cfg(feature = "feature-regime-v2")]
+        head.check_servable_by(self.profile)?;
+        self.corruption_head = Some(std::sync::Arc::new(head));
+        Ok(self)
+    }
+
+    /// The attached head, if any.
+    #[cfg(feature = "corruption-head")]
+    #[doc(hidden)]
+    pub fn corruption_head(&self) -> Option<&crate::corruption_head::CorruptionHead> {
+        self.corruption_head.as_deref()
+    }
+
+    /// Apply the attached head to a result THIS `Zensim` produced.
+    ///
+    /// `None` when no head is attached — never a silently ungated score
+    /// dressed up as a gated one.
+    ///
+    /// The composition is
+    /// [`corruption_head::gate_score`](crate::corruption_head::gate_score),
+    /// the same function `bake_verdict`'s DEPLOY section calls, so a served
+    /// score and a verdict cannot drift.
+    ///
+    /// # Errors
+    ///
+    /// [`CorruptionHeadError::FeatureLenMismatch`] when the result's feature
+    /// vector is not the width the head declares. Every shipped profile emits
+    /// 372 (gated by `corruption_head::probe_width`), so this fires only for a
+    /// head baked against a different layout.
+    #[cfg(feature = "corruption-head")]
+    #[doc(hidden)]
+    pub fn corruption_verdict(
+        &self,
+        result: &ZensimResult,
+    ) -> Option<
+        Result<
+            crate::corruption_head::CorruptionVerdict,
+            crate::corruption_head::CorruptionHeadError,
+        >,
+    > {
+        let head = self.corruption_head.as_deref()?;
+        Some(head.verdict(result.features(), result.score()))
     }
 
     /// Select the walk the scoring entries run. See

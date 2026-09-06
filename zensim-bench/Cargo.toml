@@ -103,7 +103,12 @@ png = { version = "0.18.1", optional = true }
 # 372 truncation, the spline). It is one of `zensim`'s DEFAULT features, so
 # every real consumer already has it; only this crate's `default-features =
 # false` line was hiding it.
-zensim = { path = "../zensim", default-features = false, features = ["threads", "avx512", "imgref", "deprecated-profiles", "feature-regime-v2", "candidate-profiles"] }
+zensim = { path = "../zensim", default-features = false, features = ["threads", "avx512", "imgref", "deprecated-profiles", "feature-regime-v2", "candidate-profiles",
+# `corruption-head` (2026-09-06): lets `ssim2_speed_bar`'s
+# `add156_plus_corrhead` arm price the CURRENT (ZCTH tree) head, not just
+# the incumbent ZNPR logistic. The arm sniffs the magic, so both formats
+# stay measurable in one binary.
+"corruption-head"] }
 # Dedup-K (2026-05-26): profile_compat_report example routes
 # spearman/pearson/kendall_tau through canonical zenstats.
 zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }
@@ -186,6 +191,14 @@ harness = false
 [[bench]]
 # The paired ssim2-vs-zensim speed instrument (ssim2-replacement exam).
 name = "ssim2_speed_bar"
+harness = false
+
+[[bench]]
+# What the corruption head's forward pass costs, against the profile forward it
+# rides alongside. Separate from `ssim2_speed_bar` because the head is a
+# low-single-digit-percent rider on a multi-millisecond extraction, so the
+# in-situ arm cannot resolve it; this one removes the extraction entirely.
+name = "corrhead_forward"
 harness = false
 
 [[bench]]

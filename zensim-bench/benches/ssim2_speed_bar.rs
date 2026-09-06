@@ -70,6 +70,58 @@ use zenpredict::{Model, Predictor};
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 
 /// One env-supplied bake, parsed once and reused across every round.
+/// The companion CORRUPTION head, in either wire format it can arrive in.
+///
+/// Told apart by MAGIC (`ZNPR` vs `ZCTH`), never by extension and never by
+/// try-one-then-the-other: the incumbent head is a ZNPR logistic and the
+/// current one is a ZCTH gradient-boosted tree, and pricing one while
+/// believing it is the other would be a wrong number with no symptom.
+/// `zensim-validate/src/bin/bake_verdict.rs` sniffs the same two magics.
+enum CorrHead {
+    Znpr(Head),
+    Tree(zensim::corruption_head::CorruptionHead),
+}
+
+impl CorrHead {
+    fn load(var: &str) -> Option<CorrHead> {
+        let path = std::env::var(var).ok()?;
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("# {var}={path}: unreadable ({e}) — corrhead arm SKIPPED");
+                return None;
+            }
+        };
+        if bytes.get(..4) == Some(&zensim::corruption_head::MAGIC[..]) {
+            match zensim::corruption_head::CorruptionHead::from_bytes(&bytes) {
+                Ok(h) => {
+                    eprintln!(
+                        "# {var}={path}: ZCTH tree, {} trees / {} nodes, caller_width={}, reads {}",
+                        h.n_trees(),
+                        h.n_nodes(),
+                        h.caller_input_width(),
+                        h.declared_feature_ids().len()
+                    );
+                    Some(CorrHead::Tree(h))
+                }
+                Err(e) => {
+                    eprintln!("# {var}={path}: bad ZCTH ({e}) — corrhead arm SKIPPED");
+                    None
+                }
+            }
+        } else {
+            Head::load(var).map(CorrHead::Znpr)
+        }
+    }
+
+    fn width(&self) -> usize {
+        match self {
+            Self::Znpr(h) => h.width,
+            Self::Tree(h) => h.caller_input_width(),
+        }
+    }
+}
+
 struct Head {
     model: Model,
     has_transforms: bool,
@@ -227,8 +279,8 @@ fn main() {
     // profile forward as `add156_156basic`, plus one extra forward. The delta
     // between the two arms — interleaved, so the box's state is common-mode — is
     // what attaching the head actually costs.
-    let corrhead: Option<&'static Head> =
-        Head::load("ZEN_HY_CORRHEAD").map(|h| &*Box::leak(Box::new(h)));
+    let corrhead: Option<&'static CorrHead> =
+        CorrHead::load("ZEN_HY_CORRHEAD").map(|h| &*Box::leak(Box::new(h)));
     // The fold engine + the two pool modes the two regimes correspond to.
     let zf: &'static Zensim = Box::leak(Box::new(Zensim::new(ZensimProfile::B)));
     // Byte-identical to `zensim/benches/extract_paths_bench.rs`'s `toggles_off`
@@ -360,9 +412,17 @@ fn main() {
                     group.bench("add156_plus_corrhead", move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();
                         let mut pred = Predictor::new(&h.model);
-                        let mut cpred = Predictor::new(&ch.model);
+                        let mut cpred = match ch {
+                            CorrHead::Znpr(z) => Some(Predictor::new(&z.model)),
+                            CorrHead::Tree(_) => None,
+                        };
                         let mut x: Vec<f32> = Vec::new();
                         let mut cx: Vec<f32> = Vec::new();
+                        // The ZCTH evaluator takes an f64 row; the walk emits f32.
+                        // Widened into a reused buffer OUTSIDE the timed
+                        // allocation path so the arm prices the tree walk, not a
+                        // `Vec` growth on every iteration.
+                        let mut cf: Vec<f64> = vec![0.0; ch.width()];
                         // The corruption head reads a SUBSET of the profile's own
                         // read-set (basic, or basic+peaks — both are emitted by the
                         // walk `add156_156basic` already runs), so the extraction
@@ -379,7 +439,19 @@ fn main() {
                                 )
                                 .unwrap();
                             let a = h.forward(&mut pred, &mut x, v2.features());
-                            let c = ch.forward(&mut cpred, &mut cx, v2.features());
+                            let c = match (ch, cpred.as_mut()) {
+                                (CorrHead::Znpr(z), Some(cp)) => {
+                                    z.forward(cp, &mut cx, v2.features())
+                                }
+                                (CorrHead::Tree(t), _) => {
+                                    let f = v2.features();
+                                    for (o, v) in cf.iter_mut().zip(f.iter()) {
+                                        *o = *v;
+                                    }
+                                    t.probability_f64(&cf).unwrap()
+                                }
+                                _ => 0.0,
+                            };
                             zenbench::black_box(a + c)
                         })
                     });
