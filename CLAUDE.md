@@ -407,6 +407,41 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   measurement is REGISTERED, NOT RUN. Tools: `bake_dial_refit add-winsor
   --slots` + repeatable `shared-anchor --anchor` (`e8e4ace2`), gated by
   `scripts/verify_winsor_scope_identity.sh`.
+  **★★ RUN 2026-09-06 ON THE SHIPPED BAKE — READY, AND IT COSTS NOTHING**
+  (`benchmarks/rev2_d_arms_2026-09-06.md` §12, pre-registration §12.8 — read its
+  §12.8.0 order-honesty note — ledger §3.53). Two things you must know before
+  reusing the recommendation above. (1) **The twelve-slot scope has no meaning on
+  this support.** The shipped bake declares 28 ids of which exactly **{f116,
+  f155}** are F17; the other ten carry exactly-zero weight, so after `densify`
+  the twelve-slot and two-slot arms are **BYTE-IDENTICAL**. The r6b re-fit read
+  **f77** — **the two lineages share NO F17 slot**, so §11a's numbers never
+  applied here. (2) **`extend-top` is NOT in the D lineage**: the shipped 4,222 B
+  wide bake IS `fit-lasso`'s direct output (sha `921a8f67…`), so a chain copied
+  from §11a verbatim inserts a step the artefact never had. **Measured on the
+  runtime-era postC root + the FLOOR-DENSE ladder instruments:** CID22 an EXACT
+  TIE (paired bootstrap CI `[+0.00000, +0.00000]`), all twelve board corpora
+  inside `8.2e-5`, contract **6/6**, every per-codec `A7r` floor EXACTLY the
+  shipped bake's on all five codecs, identity 100.000000 with 0 of 9,593 cells
+  above it, inversions 0.0053 unchanged, ZCTH-tree-head corruption gate
+  `pass_q10 = pass_q20 = 1.0000` unchanged, **0 of 4,292 CID22 rows perturbed**
+  (262 of 196,086 training rows). The control `Sctl` (refit, no guard)
+  reproduces the shipped verdict with CI `[0,0]` on all seven bootstrap corpora,
+  so every delta is the guard. **INSTALL CANDIDATE staged, NOT installed:**
+  `d_sdr_add156_id100_negrich_guard12_2026-09-06.bin` (1,523 B, sha256
+  `c2db9e29…`) under `/mnt/v/output/zensim/rev2-d-arms-2026-09-06/guard/shipped/`
+  — **the install recipe FORCES a `dense_bake_flip_gate` change** (that gate
+  asserts `to_bits()` equality against a twin over the retired WIDE bytes, and
+  the candidate is deliberately unequal on a clamped input), which must be
+  **re-pointed at the guarded wide bake, never weakened**. **Honest limits:** the
+  guard is a rank NO-OP, not a win, and a small outlier-ordering **LOSS**
+  (−0.00987 on the 17 LIVE rows it fires on, n=17, two of them pinned at the dial
+  floor −213.14861); and the windows are fitted on `canonical-2026-05-21` while
+  the eval root is post-option-C — one extraction era apart, unfixable today
+  because the postC root carries no safesyn leg. Board: `D_shipped@dguard2` +
+  `D_guard12_p999@dguard2`. **Stale claim corrected:**
+  `benchmarks/rev2_refit_2026-09-06.md` §8.6b says `can_bake` *"admits only
+  `logistic`"*; it returns `("logistic", "hgb")` and the **ZCTH tree head IS
+  servable**.
 
 - **⛔ THE STORED 372-COL masked/IW BLOCK IS PRE-FIX AND THREAD-DEPENDENT — THE
   RUNTIME PROFILE B IS NOT THE EVALUATED PROFILE B (found + measured 2026-08-30,

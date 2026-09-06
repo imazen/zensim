@@ -115,6 +115,34 @@
 > FREE, not a rank win; `DEFECT_F17`'s exposure table names f116 + f155 for the SHIPPED ADD156
 > bake, a different support, and that measurement is REGISTERED, NOT RUN. Nothing installed.
 
+> **★★ REV2-D-GUARD-SHIPPED — THE GUARD ON THE BAKE THAT ACTUALLY SHIPS: READY 2026-09-06:**
+> [`rev2_d_arms_2026-09-06.md`](rev2_d_arms_2026-09-06.md) §12 — the run §11a.9 registered and
+> did not do. Pre-registration `docs/PLAN_FEATURE_REV2_2026-09-05.md` §12.8, **whose §12.8.0
+> says plainly it was pushed AFTER the arm bakes and their tables existed**, with the four
+> criteria copied verbatim from the genuinely-pre-registered §12.7.1. **★ The recommended
+> twelve-slot scope has no meaning on this support:** the shipped bake declares 28 ids of which
+> exactly **{f116, f155}** are F17 (the r6b re-fit read **f77** — the two lineages share NO F17
+> slot), the other ten carry exactly-zero weight, and after `densify` the twelve-slot and
+> two-slot arms are **BYTE-IDENTICAL**. **★ It is FREE on the artefact that ships:** paired
+> bootstrap CID22 an **exact tie, CI [+0.00000, +0.00000]**, all twelve board corpora inside
+> `8.2e-5`, contract **6/6**, **every per-codec `A7r` floor exactly equal** on all five codecs,
+> identity 100.000000 with 0 of 9,593 cells above it, inversions 0.0053 unchanged, ZCTH-tree-head
+> corruption gate `pass_q10 = pass_q20 = 1.0000` unchanged, and **0 of 4,292 CID22 rows
+> perturbed** (262 of 196,086 training rows). Control `Sctl` (refit, no guard) reproduces the
+> shipped verdict with CI [0,0] on all seven bootstrap corpora — max `6.8e-5` score-pt over
+> 20,166 rows — so every delta is the guard. **★ The served-score check proves the RUNTIME
+> applies it**: through `Zensim::compute` a clamped CSIQ pair moves −0.2994 and a clean pair is
+> identical to every digit; four of LIVE's 17 clamped rows do not move because they already sit
+> at the dial floor −213.14861. **INSTALL CANDIDATE staged, NOT installed** —
+> `d_sdr_add156_id100_negrich_guard12_2026-09-06.bin` (1,523 B, `c2db9e29…`); the recipe
+> **forces a `dense_bake_flip_gate` change** which must be re-pointed, never weakened.
+> **Honest limits:** it is a rank NO-OP, not a win, and a small outlier-ordering **LOSS**
+> (−0.00987 on the 17 rows it fires on); the windows are one extraction era before the eval
+> root. Two artefact-read corrections: **`extend-top` is NOT in the D lineage** (the shipped
+> wide bake IS `fit-lasso`'s output, sha `921a8f67…`), and `can_bake` returns
+> `("logistic", "hgb")` so the **ZCTH tree head IS servable** — `rev2_refit_2026-09-06.md`
+> §8.6b is stale.
+
 
 > **★ 2026-09-05 — DEFAULT PROPOSALS:** [`default_proposals_2026-09-05.md`](default_proposals_2026-09-05.md)
 > — the SDR + HDR default answer under the 2026-09-05 G-ADDR ruling (`resolvable` floor window

@@ -2992,3 +2992,75 @@ there is to make that the `std` path too.
 
 Record: [`benchmarks/score_path_libc_determinism_2026-09-06.md`](../benchmarks/score_path_libc_determinism_2026-09-06.md).
 Gate: `scripts/verify_cross_libc_features.sh` (`just check-cross-libc`).
+
+---
+
+## §3.53 — the F17 guard on the bake that ACTUALLY SHIPS: READY, and it costs nothing (2026-09-06)
+
+**Ledger ROUND 104.** §3.51 measured the serve-time guard on a **re-fit** of the
+D recipe and closed with an explicit honesty note: that lineage reads **f77**
+among the twelve `contrast_inc` slots, while `DEFECT_F17`'s exposure table names
+**f116 and f155** for the artefact that ships, so *"the guard's effect on the
+artefact that actually ships is REGISTERED, NOT RUN."* This is that run.
+
+**Thought-why vs actual-why, the entry that earns its place.** The lane was
+framed as "re-measure §3.51's recommended twelve-slot guard on the shipped
+support". Measured first, from `zentrain.feature_ids` inside the shipped bake,
+the twelve-slot scope is **not a scope at all here**: the shipped bake declares
+28 ids and exactly **{f116, f155}** of the twelve, the other ten carry
+exactly-zero weight, and after `densify` the twelve-slot arm and a two-slot arm
+are **BYTE-IDENTICAL** (`c2db9e29…` both). So §3.51's headline
+recommendation, transplanted, silently *is* the two-slot guard — and the two
+lineages share **no F17 slot at all** (f77 vs f116/f155), which is why §3.51's
+numbers could never have stood in for these. The thought-why was "does the
+recommended scope transfer"; the actual-why is "the recommended scope has no
+meaning on this support, and the question is whether guarding f116/f155 is
+free."
+
+**It is free, and that is the whole result.** Against the shipped bake, on the
+runtime-era postC root with the FLOOR-DENSE ladder instruments: paired-bootstrap
+CID22 an **exact tie with CI `[+0.00000, +0.00000]`**, every one of the twelve
+board corpora inside `8.2e-5`, contract **6/6**, **every per-codec `A7r` floor
+exactly equal** on all five codecs, identity **100.000000** with 0 of 9,593
+cells above it, inversions **0.0053** unchanged, and the ZCTH-tree-head
+corruption gate `pass_q10 = pass_q20 = 1.0000` unchanged. It perturbs **0 of
+4,292 CID22 rows**, 0 KonJND, 0 AIC-3, and 262 of 196,086 training rows.
+
+**Two facts recovered from artefacts rather than from docs.** (1) The shipped
+4,222 B wide bake **IS** `fit-lasso`'s direct output (sha `921a8f67…` equals
+`did100-2026-09-04/bakes/d_id100_negrich_raw.bin`), so **`extend-top` is NOT in
+the D lineage** — a chain copied from §3.51 verbatim would have inserted a step
+the shipped artefact never had. (2) `train_corruption_head.py::can_bake` returns
+`name in ("logistic", "hgb")` — widened 2026-09-06, `hgb` emitting **ZCTH v1**
+per §3.49 — so `rev2_refit_2026-09-06.md` §8.6b's *"admits only `logistic`"* is
+**stale**: the tree head IS servable and `bake_verdict` loads it.
+
+**What the guard does NOT buy.** It is a rank NO-OP, not a win, and it is a
+small **LOSS** on the outlier ordering: −0.00987 on the 17 LIVE rows it actually
+fires on (n = 17; two of those already sit at the dial's bottom extrapolation
+floor −213.14861 and cannot move). The case for it is a bounded input at a
+measured cost of zero — it must not be sold as a ranking improvement.
+
+**Era confound, stated not measured away:** the windows are fitted on the
+shipped bake's own training leg (`canonical-2026-05-21/train/safesyn.parquet`,
+the source of the gram its repro names) while the eval root is post-option-C.
+Windows and clamped rows are one extraction era apart, and this is not fixable
+today — the postC root is an EVAL root and carries no safesyn leg.
+
+**Staged, NOT installed.** `d_sdr_add156_id100_negrich_guard12_2026-09-06.bin`
+(1,523 B, sha256
+`c2db9e29ac97ad6f01f844628500b670ecab323d972169128d3b24daaf044aa8`) at
+`/mnt/v/output/zensim/rev2-d-arms-2026-09-06/guard/shipped/` with a
+`_MANIFEST.json`. `ZensimProfile::D`, `zensim/weights/`,
+`ssim_form::SHIPPED_REVISION` and both registries are untouched. **The install
+recipe forces a `dense_bake_flip_gate` change** — that gate asserts `to_bits()`
+equality between D and a twin over the retired WIDE bytes, and the candidate is
+deliberately unequal on a clamped input — so it must be re-pointed at the
+guarded wide bake, never weakened. Board cells `D_shipped@dguard2` and
+`D_guard12_p999@dguard2` (both SHIPPABLE, G-ADDR grafted).
+
+Record: [`../benchmarks/rev2_d_arms_2026-09-06.md`](../benchmarks/rev2_d_arms_2026-09-06.md) §12.
+Pre-registration: [`PLAN_FEATURE_REV2_2026-09-05.md`](PLAN_FEATURE_REV2_2026-09-05.md) §12.8
+— **and its §12.8.0 order-honesty note**: that text was pushed after the arm
+bakes and their rank/G-ADDR/perturbation/outlier tables existed, with the four
+criteria copied verbatim from §12.7.1.

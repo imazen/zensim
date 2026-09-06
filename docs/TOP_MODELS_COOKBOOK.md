@@ -221,6 +221,26 @@ verified byte-identical); promoting it under its own name is a registered
 follow-up. Record:
 [`../benchmarks/default_proposals_2026-09-05.md`](../benchmarks/default_proposals_2026-09-05.md).
 
+**A BOUNDED `D` IS AVAILABLE AND FREE — staged 2026-09-06, NOT installed.**
+`D`'s 28 declared ids include **f116 and f155**, two of the twelve unbounded
+`contrast_inc` slots (`feature_defs::DEFECT_F17`), and it reads them RAW — it
+has no transform block at all. The serve-time guard (winsor `[p0.1, p99.9]` on
+those slots, with the output spline REFIT on the guarded net so the calibration
+matches what the runtime sees) was measured against the shipped bake on the
+runtime-era postC root with the FLOOR-DENSE ladder instruments and costs
+**nothing**: CID22 an exact tie (paired-bootstrap CI `[+0.00000, +0.00000]`),
+all twelve board corpora inside `8.2e-5`, contract 6/6, every per-codec `A7r`
+floor exactly equal, identity 100.000000, inversions and the corruption gate
+unchanged, and **0 of 4,292 CID22 rows perturbed**. Candidate:
+`d_sdr_add156_id100_negrich_guard12_2026-09-06.bin` (1,523 B, sha256
+`c2db9e29…`) at
+`/mnt/v/output/zensim/rev2-d-arms-2026-09-06/guard/shipped/`. It is **not** a
+rank win — it is a rank NO-OP and a small outlier-ordering loss — so the case
+for it is a bounded input at a measured cost of zero, and **the user rules**.
+Installing it forces a `dense_bake_flip_gate` change (re-point, never weaken):
+recipe [`../benchmarks/rev2_d_arms_2026-09-06.md`](../benchmarks/rev2_d_arms_2026-09-06.md)
+§12.11. Board: `D_shipped@dguard2`, `D_guard12_p999@dguard2`.
+
 **`ZensimProfile::BHdr` — the HDR proposal is KEEP, with named caveats.** UPIQ
 pooled (n=380) **0.7536**, above ssim2-PU 0.7044, above the PU-SSIM literature
 bar 0.7395, and above every one of the 24 HDR944 cells and every arm seed-group
