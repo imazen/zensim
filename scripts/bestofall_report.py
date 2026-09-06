@@ -70,11 +70,18 @@ def load(out):
     return cells
 
 
-def rank_of(d, corpus):
+def rank_of(d, corpus, per_ref=False):
+    """Pooled `srocc_signed` by default; `per_ref_mean` on request.
+
+    They are DIFFERENT statistics of the same predictions and they can disagree
+    in DIRECTION — on `hfnlproxy` this lane's ladder arm ties shipped D pooled
+    (0.49667 vs 0.49210) and LOSES to it per-ref (0.78798 vs 0.83062). A
+    near-lossless claim that does not name its statistic is not a claim.
+    """
     r = d.get("rank", {}).get(corpus)
     if not r:
         return None
-    v = r.get("srocc_signed")
+    v = r.get("per_ref_mean") if per_ref else r.get("srocc_signed")
     return abs(v) if (v is not None and corpus == "konjnd") else v
 
 
@@ -173,7 +180,7 @@ def main():
         w(f"| {arm} | " + " | ".join(cellsv) + " |")
     w("")
 
-    w("## Full rank panel (k-seed means)\n")
+    w("## Full rank panel (k-seed means, POOLED `srocc_signed`)\n")
     w("| arm | " + " | ".join(CORPORA) + " |")
     w("|---|" + "--:|" * len(CORPORA))
     for arm in ARMS:
@@ -181,6 +188,22 @@ def main():
         if not rows:
             continue
         vals = [fmt(agg([rank_of(d, c) for _s, (d, _g) in rows])[0]) for c in CORPORA]
+        w(f"| {arm} | " + " | ".join(vals) + " |")
+    w("")
+
+    # The per-ref twin, because the two disagree in direction on hfnlproxy and a
+    # reader who sees only one of them will draw the wrong conclusion.
+    w("## Same panel, PER-REF means (a different statistic of the same predictions)\n")
+    w("| arm | " + " | ".join(CORPORA) + " |")
+    w("|---|" + "--:|" * len(CORPORA))
+    for arm in ARMS:
+        rows = by_arm.get(arm, [])
+        if not rows:
+            continue
+        vals = [
+            fmt(agg([rank_of(d, c, per_ref=True) for _s, (d, _g) in rows])[0])
+            for c in CORPORA
+        ]
         w(f"| {arm} | " + " | ".join(vals) + " |")
     w("")
 
