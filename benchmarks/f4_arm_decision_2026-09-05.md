@@ -84,3 +84,96 @@ wrong and is corrected here rather than quietly dropped.
 blast radius on its POOL STATE (`feature_set_id`), not on its width. A wave that
 assumes "944 ⇒ 36 slots" will under-declare the moved slots of every
 pools-live table by 96.
+
+---
+
+## 3. ★ C2 — F4's pathology DOES NOT OCCUR in any corpus this box has pixels for
+
+`clamp` is `max(0, 1 − D²)`: bit-identical to the shipped form wherever
+`D² ≤ 1`, different only above it. So a row where clamp moves is a row holding a
+pathological pixel, and clamp is a *detector*, not merely a candidate.
+
+**It fires on nothing.** Across **217,756 rows** — the seven human corpora plus
+the full 196,086-row safesyn training leg — `clamp` moves **0 cells, 0 rows,
+0 slots**:
+
+| corpus | rows | clamp moved rows | rev1 max \|f\| over the 132 F4 slots |
+|---|--:|--:|--:|
+| cid22val | 4,292 | **0** | 1.266 |
+| kadid | 10,125 | **0** | 1.971 |
+| tid | 3,000 | **0** | 1.900 |
+| konjnd | 1,008 | **0** | 1.051 |
+| aic3 | 600 | **0** | 1.085 |
+| csiq | 866 | **0** | 1.763 |
+| live | 779 | **0** | 1.754 |
+| **safesyn** | **196,086** | **0** | **1.913** |
+
+Not one row anywhere reaches even `|f| > 2`, against the 5,814,302 on record.
+That number came from `bigcodec_hqdedup_traindigits_2026-07-02.parquet`, a
+2.3 M-row sweep with **no local pixels** (recalculation manifest §3f); the only
+other sighting is 3 rows in 10,000 of `nonphoto` val (max ~72), which is a
+byte-copy with no pixels either.
+
+**So the F4 outlier is a property of the bigcodec population and is not
+reproducible on this box.** Three consequences, all load-bearing:
+
+1. **G3 cannot be OBSERVED here.** It is instead established where it belongs —
+   at the owner, by test: `ssim_form::tests::only_the_legacy_arm_is_unbounded`
+   (F4 as a *failing* property of the shipped form) and
+   `bounded_arms_keep_d_in_zero_to_two_everywhere`, over a sweep that does reach
+   the pathology. The empirical half of G3 is this table: the shipped population
+   never enters the regime.
+2. **`clamp`'s features are bit-identical to rev1 on every row R6 fits or
+   scores.** Its gram, its fit and its rank are therefore identical too — it
+   cannot win G1, and it cannot lose it. That is a property of the arm, not an
+   inconclusive measurement.
+3. **The rank contest is `c1` vs `lorentz` vs rev1**, and it is a contest about
+   the HEALTHY regime — which is exactly what §1.4's design tension
+   (`lib.rs:204`'s deliberate no-`C1` choice vs `bounded_sim`'s Weber
+   normalisation) is about.
+
+---
+
+## 4. The fits — one owner, one recipe, one thing varied
+
+`bake_dial_refit gram` → `bake_dial_refit fit-lasso`. No script computes a fit,
+a spline or a statistic.
+
+Flags are the `did100 ctl` recipe — the one that reproduces shipped Profile D
+BYTE-IDENTICALLY — with only the input tables swapped for the arm's own:
+
+```
+--space raw --target human_score --lam 2e-3 --tau 0 --n-sweeps 400 --tol 1e-10
+```
+
+* **slices** `0..155` (the ADD156 / Profile-D lineage) and `0..227`
+  (basic + peaks). F4 reaches **36** of the first and **60** of the second, so
+  both carry the signal; the 372-wide slice would add the masked+IW 72 but is
+  not the shipped monotone-linear class.
+* **solvers** `lasso` (the shipped recipe) and `bvls` — the sign-constrained
+  monotone-linear class the user's directive names, `--solver bvls --bounds-tsv
+  benchmarks/feature_sign_mask_2026-05-26.tsv`. The bounded-variable CD solver
+  already existed at the owner (`gram_lasso::box_cd_slice`, with an
+  active-bound fixture test), so no solver was written for this. **Note for
+  readers of the numbers:** `box_cd_slice` takes no `λ` — the `bvls` arm is
+  *bounded least squares*, not "lasso with bounds", and `--lam` is accepted and
+  ignored there.
+* **the sign mask is held FIXED across arms** on purpose: it encodes the
+  structural direction of an error feature, and re-deriving it per arm would
+  vary two things at once.
+* **anchor** — each arm's own 2,000-row safesyn subset (stratified 6 codecs × 16
+  quality points, fixed seed, the SAME rows for every arm), in-era, because a
+  spline fit on revision-1 pixels is not a spline for a revision-2 dial. SROCC
+  is invariant under the monotone spline, so G1 is unaffected by this choice;
+  the dial gates are not, which is why it is in-era. The anchor keeps the raw
+  (unclamped) ssim2 target — the shipped anchor's `max(ssim2, 0)` clamp is the
+  measured cause of shipped B's missing negative tail (G-ADDR §10).
+
+4 arms × 2 slices × 2 solvers = **16 fits**, each differing from the others only
+in its input table and its declared slice/solver.
+
+**The reference point.** Shipped Profile D (`d_sdr_add156_dense_dial_2026-08-31`)
+on the same postC root, scored through the same `bake_verdict`: CID22
+**0.86333**, KonJND **0.53670** (the registered JPEG-504 ruler, which is what
+`bake_verdict` reads for `konjnd`), AIC-3 **0.77700**, CSIQ 0.90167, LIVE
+0.96029, TID 0.82368, KADID 0.80806.
