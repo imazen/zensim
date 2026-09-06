@@ -1270,6 +1270,58 @@ table, so the flag was accepted and discarded (bands 0 vs 8: same digest
 bake sets it, so nothing published is affected. **Whether stratified sampling
 HELPS is unmeasured** — it is merely reachable now.
 
+## F4's ARM IS `Clamp`, AND F4 NEVER FIRES ON A CORPUS WITH LOCAL PIXELS (2026-09-05)
+
+Full record: [`benchmarks/f4_arm_decision_2026-09-05.md`](benchmarks/f4_arm_decision_2026-09-05.md).
+Pre-registration: `docs/PLAN_FEATURE_REV2_2026-09-05.md` §7 (pushed `090d55d7`
+before any table was extracted).
+
+`ssim_form::SsimLumaForm::REV2_LUMA` is **`Clamp`** — `max(0, 1 - D^2)`, not the
+registered prior `SsimLumaC1`. **`SHIPPED_REVISION` is still `Rev1`** and the
+`v1ssimcap` entry is still `Proposed`; the arm is decided, the era is not flipped.
+
+**The fact that decides everything downstream: F4's pathology does not occur.**
+`clamp` differs from the shipped form ONLY where `(mu1-mu2)^2 > 1`, so it is a
+detector — and over **217,756 rows** (cid22val, kadid, tid, konjnd, aic3, csiq,
+live, the full 196,086-row safesyn leg, the 9,593-cell ladder, 400 identity
+pairs) it moves **0 cells**, with no slot anywhere above `|f| > 2`. The
+**5,814,302** that motivates F4 belongs to `bigcodec_hqdedup_traindigits`, which
+has **no local pixels**. Consequences you must not re-derive:
+
+* **`clamp` is BIT-IDENTICAL to revision 1** on features, Gram, lasso/BVLS solve,
+  output spline and ZNPR bytes (all six R6 bakes sha-for-sha). A rev2 flip
+  re-extracts NOTHING whose content resembles those corpora.
+* **Do not price the F4 era break as a full re-extraction** until you have
+  checked the target population with the clamp detector.
+* `c1` (Weber) moves **29.4 M** healthy cells and `lorentz` **24.0 M**, for at
+  most `+0.0025` CID22 in one of six variants. Neither is a fix; both are
+  redesigns. `Lorentz` is the registered successor if tail ORDER ever becomes
+  load-bearing — never `c1`.
+
+**Three corrections this lane measured, all live for readers:**
+
+1. **F4's blast radius keys on POOL STATE (`feature_set_id`), not width.**
+   `ext944`/`ext924` have `f156..371` all-zero (36 moved slots); the 2026-09-05
+   pools-live ladder grid (`foldapp2pools`) is **98.7 %** nonzero there (132).
+2. **The "winsor already clamps it" mitigation covers Profile B ONLY.**
+   `ssim_moment_explosion_2026-07-16.md` §7b's "the pathological rows never reach
+   the linear head" is true of B (372 x `winsor_p99`). **Profile D — the SDR
+   default — carries NO `feature_transforms` and NO `feature_bounds`**, and
+   neither does `v47_strict_qat_native` or the 944 Profile-C family.
+3. **⛔ The unbounded feature that actually fires is `contrast_inc`, not F4.**
+   Max rev1 `|f|` over all 372 slots: safesyn **36,465.7**, LIVE **3,598.2**, TID
+   927.9, KADID 618.3 — every one a `contrast_inc` slot (local 12 of each basic
+   group) = `hf_energy_gain = max(0, hf_dst_L2/hf_src_L2 - 1)`, unbounded above by
+   exactly F4's flat-source mechanism, while its siblings `var_loss` and
+   `tex_loss` are bounded at 1.0 and `mse` at 0.169. **122 of 779 LIVE rows
+   (15.7 %) exceed 100**; p99.9 is 1,088 there. It has **no registered defect, no
+   arm and no gate**. Registering it is the obvious next lane.
+
+**Per-shipped-bake F4 exposure** (read set ∩ the 132 measured F4 slots), so a
+re-verdict is priced not guessed: `v47_strict_qat_native` **125/285**, `bhdr_*`
+20/50 and 49/133, `d_sdr_add156_*` (the SDR default) **4/28**, `b_sdr_linear_*`
+12/95, the 944 Profile-C family 36/667-697.
+
 ## LATENCY + TOKEN DISCIPLINE — idle waiting is re-charged, not cached (2026-08-04)
 
 **MEASURED, `benchmarks/rnd_cycle_audit_2026-08-04.md`.** Over the 2026-08-03/04

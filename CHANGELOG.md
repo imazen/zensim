@@ -2,7 +2,32 @@
 
 ## [Unreleased]
 
-### Measured — R6: F4's pathology does not occur in any corpus this box has pixels for (2026-09-05)
+### Decided — R6: the F4 arm is `Clamp`, and F4's pathology occurs in NO corpus this box has pixels for (2026-09-05)
+
+- **`ssim_form::SsimLumaForm::REV2_LUMA` = `Clamp`** (`max(0, 1 - D^2)`), by the
+  pre-registered §7.6 rule applied step by step. `SHIPPED_REVISION` stays `Rev1`
+  and the `v1ssimcap` registry entry stays `Proposed` — that is what "shipped
+  bytes are unchanged" means, and marking it `Landed` while the shipped
+  revision is `Rev1` would be a false claim about the bytes.
+- **No arm won a rank majority.** `c1` met the 2-of-3 CI-excluding condition in
+  exactly one of six variants (`s372_bvls`: CID22 +0.00016, KonJND +0.00093) and
+  **fails the healthy-cell gate** (29.4 M cells moved, worst |delta| 0.771 vs a
+  1e-4 bar); `lorentz` fails it too (24.0 M / 0.0901) and never reaches a
+  majority. Rule 4 then selects the smallest healthy-cell perturbation:
+  **`clamp`, at 0 cells and 0 max** — the prediction §7.6 rule 5 stated in
+  advance, confirmed.
+- **`clamp` is bit-identical to revision 1 through the whole chain**: features
+  (196,086-row safesyn `cmp`-clean), Gram, lasso/BVLS solve, output spline and
+  ZNPR bytes — all six bakes sha-for-sha — so its rank delta is exactly 0 with a
+  degenerate CI. It is the unique arm that is ONLY a fix.
+- **⛔ An unbounded feature that DOES fire here, and it is not F4.** The largest
+  rev1 values across the ten legs are **36,465.7** (safesyn), 3,598.2 (LIVE),
+  927.9 (TID), 618.3 (KADID) — every one of them a `contrast_inc` slot
+  (`hf_energy_gain = max(0, hf_dst_L2/hf_src_L2 - 1)`), which is unbounded above
+  by exactly F4's flat-source mechanism while its siblings `var_loss` and
+  `tex_loss` are bounded at 1.0. **122 of 779 LIVE rows (15.7 %)** exceed 100.
+  REPORTED, not fixed: it has no registered defect, no arm and no gate. The F4
+  audit's "the one live arithmetic defect" framing is measurably incomplete.
 
 - **Pre-registered first** (`docs/PLAN_FEATURE_REV2_2026-09-05.md` §7, pushed at
   `090d55d7` before a single table was extracted): 4 arms x 8 legs x 3 slices x

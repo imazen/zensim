@@ -2277,4 +2277,21 @@ moved slots) while the 2026-09-05 pools-live ladder grid is 98.7 % nonzero there
 §3.34 priced decoder era at 73 % of an extractor era, so a wave that decodes
 elsewhere is measuring two changes at once.
 
+**★ THE VERDICT: `SsimLumaForm::REV2_LUMA` = `Clamp`.** No arm won a rank
+majority (`c1` met the 2-of-3 CI-excluding condition in 1 of 6 variants and fails
+the healthy-cell gate at 29.4 M cells / worst 0.771 against a 1e-4 bar; `lorentz`
+fails it at 24.0 M / 0.0901), so the pre-registered rule-4 branch fired and chose
+the smallest healthy-cell perturbation — `clamp`, at **0 cells and 0 max**. It is
+BIT-IDENTICAL to revision 1 through features, Gram, solve, spline and ZNPR bytes
+(all 24 bakes; the six `clamp` bakes match their `ssim2` siblings sha for sha).
+`SHIPPED_REVISION` stays `Rev1`.
+
+**⛔ And the unbounded feature that DOES fire on these tables is `contrast_inc`,
+not F4:** max rev1 `|f|` over all 372 slots is **36,465.7** (safesyn), 3,598.2
+(LIVE), 927.9 (TID), 618.3 (KADID) — every one a `contrast_inc` slot
+(`hf_energy_gain = max(0, hf_dst_L2/hf_src_L2 − 1)`), unbounded above by exactly
+F4's flat-source mechanism, while `var_loss`/`tex_loss` are bounded at 1.0.
+**122 of 779 LIVE rows (15.7 %) exceed 100.** No registered defect, no arm, no
+gate — reported, not fixed.
+
 Record: [`../benchmarks/f4_arm_decision_2026-09-05.md`](../benchmarks/f4_arm_decision_2026-09-05.md).

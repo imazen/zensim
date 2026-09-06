@@ -11,6 +11,27 @@
 > above ssim2-PU and every HDR944 arm; G-ADDR on HDR is NOT MEASURED). Grading changes + the
 > reversibility proof: [`dial_addressability_gate_2026-09-04.md`](dial_addressability_gate_2026-09-04.md) §17.
 
+> **★★ R6 — THE F4 ARM IS `Clamp`, AND F4 NEVER FIRES ON REAL PIXELS 2026-09-05:**
+> [`f4_arm_decision_2026-09-05.md`](f4_arm_decision_2026-09-05.md) — four arms of the per-pixel SSIM
+> luminance term extracted from ONE binary over **217,756 rows** (7 human corpora + the full
+> 196,086-row safesyn leg), fitted through the shipped Profile-D recipe at 3 slices x 2 solvers = 24
+> bakes, graded pre-registered ([`../docs/PLAN_FEATURE_REV2_2026-09-05.md`](../docs/PLAN_FEATURE_REV2_2026-09-05.md)
+> §7, pushed at `090d55d7` before a table existed). **`clamp` is a pathology DETECTOR** — it differs
+> from the shipped form only where `(mu1-mu2)^2 > 1` — and it **fires on NOTHING**: 0 cells moved, no
+> slot above `|f| > 2`, against the 5,814,302 on record (which belongs to the bigcodec sweep, no local
+> pixels). So `clamp` is BIT-IDENTICAL to rev1 through features -> Gram -> solve -> spline -> ZNPR bytes
+> (all six bakes sha-for-sha) and its rank delta is exactly 0. `c1` wins a 2-of-3 CI-excluding majority
+> in **one of six** variants (+0.00016 CID22) while moving **29.4 M healthy cells** (worst 0.771 vs a
+> 1e-4 bar); `lorentz` moves 24.0 M. Rule 4 selects `clamp` — the prediction the plan stated in advance.
+> **`SHIPPED_REVISION` stays `Rev1`.** Two corrections found on the way: F4's blast radius keys on
+> **pool state, not width** (`ext944`/`ext924` zero `f156..371`, the 2026-09-05 pools-live ladder grid is
+> 98.7 % nonzero, so F4 reaches 36 slots on one and 132 on the other), and the **"winsor already clamps
+> it" mitigation covers Profile B ONLY** — Profile D, the SDR default, carries no `feature_transforms`
+> and no `feature_bounds` at all. **⛔ And the unbounded feature that DOES fire is `contrast_inc`, not
+> F4**: 36,465.7 on safesyn, 3,598 on LIVE, 122 of 779 LIVE rows above 100 — `hf_energy_gain =
+> max(0, hf_dst_L2/hf_src_L2 - 1)`, unbounded by exactly F4's flat-source mechanism, with no registered
+> defect. Reported, not fixed.
+
 Methodology docs, falsification logs, sweep outputs, perf
 benchmarks, and bake binaries. 76 markdown files as of 2026-05-16,
 organized by theme + chronology. Each entry is one line:

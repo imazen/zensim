@@ -143,11 +143,51 @@ impl SsimLumaForm {
         }
     }
 
-    /// The bounded arm revision 2 ships.
+    /// The bounded arm revision 2 ships — **`Clamp`, DECIDED BY MEASUREMENT**
+    /// (`benchmarks/f4_arm_decision_2026-09-05.md`, R6).
     ///
     /// Named once so the R6 probe and the kernels cannot disagree about which
     /// arm "rev2" means.
-    pub(crate) const REV2_LUMA: Self = Self::SsimLumaC1;
+    ///
+    /// # Why `Clamp` and not [`Self::SsimLumaC1`]
+    ///
+    /// `docs/PLAN_FEATURE_REV2_2026-09-05.md` §1.4 registered a prior — *"if
+    /// the probe cannot separate them, arm A (`SsimLumaC1`) ships"* — because
+    /// it reuses `feature_v2`'s own `bounded_sim` owner and preserves severity
+    /// ORDER among pathological pixels. **The probe DID separate them**, so
+    /// the prior never fired. Four arms were extracted from ONE binary over
+    /// 217,756 rows (the seven human eval corpora + the full 196,086-row
+    /// safesyn training leg), fitted through the shipped Profile-D recipe at
+    /// three slices x two solvers, and graded on rank, dial and cell deltas:
+    ///
+    /// * **F4's pathology occurs on NONE of it.** `Clamp` — which differs from
+    ///   the shipped form only where `(mu1-mu2)^2 > 1` — moves **0 cells**, and
+    ///   no slot anywhere reaches `|f| > 2` against the 5,814,302 on record
+    ///   (which belongs to the bigcodec sweep, a population with no local
+    ///   pixels).
+    /// * **`Clamp` is therefore bit-identical to revision 1 on every row R6
+    ///   fits or scores** — features, Gram, solve, spline and ZNPR bytes, all
+    ///   six bakes sha-for-sha — so its rank delta is exactly 0 with a
+    ///   degenerate CI.
+    /// * `SsimLumaC1` moves **29.4 M** healthy cells (worst |delta| 0.771) and
+    ///   `Lorentz` **24.0 M** (worst 0.0901), against a pre-registered 1e-4
+    ///   bar, to buy at most `+0.0025` CID22 in one of six variants. Both fail
+    ///   the healthy-cell gate; neither wins a rank majority in more than one
+    ///   variant.
+    ///
+    /// So `Clamp` is the unique arm that is ONLY a fix: it changes the metric
+    /// exactly where the metric was unbounded and nowhere else, which is what
+    /// makes a rev2 flip cheap for every table whose content resembles those
+    /// corpora.
+    ///
+    /// **Its known cost, recorded rather than glossed:** above `D^2 = 1` every
+    /// pixel gets the same `num_m = 0`, so tail ORDER is flat there — the exact
+    /// property §1.4's prior was protecting. `d` stays bounded in `[0, 2]`
+    /// regardless. If a future population makes that order load-bearing,
+    /// [`Self::Lorentz`] is the registered successor (bounded, no Weber term,
+    /// monotone in `D^2`, and 4-6 orders of magnitude closer to revision 1 on
+    /// healthy content than `SsimLumaC1`) — not `SsimLumaC1`.
+    pub(crate) const REV2_LUMA: Self = Self::Clamp;
 
     /// Whether `d_raw` is bounded below by 0 by construction, making the
     /// call sites' `.max(0)` floor redundant rather than load-bearing.

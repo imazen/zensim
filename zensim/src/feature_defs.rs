@@ -578,11 +578,17 @@ const REV_F4_PROPOSED: &[Revision] = &[
         era: "v1ssimcap",
         commit: "-",
         status: RevisionStatus::Proposed,
-        note: "F4 fix: cap the per-pixel dissimilarity and restore C1 in \
-               `num_m`. Would change v1's SHIPPED bytes on every image with \
-               high-magnitude chroma, so the migration is re-extract AND \
-               re-verdict the whole 372 lineage. NOT APPLIED — registered here \
-               so the blast radius is a lookup rather than a discovery.",
+        note: "F4 fix: bound the per-pixel dissimilarity's luminance term. The \
+               ARM IS DECIDED — `SsimLumaForm::Clamp`, i.e. `max(0, 1 - D^2)` \
+               — by measurement over 217,756 rows \
+               (benchmarks/f4_arm_decision_2026-09-05.md). Clamp is \
+               BIT-IDENTICAL to revision 1 wherever `D^2 <= 1`, and no corpus \
+               with local pixels reaches past that, so this era moves NOTHING \
+               on content resembling the shipped corpora; the 5.8e6 outlier \
+               that motivates it lives in the bigcodec sweep. STILL PROPOSED, \
+               not landed: `ssim_form::SHIPPED_REVISION` is `Rev1` until the \
+               recalculation and refit land, and Proposed is what `shipped \
+               bytes are unchanged` means.",
     },
 ];
 
