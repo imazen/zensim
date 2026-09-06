@@ -243,6 +243,19 @@ What a rev2 fleet wave needs from R6, in the form it needs it:
   Profile-C family reads exactly the 36 basic slots, which is the zeroed-pool
   count of §2 and a second, independent confirmation of it.
 
+* **⛔ The "winsor already clamps it" mitigation does NOT cover the SDR default.**
+  `ssim_moment_explosion_2026-07-16.md` §7b argued F4 was already neutralised
+  because "B applies `winsor_p99` to all 372 features", so a 5.8e6 never reaches
+  the linear head. MEASURED with `zenpredict inspect`: that is true of
+  **Profile B only** (`zentrain.feature_transforms` = 372 × `winsor_p99`, with
+  per-feature params). **Profile D — today's SDR default — carries NO
+  `feature_transforms` and NO `feature_bounds` at all**, and neither do
+  `v47_strict_qat_native` (Profile A) or the 944 Profile-C family. On every
+  shipped bake except B, an unbounded `d` would go into the head unclamped. So
+  the F4 fix is load-bearing for the default, not merely tidy — and arm C's
+  registered downside ("flattens rank among the worst pixels") is NOT already
+  being paid downstream the way §7b's argument implied.
+
 * **F5 is NOT free** (`feature_rev2_2026-09-05.md` §2.6): flipping revision 2
   moves 22 of the 33 `GLOBAL_*` slots each of three shipped 944 bakes reads, so
   Profiles C and CHdr must be re-verdicted in the same wave.
