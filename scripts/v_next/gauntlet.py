@@ -319,6 +319,16 @@ def family_of(name: str) -> str:
         # view can show the inversion + its cure side by side with the mentor and shipped D.
         return "D-peaks candidates"
     n = name[len("sota944_"):] if name.startswith("sota944_") else name
+    if n.startswith("BOA_"):
+        # The best-of-all lane (benchmarks/best_of_all_2026-09-06.md): the
+        # constrained 228-slot MLP, its control, and the ladder-hinge arms.
+        #
+        # The `BOA_` prefix is not cosmetic. The lane's own arm names are
+        # `A_plain` / `B_nonneg` / …, and `A_`/`B_` are ALREADY claimed below by
+        # "arm A" / "arm B" — so promoting under the raw names would silently
+        # file a constrained-MLP cell into a 944 campaign family. Checked before
+        # those rules for the same reason the era suffix is checked first.
+        return "constrained MLP (228)"
     if n.startswith(("ens_", "W5_", "W6_")):
         return "ensembles"
     if n.startswith(("winner_A_", "A_")):
