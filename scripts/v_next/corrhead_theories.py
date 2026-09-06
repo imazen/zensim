@@ -23,16 +23,35 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from train_corruption_head import load_X, make_classifier  # THE owner
 
-ROOT = "/mnt/v/output/zensim/corruption-head-2026-09-05"
-OUT = f"{ROOT}/theories"
-LADDER = ("/mnt/v/output/zensim/ladder-2026-09-05/instruments/"
-          "dial_grid_372col_ladder.parquet")
-GATE = f"{ROOT}/corruption_grid_372col_postC_2026-09-05.parquet"
-DBAKE = os.path.expanduser("~/work/zen/zensim/zensim/weights/"
-                           "d_sdr_add156_id100_negrich_dial_2026-09-05.bin")
-FWD = os.path.expanduser("~/work/zen/zensim/target/release/"
-                         "predict_features_with_bake")
-CACHE = f"{OUT}/dataset_rev1.npz"
+# Every path below is env-overridable so this driver can be pointed at a
+# DIFFERENT extraction era's tables without a second copy of the driver
+# (rev2 refit lane, 2026-09-06). Omitting the env vars leaves the rev1
+# invocation byte-identical to the one that produced the T1-T9 record.
+#
+# CORRTH_SPLIT_ROOT is separate from CORRTH_ROOT on purpose: the FROZEN split
+# and its parity `metrics.json` live with the INCUMBENT, and a re-extraction at
+# another era must reuse them (the split keys -- ref_id / severe/<source_id> /
+# ladder/<image_id> -- are era-invariant), or the two eras are not paired.
+ROOT = os.environ.get("CORRTH_ROOT",
+                      "/mnt/v/output/zensim/corruption-head-2026-09-05")
+SPLIT_ROOT = os.environ.get("CORRTH_SPLIT_ROOT", ROOT)
+OUT = os.environ.get("CORRTH_OUT", f"{ROOT}/theories")
+LADDER = os.environ.get(
+    "CORRTH_LADDER",
+    "/mnt/v/output/zensim/ladder-2026-09-05/instruments/"
+    "dial_grid_372col_ladder.parquet")
+CORPUS = os.environ.get("CORRTH_CORPUS",
+                        f"{ROOT}/im26_corruption_372_postC.parquet")
+NEGRICH = os.environ.get("CORRTH_NEGRICH", f"{ROOT}/negrich_372_postC.parquet")
+GATE = os.environ.get("CORRTH_GATE",
+                      f"{ROOT}/corruption_grid_372col_postC_2026-09-05.parquet")
+DBAKE = os.environ.get("CORRTH_DBAKE", os.path.expanduser(
+    "~/work/zen/zensim/zensim/weights/"
+    "d_sdr_add156_id100_negrich_dial_2026-09-05.bin"))
+FWD = os.environ.get("CORRTH_FWD", os.path.expanduser(
+    "~/work/zen/zensim/target/release/predict_features_with_bake"))
+CACHE = os.environ.get("CORRTH_CACHE", f"{OUT}/dataset_rev1.npz")
+GATE_CACHE = os.environ.get("CORRTH_GATE_CACHE", f"{OUT}/gate_rev1.npz")
 NFEAT_SLICE = 228          # d228: f0..f227, free at D's V1PoolsMode::Peaks walk
 FP_TARGETS = (0.0025, 0.005, 0.01, 0.05)
 QBANDS = (("q<50", -1e9, 50.0), ("50-85", 50.0, 85.0),
@@ -80,13 +99,13 @@ def prep():
     idx = list(range(372))
 
     log("loading corpus (positives + matched anchors)")
-    Xc, exc = load_X(f"{ROOT}/im26_corruption_372_postC.parquet", idx,
+    Xc, exc = load_X(CORPUS, idx,
                      extra=("is_corruption", "family", "content_class", "severity",
                             "ref_id", "region", "kind"))
     isc = exc["is_corruption"].astype(int)
 
     log("loading negrich (severe-honest negatives)")
-    Xn, exn = load_X(f"{ROOT}/negrich_372_postC.parquet", idx,
+    Xn, exn = load_X(NEGRICH, idx,
                      extra=("source_id", "dist_name", "severity_level"))
 
     log("loading ladder (broad-honest negatives)")
@@ -135,7 +154,7 @@ def prep():
 
     # --- the FROZEN split, read not re-derived -----------------------------
     fmap = {}
-    with open(f"{ROOT}/d228/split.tsv") as f:
+    with open(f"{SPLIT_ROOT}/d228/split.tsv") as f:
         next(f)
         for line in f:
             s_, fo = line.rstrip("\n").split("\t")
@@ -146,7 +165,7 @@ def prep():
     fold = np.array([fmap[s_] for s_ in src])
 
     # --- parity gate against the incumbent's own metrics.json --------------
-    m = json.load(open(f"{ROOT}/d228/metrics.json"))
+    m = json.load(open(f"{SPLIT_ROOT}/d228/metrics.json"))
     got = {k: int(v) for k, v in zip(*np.unique(sub, return_counts=True))}
     if got != m["subclass_counts"]:
         sys.exit(f"PARITY FAIL subclass_counts {got} != {m['subclass_counts']}")
@@ -169,7 +188,7 @@ def prep():
 
     # gate grid, scored separately (never trained on)
     Xg, exg = load_X(GATE, idx, extra=("entry",))
-    np.savez_compressed(f"{OUT}/gate_rev1.npz", X=Xg.astype(np.float32),
+    np.savez_compressed(GATE_CACHE, X=Xg.astype(np.float32),
                         entry=exg["entry"].astype(str),
                         dial=dial_scores(Xg, "gate"))
     log("cached gate grid")

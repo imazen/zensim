@@ -447,7 +447,7 @@ def t6(d):
     `gate_score(perceptual, p, T) = if p > T { min(perceptual, 0) } else { perceptual }`.
     """
     import numpy as np
-    z = np.load(f"{OUT}/gate_rev1.npz", allow_pickle=False)
+    z = np.load(C.GATE_CACHE, allow_pickle=False)
     Xg = z["X"][:, :C.NFEAT_SLICE].astype(np.float64)
     entry = z["entry"]
     dialg = z["dial"]
@@ -623,3 +623,119 @@ def t9(d):
                                 logistic=float((p0 > T0)[m].mean()),
                                 hgb=float((ph > Th)[m].mean())))
     write_tsv(f"{OUT}/t9_axes_best.tsv", reg)
+
+
+# ---------------------------------------------------------------- refit ---
+# The greedy leave-family-out order T4 measured, frozen here so the rev2 refit
+# removes the SAME eight families the rev1 record names (t4_greedy.tsv, k=8).
+GREEDY_TOP8 = ['channel_zero_b', 'block_garbage', 'channel_swap_rb', 'edge_border_top_k4', 'channel_swap_gb', 'noise_salt_pepper_n16', 'edge_duplicate_top_row', 'noise_bit_flip_n1']
+
+
+def refit(d):
+    """The rev1-vs-rev2 refit table the REV2 WAVE lane asks for.
+
+    Three arms on ONE frozen split, every one through the owner's
+    `make_classifier` + this module's SHIPPED-form `fit_probs` (plain estimator
+    on train + isotonic on val), never the trainer's `CalibratedClassifierCV`
+    REPORTING form -- the 2026-09-05 record measures the two differing by up to
+    4.6 points of ladder FP, and the record's own HGB numbers are the shipped
+    form, so a comparison against them has to use it too.
+
+      logistic     the CONTROL (what ships today, arm `d228`)
+      hgb          the CANDIDATE (theory-lane hyperparameters, unchanged)
+      hgb_drop8    the CANDIDATE with T4's greedy top-8 corruption families'
+                   POSITIVES removed from the TRAIN fold only
+
+    Emits `refit_ops.tsv` (detection / severe-honest FP / broad-honest ladder FP
+    / matched-anchor FP / per-q-band FP at each matched-FP target and at
+    T = 0.9 and T = 0.95) and `refit_gate.tsv` (the single-source gate grid:
+    head-alone and DEPLOY `min(dial, 0) if fired` pass rates vs q10 and q20,
+    plus D's dial alone as the floor).
+    """
+    import numpy as np
+    from sklearn.isotonic import IsotonicRegression
+    from sklearn.preprocessing import StandardScaler
+
+    arms = []
+    for label, model, drop in (("logistic", "logistic", ()),
+                               ("hgb", "hgb", ()),
+                               ("hgb_drop8", "hgb", tuple(GREEDY_TOP8))):
+        tr = d.tr
+        if drop:
+            miss = [f for f in drop if f not in set(d.fam.tolist())]
+            if miss:
+                raise SystemExit(f"refit: families absent from this corpus: {miss}")
+            tr = d.tr & ~((d.y == 1) & np.isin(d.fam, list(drop)))
+            log(f"{label}: train {int(d.tr.sum())} -> {int(tr.sum())} "
+                f"(dropped positives of {len(drop)} families)")
+        p, _ = fit_probs(d.Xs, d.y, tr, d.va, model)
+        arms.append((label, model, tr, p))
+        log(f"{label}: pAUC5 = {C.pauc(p, d.corr_te, d.masks_te()['broad_honest'])*100:.2f}")
+
+    rows = []
+    for label, _m, _tr, p in arms:
+        rows += C.op_table(d, p, label)
+    write_tsv(f"{OUT}/refit_ops.tsv", rows)
+
+    # --- honest-cell FP PER CODEC (G-SHIP.6 names it explicitly) ------------
+    # Ladder rows only: they are the broad-honest negatives and the only rows
+    # that carry a codec identity. Reported at both thresholds and, because the
+    # 2026-09-05 record measured the ladder FP to be concentrated at HIGH
+    # quality rather than spread, split at q >= 95 as well.
+    bh = d.te & (d.sub == "broad_honest")
+    percodec = []
+    for label, _m, _tr, p in arms:
+        for T in (0.9, 0.95):
+            fired = p > T
+            for cdc in sorted(set(d.codec[bh])):
+                m = bh & (d.codec == cdc)
+                hi = m & (d.q >= 95.0)
+                percodec.append(dict(
+                    arm=label, T=T, codec=cdc, n=int(m.sum()),
+                    fp=float(fired[m].mean()) if m.sum() else float("nan"),
+                    n_q95=int(hi.sum()),
+                    fp_q95=float(fired[hi].mean()) if hi.sum() else float("nan")))
+    write_tsv(f"{OUT}/refit_percodec.tsv", percodec)
+
+    # --- the held-out single-source gate grid + the DEPLOY composition ------
+    z = np.load(C.GATE_CACHE, allow_pickle=False)
+    Xg = z["X"][:, :C.NFEAT_SLICE].astype(np.float64)
+    entry, dialg = z["entry"], z["dial"]
+    kind = np.array([e.rsplit("__", 1)[1] for e in entry])
+    trip = np.array([e.rsplit("__", 1)[0] for e in entry])
+    pos, q10, q20 = kind == "corruption", kind == "q10", kind == "q20"
+    hon = q10 | q20
+    pt = {t: i for i, t in enumerate(trip[pos])}
+    ip = np.where(pos)[0]
+    o10 = np.array([pt[t] for t in trip[q10]])
+    o20 = np.array([pt[t] for t in trip[q20]])
+
+    gate = []
+    for label, model, tr, _p_eval in arms:
+        sc = StandardScaler().fit(d.Xs[tr])
+        Z = lambda M: np.clip(sc.transform(M), -8, 8)
+        clf = C.make_classifier(model).fit(Z(d.Xs[tr]), d.y[tr])
+        raw = lambda M: (clf.decision_function(Z(M)) if hasattr(clf, "decision_function")
+                         else np.log(np.clip(clf.predict_proba(Z(M))[:, 1], 1e-12, 1-1e-12) /
+                                     np.clip(1-clf.predict_proba(Z(M))[:, 1], 1e-12, 1-1e-12)))
+        pv = 1 / (1 + np.exp(-raw(d.Xs[d.va])))
+        iso = IsotonicRegression(out_of_bounds="clip").fit(pv, d.y[d.va])
+        pr = 1 / (1 + np.exp(-raw(Xg)))
+        pg = C.rank_break(iso.predict(pr), pr)
+        head_only = 100.0 * (1.0 - pg)
+        for T in (0.9, 0.95):
+            dep = np.where(pg > T, np.minimum(dialg, 0.0), dialg)
+            gate.append(dict(
+                arm=label, T=T,
+                det_gate=float((pg[pos] > T).mean()),
+                fp_gate_anchor=float((pg[hon] > T).mean()),
+                head_pass_q10=float((head_only[ip][o10] < head_only[q10]).mean()),
+                head_pass_q20=float((head_only[ip][o20] < head_only[q20]).mean()),
+                deploy_pass_q10=float((dep[ip][o10] < dep[q10]).mean()),
+                deploy_pass_q20=float((dep[ip][o20] < dep[q20]).mean())))
+    gate.append(dict(arm="D dial alone", T="-", det_gate="", fp_gate_anchor="",
+                     head_pass_q10="", head_pass_q20="",
+                     deploy_pass_q10=float((dialg[ip][o10] < dialg[q10]).mean()),
+                     deploy_pass_q20=float((dialg[ip][o20] < dialg[q20]).mean())))
+    write_tsv(f"{OUT}/refit_gate.tsv", gate)
+    log(f"refit done -> {OUT}/refit_ops.tsv + refit_gate.tsv")

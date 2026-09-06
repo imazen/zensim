@@ -4,6 +4,33 @@
 
 > **★ RETROSPECTIVE 2026-07-26:** [`best_per_day_summer_2026.md`](best_per_day_summer_2026.md) — the **best model per calendar day** (2026-05-01 → 07-25), with verified bake paths, recipes, headline metrics, and the summer champions (best CID22 = winner_dial 0.894; best KonJND = cl_tfm 0.761; best HF-NL/dial = Ebothg_scr0.5_dial; shipped B/A/BHdr). Machine-readable twin: `/mnt/v/output/zensim/reports/best_per_day.json`. The one-stop map of every model-experiment day this summer.
 
+> **★★ REV2 REFIT — THE SHIPPED D CHAIN AT REVISION 2 IS A PROPOSAL THAT FAILS TWO SHIP GATES 2026-09-06:**
+> [`rev2_refit_2026-09-06.md`](rev2_refit_2026-09-06.md) — the REFIT sub-lane of the REV2 WAVE
+> (`zenmetrics/docs/PLAN_REV2_WAVE_2026-09-06.md` §4-5). Controls first: this tree reproduces the
+> shipped Profile-D bake **BYTE-FOR-BYTE** (`densify` → `cd1098b4…`), `extend-top` is a confirmed
+> byte no-op, and R6b's `ratio_ladder.parquet` is byte-identical to the canonical ladder instrument.
+> **★ The headline contradicts R6b's shape: in the shipped-D chain revision 2 COSTS CID22 −0.00456
+> [−0.00549, −0.00364] where R6b's own fit GAINED +0.00272 — because the two lanes fitted different
+> model classes on the same tables (146-148 active layer-0 inputs vs this lineage's 28-33). F17's
+> CID22 benefit does NOT transfer to the sparse ADD156 lineage — and on the DENSE fast-class MLP it
+> is inert (every k=3 delta smaller than the arm's own seed spread).** G-SHIP.2 dial contract PASSES
+> 6/6; G-SHIP.3 fails on **one codec** (`avif-rav1e` 23/39 ladders vs a 25/39 mentor bar, while jpeg
+> IMPROVES 28→30); G-SHIP.4 inversions PASS. Perf: the wall-time W4 cell is **NOT MEASURED** (a
+> sibling lane held ~27.7 of 32 threads and this repo's protocol forbids a contended sweep) and the
+> load-insensitive quantity IS — callgrind Ir **+0.03515 %** against a **+43 Ir** determinism control.
+> G-SHIP.6: the corruption head's HGB **candidate is invariant** to the revision (ladder-FP and
+> near-lossless-FP deltas exactly **0.000000000** at T = 0.9, per codec identical to 9 decimals,
+> DEPLOY `pass_q20` 99.85 % on both) while the shipped **logistic gets WORSE at matched threshold**
+> (+3.48 pt ladder FP and +6.55 pt near-lossless for +4.92 pt detection) — so the head does not need
+> refitting when the revision flips, and it neither rescues nor worsens the verdict.
+> **★ Three findings beyond the gates:** DEPLOY `pass_q10` is not a measure of head quality but the
+> SIGN of one image's q10 dial across a **0.39-point** cliff (three heads spanning 88.24/99.40/98.81
+> all collapse to the SAME 12.50 %); a per-seed paired bootstrap on the fast-class gives CID22 deltas
+> whose **sign flips across three seeds with all three CIs excluding zero**, because the pair
+> bootstrap cannot see initialisation variance; and the corpus the corruption head trains on carries
+> revision-1 `contrast_inc` up to **1.30e7** — 3.7e7× the pathology bar and 357× the worst R6b
+> measured, all of it pinned to the linear head's ±8 clip. Nothing installed into `ZensimProfile::D`.
+
 > **★ 2026-09-05 — DEFAULT PROPOSALS:** [`default_proposals_2026-09-05.md`](default_proposals_2026-09-05.md)
 > — the SDR + HDR default answer under the 2026-09-05 G-ADDR ruling (`resolvable` floor window
 > operative, `A1`-`A6` report-only). **SDR: keep Profile D** (the only scorer passing both tiers on

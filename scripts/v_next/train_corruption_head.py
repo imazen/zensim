@@ -496,6 +496,15 @@ def main():
                          "in the 944 layout). Same coefficients, wider drop list, so "
                          "one fit serves both without a second training run. Written "
                          "next to --bake-out as `<stem>_w<width>.bin`.")
+    ap.add_argument("--drop-positive-family", action="append", default=None,
+                    metavar="FAMILY",
+                    help="Remove POSITIVES of this corruption family from the TRAIN "
+                         "fold only (val/test untouched, negatives untouched). Repeatable. "
+                         "This is the leave-family-out intervention T4 of "
+                         "benchmarks/corruption_head_theories_2026-09-06.md measured with a "
+                         "hand-rolled mask in its study driver; hoisted here so the driver "
+                         "and this trainer use ONE owner for it. Default (absent) leaves the "
+                         "train fold byte-identical to a run without the flag.")
     ap.add_argument("--feat-subset", default=None,
                     help="npy of feature indices to restrict to (e.g. the dial+diffmap "
                          "foldable subset). Default: f0..f{nfeat-1}.")
@@ -605,6 +614,18 @@ def main():
     sub = np.concatenate([p[6] for p in parts])
     which = split_ids(src, rng)
     tr, va, te = which == "train", which == "val", which == "test"
+    if a.drop_positive_family:
+        drop = list(dict.fromkeys(a.drop_positive_family))
+        unknown = [f for f in drop if f not in set(fam.tolist())]
+        if unknown:
+            raise SystemExit(f"--drop-positive-family names {unknown} which are not "
+                             f"families in this corpus")
+        cull = (y == 1) & np.isin(fam, drop)
+        n_before = int(tr.sum())
+        tr = tr & ~cull
+        print(f"drop-positive-family: {len(drop)} families culled from TRAIN only "
+              f"({n_before} -> {int(tr.sum())} train rows; val/test untouched): "
+              + ", ".join(drop))
     print(f"total {len(X)} rows | split train {tr.sum()} / val {va.sum()} / test {te.sum()} | "
           f"subclasses {dict(zip(*np.unique(sub, return_counts=True)))}")
 

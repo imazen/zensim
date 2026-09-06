@@ -39,7 +39,16 @@ def main():
     ap.add_argument("--meta", required=True,
                     help="idx/source_id/dist_name/severity_level/score_zensim TSV")
     ap.add_argument("--feats", required=True,
-                    help="extract_features_372col CSV (human_score carries idx)")
+                    help="extract_features_372col CSV (--idx-col carries idx)")
+    ap.add_argument("--idx-col", default="human_score",
+                    help="CSV column carrying the meta idx. Default `human_score`, "
+                         "which is what the header-driven `--corpus pairs-tsv` writes "
+                         "when the pairs TSV names its idx column `human_score`. A "
+                         "pairs TSV that names it `target` instead lands it in an "
+                         "EXTRA target column of the same name (the loader only "
+                         "recognises `human_score`), and reading `human_score` there "
+                         "silently collapses every row onto idx 0 — measured 2026-09-06, "
+                         "60,000 rows in and 1 row out, no error.")
     ap.add_argument("--out", required=True)
     ap.add_argument("--nfeat", type=int, default=372)
     a = ap.parse_args()
@@ -53,7 +62,7 @@ def main():
     feats, order = {}, []
     with open(a.feats) as f:
         for r in csv.DictReader(f):
-            idx = int(float(r["human_score"]))
+            idx = int(float(r[a.idx_col]))
             v = np.array([float(r[c]) for c in cols], dtype=np.float32)
             if not np.all(np.isfinite(v)):
                 continue
