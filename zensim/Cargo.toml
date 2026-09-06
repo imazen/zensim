@@ -52,6 +52,12 @@ avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## to justify a re-extract). Default OFF. Adds only a sum; it CANNOT change any
 ## feature value, so on/off builds produce identical bakes.
 iw-diagnostics = []
+## The companion CORRUPTION HEAD: a gradient-boosted tree ensemble in its own
+## `ZCTH` wire format (`zensim::corruption_head`), plus the one owner of the
+## deploy composition. NOT default: `Zensim::compute` never runs it, and the
+## public API delta on a default build is zero. Adds no dependency.
+## Design: `docs/PLAN_CORRHEAD_SERVING_2026-09-06.md`.
+corruption-head = []
 ## TEST-ONLY scalar oracle for the pooled-feature math (`feature_v2::oracle`):
 ## an L1 Neumaier-compensated reference plus an L2 EXACT Shewchuk-expansion
 ## accumulator, used as ground truth for the era-2 error bounds

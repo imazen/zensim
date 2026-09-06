@@ -218,6 +218,15 @@
 mod attribution;
 mod blur;
 mod color;
+// The companion CORRUPTION HEAD (`docs/PLAN_CORRHEAD_SERVING_2026-09-06.md`):
+// a gradient-boosted tree ensemble in its own `ZCTH` wire format, plus the ONE
+// owner of the deploy composition `gate_score`. Gated and `#[doc(hidden)]`:
+// nothing here is on `Zensim::compute`'s default path and the public API delta
+// on a default build is ZERO. The public shape is PROPOSED in the plan doc and
+// awaits the user's approval before it becomes a supported surface.
+#[cfg(feature = "corruption-head")]
+#[doc(hidden)]
+pub mod corruption_head;
 mod diffmap;
 mod error;
 mod fused;
