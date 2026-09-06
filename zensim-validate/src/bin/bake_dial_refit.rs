@@ -1151,6 +1151,7 @@ fn cmd_gate(a: &GateArgs) -> Result<bool, String> {
     let tanh_pin = extract_tanh_output_head_scale(&model);
     let has_transforms = model.has_nontrivial_feature_transforms();
     let mut predictor = zenpredict::Predictor::new(&model);
+    let gather = zensim_validate::bake_runtime::CallerGather::for_model(&model);
     let mut scratch = vec![0f32; n];
     let raw: Vec<f64> = feats
         .iter()
@@ -1165,6 +1166,7 @@ fn cmd_gate(a: &GateArgs) -> Result<bool, String> {
                 hybrid.as_ref(),
                 tanh_pin,
                 None,
+                &gather,
                 &mut scratch,
                 row,
             ),
@@ -3532,6 +3534,7 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
         }
         let transformed = model.has_nontrivial_feature_transforms();
         let mut predictor = zenpredict::Predictor::new(model);
+        let gather = zensim_validate::bake_runtime::CallerGather::for_model(model);
         let mut xbuf = vec![0f32; n_in];
         // `--score-units`: the SAME post-network dispatch `bake_verdict`'s
         // scorer runs, through the shared owner — nothing re-implemented here.
@@ -3563,6 +3566,7 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
                         hyb.as_ref(),
                         tanh,
                         ospline.as_ref(),
+                        &gather,
                         &mut xbuf,
                         row,
                     ),

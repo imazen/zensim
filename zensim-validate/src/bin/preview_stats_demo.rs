@@ -79,7 +79,7 @@ const BAKE_TUNER_V4: &[u8] =
 // ============================================================================
 
 use zensim_validate::bake_runtime::{
-    HybridHeadDispatch, PerSampleAlphaHeadDispatch, extract_hybrid_head,
+    CallerGather, HybridHeadDispatch, PerSampleAlphaHeadDispatch, extract_hybrid_head,
     extract_per_sample_alpha_head, extract_tanh_output_head_scale, score_row,
 };
 
@@ -217,6 +217,7 @@ struct LoadedBake {
     hybrid_head: Option<HybridHeadDispatch>,
     tanh_pin_scale: Option<f64>,
     output_spline: Option<OutputCalibrationSpline>,
+    gather: CallerGather,
     n_inputs: usize,
 }
 
@@ -229,6 +230,7 @@ fn load_bake_for_profile(entry: &ProfileEntry) -> Result<LoadedBake, String> {
     let tanh_pin_scale = extract_tanh_output_head_scale(&model);
     let output_spline = output_calibration_spline::extract(&model);
     let n_inputs = model.caller_input_width();
+    let gather = CallerGather::for_model(&model);
     Ok(LoadedBake {
         label: entry.label,
         model,
@@ -237,6 +239,7 @@ fn load_bake_for_profile(entry: &ProfileEntry) -> Result<LoadedBake, String> {
         hybrid_head,
         tanh_pin_scale,
         output_spline,
+        gather,
         n_inputs,
     })
 }
@@ -253,6 +256,7 @@ fn score_features(bake: &LoadedBake, scratch: &mut Vec<f32>, row: &[f64]) -> f64
         bake.hybrid_head.as_ref(),
         bake.tanh_pin_scale,
         bake.output_spline.as_ref(),
+        &bake.gather,
         scratch,
         row,
     )

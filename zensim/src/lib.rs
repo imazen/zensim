@@ -318,6 +318,36 @@ pub(crate) mod feature_layout;
 #[doc(hidden)]
 pub use feature_layout::FEATURE_IDS_KEY as ZENTRAIN_FEATURE_IDS_KEY;
 
+/// The feature ids a bake DECLARES, in ascending order — or `None` when it
+/// declares the identity layout, which is every bake that shipped before
+/// 2026-09-06.
+///
+/// **This is the consumer-side half of the dense contract, and it must exist
+/// or dense bakes are silently mis-scored.** `zensim`'s own scoring path
+/// gathers a declared bake's ids out of the walk's identity-laid-out vector
+/// (`metric.rs`, the `declared_layout` branch). Every EVALUATION tool in
+/// `zensim-validate` builds its own scratch and copies `row[..n_inputs]`
+/// positionally — correct for an identity layout, and wrong by construction
+/// for a dense one, where position 3 is whatever id the bake declared third.
+/// Exported (doc-hidden, not the supported surface) so those tools gather
+/// through the SAME owner rather than re-parsing the metadata key.
+///
+/// `None` means "copy positionally, exactly as before" — so a caller that
+/// threads this through changes no byte for any existing bake.
+#[cfg(feature = "feature-regime-v2")]
+#[doc(hidden)]
+pub fn declared_feature_ids(model: &crate::mlp::Model) -> Option<Vec<u16>> {
+    let layout = feature_layout::declared_layout(model);
+    if layout.is_identity() {
+        return None;
+    }
+    Some(
+        (0..layout.width())
+            .map(|pos| layout.slot_at(pos).unwrap_or(u16::MAX))
+            .collect(),
+    )
+}
+
 #[cfg(feature = "feature-regime-v2")]
 #[allow(dead_code)]
 pub(crate) mod feature_plan;

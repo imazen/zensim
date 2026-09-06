@@ -59,6 +59,32 @@ for one release. **No crates.io publish in this work.**
   `benchmarks/cruft_inventory_2026-09-06.md`. Plan:
   `docs/PLAN_CRUFT_PURGE_2026-09-06.md`.
 
+### Added — every evaluation scorer GATHERS a dense bake's ids instead of slicing (2026-09-06)
+
+- `bake_runtime::CallerGather` (`Positional` | `ByFeatureId`) is the caller-side
+  half of the dense contract, built once per bake and threaded through
+  `score_row` / `score_row_minmax` / `score_with_bake_alloc` and all six scoring
+  bins. `zensim` already gathered a declared bake's ids; **`zensim-validate` did
+  not** — every eval tool copied `row[..n_inputs]` positionally, which is correct
+  for an identity layout and wrong by construction for a dense one, where
+  position 3 is whatever id the bake declared third. A dense bake would have been
+  silently mis-scored by `bake_verdict` and every sibling. This is the
+  prerequisite for converting ANY shipped bake, which is why none has been.
+- `zensim::declared_feature_ids` (`#[doc(hidden)]`) is the ONE owner both sides
+  resolve through, so the runtime and the eval tools cannot disagree about which
+  ids a bake reads.
+- The `gather` parameter is deliberately **not** an `Option` with a `None`
+  default: a new scorer must decide, where it loads the bake, which of the two
+  it means. That is the difference between "dense bakes are refused" and "dense
+  bakes are quietly mis-scored".
+- Byte-neutral for every bake that exists: `Positional` is gated against an
+  explicit reimplementation of the pre-2026-09-06 fill
+  (`positional_gather_reproduces_the_old_fill_exactly`, three width regimes,
+  `to_bits` equality), and the end-to-end gate
+  (`a_dense_bake_scores_like_its_wide_twin_through_score_row`) scores a dense
+  bake and its wide twin to the same bits with a NEGATIVE CONTROL proving a
+  positional slice of the same dense bake does NOT agree.
+
 ### Fixed — `bake_verdict` no longer scores a corpus NARROWER than the bake (2026-09-06)
 
 - `bake_runtime::score_row` sizes its scratch to the bake's caller width and

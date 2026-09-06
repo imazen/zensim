@@ -175,7 +175,7 @@ fn ds_auc(predicted: &[f64], human: &[f64], diff_threshold: f64) -> f64 {
 // ============================================================================
 
 use zensim_validate::bake_runtime::{
-    extract_hybrid_head, extract_minmax_head, extract_per_sample_alpha_head,
+    CallerGather, extract_hybrid_head, extract_minmax_head, extract_per_sample_alpha_head,
     extract_tanh_output_head_scale, score_row, score_row_minmax,
 };
 
@@ -1613,6 +1613,11 @@ fn score_grid_one(
     let tanh_pin_scale = extract_tanh_output_head_scale(model);
     let output_spline = zensim_validate::output_calibration_spline::extract(model);
     let minmax_head = extract_minmax_head(model);
+    // The bake's declared layout, resolved ONCE per grid rather than per row.
+    // Identity for every bake that shipped before 2026-09-06, so the fill is
+    // byte-for-byte what it was; a bake declaring `zentrain.feature_ids` is
+    // GATHERED instead of sliced.
+    let gather = CallerGather::for_model(model);
 
     // One row's prediction reads only that row (the `Predictor`'s scratch
     // is fully overwritten per call, and every head/spline handle above is
@@ -1638,6 +1643,7 @@ fn score_grid_one(
                     hybrid_head.as_ref(),
                     tanh_pin_scale,
                     output_spline.as_ref(),
+                    &gather,
                     scratch,
                     row,
                 ),

@@ -193,7 +193,7 @@ dial anchors, and the fast-class legs. **bigcodec and KADIS are REGISTERED as
 fleet jobs** through the existing `JobKind::Feature` executor, **not run in this
 lane** — they are millions of rows.
 
-### B-2. The consumers gather by id (NEXT — the prerequisite for converting anything)
+### B-2. The consumers gather by id — **DONE 2026-09-06**
 
 `bake_runtime::score_row` takes a caller-sized `&mut [f32]` scratch and fills it
 positionally. It must instead take a per-bake row adapter that knows the bake's
@@ -208,6 +208,29 @@ scratch fill is byte-identical and `scripts/verify_verdict_identity.sh` reports
 with the same bake scored through `Zensim::compute` on the same pixels.
 **Gate B-2.3** — a dense bake reaching an un-migrated scorer REFUSES rather than
 slicing. No positional fallback survives that could quietly serve the wrong ids.
+
+**RESULTS.** `bake_runtime::CallerGather` (`Positional` | `ByFeatureId`), built
+once per bake and threaded through `score_row`, `score_row_minmax`,
+`score_with_bake_alloc` and all six scoring bins; resolved through
+`zensim::declared_feature_ids`, the ONE owner both sides read.
+
+| gate | result |
+|---|---|
+| **B-2.1** identity bakes unchanged | **PASS.** `positional_gather_reproduces_the_old_fill_exactly` compares the arm against an explicit reimplementation of the OLD code at three width regimes (`dst` shorter, equal, longer than the row) on `to_bits`. `cargo test --workspace` green. |
+| **B-2.2** dense == wide | **PASS.** `a_dense_bake_scores_like_its_wide_twin_through_score_row` — two synthetic bakes that are the same function of the same three ids score to the same bits, with a NEGATIVE CONTROL asserting a positional slice of the dense one does NOT agree (so the test cannot pass vacuously). |
+| **B-2.3** no silent positional fallback | **PASS by construction.** The parameter is not an `Option`; a new scorer cannot omit it. |
+
+**End-to-end P-SCORE evidence.** `bake_verdict` on shipped **B** at the default
+(current-extractor) 372 root, with the whole B + B-2 stack in place, reads
+**CID22 SROCC 0.8821166166351724** and **kon504 |0.5193759178072009|** — which
+reproduce the two values `CLAUDE.md` recorded for that bake on that root BEFORE
+this lane existed (**0.88212** and **|0.51938|**) to every published digit. Two
+independently-recorded numbers, both unmoved.
+
+**Honest scope:** B-2.3 is enforced by the type, not by a runtime refusal. A
+scorer that deliberately passes `Positional` for a dense bake still mis-scores
+it — the guarantee is that doing so is now a written decision at the call site
+rather than the default.
 
 ### D. Delete the superseded derivations
 

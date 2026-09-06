@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 use zenpredict::{Model, Predictor};
 use zensim_validate::bake_runtime::{
-    extract_hybrid_head, extract_per_sample_alpha_head as extract_per_sample_alpha,
+    CallerGather, extract_hybrid_head, extract_per_sample_alpha_head as extract_per_sample_alpha,
     extract_tanh_output_head_scale, score_row as score_row_shared,
 };
 use zensim_validate::parquet_loader;
@@ -35,12 +35,14 @@ type PerSampleHeadPayload = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
 /// `(rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)` payload.
 type HybridHeadPayload = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
 
+#[allow(clippy::too_many_arguments)]
 fn score_row(
     predictor: &mut Predictor<'_>,
     has_transforms: bool,
     per_sample: Option<&PerSampleHeadPayload>,
     hybrid: Option<&HybridHeadPayload>,
     tanh_pin_scale: Option<f64>,
+    gather: &CallerGather,
     f32_features: &mut [f32],
     row: &[f64],
 ) -> f64 {
@@ -51,6 +53,7 @@ fn score_row(
         hybrid,
         tanh_pin_scale,
         None,
+        gather,
         f32_features,
         row,
     )
@@ -103,6 +106,7 @@ fn main() -> Result<(), String> {
     let g = parquet_loader::load_parquet(&parquet, "rows", "human_score", 1.0)?;
     let humans = g.human_scores;
     let mut predictor = Predictor::new(&model);
+    let gather = CallerGather::for_model(&model);
     let mut scratch = vec![0.0f32; n_inputs];
 
     let mut writer: Box<dyn std::io::Write> = match output {
@@ -117,6 +121,7 @@ fn main() -> Result<(), String> {
             per_sample.as_ref(),
             hybrid.as_ref(),
             tanh_pin_scale,
+            &gather,
             &mut scratch,
             row,
         );

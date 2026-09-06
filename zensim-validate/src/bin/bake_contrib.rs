@@ -578,6 +578,7 @@ fn main() -> ExitCode {
     let mut parity_max = 0.0f64;
     let mut parity_violations = 0usize;
     let mut predictor = Predictor::new(&model);
+    let gather = zensim_validate::bake_runtime::CallerGather::for_model(&model);
     let mut scratch = vec![0.0f32; n_inputs];
 
     for c in &data {
@@ -595,6 +596,7 @@ fn main() -> ExitCode {
                 hybrid.as_ref(),
                 pin,
                 spline.as_ref(),
+                &gather,
                 &mut scratch,
                 row,
             );
@@ -1225,6 +1227,7 @@ mod tests {
                 None,
                 None,
                 None,
+                &zensim_validate::bake_runtime::CallerGather::Positional,
                 &mut scratch,
                 &row,
             );

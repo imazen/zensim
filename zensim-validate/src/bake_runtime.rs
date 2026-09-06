@@ -298,9 +298,21 @@ pub fn score_row_minmax(
     let params = model.feature_transform_params();
     let mean = model.scaler_mean();
     let scale = model.scaler_scale();
+    // The caller row is IDENTITY-laid-out; a bake that declares a DENSE read
+    // set takes `row[ids[i]]` at layer-0 index `i`. Derived per call because
+    // min-max bakes are rare and this path already allocates `x`; the hot
+    // paths hoist a `CallerGather` instead.
+    let gather = CallerGather::for_model(model);
     let mut x = vec![0.0f64; n];
     for (i, slot) in x.iter_mut().enumerate() {
-        let raw = *row.get(i).unwrap_or(&0.0) as f32;
+        let src = match &gather {
+            CallerGather::Positional => i,
+            // `ids.len() == caller_input_width() == n` is guaranteed by
+            // `declared_layout` plus the equality check above; `get` keeps a
+            // future shape bug from panicking inside a scorer.
+            CallerGather::ByFeatureId(ids) => ids.get(i).map_or(usize::MAX, |&v| usize::from(v)),
+        };
+        let raw = *row.get(src).unwrap_or(&0.0) as f32;
         let t = match (transforms, params) {
             (Some(tf), Some(p)) => tf[i].apply_with_params(raw, &p[i]),
             (Some(tf), None) => tf[i].apply_with_params(raw, &[]),
@@ -330,6 +342,75 @@ pub fn score_row_minmax(
     apply_post_dispatch(best_min, tanh_pin_scale, output_spline)
 }
 
+/// How a caller's feature row becomes the bake's input vector.
+///
+/// **The dense contract's consumer half** (`docs/PLAN_CRUFT_PURGE_2026-09-06.md`
+/// increment B-2). A bake that declares `zentrain.feature_ids` reads its ids at
+/// PACKED positions, so a positional copy would hand it whatever happened to sit
+/// at those indices — plausible numbers, wrong features, no error. Build one per
+/// bake (never per row) and thread it through [`score_row`].
+///
+/// [`CallerGather::Positional`] is byte-for-byte what this code did before the
+/// type existed, and it is what EVERY bake shipped before 2026-09-06 resolves
+/// to — so threading this through moves no number.
+///
+/// The `gather` parameter on [`score_row`] is deliberately **not** an `Option`
+/// with a `None` default: a new scorer must decide, at the site where it loads
+/// a bake, which of the two it means. That is the difference between "dense
+/// bakes are refused" and "dense bakes are quietly mis-scored".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallerGather {
+    /// Copy `min(n_inputs, row.len())` positions, zero the tail.
+    Positional,
+    /// Take `row[ids[j]]` into slot `j`; an id past the row's width becomes
+    /// `0.0`, which is the same structural fill `Layout::gather` writes.
+    ByFeatureId(Vec<u16>),
+}
+
+impl CallerGather {
+    /// The gather this bake declares. Resolves through
+    /// `zensim::declared_feature_ids` — the ONE owner of the declaration — so
+    /// the evaluation tools and the `zensim` runtime cannot disagree about
+    /// which ids a bake reads.
+    pub fn for_model(model: &Model) -> CallerGather {
+        match zensim::declared_feature_ids(model) {
+            Some(ids) => CallerGather::ByFeatureId(ids),
+            None => CallerGather::Positional,
+        }
+    }
+
+    /// Is this bake dense? Used by callers that want to REPORT the fact.
+    pub fn is_dense(&self) -> bool {
+        matches!(self, CallerGather::ByFeatureId(_))
+    }
+
+    /// Fill `dst` (already sized to the bake's caller width) from `row`.
+    pub fn fill(&self, dst: &mut [f32], row: &[f64]) {
+        match self {
+            CallerGather::Positional => {
+                let take = dst.len().min(row.len());
+                for i in 0..take {
+                    dst[i] = row[i] as f32;
+                }
+                for f in &mut dst[take..] {
+                    *f = 0.0;
+                }
+            }
+            CallerGather::ByFeatureId(ids) => {
+                for (slot, &id) in dst.iter_mut().zip(ids.iter()) {
+                    *slot = row.get(usize::from(id)).copied().unwrap_or(0.0) as f32;
+                }
+                // A dst longer than the declaration is a shape bug upstream;
+                // zero rather than leave stale scratch, matching Positional.
+                let tail = ids.len().min(dst.len());
+                for f in &mut dst[tail..] {
+                    *f = 0.0;
+                }
+            }
+        }
+    }
+}
+
 /// Score one row through a loaded MLP `Predictor`.
 ///
 /// Per DEDUP-M, this is the single canonical implementation of the
@@ -344,8 +425,10 @@ pub fn score_row_minmax(
 /// Order of operations (bit-exact with the per-bin copies + the canonical
 /// `zensim::metric::apply_mlp_scoring_with_codec` flow):
 ///
-/// 1. Copy `min(n_inputs, row.len())` features into the scratch buffer,
-///    zero-pad any trailing slots.
+/// 1. Fill the scratch buffer from `row` — see [`CallerGather`]. Either a
+///    positional copy of `min(n_inputs, row.len())` with the tail zeroed
+///    (identity layouts: every bake that shipped before 2026-09-06), or a
+///    GATHER of the ids the bake declares (dense layouts).
 /// 2. `predictor.predict_transformed` if `has_transforms`, else
 ///    `predictor.predict`.
 /// 3. Per-sample-α head, hybrid head, or first-output fallback —
@@ -363,17 +446,11 @@ pub fn score_row(
     hybrid_head: Option<&HybridHeadDispatch>,
     tanh_pin_scale: Option<f64>,
     output_spline: Option<&OutputCalibrationSpline>,
+    gather: &CallerGather,
     f32_features: &mut [f32],
     row: &[f64],
 ) -> f64 {
-    let n_inputs = f32_features.len();
-    let take = n_inputs.min(row.len());
-    for i in 0..take {
-        f32_features[i] = row[i] as f32;
-    }
-    for f in &mut f32_features[take..] {
-        *f = 0.0;
-    }
+    gather.fill(f32_features, row);
     let result = if has_transforms {
         predictor.predict_transformed(f32_features)
     } else {
@@ -425,6 +502,9 @@ pub fn score_with_bake_alloc(
     features: &[f64],
 ) -> f64 {
     let mut buf = vec![0.0f32; n_inputs];
+    // Derived per call because this entry OWNS its allocation anyway — the
+    // hot loops use `score_row` with a hoisted `CallerGather`.
+    let gather = CallerGather::for_model(predictor.model());
     score_row(
         predictor,
         has_transforms,
@@ -432,6 +512,7 @@ pub fn score_with_bake_alloc(
         hybrid_head,
         tanh_pin_scale,
         output_spline,
+        &gather,
         &mut buf[..],
         features,
     )
@@ -621,5 +702,140 @@ mod tests {
     fn tanh_pin_propagates_nan() {
         let y = apply_post_dispatch(f64::NAN, Some(1.0), None);
         assert!(y.is_nan());
+    }
+
+    /// **B-2.1** — `Positional` is byte-for-byte the pre-2026-09-06 fill:
+    /// copy `min(len, row.len())`, zero the tail. Written as an explicit
+    /// reimplementation of the OLD code rather than a re-description, so the
+    /// test would fail if the enum's arm ever drifted from it.
+    #[test]
+    fn positional_gather_reproduces_the_old_fill_exactly() {
+        let legacy = |dst: &mut [f32], row: &[f64]| {
+            let take = dst.len().min(row.len());
+            for i in 0..take {
+                dst[i] = row[i] as f32;
+            }
+            for f in &mut dst[take..] {
+                *f = 0.0;
+            }
+        };
+        let row: Vec<f64> = (0..12).map(|i| (i as f64) * 1.5 - 3.0).collect();
+        for width in [1usize, 5, 12, 20] {
+            let mut a = vec![7.5f32; width];
+            let mut b = vec![7.5f32; width];
+            CallerGather::Positional.fill(&mut a, &row);
+            legacy(&mut b, &row);
+            assert_eq!(
+                a.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                b.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                "width {width}"
+            );
+        }
+    }
+
+    /// The gather takes the DECLARED ids, not the first N positions — the
+    /// whole point. Includes an id past the row's width, which must become
+    /// the structural `0.0` rather than panic.
+    #[test]
+    fn feature_id_gather_takes_the_declared_ids() {
+        let row: Vec<f64> = (0..10).map(|i| i as f64).collect();
+        let g = CallerGather::ByFeatureId(vec![0, 3, 7, 9, 40]);
+        let mut dst = vec![-1.0f32; 5];
+        g.fill(&mut dst, &row);
+        assert_eq!(dst, vec![0.0, 3.0, 7.0, 9.0, 0.0]);
+        assert!(g.is_dense());
+        assert!(!CallerGather::Positional.is_dense());
+        // The negative control: a positional fill of the same width would
+        // read f0..f4, which is a DIFFERENT vector.
+        let mut pos = vec![-1.0f32; 5];
+        CallerGather::Positional.fill(&mut pos, &row);
+        assert_ne!(dst, pos);
+    }
+
+    /// **B-2.2 in table space** — a DENSE bake scored through the evaluation
+    /// dispatch equals its WIDE twin scored on the same wide row.
+    ///
+    /// The two bakes are built to be the same function of the same three ids
+    /// (one wide with zero rows at every other position, one dense declaring
+    /// exactly those ids). Without the gather the dense one reads `f0,f1,f2`
+    /// and the assertion fails — which the negative control below proves by
+    /// forcing `Positional` on the dense bake.
+    #[test]
+    fn a_dense_bake_scores_like_its_wide_twin_through_score_row() {
+        const IDS: [usize; 3] = [2, 5, 9];
+        const W: usize = 12;
+        let wide = bake_json(
+            W,
+            &(0..W)
+                .map(|i| if IDS.contains(&i) { 1.0 } else { 0.0 })
+                .collect::<Vec<f32>>(),
+            None,
+        );
+        let dense = bake_json(IDS.len(), &vec![1.0f32; IDS.len()], Some(&IDS));
+        let wm = Model::from_bytes(&wide).expect("wide bake");
+        let dm = Model::from_bytes(&dense).expect("dense bake");
+        assert_eq!(dm.caller_input_width(), IDS.len());
+        let gw = CallerGather::for_model(&wm);
+        let gd = CallerGather::for_model(&dm);
+        assert!(!gw.is_dense(), "an undeclared bake must stay positional");
+        assert!(gd.is_dense(), "the declaration must be READ");
+
+        let row: Vec<f64> = (0..W).map(|i| (i as f64) * 0.75 + 0.125).collect();
+        let mut pw = Predictor::new(&wm);
+        let mut pd = Predictor::new(&dm);
+        let mut bw = vec![0.0f32; wm.caller_input_width()];
+        let mut bd = vec![0.0f32; dm.caller_input_width()];
+        let sw = score_row(&mut pw, false, None, None, None, None, &gw, &mut bw, &row);
+        let sd = score_row(&mut pd, false, None, None, None, None, &gd, &mut bd, &row);
+        assert_eq!(sw.to_bits(), sd.to_bits(), "wide {sw} vs dense {sd}");
+
+        // NEGATIVE CONTROL: the same dense bake, sliced positionally, reads
+        // f0..f2 and must NOT agree.
+        let mut bn = vec![0.0f32; dm.caller_input_width()];
+        let sn = score_row(
+            &mut pd,
+            false,
+            None,
+            None,
+            None,
+            None,
+            &CallerGather::Positional,
+            &mut bn,
+            &row,
+        );
+        assert_ne!(
+            sw.to_bits(),
+            sn.to_bits(),
+            "a positional slice of a dense bake must differ, else the test proves nothing"
+        );
+    }
+
+    /// A 1-layer sum-of-inputs bake, optionally declaring `feature_ids`.
+    fn bake_json(n: usize, w: &[f32], ids: Option<&[usize]>) -> Vec<u8> {
+        let arr = |v: &[f32]| {
+            let body: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+            format!("[{}]", body.join(","))
+        };
+        let md = match ids {
+            Some(ids) => {
+                let list: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+                format!(
+                    r#"{{"key": "{}", "type": "utf8", "text": "{}"}}"#,
+                    zensim::ZENTRAIN_FEATURE_IDS_KEY,
+                    list.join("\\n")
+                )
+            }
+            None => String::new(),
+        };
+        let json = format!(
+            r#"{{"schema_hash": 1, "scaler_mean": {mean}, "scaler_scale": {scale},
+                 "metadata": [{md}],
+                 "layers": [{{"in_dim": {n}, "out_dim": 1, "activation": "identity",
+                              "dtype": "f32", "weights": {w}, "biases": [0.0]}}]}}"#,
+            mean = arr(&vec![0.0f32; n]),
+            scale = arr(&vec![1.0f32; n]),
+            w = arr(w),
+        );
+        zenpredict_bake::bake_from_json_str(&json).expect("synthetic bake")
     }
 }

@@ -73,7 +73,8 @@ use zenpredict::{Model, Predictor};
 // `zensim_validate::bake_runtime`. Bit-exact, f32 ±1e-6 on representative
 // inputs (see benchmarks/dedup_M_score_row_evidence/).
 use zensim_validate::bake_runtime::{
-    extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale, score_row,
+    CallerGather, extract_hybrid_head, extract_per_sample_alpha_head,
+    extract_tanh_output_head_scale, score_row,
 };
 
 /// Selected input mode, parsed from the CLI.
@@ -478,6 +479,7 @@ fn evaluate_bake(
     );
 
     let mut predictor = Predictor::new(&model);
+    let gather = CallerGather::for_model(&model);
     let mut buf = vec![0.0f32; n_inputs];
     let scores: Vec<f64> = feature_rows
         .iter()
@@ -489,6 +491,7 @@ fn evaluate_bake(
                 hybrid.as_ref(),
                 tanh_pin_scale,
                 output_spline.as_ref(),
+                &gather,
                 &mut buf,
                 row,
             );
