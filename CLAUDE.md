@@ -2900,6 +2900,59 @@ design's corruption owner — the 924 dial's own ordering is broken by design;
 dial-alone numbers kept for honesty; `corruption_head` block in
 `--full-json`).
 
+**★ THE HEAD IS A TREE NOW, AND IT HAS ITS OWN WIRE FORMAT — `ZCTH` v1
+(2026-09-06, `benchmarks/corruption_head_serving_2026-09-06.md`, ledger ROUND
+101).** The right model form is a gradient-boosted tree, not a logistic
+(`corruption_head_theories_2026-09-06.md`: **98.90 % detection at 1.23 % honest
+and 2.38 % near-lossless FP**, against the shipped logistic's 86.01 / 11.37 /
+**50.00**, with no dial guard). It is served by `zensim::corruption_head`
+behind the **non-default `corruption-head`** feature.
+
+* **`--corruption-head` now takes EITHER format, sniffed by MAGIC** — `ZNPR`
+  (the incumbent logistic) or `ZCTH` (the tree). Neither → a named refusal.
+  The tree is deliberately **not** a ZNPR metadata blob: `zenpredict` is frozen
+  at the `zenanalyze-api` contract, and every consumer holding a
+  `zenpredict::Model` dispatches through `Predictor::predict`, so a tree behind
+  a plausible identity layer is **silently mis-scored by anything that does not
+  know to look** — the `--regime 944` defect shape.
+* **`zensim::corruption_head::gate_score` is the ONE owner of the deploy
+  composition** (`min(perceptual, 0)` when flagged, else passthrough). Adopting
+  it left `bake_verdict --full-json` **byte-identical** on the logistic head.
+  **It can only sort a corruption below an anchor whose own score is ABOVE
+  ZERO** — true of the grid's q20 anchors, not automatic.
+* **Numbers you can quote:** through the Rust evaluator the tree head
+  reproduces the theory lane's gate grid EXACTLY — DEPLOY `pass_q20`
+  **0.9985119047619048** (671/672), head `pass_q20` 1.0, D's dial alone
+  0.26785714285714285. Parity vs sklearn: **0 ulp** on `decision_function`,
+  **max |Δ| 3.33e-16** on the calibrated probability, fire set identical on
+  35,607 rows.
+* **Cost, and it inverts the intuition:** the tree forward is **659 ns**
+  (0.63× Profile D's own forward, ~0.011 % of a 576² compare) while the
+  **INCUMBENT LOGISTIC head costs 1.76 µs — 2.7× the 6,100-node tree and more
+  than the dial it guards.** The nonlinear head is not a speed tradeoff.
+* **`f156..228` is not just cheap at D, it is PRESENT:** `ZensimProfile::D`
+  emits 372 features with the peaks block populated **72/72**, zeroing only
+  `f228..371`. `CorruptionHead::check_servable_by` refuses a head that reads
+  outside the profile's plan, so attaching one can never widen the walk.
+* **Gotcha when reimplementing sklearn's isotonic:** `IsotonicRegression`
+  builds a `scipy.interpolate.interp1d(kind="linear")`, but `interp1d.__init__`
+  routes plain `linear` to `_call_linear_np` = **`np.interp`** (rightmost
+  bracket, slope form) — NOT the `_call_linear` you find by reading the source
+  (leftmost bracket, convex combination). MEASURED: `np.interp` is bit-identical
+  to `iso.predict`, the other is off by 1.11e-16 *on the knots*. Reading the
+  constructor is not reading the call.
+* **Deadband:** the trainer's heuristic is form-dependent (0.9 for the logistic,
+  **0.5** for `hgb`, whose severe FP is already <1 % there), so pass
+  `--deadband-t 0.9` to bake the REGISTERED operating point. `bake_verdict`
+  prefers a ZCTH head's own baked deadband unless
+  `--corruption-head-threshold` is passed, and `--full-json` reports the value
+  it APPLIED.
+* **Nothing shipped and the public API delta is ZERO.** The runtime companion
+  (`Zensim::with_corruption_head` / `corruption_verdict`) is `#[doc(hidden)]`,
+  feature-gated, and off `compute`'s path; the proposed public shape awaits the
+  user's approval in `docs/PLAN_CORRHEAD_SERVING_2026-09-06.md` §3. Gates:
+  `scripts/verify_corrhead_serving.sh` + 18 in-crate tests.
+
 **⚠ THE CORRUPTION HEAD: read this before quoting any corruption number
 (2026-09-05, `benchmarks/corruption_head_d_2026-09-05.md`, ledger ROUND 97).**
 

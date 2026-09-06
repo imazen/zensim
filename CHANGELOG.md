@@ -74,6 +74,58 @@ supported surface).
   those scripts measure. `just lint-scripts`: 611 scripts, all runnable.
   Record: `benchmarks/regime_derived_2026-09-06.md`.
 
+### Added — the nonlinear corruption head can be SERVED: `ZCTH` v1 + evaluator (2026-09-06)
+
+- **`zensim::corruption_head`, behind the new non-default `corruption-head`
+  feature** — the wire format, reader and evaluator for the gradient-boosted
+  corruption head the theory lane selected
+  (`benchmarks/corruption_head_theories_2026-09-06.md`: 98.90 % detection at
+  1.23 % honest / 2.38 % near-lossless FP, against the shipped logistic head's
+  86.01 / 11.37 / 50.00, with no dial guard). **Its own `ZCTH` magic, not a
+  ZNPR metadata blob**: `zenpredict` is frozen at the `zenanalyze-api`
+  contract, and every consumer holding a `zenpredict::Model` dispatches through
+  `Predictor::predict`, so a tree behind a plausible identity layer would be
+  silently mis-scored — the `--regime 944` defect shape. Adds no dependency.
+  **Zero public-API delta on a default build** (`cargo public-api`, 1284 items,
+  measured); every item is `#[doc(hidden)]` and the proposed public surface is
+  registered for approval in `docs/PLAN_CORRHEAD_SERVING_2026-09-06.md` §3.
+  (`9e16da2d`, `ff4906b9`)
+- **`gate_score` is the ONE owner of the deploy composition**, used by the
+  runtime companion and by `bake_verdict` for both head kinds. Adopting it left
+  `bake_verdict`'s `--full-json` **byte-identical** on the incumbent logistic
+  head (`e5dab5d1…`, measured before/after). (`f9fd2d0c`)
+- **`bake_verdict --corruption-head` accepts either format**, sniffed by magic;
+  a file that is neither is refused by name. Through the Rust evaluator it
+  reproduces the theory lane's gate-grid row **exactly** — DEPLOY `pass_q20`
+  `0.9985119047619048` (671 of 672 = the record's 99.85 %), head `pass_q20`
+  1.0, D's dial alone 0.26785714285714285. `--full-json`'s
+  `corruption_deploy.threshold` now reports the deadband **actually applied**
+  (a ZCTH head carries its own) rather than always echoing the flag.
+  (`f9fd2d0c`)
+- **`train_corruption_head.py` gained `emit_zcth` + a `--model` dispatch on
+  `--bake-out` + `--deadband-t`.** Additive, and proven so: re-running the
+  incumbent `d228` recipe through the patched owner reproduced the SHIPPED
+  artifacts byte-for-byte (`da411c8c…`, `a7ad4e85…`, identical `split.tsv`) at
+  the pre-thread-pin tree. The `hgb` bake is byte-identical across the
+  determinism lane's BLAS pin; the logistic one moves to `6f97b653…`, exactly
+  the value that lane registered. (`f9fd2d0c`)
+- **`Zensim::with_corruption_head` / `corruption_verdict`**, `#[doc(hidden)]`
+  and feature-gated — **not** on `compute`'s path, so no existing caller can
+  observe a different score. `CorruptionHead::check_servable_by` refuses a head
+  that reads a slot the profile's plan does not populate, so attaching one can
+  never widen the walk. (`ff4906b9`)
+- **`zensim-bench/benches/corrhead_forward.rs`** — the head's forward costs
+  **659 ns** against Profile D's own forward at **1.05 µs** (0.63×, 95 % CI
+  [−41.1 %, −32.0 %], zenbench 1T), i.e. ~0.011 % of a 576² compare. The
+  INCUMBENT logistic head costs **1.76 µs** — 2.7× the 6,100-node tree and more
+  than the dial it guards. `ssim2_speed_bar`'s in-situ arm was extended to
+  sniff both formats. (`ff4906b9`)
+- **`scripts/verify_corrhead_serving.sh`** runs the four data-dependent gates;
+  `corrhead_parity` compares the Rust evaluator against sklearn at **0 ulp** on
+  `decision_function` and **max \|Δ\| 3.33e-16** on the calibrated
+  probability over 35,607 rows, with the fire set identical on every one.
+  Record: `benchmarks/corruption_head_serving_2026-09-06.md`. (`f9fd2d0c`)
+
 ### Added — `rescore_parquet --densify`, and the loaders stop truncating at a gap (2026-09-06)
 
 - **`rescore_parquet --densify`** rewrites a feature parquet to store exactly the

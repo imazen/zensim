@@ -2631,3 +2631,82 @@ of which commit it was built from.
 TSV is the one of eight with no target column, so there is no `human_score`.
 Deliberately not repaired by deriving an elo, which would risk a normalisation
 that does not match `load_pipal`'s.
+
+---
+
+## §3.49 — the corruption head becomes servable: `ZCTH` v1, and one wrong reading of sklearn's own source (2026-09-06)
+
+**Ledger ROUND 101.** §3.47's theories lane concluded the corruption head should
+be a gradient-boosted tree and recorded that it could not be shipped, because
+"a nonlinear head has no wire format here". This section records the format, the
+gates, and the one thing that went wrong on the way — which is the part worth
+re-reading.
+
+**Thought-why vs actual-why, the entry that earns its place.** The evaluator has
+to reproduce sklearn's isotonic calibration. `IsotonicRegression._build_f`
+constructs a `scipy.interpolate.interp1d(kind="linear")`, so the obvious move is
+to read `interp1d._call_linear` — leftmost `searchsorted` bracket,
+convex-combination evaluation — and reimplement it. That was done, with a unit
+test asserting the value that code produces, and **both were wrong**:
+`interp1d.__init__` routes plain `linear` to `_call_linear_np`, a one-line call
+to `np.interp`, which uses the **rightmost** bracket and the **slope** form.
+MEASURED on a real 90-knot fit over 25,092 queries, the `np.interp` form is
+**bit-identical** to `iso.predict` and the scipy-source form is off by up to
+**1.11e-16** — small, and located exactly on the knots an isotonic fit is made
+of. **Reading the constructor is not reading the call.** A dispatch inside
+`__init__` can hand you a different algorithm than the method you read, and the
+divergence lands precisely on the case your data consists of. Caught only by
+comparing candidates numerically against the fitted object instead of trusting
+the reimplementation.
+
+**The format is not a ZNPR metadata blob, and the reason is a defect class this
+ledger already carries.** `zenpredict` is frozen at the `zenanalyze-api`
+contract (USER DIRECTIVE 2026-07-19), and — independently — every consumer that
+holds a `zenpredict::Model` dispatches through `Predictor::predict`. A tree in a
+`metadata[]` entry behind a plausible identity layer would be silently
+mis-scored by anything that did not know to look, which is the `--regime 944`
+shape. `b"ZCTH"` makes the confusion a refusal at byte 0.
+
+**What is now MEASURED and should not be re-derived:**
+
+* The Rust evaluator reproduces sklearn's `decision_function` at **0 ulp** over
+  35,607 rows (the tree walk is exact arithmetic, so 0 was the bar), and the
+  calibrated probability to **max |Δ| 3.330669e-16** — all of it `exp`, none of
+  it moving a single deadband decision.
+* Through `bake_verdict`, the tree head reproduces the theory lane's gate-grid
+  row **exactly**: DEPLOY `pass_q20` **0.9985119047619048** = 671/672. That also
+  settles, by measurement, that the theory lane's `rank_break` tie-break is a
+  no-op at the `T = 0.9` deadband — the Rust path does not apply it and lands on
+  the same 671.
+* **`ZensimProfile::D` populates the peaks block `f156..228` at 72/72** on a real
+  compare while zeroing only `f228..371`. "The `f0..f227` slice is free at D" was
+  a claim about COST; this is the AVAILABILITY half, and it is what makes a
+  372-wide head attachable to D at all. Both halves are now tests.
+* **The incumbent LINEAR head is 2.7× more expensive to serve than the
+  6,100-node tree** — 1.76 µs vs 659 ns, with the tree at 0.63× Profile D's own
+  forward (95 % CI [−41.1 %, −32.0 %], zenbench 1T). The nonlinear head is not a
+  speed tradeoff. The ZNPR path runs 372 feature transforms plus a 372-wide
+  dense layer; the tree touches ~600 nodes and 228 standardisations.
+* **The `hgb` bake is byte-identical across the determinism lane's BLAS thread
+  pin**, at both caller widths — `HistGradientBoostingClassifier` never went
+  through the lbfgs solve that made the logistic head thread-dependent. The
+  logistic bake moves to `6f97b653…` under the pin, which is exactly the "1
+  thread" value §3.48's table predicted, reproduced here independently.
+
+**A property of the composition to know before using it.** `gate_score` floors a
+flagged row to `min(perceptual, 0)`, so it can only sort a corruption **below**
+an anchor whose own score is above zero. That holds for the gate grid's q20
+anchors; it is not automatic, and a runtime test that used too severe an honest
+anchor would have "passed" for the wrong reason. The G7 test asserts
+`honest > 0` so the requirement is visible.
+
+**Nothing shipped.** No weights replaced, no profile changed, no board cell, no
+default-path behaviour, zero public API (`cargo public-api`, default build,
+1284 items, zero delta). The `corruption-head` feature is off unless asked for
+and the proposed public surface awaits the user's approval in
+`docs/PLAN_CORRHEAD_SERVING_2026-09-06.md` §3. Everything is **rev1**; the REV2
+WAVE's refit lane measured the same head at revision 2 separately (§8 of
+`benchmarks/rev2_refit_2026-09-06.md`) and found the `hgb` candidate invariant.
+
+Record: [`../benchmarks/corruption_head_serving_2026-09-06.md`](../benchmarks/corruption_head_serving_2026-09-06.md).
+Artifacts + shas: `/mnt/v/output/zensim/corruption-head-2026-09-05/theories/_MANIFEST_ZCTH.json`.
