@@ -949,7 +949,46 @@ an order of magnitude worse than the shipped dial** (0.95838 → 4.2 % of adjace
 rungs charged to the dial, against shipped D's 0.53 %). Attribution is never the
 excuse: `unknown = 0` on all 27 cells.
 
-*(RESULTS — the band-weight-matched `D_lad20m`, W4 and the board, pending.)*
+### 5.18 ★ THE DATA-ISOLATING A/B — floor-reaching ladders DO move the floors, on 4 of 5 codecs
+
+`H_anchorlad` vs **`D_lad20m`**: same architecture (`--nonneg-distance`), same
+hinge weight (2.0), same margin, **same band weights** — differing only in
+whether the ladder pairs reach the encoders' true floors. k = 3 each.
+
+| | `mono` | rav1e | svt | jpeg | jxl | webp |
+|---|--:|--:|--:|--:|--:|--:|
+| mentor bar | — | 0.6410 | 1.0000 | 0.6667 | 0.9615 | 1.0000 |
+| `D_lad20m` (no floor data) | 0.94191 | 0.1966 | 0.6239 | 0.4701 | 0.3205 | 0.8718 |
+| **`H_anchorlad`** (floor data) | **0.94946** | 0.1624 | **0.8120** | **0.5214** | **0.3718** | **0.8974** |
+| **Δ** | **+0.0076** | **−0.0342** | **+0.1881** | **+0.0513** | **+0.0513** | **+0.0256** |
+
+**FOUR OF FIVE CODEC FLOORS IMPROVE, and `avif-svt` by +0.188.** The one that
+does not is **`avif-rav1e` — the one codec with NO anchor ladders**, exactly as
+§9 pre-registered before any fit. The hypothesis said the failure was a DATA gap;
+on the only comparison that isolates data, it is.
+
+**So §5.11's null is NOT complete, and the record must not say it is.** The
+correct statement is narrower and more useful:
+
+> A7r is **unmoved by loss, hinge weight and architecture** (§5.11), and it
+> **responds to floor-reaching training DATA** (§5.18) — substantially, on every
+> codec that has any. It still does not reach the bars: svt is 0.188 short, jpeg
+> 0.145, jxl 0.590, webp 0.103, rav1e 0.479. **Direction right, quantity
+> insufficient** at 32 references × 4 codecs.
+
+**A second reading, free from the same pair.** `D_lad20m` vs `D_lad20` isolates
+the BAND WEIGHTS on identical data: moving from `6.0,2.0,2.0,2.0` to
+`2.0,0.7,0.7,8.0` **costs** floors (svt 0.7179 → 0.6239, jxl 0.3974 → 0.3205)
+because band 3 is empty without anchor pairs, so the change simply de-weights
+everything. That makes `H_anchorlad`'s gains over `D_lad20m` *more* attributable
+to the data, not less — the weighting handed it a deficit and the data more than
+repaid it.
+
+**What this predicts, and it is a prediction, not a result:** the next lever is a
+**larger, rav1e-inclusive anchor set**. This one is 32 references and 4 codecs;
+rav1e has none, and it is the codec furthest from its bar.
+
+*(RESULTS — W4 and the board, pending.)*
 
 ---
 
