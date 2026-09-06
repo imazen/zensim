@@ -1701,7 +1701,27 @@ fn cmd_densify(a: &DensifyArgs) -> Result<(), String> {
     // identity-laid-out vector, so pre-gathering here would double-gather.
     let probes = densify_probe_rows(caller_before, a.gate_rows);
     let before = forward_scored_raw(&bytes, &probes)?;
-    let after = forward_scored_raw(&out_bytes, &probes)?;
+    // ...EXCEPT when the kept ids are a CONTIGUOUS PREFIX `0..K-1`. Then the
+    // densified bake's declared layout is the IDENTITY layout,
+    // `zensim::declared_feature_ids` returns `None` for it by design, and its
+    // gather is POSITIONAL — so it must be fed its own K-wide row, not the
+    // caller-width one. Feeding the wide row errors with
+    // `feature row has {caller_before} values, bake expects {K}`.
+    //
+    // MEASURED 2026-09-06 on a 228-slot (f0..f227) MLP: every shipped bake this
+    // subcommand had been run on reads a SCATTERED id set, which is why the
+    // path was never exercised. Gathering here is not a double-gather in this
+    // branch precisely because there is no gather on the other side.
+    let dense_is_identity_layout = zensim::declared_feature_ids(&dense).is_none();
+    let after_probes: Vec<Vec<f64>> = if dense_is_identity_layout {
+        probes
+            .iter()
+            .map(|row| kept.iter().map(|&i| row[i]).collect())
+            .collect()
+    } else {
+        probes.clone()
+    };
+    let after = forward_scored_raw(&out_bytes, &after_probes)?;
 
     // THE gate, and it is the strong form: score the ORIGINAL bake with every
     // dropped line's value replaced by `0.0`. If the dropped lines truly

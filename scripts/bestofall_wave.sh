@@ -39,6 +39,24 @@ mkdir -p "$OUT"/{bakes,verdicts,gaddr,logs}
 HB="$OUT/heartbeat.txt"
 say() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$HB"; }
 
+# `cell` is invoked under `||` in the wave loop, which SUPPRESSES `set -e`
+# inside it. Without an explicit check every step's failure would fall through
+# and the cell would still print DONE — which it did, once, on 2026-09-06.
+# `step` checks the exit status AND that the artifact it was supposed to produce
+# exists, and returns non-zero so the caller's `||` fires.
+step() {
+  local what="$1" artifact="$2"; shift 2
+  if ! "$@"; then
+    say "STEP FAILED ($what) rc=$? — see $OUT/logs/"
+    return 1
+  fi
+  if [[ -n "$artifact" && ! -s "$artifact" ]]; then
+    say "STEP FAILED ($what) — produced no $artifact"
+    return 1
+  fi
+  return 0
+}
+
 # The six canonical training legs, verbatim from the winner's embedded repro.
 groups() {
   printf '%s\n' \
@@ -93,8 +111,8 @@ cell() {
   mapfile -t -O "${#argv[@]}" argv < <(common)
   mapfile -t -O "${#argv[@]}" argv < <(arm_extra "$arm")
   argv+=(--seed "$seed" --out "$raw")
-  "${ZL_RUNHEAVY:-$HOME/work/zen/scripts/run-heavy}" --mem 16G --jobs 8 -- \
-     "$BIN/zensim_mlp_train" "${argv[@]}" > "$OUT/logs/${name}.train.log" 2>&1
+  step train "$raw" "${ZL_RUNHEAVY:-$HOME/work/zen/scripts/run-heavy}" --mem 16G --jobs 8 -- \
+     "$BIN/zensim_mlp_train" "${argv[@]}" > "$OUT/logs/${name}.train.log" 2>&1 || return 1
 
   # ONE pack step, against the negrich dial anchor CONCATENATED with the 21-row
   # identity anchor (built by instruments/negrich_plus_identity21_anchor.parquet's
@@ -113,24 +131,41 @@ cell() {
   # knot is the top one and identity lands at exactly 100. The control gets the
   # identical chain — its raw(identity) is NOT the argmax, and what that costs
   # it is the measurement.
+  # ONE pack step, against the negrich dial anchor CONCATENATED with the 21-row
+  # identity anchor, so `fit_spline_knots` gets a knot at (raw(identity), 100)
+  # in the same pass that quantizes and prunes — QUANTIZE-then-CALIBRATE kept.
+  #
+  # `shared-anchor` is the more elegant home for a second anchor (it takes
+  # --anchor repeatably) but it asserts a SINGLE-LAYER linear bake and these are
+  # 228 -> H -> 1 MLPs. Merging the anchors up front is the same fit.
+  #
+  # 21 of 2,021 rows = 1.04 %, which owns fit_spline_knots' >= p99 top bin
+  # exactly as the id100 lane sized it; n = 38 spills and displaces the top real
+  # knot. Under --nonneg-distance raw(identity) is the ARGMAX by construction,
+  # so that knot is the top one. The control gets the identical chain — its
+  # raw(identity) is NOT the argmax, and what that costs it is the measurement.
   say "PACK $name"
-  "$BIN/bake_dial_refit" pack --in "$raw" --out "$packed" --neg-tail \
+  step pack "$packed" "$BIN/bake_dial_refit" pack --in "$raw" --out "$packed" --neg-tail \
       --anchor "$ANCHOR" --target-col ssim2_gpu \
-      > "$OUT/logs/${name}.pack.log" 2>&1
+      > "$OUT/logs/${name}.pack.log" 2>&1 || return 1
 
-  # densify is the ONLY thing that writes `zentrain.feature_ids`.
+  # densify is the ONLY thing that writes `zentrain.feature_ids`. On a
+  # contiguous-prefix read set (f0..f227) it collapses the caller width to 228
+  # and declares an IDENTITY layout.
   say "DENSIFY $name"
-  "$BIN/bake_dial_refit" densify --in "$packed" --out "$byid" --gate-rows 512 \
-      > "$OUT/logs/${name}.densify.log" 2>&1
+  step densify "$byid" "$BIN/bake_dial_refit" densify --in "$packed" --out "$byid" --gate-rows 512 \
+      > "$OUT/logs/${name}.densify.log" 2>&1 || return 1
 
   say "VERDICT $name"
-  "$BIN/bake_verdict" --bake "$byid" --features-root "$POSTC" \
+  step verdict "$OUT/verdicts/${name}.fulleval.json" \
+      "$BIN/bake_verdict" --bake "$byid" --features-root "$POSTC" \
       --name "$name" --full-json "$OUT/verdicts/${name}.fulleval.json" \
       --output "$OUT/verdicts/${name}.verdict.md" \
-      > "$OUT/logs/${name}.verdict.log" 2>&1
+      > "$OUT/logs/${name}.verdict.log" 2>&1 || return 1
 
   say "GADDR $name"
-  "$BIN/bake_verdict" --bake "$byid" --features-root "$POSTC" \
+  step gaddr "$OUT/gaddr/gaddr_${name}.json" \
+      "$BIN/bake_verdict" --bake "$byid" --features-root "$POSTC" \
       --dial-grid "$LADDER/dial_grid_372col_ladder.parquet" \
       --gaddr-grid-truth "$LADDER/dialcells_ssim2_ladder.tsv" \
       --floor-rule resolvable --floor-margin 0.5 \
@@ -138,7 +173,7 @@ cell() {
       --negtail-probe "$PROBES/negtail_probe_372_postC_2026-09-05.parquet" \
       --identity-probe "$PROBES/identity_probe_372_postC_2026-09-05.parquet" \
       --name "${name}@ladder" --gaddr-json "$OUT/gaddr/gaddr_${name}.json" \
-      --output /dev/null > "$OUT/logs/${name}.gaddr.log" 2>&1
+      --output /dev/null > "$OUT/logs/${name}.gaddr.log" 2>&1 || return 1
   say "DONE $name"
 }
 
