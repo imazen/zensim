@@ -254,28 +254,66 @@ mod tests {
     /// single build, because a wrong feature vector produces a plausible
     /// number and no error.
     ///
-    /// ## The tolerance, derived
+    /// ## The tolerance, derived — and the derivation that was WRONG first
     ///
-    /// Not bit-exact, because these values legitimately move in the last few
-    /// ULPs across SIMD tiers and rayon pool sizes. MEASURED 2026-09-06 over
-    /// the feature matrix (`benchmarks/dense_serving_ungate_2026-09-06.md`
-    /// §2): the largest default-vs-`--no-default-features --features
-    /// feature-regime-v2` disagreement — i.e. `avx512`+`threads` on against
-    /// both off, the widest tier/threading swing a consumer can produce — was
-    /// **1.048e-5** zensim points over 24 (profile × geometry × distortion)
-    /// cells. The defect this gate exists to catch moved scores by **2.26 to
-    /// 261.6** points over the same cells. `TOL = 1e-2` sits ~950× above the
-    /// measured noise and ~226× below the smallest real defect, so it can
-    /// neither flake nor pass a mis-serve.
+    /// Not bit-exact, because these values legitimately move across the
+    /// arithmetic classes this crate is built for. The first version of this
+    /// gate set `TOL = 1e-2` from a population of x86-64 builds only
+    /// (AVX-512+threads against neither, max 1.048e-5) and **i686 CI turned it
+    /// red on the first push**: `PreviewV0_1`'s single-LSB cell read
+    /// 98.378873 against the pinned 98.394763, a delta of 1.589e-2. That was a
+    /// defect in the DERIVATION, not in a kernel — the population was one
+    /// architecture wide.
+    ///
+    /// MEASURED 2026-09-06 over **160 cells** (8 profiles × 4 geometries × 5
+    /// distortion strengths) on the four arms CI actually runs
+    /// (`benchmarks/dense_serving_ungate_2026-09-06.md` §2d):
+    ///
+    /// | arms | max \|Δ\| | cells > 1e-2 |
+    /// |---|--:|--:|
+    /// | x86-64 AVX-512 vs AVX2 | **2.1411e-5** | 0 |
+    /// | x86-64 (either) vs **i686 scalar** | **2.8221e-2** | 9 |
+    /// | x86-64 (either) vs **wasm32 simd128** | **2.8221e-2** | 9 |
+    /// | i686 scalar vs wasm32 simd128 | **0** (bit-identical, 160/160) | 0 |
+    ///
+    /// Two arithmetic classes, not four: every backend with a FUSED
+    /// multiply-add (AVX-512, AVX2, and — by CI evidence — NEON) agrees to
+    /// 2.1e-5, and magetypes' scalar + wasm128 backends implement `mul_add` as
+    /// an UNFUSED `a*b+c` (`e1324192` measured the same 1-ULP split on the ring
+    /// tests) and are bit-identical to each other. On a near-identical pair the
+    /// dissimilarity features sit at the f32 cancellation floor, so a 1-ULP
+    /// difference in form becomes an O(1) RELATIVE difference there, and
+    /// `100 − 18·d^0.7` has unbounded slope as `d → 0`. That is the whole
+    /// mechanism, and it is a KNOWN, deliberately-unfixed upstream property —
+    /// the kernel-side fusing fix was tried in `e1324192` and rejected because
+    /// it shifted `sigma_sq`/`sigma12` and broke
+    /// `cross_platform::pixel_format_equivalence`.
+    ///
+    /// So the bar is set from the two populations this gate must separate:
+    /// cross-class noise **2.8221e-2** (160 cells) and the smallest mis-serve
+    /// it exists to catch, **2.258** points — the minimum over the 24
+    /// A/B/BHdr/D cells of the record's §2, whose distortion families are the
+    /// same ones these two census cells use. That minimum is measured on the
+    /// serving-matrix population, not on these two cells, because reproducing
+    /// the mis-serve here would mean re-gating the code the fix removed. `TOL = 0.25` is their GEOMETRIC
+    /// MIDPOINT (`sqrt(2.8221e-2 · 2.258) = 0.2524`) — **8.86× above the
+    /// measured noise and 9.03× below the smallest real defect**, i.e. the
+    /// maximally-separated choice rather than one picked to make CI pass.
+    ///
+    /// The tight complement lives in `scripts/serving_matrix.sh`, which
+    /// requires **bit-exact** agreement across feature sets WITHIN one
+    /// architecture. Loose across classes, exact within one.
     ///
     /// If a deliberate change moves a shipped score, this test FAILS and the
     /// pin is updated in the same commit with the measurement that justifies
-    /// it. That is the intended workflow — never widen `TOL`.
+    /// it. That is the intended workflow — never widen `TOL` to make a build
+    /// pass; widen it only by re-deriving it on a larger MEASURED population,
+    /// which is what happened here, once, and is recorded as such.
     #[test]
     fn every_shipped_profile_scores_its_pinned_value() {
-        /// See the doc comment: measured noise 1.048e-5, smallest real defect
-        /// 2.26 points.
-        const TOL: f64 = 1e-2;
+        /// See the doc comment: the geometric midpoint of the measured
+        /// cross-class noise (2.8221e-2) and the smallest real defect (2.258).
+        const TOL: f64 = 0.25;
         // (profile, quantize+shift pair, single-LSB pair). Captured from the
         // default build at 2026-09-06 with the dense gather live.
         let pins: &[(&str, f64, f64)] = &[

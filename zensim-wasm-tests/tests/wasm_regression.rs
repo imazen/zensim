@@ -277,19 +277,30 @@ fn large_image_noise_distortion() {
 /// `> 90.0` bound above is the only reason anybody noticed. A bound catches a
 /// mis-serve by luck; a pin catches it by construction, so both stay.
 ///
-/// Tolerance `1e-2`: the v1 golden gate's derived cross-class bound is
-/// `max(1e-6 abs, 1e-5·scale)` ≈ 9.3e-4 at this scale, and the measured
-/// native tier/threading spread is 1.048e-5
-/// (`benchmarks/dense_serving_ungate_2026-09-06.md` §2b) — so this sits
-/// ~10× above the widest legitimate cross-backend movement and ~230× below the
-/// smallest value the defect moved (2.258). Never widen it; a moved score is
-/// re-pinned with a measurement or it is a bug.
+/// Tolerance `0.25`, the SAME derived bar as
+/// `zensim::serving::tests::every_shipped_profile_scores_its_pinned_value` —
+/// and this crate is exactly why it has to be that wide. MEASURED 2026-09-06
+/// over 160 cells (`benchmarks/dense_serving_ungate_2026-09-06.md` §2d): the
+/// wasm32+simd128 backend is **bit-identical to i686 scalar on 160/160 cells**
+/// and up to **2.8221e-2** away from every FUSED-`mul_add` backend (AVX-512,
+/// AVX2, NEON), because magetypes implements `mul_add` unfused there and a
+/// near-identical pair's features sit at the f32 cancellation floor. `0.25` is
+/// the geometric midpoint of that noise and the 2.258-point smallest real
+/// mis-serve — 8.86× above one, 9.03× below the other.
+///
+/// An earlier `1e-2` here passed, and MEASURED why: **this particular cell is
+/// well-conditioned** — wasm32 reads `93.150736250847`, the x86-64 pin to all
+/// 12 printed digits — because 256×256 puts the pooled features far from the
+/// cancellation floor. The bar is not set by this cell; it is set by the class
+/// this backend belongs to, which reaches 2.8221e-2 elsewhere. Never widen it
+/// to make a build pass; widen it only by re-deriving on a larger measured
+/// population.
 #[test]
 fn large_image_noise_distortion_matches_the_pinned_score() {
     // Captured 2026-09-06 from the native default build with the dense gather
     // live; the pre-fix, gather-less reading of this same cell was 86.30.
     const PINNED: f64 = 93.150_736_250_847;
-    const TOL: f64 = 1e-2;
+    const TOL: f64 = 0.25;
     let z = Zensim::new(ZensimProfile::A);
     let base = generators::value_noise(256, 256, 99);
     let distorted = distortions::truncate_lsb(&base);

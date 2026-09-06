@@ -87,6 +87,103 @@ depends on `zensim` with default features turns `feature-regime-v2` back on for
 the whole graph, which is why the workspace's own test suites stayed green.
 That is a coincidence of the dependency graph, not a property anyone chose.
 
+### 2d. AMENDMENT (2026-09-06, same day) — the gate's own tolerance was derived on ONE architecture, and i686 CI caught it
+
+The first push of this fix (`bac6cc81`) turned **one** CI job red:
+`Test (i686-unknown-linux-gnu)`, `every_shipped_profile_scores_its_pinned_value`,
+369 passed / 1 failed —
+
+    PreviewV0_1/single-LSB: 98.378872789271 vs pinned 98.394762958421 (delta -0.015890)
+
+Reproduced locally BIT-FOR-BIT (same value to the last digit), so the diagnosis
+below is measurement, not inference.
+
+**How to reproduce i686 on this box, since it is not obvious.** `cross` needs
+Docker, which is not available here, and `~/.cargo/config.toml` sets
+`runner = "qemu-i386-static"` for the target, which is not installed — so
+`cargo test --target i686-unknown-linux-gnu` fails with a misleading `No such
+file or directory`. Neither is needed: an i686 binary runs NATIVELY on this
+x86-64 box (`/lib/ld-linux.so.2` is present), and archmage's x86-64 tokens are
+`target_arch = "x86_64"`-gated, so a 32-bit build takes the scalar tier no
+matter what the CPU supports. What IS needed is 32-bit link support
+(`sudo apt-get install gcc-multilib libc6-dev-i386`), after which:
+
+```sh
+cargo test --target i686-unknown-linux-gnu -p zensim --lib --no-run
+./target/i686-unknown-linux-gnu/debug/deps/zensim-<hash>          # run it directly
+```
+
+Turnaround is seconds instead of a 9-minute CI job. Same for wasm:
+`RUSTFLAGS=-Ctarget-feature=+simd128 cargo build --target wasm32-wasip1 …` then
+`wasmtime run --dir=. <…>.wasm`.
+
+**It is not a mis-serve, and not this fix's doing.** `PreviewV0_1` carries **no
+MLP bake at all** — `scoring_bake_bytes()` yields nothing for it — so no dense
+layout, no gather, nothing this lane touched is on its path. All four DENSE
+profiles (`A`, `B`, `BHdr`, `D`) passed on i686.
+
+**What it is: my TOL was derived on a population one architecture wide.** The
+original derivation used x86-64 builds only (AVX-512+threads vs neither, max
+1.048e-5) and set `TOL = 1e-2`. MEASURED over **160 cells** (8 profiles × 4
+geometries × 5 distortion strengths) on the four arms CI actually runs:
+
+| arms | n | max \|Δ\| | cells > 1e-2 |
+|---|--:|--:|--:|
+| x86-64 AVX-512 vs AVX2 | 160 | **2.1411e-5** | 0 |
+| x86-64 AVX-512 vs **i686 scalar** | 160 | **2.8221e-2** | 9 |
+| x86-64 AVX-512 vs **wasm32 simd128** | 160 | **2.8221e-2** | 9 |
+| **i686 scalar vs wasm32 simd128** | 160 | **0.0000e+00 — bit-identical** | 0 |
+
+**Two arithmetic classes, not four.** Every backend with a FUSED multiply-add
+(AVX-512, AVX2, and — by CI evidence, all three aarch64 jobs green — NEON)
+agrees to 2.1e-5. magetypes' **scalar** and **wasm128** backends implement
+`mul_add` as an unfused `a*b+c` — the same split `e1324192` measured as 1 ULP on
+the ring tests — and are **bit-identical to each other on 160/160 cells**. This
+reproduces, on scores, the structure the v1 golden policy already recorded for
+features: every non-AMD class produces *one shared alternative result set*.
+
+**Why 1 ULP of form becomes 1.6e-2 of score.** On a near-identical pair the
+dissimilarity features sit at the **f32 cancellation floor** — measured for
+`PreviewV0_1`/single-LSB: 193 of 228 features differ, the worst by **7.4×
+relative** at absolute values of ~1e-6..1e-5 (`f143`: 1.806e-6 vs 1.512e-5),
+and the raw distance moves **1.42 % relative** (3.16505e-2 → 3.20991e-2). Then
+`score = 100 − 18·d^0.7` has slope `−12.6·d^{−0.3}` = **−35.5** at that `d`, so
+1.42 % of a small distance is 1.6e-2 of score. `mean_offset` agrees to ~1e-9
+relative, so the divergence is entirely in the features.
+
+**The kernel is NOT the fix, and that is a measured prior decision, not a
+dodge.** `e1324192` already tried fusing the kernel side; it works for the ring
+tests but *"measurably shifts sigma_sq/sigma12 and newly failed
+cross_platform::pixel_format_equivalence's Srgb16Rgba case"*, and the root cause
+is upstream in magetypes. Nothing in this lane changes that judgement.
+
+**The corrected bar.** The gate must separate two MEASURED populations:
+cross-class noise **2.8221e-2** (160 cells, §2d) and the smallest mis-serve it
+exists to catch, **2.258** points — the minimum over the 24 A/B/BHdr/D cells of
+§2, whose distortion families (`truncate_lsb`, `blur3`, `checker_lsb`) are the
+same ones the gate's own two cells use. Scoped honestly: that minimum is
+measured on the serving-matrix population, not on the two census cells
+themselves, because reproducing the mis-serve on those would mean re-gating the
+code the fix removed. `TOL = 0.25` is their **geometric midpoint**
+(`sqrt(2.8221e-2 · 2.258) = 0.2524`) — **8.86× above the noise, 9.03× below the
+defect**: the maximally-separated choice, not one picked to make a build pass.
+The same bar replaces the `1e-2` in `zensim-wasm-tests`. MEASURED why that one
+passed: **its cell is well-conditioned** — wasm32 reads `93.150736250847`, the
+x86-64 pin to all 12 printed digits, because 256×256 puts the pooled features
+far from the cancellation floor. The bar is not set by that cell; it is set by
+the class the backend belongs to, which reaches 2.8221e-2 on others.
+
+**The tight complement is unchanged.** `scripts/serving_matrix.sh` requires
+**bit-exact** agreement across feature sets WITHIN one architecture, and it
+passes. Loose across classes, exact within one.
+
+**Reusable facts:** (a) a cross-architecture score bar for this metric cannot be
+tighter than ~3e-2 while magetypes' scalar/wasm128 `mul_add` stays unfused;
+(b) i686 and wasm32-simd128 are ONE class — a fix or a pin validated on either
+covers both; (c) tolerance derivations must state the POPULATION they were
+measured on, because a same-architecture population silently understates this
+one by three orders of magnitude.
+
 ### 2c. A second, independent "cannot be served": the packaged crate did not compile
 
 `zensim/Cargo.toml`'s `include` is an ALLOWLIST. `cb2f412d` pointed A/B/BHdr/D
@@ -160,13 +257,13 @@ the gather.
 
 | gate | where | what it proves |
 |---|---|---|
-| `serving::tests::every_shipped_profile_scores_its_pinned_value` | `zensim/src/serving.rs` | Every shipped profile's score on two fixed 64×64 pairs, pinned, **under every cargo feature permutation CI builds**. Tolerance `1e-2`: ~950× above the measured 1.048e−5 tier/thread noise (§2b) and ~226× below the smallest real defect (2.258, §2). Never widen it — a moved score is re-pinned with the measurement that justifies it, or it is a bug. |
+| `serving::tests::every_shipped_profile_scores_its_pinned_value` | `zensim/src/serving.rs` | Every shipped profile's score on two fixed 64×64 pairs, pinned, **under every cargo feature permutation CI builds**. Tolerance **`0.25`** — the geometric midpoint of the two MEASURED populations it must separate: cross-arithmetic-class noise 2.8221e−2 (§2d) and the smallest real defect 2.258 (§2), so 8.86× above one and 9.03× below the other. Widen it only by re-deriving on a larger measured population — never to make a build pass. |
 | `serving::tests::dense_bakes_resolve_to_a_dense_layout_and_the_gather_is_not_a_no_op` | same | The declaration is READ in this build, and — the negative control — the gathered vector genuinely DIFFERS from the positional prefix, so the gate can tell a served bake from a mis-served one. |
 | `serving::tests::every_shipped_profile_is_servable` | same | Zero refusals, in every feature set (was v2-gated, i.e. blind exactly where it mattered). |
 | `serving::tests::every_included_bake_is_packaged` | same | Every `include_bytes!("../weights/…")` is in `Cargo.toml`'s `include` allowlist. No filesystem — `include_str!` on both files. §2c is what it would have caught. |
 | `serving::tests::the_serving_matrix_example_carries_the_same_roster` | same | The cross-build example's `#[cfg]`-dependent profile list and `shipped_profiles`'s reduce to the same `(gating feature, profile)` pairs. `#[cfg]`-independent by construction, because it compares SOURCE TEXT — a runtime comparison could not be. |
 | `scripts/serving_matrix.sh` | repo | THE cross-build diff: 2 environments × 6 arms, every arm bit-identical to its environment's reference or a NAMED refusal. A third outcome is the failure. |
-| `zensim-wasm-tests` | crate | Keeps `feature-regime-v2` (from `e1324192`) **and** now pins `ZensimProfile::A`'s score on the single-LSB distortion that first exposed this. |
+| `zensim-wasm-tests` | crate | Keeps `feature-regime-v2` (from `e1324192`) **and** now pins `ZensimProfile::A`'s score on the single-LSB distortion that first exposed this, at the same derived `0.25` (§2d — wasm32 is bit-identical to i686 scalar and carries the same 2.8e−2 floor). |
 
 `scripts/serving_matrix.sh` result after the fix: **PASS**, all 8 arms, both
 environments, **zero refusals**. Before the fix the v2-free arm differed on 48

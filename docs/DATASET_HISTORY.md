@@ -3211,3 +3211,32 @@ Record: [`../benchmarks/dense_serving_ungate_2026-09-06.md`](../benchmarks/dense
 Gates: `zensim::serving`'s four tests, `scripts/serving_matrix.sh` (2
 environments × 5-6 arms, with a vacuity guard so at least one arm is genuinely
 v2-free), `zensim-wasm-tests::large_image_noise_distortion_matches_the_pinned_score`.
+
+**AMENDMENT (2026-09-06, same day) — the gate's own tolerance was derived on one
+architecture, and i686 CI caught it within the hour.** `every_shipped_profile_
+scores_its_pinned_value` shipped at `TOL = 1e-2`, derived from an x86-64-only
+population (max 1.048e-5). `Test (i686-unknown-linux-gnu)` went red on exactly
+one cell — `PreviewV0_1/single-LSB` 98.378873 vs pinned 98.394763, delta
+1.589e-2 — reproduced locally bit-for-bit. **Not a mis-serve and not this
+entry's doing**: `PreviewV0_1` carries no MLP bake, and all four DENSE profiles
+passed on i686. MEASURED over 160 cells (8 profiles x 4 geometries x 5
+distortion strengths) on the four arms CI runs, **there are TWO arithmetic
+classes, not four**: x86-64 AVX-512 vs AVX2 **2.1411e-5** (0 cells > 1e-2);
+x86-64 vs i686 scalar and x86-64 vs wasm32 simd128 both **2.8221e-2** (9 cells);
+**i686 vs wasm32 BIT-IDENTICAL on 160/160**. Every fused-`mul_add` backend
+(AVX-512, AVX2, NEON) is one class; magetypes' scalar + wasm128 `mul_add` is
+unfused and is the other — the same split `e1324192` measured as 1 ULP on the
+ring tests, and the same "one shared alternative result set" structure the v1
+golden policy already records for features. It becomes 1.6e-2 of SCORE because a
+near-identical pair puts the dissimilarity features at the f32 cancellation
+floor (193/228 features differ, worst **7.4x relative** at ~1e-6 absolute; raw
+distance moves 1.42 %) and `100 - 18*d^0.7` has slope -35.5 there. The
+kernel-side fusing fix was tried and rejected in `e1324192`. `TOL` is re-derived
+as the geometric midpoint of the two measured populations — noise 2.8221e-2 and
+smallest real defect 2.258 — giving **0.25**, 8.86x above one and 9.03x below
+the other; `zensim-wasm-tests` takes the same bar (its `1e-2` passed by luck on
+its one cell). `scripts/serving_matrix.sh` still demands BIT-EXACT agreement
+within one architecture. **Reusable: a cross-architecture score bar for this
+metric cannot be tighter than ~3e-2 while that `mul_add` stays unfused; i686 and
+wasm32-simd128 are ONE class; and a tolerance derivation must name the
+population it was measured on.** Record: `../benchmarks/dense_serving_ungate_2026-09-06.md` §2d.

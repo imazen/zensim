@@ -774,11 +774,32 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   fail. Gates: `serving::tests::{every_shipped_profile_scores_its_pinned_value,
   dense_bakes_resolve_to_a_dense_layout_and_the_gather_is_not_a_no_op,
   every_shipped_profile_is_servable, every_included_bake_is_packaged}` (the
-  pinned-score one runs under EVERY feature permutation CI builds; tolerance
-  `1e-2`, derived — ~950× above the measured noise, ~226× below the smallest
-  real defect, never widen it), `scripts/serving_matrix.sh` (the cross-build
-  diff, with a vacuity guard so at least one arm is genuinely v2-free), and
+  pinned-score one runs under EVERY feature permutation CI builds),
+  `scripts/serving_matrix.sh` (the cross-build diff, with a vacuity guard so at
+  least one arm is genuinely v2-free), and
   `zensim-wasm-tests::large_image_noise_distortion_matches_the_pinned_score`.
+  **⚠ THE PINNED-SCORE TOLERANCE IS `0.25`, AND THAT NUMBER IS ITSELF A
+  MEASUREMENT — a same-day i686 CI failure corrected it.** Set at `1e-2` from an
+  x86-64-only population (max 1.048e-5), it went red on
+  `PreviewV0_1/single-LSB` (98.378873 vs 98.394763, delta 1.589e-2) — not a
+  mis-serve: `PreviewV0_1` carries no bake, and all four dense profiles passed.
+  MEASURED over 160 cells on the four arms CI runs, **there are TWO arithmetic
+  classes, not four**: every FUSED-`mul_add` backend (AVX-512, AVX2, NEON)
+  agrees to **2.1411e-5**, while magetypes' **scalar and wasm128** backends
+  implement `mul_add` unfused, are **BIT-IDENTICAL to each other on 160/160
+  cells**, and sit up to **2.8221e-2** from the fused class. Mechanism: on a
+  near-identical pair the dissimilarity features are at the f32 cancellation
+  floor (193/228 features differ, worst 7.4× RELATIVE at ~1e-6 absolute, raw
+  distance 1.42 %) and `100 - 18·d^0.7` has slope -35.5 there. The kernel fix
+  was tried and rejected in `e1324192` (shifts `sigma_sq`/`sigma12`, breaks
+  `cross_platform::pixel_format_equivalence`; root cause upstream in
+  magetypes). `0.25` is the GEOMETRIC MIDPOINT of the two measured populations
+  (noise 2.8221e-2, smallest real defect 2.258) — 8.86× above one, 9.03× below
+  the other. **Consequences for anyone else: a cross-architecture SCORE bar for
+  this metric cannot be tighter than ~3e-2; i686 and wasm32-simd128 are ONE
+  class, so validating on either covers both; and a tolerance derivation must
+  state the POPULATION it was measured on — a same-architecture one understates
+  this by three orders of magnitude.**
   Record: `benchmarks/dense_serving_ungate_2026-09-06.md`; ledger
   `docs/DATASET_HISTORY.md` §3.55 (ROUND 106).
 

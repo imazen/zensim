@@ -32,7 +32,14 @@
 > same lane: `Cargo.toml`'s `include` allowlist was missing **six** `include_bytes!` targets, so the
 > PUBLISHED crate would not compile. **The lesson: a gate `#[cfg]`-gated on the same feature as the
 > code it protects is not a gate** — the servability census was itself behind `feature-regime-v2`.
-> Ledger `docs/DATASET_HISTORY.md` §3.55 (ROUND 106).
+> **SAME-DAY AMENDMENT (§2d):** the gate's own `TOL` was derived on an x86-64-only population and
+> i686 CI turned it red on `PreviewV0_1/single-LSB` (1.589e-2). Not a mis-serve — that profile has no
+> bake. MEASURED over 160 cells: **TWO arithmetic classes, not four** — AVX-512 vs AVX2 **2.1411e-5**,
+> while **i686 scalar and wasm32 simd128 are BIT-IDENTICAL to each other (160/160)** and up to
+> **2.8221e-2** from the fused-`mul_add` class, because magetypes implements `mul_add` unfused there
+> and a near-identical pair's features sit at the f32 cancellation floor. `TOL` re-derived as the
+> geometric midpoint of noise (2.8221e-2) and smallest real defect (2.258) = **0.25**.
+> Ledger `docs/DATASET_HISTORY.md` §3.55 (ROUND 106) + its amendment.
 
 > **★★ F19 — THE SCORE PATH TOO; OWNER + ERA LANDED, FLIP NOT TAKEN 2026-09-06:**
 > [`score_path_libc_determinism_2026-09-06.md`](score_path_libc_determinism_2026-09-06.md) — the

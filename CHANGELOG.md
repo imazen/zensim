@@ -48,6 +48,45 @@ on the supported surface, and `#[doc(hidden)] feature_set_id::registered_layout_
 (the candidate clip-width list a layout-free id is reconstructed against; not the
 supported surface).
 
+### Fixed — the pinned-score gate's tolerance was derived on ONE architecture; i686 CI caught it the same day (2026-09-06)
+
+The gate added above set `TOL = 1e-2` from a population of x86-64 builds only
+(AVX-512+threads vs neither, max 1.048e−5). `Test (i686-unknown-linux-gnu)` went
+red on the first push — `PreviewV0_1/single-LSB` 98.378873 vs pinned 98.394763,
+delta 1.589e−2 — and it is neither a mis-serve nor this lane's doing:
+`PreviewV0_1` carries no MLP bake at all, and all four DENSE profiles passed on
+i686.
+
+MEASURED over **160 cells** (8 profiles × 4 geometries × 5 distortion strengths)
+on the four arms CI runs — **there are two arithmetic classes, not four**:
+
+| arms | max \|Δ\| | cells > 1e-2 |
+|---|--:|--:|
+| x86-64 AVX-512 vs AVX2 | 2.1411e−5 | 0 |
+| x86-64 vs **i686 scalar** | **2.8221e−2** | 9 |
+| x86-64 vs **wasm32 simd128** | **2.8221e−2** | 9 |
+| i686 scalar vs wasm32 simd128 | **0 — bit-identical, 160/160** | 0 |
+
+Every FUSED-`mul_add` backend (AVX-512, AVX2, NEON) agrees to 2.1e−5;
+magetypes' scalar and wasm128 backends implement `mul_add` unfused (the split
+`e1324192` measured as 1 ULP on the ring tests) and are bit-identical to each
+other. On a near-identical pair the dissimilarity features sit at the f32
+cancellation floor — 193 of 228 features differ, worst 7.4× RELATIVE at ~1e−6
+absolute, raw distance 1.42 % — and `100 − 18·d^0.7` has slope −35.5 there, so
+1 ULP of form becomes 1.6e−2 of score. The kernel-side fusing fix was already
+tried and rejected in `e1324192` (it shifts `sigma_sq`/`sigma12` and breaks
+`cross_platform::pixel_format_equivalence`); root cause is upstream in
+magetypes.
+
+`TOL` is re-derived as the **geometric midpoint** of the two measured
+populations the gate must separate — cross-class noise 2.8221e−2 and the
+smallest real mis-serve 2.258 — i.e. **`0.25`, 8.86× above one and 9.03× below
+the other**. `zensim-wasm-tests` takes the same bar; its `1e-2` passed only
+because its one pinned cell fell inside it. `scripts/serving_matrix.sh` still
+requires **bit-exact** agreement within one architecture — loose across classes,
+exact within one. Record:
+[`benchmarks/dense_serving_ungate_2026-09-06.md`](benchmarks/dense_serving_ungate_2026-09-06.md) §2d.
+
 ### Fixed — the dense-id gather was feature-gated, so four shipped profiles were SILENTLY MIS-SCORED in every build without `feature-regime-v2` (2026-09-06)
 
 `cb2f412d` made the shipped `A`, `B`, `BHdr` and `D` bakes **dense** — each
@@ -113,8 +152,7 @@ wrong**:
 
 Gates: `serving::tests::every_shipped_profile_scores_its_pinned_value` (two
 fixed 64×64 pairs per profile, pinned, running under **every** cargo feature
-permutation; tolerance `1e-2` — ~950× above the measured 1.048e−5 tier/threading
-noise and ~226× below the smallest real defect),
+permutation; tolerance **`0.25`** — see the amendment below),
 `dense_bakes_resolve_to_a_dense_layout_and_the_gather_is_not_a_no_op` (with a
 negative control: the gathered vector must differ from the positional prefix),
 `every_shipped_profile_is_servable`, `every_included_bake_is_packaged`
