@@ -116,6 +116,30 @@ for f in sorted(glob.glob(os.path.join(out, "gates", "*.inv.json"))):
 PY2
 }
 
+do_board() {
+  # Promote the wave's cells onto the summer gauntlet. `promote_fulleval.py`
+  # RELABELS and annotates; it recomputes nothing, and every stat block is
+  # asserted byte-identical to the source verdict.
+  #
+  # ⚠ The board name carries a `BOA_` prefix. The lane's arm names are
+  # `A_plain` / `B_nonneg` / …, and `gauntlet.family_of` already claims `A_` for
+  # "arm A" and `B_` for "arm B" — 944 campaign families. Promoting under the raw
+  # names would silently file a 228-slot constrained-MLP cell into a 944
+  # campaign's toggle group, with no error.
+  local BOARD=${ZL_BOARD:-/mnt/v/output/zensim/reports/fulleval}
+  for f in "$OUT"/verdicts/*.fulleval.json; do
+    local name; name=$(basename "$f" .fulleval.json)
+    [[ "$name" == _* ]] && continue
+    local g="$OUT/gaddr/gaddr_${name}.json"
+    local args=(--verdict "$f" --name "BOA_${name}" --out-dir "$BOARD")
+    [[ -s "$g" ]] && args+=(--graft-gaddr "$g")
+    say "promote BOA_${name}"
+    python3 "$WS/scripts/promote_fulleval.py" "${args[@]}" \
+      >> "$OUT/gates/board_promote.log" 2>&1 || say "promote FAILED BOA_${name}"
+  done
+  say "board promotion done — regen with scripts/v_next/bandwise_dashboard.py --fulleval-dir $BOARD"
+}
+
 do_select() {
   say "freeze_check --select --seed-group --min-k 2 --floor-basis all"
   "$BIN/freeze_check" --select "$OUT"/verdicts/*.fulleval.json \
@@ -127,6 +151,7 @@ do_select() {
 case "${1:-all}" in
   m3a)   do_m3a ;;
   inversions) do_inversions ;;
+  board) do_board ;;
   report) do_report ;;
   select) do_select ;;
   bootstrap) shift; do_bootstrap "$@" ;;
