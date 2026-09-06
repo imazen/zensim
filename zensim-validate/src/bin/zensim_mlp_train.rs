@@ -785,6 +785,23 @@ struct Args {
     #[arg(long, default_value_t = 100.0, value_name = "FLOAT")]
     nonneg_pin: f64,
 
+    /// Append N synthetic ZERO-feature rows carrying an absolute target of the
+    /// pin — a redundant guard that the model maps a perfect copy to the top of
+    /// the dial.
+    ///
+    /// Redundant *under* `--nonneg-distance`, and that is the point: there
+    /// `raw(0⃗) = pin` bit-exactly by construction, so these rows' squared error
+    /// is exactly `0.0` and their gradient is exactly zero — the architecture
+    /// has already made the guard's job unnecessary. Without the architecture
+    /// the rows do real work, pulling the identity prediction toward the pin,
+    /// which is what makes the pair of measurements informative.
+    ///
+    /// The rows go in as a train-only group appended LAST, so TV pair indices
+    /// (which are into the concatenated group rows in `--group` order) are
+    /// unaffected. `0` (the default) appends nothing and is byte-identical.
+    #[arg(long, default_value_t = 0, value_name = "N")]
+    identity_rows: usize,
+
     /// Number of hidden layers. 1 = 372→128→heads (default).
     /// 2 = 372→128→64→heads (second layer width = n_hidden/2).
     #[arg(long, default_value_t = 1)]
@@ -3721,6 +3738,23 @@ fn main() {
     // above — the TV concatenation, the provenance/spec blocks — still sees
     // the rows; the borrow ends at the call and `loaded`'s metadata is
     // readable again for the repro sidecars below.
+    // `--identity-rows`: a train-only group of zero-feature rows whose absolute
+    // target is the pin. Built here, appended LAST, so it cannot shift the TV
+    // pair index space. Held in locals that outlive `groups`.
+    let (identity_scores, identity_rows_flat): (Vec<f64>, Vec<f64>) = if args.identity_rows > 0 {
+        let target_unit = args.nonneg_pin / args.target_scale;
+        (
+            vec![target_unit; args.identity_rows],
+            vec![0.0f64; args.identity_rows * n_features],
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    let identity_row_refs: Vec<&[f64]> = identity_rows_flat
+        .chunks(n_features.max(1))
+        .take(args.identity_rows)
+        .collect();
+
     let mut groups: Vec<TrainingGroup> = loaded
         .iter_mut()
         .map(|g| TrainingGroup {
@@ -3744,6 +3778,31 @@ fn main() {
             },
         })
         .collect();
+    if args.identity_rows > 0 {
+        println!(
+            "[identity-rows] appending {} zero-feature rows with absolute target {} \
+             (pin {} / target-scale {}){}",
+            args.identity_rows,
+            args.nonneg_pin / args.target_scale,
+            args.nonneg_pin,
+            args.target_scale,
+            if args.nonneg_distance {
+                " — REDUNDANT under --nonneg-distance: raw(0) is the pin bit-exactly,                  so this group's squared error and gradient are exactly zero"
+            } else {
+                ""
+            }
+        );
+        groups.push(TrainingGroup {
+            name: "identity_rows".to_string(),
+            human_scores: &identity_scores,
+            features: mlp_train::FeatureRows::Borrowed(&identity_row_refs),
+            metric_sigmas: None,
+            train_weight: 1.0,
+            validation_weight: 0.0,
+            loss_mode: mlp_train::GroupLossMode::Mse,
+            ref_ids: None,
+        });
+    }
 
     let bake_bytes = if want_gpu {
         if !args.per_sample_alpha_head {
