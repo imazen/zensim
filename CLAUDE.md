@@ -602,20 +602,46 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   passes cleanly. Shipped bakes were never affected. Commit: see
   `fix(#35)`.
 
-- **⚠ `train_corruption_head.py`'s BAKE IS A FUNCTION OF THE BLAS THREAD COUNT (found +
-  measured 2026-09-06, OPEN).** Same recipe, same data, same commit, byte-identical
-  source-held-out split, differing only in `OMP_NUM_THREADS`: `corruption_head_d228.bin`
-  comes out `6f97b653…` (1T) / `1229842d…` (4T) / `23ad9c5b…` (8T) / **`da411c8c…` (28T)**.
-  The shipped 2026-09-05 `d228` head is the 28T one, so **re-running the identical command
-  under `run-heavy --jobs 8` does NOT reproduce it**. Mechanism: the lbfgs solve's BLAS
-  reduction order moves the weights in the last bits and the f16 pack quantizes them
-  differently; the published `metrics.json` moves too (T = 0.9 detection 0.89527 → 0.89465,
-  per-family recall up to 0.4 pt). Same *class* as the v1 extractor's `RAYON_NUM_THREADS`
-  dependence below, far smaller amplitude. **Not fixed** — pinning the thread count or the
-  solver re-dates every published head number. **Quote a head bake's sha256 with the thread
-  count that produced it**, and never call a different-`--jobs` re-run a reproduction.
-  Measured chain (patched owner ≡ `main` owner ≡ shipped bake at 28T):
-  `benchmarks/corruption_head_theories_2026-09-06.md` §9.
+- **✅ FIXED 2026-09-06 — `train_corruption_head.py`'s BAKE WAS A FUNCTION OF THE BLAS
+  THREAD COUNT (found 2026-09-06 at `478bc28e`, fixed same day).** Same recipe, same
+  data, same commit, byte-identical source-held-out split, differing only in
+  `OMP_NUM_THREADS`: `corruption_head_d228.bin` came out `6f97b653…` (1T) /
+  `1229842d…` (4T) / `23ad9c5b…` (8T) / **`da411c8c…` (28T)**. The shipped 2026-09-05
+  `d228` head is the 28T one, so re-running the identical command under
+  `run-heavy --jobs 8` did NOT reproduce it. Mechanism: the lbfgs solve's BLAS
+  reduction order (and, for `--model hgb`, `HistGradientBoostingClassifier`'s
+  histogram reduction via libgomp) moved the weights in the last bits and the f16
+  pack quantized them differently; the published `metrics.json` moved too (T = 0.9
+  detection 0.89527 → 0.89465 at 8T, per-family recall up to 0.4 pt). Same *class* as
+  the v1 extractor's `RAYON_NUM_THREADS` dependence below, far smaller amplitude.
+  **FIX:** the owner now force-sets `OMP_NUM_THREADS`/`OPENBLAS_NUM_THREADS`/
+  `MKL_NUM_THREADS`/`VECLIB_MAXIMUM_THREADS`/`NUMEXPR_NUM_THREADS`/`BLIS_NUM_THREADS`
+  to `"1"` (unconditionally, not `setdefault` — independence from the caller's own
+  exports is the point) before `numpy` is imported, plus `threadpoolctl.
+  threadpool_limits(1)` right after import as defense-in-depth for whatever's already
+  loaded. **PROVEN, not asserted:** `scripts/v_next/corrhead_determinism_gate.py`
+  refits the exact `d228` recipe at ambient 1/4/8/28 threads and gets byte-identical
+  `corruption_head_d228.bin` / `..._w944.bin` / `metrics.json` / weights `.json` at
+  every count (sha256 `6f97b653…` — which is exactly the historical "1T" value, since
+  pinning to 1 thread reproduces the natural single-thread reduction order). A
+  synthetic smoke test found no thread-order sensitivity in `HistGradientBoostingClassifier`
+  either, before or after the fix, at the scale tested — not shipped either way
+  (`can_bake` refuses `--bake-out` for it), but the fix's env-var mechanism covers it
+  regardless since OpenMP reads its thread count at first use, not at `dlopen` time.
+  **The fix does NOT reproduce the historical 28-thread shipped bake** (`da411c8c…`)
+  **byte-for-byte — this is expected, not a defect**: no fixed thread count is
+  simultaneously ambient-independent AND equal to a specific historical
+  ambient-dependent run. The shipped `corruption_head_d228.bin` was **NOT replaced**.
+  Registered delta, scored via `predict_features_with_bake` on the canonical
+  `gb82_dog` held-out gate grid (the actual baked bytes, not the training log):
+  detection at T=0.9 **83.929 % → 84.077 % (Δ +0.149 pt)**, FP on both `q10`/`q20`
+  matched anchors **unchanged at 0.000 %**. **Quote a head bake's sha256 with the
+  thread count that produced it** for any pre-fix artifact; every post-fix build is
+  thread-count-invariant by construction, so the caveat no longer applies going
+  forward. Full record + reproduction: `benchmarks/corruption_head_theories_2026-09-06.md`
+  §11 (addendum to §9, which found this, and which still holds the original
+  patched-owner ≡ `main` owner ≡ shipped-bake-at-28T parity chain); ledger
+  `docs/DATASET_HISTORY.md` §3.48 (Ledger ROUND 100).
 
 ## Canonical training data + indexes (added 2026-05-20)
 

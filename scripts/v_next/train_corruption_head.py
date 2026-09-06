@@ -38,12 +38,70 @@ Select the slice with `--feat-range 0:156` / `--feat-range 0:228`.
 list, so the broad negatives can be an era-matched instrument instead of whatever
 720 tables happened to exist. `--corpus-nfeat` is auto-detected; the perceptual
 value-add needs a 720 corpus and is skipped (loudly) otherwise.
+
+## Determinism pin (2026-09-06)
+
+This trainer's bake used to be a function of the ambient BLAS/OpenMP thread
+count: the SAME recipe, SAME data, SAME commit produced four different
+`corruption_head_d228.bin` files at 1/4/8/28 ambient threads (found in
+`benchmarks/corruption_head_theories_2026-09-06.md` §9; the shipped
+2026-09-05 `d228` head is the 28-thread one, so a `run-heavy --jobs 8`
+re-run of the identical command did NOT reproduce it). The mechanism: the
+lbfgs solve inside `LogisticRegression.fit` (and, for `--model hgb`,
+`HistGradientBoostingClassifier`'s histogram reduction) calls into
+OpenBLAS/libgomp, whose parallel reduction order is not float-associative,
+so the fitted coefficients move in their last bits — enough for the `f16`
+bake pack to round differently and change `metrics.json`.
+
+Fixed by forcing every native threading layer this process can reach to a
+single thread BEFORE numpy/sklearn are imported, so the reduction order is
+the same sequential order regardless of what the caller (a shell, a fleet
+worker, `run-heavy --jobs N`) already exported. The env vars are force-set
+(not `setdefault`) — the whole point is independence from the ambient
+environment, not merely a default. `threadpool_limits(1)` right after import
+is belt-and-suspenders for whatever is already loaded at that point; the env
+vars are what actually matters for a library (e.g. libgomp, only loaded when
+`--model hgb` is requested) that gets `dlopen`'d later, since OpenMP/OpenBLAS
+read their thread-count env vars at first use, not at process start.
+
+Verified: `scripts/v_next/corrhead_determinism_gate.py` fits the shipped
+`d228` recipe at ambient 1/4/8/28 threads and asserts byte-identical bakes.
+The now-deterministic bake does NOT reproduce the historical 28-thread
+shipped artifact byte-for-byte (single-thread reduction order differs from
+the historical unpinned 28-thread run) — see
+`benchmarks/corruption_head_theories_2026-09-06.md` §11 (addendum to §9) for
+the measured delta (detection +0.15 pt, FP unchanged, on the canonical
+`gb82_dog` gate). The shipped `corruption_head_d228.bin` was NOT replaced by
+this fix; it stays a named 28-thread-ambient historical snapshot.
 """
-import argparse, json, os, subprocess, struct
+import os
+
+# Force every native threading layer to 1 BEFORE numpy/sklearn are imported.
+# This MUST run before `import numpy` — OpenBLAS reads these at first use,
+# which for a fresh interpreter is "as soon as numpy pulls it in" below.
+# Force-set (not os.environ.setdefault): a caller (run-heavy, a fleet worker)
+# may already export OMP_NUM_THREADS=N for its own parallelism budget, and
+# the whole point of this pin is that this script's fit results stop
+# depending on that value.
+for _tvar in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+              "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS", "BLIS_NUM_THREADS"):
+    os.environ[_tvar] = "1"
+
+import argparse, json, subprocess, struct
 import numpy as np, pyarrow.parquet as pq
+import threadpoolctl
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
+
+# Belt-and-suspenders for whatever's already loaded (openblas, via numpy,
+# is loaded by the line above). Native libraries loaded later by a lazy
+# sklearn import (libgomp, when `make_classifier("hgb", ...)` pulls in
+# HistGradientBoostingClassifier) are not yet registered with threadpoolctl
+# at this point, so they are NOT covered by this call — they are covered by
+# the forced env vars above, which libgomp reads at first parallel region,
+# not at library-load time.
+threadpoolctl.threadpool_limits(1)
 
 NFEAT = 372
 CANON = "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22"

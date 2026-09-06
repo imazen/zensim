@@ -372,3 +372,126 @@ The owner `scripts/v_next/train_corruption_head.py` gained `make_classifier(name
 hard-coded estimator exactly, so the default path is unchanged, and `--bake-out` is refused
 for the non-linear forms). The study driver consumes that factory rather than building its
 own estimators.
+
+## 11. Addendum 2026-09-06 — the thread-count bug (§9) is fixed at the owner
+
+§9 found, and left unfixed, that `train_corruption_head.py`'s bake was a function of
+the ambient BLAS/OpenMP thread count. This addendum closes it.
+
+**The fix.** `train_corruption_head.py` now force-sets `OMP_NUM_THREADS`,
+`OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `VECLIB_MAXIMUM_THREADS`,
+`NUMEXPR_NUM_THREADS`, `BLIS_NUM_THREADS` to `"1"` — unconditionally, not
+`setdefault`, since the whole point is to stop depending on whatever a caller
+(a shell, `run-heavy --jobs N`, a fleet worker) already exported — before `numpy`
+is imported, plus a `threadpoolctl.threadpool_limits(1)` call right after import
+as a belt-and-suspenders for whatever's already loaded at that point. The pin
+lives at module level (before `NFEAT = 372`), so every caller of `make_classifier`
+gets it, including `corrhead_theories.py`/`corrhead_tests.py`, which import it as
+a module rather than subprocess it.
+
+**Why env vars, not only `threadpoolctl`.** `threadpoolctl.threadpool_limits(1)`
+only clamps libraries already loaded into the process at call time. `--model hgb`
+lazily imports `HistGradientBoostingClassifier` (and therefore lazily loads
+`libgomp`) *inside* `make_classifier`, after the module-level `threadpool_limits`
+call has already run. Forcing the env vars before `numpy` import instead relies on
+the standard, well-documented behavior that OpenMP/OpenBLAS runtimes read their
+thread-count env var at first use, not at `dlopen` time — so a library loaded
+later in the same process still picks up the pin.
+
+**Test 1 — invariance across ambient thread counts (the requested proof).**
+`scripts/v_next/corrhead_determinism_gate.py` runs the shipped `d228` recipe
+(`corrhead_arms.sh`'s exact argv) with `OMP_NUM_THREADS`/`OPENBLAS_NUM_THREADS`/
+`MKL_NUM_THREADS` forced to 1, 4, 8 and 28 in the AMBIENT environment (simulating
+a caller that has already set its own opinion) and asserts the resulting bakes are
+byte-identical. MEASURED, this box, `main@478bc28e` + the fix:
+
+| ambient threads | `corruption_head_d228.bin` sha256 | `..._w944.bin` sha256 | `metrics.json` | weights `.json` |
+|---|---|---|---|---|
+| 1  | `6f97b653ba5fea2d…` | `c7cc9c874921d24e…` | `65171a8270935e64…` | `73fcd75b95439975…` |
+| 4  | `6f97b653ba5fea2d…` | `c7cc9c874921d24e…` | `65171a8270935e64…` | `73fcd75b95439975…` |
+| 8  | `6f97b653ba5fea2d…` | `c7cc9c874921d24e…` | `65171a8270935e64…` | `73fcd75b95439975…` |
+| 28 | `6f97b653ba5fea2d…` | `c7cc9c874921d24e…` | `65171a8270935e64…` | `73fcd75b95439975…` |
+
+All four columns are byte-identical across all four thread counts (`diff` on the
+raw files, not just the truncated sha above) — the fix holds on the FULL output
+surface (bake bytes, the `_w944` sibling, the trainer's printed `metrics.json`,
+*and* the persisted weights JSON), not only on the artifact the bug report named.
+As a cross-check, `23ad9c5b…` — the UNPATCHED script at ambient 8 threads,
+re-measured on this box before touching the file — reproduced §9's recorded 8T
+value exactly, confirming this addendum's repro setup matches §9's byte for byte.
+
+A synthetic (20,000×50, seed 0) smoke test of `make_classifier("hgb", seed=0)`
+— the `HistGradientBoostingClassifier` candidate the task asked to check
+separately, since `libgomp`'s histogram-reduction threading is a different
+mechanism from BLAS's — was bit-identical across the same four ambient thread
+counts **both before and after this fix** at that data scale; no thread-order
+sensitivity was observed to fix. It is not shipped (`can_bake` refuses
+`--bake-out` for it) and this addendum does not claim its histogram building is
+provably order-invariant in general, only that a moderate-scale check found no
+divergence, and that the fix's env-var mechanism defends it the same way it
+defends `LogisticRegression` regardless.
+
+**Test 2 — reproduction gate against the shipped 28-thread artifact.**
+`corrhead_determinism_gate.py --skip-gate-comparison` false (the default) also
+diffs the new deterministic build's sha256 against `d228/corruption_head_d228.bin`
+(`da411c8c9cd6a6e216c81515714fecf76b7e3d0dcf38c9be2e11dc2f390fd8b2`, unchanged on
+disk, timestamp verified untouched):
+
+```
+shipped d228.bin sha256:            da411c8c9cd6a6e216c81515714fecf76b7e3d0dcf38c9be2e11dc2f390fd8b2
+new deterministic d228.bin sha256:  6f97b653ba5fea2d33f2d49b36916e53d327749eca7e2c94a76c2e37280ef2aa
+```
+
+**They differ — this is the documented, expected outcome, not a gate failure.**
+Pinning to 1 thread reproduces the natural *1-thread* reduction order, which is
+not the same reduction order as the historical *28-thread* ambient (unpinned) run
+that produced the shipped artifact — `6f97b653…` is in fact exactly the "1T"
+value §9's own table already recorded. There is no thread count you can pin to
+that is simultaneously (a) independent of the ambient environment on every box
+and (b) equal to a historical run's ambient-dependent value, so reproducing
+`da411c8c…` exactly was never on the table once the fix forces a *fixed* count.
+**The shipped bake was NOT replaced** — `d228/corruption_head_d228.bin` and its
+`_w944` sibling are byte-identical to before this addendum, and no file under
+`/mnt/v/output/zensim/corruption-head-2026-09-05/d228*/` was touched. The new
+runs live at `/mnt/v/output/zensim/corruption-head-2026-09-05/detfix/`.
+
+**Registered delta and its effect on detection/FP, through the existing
+evaluation path.** Two independent measurements, both small:
+
+1. *The actual baked bytes*, scored via `predict_features_with_bake` (the tool
+   CLAUDE.md names for "quote the bake, not the training log") on the canonical
+   `gb82_dog` held-out gate grid (672 triples × `corruption`/`q10`/`q20`, 372-wide,
+   held out from training by construction — the SAME grid the D-companion's own
+   `_MANIFEST.json` names as `gate_grid`), shipped vs. new-deterministic, at T=0.9
+   (score < 10):
+
+   | | detection | FP (q10 anchor) | FP (q20 anchor) |
+   |---|---|---|---|
+   | shipped (`da411c8c…`) | 83.929 % | 0.000 % | 0.000 % |
+   | new deterministic (`6f97b653…`) | 84.077 % | 0.000 % | 0.000 % |
+   | Δ (new − shipped) | **+0.149 pt** | 0.000 pt | 0.000 pt |
+
+2. *The trainer's own held-out test-fold curve* (`metrics.json`, which — per the
+   already-known, separate discrepancy this addendum does not touch — reports the
+   `CalibratedClassifierCV` ensemble, not the `LogisticRegression`+isotonic model
+   that actually gets baked; included here only because it is what §9's own
+   magnitude claim was quoted against): T=0.9 detection **89.527 % → 89.424 %**
+   (Δ −0.103 pt), `fp_broad_honest` 15.830 % → 15.881 % (Δ +0.051 pt),
+   `fp_severe_honest` 0.223 % → unchanged to 3 dp; per-family recall moves up to
+   **0.38 pt** (`channel_swap_rg` 84.48 % → 84.10 %) — consistent with, and inside,
+   §9's own "up to 0.4 pt" characterization of the 8-thread case. Split (`split.tsv`,
+   905,503 bytes) is BYTE-IDENTICAL between the shipped run and every new run — the
+   PRNG-based train/val/test partition does not depend on BLAS at all, only the
+   fitted weights do.
+
+**Status: FIXED, not narrowed.** The mechanism (ambient-thread-dependent bakes) is
+closed — any future `train_corruption_head.py` run, at any ambient thread count, on
+any box, produces the same bytes. The *specific historical artifact*
+`corruption_head_d228.bin` remains, by design, an unreproduced 28-thread-ambient
+snapshot; whether to retrain and ship the now-deterministic bake (a <0.15 pt
+detection change, 0 pt FP change, on the canonical gate) is a separate, ungated
+product decision this addendum does not make.
+
+**Repro**: `python3 scripts/v_next/corrhead_determinism_gate.py` (no args needed;
+defaults point at the canonical `d228` recipe and the shipped bake). ~35 s total
+(4 fits × ~7 s + one gate-grid scoring pass). Exit 0 = determinism holds.

@@ -2465,6 +2465,7 @@ emitted** — the winning forms have no wire format (`emit_znpr` writes one iden
 layer from `coef_`; the owner now refuses `--bake-out` for them). Record:
 `benchmarks/corruption_head_theories_2026-09-06.md`.
 
+
 ## §3.46 — the rev2 372 eval root, and the two data defects the fleet gate found (2026-09-06)
 
 **New root:** `/mnt/v/zen/zensim-training/2026-09-06-full-features-372-rev2/` —
@@ -2512,3 +2513,76 @@ musl build and the dev box's glibc build of the SAME source differ by one ULP on
 ~0.024 % of cells; glibc 2.36 and 2.43 are bit-identical. The wave was unblocked by
 building the fleet binary against the base image's own glibc, not by changing any
 arithmetic.
+
+
+### §3.48 — the corruption head's BLAS/OpenMP thread-count nondeterminism is fixed at the owner (2026-09-06)
+
+**Ledger ROUND 100.** §3.47's own theories lane found, and left open, that
+`train_corruption_head.py`'s bake was a function of the ambient BLAS/OpenMP
+thread count — the identical recipe at ambient 1/4/8/28 threads produced four
+different `corruption_head_d228.bin` files, and the shipped 2026-09-05 `d228`
+head is the 28-thread one, so a `run-heavy --jobs 8` re-run did not reproduce
+it. This round fixes it at the owner.
+
+**Fix:** force `OMP_NUM_THREADS`/`OPENBLAS_NUM_THREADS`/`MKL_NUM_THREADS`/
+`VECLIB_MAXIMUM_THREADS`/`NUMEXPR_NUM_THREADS`/`BLIS_NUM_THREADS` to `"1"`
+(unconditionally) before `numpy` is imported, plus `threadpoolctl.
+threadpool_limits(1)` immediately after import. Module-level, so every caller
+of `make_classifier` — the trainer's own `main()`, and `corrhead_theories.py`/
+`corrhead_tests.py`, which import it rather than subprocess it — gets the pin.
+
+**MEASURED (this box, `main` at `478bc28e` + the fix):** the exact `d228`
+recipe (`corrhead_arms.sh`'s argv) at ambient 1/4/8/28 threads now produces
+byte-identical `corruption_head_d228.bin` (sha256 `6f97b653ba5fea2d…`),
+`..._w944.bin`, `metrics.json`, and the persisted weights `.json` — all four
+files, not only the artifact the bug was originally characterized by. Before
+touching the file, the UNPATCHED script at ambient 8 threads was independently
+re-measured on this box first and reproduced §3.47's recorded 8-thread sha
+(`23ad9c5b…`) exactly, confirming this round's repro setup matches the
+original finding byte for byte before claiming a fix.
+
+**The fix does not, and structurally cannot, reproduce the historical
+28-thread shipped bake** (`da411c8c9cd6a6e216c81515714fecf76b7e3d0dcf38c9be2e11dc2f390fd8b2`)
+**byte-for-byte** — pinning to 1 thread reproduces the natural single-thread
+reduction order, which is a different reduction order from the historical
+28-thread ambient (unpinned) run; `6f97b653…` is in fact exactly §3.47's own
+recorded "1T" value. **The shipped `corruption_head_d228.bin` was NOT
+replaced** — every file under `d228*/` is untouched (verified: mtimes and
+sha256 unchanged). Registered delta, measured through the existing evaluation
+path on the canonical `gb82_dog` held-out gate grid (672 triples, 372-wide,
+scored via `predict_features_with_bake` — i.e. the actual baked bytes, not the
+trainer's `CalibratedClassifierCV`-based `metrics.json`, which is a known
+separate discrepancy this round does not touch): detection at T=0.9 moves
+**83.929 % → 84.077 % (Δ +0.149 pt)**; FP on both `q10` and `q20` matched
+honest anchors is **unchanged at 0.000 %**. The trainer's own held-out
+test-fold curve moves by a comparable amount (T=0.9 detection 89.527 % →
+89.424 %, per-family recall up to 0.38 pt), consistent with §3.47's own
+"up to 0.4 pt" characterization of the analogous 8-thread case — and the
+`split.tsv` partition itself (905,503 bytes) is byte-identical across every
+run, pre- and post-fix: the PRNG-driven source split never depended on BLAS,
+only the fitted weights did.
+
+A synthetic (20,000×50) smoke test of `make_classifier("hgb", seed=0)` — the
+`HistGradientBoostingClassifier` candidate §3.47 introduced, whose histogram
+building threads via `libgomp` rather than BLAS — found no thread-order
+sensitivity at that scale, either before or after this fix. It is not shipped
+(`can_bake` refuses `--bake-out` for non-`logistic` forms) and this round does
+not claim its histogram building is provably order-invariant in general; the
+fix's env-var mechanism covers it regardless, since OpenMP reads its
+thread-count env var at first use rather than at library-load time, which is
+also why the pin has to be env-var-based rather than only
+`threadpoolctl.threadpool_limits` (the latter only clamps libraries already
+loaded at call time, and `--model hgb` loads `libgomp` lazily, after the
+module-level `threadpool_limits` call has already run).
+
+**Status: FIXED, not narrowed.** The mechanism is closed for every future run,
+on every box, at every thread count. Whether to retrain and ship a new
+`d228`-class bake against the now-deterministic path (a documented <0.15 pt
+detection / 0 pt FP change on the canonical gate) is a separate, ungated
+product decision this round does not make.
+
+New tool: `scripts/v_next/corrhead_determinism_gate.py` — runs the recipe at
+N ambient thread counts, asserts byte-identical bakes (exit 0 = holds, exit 1
+= regression, exit 2 = could not run), and reports the shipped-vs-new gate-grid
+delta when they differ. Record: `benchmarks/corruption_head_theories_2026-09-06.md`
+§11 (addendum to §9).
