@@ -605,3 +605,64 @@ making it selectable. M3a therefore has to be measured before selection, via
 its owner (`scripts/harvest_bakes.sh`, 27 cells, ~66 s/bake). At ~60 bakes that
 is ~66 min of exclusive CPU, so it runs on the curated candidate set after the
 fit queue drains — never concurrently, which would corrupt both.
+
+---
+
+# RESULTS
+
+## 10. THE CAPACITY TABLE — 944 lane (era2r4, k=3 per cell, seeds 4004/4005/4006)
+
+| arm | composite | CID22 | KonJND | AIC-3 | CSIQ | LIVE | im26 | nonphoto | hfnl | mono | **A7r** | bytes |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| `S156` H128 | 0.8400 | 0.8752 | 0.4189 | 0.8098 | 0.9568 | 0.9302 | 0.9021 | 0.8962 | 0.3681 | **0.9951** | 5 | 20,323 |
+| `S156` H32 | 0.8421 | 0.8790 | 0.4220 | 0.8078 | 0.9522 | 0.9420 | 0.9025 | 0.8972 | 0.3692 | 0.9948 | 5 | **15,584** |
+| `S228` H128 | 0.8652 | 0.8852 | 0.4536 | 0.7985 | 0.9556 | 0.9282 | 0.9487 | 0.9465 | 0.4173 | 0.9901 | 5 | 29,298 |
+| **`S228` H32** | **0.8666** | **0.8887** | 0.4543 | 0.7999 | 0.9571 | 0.9516 | 0.9482 | 0.9452 | 0.4168 | 0.9894 | 5 | 20,231 |
+| `S261` H128 | 0.8660 | 0.8833 | **0.4566** | 0.8053 | 0.9574 | 0.9404 | 0.9518 | 0.9491 | 0.4336 | 0.9896 | 5 | 35,308 |
+| `S261` H32 | 0.8622 | 0.8861 | 0.4156 | 0.8048 | 0.9555 | 0.9402 | 0.9487 | 0.9453 | 0.4181 | 0.9919 | 5 | 20,322 |
+| `S265` H128 *(control)* | 0.8645 | 0.8863 | 0.4322 | 0.8018 | 0.9559 | 0.9442 | 0.9504 | 0.9487 | 0.4271 | 0.9901 | 5 | 30,669 |
+| `S265` H32 | 0.8640 | 0.8866 | 0.4237 | 0.8003 | 0.9561 | 0.9486 | 0.9517 | 0.9490 | 0.4216 | 0.9903 | 5 | 21,692 |
+| `S289` H128 | 0.8633 | 0.8836 | 0.4301 | 0.7999 | 0.9545 | 0.9301 | 0.9516 | 0.9497 | 0.4257 | 0.9896 | 5 | 36,339 |
+| `S289` H32 | 0.8614 | 0.8859 | 0.4048 | 0.8031 | 0.9560 | 0.9271 | 0.9497 | 0.9468 | 0.4190 | 0.9904 | 5 | 21,444 |
+| `S265` H128 **+skip** | 0.8645 | 0.8863 | 0.4322 | 0.8018 | 0.9559 | 0.9442 | 0.9504 | 0.9487 | 0.4271 | 0.9901 | 5 | 30,696 |
+| `S265` H128 **no-decay** | 0.8635 | 0.8844 | 0.4267 | 0.8014 | 0.9581 | 0.9327 | 0.9516 | 0.9501 | 0.4187 | 0.9908 | 5 | 32,788 |
+| `S265` H128 **α-head** | **0.5710** | **−0.5860** | 0.1119 | −0.6231 | −0.0940 | −0.1953 | −0.6564 | −0.6707 | −0.2808 | 0.9606 | 5 | 68,961 |
+| **`SORACLE`** (944-full) | **0.8581** | 0.8831 | 0.4191 | 0.7960 | 0.9620 | **0.9669** | 0.9414 | 0.9385 | 0.4214 | 0.9943 | 5 | 74,327 |
+
+**Five things this table settles.**
+
+1. **CAPACITY IS NOT A LEVER.** H32 vs H128 moves composite by −0.0038…+0.0021
+   across six set×width pairs — inside every per-seed spread — while cutting the
+   bake **30–47 %** (`S156` 20,323 → 15,584 B; `S228` 29,298 → 20,231 B). The
+   registered H256 extension is therefore **NOT RUN**: a width axis that is flat
+   downward and costs bytes upward has answered its own question, and spending
+   six fits to confirm it would have been the sunk-cost move.
+2. **THE COMPUTE CEILING IS *BELOW* THE RESTRICTED SETS.** `SORACLE` — the same
+   recipe with no `--keep-features`, free to read all 944 coordinates — reads
+   composite **0.8581**, the *lowest* non-degenerate cell in the table, and
+   KonJND 0.4191 against `S228`'s 0.4543. **The fast class's KonJND gap is NOT a
+   compute gap.** That was this campaign's standing hypothesis (Phase A-ORACLE
+   was registered to test it) and it is falsified: giving the recipe every
+   feature makes it *worse*.
+3. **THE SERVING-PATH MARGIN IS NOT MET — decided by its pre-registered rule.**
+   Best of {S261, S265, S289} = `S261` H128 at composite 0.8660 / CID22 0.8833,
+   against `S228` H32's 0.8666 / 0.8887: **−0.0006 composite and −0.0054 CID22,
+   both NEGATIVE.** The rule required ≥ +0.0070 or ≥ +0.0069. **Building the
+   944-layout scoring path is not justified**, and the un-servable sets are
+   closed as a direction.
+4. **The per-sample-α head is a catastrophic regression on this recipe** —
+   CID22 **−0.5860**, i.e. an inverted ranker — and its 2-layer sibling could
+   not even be packed (`packed tanh-pin range [−38.4, 14.2] corr=−0.8350`;
+   `error: packed-network spline fit produced only 1 knots (<2)`, all 3 seeds).
+   So **arms C2/C3 do NOT run**: their frozen precondition was that `P1α` not be
+   a KonJND regression, and it is a regression on every axis. `--monotonicity-reg`
+   stays UNMEASURED with a named cause, never reported as a null.
+5. **`--skip-connection` is byte-for-byte inert on rank** (every axis identical
+   to 4 dp against the control, bakes differing by 27 B) and **`--coarse-decay`
+   is worth +0.0010 composite / +0.0019 CID22 / +0.0055 KonJND** — small, real,
+   and exactly why the `nd` control had to exist.
+
+**A7r is 5 in every cell, including `S156` and `SORACLE`.** At 944 layout the
+floor gate does not discriminate between slices at all — which, against §8's
+372 result (156 → 228 costs three codecs there), says the 944 MLP class fails it
+for a reason of its own.
