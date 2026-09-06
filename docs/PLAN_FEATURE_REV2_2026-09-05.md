@@ -993,3 +993,63 @@ revision 1. Confounds inherited unchanged from §12.4 (the CID22 `image`-crate
 decoder, the 504-row KonJND ruler, KADID/TID train==val on this lineage).
 The single-fit CI caveat of §12.6 applies identically: these are deterministic
 convex solves with no seed, so the CIs mean what they say.
+
+#### 12.7.6 RESULTS — ANSWERED 2026-09-06. Four ship candidates; the registry still does not move
+
+Full record: [`../benchmarks/rev2_d_arms_2026-09-06.md`](../benchmarks/rev2_d_arms_2026-09-06.md)
+§11 addendum. Owner extensions `e8e4ace2`, gated by
+`scripts/verify_winsor_scope_identity.sh` (ALL PASS, incl. a byte-identical
+re-emit of two stored PRE-change artefacts).
+
+**Control first.** `R-refit` — the same refit chain with no guard — is
+**rank-invisible**: its spline differs from the fit-lasso one in 5 of 38 f32
+knots by ONE ulp each, and the paired-bootstrap delta against revision 1 is
+**exactly +0.00000 on all seven corpora at both slices**, with identical G-ADDR,
+per-codec floors and inversion rate. Every delta below is the guard.
+
+**All four criteria are met, by four arms.** `W-f17-refit-p999` / `-p99` /
+`-p95` and `W-f17cell-refit-p999` each hold **contract 6/6**, **revision 1's
+per-codec floors EXACTLY on all five codecs at both slices**, an **EXACT CID22
+tie** (0.863666 vs 0.863666, CI `[+0.00000, +0.00000]`) and the inversion PASS.
+The twelve-slot arms additionally **WIN LIVE** at both slices (+0.00032 /
++0.00022 for p99.9, CI-excluding).
+
+> **RECOMMENDED SHIP CANDIDATE: `W-f17-refit-p999`** — winsor `[p0.1, p99.9]` on
+> the twelve `contrast_inc` slots, applied at SERVE time to revision-1 weights,
+> spline refit on the guarded net. **Zero CID22 cost, every floor held, no era
+> break, no recalculation, no re-extraction, no feature-definition change.** It
+> is preferred over the two tighter windows because it provably cannot move the
+> gold holdout (**0 of CID22's 51,504 `contrast_inc` cells** exceed its window,
+> against 831 at p99 and 1,480 at p95), it perturbs **0.50 %** of training rows
+> against 4.6 % and 21.9 %, and all twelve of its windows are non-degenerate
+> where **p95 collapses f25's to `hi = 1e-9`** and pins that slot to a constant.
+
+**The registered follow-up is answered, and it is HALF right.** `W-all-refit`
+(the literal `W-all-carried` with the spline refit and nothing else changed):
+the **C6 break IS the carried spline and the refit removes it** — above-identity
+`1 → 0`, contract **5/6 → 6/6** — and the **CSIQ +0.04862 survives intact** (a
+monotone spline cannot move a rank; the two arms read identical SROCC on all
+seven corpora to 5 dp, which is the study's own control). **But the `avif-svt`
+floor loss is NOT the spline**: it survives the refit unchanged at 0.9744, so
+`W-all-refit` still fails criterion 2. **And the CSIQ gain is a property of the
+ALL-372 guard, not of F17** — scoped to the twelve slots CSIQ is a TIE
+(−0.000004). §12.6's "scope is what matters" holds in both directions.
+
+**Brief (c) degenerated and was replaced, per §12.7.3.** The immediate scale
+siblings of the two D-read slots are f77/f116/f155, already inside the F17 set;
+the two exposed cells entire (36 slots) were run instead and buy a TID win at
+a228 against a CSIQ/KADID loss at a156 — the wider scope does not pay here
+either.
+
+**Honest frame, stated in the record's §11a.9:** on THIS bake the guard is
+nearly inert. The shipped-D recipe re-fit on r6b's revision-1 tables reads
+exactly **one** of the twelve F17 slots (f77), so restricted to the support the
+p99.9 guard clamps 197 of 196,086 safesyn rows, 64 of 779 LIVE rows and 0 of
+4,292 CID22 rows. The finding is that the bound is **FREE** in this class, not
+that it is a rank win. **`DEFECT_F17`'s exposure table names f116 and f155 for
+the SHIPPED ADD156 bake — a different support — so the guard's effect on the
+artefact that actually ships is REGISTERED, NOT RUN.**
+
+**Nothing installed.** `ssim_form::SHIPPED_REVISION` is `Rev1`,
+`ZensimProfile::D`, `zensim/weights/` and both registries are untouched. The
+ship candidate goes to the user beside §12.6's era-break trade.

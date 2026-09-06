@@ -339,8 +339,33 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
   the study. **And `add-winsor` CARRIES the input bake's output spline
   verbatim**, so the literal `add-winsor → extend-top` chain calibrates on the
   un-clamped net: that variant ties rev1 on CID22 and wins CSIQ **+0.04862**
-  but breaks contract **C6**. A serve-time guard with a REFIT spline is
-  registered, not run. Ledger: `docs/DATASET_HISTORY.md` §3.50.
+  but breaks contract **C6**. Ledger: `docs/DATASET_HISTORY.md` §3.50.
+  **★ RESOLVED 2026-09-06 — THE SERVE-TIME GUARD WITH A REFIT SPLINE COSTS
+  NOTHING** (`benchmarks/rev2_d_arms_2026-09-06.md` §11 addendum,
+  pre-registration §12.7, ledger §3.51). Keep revision 1's WEIGHTS, declare the
+  guard on the bake, and refit the spline on the GUARDED net — the carry defect
+  is avoided by **ORDERING**, because `shared-anchor` forwards the anchor
+  through `build_fw_ops` (the bake's own transforms). **`W-f17-refit-p999`
+  (winsor `[p0.1, p99.9]` on the twelve `contrast_inc` slots, serve-time) is an
+  EXACT CID22 TIE at both slices** — 0.863666 vs 0.863666, CI `[0, 0]`, where
+  `W-f17` cost −0.00348 and `satexcess` −0.00456 — **holds rev1's per-codec
+  floors EXACTLY on all five codecs, contract 6/6, inversions PASS, and WINS
+  LIVE** (+0.00032 / +0.00022, CI-excluding), with no era break. It is the
+  RECOMMENDED ship candidate (user decision; nothing installed). Prefer p99.9
+  over p99/p95: **0 of CID22's 51,504 `contrast_inc` cells** exceed its window
+  (831 / 1,480 at the tighter ones) and **p95 collapses f25's window to
+  `hi = 1e-9`**, pinning that slot to a constant. **§10.2's registered
+  follow-up is HALF right:** the refit DOES remove the C6 break (above-identity
+  1 → 0, contract 5/6 → 6/6) and the CSIQ **+0.04862** survives — **but the
+  `avif-svt` floor loss is NOT the spline** (0.9744 either way) **and the CSIQ
+  gain belongs to the ALL-372 guard, not to F17** (scoped to twelve slots CSIQ
+  is a tie). **Honest frame: on that lineage the guard is nearly inert** — the
+  re-fit reads ONE of the twelve F17 slots (f77), clamping 0 CID22 rows — so the
+  bound is measured FREE, not a rank win; `DEFECT_F17`'s exposure table names
+  **f116 + f155** for the SHIPPED ADD156 bake, a different support, and that
+  measurement is REGISTERED, NOT RUN. Tools: `bake_dial_refit add-winsor
+  --slots` + repeatable `shared-anchor --anchor` (`e8e4ace2`), gated by
+  `scripts/verify_winsor_scope_identity.sh`.
 
 - **⛔ THE STORED 372-COL masked/IW BLOCK IS PRE-FIX AND THREAD-DEPENDENT — THE
   RUNTIME PROFILE B IS NOT THE EVALUATED PROFILE B (found + measured 2026-08-30,

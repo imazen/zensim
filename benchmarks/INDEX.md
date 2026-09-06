@@ -67,6 +67,34 @@
 > Also corrected here: `feature_rev2_2026-09-05.md` §11.8's "122 of 779 ROWS" is the CELL count;
 > LIVE carries **60** rows with a `contrast_inc` cell above 100.
 
+> **★★ REV2-D-GUARD — A BOUNDED D THAT COSTS NOTHING: THE SERVE-TIME GUARD WITH A REFIT SPLINE 2026-09-06:**
+> [`rev2_d_arms_2026-09-06.md`](rev2_d_arms_2026-09-06.md) §11 addendum — pre-registered as
+> `docs/PLAN_FEATURE_REV2_2026-09-05.md` §12.7 and pushed before the first bake. Revision-1
+> WEIGHTS unchanged, the winsor guard declared on the bake, the output spline **refit on the
+> guarded net**; the `add-winsor` carry defect is avoided by ORDERING, because `shared-anchor`
+> forwards through `build_fw_ops`. Two default-neutral owner extensions make it possible
+> (`add-winsor --slots`, repeatable `shared-anchor --anchor`), gated by
+> `scripts/verify_winsor_scope_identity.sh` — which re-emits two stored PRE-change artefacts
+> **BYTE-IDENTICALLY** and carries its own negative controls. Control `R-refit` (refit, no guard)
+> is **rank-invisible**: 5 of 38 f32 spline knots move by ONE ulp and every corpus delta is
+> **exactly +0.00000**.
+> **★ Four arms satisfy EVERY pre-registered criterion — the first in the whole study.
+> RECOMMENDED: `W-f17-refit-p999` (winsor [p0.1, p99.9] on the twelve `contrast_inc` slots,
+> serve-time, spline refit): CID22 an EXACT TIE at both slices where `W-f17` cost −0.00348 and
+> `satexcess` −0.00456, revision 1's per-codec floors held EXACTLY on all five codecs, contract
+> 6/6, inversions PASS, and a CI-excluding LIVE WIN (+0.00032 / +0.00022) — with no era break, no
+> recalculation and no feature-definition change.** It is preferred over the tighter windows
+> because **0 of CID22's 51,504 `contrast_inc` cells** exceed its window (831 at p99, 1,480 at
+> p95) and **p95 collapses f25's window to `hi = 1e-9`**, pinning that slot to a constant.
+> **★ §10.2's registered follow-up is HALF right:** the C6 break IS the carried spline and the
+> refit removes it (above-identity 1 → 0, contract 5/6 → 6/6) while the CSIQ **+0.04862** survives
+> intact — **but the `avif-svt` floor loss is NOT the spline** (0.9744 either way), so the all-372
+> arm is still ineligible, **and the CSIQ gain belongs to the ALL-372 guard, not to F17** (scoped
+> to twelve slots CSIQ is a tie, −0.000004). **Honest frame: on this bake the guard is nearly
+> inert** — the lineage's re-fit reads ONE of the twelve F17 slots (f77), so the bound is measured
+> FREE, not a rank win; `DEFECT_F17`'s exposure table names f116 + f155 for the SHIPPED ADD156
+> bake, a different support, and that measurement is REGISTERED, NOT RUN. Nothing installed.
+
 
 > **★ 2026-09-05 — DEFAULT PROPOSALS:** [`default_proposals_2026-09-05.md`](default_proposals_2026-09-05.md)
 > — the SDR + HDR default answer under the 2026-09-05 G-ADDR ruling (`resolvable` floor window

@@ -2848,3 +2848,65 @@ no board cell, zero Rust changed.
 Record: [`../benchmarks/rev2_d_arms_2026-09-06.md`](../benchmarks/rev2_d_arms_2026-09-06.md).
 Pre-registration: [`PLAN_FEATURE_REV2_2026-09-05.md`](PLAN_FEATURE_REV2_2026-09-05.md) §12.
 Artefacts + shas: `/mnt/v/output/zensim/rev2-d-arms-2026-09-06/_MANIFEST.json` (392 files).
+
+## §3.51 — the SERVE-TIME F17 guard with a REFIT spline: a bounded D that costs nothing (2026-09-06)
+
+**Lane:** REV2-D-GUARD. **Pre-registration:** `docs/PLAN_FEATURE_REV2_2026-09-05.md`
+§12.7, pushed `a7a91263` before the first bake. **Record:**
+`benchmarks/rev2_d_arms_2026-09-06.md` §11 addendum. **Artefacts:**
+`/mnt/v/output/zensim/rev2-d-arms-2026-09-06/guard/` (`_MANIFEST.json`,
+`build_commit`, 336 files). **Nothing installed.**
+
+**What §3.50 left open.** Every arm that bounds `contrast_inc` in the FEATURE
+costs the shipped D class CID22, and the bake-side alternative `W-f17` — which
+refits the WEIGHTS on the clamped gram — costs −0.00348. The one combination
+nobody had run was the one `add-winsor`'s own source made awkward: keep
+revision 1's weights, clamp at SERVE time, and refit the output spline on the
+guarded net. The tool CARRIES the pre-clamp spline, which is why
+`W-all-carried` broke contract C6.
+
+**The fix is ORDERING, not a patch.** `shared-anchor` forwards the anchor
+through `build_fw_ops`, i.e. through the bake's own declared transforms, so a
+refit that runs AFTER `add-winsor` is fitted on exactly what the runtime sees.
+Two default-neutral owner extensions were still needed and landed at `e8e4ace2`:
+`add-winsor --slots` (the guard could only cover all 372, and §3.50's own
+finding is that SCOPE is what matters) and a REPEATABLE `shared-anchor
+--anchor` (the shipped chain fits its spline over BOTH the 2,000-row negrich
+dial anchor and the 21-row id100 identity anchor). Gate
+`scripts/verify_winsor_scope_identity.sh`: omitting `--slots` re-emits two
+stored PRE-change artefacts BYTE-IDENTICALLY, a scoped emit differs and declares
+exactly 12 tokens over 372 lines, and two `--anchor` equals one physically
+concatenated parquet — each with its own negative control.
+
+**MEASURED.** Control `R-refit` (refit chain, no guard) is **rank-invisible**:
+its spline differs from the fit-lasso one in 5 of 38 f32 knots by ONE ulp each
+and every paired-bootstrap delta is **exactly +0.00000** on all seven corpora at
+both slices, with identical G-ADDR, floors and inversion rate. Against that
+control, **`W-f17-refit-p999`** — winsor `[p0.1, p99.9]` on the twelve
+`contrast_inc` slots — reads **an EXACT CID22 TIE** (0.863666 vs 0.863666, CI
+`[+0.00000, +0.00000]`) at both slices, holds **revision 1's per-codec floors
+EXACTLY on all five codecs**, keeps **contract 6/6** and the inversion rate, and
+**WINS LIVE** (+0.00032 a156 / +0.00022 a228, CI-excluding). Four arms clear all
+four pre-registered criteria; p99.9 is recommended because **0 of CID22's 51,504
+`contrast_inc` cells** exceed its window (831 at p99, 1,480 at p95), it clamps
+0.100 % of training cells and 0.496 % of rows, and **p95 collapses f25's window
+to `hi = 1e-9`** — `winsor_window`'s zero-constant fallback, which pins that
+slot to a constant and is `cap`'s new-ties failure arriving through the bake.
+
+**The registered follow-up is HALF right, and both halves matter.** `W-all-refit`
+is `W-all-carried` with the spline refit and nothing else: the **C6 break IS the
+carried spline** (above-identity 1 → 0, contract 5/6 → 6/6, `C3 frac<0`
+0.9055 → 0.9100) and the **CSIQ +0.04862 survives intact** — but the
+**`avif-svt` floor loss is NOT the spline**, surviving unchanged at 0.9744, so
+that arm is still ineligible; **and the CSIQ gain belongs to the ALL-372 guard,
+not to F17** (scoped to twelve slots CSIQ is a tie, −0.000004).
+
+**The honest frame, and the next measurement.** On THIS bake the guard is nearly
+inert: the shipped-D recipe re-fit on r6b's revision-1 tables reads **one** of
+the twelve F17 slots (f77), so restricted to the support it clamps 197 of
+196,086 safesyn rows, 64 of 779 LIVE rows and **0 of 4,292 CID22 rows**. The
+result is that the bound is measured **FREE** in this class, not that it is a
+rank win. `feature_defs::DEFECT_F17`'s exposure table names **f116 and f155**
+for the SHIPPED ADD156 bake — a different support — so applying the same guard +
+refit to the artefact that actually ships (which needs its own dial anchor and
+instruments) is **REGISTERED, NOT RUN**.
