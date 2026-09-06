@@ -1399,7 +1399,7 @@ enum GaddrBlock {
     Ladder,
 }
 
-fn gaddr_block<'a>(v: &'a serde_json::Value, which: GaddrBlock) -> Option<&'a serde_json::Value> {
+fn gaddr_block(v: &serde_json::Value, which: GaddrBlock) -> Option<&serde_json::Value> {
     let ladder = v.get("dial_ladder");
     let canon = v.get("dial").and_then(|d| d.get("addressability"));
     match which {
@@ -4435,7 +4435,10 @@ mod tests {
         // Canonical only: `auto` falls back, `ladder` does NOT (absence is NOT
         // MEASURED, which is never a fail and never another ruler's number).
         let only_canon = serde_json::json!({"dial": {"addressability": canon}});
-        assert_eq!(gaddr_contract_fails_of(&only_canon, GaddrBlock::Auto).len(), 1);
+        assert_eq!(
+            gaddr_contract_fails_of(&only_canon, GaddrBlock::Auto).len(),
+            1
+        );
         assert!(gaddr_contract_fails_of(&only_canon, GaddrBlock::Ladder).is_empty());
         assert!(gaddr_codec_states_of(&only_canon, GaddrBlock::Ladder).is_empty());
 

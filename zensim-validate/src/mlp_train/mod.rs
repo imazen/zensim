@@ -5799,6 +5799,7 @@ fn hidden_activation_for(leaky_alpha: f64) -> Activation {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn bake_two_layer_znpr_v3(
     scaler_mean: &[f64],
     scaler_scale: &[f64],

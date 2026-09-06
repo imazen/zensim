@@ -138,7 +138,7 @@ fn nonneg_distance_output_is_exactly_the_pin_on_the_zero_vector() {
 fn nonneg_distance_pin_is_exact_at_a_non_default_value() {
     let bytes: &'static [u8] =
         Box::leak(train_nonneg(WeightDtype::F32, 42.5, true).into_boxed_slice());
-    let got = score(bytes, &vec![0.0f64; N_FEATURES]);
+    let got = score(bytes, &[0.0f64; N_FEATURES]);
     assert_eq!(got.to_bits(), 42.5f64.to_bits(), "got {got}");
 }
 
@@ -172,15 +172,17 @@ fn nonneg_distance_output_never_exceeds_the_pin() {
                 }
             }
             n_checked += 1;
-            // `!(y > PIN)` alone passes vacuously for NaN, so say what is
-            // required of a non-finite result explicitly. (Review 2026-09-06.)
+            // A bare `y <= PIN` would also reject NaN (every ordered comparison
+            // against NaN is false in IEEE 754), but via the generic "exceeds
+            // the pin" message below — say what is required of a non-finite
+            // result explicitly instead. (Review 2026-09-06.)
             assert!(
                 y.is_finite(),
                 "raw({x:?}) = {y} is not finite — the guarantee is only meaningful \
                  on a finite output"
             );
             assert!(
-                !(y > PIN),
+                y <= PIN,
                 "raw({x:?}) = {y} exceeds the pin {PIN} — the C6 guarantee is not held"
             );
         }

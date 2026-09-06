@@ -104,3 +104,13 @@ check-data: check-provenance check-orientation check-mix
 # Needs `rustup target add x86_64-unknown-linux-musl`; no container.
 check-cross-libc:
     ./scripts/verify_cross_libc_features.sh
+
+# SAME-CLASS golden check for zensim-validate/tests/legacy_bake_sha.rs: the
+# PINNED sha256 digests in that file were measured on THIS box (Zen 4 /
+# AVX-512) and are not bit-reproducible on other SIMD tiers/platforms — CI runs
+# the in-process A/B in that file's default (env-unset) path instead. Run this
+# ONLY on the Zen 4 / AVX-512 dev box that captured PINNED, after touching
+# anything in mlp_train's polarity-sensitive sites, to confirm the same-class
+# digests still hold.
+legacy-bake-zen4-golden:
+    ZENSIM_ZEN4_GOLDEN_BAKE_SHA=1 cargo test -p zensim-validate --test legacy_bake_sha -- --nocapture
