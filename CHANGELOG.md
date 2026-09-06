@@ -48,6 +48,33 @@ on the supported surface, and `#[doc(hidden)] feature_set_id::registered_layout_
 (the candidate clip-width list a layout-free id is reconstructed against; not the
 supported surface).
 
+### Added — `rescore_parquet --densify`, and the loaders stop truncating at a gap (2026-09-06)
+
+- **`rescore_parquet --densify`** rewrites a feature parquet to store exactly the
+  ids it populates. The populated set comes from the **declaration**
+  (`--keep-ids`, mandatory); the full-column scan is a **GATE** — every dropped id
+  must be all-zero on every row or the conversion refuses. `--scan-only` reports
+  the census. Writes `<output>.densify.json` with both sha256s and both id lists;
+  the source is never modified. MEASURED end to end on a real 944 table: 944 → 728
+  columns, **730 of 730 kept columns bit-identical**, all 216 dropped verified
+  all-zero.
+- **Why the scan cannot decide**: on the postC 372 root — where every id is
+  genuinely populated — a scan-only converter would have dropped `f25` from `aic3`
+  (600 rows), `f12` from `konjnd`, and eight columns from `ext_sdr25` (50 rows).
+  Small-corpus accidents, i.e. prune class 3, which `prune.rs` already refuses to
+  act on.
+- **`parquet_loader` gains two owners** (`feature_column_run`,
+  `feature_column_run_by_name`) replacing five inlined walks. Byte-for-byte the
+  same discovery for every table on disk, and a **loud refusal** when a `f<id>`
+  column exists past the end of the contiguous run. Before this, a dense-by-id
+  table (`f0..f155, f372..f943`) loaded as **156-wide with no error at all**.
+- **Registered, not fixed**: a 944 table declares 39 ids the walk never writes
+  (`APPEND_SKIP_B_SCALE0` + reference-only + HDR-gated append2 slots), and both
+  the registry regime and `Plan::emit` say `0-943`. Modelling the placement rules
+  would make `check` refuse any bake reading one — and shipped **CHdr reads 8**.
+  Pinned by `a_944_regime_declares_39_ids_the_walk_never_writes`. Record:
+  `benchmarks/table_densify_census_2026-09-06.md`.
+
 ### Changed — the LAYOUT is out of a feature-set id's identity (2026-09-06)
 
 - **Canonical form is `<compute>/<era>#<hash8>`.** Two ids differing only in

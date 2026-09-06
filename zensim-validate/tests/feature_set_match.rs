@@ -445,3 +445,89 @@ fn every_registered_layout_width_is_a_candidate() {
     }
     assert!(seen >= 12, "the registry must record layouts, saw {seen}");
 }
+
+/// **The 39 ids a 944 table DECLARES and the walk never writes** — the
+/// table-side instance of the shape the cruft-purge ruling names ("a layout
+/// where … features aren't computed").
+///
+/// MEASURED 2026-09-06 over every leg of
+/// `/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01` (a full-column scan,
+/// not a sample): 39 of 944 `f*` columns are exactly `0.0` on every row of
+/// every leg, and they are the same 39 everywhere. They are the
+/// `APPEND_SKIP_B_SCALE0` cells (`feature_defs::placement_admits` — "the 944
+/// walk never computes that append cell") plus the reference-only /
+/// HDR-gated append2 slots. The registry's `folded720append2pools` regime
+/// declares `0-943`, and `Plan::emit` agrees with it, so BOTH declarations
+/// overstate what is populated by 39.
+///
+/// This test PINS the state rather than asserting the fix, because fixing it
+/// changes a refusal surface: with `populated_slots` modelling the placement
+/// rules, `check` would begin reporting `SlotsNotPopulated` for any bake
+/// reading one of the 39 — and shipped **CHdr reads 8 of them** (`f927/928`,
+/// `f932/933`, `f937/938`, `f942/943`: `HL_BIN1`/`HL_BIN2` per scale, which
+/// are structurally zero on an SDR route). That is a live product decision,
+/// not a lane's, so it is registered with its blast radius measured.
+///
+/// When the fix lands, this test fails and its expectations are updated in the
+/// same commit — which is the point of pinning it.
+#[test]
+fn a_944_regime_declares_39_ids_the_walk_never_writes() {
+    /// The 39, measured all-zero on every leg of the ext944-era2r4 root.
+    const NEVER_WRITTEN: &[usize] = &[
+        720, 721, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769,
+        770, 771, 772, 805, 806, 822, 823, 856, 857, 873, 874, 907, 908, 927, 928, 932, 933, 937,
+        938, 942, 943,
+    ];
+
+    let (_, layout, declared) = feature_set::registry()
+        .regime("folded720append2pools")
+        .expect("the 944 regime is registered");
+    assert_eq!(layout, 944);
+    assert_eq!(
+        declared.len(),
+        944,
+        "the registry declares every id populated"
+    );
+    for &s in NEVER_WRITTEN {
+        assert!(
+            declared.contains(s),
+            "f{s} is declared populated by the registry — that is the overstatement"
+        );
+    }
+
+    // `Plan::emit` agrees with the registry, so the owner does not model the
+    // placement rules either. Asserting this is what makes the fix visible.
+    let emit = zensim::research::Request::for_slots(declared.clone(), layout)
+        .validate()
+        .expect("the 944 request plans");
+    assert_eq!(
+        emit.len(),
+        944,
+        "Plan::emit does not model APPEND_SKIP_B_SCALE0 / reference-only slots yet"
+    );
+
+    // The blast radius of the fix, pinned on the shipped artifacts.
+    let read_count = |rel: &str| -> usize {
+        let bytes = std::fs::read(rel).unwrap_or_else(|e| panic!("{rel}: {e}"));
+        let m = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        let used = zensim_validate::block_profile::used_caller_lines(&m).expect("caller lines");
+        NEVER_WRITTEN.iter().filter(|s| used.contains(s)).count()
+    };
+    assert_eq!(
+        read_count(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zensim/weights/c_sdr_purity944_2026-08-29.bin"
+        )),
+        0,
+        "shipped C reads none of the never-written slots"
+    );
+    assert_eq!(
+        read_count(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zensim/weights/c_hdr_l1t1944_2026-08-29.bin"
+        )),
+        8,
+        "shipped CHdr reads EIGHT of them (HL_BIN1/HL_BIN2 per scale) — the measured blast \
+         radius of modelling the placement rules in populated_slots"
+    );
+}

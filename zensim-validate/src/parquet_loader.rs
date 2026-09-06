@@ -196,6 +196,118 @@ struct LoadedCommon {
 /// - missing both prefixes     -> `"<path>: missing f0 / feat_0 column"`
 /// - no feature columns        -> `"<path>: no <prefix>N columns found"`
 /// - empty file                -> `"<path>: empty file ..."`
+/// **THE owner of "where are this table's feature columns".**
+///
+/// Returns `(prefix, arrow index of `<prefix>0`, n_features)` for a table whose
+/// feature columns are the CONTIGUOUS run `<prefix>0..<prefix>{n-1}` sitting at
+/// consecutive arrow positions — which is every table on disk today, and for
+/// which this is byte-for-byte the walk each loader used to inline.
+///
+/// **It REFUSES a gapped id set instead of truncating at the gap**, and that is
+/// the whole reason it exists. Each of the five loaders used to stop at the
+/// first name that did not match, so a DENSE-BY-ID table — `f0..f155,
+/// f372..f943`, which `rescore_parquet --densify` now produces — would have
+/// loaded as a 156-wide table with no error at all, and every number computed
+/// from it would have been about a different feature space. A silent truncation
+/// in a loader is the same defect class as a positional slice in a scorer: the
+/// numbers come back, and they are about the wrong columns.
+///
+/// Reading a dense table is a separate, registered step (the row has to become
+/// id-indexed end to end, not merely wider). Until it lands, "refuse" is the
+/// correct answer and "truncate" never was.
+fn feature_column_run(
+    path: &std::path::Path,
+    arrow_fields: &[std::sync::Arc<arrow::datatypes::Field>],
+) -> Result<(&'static str, usize, usize), String> {
+    let n_arrow_cols = arrow_fields.len();
+    let (prefix, f0) = ["f", "feat_"]
+        .iter()
+        .find_map(|p| {
+            arrow_fields
+                .iter()
+                .position(|f| f.name() == &format!("{p}0"))
+                .map(|i| (*p, i))
+        })
+        .ok_or_else(|| format!("{path:?}: missing f0 / feat_0 column"))?;
+    let mut n = 0usize;
+    while f0 + n < n_arrow_cols {
+        let expected = format!("{prefix}{n}");
+        if arrow_fields[f0 + n].name() != &expected {
+            break;
+        }
+        n += 1;
+    }
+    if n == 0 {
+        return Err(format!("{path:?}: no {prefix}N columns found"));
+    }
+    // The GAP check: any `<prefix><id>` column with `id >= n` means the run
+    // stopped early on a table that HAS more feature columns — a dense-by-id
+    // layout, not a narrow table.
+    let beyond: Vec<usize> = arrow_fields
+        .iter()
+        .filter_map(|f| {
+            f.name()
+                .strip_prefix(prefix)
+                .and_then(|r| r.parse::<usize>().ok())
+        })
+        .filter(|id| *id >= n)
+        .collect();
+    if !beyond.is_empty() {
+        let lo = beyond.iter().copied().min().unwrap_or(0);
+        let hi = beyond.iter().copied().max().unwrap_or(0);
+        return Err(format!(
+            "{path:?}: feature columns are NOT the contiguous run {prefix}0..{prefix}{} — \
+             {} more column(s) exist at ids {prefix}{lo}..{prefix}{hi}, so this is a DENSE-BY-ID \
+             table. Loading it as {n}-wide would silently be about a different feature space. \
+             Score it at its wide source, or wait for the id-indexed loader.",
+            n - 1,
+            beyond.len(),
+        ));
+    }
+    Ok((prefix, f0, n))
+}
+
+/// The name-indexed sibling of [`feature_column_run`], for the loaders that
+/// find each column by NAME rather than by consecutive arrow position (the
+/// dial grid, the corruption grid, the per-pair metric table). Same contract:
+/// the contiguous run today, byte-for-byte, and a LOUD REFUSAL on a gapped
+/// (dense-by-id) table rather than a silent stop at the gap.
+fn feature_column_run_by_name(
+    path: &std::path::Path,
+    names: &[String],
+    prefix: &str,
+) -> Result<Vec<usize>, String> {
+    let idx = |n: &str| names.iter().position(|x| x == n);
+    let mut out = Vec::new();
+    let mut fi = 0usize;
+    while let Some(p) = idx(&format!("{prefix}{fi}")) {
+        out.push(p);
+        fi += 1;
+    }
+    if out.is_empty() {
+        return Err(format!("{path:?}: no {prefix}N feature columns found"));
+    }
+    let beyond: Vec<usize> = names
+        .iter()
+        .filter_map(|n| n.strip_prefix(prefix).and_then(|r| r.parse::<usize>().ok()))
+        .filter(|id| *id >= out.len())
+        .collect();
+    if !beyond.is_empty() {
+        let lo = beyond.iter().copied().min().unwrap_or(0);
+        let hi = beyond.iter().copied().max().unwrap_or(0);
+        return Err(format!(
+            "{path:?}: feature columns are NOT the contiguous run {prefix}0..{prefix}{} — \
+             {} more column(s) exist at ids {prefix}{lo}..{prefix}{hi}, so this is a \
+             DENSE-BY-ID grid. Loading it as {}-wide would silently be about a different \
+             feature space.",
+            out.len() - 1,
+            beyond.len(),
+            out.len(),
+        ));
+    }
+    Ok(out)
+}
+
 pub fn load_parquet(
     path: &PathBuf,
     name: &str,
@@ -289,26 +401,8 @@ fn load_parquet_impl(
     // (e.g. the post-jxl-fix near-lossless corpus). Both name the same
     // 372-wide with-iw feature space; only the header text differs, so
     // rejecting one of them just forces a rename-copy of the parquet.
-    let (prefix, f0_arrow_idx) = ["f", "feat_"]
-        .iter()
-        .find_map(|p| {
-            arrow_fields
-                .iter()
-                .position(|f| f.name() == &format!("{p}0"))
-                .map(|i| (*p, i))
-        })
-        .ok_or_else(|| format!("{path:?}: missing f0 / feat_0 column"))?;
-    let mut n_features = 0usize;
-    while f0_arrow_idx + n_features < n_arrow_cols {
-        let expected = format!("{prefix}{n_features}");
-        if arrow_fields[f0_arrow_idx + n_features].name() != &expected {
-            break;
-        }
-        n_features += 1;
-    }
-    if n_features == 0 {
-        return Err(format!("{path:?}: no {prefix}N columns found"));
-    }
+    let (prefix, f0_arrow_idx, n_features) = feature_column_run(path, arrow_fields)?;
+    let _ = prefix;
 
     // Optional reference-identity column, for within-ref pair sampling.
     // `ref_basename` is the canonical-corpus convention; `image_path` is
@@ -683,26 +777,8 @@ pub fn stream_parquet_rows(
     }
 
     // First feature column + consecutive count — mirrors load_parquet.
-    let (prefix, f0_arrow_idx) = ["f", "feat_"]
-        .iter()
-        .find_map(|p| {
-            arrow_fields
-                .iter()
-                .position(|f| f.name() == &format!("{p}0"))
-                .map(|i| (*p, i))
-        })
-        .ok_or_else(|| format!("{path:?}: missing f0 / feat_0 column"))?;
-    let mut n_features = 0usize;
-    while f0_arrow_idx + n_features < n_arrow_cols {
-        let expected = format!("{prefix}{n_features}");
-        if arrow_fields[f0_arrow_idx + n_features].name() != &expected {
-            break;
-        }
-        n_features += 1;
-    }
-    if n_features == 0 {
-        return Err(format!("{path:?}: no {prefix}N columns found"));
-    }
+    let (prefix, f0_arrow_idx, n_features) = feature_column_run(path, arrow_fields)?;
+    let _ = prefix;
 
     let mut wanted: Vec<usize> = Vec::with_capacity(n_features + target_columns.len());
     wanted.extend(target_arrow_idx.iter().copied());
@@ -865,16 +941,8 @@ pub fn load_dial_grid(path: &PathBuf) -> Result<DialGrid, String> {
     // Optional native codec-param columns (added 2026-05-29). Fall back to q.
     let cp_i = idx("codec_param");
     let pk_i = idx("param_kind");
-    let mut feat_idx = Vec::new();
-    let mut fi = 0usize;
-    while let Some(p) = idx(&format!("f{fi}")) {
-        feat_idx.push(p);
-        fi += 1;
-    }
+    let feat_idx = feature_column_run_by_name(path, &names, "f")?;
     let n_features = feat_idx.len();
-    if n_features == 0 {
-        return Err(format!("{path:?}: no fN feature columns found"));
-    }
     let reader = builder
         .build()
         .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
@@ -1011,16 +1079,8 @@ pub fn load_ramp_grid(path: &PathBuf) -> Result<RampGrid, String> {
     } else {
         "f"
     };
-    let mut feat_idx = Vec::new();
-    let mut fi = 0usize;
-    while let Some(p) = idx(&format!("{feat_prefix}{fi}")) {
-        feat_idx.push(p);
-        fi += 1;
-    }
+    let feat_idx = feature_column_run_by_name(path, &names, feat_prefix)?;
     let n_features = feat_idx.len();
-    if n_features == 0 {
-        return Err(format!("{path:?}: no {feat_prefix}N feature columns found"));
-    }
     let reader = builder
         .build()
         .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
@@ -1129,16 +1189,8 @@ pub fn load_labeled_grid(path: &PathBuf) -> Result<LabeledGrid, String> {
     } else {
         "f"
     };
-    let mut feat_idx = Vec::new();
-    let mut fi = 0usize;
-    while let Some(p) = idx(&format!("{feat_prefix}{fi}")) {
-        feat_idx.push(p);
-        fi += 1;
-    }
+    let feat_idx = feature_column_run_by_name(path, &names, feat_prefix)?;
     let n_features = feat_idx.len();
-    if n_features == 0 {
-        return Err(format!("{path:?}: no {feat_prefix}N feature columns found"));
-    }
     let reader = builder
         .build()
         .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
@@ -1331,22 +1383,7 @@ pub fn load_konjnd_aggregation_pool(
         .iter()
         .position(|f| f.name() == "pjnd_target")
         .ok_or_else(|| format!("{path:?}: missing pjnd_target column"))?;
-    let f0_arrow_idx = arrow_fields
-        .iter()
-        .position(|f| f.name() == "f0")
-        .ok_or_else(|| format!("{path:?}: missing f0 column"))?;
-
-    let mut n_features = 0usize;
-    while f0_arrow_idx + n_features < n_arrow_cols {
-        let expected = format!("f{}", n_features);
-        if arrow_fields[f0_arrow_idx + n_features].name() != &expected {
-            break;
-        }
-        n_features += 1;
-    }
-    if n_features == 0 {
-        return Err(format!("{path:?}: no fN columns found"));
-    }
+    let (_prefix, f0_arrow_idx, n_features) = feature_column_run(path, arrow_fields)?;
 
     let mut wanted: Vec<usize> = Vec::with_capacity(n_features + 2);
     wanted.push(ref_arrow_idx);
@@ -1611,26 +1648,8 @@ pub fn load_perpair_sample(
 
     // Feature block: `f<i>` or `feat_<i>`, consecutive from index 0 (same scan
     // as `load_parquet`, so `n_features` matches).
-    let (prefix, f0_arrow_idx) = ["f", "feat_"]
-        .iter()
-        .find_map(|p| {
-            arrow_fields
-                .iter()
-                .position(|f| f.name() == &format!("{p}0"))
-                .map(|i| (*p, i))
-        })
-        .ok_or_else(|| format!("{path:?}: missing f0 / feat_0 column"))?;
-    let mut n_features = 0usize;
-    while f0_arrow_idx + n_features < n_arrow_cols {
-        let expected = format!("{prefix}{n_features}");
-        if arrow_fields[f0_arrow_idx + n_features].name() != &expected {
-            break;
-        }
-        n_features += 1;
-    }
-    if n_features == 0 {
-        return Err(format!("{path:?}: no {prefix}N columns found"));
-    }
+    let (prefix, f0_arrow_idx, n_features) = feature_column_run(path, arrow_fields)?;
+    let _ = prefix;
 
     // Metric columns actually present, preserving request order.
     let present_metrics: Vec<(String, usize)> = metric_columns
@@ -1865,4 +1884,87 @@ pub fn load_scores_and_refs(
             Some(ref_ids)
         },
     })
+}
+
+#[cfg(test)]
+mod feature_column_run_tests {
+    use super::*;
+    use arrow::datatypes::{DataType, Field};
+    use std::path::Path;
+    use std::sync::Arc;
+
+    fn fields(names: &[&str]) -> Vec<Arc<Field>> {
+        names
+            .iter()
+            .map(|n| Arc::new(Field::new(*n, DataType::Float64, false)))
+            .collect()
+    }
+
+    /// The contiguous run is found exactly as the five inlined walks found it —
+    /// same prefix, same start index, same count.
+    #[test]
+    fn a_contiguous_table_reads_exactly_as_before() {
+        let f = fields(&["ref_basename", "human_score", "f0", "f1", "f2", "extra"]);
+        assert_eq!(
+            feature_column_run(Path::new("t.parquet"), &f),
+            Ok(("f", 2, 3))
+        );
+        let g = fields(&["id", "feat_0", "feat_1"]);
+        assert_eq!(
+            feature_column_run(Path::new("t.parquet"), &g),
+            Ok(("feat_", 1, 2))
+        );
+        let names: Vec<String> = ["a", "f0", "f1", "f2"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            feature_column_run_by_name(Path::new("t.parquet"), &names, "f"),
+            Ok(vec![1, 2, 3])
+        );
+    }
+
+    /// **The reason both helpers exist.** A DENSE-BY-ID table (`f0..f155`,
+    /// `f372..`) used to load as a 156-wide table with no error, and every
+    /// number computed from it would have been about a different feature
+    /// space. It must REFUSE, and the message must name the gap.
+    #[test]
+    fn a_gapped_dense_by_id_table_is_refused_not_truncated() {
+        let mut names: Vec<&str> = vec!["ref_basename", "human_score"];
+        let owned: Vec<String> = (0..4)
+            .map(|i| format!("f{i}"))
+            .chain((8..11).map(|i| format!("f{i}")))
+            .collect();
+        names.extend(owned.iter().map(String::as_str));
+        let f = fields(&names);
+        let err = feature_column_run(Path::new("dense.parquet"), &f)
+            .expect_err("a gapped table must be refused");
+        assert!(err.contains("NOT the contiguous run"), "{err}");
+        assert!(
+            err.contains("f8..f10"),
+            "the message must name the gap: {err}"
+        );
+
+        let by_name: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+        let err2 = feature_column_run_by_name(Path::new("dense.parquet"), &by_name, "f")
+            .expect_err("the by-name sibling must refuse too");
+        assert!(err2.contains("NOT the contiguous run"), "{err2}");
+
+        // NEGATIVE CONTROL: without the columns past the gap, the SAME table
+        // loads as 4-wide — which is what made the truncation invisible.
+        let tight = fields(&["ref_basename", "human_score", "f0", "f1", "f2", "f3"]);
+        assert_eq!(
+            feature_column_run(Path::new("tight.parquet"), &tight),
+            Ok(("f", 2, 4))
+        );
+    }
+
+    /// A table with no feature columns at all is still the old error, not the
+    /// new one — "absent" and "gapped" are different findings.
+    #[test]
+    fn no_feature_columns_is_the_old_error() {
+        let f = fields(&["ref_basename", "human_score"]);
+        let err = feature_column_run(Path::new("t.parquet"), &f).expect_err("no f0");
+        assert!(err.contains("missing f0 / feat_0"), "{err}");
+    }
 }

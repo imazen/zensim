@@ -73,7 +73,240 @@ fn col_f64(batch: &RecordBatch, idx: usize) -> Vec<f64> {
     }
 }
 
+/// **`--densify` — the table half of the dense feature-id contract.**
+///
+/// Rewrites a feature parquet so it stores exactly the ids it POPULATES:
+/// absent-id columns dropped, every kept column bit-identical, row order
+/// identical, and a sidecar manifest recording the source sha256, the output
+/// sha256, the kept id list and the dropped one.
+///
+/// **The populated set comes from the DECLARATION, never from a value scan,
+/// and that is the whole design.** A scan can only say "these columns are
+/// zero on THIS corpus" — which is prune class 3, the one
+/// `zensim_validate::prune` refuses to act on. MEASURED on the postC 372 eval
+/// root, where every id is genuinely populated: a scan-only converter would
+/// have dropped `f25` from `aic3` (600 rows), `f12` from `konjnd` (1,008) and
+/// EIGHT columns from `ext_sdr25` (50 rows) — small-corpus accidents, not
+/// structural absences, and dropping them would make those tables unreadable
+/// by every bake that reads those ids.
+///
+/// So the scan is a GATE, not the source: every column the declaration says is
+/// absent must be all-zero across every row, or the conversion REFUSES. That
+/// is the direction that cannot be wrong — the declaration decides what to
+/// drop, and the data has to agree.
+///
+/// ```text
+/// rescore_parquet --densify --input wide.parquet --output dense.parquet \
+///     --keep-ids 0-155,372-719   [--feat-prefix f] [--scan-only]
+/// ```
+///
+/// `--scan-only` writes nothing and reports the census (every column's
+/// all-zero verdict), which is how the measurements above were taken.
+fn densify_main(input: &str, output: Option<&str>) {
+    let feat_prefix = arg("--feat-prefix", Some("f")).unwrap();
+    let scan_only = std::env::args().any(|a| a == "--scan-only");
+    let keep_spec = arg("--keep-ids", None);
+    if !scan_only && keep_spec.is_none() {
+        eprintln!(
+            "[densify] --keep-ids <slot-set> is REQUIRED unless --scan-only: the populated set \
+             is a DECLARATION, and deriving it from a value scan would drop columns that are \
+             merely zero on this corpus (measured: aic3 f25, konjnd f12, ext_sdr25 x8)."
+        );
+        std::process::exit(2);
+    }
+    let keep = keep_spec.as_deref().map(|spec| {
+        zensim::feature_set_id::SlotSet::parse(spec).unwrap_or_else(|| {
+            eprintln!("[densify] --keep-ids {spec:?} is not a slot set (e.g. \"0-155,372-719\")");
+            std::process::exit(2);
+        })
+    });
+
+    let file = File::open(input).expect("open input");
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file).expect("parquet reader");
+    let in_schema = builder.schema().clone();
+    let names: Vec<String> = in_schema
+        .fields()
+        .iter()
+        .map(|f| f.name().to_string())
+        .collect();
+
+    // Feature columns BY ID, located by name — never by a contiguous walk, so
+    // an already-dense table reads correctly here.
+    let mut feat: Vec<(usize, usize)> = Vec::new(); // (id, column index)
+    for (i, n) in names.iter().enumerate() {
+        if let Some(rest) = n.strip_prefix(feat_prefix.as_str())
+            && let Ok(id) = rest.parse::<usize>()
+        {
+            feat.push((id, i));
+        }
+    }
+    feat.sort_unstable();
+    assert!(
+        !feat.is_empty(),
+        "no {feat_prefix}<id> feature columns found"
+    );
+
+    // FULL-COLUMN SCAN — every row of every feature column, never a sample.
+    let mut all_zero: Vec<bool> = vec![true; feat.len()];
+    let mut n_rows = 0usize;
+    let reader = builder.build().expect("build reader");
+    for batch in reader {
+        let batch = batch.expect("read batch");
+        n_rows += batch.num_rows();
+        for (k, &(_, ci)) in feat.iter().enumerate() {
+            if !all_zero[k] {
+                continue;
+            }
+            if col_f64(&batch, ci).iter().any(|v| *v != 0.0) {
+                all_zero[k] = false;
+            }
+        }
+    }
+
+    let zero_ids: Vec<usize> = feat
+        .iter()
+        .zip(&all_zero)
+        .filter(|(_, z)| **z)
+        .map(|((id, _), _)| *id)
+        .collect();
+    eprintln!(
+        "[densify] {input}: {} rows, {} feature columns (f{}..f{}), {} all-zero: {:?}",
+        n_rows,
+        feat.len(),
+        feat[0].0,
+        feat[feat.len() - 1].0,
+        zero_ids.len(),
+        zero_ids
+    );
+
+    let Some(keep) = keep else {
+        eprintln!("[densify] --scan-only: nothing written");
+        return;
+    };
+
+    // THE GATE: every id the declaration drops must be all-zero here. The
+    // declaration decides; the data must agree.
+    let dropped: Vec<usize> = feat
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| !keep.contains(*id))
+        .collect();
+    let live_dropped: Vec<usize> = dropped
+        .iter()
+        .copied()
+        .filter(|id| {
+            feat.iter()
+                .position(|(i, _)| i == id)
+                .is_some_and(|k| !all_zero[k])
+        })
+        .collect();
+    if !live_dropped.is_empty() {
+        eprintln!(
+            "[densify] REFUSING: the declaration drops {} id(s) that carry NONZERO values in \
+             this table: {live_dropped:?}. Either the declaration is wrong or the table is not \
+             what it claims — both are findings, neither is a column to delete.",
+            live_dropped.len()
+        );
+        std::process::exit(2);
+    }
+    // The mirror check: an id the declaration KEEPS that this table does not
+    // have at all cannot be written, and silently emitting a zero column for
+    // it would manufacture exactly the fill this contract exists to remove.
+    let missing: Vec<usize> = keep
+        .iter_slots()
+        .filter(|id| !feat.iter().any(|(i, _)| i == id))
+        .collect();
+    if !missing.is_empty() {
+        eprintln!(
+            "[densify] REFUSING: the declaration keeps {} id(s) this table has no column for: \
+             {missing:?}",
+            missing.len()
+        );
+        std::process::exit(2);
+    }
+
+    let output = output.expect("--output required");
+    let keep_cols: Vec<(usize, usize)> = feat
+        .iter()
+        .copied()
+        .filter(|(id, _)| keep.contains(*id))
+        .collect();
+    let passthrough: Vec<usize> = (0..names.len())
+        .filter(|i| !feat.iter().any(|(_, ci)| ci == i))
+        .collect();
+    let out_fields: Vec<Field> = passthrough
+        .iter()
+        .map(|&i| in_schema.field(i).clone())
+        .chain(keep_cols.iter().map(|&(_, ci)| in_schema.field(ci).clone()))
+        .collect();
+    let out_schema = Arc::new(Schema::new(out_fields));
+    let props = WriterProperties::builder()
+        .set_compression(Compression::ZSTD(ZstdLevel::try_new(3).unwrap()))
+        .build();
+    let out_file = File::create(output).expect("create output");
+    let mut writer =
+        ArrowWriter::try_new(out_file, out_schema.clone(), Some(props)).expect("arrow writer");
+
+    // Second pass. Columns are moved by REFERENCE — the arrays are not
+    // rebuilt, so a kept column's bytes cannot change.
+    let file = File::open(input).expect("re-open input");
+    let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+        .expect("parquet reader")
+        .build()
+        .expect("build reader");
+    let mut written = 0usize;
+    for batch in reader {
+        let batch = batch.expect("read batch");
+        let cols: Vec<ArrayRef> = passthrough
+            .iter()
+            .map(|&i| batch.column(i).clone())
+            .chain(keep_cols.iter().map(|&(_, ci)| batch.column(ci).clone()))
+            .collect();
+        written += batch.num_rows();
+        writer
+            .write(&RecordBatch::try_new(out_schema.clone(), cols).expect("out batch"))
+            .expect("write batch");
+    }
+    writer.close().expect("close writer");
+    assert_eq!(written, n_rows, "row count changed");
+
+    let manifest = format!(
+        "{{\n  \"tool\": \"rescore_parquet --densify\",\n  \"source\": {:?},\n  \"source_sha256\": {:?},\n  \"output\": {:?},\n  \"output_sha256\": {:?},\n  \"rows\": {},\n  \"kept_ids\": {:?},\n  \"n_kept\": {},\n  \"dropped_ids\": {:?},\n  \"n_dropped\": {},\n  \"gate\": \"every dropped id verified all-zero across every row (full-column scan)\"\n}}\n",
+        input,
+        sha256_file(input),
+        output,
+        sha256_file(output),
+        n_rows,
+        keep_cols.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        keep_cols.len(),
+        dropped,
+        dropped.len(),
+    );
+    let mpath = format!("{output}.densify.json");
+    std::fs::write(&mpath, manifest).expect("write manifest");
+    eprintln!(
+        "[densify] wrote {output} ({} of {} feature columns kept) + {mpath}",
+        keep_cols.len(),
+        feat.len()
+    );
+}
+
+/// sha256 of a file, hex. Used only for the densify manifest.
+fn sha256_file(path: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).unwrap_or_default();
+    let mut h = Sha256::new();
+    h.update(&bytes);
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn main() {
+    if std::env::args().any(|a| a == "--densify") {
+        let input = arg("--input", None).expect("--input <parquet> required");
+        let output = arg("--output", None);
+        densify_main(&input, output.as_deref());
+        return;
+    }
     let input = arg("--input", None).expect("--input <parquet> required");
     let output = arg("--output", None).expect("--output <parquet> required");
     let profile = parse_profile(&arg("--profile", Some("a")).unwrap());
