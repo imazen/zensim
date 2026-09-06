@@ -758,6 +758,33 @@ struct Args {
     #[arg(long, default_value_t = false)]
     skip_connection: bool,
 
+    /// Constrain the network so `raw(x) = pin − g(x)` with `g ≥ 0` and
+    /// `g(0⃗) = 0` bit-exactly: scale-only standardization, hidden biases frozen
+    /// at 0, ReLU hidden activation (baked as `Activation::Relu`), output
+    /// weights projected `≤ 0`, output bias frozen at `--nonneg-pin`.
+    ///
+    /// This makes two dial-contract rows STRUCTURAL instead of fitted —
+    /// identity is a pin (C5) and no input can out-score it (C6) — which the
+    /// gate record proves no monotone output spline can deliver on its own
+    /// (`benchmarks/dial_addressability_gate_2026-09-04.md` §10.3: pin identity
+    /// and the offending cells cap, leave it below and they out-score identity;
+    /// it is a weights defect).
+    ///
+    /// It does NOT by itself deliver the FLOOR rows (C3/C4) or the per-codec
+    /// ordering floor (A7r) — those are a spline-anchor question and a ladder
+    /// -supervision question respectively.
+    ///
+    /// Plain path only; refused with `--skip-connection`, with any head flag,
+    /// and with `--n-hidden-layers >= 2`. Note `g` is CONVEX in the
+    /// standardized features at one hidden layer.
+    #[arg(long, default_value_t = false)]
+    nonneg_distance: bool,
+
+    /// The pinned raw output at the identity input under `--nonneg-distance`.
+    /// `100.0` matches the dial contract's identity band `[97.5, 100]`.
+    #[arg(long, default_value_t = 100.0, value_name = "FLOAT")]
+    nonneg_pin: f64,
+
     /// Number of hidden layers. 1 = 372→128→heads (default).
     /// 2 = 372→128→64→heads (second layer width = n_hidden/2).
     #[arg(long, default_value_t = 1)]
@@ -3043,6 +3070,8 @@ fn main() {
     });
 
     let hyperparams = MlpHyperparams {
+        nonneg_distance: args.nonneg_distance,
+        nonneg_pin: args.nonneg_pin,
         n_hidden: args.hidden,
         n_epochs: args.epochs,
         pairs_per_epoch: args.pairs_per_epoch,
@@ -3153,6 +3182,7 @@ fn main() {
         let mut pairs: Vec<(usize, usize)> = Vec::new();
         let mut bands: Vec<u8> = Vec::new();
         let mut tv_has_bands = false;
+        let mut tv_out_of_range = 0usize;
         for (i, line) in rdr.lines().enumerate() {
             let line = line.unwrap_or_else(|e| {
                 eprintln!("read TV pair line {}: {e}", i + 1);
@@ -3175,7 +3205,13 @@ fn main() {
                 std::process::exit(1);
             });
             if lo >= all_features.len() || hi >= all_features.len() {
-                continue; // ignore out-of-range pairs
+                // Counted and reported, never silent. The indices are into the
+                // CONCATENATED group rows in --group order, so a builder that
+                // computed them against a different group set produces a
+                // silently-decimated ladder term and a plausible-looking bake.
+                // Before 2026-09-06 this was a bare `continue`.
+                tv_out_of_range += 1;
+                continue;
             }
             pairs.push((lo, hi));
             if tv_has_bands && parts.len() >= 3 {
@@ -3183,6 +3219,23 @@ fn main() {
                 bands.push(band);
             }
         }
+        if tv_out_of_range > 0 {
+            eprintln!(
+                "WARNING: {tv_out_of_range} TV pair(s) in {tv_path:?} reference row \
+                 indices outside the {} concatenated group rows and were DROPPED. \
+                 TV indices are into the group rows in --group order; a mismatch \
+                 here means the pairs file was built against a different group set.",
+                all_features.len()
+            );
+        }
+        assert!(
+            !pairs.is_empty(),
+            "every TV pair in {tv_path:?} was out of range ({tv_out_of_range} of \
+             {tv_out_of_range}) against {} concatenated group rows. The ladder term \
+             would be a silent no-op; refusing. Rebuild the pairs file against this \
+             exact --group order.",
+            all_features.len()
+        );
         let band_id = if tv_has_bands && bands.len() == pairs.len() {
             Some(bands)
         } else {

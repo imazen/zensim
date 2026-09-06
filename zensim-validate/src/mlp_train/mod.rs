@@ -58,6 +58,40 @@ pub use goals::{ValidationPolicy, compute_goal_scores};
 /// architecture (228 → 32 → 1) with `Min` validation gating.
 #[derive(Clone, Debug)]
 pub struct MlpHyperparams {
+    /// `--nonneg-distance`: constrain the network so the dial's identity and
+    /// no-cell-above-identity properties are STRUCTURAL rather than fitted.
+    ///
+    /// The gate record's own proof (`benchmarks/dial_addressability_gate_2026-09-04.md`
+    /// §10.3) is that when real grid cells out-rank a perfect copy in RAW space,
+    /// **no monotone output spline can satisfy both C2 and C6** — pin identity at
+    /// 100 and those cells cap (tied), leave it below and they out-score identity.
+    /// It is a weights defect, so it has to be fixed in the weights.
+    ///
+    /// Under this flag the plain path becomes
+    /// `raw(x) = pin − g(x)` with `g ≥ 0` and `g(0⃗) = 0` **bit-exactly**:
+    ///
+    /// - `scaler_mean := 0⃗` (scale-only standardization), so the identity
+    ///   feature vector — MEASURED to be exactly `0⃗` on all 372 slots, for
+    ///   every image — standardizes to `0⃗`;
+    /// - hidden biases frozen at `0.0` ⇒ `h(0⃗) = ReLU(0⃗) = 0⃗`;
+    /// - hidden activation ReLU (`leaky_alpha` forced to `0.0`, baked as
+    ///   `Activation::Relu` — the wire format has had that variant all along);
+    /// - output-layer weights projected `≤ 0` after every Adam step, so
+    ///   `raw(x) = w₂·h + pin ≤ pin` for every input;
+    /// - the output bias frozen at `pin`.
+    ///
+    /// `raw(0⃗)` is then the argmax of `raw` over the entire input space, by
+    /// construction, in f32/f16/i8 alike (`0·w = 0` exactly; `ReLU(0) = 0`;
+    /// `dot(0⃗, w) = 0`).
+    ///
+    /// At one hidden layer `g` is a non-negative combination of `ReLU(linear)`
+    /// and therefore CONVEX in the standardized features — a real restriction,
+    /// stated here so nobody has to rediscover it from a rank number.
+    pub nonneg_distance: bool,
+    /// The pinned raw output at the identity input. Only read when
+    /// `nonneg_distance` is set. `100.0` matches the dial contract's identity
+    /// band `[97.5, 100]`.
+    pub nonneg_pin: f64,
     pub n_hidden: usize,
     pub n_epochs: usize,
     pub pairs_per_epoch: usize,
@@ -883,6 +917,8 @@ pub struct MlpHyperparams {
 impl Default for MlpHyperparams {
     fn default() -> Self {
         Self {
+            nonneg_distance: false,
+            nonneg_pin: 100.0,
             n_hidden: 32,
             n_epochs: 200,
             pairs_per_epoch: 50_000,
@@ -1164,6 +1200,38 @@ fn apply_group_l1(w1: &mut [f64], n_hidden: usize, lr: f64, lambda: f64) {
 fn apply_post_adam_penalties(w1: &mut [f64], n_hidden: usize, lr: f64) {
     apply_coarse_decay(w1, n_hidden, lr, coarse_decay_rate());
     apply_group_l1(w1, n_hidden, lr, group_l1_lambda());
+}
+
+/// THE owner of the `--nonneg-distance` constraint set. `None` = the flag is
+/// off and this is a no-op, which is why every existing recipe is byte-identical.
+///
+/// Three constraints, applied at init and after every Adam step so no optimizer
+/// state can drift them:
+///
+/// | constraint | why |
+/// |---|---|
+/// | `b1 := 0` | `h(0⃗) = ReLU(W₁·0⃗ + b₁) = ReLU(b₁)`, so a nonzero hidden bias makes `h(0⃗) ≠ 0⃗` and the whole chain fails |
+/// | `w₂ := min(w₂, 0)` | with `h ≥ 0` (ReLU), `w₂·h ≤ 0`, so `raw = w₂·h + pin ≤ pin` for EVERY input |
+/// | `b2 := pin` | `raw(0⃗) = w₂·0⃗ + pin = pin`, bit-exactly, in f32/f16/i8 alike |
+///
+/// Re-pinning after the step (rather than zeroing the gradient before it) is
+/// deliberate: Adam carries momentum, so a zeroed gradient still lets a bias
+/// drift for several steps. Assignment cannot.
+fn nonneg_project(w2: &mut [f64], b1: &mut [f64], b2: &mut [f64], pin: Option<f64>) {
+    let Some(pin) = pin else {
+        return;
+    };
+    for b in b1.iter_mut() {
+        *b = 0.0;
+    }
+    for w in w2.iter_mut() {
+        if *w > 0.0 {
+            *w = 0.0;
+        }
+    }
+    for b in b2.iter_mut() {
+        *b = pin;
+    }
 }
 
 /// Per-input keep mask (`true` = the input participates) — set by the bin
@@ -2007,6 +2075,50 @@ pub fn train_mlp_strategy(
     // wire-in (the sequential mini-batch path covers V_22-mix-LARGE's
     // K=256 recipe at h=128 in ~25 min wall on the 7950X — fast enough
     // that a SIMD/par-chunks port is queued, not load-bearing).
+    // `--nonneg-distance` normalization + reachability, ahead of every head
+    // branch. ReLU is not a preference here, it is what makes `h(0⃗) = 0⃗` and
+    // `h >= 0` true, so the flag OWNS `leaky_alpha` rather than asking the
+    // caller to keep two knobs consistent. The refusals below are for
+    // combinations whose guarantee this implementation does NOT establish —
+    // failing loud is this dispatcher's established response to that class.
+    let nonneg_hp;
+    let hyperparams = if hyperparams.nonneg_distance {
+        assert!(
+            !hyperparams.skip_connection,
+            "--nonneg-distance is incompatible with --skip-connection: the skip term \
+             `x · w_skip` is sign-free (scale-only standardized features are \
+             sign-free), so it breaks `raw <= pin` and the C6 guarantee the flag \
+             exists to establish. Drop one of the two."
+        );
+        assert!(
+            !(hyperparams.pool_head || hyperparams.hybrid_head || hyperparams.per_sample_alpha_head),
+            "--nonneg-distance is implemented on the plain n_features → n_hidden → 1 \
+             path only. The pool/hybrid/alpha heads reduce through additional \
+             parameters (reducer_w, rank_w, the alpha gate) whose sign constraints \
+             this build does not establish, so the non-negativity guarantee would be \
+             claimed and not held. Drop --nonneg-distance or drop the head flag."
+        );
+        assert!(
+            hyperparams.n_hidden_layers <= 1,
+            "--nonneg-distance is implemented on the 1-hidden-layer plain path only \
+             (--n-hidden-layers {} was requested). Depth >= 2 routes through the \
+             alpha-head owner, which this flag refuses.",
+            hyperparams.n_hidden_layers
+        );
+        assert!(
+            hyperparams.nonneg_pin.is_finite(),
+            "--nonneg-pin must be finite; got {}",
+            hyperparams.nonneg_pin
+        );
+        nonneg_hp = MlpHyperparams {
+            leaky_alpha: 0.0,
+            ..hyperparams.clone()
+        };
+        &nonneg_hp
+    } else {
+        hyperparams
+    };
+
     let head_flags = (hyperparams.pool_head as u8)
         + (hyperparams.hybrid_head as u8)
         + (hyperparams.per_sample_alpha_head as u8);
@@ -2280,8 +2392,26 @@ pub fn train_mlp_strategy(
     // 1. Compute per-feature scaler (mean / std) using ALL training-group
     //    samples. Validation-only groups are excluded from the scaler so
     //    we never look at validation data during fit.
-    let (scaler_mean, scaler_scale) =
+    let (mut scaler_mean, scaler_scale) =
         compute_scaler_from_groups(groups, &train_indices, n_features);
+    // `--nonneg-distance`: SCALE-ONLY standardization. The identity feature
+    // vector is exactly `0⃗` (MEASURED on all 372 slots of the pinned identity
+    // probe, all 38 refs byte-identical), and subtracting a mean would map it
+    // to `−μ/σ ≠ 0⃗` — which would break `h(0⃗) = 0⃗` and with it the whole
+    // `raw(0⃗) = pin` guarantee. The scale is kept: it is what makes the inputs
+    // comparable, and it maps `0` to `0`.
+    if hyperparams.nonneg_distance {
+        for m in scaler_mean.iter_mut() {
+            *m = 0.0;
+        }
+        log_line(
+            "MLP train: --nonneg-distance — scaler_mean zeroed (scale-only \
+             standardization), hidden biases frozen at 0, hidden activation ReLU, \
+             output weights projected <= 0, output bias frozen at the pin",
+            log,
+        );
+    }
+    let scaler_mean = scaler_mean;
 
     // 2. Standardize features per group up-front. Standardizing now
     //    avoids redoing it inside the per-step inner loop and lets the
@@ -2334,6 +2464,22 @@ pub fn train_mlp_strategy(
         .map(|_| init_rng.next_normal() * std2)
         .collect::<Vec<_>>();
     let mut b2 = vec![0.0f64; n_outputs];
+
+    // `--nonneg-distance`: start INSIDE the feasible set and pin the constants.
+    // The draws above are consumed identically either way, so the flag does not
+    // re-roll the init stream — it projects it. `nonneg_project` re-applies the
+    // same three constraints after every Adam step; doing it here as well means
+    // the guarantee holds at epoch 0, before a single update.
+    let nonneg = if hyperparams.nonneg_distance {
+        Some(hyperparams.nonneg_pin)
+    } else {
+        None
+    };
+    nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+    // Derived ONCE, here, so the activation that gets baked is a function of the
+    // slope that was trained with — and so an unrepresentable slope fails before
+    // 200 epochs of fitting rather than after.
+    let hidden_activation = hidden_activation_for(hyperparams.leaky_alpha);
 
     // Feature-subset pinning (`--keep-features`): zero the layer-1 rows of
     // dropped inputs once. Their standardized values are exactly 0.0 (the bin
@@ -2618,6 +2764,7 @@ pub fn train_mlp_strategy(
                     if steps_added > 0 {
                         adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                         apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                     }
                 }
                 continue;
@@ -2657,6 +2804,7 @@ pub fn train_mlp_strategy(
                     if steps_added > 0 {
                         adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                         apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                     }
                 }
                 continue;
@@ -2822,6 +2970,7 @@ pub fn train_mlp_strategy(
             if k == 1 || steps_since_adam >= k as u64 {
                 adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                 apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                 steps_since_adam = 0;
             }
 
@@ -2926,6 +3075,7 @@ pub fn train_mlp_strategy(
                         if tv_steps_since_adam > 0 {
                             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                             apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                         }
                         tv_steps_since_adam = 0;
                     }
@@ -2940,6 +3090,7 @@ pub fn train_mlp_strategy(
         if k > 1 && !parallel && steps_since_adam > 0 {
             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
             apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
         }
         // T8.2 final-flush for parallel buffer: handle the partial
         // batch at epoch end if pairs_per_epoch % K != 0. Buffer is
@@ -2980,6 +3131,7 @@ pub fn train_mlp_strategy(
                     if steps_added > 0 {
                         adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                         apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                     }
                 }
                 parallel_batch_buffer.clear();
@@ -3008,6 +3160,7 @@ pub fn train_mlp_strategy(
                 if steps_added > 0 {
                     adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                     apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                        nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                 }
             }
         }
@@ -3116,6 +3269,7 @@ pub fn train_mlp_strategy(
                     hyperparams.out_dtype,
                     hyperparams.feature_transforms.as_deref(),
                     hyperparams.feature_transform_params.as_deref(),
+                    hidden_activation,
                 );
                 let dir = hyperparams
                     .dump_checkpoints_dir
@@ -3149,6 +3303,7 @@ pub fn train_mlp_strategy(
                     hyperparams.out_dtype,
                     hyperparams.feature_transforms.as_deref(),
                     hyperparams.feature_transform_params.as_deref(),
+                    hidden_activation,
                 ));
             } else {
                 stale_epochs += hyperparams.log_every;
@@ -3190,6 +3345,7 @@ pub fn train_mlp_strategy(
             hyperparams.out_dtype,
             hyperparams.feature_transforms.as_deref(),
             hyperparams.feature_transform_params.as_deref(),
+            hidden_activation,
         )
     })
 }
@@ -5544,6 +5700,41 @@ fn flush_hybrid_head_nin_batch<F>(
 /// scales) cuts it to ~26 %. See V0_18 (2026-05-13) for cross-corpus
 /// quality validation of I8 quant on the V0_17 weights.
 #[allow(clippy::too_many_arguments)]
+/// Map the trainer's `leaky_alpha` to the wire format's hidden activation.
+///
+/// **This closes a train/serve divergence.** `--leaky-alpha` is a trainer
+/// hyperparameter, but every bake emitter hard-coded `Activation::LeakyRelu`
+/// and the runtime applies a HARD-CODED `zenpredict::LEAKY_RELU_ALPHA = 0.01`
+/// for that byte — so any run with a different value trained one function and
+/// served another, silently. `Activation::Relu` (byte 1) has been in the wire
+/// format and the runtime all along and was simply unreachable from here.
+///
+/// Only two slopes are representable. Anything else FAILS LOUD rather than
+/// emitting a bake whose served behaviour differs from what was fitted.
+fn hidden_activation_for(leaky_alpha: f64) -> Activation {
+    // The runtime constant is an **f32**, so `LEAKY_RELU_ALPHA as f64` is
+    // 0.009999999776482582 — NOT the f64 literal `0.01` the trainer defaults to.
+    // Both are accepted, and the ~2.2e-10 relative difference between them is
+    // the (harmless, but real) slope divergence every LeakyReLU bake has always
+    // carried: fitted at the f64 value, served at the f32 one.
+    const LEAKY_F64: f64 = 0.01;
+    if leaky_alpha == 0.0 {
+        Activation::Relu
+    } else if leaky_alpha == LEAKY_F64 || leaky_alpha == zenpredict::LEAKY_RELU_ALPHA as f64 {
+        Activation::LeakyRelu
+    } else {
+        panic!(
+            "--leaky-alpha {leaky_alpha} is not representable in the ZNPR wire format. \
+             The format encodes the hidden activation as a BYTE: 0 = Identity, \
+             1 = ReLU, 2 = LeakyReLU with the runtime's fixed slope \
+             {fixed}. A bake emitted with any other slope would be SERVED at \
+             {fixed} — a different function from the one that was fitted. Use \
+             --leaky-alpha 0 (ReLU) or --leaky-alpha {fixed} (LeakyReLU).",
+            fixed = zenpredict::LEAKY_RELU_ALPHA
+        );
+    }
+}
+
 pub fn bake_two_layer_znpr_v3(
     scaler_mean: &[f64],
     scaler_scale: &[f64],
@@ -5557,6 +5748,10 @@ pub fn bake_two_layer_znpr_v3(
     dtype: WeightDtype,
     feature_transforms: Option<&[FeatureTransform]>,
     feature_transform_params: Option<&[Vec<f32>]>,
+    // Hidden-layer activation, derived from the run's `leaky_alpha` by
+    // `hidden_activation_for`. Threaded rather than hard-coded so the served
+    // activation is the trained one.
+    hidden_activation: Activation,
 ) -> Vec<u8> {
     let scaler_mean_f32: Vec<f32> = scaler_mean.iter().map(|&v| v as f32).collect();
     let scaler_scale_f32: Vec<f32> = scaler_scale.iter().map(|&v| v as f32).collect();
@@ -5568,7 +5763,7 @@ pub fn bake_two_layer_znpr_v3(
         BakeLayer {
             in_dim: n_inputs,
             out_dim: n_hidden,
-            activation: Activation::LeakyRelu,
+            activation: hidden_activation,
             dtype,
             weights: &w1_f32,
             biases: &b1_f32,
