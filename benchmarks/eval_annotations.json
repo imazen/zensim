@@ -2424,6 +2424,20 @@
    "evidence": "refit lane measurement 2026-09-06 on the postC gate grid; the single-source limitation is already named in benchmarks/corruption_head_d_2026-09-05.md",
    "fix_path": "the fix is on the DEPLOY rule or the grid, not on the head: floor a fired cell at min(dial, anchor_floor) rather than at 0, or add references to the gate grid so the number averages over images instead of turning on one dial's sign. NEITHER IS DONE.",
    "registered": "2026-09-06"
+  },
+  {
+   "id": "single-seed-paired-bootstrap-cannot-see-init-variance-2026-09-06",
+   "kind": "annotated",
+   "fields": [
+    "rank"
+   ],
+   "scope": {
+    "manual": "documentation-only: applies to any CI-excluding rank delta reported from a SINGLE seed of a SEEDED model class. No fulleval field records how many seeds a delta was measured over, so no machine predicate can select the affected cells."
+   },
+   "reason": "A paired bootstrap resamples PAIRS. It cannot see INITIALISATION variance, and on the MLP class that variance is the LARGER term \u2014 so a single-seed paired-bootstrap CI is confidently wrong about its own sign. MEASURED 2026-09-06 on the fast-class recipe, rev1-in-era vs rev2-in-era, seed-MATCHED (s4004 vs s4004 etc.), B = 2,000, seed 20260905: CID22 deltas -0.00113 [-0.00217, -0.00008], +0.00240 [+0.00129, +0.00349], -0.00215 [-0.00311, -0.00133]. **The sign FLIPS across seeds and all three CIs exclude zero** \u2014 one experiment that would have reported a CI-excluding LOSS on two seeds and a CI-excluding WIN on the third. Over k=3 the revision is INERT on this class: every corpus delta is smaller than the seed spread of the arm it is measured in (CID22 -0.00031 vs spread 0.00600; KonJND +0.00219 vs 0.02712; AIC-3 -0.00229 vs 0.00745; CSIQ -0.00185 vs 0.00492; LIVE +0.00128 vs 0.00532; TID +0.00190 vs 0.00253; KADID +0.00153 vs 0.00322). **The converse matters as much:** a delta from a DETERMINISTIC fit with no seed \u2014 a convex lasso/BVLS chain such as the ADD156 D lineage \u2014 has no initialisation term, so its paired-bootstrap CI IS credible. That is why the D-chain's rev2 CID22 -0.00456 [-0.00549, -0.00364] stands while the fast-class number does not. Read a seeded class's rank delta only as a k-seed mean beside its seed spread.",
+   "evidence": "refit lane, 2026-09-06, fast-class S372_S228_H128_p k=3 (seeds 4004/4005/4006) at both revisions on in-era roots, identical recipe and pack chain",
+   "fix_path": "report seeded-class rank deltas as a k-seed mean with the seed spread stated beside them; reserve single-arm paired-bootstrap CIs for deterministic fits. NOT ENFORCED anywhere in tooling.",
+   "registered": "2026-09-06"
   }
  ]
 }
