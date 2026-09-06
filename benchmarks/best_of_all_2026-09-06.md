@@ -589,7 +589,72 @@ this lane prints nothing when the count is zero, and refuses outright when it is
 total), bands active with the measured low-q emphasis. The index space and the
 `--group` order agree.
 
-*(RESULTS — ladder arms pending.)*
+### 5.7 The ladder arm at k = 3 — a VARIANCE result on monotonicity, and floors it partly recovers
+
+| arm | k | CID22 | KonJND \|·\| | AIC-3 | composite | contract | `mono` (k=3) | `mono` spread | C6 per seed |
+|---|--:|--:|--:|--:|--:|:--:|--:|--:|--:|
+| `A_plain` | 3 | 0.8891 ±0.0042 | 0.4997 ±0.0117 | 0.7974 ±0.0059 | 0.8729 ±0.0008 | 4/6 | 0.94602 | 0.00436 | 1642 / 1650 / 1182 |
+| `B_nonneg` | 3 | 0.8800 ±0.0049 | 0.4987 ±0.0251 | 0.7878 ±0.0072 | 0.8646 ±0.0020 | **6/6** | 0.93245 | 0.00606 | **0 / 0 / 0** |
+| `C_lad05` | 3 | 0.8796 ±0.0074 | 0.4931 ±0.0431 | 0.7850 ±0.0042 | 0.8627 ±0.0054 | **6/6** | **0.94159** | **0.00096** | **0 / 0 / 0** |
+
+**The ladder hinge does what it was aimed at, and it is a variance result as much
+as a mean one.** It recovers **67 %** of the monotonicity the architecture cost
+(0.93245 → 0.94159 against the control's 0.94602) and **cuts the seed spread
+6.3×** (0.00606 → 0.00096). Same shape as the D3 recipe's KonJND finding: the
+arm does not add skill so much as remove the downside.
+
+**Floors — all five improve over the architecture alone, none reaches the bar:**
+
+| | rav1e | svt | jpeg | jxl | webp |
+|---|--:|--:|--:|--:|--:|
+| mentor bar | 0.6410 | 1.0000 | 0.6667 | 0.9615 | 1.0000 |
+| `A_plain` | 0.1538 | 0.7778 | 0.5470 | 0.4231 | 0.9658 |
+| `B_nonneg` | 0.1880 | 0.6068 | 0.4017 | 0.3205 | 0.8034 |
+| `C_lad05` | **0.1966** | **0.6923** | **0.4872** | **0.3974** | **0.8974** |
+
+So the ladder recovers most of the floor the architecture spent (+0.009 / +0.086
+/ +0.086 / +0.077 / +0.094) and still lands **below the control on four of five**
+and far below every mentor bar. **A7r remains 5 of 5 fail on every arm.**
+
+**Cost of the ladder on top of the architecture: essentially zero on CID22**
+(−0.00039, per-seed −0.00207 / +0.00176 / −0.00085) and inside the seed spread on
+everything else. It is close to free.
+
+**Two-reference inversions** (`--inversion-truth agree`, pnorm3 @ 0.05, 9,593
+reference cells, `unknown = 0` everywhere):
+
+| arm | `mono_agree` (k=3) | encoder-attributed rungs |
+|---|--:|--:|
+| shipped D | **0.99469** | 15 |
+| `peer_ssim2` (mentor) | 0.99160 | 26 |
+| `A_plain` | 0.94602 | 15 / 16 / 15 |
+| `B_nonneg` | 0.93245 | 13 / 15 / 14 |
+| `C_lad05` | 0.94159 | 14 / 15 / 14 |
+
+Every arm clears C1's 0.93 bar; every arm is an order of magnitude worse than the
+shipped dial on the axis C1 measures. Attribution is never the excuse — `unknown`
+is 0 on all nine cells, so nothing is being charged to "we could not tell".
+
+### 5.8 One near-lossless reading, and the correction to it
+
+`hfnlproxy` (per-ref) moves **0.3700 → 0.4773 → 0.5022** across control →
+architecture → ladder, i.e. **+0.13 over the control** on the axis this metric is
+weakest and the product cares about most.
+
+**But it is NOT a win over shipped D.** The paired bootstrap on the sampled
+per-pair block (n = 5,000, B = 2,000) reads `C_lad05_s4004` **0.48691** against
+shipped D's **0.48477**: `+0.00213, CI [−0.01100, +0.01522]` — a **tie**. The
+k=3 mean of 0.5022 against D's 0.4921 is a single-seed-vs-single-value comparison
+that the interval does not support. Recorded because I read it as a win first and
+the test said otherwise.
+
+`C_lad05_s4004` vs shipped D on the rest: CID22 **+0.01620 WIN**
+[+0.01259, +0.01982]; KonJND −0.02590 **tie**; AIC-3 +0.00974 tie; LIVE +0.00349
+tie; CSIQ **+0.05704 WIN**. TID (+0.108) and KADID (+0.123) are **train==val for
+this recipe** — both are training groups — so those are memorization guards, not
+skill, and must not be read as wins.
+
+*(RESULTS — arms D/E/F pending.)*
 
 ---
 
