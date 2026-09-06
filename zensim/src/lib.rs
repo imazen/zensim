@@ -234,6 +234,7 @@ mod pool;
 pub mod profile;
 mod simd_ops;
 pub mod source;
+pub(crate) mod ssim_form;
 mod streaming;
 // HDR foundation: transfer functions + display model (code values → absolute
 // luminance). Still foundation-only — the PU entry points take already-linear

@@ -717,7 +717,7 @@ fn ssim_d_local(mu1: f64, mu2: f64, s12: f64, ssq: f64) -> f64 {
 /// GMSD/FSIM/DISTS canonical bounded-similarity form: `(2ab+c)/(a²+b²+c)`.
 /// Bounded `(0, 1]`, `=1` iff `a == b`. Requires `a, b >= 0`.
 #[inline]
-fn bounded_sim(a: f64, b: f64, c: f64) -> f64 {
+pub(crate) fn bounded_sim(a: f64, b: f64, c: f64) -> f64 {
     (2.0 * a * b + c) / (a * a + b * b + c)
 }
 

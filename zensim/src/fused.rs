@@ -11,6 +11,7 @@
     clippy::too_many_arguments
 )]
 
+use crate::ssim_form::{ssim_dissim_raw_scalar, ssim_dissim8, ssim_dissim16};
 #[cfg(target_arch = "x86_64")]
 use archmage::arcane;
 use archmage::incant;
@@ -23,8 +24,6 @@ use magetypes::simd::f32x8;
 use magetypes::simd::generic::f32x8 as GenericF32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
-
-const C2: f32 = 0.0009;
 
 // ============================================================
 // Free raw-moments accumulation — shared across every SIMD tier
@@ -744,15 +743,14 @@ fn fused_vblur_ssim_inner_v4(
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
 ) -> StripChannelAccum {
+    let form = crate::ssim_form::active_luma_form();
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 16;
 
     // SSIM constants
-    let c2v = f32x16::splat(token, C2);
     let one = f32x16::splat(token, 1.0);
-    let two = f32x16::splat(token, 2.0);
     let zero = f32x16::zero(token);
 
     let mut acc = StripChannelAccum::zero();
@@ -814,11 +812,7 @@ fn fused_vblur_ssim_inner_v4(
                 let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
 
                 // === SSIM ===
-                let mu_diff = mu1 - mu2;
-                let num_m = mu_diff.mul_add(-mu_diff, one);
-                let num_s = two.mul_add((-mu1).mul_add(mu2, s12), c2v);
-                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + c2v;
-                let sd = (one - (num_m * num_s) / denom_s).max(zero);
+                let sd = (ssim_dissim16(token, form, mu1, mu2, ssq, s12)).max(zero);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
@@ -954,9 +948,7 @@ fn fused_vblur_ssim_inner_v4(
     let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
     let remaining_8groups = (width - col_base_8) / 8;
 
-    let c2v8 = f32x8::splat(v3, C2);
     let one8 = f32x8::splat(v3, 1.0);
-    let two8 = f32x8::splat(v3, 2.0);
     let zero8 = f32x8::zero(v3);
 
     for cg in 0..remaining_8groups {
@@ -1006,11 +998,7 @@ fn fused_vblur_ssim_inner_v4(
                 let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let mu_diff = mu1 - mu2;
-                let num_m = mu_diff.mul_add(-mu_diff, one8);
-                let num_s = two8.mul_add((-mu1).mul_add(mu2, s12), c2v8);
-                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + c2v8;
-                let sd = (one8 - (num_m * num_s) / denom_s).max(zero8);
+                let sd = (ssim_dissim8(v3, form, mu1, mu2, ssq, s12)).max(zero8);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
@@ -1171,11 +1159,7 @@ fn fused_vblur_ssim_inner_v4(
                 let dv = dst[y * width + x];
 
                 // SSIM (f32 to match SIMD paths)
-                let mu_diff = mu1 - mu2;
-                let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
-                let num_s = 2.0f32.mul_add((-mu1).mul_add(mu2, s12), C2);
-                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + C2;
-                let sd = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+                let sd = (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd as f64;
@@ -1307,15 +1291,14 @@ fn fused_vblur_ssim_inner_v4x(
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
 ) -> StripChannelAccum {
+    let form = crate::ssim_form::active_luma_form();
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 16;
 
     // SSIM constants
-    let c2v = f32x16::splat(token, C2);
     let one = f32x16::splat(token, 1.0);
-    let two = f32x16::splat(token, 2.0);
     let zero = f32x16::zero(token);
 
     let mut acc = StripChannelAccum::zero();
@@ -1377,11 +1360,7 @@ fn fused_vblur_ssim_inner_v4x(
                 let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
 
                 // === SSIM ===
-                let mu_diff = mu1 - mu2;
-                let num_m = mu_diff.mul_add(-mu_diff, one);
-                let num_s = two.mul_add((-mu1).mul_add(mu2, s12), c2v);
-                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + c2v;
-                let sd = (one - (num_m * num_s) / denom_s).max(zero);
+                let sd = (ssim_dissim16(token, form, mu1, mu2, ssq, s12)).max(zero);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
@@ -1517,9 +1496,7 @@ fn fused_vblur_ssim_inner_v4x(
     let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
     let remaining_8groups = (width - col_base_8) / 8;
 
-    let c2v8 = f32x8::splat(v3, C2);
     let one8 = f32x8::splat(v3, 1.0);
-    let two8 = f32x8::splat(v3, 2.0);
     let zero8 = f32x8::zero(v3);
 
     for cg in 0..remaining_8groups {
@@ -1569,11 +1546,7 @@ fn fused_vblur_ssim_inner_v4x(
                 let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let mu_diff = mu1 - mu2;
-                let num_m = mu_diff.mul_add(-mu_diff, one8);
-                let num_s = two8.mul_add((-mu1).mul_add(mu2, s12), c2v8);
-                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + c2v8;
-                let sd = (one8 - (num_m * num_s) / denom_s).max(zero8);
+                let sd = (ssim_dissim8(v3, form, mu1, mu2, ssq, s12)).max(zero8);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
@@ -1734,11 +1707,7 @@ fn fused_vblur_ssim_inner_v4x(
                 let dv = dst[y * width + x];
 
                 // SSIM (f32 to match SIMD paths)
-                let mu_diff = mu1 - mu2;
-                let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
-                let num_s = 2.0f32.mul_add((-mu1).mul_add(mu2, s12), C2);
-                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + C2;
-                let sd = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+                let sd = (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd as f64;
@@ -1875,14 +1844,13 @@ fn fused_vblur_ssim_inner_v3(
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
 ) -> StripChannelAccum {
+    let form = crate::ssim_form::active_luma_form();
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
     let col_groups = width / 8;
 
-    let c2v = f32x8::splat(token, C2);
     let one = f32x8::splat(token, 1.0);
-    let two = f32x8::splat(token, 2.0);
     let zero = f32x8::zero(token);
 
     let mut acc = StripChannelAccum::zero();
@@ -1936,11 +1904,7 @@ fn fused_vblur_ssim_inner_v3(
                 let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let mu_diff = mu1 - mu2;
-                let num_m = mu_diff.mul_add(-mu_diff, one);
-                let num_s = two.mul_add((-mu1).mul_add(mu2, s12), c2v);
-                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + c2v;
-                let sd = (one - (num_m * num_s) / denom_s).max(zero);
+                let sd = (ssim_dissim8(token, form, mu1, mu2, ssq, s12)).max(zero);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
@@ -2101,11 +2065,7 @@ fn fused_vblur_ssim_inner_v3(
                 let dv = dst[y * width + x];
 
                 // SSIM
-                let mu_diff = mu1 - mu2;
-                let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
-                let num_s = 2.0f32.mul_add((-mu1).mul_add(mu2, s12), C2);
-                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + C2;
-                let sd = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+                let sd = (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd as f64;
@@ -2241,6 +2201,7 @@ fn fused_vblur_ssim_inner(
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
 ) -> StripChannelAccum {
+    let form = crate::ssim_form::active_luma_form();
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
 
@@ -2249,9 +2210,7 @@ fn fused_vblur_ssim_inner(
     let r = radius;
     let col_groups = width / 8;
 
-    let c2v = f32x8::splat(token, C2);
     let one = f32x8::splat(token, 1.0);
-    let two = f32x8::splat(token, 2.0);
     let zero = f32x8::zero(token);
 
     let mut acc = StripChannelAccum::zero();
@@ -2320,11 +2279,7 @@ fn fused_vblur_ssim_inner(
                 let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let mu_diff = mu1 - mu2;
-                let num_m = mu_diff.mul_add(-mu_diff, one);
-                let num_s = two.mul_add((-mu1).mul_add(mu2, s12), c2v);
-                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + c2v;
-                let sd = (one - (num_m * num_s) / denom_s).max(zero);
+                let sd = (ssim_dissim8(token, form, mu1, mu2, ssq, s12)).max(zero);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
@@ -2492,11 +2447,7 @@ fn fused_vblur_ssim_inner(
                 let dv = dst[y * width + x];
 
                 // SSIM
-                let mu_diff = mu1 - mu2;
-                let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
-                let num_s = 2.0f32.mul_add((-mu1).mul_add(mu2, s12), C2);
-                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + C2;
-                let sd = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+                let sd = (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd as f64;

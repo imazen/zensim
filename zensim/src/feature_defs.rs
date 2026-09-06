@@ -290,6 +290,57 @@ pub(crate) struct Revision {
     pub note: &'static str,
 }
 
+/// WHICH registered revision's semantics a computation uses.
+///
+/// The [`Revision`] entries above record, per signal, which eras MOVED it.
+/// This is the knob that SELECTS one — phase 3 of
+/// `docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`, executed by
+/// `docs/PLAN_FEATURE_REV2_2026-09-05.md`.
+///
+/// It is deliberately a small closed enum rather than a set of era tokens:
+/// eras in this crate have only ever moved forward together, and a research
+/// extraction needs to reproduce "the semantics of era X", not an arbitrary
+/// per-slot mixture. [`Self::era_tokens`] is the bridge back to the registry,
+/// so "which slots does this revision move?" stays a lookup over the signal
+/// table rather than a second list that can drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
+pub(crate) enum FormulaRevision {
+    /// Everything shipped through era `v1postc` — the semantics every stored
+    /// table and every published verdict was read at.
+    #[default]
+    Rev1,
+    /// The 2026-09-05 batched arithmetic-fix era: the audit's F4 and F5 fixes
+    /// landing together, so exactly one era boundary exists rather than one
+    /// per defect.
+    Rev2,
+}
+
+impl FormulaRevision {
+    /// The era tokens this revision introduces, relative to [`Self::Rev1`].
+    ///
+    /// Empty for `Rev1`, which is the baseline rather than a change.
+    pub(crate) const fn era_tokens(self) -> &'static [&'static str] {
+        match self {
+            Self::Rev1 => &[],
+            Self::Rev2 => &["v1ssimcap", "freecomp"],
+        }
+    }
+
+    /// Every slot id this revision moves, derived from the signal table's own
+    /// [`Revision`] entries — never from a separate list.
+    ///
+    /// This is the predicate gate **G3.1** checks against a re-extraction: a
+    /// slot that moves and is not returned here is a FAILURE.
+    pub(crate) fn moved_slots(self, width: u16, n_scales: usize) -> Vec<u16> {
+        let tokens = self.era_tokens();
+        (0..width as usize)
+            .filter_map(|id| def_at(id, n_scales))
+            .filter(|d| d.signal.revisions.iter().any(|r| tokens.contains(&r.era)))
+            .map(|d| d.id)
+            .collect()
+    }
+}
+
 /// One registered signal: a feature definition before the layout replicates
 /// it across scales and channels.
 #[derive(Debug, Clone, Copy)]
@@ -387,7 +438,12 @@ const DEFECT_F4: Defect = Defect {
            cap, and `num_m = 1 - (mu1-mu2)^2` carries no C1. L4 pooling then \
            amplifies it: f313 reads 5,814,302 on scanned rows against a \
            photographic p99.9 of 0.48. Absorbed today by the bake-side winsor \
-           guard, not by the feature.",
+           guard, not by the feature. BLAST RADIUS CORRECTED 2026-09-05: the \
+           audit attached this to the masked and IW blocks only (72 slots); a \
+           bounded-form re-extraction MEASURES 132 — basic 36, peaks 24, \
+           masked 36, IW 36 — because every one of them is pooled from the \
+           SAME per-pixel `d`. The peaks pair is `ssim_max`/`ssim_l8`, which a \
+           per-block reading of the audit would not have predicted.",
 };
 
 /// The PROPOSED fix for [`DEFECT_F4`] — registered, deliberately NOT applied.
@@ -558,9 +614,12 @@ pub(crate) static BASIC: [SignalDef; 13] = {
     use KernelId::V1Fused as K;
     use Statistic::{L2, L4, Mean, Ratio};
     [
-        v1(F, 0, "ssim_mean", Mean, K),
-        v1(F, 1, "ssim_4th", L4, K),
-        v1(F, 2, "ssim_2nd", L2, K),
+        // F4 reaches EVERY slot built from the per-pixel SSIM dissimilarity,
+        // not only the masked and IW blocks the audit named — MEASURED, see
+        // `f4_moves_exactly_the_registered_slots`.
+        v1_defect(F, 0, "ssim_mean", Mean, K),
+        v1_defect(F, 1, "ssim_4th", L4, K),
+        v1_defect(F, 2, "ssim_2nd", L2, K),
         v1(F, 3, "edge_art_mean", Mean, K),
         v1(F, 4, "edge_art_4th", L4, K),
         v1(F, 5, "edge_art_2nd", L2, K),
@@ -580,10 +639,11 @@ pub(crate) static PEAKS: [SignalDef; 6] = {
     use KernelId::V1Peaks as K;
     use Statistic::{L8, Max};
     [
-        v1(F, 0, "ssim_max", Max, K),
+        // Same source expression as BASIC's ssim_* — see the F4 note there.
+        v1_defect(F, 0, "ssim_max", Max, K),
         v1(F, 1, "edge_art_max", Max, K),
         v1(F, 2, "edge_det_max", Max, K),
-        v1(F, 3, "ssim_l8", L8, K),
+        v1_defect(F, 3, "ssim_l8", L8, K),
         v1(F, 4, "edge_art_l8", L8, K),
         v1(F, 5, "edge_det_l8", L8, K),
     ]
@@ -1541,6 +1601,113 @@ pub(crate) fn signals() -> impl Iterator<Item = &'static SignalDef> {
 
 #[cfg(test)]
 mod tests {
+    /// **G3.1 for revision 2's `v1ssimcap` era** — the registry's claim about
+    /// WHICH slots the F4 fix moves, checked against a re-extraction.
+    ///
+    /// MEASURED 2026-09-05 (`/mnt/v/output/zensim/rev2-2026-09-05/`): the
+    /// `feature_invariant_probe dump` set, 22,396 `to_bits()` cells over 3
+    /// routes, re-run with `ZENSIM_SSIM_LUMA=c1` and diffed against the
+    /// shipped form, moves exactly **132** slots — basic 36, peaks 24, masked
+    /// 36, IW 36.
+    ///
+    /// **This gate FAILED when it was first written, and that is the finding.**
+    /// `docs/FEATURE_DEFECTS_AUDIT_2026-09-05.md` scopes F4 to "the `ssim_*`
+    /// family in `f228..299` + `f300..371`" — 72 slots — because that is where
+    /// the 5.8e6 outliers were observed. But the basic block's
+    /// `ssim_mean/4th/2nd` and the peaks block's `ssim_max`/`ssim_l8` are
+    /// pooled from the SAME per-pixel `d`, so a bounded form moves them too.
+    /// Observing where a defect's SYMPTOM is largest is not the same as
+    /// deriving where its CAUSE reaches; the registry now carries the derived
+    /// answer.
+    ///
+    /// The peaks pair is the part no per-block reading would have predicted:
+    /// `ssim_max` and `ssim_l8` are local 0 and local 3 of a 6-signal block,
+    /// so the moved ids are an every-third-slot comb, not a contiguous run.
+    #[test]
+    fn f4_moves_exactly_the_registered_slots() {
+        use super::FormulaRevision;
+        use crate::NUM_SCALES;
+        let got = FormulaRevision::Rev2.moved_slots(372, NUM_SCALES);
+
+        // Derived independently of the signal table, from the layout the
+        // measurement exposed: (block base, per-cell width, local ids).
+        let mut want: Vec<u16> = Vec::new();
+        for (base, per_cell, locals) in [
+            (0u16, 13u16, &[0u16, 1, 2][..]), // basic  ssim_mean/4th/2nd
+            (156, 6, &[0, 3][..]),            // peaks  ssim_max / ssim_l8
+            (228, 6, &[0, 1, 2][..]),         // masked ssim_mean/4th/2nd
+            (300, 6, &[0, 1, 2][..]),         // IW     ssim_mean/4th/2nd
+        ] {
+            for cell in 0..(NUM_SCALES as u16 * 3) {
+                for &l in locals {
+                    want.push(base + cell * per_cell + l);
+                }
+            }
+        }
+        want.sort_unstable();
+
+        assert_eq!(
+            got, want,
+            "the registry's v1ssimcap slot set disagrees with the measured one"
+        );
+        assert_eq!(
+            got.len(),
+            132,
+            "expected 132 moved slots, got {}",
+            got.len()
+        );
+        // The audit's two worst columns must be in it.
+        for id in [241u16, 313] {
+            assert!(
+                got.contains(&id),
+                "f{id} (an audit-named worst column) is missing"
+            );
+        }
+    }
+
+    /// Revision 1 is the baseline, so it moves nothing by definition.
+    #[test]
+    fn rev1_moves_no_slots() {
+        use super::FormulaRevision;
+        use crate::NUM_SCALES;
+        assert!(
+            FormulaRevision::Rev1
+                .moved_slots(944, NUM_SCALES)
+                .is_empty()
+        );
+        assert!(FormulaRevision::Rev1.era_tokens().is_empty());
+    }
+
+    /// Revision 2 carries BOTH registered eras, and `freecomp`'s slots are
+    /// reachable only at a width that has an append block — which is exactly
+    /// why F5 is free today and stops being free the moment a bake declares
+    /// one.
+    #[test]
+    fn rev2_carries_both_eras_and_f5_needs_the_append_block() {
+        use super::FormulaRevision;
+        use crate::NUM_SCALES;
+        let toks = FormulaRevision::Rev2.era_tokens();
+        assert!(
+            toks.contains(&"v1ssimcap") && toks.contains(&"freecomp"),
+            "{toks:?}"
+        );
+
+        let at372 = FormulaRevision::Rev2.moved_slots(372, NUM_SCALES);
+        let at944 = FormulaRevision::Rev2.moved_slots(944, NUM_SCALES);
+        assert_eq!(at372.len(), 132, "372 sees only the v1ssimcap slots");
+        assert!(
+            at944.len() > at372.len(),
+            "944 must additionally reach freecomp's raw-moment slots: {} vs {}",
+            at944.len(),
+            at372.len()
+        );
+        // Every 372 slot is still in the 944 set — a revision appends, it
+        // never drops.
+        for id in &at372 {
+            assert!(at944.contains(id), "f{id} vanished at 944");
+        }
+    }
+
     use super::*;
 
     const NS: usize = crate::NUM_SCALES;
@@ -1755,9 +1922,22 @@ mod tests {
                 by_id.entry(d.id).or_default().push(id);
             }
         }
-        // F4: the three `ssim_*` signals in BOTH the masked and IW blocks,
-        // per (scale, channel) — 2 blocks x 3 signals x 4 scales x 3 channels.
-        assert_eq!(by_id.get("F4").map(Vec::len), Some(72), "F4 slot count");
+        // F4: every slot pooled from the per-pixel SSIM dissimilarity.
+        //
+        // WIDENED 2026-09-05 from 72 to 132, by MEASUREMENT rather than by
+        // re-reading the audit. This assertion previously encoded the audit's
+        // own scoping — "the `ssim_*` family in `f228..299` + `f300..371`",
+        // i.e. masked + IW only — which is where the 5.8e6 SYMPTOM was
+        // observed. Re-extracting the probe's 22,396-cell dump under a bounded
+        // luminance form moves 132 slots: basic 36 (`ssim_mean/4th/2nd`),
+        // peaks 24 (`ssim_max`, `ssim_l8`), masked 36, IW 36. They share one
+        // per-pixel `d`, so they share its defect.
+        //
+        // This is a WIDENING of the claim, not a relaxation: the registry now
+        // asserts the defect reaches 60 MORE slots than before, and
+        // `f4_moves_exactly_the_registered_slots` holds that set against a
+        // re-extraction so it cannot drift back to the smaller number.
+        assert_eq!(by_id.get("F4").map(Vec::len), Some(132), "F4 slot count");
         // The audit's two worst scanned slots must be inside it.
         for named in [241usize, 313] {
             assert!(
