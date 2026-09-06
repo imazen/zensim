@@ -255,3 +255,135 @@ rev1.
 
 **Ship rule unchanged:** install into `ZensimProfile::D` only on the full gate
 AND CID22 >= today's D with CI. Otherwise the result is a proposal.
+
+---
+
+## 7. R6 — PRE-REGISTERED, 2026-09-05 (written and pushed before any extraction)
+
+R6 is the one gate above that the lane could not run: §1.6 of
+[`../benchmarks/feature_rev2_2026-09-05.md`](../benchmarks/feature_rev2_2026-09-05.md)
+measured that the ladder proxy gives **identical** results for all four arms, so
+the F4 arm has to be chosen by a real fit on real corpora. This section fixes
+what will be run, on what, and how the answer is read off — before it is run.
+
+### 7.1 One decision, not four
+
+The plan's R6 line says *"keep rev1 for a family unless …"*. **AMENDED, and the
+amendment is stated here rather than applied silently:** the arm is chosen
+**GLOBALLY, once**, not per family. `ssim_form` exists precisely because the
+per-pixel dissimilarity had 36 owners; letting `basic` take one arm and `IW`
+another would re-create that defect on purpose. Per-family numbers are reported
+as evidence, never as separate decisions.
+
+### 7.2 What is extracted
+
+**One binary, four arms, no rebuild between them** — `ZENSIM_SSIM_LUMA` ∈
+`{ssim2, c1, lorentz, clamp}` (`ssim2` IS the shipped rev1 form). A rebuild
+alone has been measured to move a timing ~10 % in this repo; it must not be
+allowed to move a feature.
+
+**Width: 372 (`extended+iw`, `num_scales=4`).** Justified, not assumed: F4's
+registered blast radius is 132 slots — basic 36 + peaks 24 + masked 36 + IW 36 —
+and at 372 **all 132 are live**. The folded 944 regimes zero `f156..371`, so a
+944 read sees only the basic 36 and is a strictly weaker instrument for this
+decision. A confirming 944 extraction is run on one corpus to check that
+structural claim; the full 944 wave is part of the recalculation, not of R6.
+
+| leg | rows | source of pixels |
+|---|--:|---|
+| safesyn (training) | 196,086 | bitstreams (`training_safe_synthetic.csv`; `.jpg` 111,068 / `.avif` 34,001 / `.jxl` 26,362 / `.webp` 24,655) — pre-scanned, **0 missing** |
+| cid22val | 4,292 | `/mnt/v/dataset/cid22/CID22_validation_set` |
+| kadid | 10,125 | `/mnt/v/dataset/kadid10k` |
+| tid | 3,000 | `/mnt/v/dataset/tid2013` |
+| konjnd | 1,008 | `/mnt/v/datasets/KonJND-1k` |
+| aic3 | 600 | `/mnt/v/dataset/aic3_ctc_epfl` |
+| csiq | 866 | `csiq_pairs.tsv` |
+| live | 779 | `live_r2_pairs.tsv` |
+
+**sdr25, aic4, nonphoto, imazen26, hfnlproxy and hf_nearlossless are byte-COPIES
+in the postC root and are NOT re-extractable on this box** (record §3a). They are
+declared ABSENT, never filled from a rev1 table — mixing eras inside one arm's
+root is the exact defect the era ledger exists to prevent.
+
+**Decoder era** is recorded per format in every manifest: extraction decodes
+through `zensim-bench/examples/shared/zen_decode.rs` (magic-byte detect via
+`zencodec`, then zenjpeg / zenpng / zenwebp / zenavif / zenjxl) at this lane's
+build commit. §3.34 measured decoder era at 73 % of the extractor-era shift, so
+it is an input, not a footnote.
+
+### 7.3 Controls — run first, reported first
+
+* **C1 pipeline control.** At arm `ssim2` the extraction must reproduce the
+  registered postC 372 root **bit-exactly**. If it does not, nothing downstream
+  is comparable and that is the finding.
+* **C2 pathology detector.** `clamp` is exact for `D² ≤ 1` and differs from
+  `ssim2` only above it, so *a row where `clamp` moves is a row containing at
+  least one pixel in F4's pathological regime*. Report moved rows / cells /
+  slots / max |Δ| per corpus. A corpus where `clamp` moves nothing **cannot
+  discriminate an arm on pathology** and is reported as such rather than counted.
+* **C3 identity.** At every arm, `ref == dist` must give the all-zero 372 vector
+  (the registered 372 identity fact, `dial_addressability_gate` §15.3).
+
+### 7.4 The fits — one owner, one recipe, one thing varied
+
+`bake_dial_refit gram` → `bake_dial_refit fit-lasso`. No script computes a fit.
+
+Flags are the did100 `ctl` recipe (which reproduces shipped Profile D
+byte-identically) with **only the input tables changed**:
+`--space raw --target human_score --lam 2e-3 --tau 0 --n-sweeps 400 --tol 1e-10`.
+
+* **slices**: `0..155` (ADD156 / Profile-D lineage) and `0..227` (basic+peaks).
+* **solvers**: `lasso` (the shipped recipe) **and** `bvls`
+  (`--solver bvls --bounds-tsv benchmarks/feature_sign_mask_2026-05-26.tsv`) —
+  the sign-constrained monotone-linear class the user's directive names. The
+  bounded-variable CD solver already exists at the owner
+  (`gram_lasso::box_cd_slice`, with an active-bound fixture test), so no new
+  solver is written.
+* **the sign mask is held FIXED across arms on purpose**: it encodes the
+  structural direction of an error feature, and re-deriving it per arm would
+  vary two things at once.
+* **anchor**: each arm's OWN 2,000-row safesyn subset (stratified 6 codecs × 16
+  quality points, fixed seed, identical row set across arms) — in-era, because a
+  spline fit on rev1 pixels is not a spline for a rev2 dial. SROCC is invariant
+  under the monotone spline, so the rank gates are unaffected by this choice;
+  the dial gates are not, which is why it is in-era.
+
+4 arms × 2 slices × 2 solvers = **16 fits**, every one differing from the others
+only in its input table and its declared slice/solver.
+
+### 7.5 Gates
+
+| # | gate | criterion |
+|---|---|---|
+| **G1 RANK (primary)** | pooled SROCC on **CID22, KonJND (\|·\|), AIC-3** — the plan's held-out three — vs the `ssim2` arm, **paired** bootstrap (same resampled index sets, B = 2,000, seed 20260905) through `panel --batch` via `scripts/wave6_paired_bootstrap.py`. A win counts only if the 95 % CI on the DELTA excludes 0. |
+| **G2 rank (reported)** | CSIQ, LIVE, TID. KADID is train==val for this class and is an integrity guard, never ranking signal. |
+| **G3 OUTLIER REMOVAL** | over the 132 F4 slots on the union of all extracted rows, `max f_j` must be ≤ the arm's structural bound (`d ∈ [0,2]` ⇒ every `ssim_*` pool ≤ 2). rev1's value is reported beside it. **An arm that fails G3 cannot be Rev2 at any rank.** |
+| **G4 HEALTHY-CELL PERTURBATION** | on rows C2 does NOT flag, no cell may move more than **1e-4 absolute** — ~6× the largest healthy-regime delta on record (1.62e-5 for `c1` on the invariant dump). Exceeding it means the arm is changing healthy content, which is a different claim than fixing an outlier, and it is reported as such rather than waved through. |
+| **G5 DIAL** | identity ⇒ zero (C3); per-codec floor representability and two-reference dial inversions on the **ladder instrument at the same arm**. |
+
+### 7.6 Decision rule — fixed before the numbers exist
+
+1. An arm that **fails G3** is out, whatever its rank.
+2. If exactly one surviving arm wins a **strict majority (≥ 2 of 3)** of
+   {CID22, KonJND, AIC-3} against `ssim2` with CI-excluding deltas, and does not
+   regress G4/G5, **that arm is Rev2**.
+3. More than one qualifies → the one with more CI-excluding wins; still tied →
+   **arm A (`c1`)**, per §1.4's prior, which was registered before any of this.
+4. **No arm wins a rank majority → the arithmetic fix still lands.** The plan's
+   original wording ("keep rev1") is amended here, explicitly and in advance,
+   because keeping rev1 means shipping an unbounded metric and the user
+   directive that authorized this lane is *"fix arithmetic defects aggressively
+   before shipping"*. In that case Rev2 is the surviving arm with the **smallest
+   healthy-cell perturbation** — moved-cell count on C2-unflagged rows, tie-broken
+   by max |Δ| there.
+5. **Stated in advance so it cannot be read as a retrofit:** rule 4 is expected
+   to select `clamp`, because `clamp` is bit-identical to rev1 wherever
+   `D² ≤ 1`. If the measurements land that way, that is a prediction confirmed,
+   not a rule bent to fit.
+
+### 7.7 Out of scope, named rather than omitted
+
+The full recalculation (§5), the refit/re-verdict at rev2 (§6), R9 (perf), and
+F12. `SHIPPED_REVISION` stays `Rev1` until the recalculation lands; R6 chooses
+which arm the registry's `Rev2` **means**, and hands the fleet lane an arm token
+plus a manifest.
