@@ -125,6 +125,7 @@ do_binparity() {
   local name="${1:-B_nonneg_s4004}"
   local arm="${name%_s*}" seed="${name##*_s}"
   local cur="$WS/target/release/zensim_mlp_train"
+  local BINCUR="$WS/target/release/bake_dial_refit"
   [[ -x "$cur" ]] || { say "binparity SKIP — no current binary at $cur"; return 3; }
   say "binparity: retraining $name with the CURRENT binary"
   ZL_BIN="$WS/target/release" ZL_OUT="$OUT/binparity" \
@@ -132,9 +133,21 @@ do_binparity() {
     > "$OUT/logs/binparity_${name}.log" 2>&1 || true
   local a="$OUT/bakes/${name}.bin" b="$OUT/binparity/bakes/${name}.bin"
   if [[ -s "$a" && -s "$b" ]]; then
-    local sa sb; sa=$(sha256sum "$a" | cut -d' ' -f1); sb=$(sha256sum "$b" | cut -d' ' -f1)
+    # STRIP `zentrain.repro` FIRST. A raw bake embeds its own argv, and the two
+    # runs necessarily write to different --out paths, so a raw sha256 ALWAYS
+    # differs and the check would report FAIL on a byte-identical model. This is
+    # the documented equivalence method (`bake_dial_refit strip --key
+    # zentrain.repro` + sha), and the first draft here ignored it and produced
+    # exactly that false FAIL.
+    local sa sb
+    "$BINCUR" strip --in "$a" --out "$OUT/binparity/_frozen_stripped.bin" \
+        --key zentrain.repro >/dev/null 2>&1
+    "$BINCUR" strip --in "$b" --out "$OUT/binparity/_current_stripped.bin" \
+        --key zentrain.repro >/dev/null 2>&1
+    sa=$(sha256sum "$OUT/binparity/_frozen_stripped.bin" | cut -d' ' -f1)
+    sb=$(sha256sum "$OUT/binparity/_current_stripped.bin" | cut -d' ' -f1)
     if [[ "$sa" == "$sb" ]]; then
-      say "binparity PASS — $name is BYTE-IDENTICAL across the review fixes ($sa)"
+      say "binparity PASS — $name weights BYTE-IDENTICAL across the review fixes, repro-stripped sha $sa"
     else
       say "binparity FAIL — $name MOVED: frozen $sa vs current $sb"
     fi
