@@ -24,6 +24,16 @@ Removals, all currently in the SUPPORTED surface (`docs/public-api/zensim.txt`):
   "which pools ran" is a `Plan` property derived from the declared ids, not a
   caller-set mode. (`V1FreeExtras`'s own field doc already says
   "TEST/BENCH INSTRUMENTATION — NOT A PRODUCT MODE".)
+- `feature_set_id::FeatureSetId`'s **LAYOUT component** — `new` / `from_slots` lose
+  their `layout_width` parameter, `layout_width()` goes, and `Display` emits
+  `<compute>/<era>#<hash8>`. With a DENSE wire the layout token carries no
+  information the hash does not, and it lies in a refusal surface: MEASURED, a
+  dense `B` and its wide twin produce `…@w95/unknown#9403d2a7` and
+  `…@w372/unknown#9403d2a7` — same compute, same slots hash — and `check()`
+  reported `LayoutDiffers` on every dense-bake/wide-table pair. The width moves to
+  `FeatureSetRef::layout` (`Option<usize>`), a property of the ARTIFACT rather than
+  of the set. **Every `@w<N>` string still parses**, so every registry key and every
+  published id resolves to the same set and hash.
 - `metric::FeatureView` — `FeatureView::new` GUESSES its tier from the vector's
   length and returns `None` when the length is ambiguous. Its own v2 successor
   documents the contrast (`feature_v2.rs:1219-1221`). Deprecate one release.
