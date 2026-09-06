@@ -75,13 +75,31 @@ fn raw_moments_accumulate8<T: F32x8Backend + Copy>(
     fm_d: &mut GenericF32x8<T>,
     fm_s2: &mut GenericF32x8<T>,
     fm_d2: &mut GenericF32x8<T>,
+    fm_dd: &mut GenericF32x8<T>,
+    fm_ds: &mut GenericF32x8<T>,
     s: GenericF32x8<T>,
     d: GenericF32x8<T>,
 ) {
     *fm_s = *fm_s + s;
     *fm_d = *fm_d + d;
+    // Revision 1's two raw second moments, spelled so they stay BIT-identical:
+    // `s * s` is still rounded before the add, and the add is still plain.
     *fm_s2 = *fm_s2 + s * s;
     *fm_d2 = *fm_d2 + d * d;
+    // Revision 2's PAIRED second moment, `Σ(d−s)(d+s) = Σ(d²−s²)`, formed per
+    // pixel so the cancellation happens on ONE pixel's small difference
+    // instead of between two large totals. Accumulated unconditionally: it is
+    // four cheap ops on registers already live, and an extra accumulator
+    // cannot move revision 1's outputs, which is what keeps R1 byte-exact.
+    let df = d - s;
+    *fm_dd = *fm_dd + df * (d + s);
+    // …and revision 2's paired FIRST difference. Both terms of
+    // `gvar2 - gvar1` have to come from per-pixel differences, not from
+    // differencing two large totals: MEASURED, fixing only the second moment
+    // moved the paired disagreement 9.12 % -> 8.32 % and left `GLOBAL_CGAIN`
+    // flat (68 -> 69 cells past the bar), because `(md - ms)` was still
+    // `(sum_d - sum_s)/n` and carried the same `mean^2/gvar` amplification.
+    *fm_ds = *fm_ds + df;
 }
 
 /// Reduce the four lane accumulators to scalars and add them into `acc`'s
@@ -95,11 +113,15 @@ fn raw_moments_finish8<T: F32x8Backend + Copy>(
     fm_d: GenericF32x8<T>,
     fm_s2: GenericF32x8<T>,
     fm_d2: GenericF32x8<T>,
+    fm_dd: GenericF32x8<T>,
+    fm_ds: GenericF32x8<T>,
 ) {
     acc.sum_s += fm_s.reduce_add() as f64;
     acc.sum_d += fm_d.reduce_add() as f64;
     acc.sum_s2 += fm_s2.reduce_add() as f64;
     acc.sum_d2 += fm_d2.reduce_add() as f64;
+    acc.sum_dd += fm_dd.reduce_add() as f64;
+    acc.sum_ds += fm_ds.reduce_add() as f64;
 }
 
 /// 16-lane sibling of [`raw_moments_accumulate8`] — `_v4`'s and `_v4x`'s
@@ -118,13 +140,31 @@ fn raw_moments_accumulate16<T: F32x16Backend + Copy>(
     fm_d: &mut f32x16<T>,
     fm_s2: &mut f32x16<T>,
     fm_d2: &mut f32x16<T>,
+    fm_dd: &mut f32x16<T>,
+    fm_ds: &mut f32x16<T>,
     s: f32x16<T>,
     d: f32x16<T>,
 ) {
     *fm_s = *fm_s + s;
     *fm_d = *fm_d + d;
+    // Revision 1's two raw second moments, spelled so they stay BIT-identical:
+    // `s * s` is still rounded before the add, and the add is still plain.
     *fm_s2 = *fm_s2 + s * s;
     *fm_d2 = *fm_d2 + d * d;
+    // Revision 2's PAIRED second moment, `Σ(d−s)(d+s) = Σ(d²−s²)`, formed per
+    // pixel so the cancellation happens on ONE pixel's small difference
+    // instead of between two large totals. Accumulated unconditionally: it is
+    // four cheap ops on registers already live, and an extra accumulator
+    // cannot move revision 1's outputs, which is what keeps R1 byte-exact.
+    let df = d - s;
+    *fm_dd = *fm_dd + df * (d + s);
+    // …and revision 2's paired FIRST difference. Both terms of
+    // `gvar2 - gvar1` have to come from per-pixel differences, not from
+    // differencing two large totals: MEASURED, fixing only the second moment
+    // moved the paired disagreement 9.12 % -> 8.32 % and left `GLOBAL_CGAIN`
+    // flat (68 -> 69 cells past the bar), because `(md - ms)` was still
+    // `(sum_d - sum_s)/n` and carried the same `mean^2/gvar` amplification.
+    *fm_ds = *fm_ds + df;
 }
 
 /// 16-lane sibling of [`raw_moments_finish8`].
@@ -142,11 +182,15 @@ fn raw_moments_finish16<T: F32x16Backend + Copy>(
     fm_d: f32x16<T>,
     fm_s2: f32x16<T>,
     fm_d2: f32x16<T>,
+    fm_dd: f32x16<T>,
+    fm_ds: f32x16<T>,
 ) {
     acc.sum_s += fm_s.reduce_add() as f64;
     acc.sum_d += fm_d.reduce_add() as f64;
     acc.sum_s2 += fm_s2.reduce_add() as f64;
     acc.sum_d2 += fm_d2.reduce_add() as f64;
+    acc.sum_dd += fm_dd.reduce_add() as f64;
+    acc.sum_ds += fm_ds.reduce_add() as f64;
 }
 
 /// Scalar sibling of [`raw_moments_accumulate8`] / [`raw_moments_accumulate16`]
@@ -158,6 +202,8 @@ fn raw_moments_accumulate_scalar(
     fm_d: &mut f32,
     fm_s2: &mut f32,
     fm_d2: &mut f32,
+    fm_dd: &mut f32,
+    fm_ds: &mut f32,
     s: f32,
     d: f32,
 ) {
@@ -165,6 +211,9 @@ fn raw_moments_accumulate_scalar(
     *fm_d += d;
     *fm_s2 += s * s;
     *fm_d2 += d * d;
+    let df = d - s;
+    *fm_dd += df * (d + s);
+    *fm_ds += df;
 }
 
 /// Scalar sibling of [`raw_moments_finish8`] / [`raw_moments_finish16`].
@@ -175,11 +224,15 @@ fn raw_moments_finish_scalar(
     fm_d: f32,
     fm_s2: f32,
     fm_d2: f32,
+    fm_dd: f32,
+    fm_ds: f32,
 ) {
     acc.sum_s += fm_s as f64;
     acc.sum_d += fm_d as f64;
     acc.sum_s2 += fm_s2 as f64;
     acc.sum_d2 += fm_d2 as f64;
+    acc.sum_dd += fm_dd as f64;
+    acc.sum_ds += fm_ds as f64;
 }
 
 // ============================================================
@@ -504,6 +557,11 @@ pub(crate) struct StripChannelAccum {
     pub sum_d: f64,
     pub sum_s2: f64,
     pub sum_d2: f64,
+    /// Revision 2's paired second moment `Σ(d−s)(d+s) = Σ(d²−s²)`, formed
+    /// per pixel. See [`raw_moments_accumulate16`] for why it exists.
+    pub sum_dd: f64,
+    /// Revision 2's paired first difference `Σ(d−s)`.
+    pub sum_ds: f64,
     // --- Free bounded error (`FreeExtrasWork::bounded_err` / `lum_bins`;
     //     zero and untouched otherwise) ---
     /// Σ `sat((s−d)², C_MSE)` — the v2-348 `MSE` slot's numerator.
@@ -542,6 +600,8 @@ impl StripChannelAccum {
             edge_art_max: 0.0,
             edge_det_max: 0.0,
             sum_s: 0.0,
+            sum_dd: 0.0,
+            sum_ds: 0.0,
             sum_d: 0.0,
             sum_s2: 0.0,
             sum_d2: 0.0,
@@ -773,6 +833,9 @@ fn fused_vblur_ssim_inner_v4(
             f32x16::zero(token),
             f32x16::zero(token),
         );
+        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
+        let mut fm_dd = f32x16::zero(token);
+        let mut fm_ds = f32x16::zero(token);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
@@ -887,9 +950,11 @@ fn fused_vblur_ssim_inner_v4(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if free.raw_moments {
-                    raw_moments_accumulate16(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
+                    raw_moments_accumulate16(
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
+                    );
                     if y + 1 == inner_end {
-                        raw_moments_finish16(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
+                        raw_moments_finish16(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
                     }
                 }
 
@@ -966,6 +1031,9 @@ fn fused_vblur_ssim_inner_v4(
             f32x8::zero(v3),
             f32x8::zero(v3),
         );
+        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
+        let mut fm_dd = f32x8::zero(v3);
+        let mut fm_ds = f32x8::zero(v3);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
@@ -1072,9 +1140,11 @@ fn fused_vblur_ssim_inner_v4(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if free.raw_moments {
-                    raw_moments_accumulate8(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
+                    raw_moments_accumulate8(
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
+                    );
                     if y + 1 == inner_end {
-                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
+                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
                     }
                 }
 
@@ -1134,6 +1204,10 @@ fn fused_vblur_ssim_inner_v4(
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        // Revision 2's paired second moment and first difference (see
+        // `raw_moments_accumulate16`).
+        let mut fm_dd = 0.0f32;
+        let mut fm_ds = 0.0f32;
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
@@ -1217,10 +1291,11 @@ fn fused_vblur_ssim_inner_v4(
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if free.raw_moments {
                     raw_moments_accumulate_scalar(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv,
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, sv,
+                        dv,
                     );
                     if y + 1 == inner_end {
-                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
+                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
                     }
                 }
 
@@ -1321,6 +1396,9 @@ fn fused_vblur_ssim_inner_v4x(
             f32x16::zero(token),
             f32x16::zero(token),
         );
+        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
+        let mut fm_dd = f32x16::zero(token);
+        let mut fm_ds = f32x16::zero(token);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
@@ -1435,9 +1513,11 @@ fn fused_vblur_ssim_inner_v4x(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if free.raw_moments {
-                    raw_moments_accumulate16(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
+                    raw_moments_accumulate16(
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
+                    );
                     if y + 1 == inner_end {
-                        raw_moments_finish16(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
+                        raw_moments_finish16(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
                     }
                 }
 
@@ -1514,6 +1594,9 @@ fn fused_vblur_ssim_inner_v4x(
             f32x8::zero(v3),
             f32x8::zero(v3),
         );
+        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
+        let mut fm_dd = f32x8::zero(v3);
+        let mut fm_ds = f32x8::zero(v3);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
@@ -1620,9 +1703,11 @@ fn fused_vblur_ssim_inner_v4x(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if free.raw_moments {
-                    raw_moments_accumulate8(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
+                    raw_moments_accumulate8(
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
+                    );
                     if y + 1 == inner_end {
-                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
+                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
                     }
                 }
 
@@ -1682,6 +1767,10 @@ fn fused_vblur_ssim_inner_v4x(
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        // Revision 2's paired second moment and first difference (see
+        // `raw_moments_accumulate16`).
+        let mut fm_dd = 0.0f32;
+        let mut fm_ds = 0.0f32;
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
@@ -1765,10 +1854,11 @@ fn fused_vblur_ssim_inner_v4x(
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if free.raw_moments {
                     raw_moments_accumulate_scalar(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv,
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, sv,
+                        dv,
                     );
                     if y + 1 == inner_end {
-                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
+                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
                     }
                 }
 
@@ -1871,6 +1961,9 @@ fn fused_vblur_ssim_inner_v3(
             f32x8::zero(token),
             f32x8::zero(token),
         );
+        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
+        let mut fm_dd = f32x8::zero(token);
+        let mut fm_ds = f32x8::zero(token);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
@@ -1978,9 +2071,11 @@ fn fused_vblur_ssim_inner_v3(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if free.raw_moments {
-                    raw_moments_accumulate8(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
+                    raw_moments_accumulate8(
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
+                    );
                     if y + 1 == inner_end {
-                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
+                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
                     }
                 }
 
@@ -2040,6 +2135,10 @@ fn fused_vblur_ssim_inner_v3(
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        // Revision 2's paired second moment and first difference (see
+        // `raw_moments_accumulate16`).
+        let mut fm_dd = 0.0f32;
+        let mut fm_ds = 0.0f32;
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
@@ -2123,10 +2222,11 @@ fn fused_vblur_ssim_inner_v3(
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if free.raw_moments {
                     raw_moments_accumulate_scalar(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv,
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, sv,
+                        dv,
                     );
                     if y + 1 == inner_end {
-                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
+                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
                     }
                 }
 
@@ -2231,6 +2331,9 @@ fn fused_vblur_ssim_inner(
             f32x8::zero(token),
             f32x8::zero(token),
         );
+        // Revision 2\'s paired second moment (see `raw_moments_accumulate16`).
+        let mut fm_dd = f32x8::zero(token);
+        let mut fm_ds = f32x8::zero(token);
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
@@ -2353,9 +2456,11 @@ fn fused_vblur_ssim_inner(
                 // ~2 orders below the module's 5e-4 tolerance
                 // (`free_extras_match_the_944_append_block`).
                 if free.raw_moments {
-                    raw_moments_accumulate8(&mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, s, d);
+                    raw_moments_accumulate8(
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, s, d,
+                    );
                     if y + 1 == inner_end {
-                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
+                        raw_moments_finish8(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
                     }
                 }
 
@@ -2422,6 +2527,10 @@ fn fused_vblur_ssim_inner(
         // at the band's last inner row (see `raw_moments`). Dead code when
         // the caller did not ask.
         let (mut fm_s, mut fm_d, mut fm_s2, mut fm_d2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        // Revision 2's paired second moment and first difference (see
+        // `raw_moments_accumulate16`).
+        let mut fm_dd = 0.0f32;
+        let mut fm_ds = 0.0f32;
         // Free bounded-error lane accumulators (`free.bounded_err` /
         // `free.lum_bins`) — same band-batched shape and rationale as
         // `fm_*` above: vector-add every row, reduce ONCE at the band's
@@ -2505,10 +2614,11 @@ fn fused_vblur_ssim_inner(
                 // === Free raw moments (`raw_moments`) — scalar tail ===
                 if free.raw_moments {
                     raw_moments_accumulate_scalar(
-                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, sv, dv,
+                        &mut fm_s, &mut fm_d, &mut fm_s2, &mut fm_d2, &mut fm_dd, &mut fm_ds, sv,
+                        dv,
                     );
                     if y + 1 == inner_end {
-                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2);
+                        raw_moments_finish_scalar(&mut acc, fm_s, fm_d, fm_s2, fm_d2, fm_dd, fm_ds);
                     }
                 }
 

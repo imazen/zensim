@@ -4103,6 +4103,10 @@ struct AppendAccum {
     sum_d: f64,
     sum_s2: f64,
     sum_d2: f64,
+    /// Revision 2's paired second moment `Σ(d−s)(d+s)`.
+    sum_dd: f64,
+    /// Revision 2's paired first difference `Σ(d−s)`.
+    sum_ds: f64,
     /// append2 highlight bins (HDR route + `append2_block` only — the
     /// `HL = true` kernel instantiation; untouched zeros otherwise).
     ws_hl1: WeightedSum,
@@ -4129,6 +4133,8 @@ impl AppendAccum {
         self.sum_d += other.sum_d;
         self.sum_s2 += other.sum_s2;
         self.sum_d2 += other.sum_d2;
+        self.sum_dd += other.sum_dd;
+        self.sum_ds += other.sum_ds;
         self.ws_hl1.accumulate(&other.ws_hl1);
         self.ws_hl2.accumulate(&other.ws_hl2);
     }
@@ -4191,6 +4197,11 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
         let (mut r_cg, mut r_cl, mut r_tex) = (zero, zero, zero);
         let (mut r_art2, mut r_det2) = (zero, zero);
         let (mut r_s, mut r_d, mut r_s2, mut r_d2) = (zero, zero, zero, zero);
+        // Revision 2's paired second moment. See
+        // `crate::fused::raw_moments_accumulate16` for the measurement chain
+        // that ruled out both accumulation granularity and compensation and
+        // landed on reassociation.
+        let (mut r_dd, mut r_ds) = (zero, zero);
         let (mut p_hl1w, mut p_hl1v, mut p_hl2w, mut p_hl2v) = (zero, zero, zero, zero);
 
         let mut x = 0usize;
@@ -4286,6 +4297,11 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
             r_d += dd;
             r_s2 += s * s;
             r_d2 += dd * dd;
+            // Revision 2's paired second moment — see
+            // `crate::fused::raw_moments_accumulate16`.
+            let df = dd - s;
+            r_dd += df * (dd + s);
+            r_ds += df;
 
             x += 8;
         }
@@ -4308,6 +4324,8 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
         acc.sum_d += r_d.reduce_add() as f64;
         acc.sum_s2 += r_s2.reduce_add() as f64;
         acc.sum_d2 += r_d2.reduce_add() as f64;
+        acc.sum_dd += r_dd.reduce_add() as f64;
+        acc.sum_ds += r_ds.reduce_add() as f64;
         if HL {
             acc.ws_hl1.num += p_hl1v.reduce_add() as f64;
             acc.ws_hl1.den += p_hl1w.reduce_add() as f64;
@@ -4383,6 +4401,8 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
             acc.sum_d += dd;
             acc.sum_s2 += s * s;
             acc.sum_d2 += dd * dd;
+            acc.sum_dd += (dd - s) * (dd + s);
+            acc.sum_ds += dd - s;
         }
     }
 
@@ -4723,15 +4743,199 @@ fn global_stats_from_raw_moments(
     sum_d: f64,
     sum_s2: f64,
     sum_d2: f64,
+    sum_dd: f64,
+    sum_ds: f64,
     n_f: f64,
+    paired: bool,
 ) -> (f64, f64, f64) {
     let dmean = saturate((sum_s - sum_d).abs() / n_f, C_GDMEAN);
     let gmean_s = sum_s / n_f;
     let gmean_d = sum_d / n_f;
     let gvar1 = (sum_s2 / n_f - gmean_s * gmean_s).max(0.0);
     let gvar2 = (sum_d2 / n_f - gmean_d * gmean_d).max(0.0);
+    if paired {
+        // REVISION 2 (`freecomp`). `bounded_excess_pair` needs the DIFFERENCE
+        // `gvar2 - gvar1` and the SUM `gvar1 + gvar2`. Only the difference is
+        // ill-conditioned, and only because each variance is itself
+        // `sum(x^2)/n - mean^2` — so the difference of two variances is a
+        // difference of differences of large nearly-equal numbers.
+        //
+        // Reassociating removes the amplifier exactly:
+        //     gvar2 - gvar1 = [sum(d^2) - sum(s^2)]/n - (md^2 - ms^2)
+        //                   = sum((d-s)(d+s))/n - (md - ms)(md + ms)
+        // Both terms are now O(distortion) rather than O(mean^2), and
+        // `sum_dd` is accumulated per PIXEL so its cancellation happens on one
+        // pixel's small difference instead of between two large totals. The
+        // SUM keeps the raw form: when the variances are small enough for
+        // their error to matter, `C_GCONTRAST` (1e-4) already dominates the
+        // denominator.
+        //
+        // WHY THIS AND NOT THE OBVIOUS TWO, both tried and MEASURED to fail
+        // (`benchmarks/feature_rev2_2026-09-05.md`, 60 real source images,
+        // paired cells, free-vs-append past the 2e-5 bar):
+        //   * matching the append kernel's per-ROW reduction granularity in
+        //     the free walk: 4.47 % -> 3.90 %, worst cell WORSE. The error is
+        //     within one row, not across rows.
+        //   * Kahan-compensating the f32 second moments: compensating the FREE
+        //     route alone made agreement WORSE (4.97 % -> 5.39 %), which is
+        //     what identified the APPEND route as the inaccurate one;
+        //     compensating BOTH still left 9.66 %.
+        // The reason both fail is that they chase precision in `sum(s^2)`
+        // while the amplification is `mean^2/gvar`. With `sum(s^2)` accurate
+        // to one f32 ulp the predicted feature error is
+        // `1.2e-7 * mean^2 / (gvar1+gvar2+C)`, which for a flat region is
+        // ~3e-4 — and the MEASURED worst cell was 3.70e-4. The arithmetic
+        // says no f32 accumulation scheme can fix this; only removing the
+        // amplifier can.
+        //
+        // `GLOBAL_DMEAN` is untouched: it never squares, and it MEASURED
+        // clean (0 of 649 cells past the bar) while `GLOBAL_CGAIN` was 39.8 %
+        // and `GLOBAL_CLOSS` 11.6 %.
+        let diff = sum_dd / n_f - (sum_ds / n_f) * (gmean_d + gmean_s);
+        let recip_denom = 1.0 / (gvar1 + gvar2 + C_GCONTRAST);
+        return (
+            dmean,
+            diff.max(0.0) * recip_denom,
+            (-diff).max(0.0) * recip_denom,
+        );
+    }
     let (g_cgain, g_closs) = bounded_excess_pair(gvar2, gvar1, C_GCONTRAST);
     (dmean, g_cgain, g_closs)
+}
+
+#[cfg(test)]
+mod global_contrast_rev2_tests {
+    use super::*;
+
+    /// **The F5 gate.** Replaces (does not re-run) the synthetic-image
+    /// `free_extras_match_the_944_append_block` comparison, which could not
+    /// see this defect because synthetic content does not produce the
+    /// flat-but-not-constant regions where `mean²/gvar` is large.
+    ///
+    /// The property under test is the one that actually broke: given raw
+    /// moments carrying only f32-grade precision — which is all either route
+    /// can deliver, since both accumulate in f32 lanes — how far does the
+    /// computed `GLOBAL_CGAIN`/`GLOBAL_CLOSS` land from the exact answer?
+    ///
+    /// MEASURED consequence on real pixels (60 source images, 1,120 paired
+    /// tranche cells, `benchmarks/feature_rev2_2026-09-05.md`): free-vs-append
+    /// disagreement past the 2e-5 bar falls from **8.30 % to 0.18 %** and the
+    /// worst cell from 2.31e-4 to 2.49e-5.
+    #[test]
+    fn paired_form_survives_f32_grade_moments_where_the_raw_form_does_not() {
+        // A flat-but-not-constant region: large mean, tiny variance, tiny
+        // distortion — the configuration where `mean^2/gvar` is the amplifier.
+        let n = 65536.0f64;
+        let (ms, md) = (0.5f64, 0.5f64 + 3e-5);
+        let (var_s, var_d) = (1.0e-6f64, 1.3e-6f64);
+
+        let sum_s = ms * n;
+        let sum_d = md * n;
+        let sum_s2 = (var_s + ms * ms) * n;
+        let sum_d2 = (var_d + md * md) * n;
+        let sum_ds = (md - ms) * n;
+        // sum((d-s)(d+s)) = sum(d^2) - sum(s^2), formed per pixel.
+        let sum_dd = sum_d2 - sum_s2;
+
+        // Exact answer, in full f64 from the variances themselves.
+        let (want_gain, want_loss) = bounded_excess_pair(var_d, var_s, C_GCONTRAST);
+
+        // f32-grade moments: round the four raw totals to f32, which is the
+        // precision any f32 lane accumulation can deliver no matter how it is
+        // ordered or compensated. The PAIRED inputs are per-pixel differences,
+        // so they are small and survive the same rounding.
+        let f32r = |x: f64| x as f32 as f64;
+        let (raw_gain, raw_loss) = {
+            let (_, g, l) = global_stats_from_raw_moments(
+                f32r(sum_s),
+                f32r(sum_d),
+                f32r(sum_s2),
+                f32r(sum_d2),
+                f32r(sum_dd),
+                f32r(sum_ds),
+                n,
+                false,
+            );
+            (g, l)
+        };
+        let (pair_gain, pair_loss) = {
+            let (_, g, l) = global_stats_from_raw_moments(
+                f32r(sum_s),
+                f32r(sum_d),
+                f32r(sum_s2),
+                f32r(sum_d2),
+                f32r(sum_dd),
+                f32r(sum_ds),
+                n,
+                true,
+            );
+            (g, l)
+        };
+
+        let raw_err = (raw_gain - want_gain)
+            .abs()
+            .max((raw_loss - want_loss).abs());
+        let pair_err = (pair_gain - want_gain)
+            .abs()
+            .max((pair_loss - want_loss).abs());
+        // The bar is the audit's own 2e-5 route-parity bar, not a number
+        // picked to make the test pass: the defect is exactly "the raw form
+        // lands further from truth than the bar allows".
+        const BAR: f64 = 2e-5;
+        assert!(
+            raw_err > BAR,
+            "the raw form should cross the parity bar here (that IS the defect); got {raw_err}"
+        );
+        assert!(
+            pair_err < BAR / 10.0 && pair_err < raw_err / 10.0,
+            "paired form must land an order below the bar: paired {pair_err} vs raw {raw_err}"
+        );
+    }
+
+    /// The reassociation is an ALGEBRAIC IDENTITY, so with exact inputs the
+    /// two forms must agree. If they ever do not, the revision changed the
+    /// definition rather than its conditioning.
+    #[test]
+    fn the_two_forms_are_the_same_function_in_exact_arithmetic() {
+        for &(ms, md, var_s, var_d) in &[
+            (0.5f64, 0.5f64, 0.01f64, 0.02f64),
+            (0.2, 0.9, 0.3, 0.05),
+            (0.0, 0.0, 0.0, 0.0),
+            (1000.0, 1000.5, 4.0, 3.0),
+        ] {
+            let n = 4096.0;
+            let sum_s = ms * n;
+            let sum_d = md * n;
+            let sum_s2 = (var_s + ms * ms) * n;
+            let sum_d2 = (var_d + md * md) * n;
+            let a = global_stats_from_raw_moments(
+                sum_s,
+                sum_d,
+                sum_s2,
+                sum_d2,
+                sum_d2 - sum_s2,
+                (md - ms) * n,
+                n,
+                false,
+            );
+            let b = global_stats_from_raw_moments(
+                sum_s,
+                sum_d,
+                sum_s2,
+                sum_d2,
+                sum_d2 - sum_s2,
+                (md - ms) * n,
+                n,
+                true,
+            );
+            let tol = 1e-9 * a.1.abs().max(a.2.abs()).max(1.0);
+            assert_eq!(a.0, b.0, "GLOBAL_DMEAN must be untouched by the revision");
+            assert!(
+                (a.1 - b.1).abs() <= tol && (a.2 - b.2).abs() <= tol,
+                "{a:?} vs {b:?}"
+            );
+        }
+    }
 }
 
 /// The three luminance-binned bounded-error values, from the dark/bright
@@ -4811,8 +5015,16 @@ fn finish_append(
     };
     out[idx_append::ART_DEV2] = clamp01(dev_from_moments(dense.sum_art, app.sum_art2, n_f));
     out[idx_append::DET_DEV2] = clamp01(dev_from_moments(dense.sum_det, app.sum_det2, n_f));
-    let (g_dmean, g_cgain, g_closs) =
-        global_stats_from_raw_moments(app.sum_s, app.sum_d, app.sum_s2, app.sum_d2, n_f);
+    let (g_dmean, g_cgain, g_closs) = global_stats_from_raw_moments(
+        app.sum_s,
+        app.sum_d,
+        app.sum_s2,
+        app.sum_d2,
+        app.sum_dd,
+        app.sum_ds,
+        n_f,
+        crate::ssim_form::active_revision().paired_global_contrast(),
+    );
     out[idx_append::GLOBAL_DMEAN] = g_dmean;
     out[idx_append::GLOBAL_CGAIN] = clamp01(g_cgain);
     out[idx_append::GLOBAL_CLOSS] = clamp01(g_closs);
@@ -4885,6 +5097,11 @@ struct V1BasicSums {
     sum_d: f64,
     sum_s2: f64,
     sum_d2: f64,
+    /// Revision 2's paired second moment `Σ(d−s)(d+s)`, carried alongside the
+    /// raw pair so `global_stats_from_raw_moments` can pick per revision.
+    sum_dd: f64,
+    /// Revision 2's paired first difference `Σ(d−s)`.
+    sum_ds: f64,
     // --- FREE bounded error ([`V1FreeExtras::RawMomentsPlusBoundedErr`]) ---
     // Σ sat((s−d)², C_MSE) over this (scale, channel), and the Y-only
     // dark/bright weighted sums of that same per-pixel value. Zero unless
@@ -4937,6 +5154,8 @@ impl V1BasicSums {
         self.sum_d += o.sum_d;
         self.sum_s2 += o.sum_s2;
         self.sum_d2 += o.sum_d2;
+        self.sum_dd += o.sum_dd;
+        self.sum_ds += o.sum_ds;
         self.sum_msat += o.sum_msat;
         self.lum_wd_num += o.lum_wd_num;
         self.lum_wd_den += o.lum_wd_den;
@@ -4975,6 +5194,8 @@ impl V1BasicSums {
         self.sum_d += s.sum_d;
         self.sum_s2 += s.sum_s2;
         self.sum_d2 += s.sum_d2;
+        self.sum_dd += s.sum_dd;
+        self.sum_ds += s.sum_ds;
         // FREE bounded error: plain sums, merged the same unconditional way
         // as the raw moments above (+0.0 when the kernel did not fill them).
         self.sum_msat += s.sum_msat;
@@ -5022,8 +5243,16 @@ impl V1BasicSums {
     /// to the append kernel's `sum_s`).
     fn finalize_free(&self, n: usize) -> ([f64; 3], f64) {
         let n_f = n as f64;
-        let (dmean, cgain, closs) =
-            global_stats_from_raw_moments(self.sum_s, self.sum_d, self.sum_s2, self.sum_d2, n_f);
+        let (dmean, cgain, closs) = global_stats_from_raw_moments(
+            self.sum_s,
+            self.sum_d,
+            self.sum_s2,
+            self.sum_d2,
+            self.sum_dd,
+            self.sum_ds,
+            n_f,
+            crate::ssim_form::active_revision().paired_global_contrast(),
+        );
         (
             [dmean, cgain.clamp(0.0, 1.0), closs.clamp(0.0, 1.0)],
             saturate(self.sum_s / n_f, C_LUM_T).clamp(0.0, 1.0),

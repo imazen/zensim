@@ -417,6 +417,35 @@ impl FormulaRevision {
         }
     }
 
+    /// Whether `GLOBAL_CGAIN`/`GLOBAL_CLOSS` are formed from the PAIRED
+    /// second moment `Σ(d−s)(d+s)` instead of the difference of two raw
+    /// variances — the `freecomp` half of revision 2.
+    ///
+    /// F5: `fused.rs`'s own comment claims the band-batched reorder "costs
+    /// negligible precision: worst |Δ| vs the 944 append block is 5.35e-6".
+    /// That was measured through `free_extras_match_the_944_append_block`,
+    /// which is SYNTHETIC-IMAGE-ONLY. On real pairs the audit measures 2,607
+    /// of 28,601 cells (9.12 %) past the 2e-5 bar, worst 3.63e-3 — because
+    /// `Σs²/n − mean²` amplifies the accumulated f32 error by `mean²/var`,
+    /// which is unbounded as a region flattens, and synthetic images do not
+    /// produce the flat-but-not-constant regions that make it large.
+    ///
+    /// **Granularity was tried first and MEASURED not to be the lever**:
+    /// matching the append kernel's per-row reduction moves the paired
+    /// disagreement only 4.47 % -> 3.90 % past the bar and leaves the worst
+    /// cell worse, because the error lives in the f32 accumulation WITHIN one
+    /// row. Compensation removes the depth dependence instead. See
+    /// [`crate::fused`]'s `kahan_add16` for the full measurement.
+    ///
+    /// It changes **no shipped byte**: only the free walk is compensated, the
+    /// append route is untouched, so no 944 table moves. That also makes the
+    /// free route the more accurate of the two, which is what turns the
+    /// remaining free-vs-append gap into a MEASUREMENT of the append route's
+    /// own error (plan R4) rather than an unattributed disagreement.
+    pub(crate) const fn paired_global_contrast(self) -> bool {
+        matches!(self, Self::Rev2)
+    }
+
     /// Every slot id this revision moves, derived from the signal table's own
     /// [`Revision`] entries — never from a separate list.
     ///
