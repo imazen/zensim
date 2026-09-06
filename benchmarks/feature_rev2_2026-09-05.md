@@ -408,3 +408,95 @@ ONLY — it does not reach the CSFW twin. But CSFW's output passes through
 output rather than an unboundedness defect, and it has no second route to be
 skewed against, so F5's parity framing does not apply. Registered here as an
 open observation for the F5 lane; no arm, no gate in R6b.
+
+## 11.5 The arms, and the prediction that was wrong
+
+One owner ([`zensim/src/hf_gain_form.rs`](../zensim/src/hf_gain_form.rs)), five
+arms, selected at RUNTIME by `ZENSIM_HF_GAIN` from ONE binary — a rebuild
+between arms would put the same class of confound into the FEATURES that this
+repo has measured moving a timing ~10 %. `a = var_dst`, `b = var_src`,
+`g = max(0, a/b − 1)`, and the `b > 1e-10` gate is unchanged in every arm.
+
+| arm | form | bound | agrees with rev1 | new constant |
+|---|---|---|---|---|
+| `ratio` | `g` | **none** | exactly | — |
+| `bexcess` | `max(0, a−b)/(a+b+C_HF)` | `[0,1)` | to **half** (`→ g/2`) | none — `C_HF` is this family's own |
+| `log1p` | `ln(1 + g)` | **none** | 1st order | none |
+| `satexcess` | `g/(g+1)` = `saturate(g, 1)` | `[0,1)` | **1st order** | none — `c = 1` is the unique 1st-order scale |
+| `cap` | `min(g, 1)` | `[0,1]` | exactly for `g ≤ 1` | none — 1.0 is the two `loss` siblings' own bound |
+
+**★ The pre-registration predicted `bexcess` would be order-preserving. It is
+not, and the measurement is what says so.** §11.5 of the plan reasoned from
+`∂f/∂a` at fixed `b` — under which `bexcess` *is* strictly increasing — and
+concluded it preserved the slot's ordering. It does not: `max(0, a−b)/(a+b+C)`
+reads the **magnitude** of `b`, not only the ratio `a/b`, so two cells with the
+same `g` and different `var_src` get different values. **MEASURED: 46,032
+adjacent-pair inversions against the revision-1 order over the seven eval
+legs.** Reusing `feature_v2`'s own `bounded_excess` owner — the move that looked
+most defensible on paper, and the one §11.1 argues F17 exists for not having
+made — does not bound the shipped statistic, it **replaces** it with a
+scale-dependent one.
+
+The distinction is now named in the owner and gated:
+`HfGainForm::preserves_order` is the LOCAL question (monotone in `var_dst` at
+fixed `var_src`; true for `bexcess`), `HfGainForm::depends_only_on_ratio` is
+what gate H5 measures (false for `bexcess`), and
+`only_bounded_excess_depends_on_the_magnitude` pins both against the
+arithmetic.
+
+Two structural facts that survive the measurement:
+
+* **`satexcess` restores the family's src↔dst symmetry by changing only the
+  broken member**: `g/(g+1) = max(0, 1 − var_src/var_dst)`, the exact reflection
+  of `var_loss = max(0, 1 − var_dst/var_src)` — verified as an identity in the
+  owner's tests, not asserted. Making the family consistent under `bexcess`
+  would instead re-form two features that are not broken, 12 slots → 36.
+* **`cap` is F4's `Clamp` applied here, and F17 is where that arm stops being
+  free.** On the corpora R6 fitted, `Clamp` moved **0** cells; `cap` leaves
+  every healthy cell untouched too — but ties **24,935** pairs the shipped form
+  separates, because F17's regime is not rare (2.59 % of cells exceed `g = 1`).
+
+## 11.6 Controls — all seven pass, and two of them were not in the plan
+
+| # | control | result |
+|---|---|---|
+| **CB1** | this lane's revision-1 arm reproduces R6's `ssim2` tables | **BYTE-IDENTICAL on all ten legs** (7 eval + anchor + identity + ladder), 30,670 rows, by `cmp`. `1aa3a419` touched `feature_v2.rs` and `fold_engine.rs` between the two waves and is value-inert. |
+| **CB2** | pathology detector | a cell is pathological above the gold holdout's p99.9 (**0.34687**); flagged rows per leg: CID22 40, KADID 5,538, TID 1,760, KonJND 19, AIC-3 6, CSIQ 332, LIVE 235. |
+| **CB3** | identity ⇒ zero | the 400 self-pairs give the all-zero 372 vector at every arm. |
+| **CB4** | containment | every arm differs from revision 1 in **exactly** the twelve F17 columns and nowhere else, on every leg. |
+| **CB5** | closed form (**added**) | the extracted `satexcess`, `log1p` and `cap` tables equal the closed-form transform of the revision-1 table with `max abs(pred − got) = 0` **EXACTLY**. This is what proves the runtime arm switch fired: a typo in the env match falls through to the shipped form and yields a table identical to the control, which every downstream gate would report as "this arm moves nothing". |
+| **CB6** | fit chain (**added**) | this tree's `bake_dial_refit` reproduces R6's `ssim2_s156_lasso.bin` **byte-identically** from R6's own gram and anchor (sha256 `badb848d…`), so the purge lane's commits between the two waves left the fit chain unchanged. |
+| **CB7** | width / pool state (**added**) | `scripts/r6b_width_probe.sh`: every arm moves a **subset of the twelve** at the 944-full pool-live shape AND at the v1-only 372 shape. Unlike F4 — whose count is 132 at 372 and pools-live 944 but 36 at the zeroed roots — **F17's blast radius does not vary with pool state.** The synthetic pair holds four of the twelve at exactly 0.0 and all four stay untouched under every arm, so the same run is a free H4 check. |
+
+CB1's byte-identity is what lets R6's `ssim2` bakes serve as this lane's
+revision-1 control, and CB7 is here because deriving was not enough for F4: the
+audit reasoned 72 slots and the measurement found 132.
+
+## 11.7 H3 / H4 / H5 — the structural gates, and they decide this
+
+Over the seven eval legs (216,756 rows minus safesyn; the safesyn leg is
+included in the final table of §11.8):
+
+| arm | CB4 | H3 max `f` | declared bound | H3 | H5 inversions | H5 new ties | H5 | H6 healthy cells | H6 max \|Δ\| |
+|---|:--:|--:|--:|:--:|--:|--:|:--:|--:|--:|
+| revision 1 (`ratio`) | — | **3,598.21** | none | — | 0 | 0 | — | — | — |
+| `bexcess` | ok | 0.99687 | 1.0 | PASS | **46,032** | 0 | **FAIL** | 25,714 | 0.33870 |
+| `log1p` | ok | **8.18847** | **none** | **FAIL** | 0 | 0 | PASS | 25,714 | 0.04907 |
+| `satexcess` | ok | 0.99972 | 1.0 | **PASS** | **0** | **0** | **PASS** | 25,714 | 0.08930 |
+| `cap` | ok | 1.00000 | 1.0 | PASS | 0 | **24,935** | **FAIL** | **0** | **0** |
+
+`satexcess` is the only arm that passes all three. Two things about that are
+worth stating rather than leaving implicit:
+
+* **The structural gates are decidable from the revision-1 tables alone**, and
+  the predictions match the extraction exactly (CB5). H3 and H5 are properties
+  of an arm's algebra, not of a fit — so the extraction wave's value here is the
+  controls, the H6 magnitudes, and the RANK COST in §11.8, not the elimination.
+* **H6 does not rank the survivors, because there is one.** The rank it would
+  give — `cap` (0 cells) < `log1p` (0.04907) < `satexcess` (0.08930) <
+  `bexcess` (0.33870) — puts two eliminated arms first, which is exactly why
+  §11.9 orders rule 1 before rule 4 and said so before the numbers existed.
+* `satexcess`'s H6 max is not a free parameter: `g − g/(g+1) = g²/(1+g)`, which
+  at the CB2 bar `g = 0.34687` is **0.089332**. The measured max over every leg
+  is 0.08930. The healthy-cell perturbation is pinned by where the pathology
+  bar was drawn, not by the corpus.
