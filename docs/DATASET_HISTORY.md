@@ -3139,3 +3139,75 @@ flipping `SHIPPED_REVISION`.
 Record: [`benchmarks/score_owner_consolidation_2026-09-06.md`](../benchmarks/score_owner_consolidation_2026-09-06.md).
 Gates: `zensim-validate/tests/{score_owner_parity,no_score_path_libm}.rs`
 (both mutation-verified), `zensim::score_math`'s 9 unit tests.
+
+---
+
+## §3.55 — the dense-id gather was FEATURE-GATED, so four shipped profiles were silently mis-scored in every non-default build (2026-09-06)
+
+**Ledger ROUND 106.** §3.53's cruft-purge increment 2A (`cb2f412d`) flipped `A`,
+`B`, `BHdr` and `D` to the dense contract and proved, three ways, that **no
+shipped score moved**. It did — on a DEFAULT build. This entry records the
+configuration that proof did not cover, and closes it. **Status: FIXED. No
+stored table, bake, board row or published verdict is invalidated** — every
+number this repo has ever recorded came from a default-feature build, which was
+always on the correct side.
+
+**The defect.** Serving a dense bake means GATHERING its declared ids out of the
+walk's identity-laid-out vector. The gather, and `feature_layout` behind it, was
+`#[cfg(feature = "feature-regime-v2")]`. That feature is default-on — so
+`cargo add zensim` was correct and every measurement in this ledger is safe —
+but a consumer setting `default-features = false` fell through to
+`prep_bake_input_f32`'s POSITIONAL PREFIX branch: `B` reads ids `f3..f369` and
+was served positions `0..94`. Plausible numbers, wrong features, no error.
+
+**MEASURED** (`zensim/examples/serving_matrix.rs`; reference = default, arm =
+every default feature except `feature-regime-v2`, so tier and threading are
+held constant). All 48 `A`/`B`/`BHdr`/`D` cells were wrong:
+
+| profile | min \|Δ\| | max \|Δ\| | worst cell | default | without the gather |
+|---|--:|--:|---|--:|--:|
+| `A` | 2.4921 | 7.6714 | 256×256 checker_lsb | 94.114457 | 86.443061 |
+| **`B`** (`codec_target()`) | 2.2580 | 34.6773 | 48×40 blur3 | 48.171502 | **13.494210** |
+| `BHdr` | 3.3364 | 13.5977 | 127×93 checker_lsb | 95.117667 | 81.519927 |
+| **`D`** | 4.5262 | **261.5804** | 576×96 blur3 | 48.431759 | **−213.148613** |
+| `C` / `CHdr` | — | — | — | — | `ModelForwardFailed`, all 12 |
+
+The instrument's own noise floor, same instrument, gather live in both arms,
+`avx512`+`threads` against neither: **1.048e−5** over 24 cells. So the defect is
+five orders of magnitude above the widest legitimate cross-tier movement.
+
+**The fix is an UNGATE, and it is free.** `feature_layout` depends only on
+`feature_set_id`, `feature_defs` and `mlp::Model` — none v2-gated — and every
+shipped dense bake's highest declared id is < 372, which the legacy v1 buffered
+walk already emits. So the gather works against the walk `--no-default-features`
+already had. Same-parent A/B (a second workspace at `fc47b08e` with its own
+target dir, best of 3 warm incremental rebuilds): `--no-default-features`
+`.rlib` **3,138,964 → 3,273,736 B (+4.29 %)** and **2.60 → 2.74 s**; default
+`.rlib` **7,492,468 → 7,496,008 B (+0.05 %)**, 5.85 → 5.89 s. The non-default
+figure exceeds the module's own size because ungating it makes `feature_defs`'s
+registry reachable in a build where nothing referenced it; an `.rlib` carries
+metadata, so it upper-bounds shipped code growth rather than measuring it.
+`candidate-profiles` now requires
+`feature-regime-v2` (only the v2 walk emits the 944 `C`/`CHdr` declare), so
+**every profile a build can name it can serve** — zero refusals in every
+configuration.
+
+**The generalizable lesson, and it is the reason this is in the ledger.** *A
+gate that is `#[cfg]`-gated on the same feature as the code it protects is not a
+gate.* The servability census — `every_shipped_profile_is_servable`, the
+instrument whose entire purpose is this question — lived inside the
+`feature-regime-v2`-gated `feature_plan`, so it was blind in exactly the builds
+that were broken. It has moved to the always-compiled `zensim/src/serving.rs`.
+The same shape produced a SECOND, independent instance in the same lane:
+`zensim/Cargo.toml`'s `include` allowlist is only exercised by `cargo package`,
+which no workspace build runs, and MEASURED with `cargo package --list` it was
+missing **six** `include_bytes!` targets — a published 0.3.0 would not have
+compiled for anyone. Both halves are now checked from a configuration that can
+fail: a pinned score in the library's own unit tests (runs under every feature
+permutation CI builds), and an allowlist check that reads the manifest via
+`include_str!`.
+
+Record: [`../benchmarks/dense_serving_ungate_2026-09-06.md`](../benchmarks/dense_serving_ungate_2026-09-06.md).
+Gates: `zensim::serving`'s four tests, `scripts/serving_matrix.sh` (2
+environments × 5-6 arms, with a vacuity guard so at least one arm is genuinely
+v2-free), `zensim-wasm-tests::large_image_noise_distortion_matches_the_pinned_score`.

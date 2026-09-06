@@ -269,3 +269,40 @@ fn large_image_noise_distortion() {
         result.score()
     );
 }
+
+/// **The PINNED form of `large_image_noise_distortion`.**
+///
+/// This exact pair is what exposed the dense mis-serving on 2026-09-06: with
+/// the id gather compiled out, `ZensimProfile::A` read 86.30 here, and the
+/// `> 90.0` bound above is the only reason anybody noticed. A bound catches a
+/// mis-serve by luck; a pin catches it by construction, so both stay.
+///
+/// Tolerance `1e-2`: the v1 golden gate's derived cross-class bound is
+/// `max(1e-6 abs, 1e-5·scale)` ≈ 9.3e-4 at this scale, and the measured
+/// native tier/threading spread is 1.048e-5
+/// (`benchmarks/dense_serving_ungate_2026-09-06.md` §2b) — so this sits
+/// ~10× above the widest legitimate cross-backend movement and ~230× below the
+/// smallest value the defect moved (2.258). Never widen it; a moved score is
+/// re-pinned with a measurement or it is a bug.
+#[test]
+fn large_image_noise_distortion_matches_the_pinned_score() {
+    // Captured 2026-09-06 from the native default build with the dense gather
+    // live; the pre-fix, gather-less reading of this same cell was 86.30.
+    const PINNED: f64 = 93.150_736_250_847;
+    const TOL: f64 = 1e-2;
+    let z = Zensim::new(ZensimProfile::A);
+    let base = generators::value_noise(256, 256, 99);
+    let distorted = distortions::truncate_lsb(&base);
+    let base_px = px(&base);
+    let dist_px = px(&distorted);
+    let src = RgbaSlice::new(&base_px, 256, 256);
+    let dst = RgbaSlice::new(&dist_px, 256, 256);
+    let got = z.compute(&src, &dst).unwrap().score();
+    assert!(
+        (got - PINNED).abs() <= TOL,
+        "profile A on 256x256 value_noise + truncate_lsb: {got:.12}, pinned {PINNED:.12} \
+         (delta {:.6}). A mis-served dense bake looks exactly like this — investigate \
+         before re-pinning.",
+        got - PINNED
+    );
+}

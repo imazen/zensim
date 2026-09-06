@@ -155,6 +155,15 @@ jobs:
             "custom-profiles"
             "feature-regime-v2"
             "custom-profiles,feature-regime-v2"
+            # PROFILE-SET axes — absent until 2026-09-06, which is why the
+            # dense-serving mis-score shipped: every cell above ships only
+            # `B` + `BHdr`, so `A` (dense, `deprecated-profiles`) and `D`
+            # (dense, `candidate-profiles`) were never scored outside the
+            # default-feature job. `deprecated-profiles` alone is the exact
+            # broken configuration — dense bakes, no `feature-regime-v2`.
+            # benchmarks/dense_serving_ungate_2026-09-06.md
+            "deprecated-profiles"
+            "deprecated-profiles,candidate-profiles"
           )
           for features in "${features_list[@]}"; do
             if [ -z "$features" ]; then
@@ -169,6 +178,14 @@ jobs:
             cargo test -p zensim $flags --lib -- --nocapture
             echo "::endgroup::"
           done
+      # The CROSS-BUILD half of the serving contract. The loop above runs the
+      # pinned-score gate inside each feature set; this diffs the feature sets
+      # against each other, which is the only way to see a mis-served bake —
+      # a wrong feature vector produces a plausible number and no error, so it
+      # is invisible from inside any single build.
+      # benchmarks/dense_serving_ungate_2026-09-06.md
+      - name: Serving matrix (cross-build score identity)
+        run: scripts/serving_matrix.sh
 
   corpus-tests:
     name: Corpus ICC tests

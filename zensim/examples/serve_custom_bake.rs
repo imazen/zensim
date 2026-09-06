@@ -33,7 +33,7 @@
 //! plus a SERVED/REFUSED summary. This is the filesystem tier of the
 //! servability contract (user directive 2026-09-05: *"also make sure
 //! everything can be served"*); the no-filesystem tier is the in-lib census
-//! (`feature_plan::servability_census`), which gates every SHIPPED profile and
+//! (`serving::tests::every_shipped_profile_is_servable`), which gates every SHIPPED profile and
 //! every registered producer set on a build with no `/mnt/v`.
 //!
 //! A REFUSED row is the contract failing, not the tool: every bake whose read

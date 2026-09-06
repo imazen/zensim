@@ -20,14 +20,31 @@ categories = ["multimedia::images", "computer-vision"]
 # research tooling but is NOT shipped to crates.io — every experimental bake
 # now lives in the unpublished `zensim-experimental` crate. `Cargo.toml`, the
 # `readme`, and license metadata are always included.
+# GATED by `serving::tests::every_included_bake_is_packaged` — every
+# `include_bytes!("../weights/…")` in `src/` must appear below, or the
+# PUBLISHED crate does not compile. It did not, between 2026-08-29 and
+# 2026-09-06: `cb2f412d` pointed A/B/BHdr/D at the four `*_byid_*` bakes and
+# `c_sdr_purity944` / `c_hdr_l1t1944` replaced `c_sdr_mlp944_corrmix`, and this
+# list moved with neither. `cargo package --list` showed the six missing files.
 include = [
     "src/**/*.rs",
+    # SERVED bakes — `include_bytes!`ed by `profile.rs` outside `cfg(test)`.
+    "weights/v47_strict_qat_native_byid_2026-09-06.bin",
+    "weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin",
+    "weights/bhdr_linear_shaped_cvvdpmix_byid_2026-09-06.bin",
+    "weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin",
+    "weights/c_sdr_purity944_2026-08-29.bin",
+    "weights/c_hdr_l1t1944_2026-08-29.bin",
+    # RETIRED pre-densify bytes: `include_bytes!`ed by the `cfg(test)` flip
+    # gate, and by the `ProfileParams::builder` doctest. `cargo test` on a
+    # packaged crate has to work, so they ship.
     "weights/v47_strict_qat_native_2026-05-27.bin",
     "weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin",
     "weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin",
-    "weights/b_sdr_linear_cid80_anchored_2026-07-04.bin",
-    "weights/c_sdr_mlp944_corrmix_2026-08-05.bin",
     "weights/d_sdr_add156_id100_negrich_dial_2026-09-05.bin",
+    # The raw pre-guard B ensemble, so downstream can byte-reproduce B via
+    # `scripts/reproduce_b.sh`. Not `include_bytes!`ed.
+    "weights/b_sdr_linear_cid80_anchored_2026-07-04.bin",
     "weights/manifests/v47_strict_qat.toml",
 ]
 
@@ -101,11 +118,23 @@ custom-profiles = []
 ## drop `A` and its ~27 KB MLP bake entirely. A future minor release may move
 ## this feature out of `default`; migrate off `A` now.
 deprecated-profiles = []
-# Generation-C candidate profiles (C = 149 KB SDR MLP, CHdr = 180 KB HDR MLP).
+# Generation-C candidate profiles (C = 149 KB SDR MLP, CHdr = 180 KB HDR MLP)
+# plus `D`.
 # ON by default; size-sensitive builds drop them (`--no-default-features` +
 # re-add what you need) to save ~329 KB of embedded bake bytes — the same
 # opt-out shape as `deprecated-profiles` (A's ~27 KB v47 bake).
-candidate-profiles = []
+#
+# **Requires `feature-regime-v2`, since 2026-09-06, because these profiles
+# cannot be SERVED without it.** `C` / `CHdr` declare a 944-wide caller vector
+# and only the v2 walk emits 944 — without it `Zensim::new(C).compute(..)`
+# returned `ModelForwardFailed` on every call ("bake declares more input
+# features than the caller supplied"), i.e. the feature shipped a profile the
+# build could not serve. `D`'s whole reason to exist is the fold engine, which
+# is also behind that feature (`benchmarks/profile_d_notax_2026-09-01.md`), so
+# the dependency is the honest statement of what this feature needs rather
+# than an incidental coupling. A feature that ships a variant must ship what
+# serves it.
+candidate-profiles = ["feature-regime-v2"]
 ## The "bounded" v2 feature-extraction regime (`feature_v2` module,
 ## `Zensim::compute_v2_features`, `FeatureViewV2`) AND the streaming fold
 ## engine it carries (`fold_engine.rs`, `benchmarks/fold_engine_2026-08-31.md`)

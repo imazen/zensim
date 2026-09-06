@@ -728,6 +728,60 @@ re-learning: a successful push makes `@` immutable and jj creates a **fresh empt
 
 ### Resolved
 
+- **✅ RESOLVED 2026-09-06 — THE DENSE-ID GATHER WAS `#[cfg]`-GATED, so `A`, `B`,
+  `BHdr` and `D` were SILENTLY MIS-SCORED in every build without
+  `feature-regime-v2`.** Kept here because it names a defect CLASS that keeps
+  recurring, and because any number produced by a `default-features = false`
+  build before 2026-09-06 is wrong. Since `cb2f412d` those four shipped bakes
+  are DENSE — each declares the ids it reads and its layer-0 width is that read
+  set, not 372 — and serving one requires GATHERING those ids out of the walk's
+  identity-laid-out vector. The gather, and `feature_layout` behind it, sat
+  behind `feature-regime-v2`. That feature is default-on, **so every number this
+  repo has ever recorded is safe**; a consumer that turned defaults off fell
+  through to `prep_bake_input_f32`'s POSITIONAL PREFIX branch and got a
+  plausible wrong number with no error. **MEASURED** (default vs every default
+  feature except `feature-regime-v2`, so tier and threading are held constant;
+  6 profiles × 4 geometries × 3 distortions): **all 48 A/B/BHdr/D cells wrong** —
+  `B`, which is what `ZensimProfile::codec_target()` returns, read **48.17 →
+  13.49** on a blur (max |Δ| 34.68); `D` **48.43 → −213.15** (max |Δ| 261.58, a
+  sign flip); `A` 94.11 → 86.44; `BHdr` 95.12 → 81.52; `C`/`CHdr` refused
+  outright on all 12 cells. The same instrument's noise floor with the gather
+  live in both arms (`avx512`+`threads` against neither) is **1.048e−5**.
+  **FIXED by UNGATING**, which turned out to be free: `feature_layout` depends
+  only on `feature_set_id` + `feature_defs` + `mlp::Model`, none v2-gated, and
+  every shipped dense bake's highest declared id is < 372 — a width the legacy
+  v1 buffered walk already emits. Same-parent A/B: `--no-default-features`
+  `.rlib` **+134,772 B (+4.29 %)**, rebuild **+0.14 s**; default `.rlib`
+  **+3,540 B (+0.05 %)**. (The non-default figure exceeds the module's own size
+  because ungating it makes `feature_defs`'s registry reachable where nothing
+  referenced it; `.rlib` includes metadata, so it upper-bounds shipped growth.) The two gather
+  sites in `metric.rs` lose their `#[cfg]` forks, so there is ONE path and no
+  legacy path left to refuse from. `candidate-profiles` now **requires**
+  `feature-regime-v2` (only the v2 walk emits the 944 that `C`/`CHdr` declare),
+  so **every profile a build can name it can serve** — the census reads zero
+  refusals in every configuration.
+  **⚠ THE LESSON, because it produced a SECOND instance in the same lane: a gate
+  `#[cfg]`-gated on the same feature as the code it protects is not a gate.**
+  `every_shipped_profile_is_servable` — the instrument whose entire purpose is
+  this question — lived inside the `feature-regime-v2`-gated `feature_plan`, so
+  it was blind exactly where it mattered; it now lives in the always-compiled
+  `zensim/src/serving.rs`. Same shape, second instance: `zensim/Cargo.toml`'s
+  `include` allowlist is only exercised by `cargo package`, which no workspace
+  build runs, and MEASURED with `cargo package --list` it was missing **six**
+  `include_bytes!` targets (the four `*_byid_2026-09-06.bin` bakes plus
+  `c_sdr_purity944` / `c_hdr_l1t1944`) — **a published 0.3.0 would not have
+  compiled for anyone**. Both are now checked from a configuration that can
+  fail. Gates: `serving::tests::{every_shipped_profile_scores_its_pinned_value,
+  dense_bakes_resolve_to_a_dense_layout_and_the_gather_is_not_a_no_op,
+  every_shipped_profile_is_servable, every_included_bake_is_packaged}` (the
+  pinned-score one runs under EVERY feature permutation CI builds; tolerance
+  `1e-2`, derived — ~950× above the measured noise, ~226× below the smallest
+  real defect, never widen it), `scripts/serving_matrix.sh` (the cross-build
+  diff, with a vacuity guard so at least one arm is genuinely v2-free), and
+  `zensim-wasm-tests::large_image_noise_distortion_matches_the_pinned_score`.
+  Record: `benchmarks/dense_serving_ungate_2026-09-06.md`; ledger
+  `docs/DATASET_HISTORY.md` §3.55 (ROUND 106).
+
 - **✅ RESOLVED 2026-08-30 — v1's 372-feature vector could come out 93 / 186 / 279
   wide, and it was SIZE, not batch.** `docs/DATASET_HISTORY.md` §3.26 registered
   this as "a v1-372 feature vector is not a pure function of its pair … it is a

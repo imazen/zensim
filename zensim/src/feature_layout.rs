@@ -102,6 +102,11 @@ impl Layout {
     }
 
     /// A stable name for manifests and messages (`w944`, `dense265`).
+    // Consumers (`feature_plan`, `research`) are `feature-regime-v2`-gated; the
+    // LAYOUT itself is not, because the shipped dense bakes it serves are not
+    // (2026-09-06 ungate). Scoped so a genuinely-dead accessor still shows up
+    // on a default build.
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
@@ -113,6 +118,11 @@ impl Layout {
 
     /// The position of feature `id`, or `None` when this layout does not
     /// carry it.
+    // Consumers (`feature_plan`, `research`) are `feature-regime-v2`-gated; the
+    // LAYOUT itself is not, because the shipped dense bakes it serves are not
+    // (2026-09-06 ungate). Scoped so a genuinely-dead accessor still shows up
+    // on a default build.
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
     pub(crate) fn pos_of(&self, id: u16) -> Option<usize> {
         self.by_id
             .binary_search_by_key(&id, |&(i, _)| i)
@@ -121,6 +131,11 @@ impl Layout {
     }
 
     /// Every id this layout carries.
+    // Consumers (`feature_plan`, `research`) are `feature-regime-v2`-gated; the
+    // LAYOUT itself is not, because the shipped dense bakes it serves are not
+    // (2026-09-06 ungate). Scoped so a genuinely-dead accessor still shows up
+    // on a default build.
+    #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
     pub(crate) fn ids(&self) -> SlotSet {
         SlotSet::from_slots(self.slot_at.iter().flatten().map(|&id| usize::from(id)))
     }
@@ -186,6 +201,9 @@ impl Layout {
 /// So both readings are tried and the recorded `slots_hash8` picks the one
 /// the id actually names. An id neither reading reproduces describes a set
 /// this build does not have, and saying so is the point.
+// Consumers (`feature_plan::Plan`, `research`) are `feature-regime-v2`-gated;
+// see `Layout::name`'s note.
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
 pub(crate) fn slots_of(id: &FeatureSetId) -> Option<SlotSet> {
     let ns = crate::NUM_SCALES;
     let mut union = SlotSet::from_slots([]);
@@ -628,7 +646,7 @@ pub(crate) mod tests {
     fn every_shipped_bake_resolves_to_its_own_declared_width() {
         let mut n = 0usize;
         let mut dense = 0usize;
-        for (name, p) in crate::feature_plan::servability_census::shipped_profiles() {
+        for (name, p) in crate::serving::shipped_profiles() {
             for bytes in p.params().scoring_bake_bytes() {
                 let Ok(m) = crate::mlp::Model::from_bytes(bytes) else {
                     continue;
@@ -661,9 +679,7 @@ pub(crate) mod tests {
                 n += 1;
             }
         }
-        use crate::feature_plan::servability_census::{
-            expected_min_bake_count, expected_min_dense_count,
-        };
+        use crate::serving::{expected_min_bake_count, expected_min_dense_count};
         assert!(
             n >= expected_min_bake_count(),
             "the census must actually see bakes, saw {n}, expected >= {}",

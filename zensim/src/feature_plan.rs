@@ -899,122 +899,15 @@ mod toggle_gates {
 pub(crate) mod servability_census {
     use super::*;
     use crate::feature_set_id::ComputeToken as T;
-    use crate::{RgbSlice, Zensim, ZensimProfile};
 
-    /// A deterministic non-identical SDR pair. 64×64 is the pyramid minimum,
-    /// so it exercises the real 4-scale walk with no reflect-pad.
-    fn pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
-        let mut src = vec![[0u8; 3]; w * h];
-        let mut dst = vec![[0u8; 3]; w * h];
-        for y in 0..h {
-            for x in 0..w {
-                let i = y * w + x;
-                let v = ((x * 7 + y * 13) % 251) as u8;
-                src[i] = [v, v.wrapping_add(40), v.wrapping_mul(3)];
-                // A structured, non-trivial distortion: quantize + shift.
-                dst[i] = [
-                    v & 0xF0,
-                    v.wrapping_add(37),
-                    v.wrapping_mul(3).wrapping_sub(9),
-                ];
-            }
-        }
-        (src, dst)
-    }
-
-    /// Every profile this build ships, with its name.
-    ///
-    /// `pub(crate)` so the layout census (`feature_layout::tests`) enumerates
-    /// the SAME roster rather than keeping a second list that could drift
-    /// past a feature flag — the roster is `#[cfg]`-dependent, which is
-    /// exactly the kind of list a copy gets wrong.
-    pub(crate) fn shipped_profiles() -> Vec<(&'static str, ZensimProfile)> {
-        let mut v: Vec<(&'static str, ZensimProfile)> = vec![
-            ("B", ZensimProfile::B),
-            ("BHdr", ZensimProfile::BHdr),
-            ("PreviewV0_1", ZensimProfile::PreviewV0_1),
-            ("PreviewV0_2", ZensimProfile::PreviewV0_2),
-        ];
-        #[cfg(feature = "deprecated-profiles")]
-        {
-            // `A` is deprecated but SHIPPED, and the contract is about what
-            // ships. Censusing it is the point.
-            #[allow(deprecated)]
-            v.push(("A", ZensimProfile::A));
-        }
-        #[cfg(feature = "candidate-profiles")]
-        {
-            v.push(("C", ZensimProfile::C));
-            v.push(("CHdr", ZensimProfile::CHdr));
-            v.push(("D", ZensimProfile::D));
-        }
-        v
-    }
-
-    /// The number of (profile, bake) pairs [`shipped_profiles`] contributes a
-    /// SCORING bake for, under the ACTIVE feature set — the floor
-    /// `every_shipped_bake_resolves_to_its_own_declared_width` and
-    /// `from_block_profile_agrees_with_the_id_space_derivation` check against
-    /// so a census that silently sees nothing still fails loud.
-    ///
-    /// `PreviewV0_1` / `PreviewV0_2` are always in the roster but carry no
-    /// MLP bake (`scoring_bake_bytes()` yields nothing for them), so the
-    /// floor tracks the SAME `#[cfg]` gates as `shipped_profiles` itself —
-    /// `A` (1 bake) behind `deprecated-profiles`, `C`+`CHdr`+`D` (3 bakes)
-    /// behind `candidate-profiles`. A bare constant here is precisely the
-    /// "second list that could drift past a feature flag" this module's own
-    /// doc on `shipped_profiles` warns about: found 2026-09-06 when the CI
-    /// permutation matrix's `--features feature-regime-v2` cell (neither
-    /// extra feature on) hit a hardcoded `>= 5` that only B+BHdr (2 bakes)
-    /// can ever satisfy without them.
-    pub(crate) fn expected_min_bake_count() -> usize {
-        2 // B, BHdr — unconditional
-            + usize::from(cfg!(feature = "deprecated-profiles")) // A
-            + 3 * usize::from(cfg!(feature = "candidate-profiles")) // C, CHdr, D
-    }
-
-    /// How many of [`expected_min_bake_count`]'s bakes are DENSE
-    /// (`zentrain.feature_ids`-declared) under the active feature set.
-    ///
-    /// `B` and `BHdr` are dense unconditionally; `A` and `D` are dense when
-    /// their gating feature is on; `C` / `CHdr` are DELIBERATELY never dense
-    /// — see `profile::mlp_bake_c_purity944`'s doc comment, a registered,
-    /// pending user decision, not an oversight.
-    pub(crate) fn expected_min_dense_count() -> usize {
-        2 // B, BHdr
-            + usize::from(cfg!(feature = "deprecated-profiles")) // A
-            + usize::from(cfg!(feature = "candidate-profiles")) // D only — not C/CHdr
-    }
-
-    /// One census row.
-    #[derive(Debug)]
-    struct Row {
-        name: String,
-        declared_width: usize,
-        outcome: Result<usize, String>,
-    }
-
-    fn census_profile(name: &str, p: ZensimProfile) -> Row {
-        let (w, h) = (64usize, 64usize);
-        let (src, dst) = pair(w, h);
-        let declared_width = p
-            .params()
-            .scoring_bake_bytes()
-            .filter_map(|b| crate::mlp::Model::from_bytes(b).ok())
-            .map(|m| m.caller_input_width())
-            .max()
-            .unwrap_or(0);
-        let z = Zensim::new(p);
-        let outcome = z
-            .compute(&RgbSlice::new(&src, w, h), &RgbSlice::new(&dst, w, h))
-            .map(|r| r.features().len())
-            .map_err(|e| format!("{e:?}"));
-        Row {
-            name: name.to_string(),
-            declared_width,
-            outcome,
-        }
-    }
+    // The ROSTER and the profile-shaped census moved to `crate::serving` on
+    // 2026-09-06 so they compile in EVERY feature set. They were here, behind
+    // `feature-regime-v2`, while the dense-serving gather they exist to
+    // protect was gated on the same feature — so the census was blind in
+    // exactly the builds that were broken
+    // (`benchmarks/dense_serving_ungate_2026-09-06.md`). What stays here is
+    // only what genuinely needs a `Plan`; the roster is still ONE list.
+    use crate::serving::{expected_min_bake_count, shipped_profiles};
 
     /// **Per-bake revision, and the one place its limitation is
     /// load-bearing.** A profile whose bakes declare DIFFERENT formula
@@ -1128,91 +1021,6 @@ pub(crate) mod servability_census {
             "the two derivations disagree on {} of {checked} bakes:\n  {}",
             disagreements.len(),
             disagreements.join("\n  ")
-        );
-    }
-
-    /// **THE contract gate.** Every shipped profile serves a non-identical
-    /// pair, and emits at least the width its widest bake declares.
-    ///
-    /// The census REPORT is printed on every run (`--nocapture` to see it) so
-    /// "what cannot be served today, and why" is a measurement rather than an
-    /// inference from reading `profile.rs`.
-    #[test]
-    fn every_shipped_profile_is_servable() {
-        let rows: Vec<Row> = shipped_profiles()
-            .into_iter()
-            .map(|(n, p)| census_profile(n, p))
-            .collect();
-        // The PRE-increment-1 rule, stated exactly as `prep_bake_input_f32`
-        // enforced it: the extraction emitted at most the v1 width, so a bake
-        // was servable iff `caller_input_width() <= v1_width + 4` (the `+4` is
-        // the optional size-axis augmentation). Reproduced here rather than
-        // recalled, so the BEFORE column of the census is derived from the
-        // removed condition rather than from memory.
-        let v1_width = crate::NUM_SCALES
-            * 3
-            * (crate::metric::FEATURES_PER_CHANNEL_EXTENDED
-                + crate::metric::FEATURES_PER_CHANNEL_IW);
-        let old_rule = |declared: usize| declared <= v1_width + 4;
-        let mut report = String::from(
-            "\nSERVABILITY CENSUS — shipped profiles\n\
-             (BEFORE = the removed `prep_bake_input_f32` rule: declared <= v1_width + 4)\n\
-             profile      declared  emitted  BEFORE  NOW\n",
-        );
-        let (mut before_ok, mut after_ok) = (0usize, 0usize);
-        let mut unservable = Vec::new();
-        for r in &rows {
-            if old_rule(r.declared_width) {
-                before_ok += 1;
-            }
-            match &r.outcome {
-                Ok(emitted) => {
-                    after_ok += 1;
-                    report.push_str(&format!(
-                        "  {:<10} {:>8}  {:>7}  {:>6}  SERVED\n",
-                        r.name,
-                        r.declared_width,
-                        emitted,
-                        if old_rule(r.declared_width) {
-                            "served"
-                        } else {
-                            "REFUSED"
-                        }
-                    ));
-                    assert!(
-                        *emitted >= r.declared_width,
-                        "{}: emitted {emitted} < declared {}",
-                        r.name,
-                        r.declared_width
-                    );
-                }
-                Err(e) => {
-                    report.push_str(&format!(
-                        "  {:<10} {:>8}  {:>7}  {:>6}  NOT SERVED: {e}\n",
-                        r.name,
-                        r.declared_width,
-                        "-",
-                        if old_rule(r.declared_width) {
-                            "served"
-                        } else {
-                            "REFUSED"
-                        }
-                    ));
-                    unservable.push(format!("{} ({e})", r.name));
-                }
-            }
-        }
-        report.push_str(&format!(
-            "  ---- servable: {before_ok}/{} BEFORE, {after_ok}/{} NOW\n",
-            rows.len(),
-            rows.len()
-        ));
-        println!("{report}");
-        assert!(
-            unservable.is_empty(),
-            "{} shipped profile(s) cannot be served: {}\n{report}",
-            unservable.len(),
-            unservable.join(", ")
         );
     }
 

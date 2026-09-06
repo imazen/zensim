@@ -32,6 +32,16 @@ description = "Integration tests for zensim under wasm32-wasip1 + simd128"
 # excluding `feature-regime-v2` while depending on a profile whose bake is now
 # dense, which is why the WASM job was the only CI lane to see it. Full 15/15
 # wasm_regression suite reverified green with this feature added.
+#
+# **The ROOT CAUSE was fixed at the owner on 2026-09-06** — the id gather is no
+# longer `#[cfg]`-gated at all, so a build without `feature-regime-v2` now
+# serves every dense bake correctly
+# (`benchmarks/dense_serving_ungate_2026-09-06.md`). This feature stays
+# named here anyway, because the point of this crate is to test the profile set
+# real users get, and default-on features are part of that set. The score it
+# was mis-reading is now PINNED by
+# `large_image_noise_distortion_matches_the_pinned_score`, so the regression is
+# caught by a value rather than by a build configuration.
 zensim = { workspace = true, features = [
     "imgref",
     "classification",

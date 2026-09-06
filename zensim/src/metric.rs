@@ -615,11 +615,13 @@ pub fn score_features_fd_gradient_with_profile(
     // the wrong features — MEASURED against the sequential recipe the moment
     // shipped `B` went dense: component 0 read −748.7 batched against the
     // correct 0.0, because caller position 0 carries id `f0` and `B` declares
-    // `f3..f369`. `declared_layout` is the identity for every bake that shipped
-    // before 2026-09-06, and on that path nothing below changes.
-    #[cfg(feature = "feature-regime-v2")]
+    // `f3..f369`. For an identity-layout bake (no declaration, or one this
+    // build cannot reproduce) nothing below changes.
+    //
+    // **Not `#[cfg]`-conditional, and must never become so again** — see the
+    // single-forward path's note and
+    // `benchmarks/dense_serving_ungate_2026-09-06.md`.
     let layout = crate::feature_layout::declared_layout(&model);
-    #[cfg(feature = "feature-regime-v2")]
     let dense_ids: Option<Vec<u16>> = (!layout.is_identity()).then(|| {
         (0..layout.width())
             .filter_map(|p| layout.slot_at(p))
@@ -627,17 +629,13 @@ pub fn score_features_fd_gradient_with_profile(
     });
     // Same refusal as the single-forward path, for the same reason — a short
     // row would be silently zero-filled at ids the bake genuinely reads.
-    #[cfg(feature = "feature-regime-v2")]
     if dense_ids.is_some() && n < layout.walk_width() {
         return Err(ZensimError::ModelForwardFailed {
             reason: "the bake declares feature ids this feature vector does not reach",
         });
     }
-    #[cfg(not(feature = "feature-regime-v2"))]
-    let dense_ids: Option<Vec<u16>> = None;
 
     let mut f32buf: Vec<f32> = Vec::with_capacity(n_inputs.max(n));
-    #[cfg(feature = "feature-regime-v2")]
     let mut gathered: Vec<f64> = Vec::new();
     let mut grad = vec![0.0f64; n];
     for k in 0..n {
@@ -664,20 +662,11 @@ pub fn score_features_fd_gradient_with_profile(
         }
         let eps = (base[k].abs() * 1e-3).max(1e-5);
         let mut fwd = |probe: &[f64], p: &mut crate::mlp::Predictor<'_>| -> f64 {
-            let src: &[f64] = {
-                #[cfg(feature = "feature-regime-v2")]
-                {
-                    if dense_ids.is_some() {
-                        layout.gather(probe, &mut gathered);
-                        &gathered
-                    } else {
-                        probe
-                    }
-                }
-                #[cfg(not(feature = "feature-regime-v2"))]
-                {
-                    probe
-                }
+            let src: &[f64] = if dense_ids.is_some() {
+                layout.gather(probe, &mut gathered);
+                &gathered
+            } else {
+                probe
             };
             if prep_bake_input_f32(src, n_inputs, width, height, &mut f32buf).is_err() {
                 return f64::NAN;
@@ -4722,6 +4711,56 @@ fn forward_one_bake_with_codec(
         _ => None,
     };
 
+    // **LAYOUT — resolved ONCE, before any head branches.** A bake declaring a
+    // DENSE feature set reads its ids at packed positions, so the caller's
+    // identity-laid-out vector must be GATHERED rather than sliced.
+    // `declared_layout` returns the identity layout for a bake with no id, an
+    // unreproducible id, or a `zentrain.feature_set_id` whose slot count
+    // differs from the declared width — for those, `feats` IS `features` and
+    // nothing below changes by a bit.
+    //
+    // **Not `#[cfg]`-conditional, and must never become so again.** The
+    // shipped `A`, `B`, `BHdr` and `D` bakes have been dense since `cb2f412d`;
+    // while this was gated on `feature-regime-v2`, a build without that
+    // feature fell through to `prep_bake_input_f32`'s PREFIX branch and served
+    // every one of them the wrong features with no error — MEASURED at up to
+    // 261 zensim points and a sign flip on `D`
+    // (`benchmarks/dense_serving_ungate_2026-09-06.md`).
+    //
+    // **Hoisted above the min-max branch on purpose.** It used to sit below,
+    // so a dense bake carrying a min-max head hit that branch's
+    // `features.len() != n` guard and was REFUSED — loud, so never a wrong
+    // number, but also not servable, and a second head added below the gather
+    // would have inherited the same hazard silently. No shipped profile has a
+    // min-max head, so this moves no shipped byte — which is also why the
+    // dense × min-max combination is UNTESTED: it has no artifact to test
+    // against. What is proven is that the identity path is unchanged (every
+    // gate below, plus `serving`'s pinned scores). Gated by
+    // `feature_layout::tests::every_shipped_bake_resolves_to_its_own_declared_width`,
+    // by `serving::tests::every_shipped_profile_scores_its_pinned_value` (which
+    // runs under EVERY feature permutation, which is the point), and end to end
+    // by `dense_layout_round_trip` + `scripts/serving_matrix.sh`.
+    let layout = crate::feature_layout::declared_layout(&model);
+    let mut gathered: Vec<f64> = Vec::new();
+    let feats: &[f64] = if layout.is_identity() {
+        features
+    } else {
+        // **The row must REACH every declared id, or this is a refusal.**
+        // `Layout::gather` writes the structural `0.0` for an id the walk did
+        // not reach, which is correct for a DECLARED GAP and wrong for a
+        // caller who simply handed over a short vector: every id a dense bake
+        // declares is an id it reads, so filling one is exactly the "a
+        // consumer cannot tell this zero from a measured zero" failure the
+        // dense contract exists to end. Loud, named, and never a silent prefix.
+        if features.len() < layout.walk_width() {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "the bake declares feature ids this feature vector does not reach",
+            });
+        }
+        layout.gather(features, &mut gathered);
+        &gathered
+    };
+
     // Min-max monotone head (Sill 1998): the score REPLACES the layer forward,
     // so bypass the Predictor entirely — read the bake's scaler + feature
     // transforms directly, apply transform→scale→clamp±8→min-max, then the
@@ -4737,7 +4776,7 @@ fn forward_one_bake_with_codec(
         // only aligns for a 1:1 transform pipeline. A variable-arity bake
         // (expander, or pruned with `drop`) breaks the alignment AND panics
         // in the scalar `apply_with_params`; refuse instead.
-        if mm.n != n || features.len() != n || model.caller_input_width() != n {
+        if mm.n != n || feats.len() != n || model.caller_input_width() != n {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "min-max head n does not match bake n_inputs / feature length",
             });
@@ -4749,7 +4788,7 @@ fn forward_one_bake_with_codec(
         let mut x_std = vec![0.0f64; n];
         for (i, slot) in x_std.iter_mut().enumerate() {
             // transform in f32 (matches the trainer's `apply_with_params(x as f32)`)
-            let raw = features[i] as f32;
+            let raw = feats[i] as f32;
             let t = match (transforms, params) {
                 (Some(tf), Some(p)) => tf[i].apply_with_params(raw, &p[i]),
                 (Some(tf), None) => tf[i].apply_with_params(raw, &[]),
@@ -4784,40 +4823,7 @@ fn forward_one_bake_with_codec(
         )
     };
     let mut f32_features: Vec<f32> = Vec::new();
-    // LAYOUT. A bake declaring a DENSE feature set reads its ids at packed
-    // positions, so the caller's identity-laid-out vector must be GATHERED
-    // rather than sliced. `declared_layout` returns the identity layout for
-    // every bake that exists today — no id, an unreproducible id, or (the
-    // normal case) a `zentrain.feature_set_id` whose slot count differs from
-    // the declared width all resolve to identity — so this branch is not
-    // taken by any shipped or board bake, and `prep_bake_input_f32` sees
-    // exactly what it saw before. Gated by
-    // `feature_layout::tests::every_shipped_bake_resolves_to_an_identity_layout`
-    // and, end to end, by `dense_layout_round_trip`.
-    #[cfg(feature = "feature-regime-v2")]
-    {
-        let layout = crate::feature_layout::declared_layout(&model);
-        if !layout.is_identity() {
-            // **The row must REACH every declared id, or this is a refusal.**
-            // `Layout::gather` writes the structural `0.0` for an id the walk
-            // did not reach, which is correct for a DECLARED GAP and wrong for
-            // a caller who simply handed over a short vector: every id a dense
-            // bake declares is an id it reads, so filling one is exactly the
-            // "a consumer cannot tell this zero from a measured zero" failure
-            // the dense contract exists to end. Loud, named, and never a
-            // silent prefix.
-            if features.len() < layout.walk_width() {
-                return Err(ZensimError::ModelForwardFailed {
-                    reason: "the bake declares feature ids this feature vector does not reach",
-                });
-            }
-            let mut gathered: Vec<f64> = Vec::new();
-            layout.gather(features, &mut gathered);
-            prep_bake_input_f32(&gathered, n_inputs, width, height, &mut f32_features)?;
-            return dispatch(&mut predictor, &f32_features);
-        }
-    }
-    prep_bake_input_f32(features, n_inputs, width, height, &mut f32_features)?;
+    prep_bake_input_f32(feats, n_inputs, width, height, &mut f32_features)?;
     dispatch(&mut predictor, &f32_features)
 }
 

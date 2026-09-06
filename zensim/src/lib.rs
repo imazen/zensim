@@ -347,8 +347,38 @@ pub(crate) mod feature_v2_stream;
 // landed this as a bare `layout_width` and recorded WHY (every registered
 // layout was the identity mapping, so a full map had no consumer that could
 // distinguish it from the width). `Layout::dense` is that consumer.
-#[cfg(feature = "feature-regime-v2")]
+//
+// **UNGATED since 2026-09-06, and that is a correctness fix, not tidiness.**
+// It was gated on `feature-regime-v2` while the bakes it serves are not: since
+// `cb2f412d` the shipped `A`, `B`, `BHdr` and `D` are DENSE, and a build
+// without that feature resolved their width disagreement POSITIONALLY —
+// `prep_bake_input_f32`'s prefix branch — which is a silently-wrong score, the
+// one outcome the dense contract forbids. MEASURED before the ungate, all 48
+// A/B/BHdr/D cells wrong (`benchmarks/dense_serving_ungate_2026-09-06.md` §2):
+// B — what `codec_target()` returns — 48.17 -> 13.49 on a blur; D 48.43 ->
+// -213.15, a sign flip; A 94.11 -> 86.44; BHdr 95.12 -> 81.52. This module
+// depends only on `feature_set_id` + `feature_defs` + `mlp::Model`, none of
+// which is v2-gated, and every shipped dense bake's highest declared id is
+// < 372 — a width the legacy v1 walk already emits — so serving a declaration
+// correctly costs a default build +3,540 B of `.rlib` (+0.05 %) and a
+// `--no-default-features` build +134,772 B (+4.29 %) — the latter because
+// ungating this makes `feature_defs`'s registry reachable where nothing had
+// referenced it. Same-parent A/B, `benchmarks/dense_serving_ungate_2026-09-06.md`.
 pub(crate) mod feature_layout;
+
+// **The SERVABILITY census** — the roster of shipped profiles and the gate
+// that every one of them serves a real pair. Always compiled, deliberately:
+// it lived inside the `feature-regime-v2`-gated `feature_plan` until
+// 2026-09-06, so the one instrument that asks "can this build serve what it
+// ships?" was blind in exactly the builds that could not. The plan-shaped
+// gates stay in `feature_plan`; only the profile-shaped ones moved.
+//
+// `allow(dead_code)` only in NON-test builds: every item here exists so the
+// gates share ONE roster instead of each keeping a `#[cfg]`-dependent copy
+// (the drift this module's own doc warns about). Scoped to `not(test)` so a
+// genuinely-unused item still shows up where it can be seen.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod serving;
 
 /// THE metadata key a bake declares its read set under — an ascending decimal
 /// feature-id list, one per line.
@@ -358,7 +388,6 @@ pub(crate) mod feature_layout;
 /// crate (`zensim-validate`'s `bake_dial_refit densify`) from the runtime that
 /// READS it (`feature_layout::declared_layout`). A second string literal in
 /// the writer is the duplication this repo's one-owner rule exists to prevent.
-#[cfg(feature = "feature-regime-v2")]
 #[doc(hidden)]
 pub use feature_layout::FEATURE_IDS_KEY as ZENTRAIN_FEATURE_IDS_KEY;
 
@@ -378,7 +407,6 @@ pub use feature_layout::FEATURE_IDS_KEY as ZENTRAIN_FEATURE_IDS_KEY;
 ///
 /// `None` means "copy positionally, exactly as before" — so a caller that
 /// threads this through changes no byte for any existing bake.
-#[cfg(feature = "feature-regime-v2")]
 #[doc(hidden)]
 pub fn declared_feature_ids(model: &crate::mlp::Model) -> Option<Vec<u16>> {
     let layout = feature_layout::declared_layout(model);

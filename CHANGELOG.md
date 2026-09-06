@@ -48,6 +48,86 @@ on the supported surface, and `#[doc(hidden)] feature_set_id::registered_layout_
 (the candidate clip-width list a layout-free id is reconstructed against; not the
 supported surface).
 
+### Fixed — the dense-id gather was feature-gated, so four shipped profiles were SILENTLY MIS-SCORED in every build without `feature-regime-v2` (2026-09-06)
+
+`cb2f412d` made the shipped `A`, `B`, `BHdr` and `D` bakes **dense** — each
+declares the feature ids it reads and its layer-0 width is that read set, not
+372. Serving one requires GATHERING those ids out of the walk's
+identity-laid-out vector. That gather, and the whole `feature_layout` module
+behind it, was `#[cfg(feature = "feature-regime-v2")]`. The feature is
+default-on, so `cargo add zensim` was fine; **any consumer setting
+`default-features = false` was not** — the width disagreement fell through to
+`prep_bake_input_f32`'s POSITIONAL PREFIX branch and produced a plausible,
+wrong number with no error. `e1324192` fixed the WASM symptom by adding the
+feature there; this fixes the cause.
+
+Two in-workspace crates were exposed, one of them published: **`zensim-regress`
+0.4.0** (`default-features = false`, `["classification", "custom-profiles"]`),
+whose documented usage is `Zensim::new(ZensimProfile::codec_target())` — i.e.
+`B`, which is dense — and the unpublished `zensim-experimental`. Cargo feature
+unification is the only reason the workspace's own suites stayed green.
+
+MEASURED (`zensim/examples/serving_matrix.rs`, 6 profiles × 4 geometries × 3
+distortions, default vs every default feature except `feature-regime-v2`, so
+the SIMD tier and rayon are held constant) — **all 48 A/B/BHdr/D cells were
+wrong**:
+
+| profile | min \|Δ\| | max \|Δ\| | worst cell | default | without the gather |
+|---|--:|--:|---|--:|--:|
+| `A` | 2.4921 | 7.6714 | 256×256 checker_lsb | 94.114457 | 86.443061 |
+| `B` (`codec_target()`) | 2.2580 | 34.6773 | 48×40 blur3 | 48.171502 | 13.494210 |
+| `BHdr` | 3.3364 | 13.5977 | 127×93 checker_lsb | 95.117667 | 81.519927 |
+| `D` | 4.5262 | **261.5804** | 576×96 blur3 | 48.431759 | **−213.148613** |
+| `C` / `CHdr` | — | — | — | — | `ModelForwardFailed` on all 12 |
+
+- **`feature_layout` is UNGATED**, as are `declared_feature_ids` and
+  `ZENTRAIN_FEATURE_IDS_KEY`; the two gather sites in `metric.rs` (the
+  single-forward path and the batched FD-gradient entry) lose their `#[cfg]`
+  forks, so there is one code path and no legacy path left to refuse from. It
+  costs nothing the module did not already cost: it depends only on
+  `feature_set_id` + `feature_defs` + `mlp::Model`, and every shipped dense
+  bake's highest declared id is < 372, which the legacy v1 walk already emits.
+  Same-parent A/B (a second workspace at `fc47b08e`, own target dir):
+  `--no-default-features` `.rlib` **+134,772 B (+4.29 %)** and rebuild
+  **+0.14 s (+5.4 %)**; default `.rlib` **+3,540 B (+0.05 %)**, rebuild
+  +0.04 s. The `--no-default-features` figure is larger than the module itself
+  because ungating it makes `feature_defs`'s registry reachable in a build where
+  nothing referenced it; `.rlib` includes metadata, so it upper-bounds shipped
+  code growth.
+- **`candidate-profiles` now requires `feature-regime-v2`.** `C` / `CHdr`
+  declare a 944-wide caller vector and only the v2 walk emits 944, so without
+  it the feature shipped two profiles the build could not serve at all. After
+  this, every profile a build can name it can serve — the census has **zero
+  refusals in every configuration**.
+- **The servability census moved to `zensim/src/serving.rs`, always compiled.**
+  It lived in the `feature-regime-v2`-gated `feature_plan`, so the one
+  instrument that asks "can this build serve what it ships?" was blind in
+  exactly the builds that were broken. The plan-shaped gates stay in
+  `feature_plan` and import the one roster from `serving`.
+- **`zensim/Cargo.toml`'s `include` allowlist was stale and the packaged crate
+  did not compile** — an independent instance of the same defect class.
+  MEASURED with `cargo package --list`: six `include_bytes!` targets were
+  absent (the four `*_byid_2026-09-06.bin` bakes plus `c_sdr_purity944` /
+  `c_hdr_l1t1944`), and of the seven weights packaged exactly one was
+  referenced. Corrected, and gated.
+
+Gates: `serving::tests::every_shipped_profile_scores_its_pinned_value` (two
+fixed 64×64 pairs per profile, pinned, running under **every** cargo feature
+permutation; tolerance `1e-2` — ~950× above the measured 1.048e−5 tier/threading
+noise and ~226× below the smallest real defect),
+`dense_bakes_resolve_to_a_dense_layout_and_the_gather_is_not_a_no_op` (with a
+negative control: the gathered vector must differ from the positional prefix),
+`every_shipped_profile_is_servable`, `every_included_bake_is_packaged`
+(`include_str!` on `Cargo.toml` + the sources, no filesystem), the new
+`scripts/serving_matrix.sh` cross-build diff (2 environments × 5-6 arms, with a
+vacuity guard so at least one arm is genuinely v2-free), and
+`zensim-wasm-tests`'s `large_image_noise_distortion_matches_the_pinned_score`.
+Record: [`benchmarks/dense_serving_ungate_2026-09-06.md`](benchmarks/dense_serving_ungate_2026-09-06.md).
+
+**No shipped score moves** — this makes non-default builds agree with the
+default build, never the other way round. Public-API delta on a default build:
+zero.
+
 ### Fixed — CI hygiene lane 2: i686 overflow/FMA divergence, four `-D warnings` sites masked behind them, and a WASM silent mis-score (2026-09-06)
 
 Eight independent standing-red CI causes across the `Feature permutations`,

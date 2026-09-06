@@ -17,6 +17,23 @@
 > 545 cases where the two differ; the case for the fix is determinism, not accuracy. **The SCORE was
 > the one thing it left exposed; F19 below closes it.**
 
+> **★★ THE DENSE GATHER WAS FEATURE-GATED — four shipped profiles silently mis-scored in every non-default build, 2026-09-06:**
+> [`dense_serving_ungate_2026-09-06.md`](dense_serving_ungate_2026-09-06.md). Since `cb2f412d` the
+> shipped `A`/`B`/`BHdr`/`D` bakes are DENSE, but the id gather that serves a dense declaration lived
+> behind `feature-regime-v2`. Default builds were fine; **`default-features = false` fell through to
+> the POSITIONAL PREFIX** and returned a plausible wrong number with no error. MEASURED, all 48
+> A/B/BHdr/D cells wrong: `B` (the `codec_target()` default) 48.17 → **13.49** on a blur, `D` 48.43 →
+> **−213.15**, `A` 94.11 → 86.44; `C`/`CHdr` refused outright on all 12. Instrument noise floor over
+> the same cells: **1.048e−5**. FIXED by UNGATING `feature_layout` (free — it needs only
+> `feature_set_id` + `feature_defs` + `mlp::Model`, and every shipped dense bake's highest id is
+> < 372: same-parent A/B `--no-default-features` `.rlib` +4.29 %, default +0.05 %) and by making `candidate-profiles`
+> require `feature-regime-v2`, so **every profile a build can name it can serve**. **No shipped score
+> moved** — every number in this repo came from a default build. Second instance of the same class,
+> same lane: `Cargo.toml`'s `include` allowlist was missing **six** `include_bytes!` targets, so the
+> PUBLISHED crate would not compile. **The lesson: a gate `#[cfg]`-gated on the same feature as the
+> code it protects is not a gate** — the servability census was itself behind `feature-regime-v2`.
+> Ledger `docs/DATASET_HISTORY.md` §3.55 (ROUND 106).
+
 > **★★ F19 — THE SCORE PATH TOO; OWNER + ERA LANDED, FLIP NOT TAKEN 2026-09-06:**
 > [`score_path_libc_determinism_2026-09-06.md`](score_path_libc_determinism_2026-09-06.md) — the
 > SCORE half of F18. Owner `zensim::det_math::PowForm` + `DetPow`, era **`scorepow`** on `Rev2`,

@@ -75,7 +75,7 @@ ruling but are **batched under `CHANGELOG.md` "QUEUED BREAKING CHANGES"** for
 |---|---|---|
 | **P-BYTE** | No shipped byte moves. | `zensim/tests/v1_golden_bytes.rs` (incl. the non-tight fixture) + `fold_engine_parity.rs` + `feature_invariants` + a full `to_bits()` dump over the 20-cell parity matrix (`zensim/tests/common/parity_cells.rs`), diffed before/after. |
 | **P-SCORE** | No shipped bake's prediction moves. | `bake_verdict --full-json` on a fixed bake + fixed root, before vs after: the diff is the **wall-time line only**. |
-| **P-SERVE** | Servability census stays at **zero refusals**. | `feature_plan::servability_census` (no filesystem) + `serve_custom_bake --census` (filesystem tier, `zensim/weights` + `--fulleval-dir`). A new refusal is a gate FAILURE, never a known limitation. |
+| **P-SERVE** | Servability census stays at **zero refusals**, **in every cargo feature set**. | `serving::tests::every_shipped_profile_is_servable` (no filesystem; **moved out of `feature_plan` on 2026-09-06** — it was gated on `feature-regime-v2`, so it was blind in exactly the builds that were broken, see below) + `serve_custom_bake --census` (filesystem tier, `zensim/weights` + `--fulleval-dir`) + `scripts/serving_matrix.sh` (the cross-BUILD diff). A new refusal is a gate FAILURE, never a known limitation. |
 | **P-TEST** | `cargo test --workspace` green; `just clippy` (`-D warnings`) green; `cargo fmt` clean. | |
 | **P-API** | Every public-API delta is **ENUMERATED here** and mirrored into `CHANGELOG.md` QUEUED BREAKING CHANGES **in the same commit**, with `cargo public-api` output attached. `cargo semver-checks` is RUN and its verdict recorded. | `just api-doc-check` regenerates `docs/public-api/*.txt`. |
 | **P-OWNER** | One owner per task. Any converter is an extension of the canonical tool, never a new script. | grep + a test asserting any wrapper agrees with the owner. |
@@ -106,6 +106,34 @@ skipping, `V1PoolsMode`/`V1FreeExtras`/`skip_unread_pools`, `from_block_profile`
 `wide_bake_v2_read`, `caller_input_width` positional arithmetic,
 `prep_bake_input_f32` widening. A concept found later that is not in the
 inventory is an inventory failure, recorded as such.
+
+### A-bis. FOUND BY A DOWNSTREAM LANE (2026-09-06): increment 2A's dense flip was correct on a DEFAULT build only
+
+Increment 2A proved "no shipped score moves" three ways, and every one of those
+proofs ran on a default-feature build. **`feature-regime-v2` is default-on but
+not unconditional**, and the gather that serves a dense declaration lived behind
+it — so `A`, `B`, `BHdr` and `D` were served the POSITIONAL PREFIX in every
+`default-features = false` build: `B` 48.17 → 13.49 on a blur, `D` 48.43 →
+−213.15, all 48 cells wrong, no error. Two in-workspace consumers were exposed,
+one of them published (`zensim-regress` 0.4.0).
+
+**Fixed by ungating `feature_layout`** (free: it needs only `feature_set_id` +
+`feature_defs` + `mlp::Model`, and every shipped dense bake's highest declared id
+is < 372, which the legacy v1 walk already emits — measured cost, same-parent
+A/B: `--no-default-features` `.rlib` +4.29 %, default +0.05 %) and by making
+`candidate-profiles` require `feature-regime-v2`, so every profile a build can
+name it can serve.
+
+**Two things this plan should carry forward.** (1) **P-SERVE and P-BYTE are
+per-FEATURE-SET obligations, not per-commit ones** — a proof that ran only under
+default features does not cover the contract. (2) **A gate `#[cfg]`-gated on the
+same feature as the code it protects is not a gate**; the same shape produced a
+second instance in the same lane, where `Cargo.toml`'s `include` allowlist (only
+exercised by `cargo package`) was missing six `include_bytes!` targets and the
+published crate would not have compiled.
+
+Record: [`../benchmarks/dense_serving_ungate_2026-09-06.md`](../benchmarks/dense_serving_ungate_2026-09-06.md);
+ledger `DATASET_HISTORY.md` §3.55.
 
 ### B. Bakes declare their ids — `bake_dial_refit densify`
 
