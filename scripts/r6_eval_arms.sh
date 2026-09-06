@@ -28,6 +28,7 @@ for arm in $ARMS; do
       nice -n19 ionice -c3 "$BV" --bake "$B" --corpora "$c" \
           --features-root "$ROOT/evalroot/$arm" \
           --per-pair-output "$ROOT/perpair/${arm}_${v}_${c}.tsv" \
+          --json "$ROOT/verdicts/${arm}_${v}_${c}.json" \
           --output "$ROOT/verdicts/${arm}_${v}_${c}.md" >/dev/null 2>>"$ROOT/verdicts/bv.err" \
         || echo "  FAILED ${arm}_${v}_${c}" >&2
     done

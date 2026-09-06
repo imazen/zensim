@@ -29,6 +29,9 @@ from pack_eval372_root import read_fresh_csv, sha256  # noqa: E402
 
 POSTC = "/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC"
 EXTRA_LEGS = ("safesyn", "anchor", "identity")
+# main@origin at the moment `zensim-validate` and
+# `extract_features_372col` were built for this wave.
+EXTRACTOR_BUILD_COMMIT = "ceb86c2dad6b856c1999392731635f14eba921f9"
 
 
 def main() -> int:
@@ -48,6 +51,11 @@ def main() -> int:
         print(f"{arm}/{leg:9s} rows={t.num_rows:7d} sha256 {sha256(dst)[:16]}…")
 
     env = dict(os.environ)
+    # The commit the EXTRACTOR BINARY was built at, not the packer's working
+    # copy: one binary produced every arm (that is the whole control), and the
+    # tree moves under it while the wave runs. pack_eval372_root.py honours
+    # ZEN_BUILD_COMMIT ahead of git/jj for exactly this case.
+    env.setdefault("ZEN_BUILD_COMMIT", EXTRACTOR_BUILD_COMMIT)
     env["EVAL372_NO_STORED"] = "1"
     env["EVAL372_SKIP"] = "pipal"
     env["EVAL372_MANIFEST_EXTRA"] = (

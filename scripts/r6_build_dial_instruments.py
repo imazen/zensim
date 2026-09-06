@@ -28,6 +28,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "can
 from pack_eval372_root import read_fresh_csv, sha256  # noqa: E402
 
 BASE_ARM = "ssim2"
+LADDER_GRID = ("/mnt/v/output/zensim/ladder-2026-09-05/instruments/"
+               "dial_grid_372col_ladder.parquet")
 NEGTAIL_N = 2000
 SEED = 20260905
 
@@ -49,10 +51,33 @@ def main() -> int:
 
     for arm in arms:
         t = os.path.join(root, "tables", arm)
+        # The dial grid's CELL IDENTITY (image_id / codec / q / codec_param /
+        # param_kind) is a property of the instrument, not of the arm, so it is
+        # carried over from the registered ladder grid verbatim and only the
+        # features are replaced. The join is POSITIONAL because the pairs TSV
+        # the extraction reads IS the grid's own row order — and it is GATED on
+        # ref_basename == image_id row for row, exactly the gate the ladder
+        # manifest records, so a re-ordered pairs list fails loudly instead of
+        # silently labelling every cell with the wrong codec.
         lad = read_fresh_csv(os.path.join(t, "ladder.csv"))
+        ref = pq.read_table(LADDER_GRID)
+        if lad.num_rows != ref.num_rows:
+            raise SystemExit(f"{arm}/ladder: {lad.num_rows} extracted rows vs "
+                             f"{ref.num_rows} in the registered grid")
+        want = ref.column("image_id").to_pylist()
+        got = [os.path.splitext(x)[0] for x in lad.column("ref_basename").to_pylist()]
+        bad = [i for i, (x, y) in enumerate(zip(got, want)) if x != y]
+        if bad:
+            raise SystemExit(f"{arm}/ladder: image_id mismatch on {len(bad)} rows "
+                             f"(first at {bad[0]}: {got[bad[0]]!r} vs {want[bad[0]]!r})")
+        cols = {n: ref.column(n) for n in ("image_id", "codec", "q",
+                                          "codec_param", "param_kind")}
+        for i in range(372):
+            cols[f"f{i}"] = lad.column(f"f{i}")
         p = os.path.join(out, f"{arm}_ladder.parquet")
-        pq.write_table(lad, p, compression="zstd")
-        print(f"{arm}/ladder    rows={lad.num_rows:6d} sha256 {sha256(p)[:16]}…")
+        pq.write_table(pa.table(cols), p, compression="zstd")
+        print(f"{arm}/ladder    rows={ref.num_rows:6d} sha256 {sha256(p)[:16]}… "
+              f"(cell identity from the registered grid, features from the arm)")
 
         ss = read_fresh_csv(os.path.join(t, "safesyn.csv")).take(pa.array(neg))
         cols = {n: ss.column(n) for n in ss.schema.names}
