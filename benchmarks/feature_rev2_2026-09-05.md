@@ -511,3 +511,41 @@ worth stating rather than leaving implicit:
   at the CB2 bar `g = 0.34687` is **0.0893343**. The measured max over every leg
   is 0.08930. The healthy-cell perturbation is pinned by where the pathology
   bar was drawn, not by the corpus.
+
+## 11.8 The rank cost is real, and it is INTRINSIC TO BOUNDING
+
+Point estimates, each arm's own bake scored on its own eval root (the whole-metric
+comparison §7.4 of the plan fixes), against the revision-1 arm's four bakes —
+which are R6's `ssim2` bakes, usable here because CB1 makes the tables
+byte-identical and CB6 makes the fit chain reproduce them:
+
+| variant | corpus | rev1 | `bexcess` | `satexcess` | Δ `bexcess` | Δ `satexcess` |
+|---|---|--:|--:|--:|--:|--:|
+| s156_lasso | CID22 | 0.84134 | 0.84602 | 0.84410 | **+0.00467** | **+0.00276** |
+| s156_lasso | KonJND | 0.58361 | 0.55886 | 0.55457 | **−0.02474** | **−0.02904** |
+| s156_lasso | AIC-3 | 0.79575 | 0.79818 | 0.79896 | +0.00243 | +0.00321 |
+| s228_lasso | CID22 | 0.83934 | 0.84509 | 0.84372 | **+0.00574** | **+0.00438** |
+| s228_lasso | KonJND | 0.54799 | 0.52851 | 0.53475 | **−0.01949** | **−0.01324** |
+| s228_lasso | AIC-3 | 0.78214 | 0.78525 | 0.78452 | +0.00311 | +0.00238 |
+| s156_bvls | CID22 | 0.83603 | 0.84159 | 0.84393 | **+0.00556** | **+0.00790** |
+| s156_bvls | KonJND | 0.59840 | 0.54948 | 0.51855 | **−0.04891** | **−0.07985** |
+| s156_bvls | AIC-3 | 0.79132 | 0.79080 | 0.79221 | −0.00052 | +0.00088 |
+| s228_bvls | CID22 | 0.83071 | 0.83596 | 0.83978 | **+0.00525** | **+0.00906** |
+| s228_bvls | KonJND | 0.58904 | 0.54701 | 0.52032 | **−0.04203** | **−0.06872** |
+| s228_bvls | AIC-3 | 0.78313 | 0.78337 | 0.78415 | +0.00024 | +0.00102 |
+
+**The fix is not free, and the trade has one sign everywhere: CID22 up, AIC-3 up,
+KonJND down — in all four variants, for BOTH bounded arms.** That is the load-
+bearing observation, and it is why the second arm is in the table at all:
+`bexcess` and `satexcess` are structurally different maps (one reads the
+magnitude, one is a pure function of the ratio; they disagree by up to 0.34 per
+cell) and they produce the same trade. **The KonJND regression is a property of
+BOUNDING `contrast_inc`, not of any one arm's shape** — the near-threshold
+corpus is using the unbounded magnitude, and no bounded form can return it.
+
+Registered as a follow-up rather than argued away: if that axis is worth
+recovering, the information a bound removes can be re-added as a **NEW append
+slot** under the append-only numbering discipline (`log1p(g)` at `f944+`, say),
+which is a feature ADDITION with its own gates — not a reason to keep an
+unbounded slot in the shipped set. Nothing here proposes it; it is named so the
+next lane does not have to rediscover the trade first.
