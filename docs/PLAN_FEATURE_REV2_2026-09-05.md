@@ -854,3 +854,142 @@ CSIQ by **+0.04862** — but breaks contract C6 (1 of 9,593 cells out-scores a
 perfect copy), exactly the stale-spline defect §12.2 predicted from the owner's
 source. A serve-time guard with a REFIT spline is registered as a follow-up, not
 run.
+
+---
+
+### 12.7 REV2-D-GUARD — the serve-time guard with a REFIT spline. PRE-REGISTERED 2026-09-06, pushed before the first bake
+
+**Lane:** REV2-D-GUARD. **Record:**
+[`../benchmarks/rev2_d_arms_2026-09-06.md`](../benchmarks/rev2_d_arms_2026-09-06.md)
+§11 addendum. **Artefacts:** `/mnt/v/output/zensim/rev2-d-arms-2026-09-06/guard/`.
+
+**The registered follow-up this executes** is §12.6's last sentence and record
+§10.2's last bullet: *"a serve-time guard whose spline is REFIT would keep the
+gain without the C6 break — registered here, not run."*
+
+#### 12.7.0 The question
+
+`W-all-carried` — revision-1 WEIGHTS, all 372 slots clamped at serve time,
+spline CARRIED — is the only model in §12.6 that ties revision 1 on CID22
+(−0.00002, CI includes 0) and it WINS CSIQ by **+0.04862**, the largest single
+rank gain in that study. It breaks contract **C6** (1 of 9,593 grid cells
+out-scores a perfect copy) and the `avif-svt` floor, and the cause was read
+from `cmd_add_winsor`'s source before it was run: the tool writes the transform
+tokens and then carries *"everything the raw bake had (incl. its spline)
+verbatim"*, so the output calibration was fitted on the **un**-clamped net.
+
+`W-f17` — twelve slots, clamp INSIDE the fit — is the only non-revision-1 model
+with A7r 0 fails AND contract 6/6 AND the best LIVE-outlier ordering
+(+0.94348), but it REFITS the weights on the clamped gram, lands a different
+sparse support, and costs CID22 −0.00348.
+
+**Neither arm is the combination the follow-up names.** This lane runs it:
+**revision-1 weights, unchanged; the guard applied at serve time; the spline
+refit on the guarded net.** If the C6 break is the carried spline and nothing
+else, the refit removes it while keeping `W-all-carried`'s tie-and-CSIQ-win —
+and the scope finding says the twelve-slot scope should also keep the outlier
+ordering that `W-all` destroys.
+
+#### 12.7.1 Decision rule — fixed before any number exists
+
+An arm is a **SHIP CANDIDATE** iff ALL FOUR hold:
+
+1. **G-ADDR contract 6/6.**
+2. **`A7r` per-codec `repr` ≥ the revision-1 in-era arm's on EVERY one of the
+   five codecs** (`avif-rav1e` 0.6667, `avif-svt` 1.0000, `jpeg` 0.7179, `jxl`
+   1.0000, `webp` 1.0000 at a156 — the same bar §12.1 step 1 used).
+3. **Paired-bootstrap CID22 delta vs revision 1 not worse than zero** — CI
+   including 0, or excluding 0 on the positive side.
+4. **Two-reference inversions PASS** (G3, rate ≤ 0.07).
+
+A ship candidate goes to the USER beside the era-break options; it is **not
+installed by this lane**. If no arm qualifies, the best arm and the axis it
+misses on are reported, and nothing moves. `SHIPPED_REVISION` stays `Rev1`,
+`ZensimProfile::D`, `zensim/weights/` and the feature-set / G-ADDR-floor
+registries are untouched either way.
+
+#### 12.7.2 The chain — one thing varied
+
+Base bakes are §12.6's own `D_ratio_s{156,228}_raw.bin`: 372-wide, **no
+transform block**, revision-1 features, revision-1 weights, and the fit-lasso
+spline over `ratio/anchor.parquet` (2,000 rows, `human_score` ∈ [−64.22,
+98.08], 70 negative — the negrich anchor) + `identity_anchor_ratio_n21.parquet`
+(21 rows at exactly 100.0 — the id100 anchor).
+
+```
+add-winsor    --in D_ratio_s<S>_raw.bin --slots <spec> --lo-pct 0.1 --hi-pct <Q>
+              --fit-corpus <r6b>/tables/ratio/safesyn.parquet     [OWNER EXTENSION]
+shared-anchor --anchor <r6b>/tables/ratio/anchor.parquet
+              --anchor identity_anchor_ratio_n21.parquet
+              --target-col human_score                            [OWNER EXTENSION]
+extend-top    --anchor <r6b>/tables/ratio/anchor.parquet --target-col human_score
+densify       --gate-rows 512
+```
+
+**The carry defect is avoided by ORDERING, not by patching `add-winsor`:**
+`shared-anchor` forwards the anchor through `build_fw_ops(&model)`, i.e. through
+the bake's declared transforms, so a refit that runs AFTER the guard is fitted
+on exactly what the runtime sees. Two owner extensions are required and are the
+only code this lane changes:
+
+* **`add-winsor --slots`** — restrict which feature indices receive
+  `winsor_p99`; every other slot emits the `identity` token with empty params,
+  the same convention `fit-lasso --transforms-tsv` already emits. Omitting the
+  flag must be **byte-identical** to today (gated).
+* **`shared-anchor --anchor` becomes REPEATABLE** — anchors concatenated in
+  argv order, mirroring `fit-lasso --anchor-parquet`. A single `--anchor` must
+  be **byte-identical** to today (gated).
+
+**Held constant:** the base weights, the two anchors, `--lo-pct 0.1`, the spline
+fitter and its 18 percentile edges, `extend-top`'s band, `densify`'s gate size,
+the eval corpora and era root (revision 1 — these models ARE revision 1), the
+dial instruments, the floor rule, the tail pins, and the bootstrap's seed
+(20260905) and index sets. **Varied:** the guard's SCOPE and its upper
+percentile.
+
+#### 12.7.3 Arms — 5 × 2 slices = 10 bakes
+
+| arm | guard scope | hi-pct | answers |
+|---|---|--:|---|
+| **`R-refit`** | none | — | **CONTROL.** Isolates the refit path itself: same weights, same anchors, no guard. Every guarded arm is read against THIS as well as against published `ratio`. |
+| **`W-f17-refit-p999`** | the twelve F17 slots | 99.9 | brief (a) — the registered follow-up at the published window |
+| `W-f17-refit-p99` | the twelve F17 slots | 99 | brief (b) |
+| `W-f17-refit-p95` | the twelve F17 slots | 95 | brief (b) — does a tighter window fix the LIVE outliers' ordering without moving healthy rows? |
+| `W-f17cell-refit-p999` | the twelve F17 slots **+ the two D-read cells entire** (f104–f116, f143–f155): 36 slots | 99.9 | brief (c), see below |
+
+**Brief (c), resolved against the owner before it was run.** The exposure table
+is `feature_defs::DEFECT_F17`'s note, which states that Profile D *"has no
+transform block at all and reads f116 (max 1,380) and f155 (max 2,127) raw"*.
+The basic block is 13 signals per `(scale, channel)` cell at `13·cell + k`
+(`def_at`: `scale = cell/3`, `channel = TRIPLE[cell%3]`), so f116 is cell 8 =
+(scale 2, channel 2) and f155 is cell 11 = (scale 3, channel 2). Their
+**immediate scale siblings are f77, f116 and f155 — every one of which is
+already inside the twelve-slot F17 set**, so (c) as literally written degenerates
+to (a). The nearest non-degenerate owner-grounded reading is run instead: the
+twelve F17 slots plus the **full 13-signal basic cells** of the two exposed
+slots, which adds `mse`, `var_loss`, `tex_loss` and the nine ssim/edge signals
+at exactly the two (scale, channel) cells the SDR default reads raw. It also
+fills in §12.6's scope curve between `W-f17` (12 slots) and `W-all` (372).
+
+#### 12.7.4 Grading — identical to §12.6
+
+Paired-bootstrap rank (B = 2,000, seed 20260905, same index sets both sides) on
+CID22, KonJND, AIC-3, TID, KADID, CSIQ, LIVE; G-ADDR contract 6/6 and A7r
+resolvable per-codec floors; two-reference inversions; identity; the LIVE
+outlier-row ordering on the SAME 60-row subset cut once at revision 1; and one
+new axis the brief requires:
+
+* **HEALTHY-CELL PERTURBATION** — how many of the 196,086 × 12 (or × 36)
+  training-leg cells the guard actually clamps, per arm, with the fraction of
+  ROWS touched. A guard is only cheap if it moves the tail and nothing else;
+  this is the number that says so, and it is what separates the three
+  percentiles.
+
+#### 12.7.5 What this lane does NOT do
+
+No re-extraction, no era break, no feature-definition change, no perf claim, no
+install. `W-f17-refit` reads on the revision-1 era root because its features ARE
+revision 1. Confounds inherited unchanged from §12.4 (the CID22 `image`-crate
+decoder, the 504-row KonJND ruler, KADID/TID train==val on this lineage).
+The single-fit CI caveat of §12.6 applies identically: these are deterministic
+convex solves with no seed, so the CIs mean what they say.
