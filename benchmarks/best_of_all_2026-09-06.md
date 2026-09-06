@@ -722,7 +722,53 @@ Three readings the pooled panel does not give:
    against shipped D's **0.8306**. A large move in the right direction on the
    axis this metric is weakest, that does not close the gap to the incumbent.
 
-*(RESULTS — arms E/F pending.)*
+### 5.11 `E_plainlad` — the attribution control, and it separates the two mechanisms cleanly
+
+This arm is the ladder hinge with **no architecture change**. The plan added it
+with the budget freed by dropping rev2, on the grounds that without it a win by
+`nonneg + ladder` could not be attributed. It earns its place:
+
+| arm | contract | C5 outside | C6 | `mono` (k=3) | spread | A7r | CID22 | spread |
+|---|:--:|--:|--:|--:|--:|--:|--:|--:|
+| `A_plain` | 4/6 | 38 | 1491 | 0.94602 | 0.00436 | 5.0 | 0.8891 | 0.0042 |
+| `B_nonneg` | **6/6** | **0** | **0** | 0.93245 | 0.00606 | 5.0 | 0.8800 | 0.0049 |
+| `C_lad05` | **6/6** | **0** | **0** | 0.94159 | 0.00096 | 5.0 | 0.8796 | 0.0074 |
+| `D_lad20` | **6/6** | **0** | **0** | 0.94648 | 0.00861 | 5.0 | 0.8787 | 0.0049 |
+| `E_plainlad` | 4/6 | 38 | 513 | **0.95201** | 0.00383 | **4.7** | **0.8855** | **0.0024** |
+
+**The two mechanisms are separable, and they interfere.**
+
+- **C5 and C6 come from the ARCHITECTURE, and only from it.** The ladder alone
+  leaves identity 38/38 outside the band and **513** cells above identity. It
+  moves C6 (1,491 → 513, a 66 % reduction) but does not close it, and it does not
+  touch C5 at all. No amount of ladder supervision substitutes for the
+  constraint.
+- **Monotonicity and the floors come from the LADDER, and it works BETTER
+  without the architecture.** `E_plainlad` posts the wave's best `mono`
+  (**0.95201**, above the control's 0.94602 and above every constrained arm) and
+  its best jpeg floor (0.5812 vs the control's 0.5470).
+- **The architecture COSTS what the ladder buys.** That is why
+  `nonneg + ladder` lands at 0.94159/0.94648 rather than at 0.95201 — the hinge
+  spends most of its effect repaying the constraint instead of improving on the
+  control.
+- **The ladder alone is the cheapest arm on rank** — CID22 0.8855 (−0.0036 vs
+  control) with the **tightest seed spread in the wave** (0.0024 against the
+  control's 0.0042).
+
+**The one A7r movement in the entire wave is not a result.** `E_plainlad` reads
+A7r 4.7 because **webp hit exactly 1.0000 against its 1.0000 bar on one seed of
+three** (`s4005`); the other two seeds read 0.9744 and 0.9231. A single-seed
+boundary touch on the easiest codec is a boundary touch, not a mechanism. The
+best any arm gets on the hard codecs is `rav1e 0.2564` against a 0.6410 bar and
+`jxl 0.4231` against 0.9615.
+
+**Conclusion on A7r, now with an attribution behind it: none of architecture,
+ladder supervision, hinge weight, or their combination moves it.** That is
+consistent with the fastclass2 campaign's own finding that 35 recipe-axis cells
+cleared it zero times, and it extends that null to two mechanisms the campaign
+did not test.
+
+*(RESULTS — arm F pending.)*
 
 ---
 
