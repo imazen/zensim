@@ -464,6 +464,39 @@ What a rev2 fleet wave needs from R6, in the form it needs it:
   resolves through it. A worker selects it with `ZENSIM_FORMULA_REV=2`; the
   per-arm override `ZENSIM_SSIM_LUMA` is a MEASUREMENT knob and must not appear
   in a production wave's environment.
+* **⊕ ADDENDUM 2026-09-06 (R6b): revision 2 carries a THIRD era, `v1hfgain`,
+  and a wave that declares only `v1ssimcap` + `freecomp` under-declares it.**
+  F17 (`contrast_inc` = `max(0, var_dst/var_src − 1)`, unbounded) is registered
+  and its arm is decided in
+  [`feature_rev2_2026-09-05.md`](feature_rev2_2026-09-05.md) §11. What the fleet
+  needs from it, in the form it needs it:
+
+  | | slots moved at 372 | at pools-live 944 | at zeroed `ext944`/`ext924` |
+  |---|--:|--:|--:|
+  | `v1ssimcap` (F4) | 132 | 132 | 36 |
+  | **`v1hfgain` (F17)** | **12** | **12** | **12** |
+  | combined, v1 side | **144** | **144** | **48** |
+
+  F17's twelve are `f12 f25 f38 f51 f64 f77 f90 f103 f116 f129 f142 f155` —
+  `basic` block-local 12 at every (scale, channel). **Unlike F4, the count does
+  not vary with pool state**, MEASURED at all four walk shapes
+  (`scripts/r6b_width_probe.sh`), because `contrast_inc` is a basic slot and
+  every layout keeps the basic block. `freecomp` (F5) is unchanged and still
+  reachable only at a width with an append block.
+
+  Same arm token discipline: the arm is named ONCE at
+  `zensim::hf_gain_form::HfGainForm::REV2_HFGAIN`, a worker selects it with
+  `ZENSIM_FORMULA_REV=2` alongside F4 and F5 (one era boundary, one
+  recalculation), and the per-arm override `ZENSIM_HF_GAIN` is a MEASUREMENT
+  knob that must not appear in a production wave's environment.
+
+  **The re-verdict list grows by the same two profiles the exposure table
+  misses.** Unlike F4, F17 fires on every corpus this box has pixels for, so
+  every bake reading one of the twelve moves: **D** (the SDR default, 2 slots,
+  NO transform block) and **CHdr** (12 slots, all `identity`) are unguarded;
+  A and B are winsor-guarded on their F17 slots; C has 10 of 12 guarded; BHdr 4
+  of 6. Per-bake table: §11.3 of the rev2 record.
+
 * **Blast radius keys on the FEATURE-SET ID, not the width** (§2). At 372 and at
   a pools-live 944 (`foldapp2pools`) F4 moves **132** slots; at the campaign's
   zeroed `ext944` / `ext924` roots it moves **36**. A wave that declares "944 ⇒
