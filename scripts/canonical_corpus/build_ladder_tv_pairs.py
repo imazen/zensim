@@ -82,6 +82,27 @@ def main():
                     help="pairs whose higher member sits at or below this q go to band 0")
     ap.add_argument("--index-offset", type=int, default=0,
                     help="added to every emitted index; use when this group is not --group 0")
+    ap.add_argument("--anchor-parquet", default=None,
+                    help="a SECOND ladder source carrying image_id/codec/codec_param, appended "
+                         "to the same TSV at --anchor-offset. Its ladders reach the encoders' "
+                         "TRUE lowest settings, which the primary corpus does not.")
+    ap.add_argument("--anchor-offset", type=int, default=0,
+                    help="global row index of the anchor group's first row (= the summed row "
+                         "counts of every --group that precedes it)")
+    ap.add_argument("--anchor-bottom-k", type=int, default=3,
+                    help="pairs touching the K lowest settings of an anchor ladder go to "
+                         "BAND 3 — the same window --floor-rule resolvable reads. Band 3 is "
+                         "its own band ON PURPOSE: sharing band 0 with the primary corpus' "
+                         "~80k low-q pairs would dilute the floor signal ~300:1 and make "
+                         "--tv-band-weights unable to address it.")
+    ap.add_argument("--anchor-repeat", type=int, default=1,
+                    help="replicate every anchor pair N times in the pool. The sampler draws "
+                         "UNIFORMLY from the pair list, so a band weight alone cannot fix a "
+                         "1.9%%-of-pool presence — it scales the gradient of a draw that "
+                         "almost never happens.")
+    ap.add_argument("--anchor-bottom-repeat", type=int, default=1,
+                    help="ADDITIONAL replication for the bottom-window pairs, on top of "
+                         "--anchor-repeat")
     args = ap.parse_args()
 
     tbl = pq.read_table(args.parquet, columns=["ref_basename", "human_score"])
@@ -158,12 +179,49 @@ def main():
             band = 0 if q_hi <= args.low_q else (1 if q_hi < 85.0 else 2)
             pairs.append((lo + args.index_offset, hi + args.index_offset, band))
 
+    # ── the ANCHOR ladders ────────────────────────────────────────────────
+    # Their point is the BOTTOM: `--floor-rule resolvable` grades the three
+    # lowest mentor-resolvable settings of each ladder, and the primary corpus
+    # has no cells there at all (its q grid starts at 5 and steps by 5). Pairs
+    # inside that window go to band 0 so `--tv-band-weights` can up-weight
+    # exactly the ordering A7r reads.
+    n_anchor = 0
+    anchor_bottom = 0
+    if args.anchor_parquet:
+        at = pq.read_table(args.anchor_parquet,
+                           columns=["image_id", "codec", "codec_param", "ssim2_gpu"])
+        aid = [str(x) for x in at.column("image_id").to_pylist()]
+        acod = at.column("codec").to_pylist()
+        aparam = at.column("codec_param").to_pylist()
+        assim = at.column("ssim2_gpu").to_pylist()
+        alad = defaultdict(list)
+        for i in range(at.num_rows):
+            alad[(aid[i], acod[i])].append(i)
+        for _key, idxs in alad.items():
+            idxs.sort(key=lambda i: float(aparam[i]))
+            if len(idxs) < 2:
+                continue
+            bottom = set(idxs[: args.anchor_bottom_k])
+            for a, b in zip(idxs, idxs[1:]):
+                d = assim[b] - assim[a]
+                if abs(d) < args.margin:
+                    continue
+                lo, hi = (a, b) if d > 0 else (b, a)
+                is_bottom = a in bottom or b in bottom
+                band = 3 if is_bottom else 1
+                reps = args.anchor_repeat * (args.anchor_bottom_repeat if is_bottom else 1)
+                for _ in range(reps):
+                    pairs.append((lo + args.anchor_offset, hi + args.anchor_offset, band))
+                n_anchor += reps
+                if is_bottom:
+                    anchor_bottom += reps
+
     with open(args.out, "w") as f:
         f.write("lo_idx\thi_idx\tband_id\n")
         for lo, hi, band in pairs:
             f.write(f"{lo}\t{hi}\t{band}\n")
 
-    band_counts = [0, 0, 0]
+    band_counts = [0, 0, 0, 0]
     for _, _, b in pairs:
         band_counts[b] += 1
 
@@ -195,6 +253,15 @@ def main():
                       "the gate's rule needs pnorm3 (margin 0.05) or max (0.25)",
             "rows_with_a_value": n_ba,
         },
+        "anchor": {
+            "parquet": args.anchor_parquet,
+            "offset": args.anchor_offset,
+            "bottom_k": args.anchor_bottom_k,
+            "pairs_emitted": n_anchor,
+            "of_which_bottom_window_band0": anchor_bottom,
+            "note": "the anchor ladders reach the encoders' TRUE lowest settings; the primary "
+                    "corpus does not, which is the DATA gap this arm tests",
+        } if args.anchor_parquet else None,
         "counts": {
             "ladders": n_ladders,
             "ladders_too_short_after_dedup": n_short,
@@ -204,6 +271,7 @@ def main():
             "band_0_low_q": band_counts[0],
             "band_1_mid_q": band_counts[1],
             "band_2_high_q": band_counts[2],
+            "band_3_anchor_floor_window": band_counts[3],
         },
         "out": {"path": args.out, "sha256": None},
     }

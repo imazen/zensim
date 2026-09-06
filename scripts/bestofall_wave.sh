@@ -32,6 +32,8 @@ PROBES=/mnt/v/output/zensim/dpeaks372-2026-09-05/instruments
 IDANCHOR=/mnt/v/output/zensim/did100-2026-09-04/work/identity_anchor_sg_n21.parquet
 ANCHOR=$INSTR/negrich_plus_identity21_anchor.parquet
 TVPAIRS=$INSTR/ladder_tv_pairs_safesyn.tsv
+TVANCHORED=$INSTR/ladder_tv_pairs_anchored.tsv
+ANCHORGRP=$INSTR/ladder_anchor_train_norm.parquet
 COMMON=/mnt/v/output/zensim/rev2-refit-2026-09-06/fastclass/common_args.txt
 SLICE="$WS/scripts/sota944/slice_basic156_peaks.txt"
 
@@ -68,6 +70,14 @@ groups() {
     --group "konjnd:$CANON/konjnd-dense-norm.parquet:1.2:0.0:both"
 }
 
+# The anchor arms add ONE group, appended LAST. Its TV offset (455151) is the
+# summed row count of the six above, so appending anywhere else would silently
+# shift the whole anchor half of the pairs file.
+groups_anchored() {
+  groups
+  printf '%s\n' --group "ladderanchor:$ANCHORGRP:0.6:0.0:rank"
+}
+
 # Everything after the groups, from the frozen common-args file, with the dead
 # sibling-worktree `--keep-features` path repointed at this checkout's copy
 # (same file, same bytes — verified by sha in the record).
@@ -93,6 +103,18 @@ arm_extra() {
     E_plainlad) printf '%s\n' --tv-pairs-file "$TVPAIRS" --tv-weight 0.5 \
                               --tv-margin 0.25 --tv-apply-every 50 --tv-batch 16 \
                               --tv-band-weights 1.5,0.5,0.5,0.5 ;;
+    # G/H — the ANCHOR-LADDER arms (plan §9). Same hinge weight as D_lad20, plus
+    # the anchor group's floor-reaching ladders. Band 3 IS the floor window and
+    # carries 4x band 0's weight; the anchor pairs are replicated in the pool
+    # because the sampler draws uniformly and a band weight cannot rescue a draw
+    # that almost never happens.
+    G_anchorlad) printf '%s\n' --tv-pairs-file "$TVANCHORED" --tv-weight 2.0 \
+                              --tv-margin 0.25 --tv-apply-every 50 --tv-batch 16 \
+                              --tv-band-weights 2.0,0.7,0.7,8.0 ;;
+    H_anchorlad) printf '%s\n' --nonneg-distance \
+                              --tv-pairs-file "$TVANCHORED" --tv-weight 2.0 \
+                              --tv-margin 0.25 --tv-apply-every 50 --tv-batch 16 \
+                              --tv-band-weights 2.0,0.7,0.7,8.0 ;;
     *) echo "unknown arm $1" >&2; exit 2 ;;
   esac
 }
@@ -107,7 +129,10 @@ cell() {
 
   say "TRAIN $name"
   local -a argv=()
-  mapfile -t -O "${#argv[@]}" argv < <(groups)
+  case "$arm" in
+    G_anchorlad|H_anchorlad) mapfile -t -O "${#argv[@]}" argv < <(groups_anchored) ;;
+    *)                       mapfile -t -O "${#argv[@]}" argv < <(groups) ;;
+  esac
   mapfile -t -O "${#argv[@]}" argv < <(common)
   mapfile -t -O "${#argv[@]}" argv < <(arm_extra "$arm")
   argv+=(--seed "$seed" --out "$raw")
@@ -196,7 +221,7 @@ case "${1:-all}" in
   all)
     rm -f "$OUT/WAVE.done"
     say "WAVE START"
-    for arm in A_plain B_nonneg C_lad05 D_lad20 E_plainlad F_nonneg32; do
+    for arm in ${ZL_ARMS:-A_plain B_nonneg C_lad05 D_lad20 E_plainlad F_nonneg32}; do
       for seed in 4004 4005 4006; do
         cell "$arm" "$seed" || say "CELL FAILED $arm $seed (continuing)"
       done
