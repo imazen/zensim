@@ -2,6 +2,50 @@
 
 ## [Unreleased]
 
+### Measured — R6: F4's pathology does not occur in any corpus this box has pixels for (2026-09-05)
+
+- **Pre-registered first** (`docs/PLAN_FEATURE_REV2_2026-09-05.md` §7, pushed at
+  `090d55d7` before a single table was extracted): 4 arms x 8 legs x 3 slices x
+  2 solvers, five gates, and a decision rule that lands the arithmetic fix even
+  if no arm wins on rank.
+- **C1 pipeline control PASSES on all seven corpora.** With
+  `ZENSIM_SSIM_LUMA=ssim2` (the shipped revision-1 form) the extraction is
+  `cmp`-clean against the registered postC 372 root's own source CSVs — so the
+  arms are comparable, and the rev2 lane's R1 byte-identity claim reproduces
+  end to end on real corpora at a later commit, not merely on the 22,397-row
+  invariant dump. Independently corroborated by the fleet lane through a third
+  decoder/entry-point combination (`docs/DATASET_HISTORY.md` §3.43).
+- **C2: the `clamp` arm is a DETECTOR, and it fires on nothing.** `clamp` is
+  bit-identical to the shipped form wherever `D^2 <= 1`, so a row it moves holds
+  a pathological pixel. Across **217,756 rows** — the seven human corpora plus
+  the full 196,086-row safesyn training leg — it moves **0 cells**, and nothing
+  anywhere reaches `|f| > 2` against the **5,814,302** on record. That number is
+  a property of `bigcodec_hqdedup_traindigits_2026-07-02.parquet`, which has no
+  local pixels. G3 is therefore established at the owner by test
+  (`ssim_form::tests::only_the_legacy_arm_is_unbounded`,
+  `bounded_arms_keep_d_in_zero_to_two_everywhere`), not by observation here.
+- **The registry's 132-slot blast radius is confirmed on real corpora**, family
+  for family (basic 36 / peaks 24 / masked 36 / IW 36), by an instrument that
+  never reads the registry — including the every-third-slot peaks comb.
+- **⛔ CORRECTION to this lane's own pre-registration.** §7.2 asserted that the
+  folded 944 regimes zero `f156..371`, so a 944 read would see only F4's basic
+  36. MEASURED: it depends on the FEATURE SET, not the width — `ext944` and
+  `ext924` are 0 nonzero there, but the 2026-09-05 pools-live ladder grid
+  (`foldapp2pools`) is **98.7 %** nonzero, so F4 reaches all 132 slots on it. A
+  rev2 wave must key each table's blast radius on its `feature_set_id`.
+- Record: `benchmarks/f4_arm_decision_2026-09-05.md`. Instruments:
+  `scripts/r6_{extract_arms.sh,pack_arm.py,fit_arms.sh,eval_arms.sh,dial_arms.sh,build_dial_instruments.py,arm_delta.py,decide.py,safesyn_subset.py}`.
+
+### Added — `pack_eval372_root.py` can build a root with NO stored copies (2026-09-05)
+
+- `EVAL372_NO_STORED` / `EVAL372_SKIP` / `EVAL372_MANIFEST_EXTRA`. Copying a
+  stored table is right for a root that changes only the EXTRACTOR era; it is
+  wrong for one that changes the FORMULA, because the copy is then a different
+  arithmetic revision sitting inside a directory that claims to be one arm. An
+  absent corpus is recorded as ABSENT with a reason and `bake_verdict` reports
+  it as missing — which is honest and costs nothing when the corpus is outside
+  the decision set.
+
 ### Fixed — `--coarse-decay` was a silent no-op on the per-sample-α head (2026-09-05)
 
 - `--coarse-decay` / `--coarse-l2-mult` are applied by
