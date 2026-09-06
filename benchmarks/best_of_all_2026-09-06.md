@@ -654,7 +654,28 @@ tie; CSIQ **+0.05704 WIN**. TID (+0.108) and KADID (+0.123) are **train==val for
 this recipe** — both are training groups — so those are memorization guards, not
 skill, and must not be read as wins.
 
-*(RESULTS — arms D/E/F pending.)*
+### 5.9 The hinge weight is a variance/mean trade, and neither end reaches A7r
+
+| arm | `mono` (k=3) | spread | rav1e | svt | jpeg | jxl | webp | CID22 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| mentor bar | — | — | 0.6410 | 1.0000 | 0.6667 | 0.9615 | 1.0000 | — |
+| `A_plain` | 0.94602 | 0.00436 | 0.1538 | 0.7778 | 0.5470 | 0.4231 | 0.9658 | 0.8891 |
+| `B_nonneg` | 0.93245 | 0.00606 | 0.1880 | 0.6068 | 0.4017 | 0.3205 | 0.8034 | 0.8800 |
+| `C_lad05` (w = 0.5) | 0.94159 | **0.00096** | 0.1966 | 0.6923 | **0.4872** | 0.3974 | **0.8974** | 0.8796 |
+| `D_lad20` (w = 2.0) | **0.94648** | 0.00861 | **0.2222** | **0.7179** | 0.4615 | 0.3974 | 0.8632 | 0.8787 |
+
+**`w = 2.0` fully recovers the control's monotonicity** (0.94648 vs 0.94602) —
+the architecture's C1 cost is entirely repayable by the ladder hinge — **but at
+9× the seed spread** (0.00861 vs `w = 0.5`'s 0.00096). The two ends of the sweep
+buy different things: 0.5 buys **reproducibility** (and the best jpeg/webp
+floors), 2.0 buys **mean monotonicity** (and the best rav1e/svt floors). Neither
+is dominated, and **neither moves A7r off 5 of 5**.
+
+Both keep **contract 6/6 on every seed**, and the CID22 spread between them
+(0.8796 vs 0.8787) is inside its own seed spread — the hinge weight is not a rank
+lever in this range.
+
+*(RESULTS — arms E/F pending.)*
 
 ---
 
