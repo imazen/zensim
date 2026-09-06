@@ -988,6 +988,26 @@ repaid it.
 **larger, rav1e-inclusive anchor set**. This one is 32 references and 4 codecs;
 rav1e has none, and it is the codec furthest from its bar.
 
+### 5.19 The W4 run had to be thrown away once, and why the logs were deleted rather than caveated
+
+The W4 driver checks the load **once** at start and refuses a busy box. It passed
+that check during a dip **between M3a cells**, then began measuring at load
+**8.43** with the M3a pass running against it.
+
+`benchmarks/profile_d_notax_2026-09-01.md` §4 measured what that does: ONE
+concurrent niced build swung the stable `fast_ssim2` arm **128.9–633.6 ms inside
+a single cell**. A speed number taken under that is not a slow number, it is a
+meaningless one — and `min()` over starts does not rescue it, because contention
+is not the only failure mode there (the same doc records `zenbench` degenerating
+to spuriously **LOW** readings under a tight wall budget, which `min()` would
+happily select as "the best one").
+
+So the partial logs were **deleted, not kept and caveated**, and the run was
+re-staged behind two gates instead of one: the endgame chain must report DONE
+(not merely dip), and then load must read `< 2` on **three consecutive 30 s
+samples**. M3a is bursty, so a single sample between cells looks idle and is not
+— which is precisely how the first attempt got through.
+
 *(RESULTS — W4 and the board, pending.)*
 
 ---
