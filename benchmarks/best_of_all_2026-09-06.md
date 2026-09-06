@@ -13,7 +13,9 @@ contract on **identity (90.9368, 38 of 38 probe rows outside the band)** with
 matching either/or on the shipped-B lineage: **no monotone output spline can
 satisfy both C2 and C6** when real cells out-rank a perfect copy in raw space.
 So the dial cannot be repaired downstream of the weights. This lane makes the
-identity and no-cell-above-identity rows **structural**.
+identity and no-cell-above-identity rows **structural — with one condition that
+this wave's own transform screen does not meet; read §2.4 before quoting the
+word.**
 
 ---
 
@@ -477,11 +479,14 @@ masked/IW block `f228..f371` — all 144 of those columns are exactly zero.)*
 
 **Three things this is evidence for, and one it is not.**
 
-1. **C5 and C6 are structural, on real data, through the real chain.** The grid
-   max is **exactly 100.000** — the pin survives training, f16 packing,
-   dead-column pruning and the spline refit, which is the empirical form of the
+1. **C5 and C6 hold on real data, through the real chain.** The grid max is
+   **exactly 100.000** — the pin survives training, f16 packing, dead-column
+   pruning and the spline refit, which is the empirical form of the
    `nonneg_distance_holds_after_pack_and_prune` claim the unit tests could not
-   reach.
+   reach. **⚠ "Structural" is the wrong word for C6 under this wave's transform
+   screen** — see §2.4: `raw(x) ≤ pin` is structural, `raw(identity) = pin` is
+   not (it reads 99.6138), so identity is not the argmax and C6 = 0 is a
+   measurement on 9,593 cells.
 2. **The C2 ⊻ C6 either/or is DISSOLVED, not traded.** The gate record's proof
    says a spline can buy C6 only by capping cells and paying in `tied`. Here C6
    goes 1,642 → 0 **while `tied` goes 0.0017 → 0.0000**. Nothing was capped;
