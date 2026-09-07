@@ -20,7 +20,15 @@
 #
 # WHAT THIS DOES
 # --------------
-#   fetch -> assert <bookmark>@origin is an ANCESTOR of the target -> set -> push -> verify
+#   fetch -> assert <bookmark>@origin is an ANCESTOR of the target
+#         -> hygiene: address/identifier check on the outgoing diff
+#         -> set -> push -> verify
+#
+# The second gate scans the lines this push would ADD for the identifier classes
+# that must not enter a public repo (see scripts/lib/hygiene_patterns.txt for the
+# patterns and the reasoning). It exits 7 -- a DIFFERENT code from the sideways
+# refusal below, so a caller can tell the two apart -- and, like the first gate,
+# it has no bypass flag.
 #
 # The assertion is not a warning. If any commit is reachable from <bookmark>@origin
 # but NOT from the target, this script prints every one of them and exits 3 WITHOUT
@@ -33,7 +41,14 @@
 #   scripts/safe_push.sh -b <bookmark>         # a bookmark other than main
 #   scripts/safe_push.sh --dry-run             # run every check, push nothing
 #   scripts/safe_push.sh --self-test           # build a throwaway repo and prove
-#                                              #   a sideways target is REFUSED
+#                                              #   a sideways target is REFUSED and
+#                                              #   a flagged identifier is REFUSED
+#
+# EXIT CODES
+#   0 pushed (or --dry-run/--self-test passed)   4 fetch failed
+#   2 bad usage / unresolvable revision          5 bookmark set or push failed
+#   3 REFUSED: not a fast-forward                6 push reported success but did not land
+#                                                7 REFUSED: hygiene check on the outgoing diff
 set -uo pipefail
 
 BOOKMARK=main
@@ -51,6 +66,105 @@ while [ $# -gt 0 ]; do
     *) echo "safe_push: unknown argument '$1' (see --help)" >&2; exit 2 ;;
   esac
 done
+
+
+# ---------------------------------------------------------------- hygiene
+
+# Patterns live in ONE file, shared with scripts/lint_scripts.py, so the pre-push
+# gate and the tracked-file lint can never drift into checking different things.
+HYGIENE_PATTERNS_FILE="$(cd "$(dirname "$0")" && pwd)/lib/hygiene_patterns.txt"
+
+# Site-specific additions (names, labels) are NOT in this repo: they come from the
+# private homefleet config, whose `hygiene_patterns` array this reads if it is
+# present. Absent config = the generic classes only, announced, never silent.
+HOMEFLEET_NODES_DEFAULT="$HOME/work/zen/homefleet/zenmetrics/fleet/nodes.toml"
+
+hygiene_extra_patterns() {
+  local cfg="${HOMEFLEET_NODES:-$HOMEFLEET_NODES_DEFAULT}"
+  [ -r "$cfg" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$cfg" <<'PYEOF' 2>/dev/null || true
+import sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as f:
+        cfg = tomllib.load(f)
+except Exception:
+    raise SystemExit(0)
+for i, pat in enumerate(cfg.get("hygiene_patterns") or []):
+    if isinstance(pat, str) and pat:
+        print(f"private-{i}\t{pat}")
+PYEOF
+}
+
+# Added lines of the outgoing diff, as "<path>:<text>". `jj diff --git` is used
+# rather than a bare diff because only the git format carries the `+++ b/<path>`
+# header this needs to attribute a hit to a file. The pattern file itself is
+# skipped: it necessarily contains regexes that describe the very classes it
+# matches, and a guard that refuses its own definition is a guard nobody can edit.
+hygiene_added_lines() {
+  local from="$1" to="$2"
+  jj diff --ignore-working-copy --git --from "$from" --to "$to" 2>/dev/null |
+    awk '
+      /^\+\+\+ b\// { path = substr($0, 7); next }
+      /^\+\+\+ \/dev\/null/ { path = ""; next }
+      /^\+/ && path != "" && path != "scripts/lib/hygiene_patterns.txt" {
+        print path ":" substr($0, 2)
+      }'
+}
+
+# Returns 0 clean, 7 refused. Prints every hit; never truncates to one.
+hygiene_check() {
+  local from="$1" to="$2"
+
+  if [ ! -r "$HYGIENE_PATTERNS_FILE" ]; then
+    echo "safe_push: hygiene: address/identifier check CANNOT RUN — no $HYGIENE_PATTERNS_FILE" >&2
+    echo "  Refusing rather than pushing unchecked." >&2
+    return 7
+  fi
+
+  local added; added=$(hygiene_added_lines "$from" "$to")
+  if [ -z "$added" ]; then
+    echo "safe_push: hygiene: address/identifier check — no added lines to scan."
+    return 0
+  fi
+
+  local hits="" name rx n_pat=0
+  while IFS=$'\t' read -r name rx; do
+    case "$name" in ''|\#*) continue ;; esac
+    [ -z "$rx" ] && continue
+    n_pat=$((n_pat + 1))
+    local found
+    found=$(printf '%s\n' "$added" | grep -nE -- "$rx" || true)
+    if [ -n "$found" ]; then
+      hits="${hits}$(printf '%s\n' "$found" | sed "s/^/    [${name}] /")
+"
+    fi
+  done <<HYGEOF
+$(cat "$HYGIENE_PATTERNS_FILE"; hygiene_extra_patterns)
+HYGEOF
+
+  if [ -n "$hits" ]; then
+    echo "" >&2
+    echo "safe_push: REFUSED — hygiene: address/identifier check." >&2
+    echo "" >&2
+    echo "  These lines would be ADDED to a public repo by this push:" >&2
+    echo "" >&2
+    printf '%s' "$hits" | cut -c1-200 >&2
+    echo "" >&2
+    echo "  There is no bypass. The two resolutions are:" >&2
+    echo "    1. use the documented canonical form — http://localhost:<port> for a" >&2
+    echo "       served page, a neutral node id for a box;" >&2
+    echo "    2. move the value into the private homefleet repo and have the public" >&2
+    echo "       side read it from there at runtime." >&2
+    echo "" >&2
+    echo "  Patterns: $HYGIENE_PATTERNS_FILE" >&2
+    echo "" >&2
+    return 7
+  fi
+
+  echo "safe_push: hygiene: address/identifier check OK ($n_pat pattern(s), $(printf '%s\n' "$added" | grep -c .) added line(s))."
+  return 0
+}
 
 # ---------------------------------------------------------------- core
 
@@ -119,6 +233,11 @@ do_push() {
     fi
     echo "safe_push: OK — ${remote_rev} (${remote_tip:0:12}) is an ancestor of ${target:0:12}."
   fi
+
+  # SECOND GATE. Scan what this push would ADD. For a brand-new bookmark there is
+  # no remote tip to diff against, so the whole target tree is the addition.
+  local hygiene_from="${remote_tip:-$(jjq 'root()')}"
+  hygiene_check "$hygiene_from" "$target" || return 7
 
   if [ "$dry" = 1 ]; then
     echo "safe_push: --dry-run, stopping before 'bookmark set'."
@@ -227,6 +346,37 @@ self_test() {
   else
     echo "  CASE 4 rebase-then-push lands BOTH lanes ......... FAIL (rc=$rc not_landed='${miss_fixed} ${miss_ff}')"
     sed 's/^/      /' "$tmp/case4.log"; fails=$((fails+1))
+  fi
+
+  # --- CASE 5: a flagged identifier is REFUSED (rc=7), remote UNMOVED ----
+  # Built from the pattern file's own private-network-address class, so the case
+  # cannot drift from the rule it is testing. The literal is assembled at runtime
+  # rather than written out, so this script never itself carries the shape it bans.
+  jj new 'main@origin' -m "hygiene-probe" >/dev/null 2>&1
+  printf 'probe http://%s.%s.%s.%s:3300/x\n' 192 168 50 44 > probe.md
+  jj status >/dev/null 2>&1
+  local hyg_tip; hyg_tip=$(jj log --no-graph --ignore-working-copy -r '@' -T 'commit_id')
+  before=$(jj log --no-graph --ignore-working-copy -r 'main@origin' -T 'commit_id')
+  "$script" -r "$hyg_tip" >"$tmp/case5.log" 2>&1; rc=$?
+  after=$(jj log --no-graph --ignore-working-copy -r 'main@origin' -T 'commit_id')
+  if [ "$rc" -eq 7 ] && [ "$before" = "$after" ] && grep -q 'probe.md' "$tmp/case5.log"; then
+    echo "  CASE 5 flagged line REFUSED (rc=7), remote UNMOVED . PASS"
+  else
+    echo "  CASE 5 flagged line REFUSED (rc=7), remote UNMOVED . FAIL (rc=$rc, before=${before:0:12} after=${after:0:12})"
+    sed 's/^/      /' "$tmp/case5.log"; fails=$((fails+1))
+  fi
+
+  # --- CASE 6: the NEGATIVE CONTROL — same commit, canonical form, ACCEPTED --
+  # Without this, CASE 5 would also pass if the hygiene gate refused everything.
+  echo 'probe http://localhost:3300/x' > probe.md
+  jj status >/dev/null 2>&1
+  local clean_tip; clean_tip=$(jj log --no-graph --ignore-working-copy -r '@' -T 'commit_id')
+  "$script" -r "$clean_tip" >"$tmp/case6.log" 2>&1; rc=$?
+  if [ "$rc" -eq 0 ] && [ -z "$(jj log --no-graph --ignore-working-copy -r "${clean_tip} ~ ::main@origin" -T 'commit_id')" ]; then
+    echo "  CASE 6 canonical form ACCEPTED and landed ....... PASS"
+  else
+    echo "  CASE 6 canonical form ACCEPTED and landed ....... FAIL (rc=$rc)"
+    sed 's/^/      /' "$tmp/case6.log"; fails=$((fails+1))
   fi
 
   echo ""

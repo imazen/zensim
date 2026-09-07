@@ -142,7 +142,7 @@ input shaping outside pure-HDR; bigcodec mass in linear CID22 fits.
   bakes, ensembles, residual, attribution);
   `benchmarks/strategy_ablation_2026-07-02.md` (MLP campaign + collapse
   program); `docs/PLAN_HDR.md`; reports viewer
-  `http://172.23.240.1:3300/zensim/reports/` (`2026-07-03_linear_vs_all` is
+  `http://localhost:3300/zensim/reports/` (`2026-07-03_linear_vs_all` is
   the cross-metric page).
 - Artifacts: `/mnt/v/output/zensim-multicodec-probe/linear-probe/`
   ({bakes,fits,residual}, panel_all.tsv, verdicts).

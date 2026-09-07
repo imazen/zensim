@@ -45,6 +45,28 @@ exists because a push can report success and not land (2026-05-29 orphaned-bookm
 incident). Guard self-test: 4 cases including the negative control (sideways
 REFUSED, remote provably unmoved) — `scripts/safe_push.sh --self-test`.
 
+**A SECOND GATE runs in the same wrapper: `hygiene: address/identifier check`.**
+It scans the lines the push would ADD for the identifier classes that must not
+enter a public repo (private-range addresses, hardware addresses, household
+framing), and **exits 7** — a different code from the sideways refusal's 3, so a
+caller can tell them apart. There is no bypass flag, for the same reason there is
+no `--force`. The patterns have ONE owner,
+[`scripts/lib/hygiene_patterns.txt`](scripts/lib/hygiene_patterns.txt), shared
+with `scripts/lint_scripts.py` (which runs the same classes over every tracked
+file, so an INHERITED hit is found and not only a newly added one) and pinned by
+7 tests in `scripts/test_lint_scripts.py`; both run in CI. Site-specific
+additions (names, labels) are NOT in this repo — they come from
+`hygiene_patterns` in the private homefleet config (`HOMEFLEET_NODES`, default
+`~/work/zen/homefleet/zenmetrics/fleet/nodes.toml`), because a public pattern
+list that spelled out the values it protects would leak exactly what it exists to
+keep out. **MEASURED on the trees it was built against: 0 false positives across
+2,832 tracked zensim files and 2,040 zenmetrics files, and 13 true positives** —
+all one class, the stale WSL-gateway form of a gallery URL, which the memory
+record had already flagged as going stale and which nothing had ever checked.
+Guard self-test: `scripts/safe_push.sh --self-test` is 6 cases, including the
+negative control (CASE 6: the canonical `localhost` form of the SAME line is
+ACCEPTED and lands — without it, a gate that refused everything would also pass).
+
 Two jj traps the script already handles, which hand-rolled one-liners keep
 re-learning: a successful push makes `@` immutable and jj creates a **fresh empty
 `@` on top**, so `-r @` one command later targets the wrong commit; and a jj

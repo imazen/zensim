@@ -177,14 +177,15 @@ surrounding key, values never read out:
 | file | what it carries |
 |---|---|
 | `scripts/jobsys/fleet_power.py` | **5 MAC addresses** in a `"mac": "…"` node roster, plus 7 LAN addresses (2026-08-26) |
-| `docs/PLAN_REV2_RECALC_2026-09-06.md` | **child-framing** ("Kids' PCs") — **committed by this session** |
+| `docs/PLAN_REV2_RECALC_2026-09-06.md` | **child-framing** on two household boxes — **committed by this session** |
 | `benchmarks/avif_sweep_subsample_2026-09-01.md` | child-framing, a **family first name**, 2 LAN addresses |
 | `docs/rev2_lan_stage.pointer.md` | LAN address — **committed by this session** (2026-09-05) |
 | `benchmarks/avif_eradelta_analysis_2026-09-03.pointer.md`, `benchmarks/fleetbench_2026-08-24.md`, `docs/INCIDENT_r2_writes_2026-08-26.md`, `scripts/jobsys/fleet_sentinel.sh` | one LAN address each |
 
-**The MAC roster is a regression of a closed incident.** The 2026-08-03 audit found "NODES.md
-+ the PXE stack public in imazen/zenmetrics with kids' names, MACs, IPs, and a disk serial",
-migrated it to the private `homefleet` repo, and wrote the rule. `fleet_power.py` re-introduced
+**The MAC roster is a regression of a closed incident.** The 2026-08-03 audit found NODES.md
+and the PXE stack public in imazen/zenmetrics carrying the whole identifier class — household
+names, hardware addresses, LAN addresses, a disk serial — migrated it to the private
+`homefleet` repo, and wrote the rule. `fleet_power.py` re-introduced
 a MAC-keyed node roster into that same repo on **2026-08-26 — three weeks after the fix**.
 
 *(One caution about this class of finding: a keyword scan over-reports badly. Four "kids" hits

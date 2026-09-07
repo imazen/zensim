@@ -105,7 +105,7 @@ picker join bug), row-count/sha drift vs manifests, split-rule violations.
 
 **Every result gets a visual report; reports collect at
 `/mnt/v/output/zensim/reports/` with a regenerated `index.html` viewer —
-browsable at <http://172.23.240.1:3300/zensim/reports/>.** This is built into
+browsable at <http://localhost:3300/zensim/reports/>.** This is built into
 the standard flow, not an extra step:
 
 - `hz.sh pull` auto-generates a report for every pulled `.bin` that doesn't

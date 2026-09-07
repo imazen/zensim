@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-tests for check_conflict_markers() in lint_scripts.py.
+"""Self-tests for check_conflict_markers() and the hygiene patterns in lint_scripts.py.
 
 Run: python3 scripts/test_lint_scripts.py
 Exits 0 if all pass, nonzero (with traceback) on the first failure.
@@ -12,6 +12,12 @@ conflict-marker line, found and fixed only by a human re-reading the file.
 These tests pin the fix: the exact leaked shape must fail, and the
 Markdown constructs that look similar (an H1 underline, a table rule, an
 hr) must not.
+
+The hygiene: address/identifier tests below pin the OTHER shared gate --
+scripts/lib/hygiene_patterns.txt, read by both this linter and
+scripts/safe_push.sh. Every flagged literal in them is ASSEMBLED at runtime
+from parts, never written out, so this file cannot itself carry the shapes
+it exists to ban (and so the linter does not flag its own test suite).
 """
 from __future__ import annotations
 
@@ -20,7 +26,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lint_scripts import _scan_file, find_conflict_markers  # noqa: E402
+from lint_scripts import _hygiene_patterns, _scan_file, find_conflict_markers  # noqa: E402
 
 
 def _write(tmp_dir: str, name: str, content: str) -> Path:
@@ -180,12 +186,83 @@ def test_binary_file_is_skipped_not_scanned():
     assert hits == [], hits
 
 
+# ---------------------------------------------------------------- hygiene
+
+
+def _hygiene_hits(line: str) -> list[str]:
+    """Names of every hygiene class matching one line. Uses the real loader, so
+    a pattern-file edit that breaks a class fails here rather than in a push."""
+    return [name for name, rx in _hygiene_patterns() if rx.search(line)]
+
+
+def test_hygiene_patterns_file_actually_loads():
+    """A missing or malformed pattern file must not silently disarm the gate:
+    lint_scripts reports it as a failure, and that path starts here."""
+    pats = _hygiene_patterns()
+    names = {n for n, _ in pats}
+    assert "private-network-address" in names, names
+    assert "hardware-address" in names, names
+    assert "household-framing" in names, names
+
+
+def test_hygiene_positive_private_network_addresses():
+    """All three RFC1918 ranges, each assembled from parts."""
+    for octets in (("192", "168", "50", "44"), ("10", "1", "2", "3"), ("172", "20", "0", "5")):
+        line = "see http://%s.%s.%s.%s:3300/report" % octets
+        assert "private-network-address" in _hygiene_hits(line), line
+
+
+def test_hygiene_positive_hardware_address():
+    mac = ":".join(["04", "7c", "16", "b3", "18", "51"])
+    line = f'  "hw": "{mac}",'
+    assert "hardware-address" in _hygiene_hits(line), line
+
+
+def test_hygiene_positive_household_framing():
+    for line in ("the %s PCs stay on Windows" % ("kid" + "s'"),
+                 "borrowed a %s box overnight" % ("child" + "'s")):
+        assert "household-framing" in _hygiene_hits(line), line
+
+
+def test_hygiene_negative_canonical_and_loopback_forms():
+    """The documented canonical form, loopback, and bind-all must all pass --
+    otherwise the gate refuses the very thing it tells you to use instead."""
+    for line in ("browse http://localhost:3300/zensim/reports/",
+                 "curl http://127.0.0.1:3300/health",
+                 "python3 -m http.server 3400 --bind 0.0.0.0",
+                 "worker on r7900x, secondary on tower"):
+        assert _hygiene_hits(line) == [], (line, _hygiene_hits(line))
+
+
+def test_hygiene_negative_version_and_identifier_lookalikes():
+    """The classes that made a naive keyword grep useless: a dotted version, a
+    timestamp, and `kids` as a plain code identifier (a knob-id set, which a
+    real script in a sibling repo genuinely has). None may fire."""
+    for line in ("zenjxl 0.4.0, build 10.0.19045 on the runner",
+                 "elapsed 01:02:03:04:05 in the log",
+                 "per_img_front_kids = {}   # img -> set(kid) on front",
+                 "topk_kids = sorted(keep)"):
+        assert _hygiene_hits(line) == [], (line, _hygiene_hits(line))
+
+
+def test_hygiene_public_patterns_carry_no_specific_values():
+    """The public pattern file must describe CLASSES, never the values it
+    protects -- a pattern list that spelled them out would leak exactly what it
+    exists to keep out. Checked by feeding the file to its own patterns."""
+    from lint_scripts import HYGIENE_PATTERNS_FILE
+
+    text = HYGIENE_PATTERNS_FILE.read_text(encoding="utf-8")
+    for lineno, line in enumerate(text.splitlines(), 1):
+        hits = _hygiene_hits(line)
+        assert hits == [], (lineno, line, hits)
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
         t()
         print(f"PASS {t.__name__}")
-    print(f"\nALL {len(tests)} lint_scripts conflict-marker tests passed.")
+    print(f"\nALL {len(tests)} lint_scripts tests passed.")
     return 0
 
 

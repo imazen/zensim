@@ -5,7 +5,7 @@ canonical validation corpora, plus the full Mohammadi stat panel per corpus.
 
 THE RULE (user directive 2026-07-02): every result gets one of these, they
 collect under /mnt/v/output/zensim/reports/ (browsable at
-http://172.23.240.1:3300/zensim/reports/), and the viewer index.html is
+http://localhost:3300/zensim/reports/), and the viewer index.html is
 regenerated on every run. runcells.sh calls this automatically per cell, so
 reports are the NORMAL output of training, not an extra step.
 
@@ -171,7 +171,7 @@ def main():
                     f"— {m.get('date','')} · sha {m.get('sha256','')[:12]}…</li>")
         f.write("</ul>")
     print(f"report: {out_dir}/report.html")
-    print(f"viewer: http://172.23.240.1:3300/zensim/reports/")
+    print(f"viewer: http://localhost:3300/zensim/reports/")
 
 
 if __name__ == "__main__":

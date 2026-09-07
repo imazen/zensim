@@ -43,6 +43,12 @@ Checks:
   CONFLICT  — a leaked git/jj conflict-marker line (see check_conflict_markers
               below for the exact forms) in any tracked text file, not just
               scripts/ -- a conflict "resolved" by hand that missed a line
+  HYGIENE   — hygiene: address/identifier check. Any tracked text file matching
+              a class in scripts/lib/hygiene_patterns.txt, which is the SAME
+              file scripts/safe_push.sh reads for its pre-push gate, so the two
+              can never drift into checking different things. That gate scans
+              the outgoing diff; this scans the whole tracked tree, which is how
+              an inherited hit gets found rather than only a newly added one.
 
 A hardcoded build artifact under THIS repo's own `target/` is only a warning:
 it may simply not be built yet. A path under a *deleted worktree* is fatal —
@@ -51,6 +57,7 @@ that one can never come back.
 from __future__ import annotations
 
 import ast
+import os
 import re
 import sys
 from pathlib import Path
@@ -524,6 +531,97 @@ def check_conflict_markers() -> list[str]:
     return fails
 
 
+
+HYGIENE_PATTERNS_FILE = SCRIPTS / "lib" / "hygiene_patterns.txt"
+HOMEFLEET_NODES_DEFAULT = Path.home() / "work" / "zen" / "homefleet" / "zenmetrics" / "fleet" / "nodes.toml"
+
+
+def _hygiene_patterns() -> list[tuple[str, "re.Pattern[str]"]]:
+    """The shared class patterns, plus the private site-specific ones if the
+    homefleet config is readable.
+
+    The public list is deliberately generic -- a pattern file in a public repo
+    that spelled out the values it protects would leak exactly what it exists
+    to keep out -- so names and labels live in the private config's
+    `hygiene_patterns` array instead. A missing config is not an error: the
+    generic classes still run. Returns [] only if the shared file itself is
+    unreadable, which the caller reports as a failure rather than a pass.
+    """
+    pats: list[tuple[str, re.Pattern[str]]] = []
+    try:
+        raw = HYGIENE_PATTERNS_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    for line in raw.splitlines():
+        if not line.strip() or line.lstrip().startswith("#") or "\t" not in line:
+            continue
+        name, rx = line.split("\t", 1)
+        try:
+            pats.append((name.strip(), re.compile(rx)))
+        except re.error:
+            continue
+
+    cfg_path = Path(os.environ.get("HOMEFLEET_NODES") or HOMEFLEET_NODES_DEFAULT).expanduser()
+    try:
+        import tomllib
+
+        with open(cfg_path, "rb") as f:
+            for i, extra in enumerate(tomllib.load(f).get("hygiene_patterns") or []):
+                if isinstance(extra, str) and extra:
+                    try:
+                        pats.append((f"private-{i}", re.compile(extra)))
+                    except re.error:
+                        continue
+    except (OSError, ImportError, ValueError):
+        pass
+    return pats
+
+
+def check_address_identifiers() -> list[str]:
+    """hygiene: address/identifier check over every tracked text file.
+
+    WHY THIS EXISTS. Global CLAUDE.md forbids household and home-network
+    identifiers in a public repo and prescribes grepping the diff before a
+    push. Nothing enforced it, so on 2026-09-06 an audit found the class live
+    in two public repos -- and the mechanism was not carelessness but COPYING:
+    one documented example in a shared doc spread a LAN URL through a dozen
+    files in two days. A class that spreads by being read has to be checked by
+    a machine, not by remembering.
+
+    Skips `.orig`/`.rej` (patch tooling writes what it likes there), binaries,
+    and the pattern file itself -- which necessarily contains regexes
+    describing the classes it matches, and a guard that refuses its own
+    definition is a guard nobody can edit.
+    """
+    pats = _hygiene_patterns()
+    if not pats:
+        return [f"{HYGIENE_PATTERNS_FILE.relative_to(ROOT)}: unreadable or empty — "
+                "cannot run the address/identifier check"]
+
+    files = _tracked_files()
+    if not files:
+        return []
+
+    rel_patterns = str(HYGIENE_PATTERNS_FILE.relative_to(ROOT))
+    fails: list[str] = []
+    for rel in files:
+        if rel.endswith((".orig", ".rej")) or rel == rel_patterns:
+            continue
+        fp = ROOT / rel
+        try:
+            raw = fp.read_bytes()
+        except OSError:
+            continue
+        if b"\0" in raw[:BINARY_SNIFF_BYTES]:
+            continue
+        for lineno, line in enumerate(raw.decode("utf-8", errors="replace").splitlines(), 1):
+            for name, rx in pats:
+                if rx.search(line):
+                    fails.append(f"{rel}:{lineno}: [{name}] {line.strip()[:120]}")
+                    break
+    return fails
+
+
 def main() -> int:
     list_only = "--list" in sys.argv
     failures: dict[str, list[str]] = {}
@@ -553,6 +651,10 @@ def main() -> int:
     conflicts = check_conflict_markers()
     if conflicts:
         failures["<conflict markers>"] = conflicts
+
+    hygiene = check_address_identifiers()
+    if hygiene:
+        failures["<hygiene: address/identifier check>"] = hygiene
 
     if not failures:
         print(f"lint_scripts: {n} scripts checked, all runnable")

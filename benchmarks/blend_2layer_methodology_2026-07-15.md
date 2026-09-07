@@ -137,4 +137,4 @@ ZENSIM_DIAL_GRID=.../dial_grid_372col_2026-05-29_quarantined.parquet \
 ```
 
 Dashboard: `scripts/v_next/bandwise_dashboard.py` →
-`http://172.23.240.1:3300/zensim/dashboards/bandwise_dashboard_2026-07-15.html`.
+`http://localhost:3300/zensim/dashboards/bandwise_dashboard_2026-07-15.html`.

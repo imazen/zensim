@@ -140,7 +140,7 @@ hard_pair_max_delta=0.05, stratified_bands=10, dro_eta=0.5, trainer 78ec8e61.
 ## Three-way head-to-head (t1dro51_s31 vs Profile-A vs ssim2, per-pair, 2026-07-03)
 
 Report: /mnt/v/output/zensim/reports/2026-07-03_compare_t1dro51_s31 (viewer
-http://172.23.240.1:3300/zensim/reports/). ssim2 scored per-pair fresh via
+http://localhost:3300/zensim/reports/). ssim2 scored per-pair fresh via
 `zenmetrics batch` (CID22 sanity: 0.8894 = its known number; A = 0.8657 exact).
 
 | corpus | t1dro51_s31 | ProfileA | ssim2 |

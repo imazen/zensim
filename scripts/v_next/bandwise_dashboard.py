@@ -819,7 +819,7 @@ def main():
             "code{background:#f0f0f0;padding:.1rem .3rem}a{color:#06c}</style>" + "".join(body))
     Path(a.out).write_text(html)
     print(f"wrote {a.out}  ({len(html)//1024} KB)\n  view: "
-          + a.out.replace("/mnt/v/output/", "http://172.23.240.1:3300/"))
+          + a.out.replace("/mnt/v/output/", "http://localhost:3300/"))
 
 
 if __name__ == "__main__":

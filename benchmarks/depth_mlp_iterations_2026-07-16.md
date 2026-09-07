@@ -72,7 +72,7 @@ per-image threshold, so cross-image pairing had been teaching between-image scal
   confirmed `withinref=true` on both ladder groups on iteration 2's first run).
 
 Dashboard: `/mnt/v/output/zensim/depth-iter/dash/depth_2026-07-16.html`
-(browser: http://172.23.240.1:3300/zensim-depth-dashboard/depth_2026-07-16.html).
+(browser: http://localhost:3300/zensim-depth-dashboard/depth_2026-07-16.html).
 
 ## ⚠ THE DECIDING GATE: depth wins rank, FAILS the dial (two-panel verdict)
 
