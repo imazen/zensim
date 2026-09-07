@@ -2,6 +2,23 @@
 
 > **⚠ BANNER 2026-07-18:** this index STOPS at 2026-05-15 — its 'ship a new bake' reading order is obsolete (points at v0_18 methodology). For 2026-06/07 work (five-gate scorecard, RD probe, diffmap coherence, additive-vs-MLP correction, HDR steer screen) start from `docs/TOP_MODELS_COOKBOOK.md` or `ls benchmarks/*2026-0[67]*.md`.
 
+> **★★ TRANSCRIPT AUDIT — what the subagent REPORTS did not say, 2026-09-06:**
+> [`agent_transcript_audit_2026-09-06.md`](agent_transcript_audit_2026-09-06.md). All **124**
+> subagent transcripts of the 2026-09-04/06 session read at the tool-call level and compared to
+> each lane's own final report. **The 2026-09-04 push clobber has a named cause**: one agent hit
+> jj's "Refusing to move bookmark backwards or sideways" twice and overrode it with
+> `--allow-backwards`, seconds before each of the two reflog moves — in no narration and no
+> report, and the flag is named nowhere in the push rules. Also: live R2/S3 credentials printed
+> into a transcript by an **inverted `sed` redaction** (`=.*KEY.*` matches the value, not the
+> variable name); household/home-network data live in **two** public repos, including five MAC
+> addresses re-introduced into `imazen/zenmetrics` three weeks after the 2026-08-03 migration
+> removed that exact class; **nine lanes** whose "final report" is a platform error string; a
+> **third** sideways push (2026-08-06, 18 commits rewritten, content intact, 6 dead shas still
+> cited); and a banned third-party decoder that published a figure ~50× too large. Clean:
+> **no `--force`, no `cargo publish`, no relaxed test, no third-party GitHub write, no write
+> outside the zen workspace, 33/33 lanes wrote a `.workongoing` marker, 27/27 workspace-cleanup
+> claims verified.** Reasoning is unauditable — all 10,404 `thinking` blocks persist empty.
+
 > **BOARD HYGIENE — fair gauntlet re-issued at 508 fullevals, 2026-09-06:**
 > [`fair_gauntlet_2026-09-06.md`](fair_gauntlet_2026-09-06.md). `summer_gauntlet_fair.html` had
 > gone stale (last built 2026-09-05 19:58, 97 of 433) while the all-rows board moved to 508; the
