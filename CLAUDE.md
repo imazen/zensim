@@ -40,7 +40,7 @@ the numbers would just have been wrong. Full record:
 target → bookmark set → push → verify the target landed.** On a sideways target it
 **exits 3, prints every commit the push would drop, and does not touch the
 bookmark.** There is no `--force`; the fix is `jj git fetch && jj rebase -d
-main@origin`, resolve keeping BOTH lanes' hunks, then re-run. The post-push verify
+main@origin`, resolve keeping BOTH lanes' hunks, then re-run. **Equally prohibited: `jj bookmark set --allow-backwards` (and any `--allow-*` flag that lets a bookmark move sideways), `jj git push --force`, and `git push --force*`.** The 2026-09-06 transcript audit (`benchmarks/agent_transcript_audit_2026-09-06.md`) found that BOTH 2026-09-04 sideways moves were produced by exactly that flag after jj had refused the move twice — the refusal IS the guard; overriding it is the incident. If a push is refused, the only correct action is the rebase above; there is no flag that makes a sideways move safe. The post-push verify
 exists because a push can report success and not land (2026-05-29 orphaned-bookmark
 incident). Guard self-test: 4 cases including the negative control (sideways
 REFUSED, remote provably unmoved) — `scripts/safe_push.sh --self-test`.
