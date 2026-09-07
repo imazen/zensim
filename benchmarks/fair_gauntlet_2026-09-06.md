@@ -143,7 +143,7 @@ stay `VERIFIED-FAIR`, k=7 each).
 ## 5. Serving + named-cell verification
 
 ```
-curl -s -o /dev/null -w '%{http_code} %{size_download}' http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html
+curl -s -o /dev/null -w '%{http_code} %{size_download}' http://localhost:3300/zensim/reports/summer_gauntlet_fair.html
 -> 200 12419271   (matches the file on disk exactly; also 200 via localhost:3300)
 ```
 
@@ -154,7 +154,7 @@ missing-id banner, scoreboard holds exactly the three rows in fragment order. Ve
 individually first, then combined (all four invocations rc=0).
 
 ```
-http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=BOA_F_nonneg32_s4004,D_guard12_p999@dguard2,fc2_372_S228_H128_s4004
+http://localhost:3300/zensim/reports/summer_gauntlet_fair.html#compare=BOA_F_nonneg32_s4004,D_guard12_p999@dguard2,fc2_372_S228_H128_s4004
 ```
 
 ## Reproduce

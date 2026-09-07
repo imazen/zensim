@@ -1,5 +1,5 @@
 # FLEET criterion-1 runtime-column audit — ssim2+butteraugli GPU-only
-# date: 2026-08-27  store: tower (ZEN_STORE=tower, http://192.168.50.170:3900)
+# date: 2026-08-27  store: tower (ZEN_STORE=tower, port 3900)
 # cmd: ZEN_STORE=tower python3 scripts/jobsys/audit_gpu_only_metrics.py  (zenmetrics)
 # result: PASS (exit 0) — every ssim2/butteraugli done row ends -gpu; violations table empty
 

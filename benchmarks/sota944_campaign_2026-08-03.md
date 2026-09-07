@@ -706,7 +706,7 @@ at 944 — the #1 blocker, two independent candidates failed on it); (2) issue #
 near-top anchors (the CID22 gap concentrates where training pairs end — the
 0.0055 deficit is the size of the near-top signal the anchors would add).
 
-Wave ops (recorded): i265 retired (5.4×); jason observed BUSY (another
+Wave ops (recorded): i265 retired (5.4×); node-2 observed BUSY (another
 session's zensr job — untouched); tower's {199,256,512} sentinel-blocked and
 reassigned to lianli/wsl when tower's pace measured ~90 s/epoch; the lianli
 lane wrapper's bake_verdict-not-found stderr is expected-by-design (verdicts
@@ -1202,8 +1202,8 @@ decision remains the user's.
 
 Workspace `zensim--wave4` on `main@origin`; `CARGO_TARGET_DIR=$HOME/tmp/zensimw4-target`;
 logs `~/tmp/wave4/`. Lanes: **wsl** (local) + **lianli** — the two proven lanes;
-tower is media-serving (observe-before-load) and jason/ian are the kids' Windows
-boxes, so neither is enrolled. **One trainer binary, built locally and shipped to
+tower is media-serving (observe-before-load) and node-2/node-3 default to their
+other OS, so neither is enrolled. **One trainer binary, built locally and shipped to
 the remote lane**, so both lanes run the identical program. Every run's train node
 is recorded. Bakes land on the shared campaign path
 `/mnt/v/output/zensim/bakes/sota944/bakes/`; the remote lane rsyncs each bake back
@@ -1459,8 +1459,8 @@ user's.
 - **sdr25 selection is thin** (n=50 pairs / 5 refs) and now demonstrably decoupled
   from CID22 even within a fixed mix. Used as registered; flagged as unfit for
   future campaigns.
-- **No tower / jason / ian lane.** Tower was media-serving (load 2.4, Plex + the
-  \*arr stack) and the kids' boxes are Windows by default; observe-before-load said
+- **No tower / node-2 / node-3 lane.** Tower was media-serving (load 2.4, and the
+  rest of its stack) and node-2/node-3 default to their other OS; observe-before-load said
   skip, so only wsl + lianli ran. Not a limitation on the result — the registered
   12 cells all completed.
 
@@ -2043,7 +2043,7 @@ Workspace `zensim--wave6` on `main@origin`; `CARGO_TARGET_DIR=$HOME/tmp/zensimw6
 logs `~/tmp/wave6/`; every heavy step under `~/work/zen/scripts/run-heavy`; verdicts
 through `scripts/sota944_verdict.sh` (the one frozen §0 invocation). Training is
 fleet-parallel across lanes that are **genuinely free** (observe-before-load: tower
-serves media, the kids' boxes default to Windows). Scoring arms are foreground.
+serves media, node-2/node-3 default to their other OS). Scoring arms are foreground.
 Nothing is shipped, swapped, promoted, or published; no default changes; no bake
 enters `zensim/weights/`. The freeze decision remains the user's.
 

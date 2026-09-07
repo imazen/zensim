@@ -8118,7 +8118,7 @@ flat-to-small byte deltas (−0.9% to +3.8%) — real encoder RD non-monotonicit
 settings, the same signature the floor-resolution lane found for the mentor's own floor failures.
 Only 1 of 10 is D-specific (ssim2 flat, D drops 3.6 points). Visual page (full-frame + native 1:1
 crop per step, imazen-only `zenpng`/`zenresize` via `ladder_tile_gen`, centered crop sized to 40% of
-the short side — not hand-picked): `http://192.168.50.44:3300/zensim/ladder-2026-09-05/inversions/
+the short side — not hand-picked): `http://localhost:3300/zensim/ladder-2026-09-05/inversions/
 index.html`, curl `200` both LAN and localhost. **Side finding, worked around not fixed at the
 time — FIXED later 2026-09-05, see `d_inversions_2026-09-05.md` §6 addendum:** a clean
 `zensim-bench` build was broken for ANY target — NOT actually `zenjxl`'s pin (that had already been

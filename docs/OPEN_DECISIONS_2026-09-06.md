@@ -2,8 +2,8 @@
 
 Every ruling that is the user's to make, with the measured evidence, the options and their consequences, the coordinator's recommendation, and the exact next action each ruling triggers. Links are to records on `main` (GitHub blob URLs) and to the LAN gallery. Nothing here is installed or flipped until ruled.
 
-Board (fair tier, ladder ruler): http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html
-Four-way compare (shipped D · constrained MLP · guarded D · fast-class MLP): http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=d_id100_negrich@did100lane,BOA_F_nonneg32_s4004,D_guard12_p999@dguard2,fc2_372_S228_H128_s4004
+Board (fair tier, ladder ruler): http://localhost:3300/zensim/reports/summer_gauntlet_fair.html
+Four-way compare (shipped D · constrained MLP · guarded D · fast-class MLP): http://localhost:3300/zensim/reports/summer_gauntlet_fair.html#compare=d_id100_negrich@did100lane,BOA_F_nonneg32_s4004,D_guard12_p999@dguard2,fc2_372_S228_H128_s4004
 
 ---
 
@@ -93,4 +93,4 @@ Proposed public surface (0.3.0 batch, feature `corruption-head`): `CorruptionHea
 - **AVIF hold** — lifted only for the ladder/anchor encodes with the new zenav1-svt (measured 1.50×, not 2×); tuning waves stay parked.
 - **Rotate the OPENAI key** that a lane printed into a transcript on 2026-09-04 (recommended then; not confirmed).
 
-Related pages: JXL floor ladders http://192.168.50.44:3300/zensim/dpeaks372-2026-09-05/jxlfloor/ladders/index.html · D's worst inversions (encoder-confirmed vs dial-only) http://192.168.50.44:3300/zensim/ladder-2026-09-05/inversions/index.html
+Related pages: JXL floor ladders http://localhost:3300/zensim/dpeaks372-2026-09-05/jxlfloor/ladders/index.html · D's worst inversions (encoder-confirmed vs dial-only) http://localhost:3300/zensim/ladder-2026-09-05/inversions/index.html

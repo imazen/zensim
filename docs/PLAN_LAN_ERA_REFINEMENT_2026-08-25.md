@@ -773,20 +773,20 @@ Teardown a box: `ssh <h> sudo docker rm -f zen-hdr`.
   `ZEN_WORKER`. Fix `hdr-gpu-scale.sh` to pass the name via `-e` from an env var, not heredoc interpolation.
 
 ### ⚠ FLEET CAPACITY CORRECTION (2026-08-26) — only ONE 6 GB GPU box
-`~/.ssh/config` has `Host r7900x lianli → 192.168.50.27` — **both aliases are the SAME physical
+`~/.ssh/config` maps `Host r7900x` and `Host lianli` to the same address — **both aliases are the SAME physical
 box** (hostname `r7900x`, one GTX 1060 6 GB). So the earlier "scaled to 3 GPU boxes" was wrong:
-- **.27 (r7900x≡lianli): the ONLY 6 GB GPU box** — GPU scoring is SERIAL here. Running TWO GPU
+- **r7900x≡lianli: the ONLY 6 GB GPU box** — GPU scoring is SERIAL here. Running TWO GPU
   containers on it (the medium "2-worker" launch) contended for the single 6 GB card → the OOM
-  `failed=9` cells. Run ONE GPU worker at a time on .27.
-- r5900xt (.250): GTX 1050 **2 GB** — CORRECTION: it DID score the small bucket on GPU (ledger chunk
+  `failed=9` cells. Run ONE GPU worker at a time on r7900x.
+- r5900xt: GTX 1050 **2 GB** — CORRECTION: it DID score the small bucket on GPU (ledger chunk
   `pass-r5900xt-hdr-1` = 687/687 done); the earlier "skipped/GPU 0%" read was POST-completion idle. So
   the 2 GB card handles SMALL HDR images but likely OOMs on huge/medium. Currently on CPU `sf-cpu`.
-- i265 (.140): no GPU → CPU worker.
-NODES.md lists lianli + r7900x as separate nodes (different MACs); the real second box (lianli
-`74:56:3c:b8:45:8d`) is either down or the config conflates them — a WoL/config follow-up could
+- i265: no GPU → CPU worker.
+NODES.md lists lianli + r7900x as separate nodes (distinct hardware addresses); the real second
+box (lianli) is either down or the config conflates them — a WoL/config follow-up could
 recover a second GPU. Until then: GPU = 1 box (serial), CPU = i265 + r5900xt. GPU buckets run
 sequentially via `lan_score_launch.sh` single-run (pool mode is tar/enc-oriented, doesn't fit the
-HDR direct-blob score jobs). Sequence on .27: small → huge → medium-leftovers → sf2(butteraugli) — AUTOMATED by
+HDR direct-blob score jobs). Sequence on r7900x: small → huge → medium-leftovers → sf2(butteraugli) — AUTOMATED by
 `scripts/jobsys/lan_gpu_sequence.sh` (one box drains all 6 GPU buckets in blocking single-run mode,
 self-advancing, `~/lan_gpu_seq.COMPLETE` marker). LAUNCHED 2026-08-26T01:03Z; small already done,
 huge scoring. sf=ssim2-gpu+iwssim-gpu, sf2=butteraugli-gpu (the goal's GPU-only pair).
@@ -825,10 +825,10 @@ viewer serves the 07-01 SDR canonical set only.
   (`--cpuset-cpus=0-23` leaves 8 cores for the media stack, `--cpu-shares=256`, `--memory=40g`,
   fresh image pull, Docker-only, creds passed as env — the stateless host is untouched). Observed
   first: load 1.08, media stack + `zen-lanstore` + PXE running, no heavy compute worker → safe.
-- **4 boxes busy:** .27 `zen-seq-huge` (GPU, 6-bucket sequencer) + i265 `zen-hdr-cpu` + r5900xt
+- **4 boxes busy:** r7900x `zen-seq-huge` (GPU, 6-bucket sequencer) + i265 `zen-hdr-cpu` + r5900xt
   `zen-score-cpu` + tower `zen-hdr-cpu` (all CPU on sf-cpu). Remaining home boxes: **mac** (needs
-  the arm-native `_pool944neon` worker, not the x86 image) + **node-2/node-3** (kids' PCs, flip
-  needs user approval) — both constrained, not autonomously enrollable.
+  the arm-native `_pool944neon` worker, not the x86 image) + **node-2/node-3** (default to their
+  other OS; flipping needs user approval) — both constrained, not autonomously enrollable.
 - **declare→gap→reconcile** is the zenfleet substrate, live per bucket (declared cells in the
   manifest, `ledger/` = done chunks, `claims/` = in-flight gaps under R2 lease): at snapshot
   sf-cpu 1299 done + 50 claims, sf-gpu-huge 12 + 11, sf-gpu(medium) 14 + 7, sf-gpu-small 2 done,
@@ -953,7 +953,7 @@ Serving a LAN set in the browser is a real multi-step ETL, confirmed (not a quic
 `s5cmd ls` the artifacts → (encode_sha, bytes); (3) join scores+bytes+ref-dims → an RD parquet in
 `{base}/{dataset}/*.parquet` shape; (4) `rollup_zenmetrics.py --base <that>` + a set-selector. Real
 ETL, ~an hour+ per set. **The browser IS functional and SERVED** (http://localhost:3400/ ,
-http://192.168.50.44:3400/ — `python3 -m http.server 3400 --bind 0.0.0.0 --directory
+on the LAN as well — `python3 -m http.server 3400 --bind 0.0.0.0 --directory
 ~/work/coefficient/viewer/build`) on the 07-01 canonical set; LAN coverage is the ETL above.
 
 ### C6 UPDATE 2026-08-26 — hdrgrid IS SERVED (selector + gate live)
@@ -1216,7 +1216,7 @@ r5900xt + r3500 + **Tower (caps VERIFIED via docker inspect: cpuset 0-23,
 shares 256, mem 40g — the launcher gained ZEN_CPUSET/ZEN_CPU_SHARES/ZEN_MEMORY,
 `116bf83b`)** + **dev itself (capped 0-19/24g — the operator box works too)**,
 all cpu_heavy-routed on the classing-fixed image, all snapshot-consumed at
-boot. Genuinely gated: r5600g (Windows/kids — user approval), r7900x
+boot. Genuinely gated: r5600g (Windows default — user approval), r7900x
 (hard-off), lilith (broken WSL, store-blocked), mac (**needs an aarch64
 executor image — no arm tag exists on ghcr; queued build**: aarch64-musl
 zenmetrics with sweep+hdr-gainmap+cpu-metrics + the arm base, then the mac's

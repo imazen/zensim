@@ -173,17 +173,17 @@ Verified with `node scripts/v_next/gauntlet_render_check.js <html> --hash
 *"scoreboard holds exactly N row(s) in fragment order"* with no banner.
 
 **SDR — fair board** (shipped D, Profile A, Profile B, the λ arm):
-`http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=d_id100_negrich@did100lane,v47_strict_QAT_native@cur372,b_sdr_linear_cid80_inclwinsor_dense_dial@cur372,Dpeaks_lam1em3`
+`http://localhost:3300/zensim/reports/summer_gauntlet_fair.html#compare=d_id100_negrich@did100lane,v47_strict_QAT_native@cur372,b_sdr_linear_cid80_inclwinsor_dense_dial@cur372,Dpeaks_lam1em3`
 
 **HDR — fair board** (BHdr + the three top-composite VERIFIED-FAIR HDR arms):
-`http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=bhdr_linear_shaped_cvvdpmix@cur372,HDR944_L1T1_s4005_hfpack,HDR944_GH2b_s4005_hfpack,HDR944R_t1_s4005_hfpack`
+`http://localhost:3300/zensim/reports/summer_gauntlet_fair.html#compare=bhdr_linear_shaped_cvvdpmix@cur372,HDR944_L1T1_s4005_hfpack,HDR944_GH2b_s4005_hfpack,HDR944R_t1_s4005_hfpack`
 
 **SDR — all rows, with `peer_ssim2`:**
-`http://192.168.50.44:3300/zensim/reports/summer_gauntlet.html#compare=d_id100_negrich@did100lane,v47_strict_QAT_native@cur372,b_sdr_linear_cid80_inclwinsor_dense_dial@cur372,Dpeaks_lam1em3,peer_ssim2`
+`http://localhost:3300/zensim/reports/summer_gauntlet.html#compare=d_id100_negrich@did100lane,v47_strict_QAT_native@cur372,b_sdr_linear_cid80_inclwinsor_dense_dial@cur372,Dpeaks_lam1em3,peer_ssim2`
 
 **HDR — all rows**, adding the UPIQ-best single seed (LEGACY, so absent from the
 fair board) and `peer_ssim2`:
-`http://192.168.50.44:3300/zensim/reports/summer_gauntlet.html#compare=bhdr_linear_shaped_cvvdpmix@cur372,HDR944_L1T1_s4005_hfpack,HDR944_GH2b_s4005_hfpack,HDR944R_t1_s4005_hfpack,HDR944_L1T1_s4004,peer_ssim2`
+`http://localhost:3300/zensim/reports/summer_gauntlet.html#compare=bhdr_linear_shaped_cvvdpmix@cur372,HDR944_L1T1_s4005_hfpack,HDR944_GH2b_s4005_hfpack,HDR944R_t1_s4005_hfpack,HDR944_L1T1_s4004,peer_ssim2`
 
 Boards: fair **9.66 MB** (130 of 467 rows, cap 12 MB), all-rows **21.91 MB** (467
 rows; the over-cap is pre-existing and reported, not introduced here). Both pass

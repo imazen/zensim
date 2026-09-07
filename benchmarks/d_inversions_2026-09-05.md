@@ -213,8 +213,7 @@ crop (centered, sized to 40% of the image's short side — not hand-picked, so t
 accused of cherry-picking a flattering or damning region), each labelled with q / ssim2 / D /
 encoded bytes, plus a per-entry badge stating whether ssim2 independently confirms the drop.
 
-- **Local:** `http://localhost:3300/zensim/ladder-2026-09-05/inversions/index.html` — curl `200`.
-- **LAN:** `http://192.168.50.44:3300/zensim/ladder-2026-09-05/inversions/index.html` — curl `200`.
+- **Served:** `http://localhost:3300/zensim/ladder-2026-09-05/inversions/index.html` — curl `200`.
 
 Tiles rendered **only** through `zensim-bench/examples/ladder_tile_gen` (`full`/`crop` modes —
 `zenpng` decode/encode + `zenresize` Mitchell downscale; no foreign imaging tool touches a pixel),

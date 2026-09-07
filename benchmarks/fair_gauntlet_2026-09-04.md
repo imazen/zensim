@@ -358,14 +358,14 @@ comparison* in the control bar writes and copies it.
 **Clean example** — three fair-board rows, no banner:
 
 ```
-http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=W10L9PH_s4004_packed,HDR944_L1T1_s4005_hfpack,LSTAR_s4021_packed
+http://localhost:3300/zensim/reports/summer_gauntlet_fair.html#compare=W10L9PH_s4004_packed,HDR944_L1T1_s4005_hfpack,LSTAR_s4021_packed
 ```
 
 **With a deliberate typo** — the found row still renders, and a full-width red banner names
 the missing id verbatim with its three nearest board names as one-click **replacements**:
 
 ```
-http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=W10L9PH_s4004_packed,W10L9PH_s4004_pack
+http://localhost:3300/zensim/reports/summer_gauntlet_fair.html#compare=W10L9PH_s4004_packed,W10L9PH_s4004_pack
 ```
 
 ### The banner is actionable (2026-09-05)
@@ -389,7 +389,7 @@ last, after exact and case-insensitive matching, so a real name always wins over
 that merely prefixes it:
 
 ```
-http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=HDR944_L1T1_s4005
+http://localhost:3300/zensim/reports/summer_gauntlet_fair.html#compare=HDR944_L1T1_s4005
 ```
 
 resolves to `HDR944_L1T1_s4005_hfpack` with **no banner** and a small "prefix expanded" note

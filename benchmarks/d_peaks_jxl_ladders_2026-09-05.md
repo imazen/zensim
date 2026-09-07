@@ -15,7 +15,7 @@ regression — neither arm ships).
 
 ## 1. The ladders page
 
-`http://192.168.50.44:3300/zensim/dpeaks372-2026-09-05/jxlfloor/ladders/index.html`
+`http://localhost:3300/zensim/dpeaks372-2026-09-05/jxlfloor/ladders/index.html`
 (curl-verified `HTTP 200`, both via the LAN IP and `localhost:3300`).
 
 For each of the 4 failing references, the page shows the reference plus 5 JXL steps —
@@ -170,7 +170,7 @@ present (LEGACY rows are only hidden there, not dropped).
 
 **FAIR board, 3-way (shipped D + both candidates) — clean, no banner:**
 ```
-http://192.168.50.44:3300/zensim/reports/summer_gauntlet_fair.html#compare=d_id100_negrich@did100lane,Dpeaks_lam1em3_minus_f162,Dpeaks_lam1em3
+http://localhost:3300/zensim/reports/summer_gauntlet_fair.html#compare=d_id100_negrich@did100lane,Dpeaks_lam1em3_minus_f162,Dpeaks_lam1em3
 ```
 Verified: `node scripts/v_next/gauntlet_render_check.js summer_gauntlet_fair.html --hash
 'compare=d_id100_negrich@did100lane,Dpeaks_lam1em3_minus_f162,Dpeaks_lam1em3' --expect-visible
@@ -179,7 +179,7 @@ PASS (exact 3 rows, fragment order, no banner).
 
 **All-rows board, 4-way (adds the ssim2 mentor row) — clean, no banner:**
 ```
-http://192.168.50.44:3300/zensim/reports/summer_gauntlet.html#compare=d_id100_negrich@did100lane,Dpeaks_lam1em3_minus_f162,Dpeaks_lam1em3,peer_ssim2
+http://localhost:3300/zensim/reports/summer_gauntlet.html#compare=d_id100_negrich@did100lane,Dpeaks_lam1em3_minus_f162,Dpeaks_lam1em3,peer_ssim2
 ```
 Verified the same way, 4 rows, fragment order, no banner. `d_id100_negrich@did100lane`
 is shipped `ZensimProfile::D`'s own board row (`bake_sha256` matches

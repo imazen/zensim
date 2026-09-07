@@ -9,7 +9,7 @@
 # file still being written can never be harvested half-copied. Copies to a
 # .part and renames, so the local appearance is atomic.
 set -uo pipefail
-L=${WAVE9_REMOTE:-lilith@192.168.50.27}
+L=${WAVE9_REMOTE:-lilith@r7900x}
 RDIR=${WAVE9_REMOTE_OUT:-/home/lilith/sota944/out/w9}
 OUT=${SOTA944_OUT:-/mnt/v/output/zensim/bakes/sota944/bakes}
 LOG=${WAVE9_LOG:-$HOME/tmp/wave9}
