@@ -10,6 +10,13 @@ SOTA bar are frozen here; the results section is appended in place afterwards. P
 `benchmarks/issue50_topcliff_2026-08-02.md`, `benchmarks/bandvis_dst_activity_2026-08-02.md`,
 CLAUDE.md ★924-parquets + ★E-M campaign.
 
+> **Commit references refreshed 2026-09-06.** A 2026-08-06 bookmark move rewrote 18
+> commits under new shas; nothing was lost (every subject appears exactly once on
+> `main`), but seven citations in this doc and three in `CHANGELOG.md` still named the
+> pre-move shas and resolved to nothing. Each was repointed at the surviving commit,
+> matched by subject and confirmed by `git patch-id --stable` — all six pairs are
+> content-identical and on `main@origin`. No claim, number or conclusion changed.
+
 ## 0. Data (unified 944 regime — REGIME PURITY absolute; never column-mix)
 
 | input | path | role |
@@ -12669,13 +12676,13 @@ takeaway's missing guard row is now measured**: M3a(`BANDING`@s0-Y+s0-B) =
 | # | class | disposition |
 |---|---|---|
 | C1 | silent orientation loss | **AUDITED + PARTIAL**: zensim-side `.abs()` census — remaining sites are (a) the documented aggregate convention in `panel.rs` (signed twin now emitted everywhere), (b) the aggregate bootstrap-CI resample (`bake_verdict.rs:1306`, convention-consistent; folded-near-zero caveat noted — immaterial for aggregate corpus values), (c) declared display points (freeze_check JND line prints signed AND \|·\| together). `SignedStat` for zenstats = **PROPOSED** (cross-repo): a `#[must_use] SignedStat(f64)` whose `Display` is signed and whose `.display_abs()` is the only abs, making every silent `\|·\|` greppable; migration = mechanical since `srocc_signed` already flows |
-| C2 | wrong-regime reads | **LANDED** (`e39448c2`): `folded_root_conflict` + `bake_verdict --regime 944` REFUSAL, `--cross-regime` override with banner; smoke-verified on the b_sdr class (refused), ADD156 (passes), override (proceeds); 4+1 new tests |
+| C2 | wrong-regime reads | **LANDED** (`38280b09`): `folded_root_conflict` + `bake_verdict --regime 944` REFUSAL, `--cross-regime` override with banner; smoke-verified on the b_sdr class (refused), ADD156 (passes), override (proceeds); 4+1 new tests |
 | C3 | era-ambiguous corrections | **LANDED-LIGHT**: both halves turn out to exist or now do — verdicts ALREADY stamp per-corpus table sha256s (how W.3.5 was checkable), and the H-part-1 rebuild ALREADY wrote a full `target_orientation` correction block into the ext manifests (`corrected_sha256` + `preserved_inverted_sha256` + transform + repro hazard). The missing one-call reader is now `scripts/check_table_era.py <sha>`: CURRENT (rc 0) / SUPERSEDED with the hazard text (rc 3) / UNKNOWN (rc 4), scanning every `_MANIFEST.json` under the canonical roots, with a generic `*_sha256` scan so future correction-block shapes are found without editing the tool. Verified on both kadid shas + a garbage sha |
 | C4 | sub-agent report drift | **LANDED**: `scripts/verify_push.sh` — fetch + ancestry + ONE verbatim-pastable line (`VERIFY-PUSH OK <sha> is-ancestor-of <ref> checked=<ts>`), git path in the primary, jj fallback in workspaces (where `git rev-parse` silently fails — the same failure that blanked the .meta provenance); FAIL exits 1. Both paths smoke-verified. Supervisors: require the line, then re-run the command yourself |
-| C5 | fail-silent emitters | **LANDED** (`84c91c6b`): all-rows-missing ⇒ REFUSE; any-missing ⇒ nonzero + `missing_source_rows` in the .meta; `repo_commit()` git→jj→HARD-ERROR (never blank); `--only/--date` for targeted regen; the R2 ladder regenerated (identical to the recovered workspace copy) + R.R2 resolved |
+| C5 | fail-silent emitters | **LANDED** (`a4b82191`): all-rows-missing ⇒ REFUSE; any-missing ⇒ nonzero + `missing_source_rows` in the .meta; `repo_commit()` git→jj→HARD-ERROR (never blank); `--only/--date` for targeted regen; the R2 ladder regenerated (identical to the recovered workspace copy) + R.R2 resolved |
 | C6 | substring identity lookups | **AUDITED — owners clean**: promoter/board/dominance/gauntlet lookups are exact dict/set membership or intended prefix-taxonomy; the `W10L9_s4003 ⊂ _packed` trap lives in ad-hoc `--glob`/grep — use anchored patterns (`.../W10L9_s4003.bin`, never `*W10L9_s4003*`) |
 | C7 | pgrep -f self-match | **LANDED**: `scripts/lib/proc.sh` — exact-name helpers with the 15-char comm truncation handled loudly, PID-wait, completion-marker wait, and a `proc_kill_exact` that REFUSES -f-shaped patterns |
-| C8 | calibration-blind defaults | **LANDED** (`e39448c2`): `pack` probes what tau=0.005 would kill and auto-defaults to 0 above 10% live-line kill; measured on the population (dense 0/667 → keeps 0.005; ADD156 14/28 and GL4 54/57 → auto-0); auto output byte-identical to explicit `--zerobias-bulk 0`; every pack now prints the kill preview |
+| C8 | calibration-blind defaults | **LANDED** (`38280b09`): `pack` probes what tau=0.005 would kill and auto-defaults to 0 above 10% live-line kill; measured on the population (dense 0/667 → keeps 0.005; ADD156 14/28 and GL4 54/57 → auto-0); auto output byte-identical to explicit `--zerobias-bulk 0`; every pack now prints the kill preview |
 | C9 | under-reporting instruments | **AUDITED**: `bake_verdict` dual-timer landed earlier in the window; freeze_check/panel/bake_dial_refit print no self-timers (nothing to under-report); `pack`'s new kill-preview adds affirmative telemetry |
 
 ### W.R6 — process findings not covered above
@@ -13064,7 +13071,7 @@ nothing ships, swaps, or flips — every ship/flip decision is the user's.**
 ## thread-1 grid ran but BEFORE its results section is written; folds appendix
 ## W's corrections into this appendix's priors and adds ONE arm)
 
-Appendix W (`16d55fa4`) landed three corrections that bind X.1's priors:
+Appendix W (`5243b240`) landed three corrections that bind X.1's priors:
 
 1. **P1's root-A CID22 claim is corrected at source**: T.R9's "v1 block buys
    CID22 +0.006" is RETRACTED at convergence (+0.00487, below the 0.005
@@ -13407,7 +13414,7 @@ storage, gate outcomes) against the estimates above.
 
 ## Y.R0 — PART-0 PRELIMINARY (2026-08-06; CONTENDED BOX — ratios usable, absolute ms provisional; the frozen bar lands in Y.R0-final on a quiet window)
 
-Instrument committed: `zensim/benches/tenx_bar_bench.rs` (`c0174dc6`). First
+Instrument committed: `zensim/benches/tenx_bar_bench.rs` (`ba8899ca`). First
 ST sweep ran with THREE sibling lanes live (load 17–34: `v2_ab_extract` 245%,
 `diffmap_block_coherence` 217%, squintly-score 115%) — zenbench flagged
 drift/CV on most arms (576² 4 clean rounds; 1MP CV 27–64%; 4K 2 rounds).
@@ -13441,7 +13448,7 @@ per-size bar table is deferred to Y.R0-final rather than frozen on a
 drift-flagged run (registered deviation: freezing on this data would violate
 the bench's own flags).
 
-## Y.R1 — L-Y1 RESULTS (batched FD probe; zensim `636ddbfe` + jxl `eb80d522`; all gates green first run, no tolerance touched)
+## Y.R1 — L-Y1 RESULTS (batched FD probe; zensim `5e6e05a3` + jxl `eb80d522`; all gates green first run, no tolerance touched)
 
 **zensim side.** `score_features_fd_gradient_with_profile` — ONE
 `Model::from_bytes` + ONE `Predictor` (+ one reused f32 buffer) for all 2·N
@@ -13534,7 +13541,7 @@ dose-response + controls are the defense).
 
 ## Y.R3 — A-Y4 AVIF RECT-QUERY STEERING (2026-08-06): the channel is LIVE end-to-end; the naive per-SB delta-q spend is a measured matched-rate LOSS — registered outcome (c) with mechanism
 
-**Interface (committed):** zensim `avif_sb_hints` example (`9ed79f97`) —
+**Interface (committed):** zensim `avif_sb_hints` example (`6b273834`) —
 (ref, dist) → folded-944 features → the bake's batched FD gradient (L-Y1) →
 `compute_attribution_density_full` → per-64px-SB mean grid TSV
 (`AttributionResult::block_sums`; `query_rect` serves arbitrary 4–128 px
