@@ -1,4 +1,276 @@
-# The cruft purge — retiring positional feature layouts
+# The cruft purge — make zensim development obvious
+
+## Current cleanup plan — 2026-09-07
+
+**Plan, not an executed deletion.** Reviewed against `0205c45c` plus the current
+documentation/chart edits. This expands the existing feature-layout cleanup;
+the original September 6 registration is preserved below. Its early “D
+(default)”, “no declared bakes” and consumer-not-wired statements are historical:
+**B is the library/`codec_target()` default; A/B/BHdr/D already use explicit IDs
+and the consumers gather them.** The targeting CLI still defaults to `tuner-v4`.
+Repeating completed migrations would add work, not clarity.
+
+The objective is that a developer can answer five questions from one entry
+page: **what behavior matters, which implementation owns it, how to change it,
+how to test it, and whether the result is better for users.** The user still
+controls one target score. Fewer files alone is not the acceptance criterion.
+
+The measured surface is 612 Python/shell files, 46 Rust binary source files,
+76 Rust examples, 13 `just` recipes and 660 tracked Markdown files. The static
+script linter passes; it cannot tell us whether a script uses the right science
+or duplicates another implementation. Detailed candidate inventories are local
+at `~/tmp/zensim-science-audit-2026-09-07/`.
+
+### 0. Establish correctness before choosing what survives
+
+**September 7 user preference:** canonical implementations should generally be
+Rust; Python is fastest for invention. Keep that distinction in this plan.
+An owner is a maintenance decision, not proof that its result is correct.
+There is no language-based deletion rule and no requirement to port an idea
+before testing whether it is useful.
+
+The chronology supports a substantial Rust production/reproduction path by
+July 29, but not a completed removal of Python. The Rust trainer existed on
+May 10; the older spline scripts date to May and `blend_lib.py` to July 15.
+The [July duplication audit](../benchmarks/duplication_audit_2026-07-15.md)
+explicitly left the Torch cluster open in its July 29 addendum. These are
+mostly unfinished migrations, not evidence of a wholesale move back to Python
+in the last month. Check later dated sections before accepting a port's initial
+status summary.
+
+| Area | Evidence and confidence | Limit before replacement/deletion |
+|---|---|---|
+| Specific bake reproduction and packing | Strong, bounded [July 29 byte-identity evidence](../benchmarks/key_bake_repro_verification_2026-07-29.md): BHdr from frozen Gram inputs, packing against fresh Python and the shipped artifact. | B starts from a committed raw bake, so its reproduction is not a fresh original fit. A uses a pinned earlier tree. These records do not prove every calibrator or later checkout equivalent. |
+| Product/evaluator score arithmetic | Strong binding evidence from [September 6 consolidation](../benchmarks/score_owner_consolidation_2026-09-06.md): actual adapter comparisons, spline boundaries and mutation-tested controls. | Both implementations were Rust and still diverged before that fix. Sharing arithmetic does not prove the chosen formula's perceptual validity or close separate metadata decoding. |
+| Features, serving and training mechanisms | Real goldens, invariants, scalar/exact references, finite-difference gradient checks and selected train/bake/serve tests exist. Confidence applies to those tested branches and tolerances. | C/CHdr activity semantics, ignored trainer options and table/metadata admission remain open. SIMD tolerance checks are not byte-identical whole-training proofs. |
+| Statistics | Ordinary finite/tied statistics have useful reference checks. Full panel cross-language gates were reported passing [September 1](../benchmarks/hfhuman_2026-09-01.md). | Those integration tests are ignored by default and reuse Rust's logistic-rescaled output: they do not independently validate the fit. Legacy `mohammadi_eval.py` PWRC/OR definitions differ from the current owner. The parity script's stale header overstates equivalence. |
+| Torch/blend training and panel | No complete same-recipe Rust/Python training-and-export equivalence gate found. `blend_lib.panel` has demonstrably different rescaling and band definitions. | Preserve useful experiments; establish the intended method, supported options, data/order and exported-bake behavior before replacement. A matching rank correlation is insufficient. |
+| Four remaining spline writers | Only partial migration is established; July 29 `recal_v47_dial.py` strip parity does not validate its fit. | Knot selection, f32 serialization and runtime boundaries need separate comparisons. SciPy polynomial extrapolation and the product's bounded linear tails differ. Monotonic knots alone do not prove diagnostic/runtime agreement. |
+
+This confidence review inspected current source/assertions and dated results;
+it did **not** rerun the full parity matrix or retrain the models. One small
+spline counterexample was checked: knots `(0,0), (1,1), (2,4)` give SciPy
+extrapolated output `10` at input `-2`, versus `0` for the old V9 linear-tail
+helper. This establishes a contract difference, not a defect in a shipped bake.
+
+For each proposed substitution, first name the intended method independently
+of either implementation. Then compare actual implementations on shared normal
+and boundary fixtures, with a relevant negative control. Finally evaluate the
+actual exported bake through Rust and the real codec target loop. Record
+intentional corrections as changed behavior; do not force parity with a known
+bug or quietly regrade historical results with a new instrument.
+
+Python experiments may invent losses, models, transforms and fit procedures.
+Record the recipe and artifacts in the existing experiment record, reuse Rust
+owners for unchanged operations where practical, and mark results from a private
+instrument accordingly. A promising mechanism graduates into its existing Rust
+owner after validation. Retire the redundant supported path only after that;
+retain a Python implementation when it is a useful independent oracle or a
+still-active hypothesis. No second experiment registry is needed.
+
+### 1. Make the supported development path small
+
+- Keep [`../SESSION-RESUME.md`](../SESSION-RESUME.md) as the short current-state
+  entry. It names the default B, fast baseline D, current unified challenger,
+  remaining blockers, and links the commands. Historical model families stay
+  available through the archive, outside the default comparison view.
+- Reduce `CLAUDE.md` to current instructions, the existing owner table and
+  links; target roughly 150 lines instead of 4,000. Move unique historical
+  findings to their existing benchmark records before removing copied prose.
+- Make [`WAVE_PLAYBOOK.md`](WAVE_PLAYBOOK.md) the single operational sequence.
+  Fold in enduring rules from `RESEARCH.md` and `ITERATION_PROTOCOL.md`, then
+  turn their active-workflow sections into short historical pointers. Keep
+  `REPRODUCIBILITY.md`, `MODEL_SELECTION_SCORECARD.md`, `FEATURE_SET_IDS.md` and
+  `DATA_SPLITS.md` as the contracts for their respective subjects.
+- Extend **the existing `justfile`**, with short useful `just --list` help:
+  check a change → validate a recipe → train → evaluate → compare/qualify.
+  These are proposed thin entry points over the current owners, not commands
+  implemented by this plan. Remove the hardcoded August SOTA recipe as the
+  implicit input to `check-mix`; require the actual experiment's inputs.
+  Keep normal library development independent of large research datasets and
+  the standalone codec-tool workspaces.
+- Align the targeting CLI default with `codec-target`, preserving explicit
+  legacy profile selection. Treat this as a documented score-behavior migration:
+  test CLI/library default agreement and record the changed default outputs.
+
+**Done when:** a developer can follow this route without reading a campaign log,
+guessing a feature width, or choosing among several “default” evaluation tools.
+Every command prints its resolved inputs and expected outputs. This cleanup
+adds no second supported trainer, statistics library, report generator,
+scheduler or registry. Bounded Python prototypes remain available under §0.
+
+### 2. First deletion batch: obsolete independent tools
+
+| Target | Why remove it | Condition before removal |
+|---|---|---|
+| `scripts/fit_output_spline.py` | Independent spline fitting/serialization against held-out AIC-3; no tracked executable caller found. | Preserve the historical revision/reference. Current calibration belongs in `bake_dial_refit` using admissible training anchors; do not reproduce the leakage as a replacement. |
+| `scripts/v_next/v0_20b/bake_v3.py` | Incomplete baking stub: writes an NPZ, reports the remaining baker as pending, and can finish successfully without the requested bake. | Confirm no live caller; update active instructions to the existing complete JSON/`zenpredict bake` path. Keep any unique historical recipe at its recorded revision. |
+| `zensim-validate/src/bin/preview_stats_demo.rs` | Autodiscovered 756-line binary embedding seven May bakes and obsolete default labels; no executable/workflow caller found. | Check known external CLI usage and preserve any needed report fixture; use `bake_verdict`/the existing comparison board. Do not delete its historical bake inputs with the binary. |
+| `scripts/v_next/v0_20_screen_to_trainer_args.py` | The README already calls it redundant with the trainer's `--auto-transforms`. | Compare top-N, minimum-lift and max-feature-ID behavior; migrate any required semantics and callers before deleting. |
+| Repeated join-safety unit-test invocation in `.github/workflows/ci.yml` / `joinsafety.yml` | Same unit suite/dependency setup runs twice. | Keep one test invocation and the separate join gate; preserve required CI status checks. |
+
+Use `lint-scripts`, caller searches and relevant argument/behavior checks for
+this batch. A missing prebuilt binary is not evidence that its source is dead.
+Current `run_cross_codec_v*` aliases already share one implementation and have
+argv parity tests; removing those small compatibility wrappers is low priority.
+
+Defer `scripts/mohammadi_eval.py` retirement to the instrument review in §0.
+Its PWRC/OR definitions differ from current `panel`; no caller is not proof
+of mathematical equivalence. Preserve its historical instrument identity and
+any needed keyed-row/sigma behavior before archiving it. Keep the independent
+panel reference and correct its stale equivalence claims.
+
+### 3. Separate active invention from redundant supported paths
+
+The high-value dependency chain is:
+
+```text
+bandwise_dashboard.py legacy mode / blend_search.py
+    → blend_lib.py (Torch training, NumPy scoring, private statistics)
+gauntlet.py historical composite fallback → blend_lib.py
+```
+
+Keep `bandwise_dashboard.py --fulleval-dir` and `gauntlet.py` as the current
+board owner. Retire the old NPZ/Matplotlib report mode after preserving its
+needed outputs and recipe lineage. Identify which blend-search operations are
+active hypotheses and which duplicate a supported operation. For the latter,
+prove the intended behavior and migrate to `zensim_mlp_train`,
+`bake_dial_refit`, `bake_verdict` and `zenstats`; then delete the proven redundant
+implementations and their imports **in the same change**.
+Archive abandoned studies instead of porting them merely to preserve a command.
+
+Apply the same treatment to the independent negative/diverse training family
+(`train_mlp_negatives.py`, `train_mlp_diverse.py` and their analysis/baking
+consumers) and the remaining spline writers (`calibrate_v9_spline.py`,
+`calibrate_balanced_v9_spline.py`, `v11_ssim2/calibrate_v11_balanced_spline.py`,
+`recal_v47_dial.py`). These live under `scripts/v_next/`. Preserve recipe-specific
+anchor selection and postprocessing when migrating a live recipe; use
+same-recipe bake/prediction parity, not merely a matching aggregate score.
+
+Remove the board's dependency-sensitive composite recalculation. Current rows
+consume the Rust verdict's value. Historical rows retain a verified recorded
+value/rule or an explicit unmeasured state. Today the broad exception fallback
+can change rejection behavior when an optional Python import fails.
+
+**Done when:** rendering stored verdicts requires no Torch trainer or private
+IQA statistics, current scientific fields are unchanged, and both gauntlet
+gates/browser checks pass. This removes competing implementations while keeping
+the comprehensive board and historical evidence.
+
+Extend the existing script linter only where it can catch accidental production
+forks or silent fallbacks at these owner boundaries. Review new private methods
+for their declared experimental/reference role; do not reject them merely for
+using Torch, SciPy or Python. Keep independent reference tests, measured gated
+mirrors and frozen as-run protocols. A prototype need not be a second supported
+way to produce the official score.
+
+### 4. Make evaluation complete, reusable and explicit
+
+Consolidate the live path through `harvest_bakes.sh` and `run_full_eval.sh`.
+Today harvest may run a standalone verdict and then repeat evaluation through
+full-eval; full-eval builds both binaries before choosing which measurements
+are needed. Build once, record binary identity, and run only required stages.
+Retain `sota944_verdict.sh` as a historical campaign invocation until its callers
+have migrated; its frozen preset is not the generic development interface.
+
+Replace “this filename exists, therefore done” with validated result reuse:
+bake bytes, feature/data/decoder revision, evaluator binary, instrument and
+requested stage must match. A partial, malformed or same-name stale file must
+not count as a completed evaluation. Reuse existing provenance fields; extend
+the owning schema for missing identity, not a second cache registry.
+
+Add a **qualification mode at the existing verdict/selection owners** that
+requires complete passing product evidence. The default board shows B, D and
+the current challenger with `qualified`, `fails: …` or `missing: …` before the
+research composite. Real codec RD/target results are required evidence; an
+offline full-eval alone cannot fill those fields.
+
+**Done when:** an interrupted run resumes correctly; changing a bake under the
+same filename cannot reuse its old verdict; missing floor/identity/loop evidence
+prevents qualification; changing presentation never recomputes science.
+
+### 5. Finish the feature contract, then remove legacy routing
+
+- Make the registered feature IDs and per-bake semantic revision authoritative
+  from table admission to runtime output. Reject missing/duplicate required IDs
+  and incompatible revisions before fitting/scoring. Preserve registered legacy
+  aliases; width and an observed all-zero column are insufficient evidence.
+- Resolve the C/CHdr `append2_dst_activity` train/serve discrepancy as an explicit
+  model-behavior change, with before/after evidence. Then finish their declared-ID
+  conversion and retire `ComputeSet::from_block_profile` and
+  `fold_engine::wide_bake_v2_read` once every remaining legacy/custom caller has
+  an equivalent plan. Require pixel-feature/score parity and a cheap-wide/free-set
+  cost control, preserving the existing Off→Peaks working-set policy. Coverage
+  tests alone and densifying C/CHdr alone do not prove that census.
+- Migrate repeated feature metadata parsing/era labeling to the existing
+  feature-set/layout owners. Preserve the information carried by old presets
+  and public positional accessors through compatibility adapters.
+- Make unsupported trainer option combinations fail before work starts.
+  The remaining cases include non-alpha anchor/PJND/KonJND losses in
+  `mlp_train/mod.rs` and GPU dispatch before the shared capability checks in
+  `bin/zensim_mlp_train.rs`. Resolve one effective configuration for both paths.
+  Keep historical reproduction modes explicit; normalize irrelevant defaults
+  and reject explicitly requested unsupported behavior. The recent depth,
+  skip, EMA and other guards already landed; do not reimplement them.
+- Retire `FeatureTier` and its positional training truncations in
+  `zensim-validate/src/main.rs` after checking CLI consumers. Preserve its
+  still-used extraction mode. Review `examples/mlp_cross_check.rs` with the
+  historical site's JS consumer before removing that old 228-wide example.
+- Share validated score/head metadata decoding between `metric.rs` and
+  `bake_runtime.rs`; distinguish absent metadata from malformed metadata.
+  Arithmetic already has the `score_math` owner. Keep the runtime cache and
+  evaluator adapters, and prove valid-bake parity before retiring parsers.
+
+**Done when:** serving, training and evaluation agree on the same declared
+features and semantics; all supported build configurations pass the existing
+serving/golden checks; each removed symbol has no live caller. API removals
+remain a versioned compatibility change, not an incidental cleanup.
+
+### 6. Ablate useful complexity, not evidence
+
+| Ablation | Method | When removal is justified |
+|---|---|---|
+| Feature groups in the strongest valid unified recipe | Use existing cost/contribution tools to choose a small set of groups; retrain without each group with matched data and pack/calibrate identically. For stochastic fits, use at least three paired, recorded initialization/order replicates. Keep the full-feature research path. | Predeclared perceptual noninferiority, complete codec-floor/identity gates, and a measured extraction/loop cost or maintenance benefit. Frozen-model zeroing is only a diagnostic. |
+| Optional losses, transforms and heads in that recipe | One component changed at a time; validate train/serve semantics first. Use the exact served bake for the verdict and high-fidelity checks. | Removal survives held-out content and independent fixed-target quality/cost evaluation. A better composite alone is insufficient. |
+| Buffered versus fold execution paths | Use the existing fold-engine retirement plan and caller/parity matrix, including HDR, cancellation, non-four-scale, reference reuse, legacy profiles and minimal-feature builds. | All supported callers have a replacement with demonstrated numerical and cost behavior. This is implementation retirement, not a new model experiment. |
+
+Run the registered **all-codec floor-coverage control, including rav1e**, before
+interpreting a floor failure as proof that a model component is unnecessary.
+Repeating a deterministic linear fit with different unused seed labels is not
+replication; use held-out content and reference-level uncertainty for that arm.
+Do not repeat already-exhausted capacity/hinge sweeps. Keep the scientific work
+to one justified challenger and a small number of discriminating arms; qualify
+on independently judged quality, target error, bytes, passes, latency and memory.
+
+### Archive and storage cleanup come last
+
+Move `regression-report.md`, `zengrid-proposal.md`, the completed
+`STREAMING_FOLDAPP_PLAN_2026-07-26.md` and `REPRODUCE_V47.md` out of the root
+navigation after updating references. Retire the old `scripts/hetzner/` launch
+entry points after caller/reproduction checks; its `rebuild_derived.py` is a data
+algorithm requiring separate treatment.
+
+Keep published API compatibility, goldens, retired dense/wide twins, unique
+recipes, split/era registries, failed-result evidence and deployed `site/`
+assets. The 56 experimental bakes have real compiled consumers. Exact duplicate
+bake copies offer only 1.67 MB of savings and need include/URL rewiring first.
+Two old local `perf.data` captures offer about 409 MB after a fresh liveness/
+evidence check. No blanket `git clean`, dataset deletion or build-directory purge
+is part of this plan.
+
+**Execution order:** establish the §0 evidence requirements; 1 → 2 → 3 → 4;
+then the compatible portions of 5, followed
+by the bounded ablations in 6. Storage cleanup is optional. Each implementation
+change closes its callers, checks and documentation before the next begins.
+Success means fewer supported decisions and fewer ways to obtain a plausible
+wrong result—not a quota of deleted files.
+
+---
+
+<details>
+<summary>Original September 6 feature-layout registration and measured increments</summary>
+
+## Historical plan — retiring positional feature layouts
 
 **Status:** pre-registered 2026-09-06, before any code in this lane. Gates below
 are written first and are never edited to match a result. A gate that fails is
@@ -362,3 +634,5 @@ bit-identically before any consumer is repointed.
 wire shape); any renumbering (append-only stands); flipping F4 or F5 (they stay
 registered `Proposed`); any crates.io publish; bigcodec/KADIS conversion (fleet
 jobs, registered not run); `zenanalyze-api` (frozen).
+
+</details>

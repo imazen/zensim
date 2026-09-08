@@ -97,15 +97,12 @@ impl Default for TargetSpec {
             target: 70.0,
             tolerance: 1.0,
             max_iterations: 8,
-            // Default to the canonical production codec-target profile
-            // (`ZensimProfile::codec_target()` == `A`, the shipped 2026-05-27
-            // v47-strict-QAT-native bake). This is the profile a codec dials
-            // against in production; it is bounded, identity-max, and monotone
-            // on all content. The historical trail variants (TunerV4 /
-            // Balanced / Compression / Ensemble etc.) now live in the
-            // unpublished `zensim-experimental` crate — use the CLI
-            // `--profile` flag (which still parses every named trail) when
-            // you need a specific experimental trail for evaluation.
+            // Follow the library's codec-target alias (B as of 2026-09-07).
+            // This selects the scorer; convergence still depends on the
+            // codec, content, target, and probe budget. The CLI separately
+            // defaults to historical tuner-v4: pass --profile codec-target
+            // there to match this default. Current mapping and score contract:
+            // docs/CODEC_TARGET_METRIC.md in the parent repository.
             profile: ZensimProfile::codec_target(),
         }
     }

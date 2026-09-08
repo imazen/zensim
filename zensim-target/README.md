@@ -1,151 +1,141 @@
 # zensim-target
 
-CLI + library that picks codec encode parameters to hit a user-typed
-zensim score. Given `(image, target_score, codec)`, runs a binary
-search over the codec's quality knob, encodes + decodes at each
-probe, scores the round-trip via `zensim::Zensim::compute`, and
-returns the encoded bytes that landed closest to `target ± tolerance`.
+CLI and library that choose a codec's encode parameter to approach a requested
+zensim score. Given `(image, target_score, codec)`, each probe encodes, decodes,
+and scores the reconstruction; the result includes encoded bytes, achieved
+score, probe history, and whether it reached the requested tolerance.
 
-The runtime side of the "user-facing quality dial" goal documented in
-[`zensim/CLAUDE.md`](../CLAUDE.md): the user types "give me zensim 70"
-and the codec stack does the binary search.
+**Checked against source on 2026-09-07:** the library default uses
+`ZensimProfile::codec_target()`, currently B. The CLI still defaults to the
+historical `tuner-v4` profile. Pass **`--profile codec-target`** to use the same
+scorer as the library default. Selecting a default profile does not establish
+that every image or target is reachable.
 
-## Licensing
+The [codec-target integration guide](../docs/CODEC_TARGET_METRIC.md) owns the
+current profile mapping, score contract, known limitations, and codec-native
+callers. The intended end-user control is one target score; codec quality and
+JXL distance are internal search parameters.
 
-This crate is **AGPL-3.0-only or Imazen commercial**. It links the
-AGPL zen codec crates (`zenjpeg`, `zenwebp`, `zenavif`, `zenjxl`,
-`zenpng`); `zensim` itself stays MIT/Apache. `publish = false` — the
-crate is internal to the zensim workspace.
+## Build and CLI
 
-## CLI
+This is a **standalone Cargo workspace**, excluded from the parent workspace.
+Its path dependencies require the sibling codec repositories. From the zensim
+repository root:
 
 ```bash
-cargo run --release -p zensim-target -- <input.png> \
-    --target 70 \
-    --codec zenjpeg \
-    [--profile tuner-v2] \
-    [--tolerance 1.0] \
-    [--max-iterations 8] \
-    [--output encoded.jpg]
+cargo run --release --manifest-path zensim-target/Cargo.toml --bin zensim-target -- \
+  input.png --target 80 --codec zenjpeg --profile codec-target \
+  --tolerance 1.0 --max-iterations 8 --output encoded.jpg
 ```
 
-Output:
+The default build enables JPEG, WebP, AVIF, and PNG. Add `--features zenjxl`
+**before** `--` to enable the JXL adapter. A smaller JPEG-only build uses
+`--no-default-features --features zenjpeg`. The selected codec must be enabled
+in the build.
 
-```
-codec=Jpeg  target=70.0  achieved=69.456  knob=78.438  bytes=62234  iters=5  converged=true
-```
+The CLI defaults to target 70, tolerance 1, and at most eight probes. It prints
+`codec`, `target`, `achieved`, `knob`, `bytes`, `iters`, and `converged` in its
+summary. Without `--quiet`, it also prints the collected per-probe trace.
+`--output` writes the returned bytes; omitting it performs the search without
+writing an encoded file. The CLI can write a best-effort result and exit
+successfully with `converged=false`, so inspect that field when target accuracy
+is required.
 
-With the default trace (no `--quiet`), each iteration prints a
-`iter / knob / achieved / bytes` row before the summary.
+### Profile selection
 
-### Codecs
+| CLI value | Meaning |
+|---|---|
+| `codec-target` (`codec_target`) | Current `ZensimProfile::codec_target()`; use this to match `TargetSpec::default()` |
+| `latest` (`latest-preview`, `latest_preview`) | Current `ZensimProfile::latest_preview()` |
+| `a` (`v0_3`, `v03`, `preview-v0.3`) | Deprecated A profile |
+| `v0_2` (`v02`, `preview-v0.2`) | Historical linear profile supplied by `zensim-experimental` |
+| `tuner`, `tuner-v2`, `tuner-v3`, `tuner-v4` | Historical experimental tuners; **CLI default is `tuner-v4`**; `default` also selects it |
+| `balanced`, `balanced-v2`, `balanced-v3`, `compression`, `compression-v2`, `compression-v3`, `ensemble` | Historical experimental profiles for evaluation |
 
-| `--codec`  | scale | direction | notes |
-|------------|-------|-----------|-------|
-| `zenjpeg`  | 5..99 (q) | q↑ → score↑ | `ApproxJpegli` + `ChromaSubsampling::Quarter` |
-| `zenwebp`  | 1..100 (q) | q↑ → score↑ | `LossyConfig::with_quality`, method=4 |
-| `zenavif`  | 1..100 (q) | q↑ → score↑ | `EncoderConfig::quality`, speed=6 |
-| `zenjxl`   | 0.01..15 (distance) | distance↓ → score↑ | full encode+decode wired via `zencodec` traits |
-| `zenpng`   | n/a (lossless) | — | single probe; score reflects PNG↔PNG round-trip |
+Names are case-insensitive. The [parser](src/bin/zensim_target.rs) lists all
+compatibility aliases. It does not currently accept `b`, `c`, or `d` as CLI
+profile names; library callers can set `TargetSpec::profile` directly. Old
+JND/JOD anchor labels and May-era profile measurements are historical
+calibration conventions, not guarantees for the current default.
 
-### Profiles
+### Codec adapters
 
-| `--profile` | `ZensimProfile` | notes |
-|---|---|---|
-| `v0_2` | `PreviewV0_2` | linear weights, small-image friendly |
-| `v0_3` | `PreviewV0_3` | legacy MLP — useful fallback |
-| `balanced` | `PreviewV0_5Balanced` | ⚠ ranking metric — non-monotonic q-step output (V0_5 ranking ships are NOT calibrated for quality-dial use) |
-| `compression` | `PreviewV0_5Compression` | ⚠ same |
-| `ensemble` | `PreviewV0_5Ensemble` | ⚠ same |
-| `tuner` | `PreviewV0_5Tuner` | prior tuner ship (V_tuner-v2-s2 calibrated, 2026-05-18) |
-| `tuner-v2` (default) | `PreviewV0_5TunerV2` | EXP-CROSS-CODEC-V6 ship (2026-05-19) — passes every Tuner-trail gate, Pareto-dominates `tuner` on monotonicity / median range / cross-codec PJND parity |
+| `--codec` | Search range | Direction assumed by the search | Fixed settings |
+|---|---|---|---|
+| `zenjpeg` | q 5–99 | q increases score | `ApproxJpegli`, quarter chroma subsampling |
+| `zenwebp` | q 1–100 | q increases score | method 4 |
+| `zenavif` | q 1–100 | q increases score | speed 6 |
+| `zenjxl` | distance 0.01–15 | distance decreases score | other settings use encoder defaults; requires `zenjxl` feature |
+| `zenpng` | no lossy quality knob | one probe | lossless RGB encode |
 
-### Default profile: PreviewV0_5TunerV2 (2026-05-19)
-
-The CLI default rotated from `PreviewV0_3` to `PreviewV0_5TunerV2`
-because the latter strictly improves the four properties a quality
-dial needs:
-
-1. **Strict monotonicity 95.22 %** on the 50-image × 19-q JPEG sweep
-   (vs prior `tuner` ship 92.78 %, vs V0_5 ranking ships 71–86 %).
-2. **Tied rate 0.00 %** (vs ranking ships 57–76 % clamp-flat dead
-   zones).
-3. **Median dynamic range 78 score units** across the JPEG q range
-   (vs V5 candidate 30.73 — V6 restored range without losing
-   monotonicity).
-4. **Cross-codec PJND parity** at T=63: mean butter_pnorm3 1.731
-   (gate < 2.5), cc_std_median 0.91 across {jpeg, webp, avif, jxl},
-   all-band cc_std_max 1.68.
-
-CID22 SROCC sits at 0.8770 (essentially tied with `tuner` at
-0.8786). KADID/TID/KonJND drop to 0.72 / 0.75 / 0.20 by design —
-the Tuner trail trains on safesyn only and is **NOT** a general
-ranking metric. For ranking workloads use `--profile balanced` or
-`--profile compression`.
-
-The cross-codec demo at
-[`benchmarks/zensim_target_v6_cross_codec_2026-05-19.md`](../benchmarks/zensim_target_v6_cross_codec_2026-05-19.md)
-runs 10 images × 4 codecs at T=63 and shows median z_std=0.64,
-median p_std=0.10 — both well inside the gates documented in
-the V6 methodology.
+The CLI loads its reference through the `image` crate and converts it to
+packed RGB8. The adapters return decoded RGB8 for scoring. This helper does
+not provide HDR, alpha-preserving, or color-managed target search. Decoder
+lineage is part of a reproducible measurement; the
+[adapters](src/codec.rs) specify the decoder used for each codec.
 
 ## Rust API
 
-```rust
-use zensim::ZensimProfile;
-use zensim_target::{CodecKind, TargetSpec, target_search};
+The input is tightly packed RGB8 with exactly `width * height * 3` bytes and
+no row padding. For example:
 
-let rgb: Vec<u8> = /* width*height*3 bytes */;
-let spec = TargetSpec {
-    target: 70.0,
-    tolerance: 1.0,
-    max_iterations: 8,
-    profile: ZensimProfile::PreviewV0_5TunerV2,
-};
-// Or use the default, which is also PreviewV0_5TunerV2:
-// let spec = TargetSpec { target: 70.0, ..TargetSpec::default() };
-let result = target_search(&rgb, width, height, CodecKind::Jpeg, spec)?;
-println!("achieved {:.2} at q={:.1} in {} iterations", 
-    result.achieved_score, result.final_knob, result.iterations);
-std::fs::write("out.jpg", &result.encoded)?;
+```rust
+use zensim_target::{CodecKind, TargetResult, TargetSpec, target_search};
+
+fn encode_at_target(rgb: &[u8], width: u32, height: u32) -> anyhow::Result<TargetResult> {
+    let spec = TargetSpec {
+        target: 80.0,
+        ..TargetSpec::default()
+    };
+    target_search(rgb, width, height, CodecKind::Jpeg, spec)
+}
 ```
 
-## Algorithm
+Inspect `converged`, `achieved_score`, `final_knob`, `iterations`, and `probes`
+before using the returned `encoded` bytes. Supply finite target/tolerance
+values, a nonnegative tolerance, and at least one iteration; those constraints
+are not validated by the current helper.
 
-Binary midpoint search over the codec's native quality knob:
+## Search behavior and limitations
 
-1. Encode reference at `q_mid = (q_lo + q_hi) / 2`.
-2. Decode encoded bytes back to RGB.
-3. Score `zensim(reference, decoded)` with the chosen profile.
-4. If `|achieved - target| <= tolerance`: done.
-5. If achieved > target (too sharp): `q_hi = q_mid`.
-6. Else: `q_lo = q_mid`.
+The default algorithm bisects the adapter's quality range. It encodes and
+decodes at the midpoint, computes `Zensim::compute(reference, decoded)`, and
+returns immediately when `|achieved - target| <= tolerance`. Otherwise it
+updates the bracket using the direction in the codec table. When the budget
+runs out, it returns the probe with the smallest absolute target error and
+sets `converged=false`. PNG always uses one probe and reports convergence
+against the same tolerance.
 
-Capped at `max_iterations`. Returns the best probe by
-`|achieved - target|` if the budget runs out without converging.
+`ZENSIM_TARGET_SECANT=1` (or `true`) enables a bracket-safeguarded secant step
+using the two most recent probes. It accepts a finite estimate strictly inside
+the current bracket; otherwise it uses the midpoint. This option is off by
+default and does not change the metric being targeted.
 
-For zenjxl the direction is inverted (lower distance → higher
-quality → higher score), handled internally via
-`lower_quality_means_higher_score`.
+The search assumes scores follow the codec knob's direction; it does not prove
+monotonicity or repair inversions. Quantized knobs, plateaus, codec floors and
+ceilings, and a limited probe budget can prevent convergence. It searches one
+knob with fixed codec settings, retains the closest observed score, and does
+not optimize encoded size among equally acceptable probes. Scores are not
+clamped at zero by this helper; negative measurements remain visible.
 
-## Demo results
+For product evaluation, record achieved target error, bytes, probe count and
+total encode/decode/score time, split by codec and content. Equal achieved
+zensim scores alone do not establish equal perceived quality across codecs;
+use the independent evidence required by the integration guide.
 
-See [`benchmarks/zensim_target_demo_2026-05-18.md`](../benchmarks/zensim_target_demo_2026-05-18.md)
-for the full 3 codecs × 3 images × 4 targets = 36-cell matrix.
-Headline: **33 / 36 (92 %) converged within ±1.5 score units**,
-median 5 iterations.
+## Historical measurements
 
-## Known limitations (v0.1)
+These records describe the profiles and codec versions used on their dates:
 
-1. `PreviewV0_5{Balanced,Compression,Ensemble}` profiles produce
-   non-monotonic scores in the target search loop — they're ranking
-   metrics, not quality-dial metrics. Use `tuner-v2` (default) or
-   `tuner` for quality-dial workloads.
-2. Single-knob search only — codec-specific knobs (subsampling,
-   effort, speed) stay at defaults.
-3. Bisection. A secant or Brent's-method update would converge
-   faster on smooth RD curves.
-4. Screen-content images with text-rich regions (UI screenshots,
-   code listings) may hit the codec's q-ceiling before reaching low
-   targets (e.g. T < 65 on dense-text images via zenjpeg / zenwebp).
-   The search returns the best-so-far in that case (`converged=false`).
+- [May 18, 2026 demo matrix](../benchmarks/zensim_target_demo_2026-05-18.md):
+  three codecs, three images and four targets.
+- [May 19, 2026 V6 cross-codec demo](../benchmarks/zensim_target_v6_cross_codec_2026-05-19.md):
+  ten images and four codecs with the historical tuner-v2 calibration.
+
+They do not certify today's library default or current codec adapters.
+
+## Licensing
+
+This internal, unpublished crate is **AGPL-3.0-only or Imazen commercial**
+because it links the codec crates. The `zensim` metric library remains
+MIT/Apache-2.0.

@@ -2,16 +2,29 @@
 
 # zensim
 
-Perceptual image similarity in 22 ms at 1080p. 18x faster than C++ SSIMULACRA2 at 4K.
+A perceptual image quality score for codec quality targeting: users choose one
+score, and encoders choose the settings to reach it.
 
 Built on the same psychovisual foundations as SSIMULACRA2 and butteraugli — multi-scale SSIM, edge artifacts, detail loss, and high-frequency features in XYB color space — but with trained weights, fused SIMD kernels, and multi-threaded computation.
+
+**Current checkout (2026-09-07):** the user-facing control is one target score.
+`codec_target()` returns B; D is an explicit fast profile. Negative scores are
+valid. The benchmark tables below are historical measurements, not a fresh
+qualification of today's profiles. See the [current integration guide](https://github.com/imazen/zensim/blob/main/docs/CODEC_TARGET_METRIC.md)
+for bake identities, actual consumer behavior and the remaining dial requirements.
 
 **Interactive chart exploration**: <https://imazen.github.io/zensim/> — scatter zensim / fast-ssim2 / butteraugli against human MOS across CID22 / KADID / TID / AIC corpora, filter by codec + version, with per-band SROCC tables and step-5 (20-bin) breakdowns.
 
 
 ## Correlation with human perception
 
-Full Mohammadi 2025 stat panel against three independent human-rated image quality databases that v0.3 did NOT train on. KADID-10k and TID2013 are excluded because v0.3's recovery-phase-4 retrain included them as training groups — they're no longer fair holdouts. On the **CID22** codec-compression holdout, the default profile `B` reaches SROCC ≈ 0.876 and the deprecated `A` ≈ 0.86 (fast-ssim2: 0.89), both spending the full 0–100 dial with JND landing near score 60 — the property that matters for codec quality targeting. **The detailed per-corpus / per-band tables below are profile `A`'s** (the prior default); `B`'s full held-out panel is in [`benchmarks/profile_b_methodology_2026-07-12.md`](benchmarks/profile_b_methodology_2026-07-12.md), and regenerating these tables for `B` before release is a tracked follow-up.
+Quality targeting requires both perceptual agreement and a useful score range.
+The tables below preserve the older v0.3/A evaluation; B's dated methodology is
+in its [July record](https://github.com/imazen/zensim/blob/main/benchmarks/profile_b_methodology_2026-07-12.md).
+They do not qualify the current profiles against September's stricter dial
+requirements. CID22 has also been consulted repeatedly during model selection;
+it is not an untouched final test. Current split policy and exceptions are in
+[DATA_SPLITS](https://github.com/imazen/zensim/blob/main/docs/DATA_SPLITS.md).
 
 
 ## Quick start
@@ -24,13 +37,11 @@ zensim = "0.3"
 ```rust
 use zensim::{Zensim, ZensimProfile, RgbSlice};
 
-// Pick a profile explicitly for pinned reproducibility:
-let z = Zensim::new(ZensimProfile::B);
-// `B` is the deterministic linear-ensemble default for SDR content; `BHdr`
-// is its HDR (absolute-nits) counterpart. Or use
-// `ZensimProfile::codec_target()` / `latest_preview()` for the stable
-// codec-target contract (both return `B`). `A` (the v47 MLP) is deprecated
-// (behind the default-on `deprecated-profiles` feature).
+// Use the common codec-target profile (currently B for SDR):
+let z = Zensim::new(ZensimProfile::codec_target());
+// Reproducible experiments also pin the dependency, bake and extractor
+// revision; selecting a profile name alone does not freeze its bytes.
+// Use the absolute-luminance API and BHdr route for HDR content.
 // `src_pixels` / `dst_pixels` are `&[[u8; 3]]` — interleaved, sRGB-encoded
 // (gamma, NOT linear) 8-bit RGB. `width`/`height` are `usize`. See "Input
 // format" below: getting sRGB-vs-linear wrong silently corrupts every score.
@@ -46,7 +57,7 @@ Also accepts `RgbaSlice` (composited over a noise background), `imgref::ImgRef` 
 
 ### Input format (read this — wrong input silently corrupts the score)
 
-The `0..100` score is only meaningful if the pixels you pass match the contract zensim assumes. There is **no format auto-detection** for the `RgbSlice` fast path: if you hand it linear bytes where it expects sRGB, or planar bytes where it expects interleaved, it computes a perfectly valid-looking but wrong score — no error is raised. The contract:
+The score is only meaningful if the pixels you pass match the contract zensim assumes. There is **no format auto-detection** for the `RgbSlice` fast path: if you hand it linear bytes where it expects sRGB, or planar bytes where it expects interleaved, it computes a perfectly valid-looking but wrong score — no error is raised. The contract:
 
 - **Color encoding: sRGB-encoded (gamma), NOT linear.** `RgbSlice` / `RgbaSlice` / the `Srgb8*` and `Srgb16Rgba` `StridedBytes` formats all expect **display-encoded sRGB** values — the bytes a PNG/JPEG decoder gives you. zensim linearizes internally before the XYB conversion. If your data is already linear light, do **not** feed it as sRGB; use `StridedBytes` with `PixelFormat::LinearF32Rgba` (linear 32-bit float RGBA) instead. (Display P3 reuses the sRGB transfer function, so `Srgb8*` formats linearize it correctly; SDR BT.2020 technically wants BT.1886 — for exact results linearize externally and use `LinearF32Rgba`. Set primaries via `StridedBytes::with_color_primaries`.)
 - **Channel order: interleaved, not planar.** `RgbSlice` takes `&[[u8; 3]]` laid out `R,G,B, R,G,B, …` (one `[u8; 3]` per pixel), `RgbaSlice` takes `&[[u8; 4]]` as `R,G,B,A, …`. **Planar** input (all R, then all G, then all B) is **not** accepted by these types — you must interleave it first, or describe it some other way. The `[[u8; 3]]` / `[[u8; 4]]` element type also pins it to exactly 3 / 4 bytes per pixel, **tightly packed** (no per-row padding) — for row padding use `StridedBytes` (below).
@@ -109,35 +120,42 @@ Format mapping is automatic: RGBX/BGRX becomes opaque, premultiplied alpha is un
 
 ## Target-score CLI (`zensim-target`)
 
-The [`zensim-target`](https://github.com/imazen/zensim/blob/main/zensim-target/README.md) workspace crate is the
+The [`zensim-target`](zensim-target/README.md) standalone workspace is the
 runtime side of the "user-facing quality dial" goal. Given an input
 image and a target zensim score, it picks the codec quality knob via
 binary search:
 
 ```bash
-cargo run --release -p zensim-target -- input.png \
-    --target 70 --codec zenjpeg --output out.jpg
-# codec=Jpeg  target=70.0  achieved=69.46  knob=78.44  bytes=62234  iters=5  converged=true
+cargo run --release --manifest-path zensim-target/Cargo.toml --bin zensim-target -- \
+    input.png --target 70 --codec zenjpeg --profile codec-target --output out.jpg
 ```
 
-Supported codecs: `zenjpeg`, `zenwebp`, `zenavif` (wired and
-demonstrated); `zenpng` (lossless, single probe); `zenjxl`
-(encode-only in v0.1, decode plumbing pending). Demo matrix at
+The explicit profile matters: the library defaults to B, while the CLI still
+defaults to historical `tuner-v4`. JPEG, WebP, AVIF and PNG are enabled by
+default; JXL encode/decode requires `--features zenjxl` before `--`.
+The historical May 18 demo matrix at
 [`benchmarks/zensim_target_demo_2026-05-18.md`](https://github.com/imazen/zensim/blob/main/benchmarks/zensim_target_demo_2026-05-18.md):
-33 / 36 cells converged within ±1.5 score units, median 5 iterations.
+reported 33 / 36 cells within ±1.5 score units, median 5 iterations. Those
+are dated demo results; inspect today's returned `converged` and achieved
+score rather than assuming the target was reached.
 
 `zensim-target` is **AGPL-3.0-only** because it links the AGPL zen
 codec crates; the core `zensim` library stays MIT/Apache.
 
 ## What the score means
 
-100 = identical. Higher = more similar. Every published profile (`A`, `B`, `BHdr`) routes its raw MLP/linear-ensemble output through a monotone PCHIP dial spline calibrated so the dial tracks degradation monotonically (identity ≈ 97.7 for `A`; byte-identical inputs short-circuit to exactly 100 for all profiles).
+100 = identical; higher = more similar. Negative values represent severe
+degradation and must remain visible. Byte-identical inputs short-circuit to
+100; that does not prove a model's near-identity behavior. A monotone output
+spline preserves raw ordering and cannot repair a raw codec-quality inversion.
+The historical JND-at-60 convention below is not a universal perceptual
+guarantee for current profiles; see the [score contract](docs/CODEC_TARGET_METRIC.md).
 
 Each `ZensimResult` also provides approximate translations to other metrics:
 
 | Method | What it returns |
 |--------|-----------------|
-| `score()` | Zensim similarity (0-100) |
+| `score()` | Zensim similarity; higher is better, negative values are valid |
 | `raw_distance()` | Feature distance before mapping (lower = better) |
 | `approx_ssim2()` | SSIMULACRA2 estimate (MAE 4.4 pts, Pearson r = 0.974) |
 | `approx_dssim()` | DSSIM estimate (MAE 0.00129, Pearson r = 0.952) |
@@ -183,7 +201,8 @@ for dst_pixels in &distorted_images {
 
 ## How it works
 
-228 features — 19 per channel (X, Y, B) per scale (1x, 2x, 4x, 8x) — scored by trained weights:
+The extractor computes the features declared by the selected bake, scored by
+trained weights. The original 228-feature vocabulary included:
 
 - **SSIM** (mean, L2, L4 pooling) — structural similarity in XYB, using ssimulacra2's modified formula (no luminance denominator)
 - **Edge artifacts** (mean, L2, L4) — ringing, banding, blockiness
@@ -196,16 +215,25 @@ Computed in XYB (cube-root LMS) with O(1)-per-pixel box blur and fused AVX2/AVX-
 
 ## Profiles
 
-Each `ZensimProfile` bundles weights and score-mapping parameters. Scores from a given profile stay stable across crate versions. The published crate ships five selectable profiles (`A` deprecated, `PreviewV0_1` / `PreviewV0_2` retained for 0.2.7 compatibility, `B` / `BHdr` current); the historical / experimental research profiles are preserved (bit-identically) in the unpublished `zensim-experimental` crate.
+Each `ZensimProfile` bundles weights and score-mapping parameters. A profile
+name is not a frozen model: pin the bake and extraction revision when
+reproducing scores. Current checkout mapping, checked September 7:
 
-| Profile | Kind | CID22 SROCC | Bake |
-|---------|------|------:|------|
-| `B` (**default** — `codec_target()`) | 372-input linear ensemble (35-weight lasso) + dial spline, SDR content | **0.8764** | 7.3 KB ens-Pline-cid80 |
-| `BHdr` | linear ensemble on PU-linear (absolute-nits) features + dial spline, HDR content only | n/a — HDR-only (UPIQ-HDR \|SROCC\| 0.7313) | 11.7 KB hdr-lasso0.001-shaped |
-| `A` (**deprecated** — behind `deprecated-profiles`) | 372-input MLP, per-sample-α + monotone PCHIP dial spline | **0.8657** | 27 KB v47-strict-QAT |
-| `PreviewV0_1` / `PreviewV0_2` | 228-weight linear (no MLP), `100 − 18·d^0.7` mapping — 0.2.7-compat | — | embedded weight arrays |
+| Profile | Role and declared features | Bake size |
+|---------|----------------------------|----------:|
+| `B` (**default** — `codec_target()`) | SDR linear ensemble + dial spline; 95 IDs | 2,012 B |
+| `BHdr` | HDR linear ensemble on absolute-luminance features; 133 IDs | 5,331 B |
+| `D` | Fast SDR linear profile + id100/negative-tail spline; 28 IDs | 1,420 B |
+| `C` / `CHdr` | SDR/HDR candidates; 944-wide bakes, activity-toggle discrepancy remains | 149,343 / 180,195 B |
+| `A` (**deprecated**) | Prior MLP profile; 285 IDs | 26,456 B |
+| `PreviewV0_1` / `PreviewV0_2` | Original 228-weight linear profiles, retained for compatibility | In-source arrays |
+
+Exact filenames, hashes, serving limitations and evaluation records are in the
+[integration guide](https://github.com/imazen/zensim/blob/main/docs/CODEC_TARGET_METRIC.md).
 
 `ZensimProfile::codec_target()` and `latest_preview()` both return `B` — the canonical production codec-target the zen codecs dial against (the deprecated `latest()` also returns `B`). `A` (the prior default, the v47 MLP) is now `#[deprecated]` and lives behind the default-on `deprecated-profiles` feature — build with `--no-default-features` to drop it. To load your own bake, construct `ZensimProfile::Custom { params, name }` via [`ProfileParams::builder()`](https://docs.rs/zensim/latest/zensim/profile/struct.ProfileParams.html). Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+
+**`D` dial-era v2 (2026-09-05).** `D`'s bake changed from `d_sdr_add156_dense_dial_2026-08-31.bin` to `d_sdr_add156_id100_negrich_dial_2026-09-05.bin`. **The forward pass is byte-identical** (both strip to the same weight bytes), so rank and speed do not move — pooled SROCC is bit-identical on 11 of 14 canonical corpora and within a monotone remap's tie residue on the other three (`kadid` −1.3e-7, `live` +5.8e-7, `tid` +7.9e-6); CID22 is 0.863380 before and after. What changes is the **dial**: a perfect copy now reads **100.000** instead of 96.116, the dial-grid top moves 96.05 → 99.38 (p95 95.28 → 95.52) and the bottom −12.20 → −57.17 (p5 9.52 → 8.83), reach 108.25 → 156.55, and the deepest negative-tail probe row −100.0 → −213.1 — negative scores work further out, which is the product contract, not a regression. No grid cell out-scores identity, before or after (0 of 4,424). **Stored `zensim-d` dial values predate this and must be re-read, not rescaled** — the remap is a PCHIP spline, not an affine. Details + gates: [`benchmarks/d_ship_flip_2026-09-05.md`](benchmarks/d_ship_flip_2026-09-05.md).
 
 `ZensimProfile::PreviewV0_1` / `PreviewV0_2` (the linear profiles that shipped in 0.2.7) are RETAINED as first-class, non-deprecated, selectable variants — the 0.3.0 line reverted their removal (commit `493c91cd`) to preserve semver compatibility with 0.2.7; see the CHANGELOG `[Unreleased]` **Restored** entry. `B` is the current deterministic-linear default for SDR content.
 
@@ -218,6 +246,9 @@ The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, an
 | `avx512` | yes | AVX-512 SIMD paths |
 | `threads` | yes | Multi-threaded computation via rayon (disable for wasm / single-threaded) |
 | `imgref` | yes | `ImageSource` impls for `imgref::ImgRef<Rgb<u8>>` and `ImgRef<Rgba<u8>>` |
+| `candidate-profiles` | yes | C, CHdr and D profile variants |
+| `deprecated-profiles` | yes | Deprecated A profile |
+| `feature-regime-v2` | yes | Extended feature extraction; distinct from the opt-in feature arithmetic revision 2 |
 | `training` | no | Expose metric internals for weight training |
 | `classification` | no | Error classification API (`classify()`, `DeltaStats`, `ErrorCategory`) |
 | `zenpixels` | no | `ImageSource` adapter for zenpixels `PixelSlice`/`PixelBuffer` |

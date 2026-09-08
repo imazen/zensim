@@ -1,6 +1,13 @@
 # `benchmarks/` — INDEX
 
-> **⚠ BANNER 2026-07-18:** this index STOPS at 2026-05-15 — its 'ship a new bake' reading order is obsolete (points at v0_18 methodology). For 2026-06/07 work (five-gate scorecard, RD probe, diffmap coherence, additive-vs-MLP correction, HDR steer screen) start from `docs/TOP_MODELS_COOKBOOK.md` or `ls benchmarks/*2026-0[67]*.md`.
+> **Current navigation, 2026-09-07:** this index spans May–September. The old
+> 'ship a new bake' reading order is historical. Start from
+> [`SESSION-RESUME.md`](../SESSION-RESUME.md) for current product state and
+> [`science_workflow_audit_2026-09-07.md`](science_workflow_audit_2026-09-07.md)
+> for the chronology review and cleanup priorities. Later corrections take
+> precedence over earlier headlines; verify each claim against its instrument
+> and implementation. In particular, a selected recipe is not necessarily a
+> qualified common dial.
 
 > **★★ TRANSCRIPT AUDIT — what the subagent REPORTS did not say, 2026-09-06:**
 > [`agent_transcript_audit_2026-09-06.md`](agent_transcript_audit_2026-09-06.md). All **124**

@@ -3307,10 +3307,21 @@ function renderDial(){
   host.append(el('h2',{text:'Per-codec dial curves'}));
   host.append(el('div',{class:'cap',html:'Median dial score vs grid quality per codec family (across each family\u2019s '
     +'image ladders on the densified grid; jxl x-axis = butteraugli-distance mapped to q-equiv). A good dial rises '
-    +'monotonically and spans low→high. Hover for each bake’s <b>p25 / p50 / p75</b> at that q plus the '
+    +'monotonically and spans low→high. All codec charts share a score axis that expands beyond 0–100 '
+    +'when visible medians do. Hover for each bake’s <b>p25 / p50 / p75</b> at that q plus the '
     +'per-codec mono%/tied% — a family can be broken while the pooled headline stays green. Wheel/slider zooms '
     +'the axes (marks stay constant size); double-click resets.'}));
   const codecs=[...new Set(bs.flatMap(b=>Object.keys(b.dial.curves)))].sort();
+  // One score scale across codec families, including the negative tail. Derive it
+  // from the plotted medians so hiding/showing bakes updates every chart together.
+  let scoreMin=0,scoreMax=100;
+  bs.forEach(b=>Object.values(b.dial.curves).forEach(cv=>{
+    if(cv.length<2)return;
+    cv.forEach(p=>{if(Number.isFinite(p[2])){
+      scoreMin=Math.min(scoreMin,p[2]);scoreMax=Math.max(scoreMax,p[2]);
+    }});
+  }));
+  scoreMin=Math.floor(scoreMin/10)*10;scoreMax=Math.ceil(scoreMax/10)*10;
   const grid=el('div',{style:'display:flex;flex-wrap:wrap;gap:10px'});
   codecs.forEach(cd=>{
     const t=TH();
@@ -3340,7 +3351,7 @@ function renderDial(){
           return s;}}),
       grid:{left:44,right:12,top:30,bottom:44},
       xAxis:Object.assign(axStyle(),{name:''}),
-      yAxis:Object.assign(axStyle(),{scale:false,min:0,max:100}),
+      yAxis:Object.assign(axStyle(),{scale:false,min:scoreMin,max:scoreMax}),
       dataZoom:[{type:'inside',xAxisIndex:0,filterMode:'none'},
                 {type:'inside',yAxisIndex:0,filterMode:'none'},
                 dzSlider({xAxisIndex:0,filterMode:'none'})],

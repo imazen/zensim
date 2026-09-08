@@ -1654,9 +1654,14 @@ misreadable fact here:
 
 * **C1** (`mono`) gets **harder**: the ladder samples q 0..30 at step 1, so it holds
   far more near-flat adjacent pairs. `A2b_l0.002` 0.97852 → **0.91712** against 0.93.
-* **C2** (*no cell out-scores a perfect copy*) gets **easier**: floor-dense sampling
+* **C2** (*flat/clamp dead-zone fraction*) gets **easier**: floor-dense sampling
   puts proportionally fewer cells near the ceiling clamp. `W10L9PH_s4007_packed`
   0.09081 → **0.03060** against 0.05.
+
+**Label corrected 2026-09-07:** C2 reads `measured.grid.tied`. The earlier
+“no cell out-scores a perfect copy” label belongs to C6 (absolute count, bar
+zero). C5/C6 for this example are NOT MEASURED on both rulers; the C2 change
+does not measure an improvement in identity behavior.
 
 Board-wide C-row fails on the ladder: C3 43, C4 43, C2 22, C1 20, C5 5.
 

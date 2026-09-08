@@ -41,10 +41,12 @@ Operational notes (learned the hard way — see `benchmarks/rd_probe_results_202
 **G-DIAL asks "monotone calibrated dial on the standard grid?"; it does NOT ask "does the
 dial reach the floor and ceiling a codec loop needs?"** That second question is G-ADDR
 (`bake_verdict`'s dial-addressability gate, owner `zensim-validate/src/dial_addressability.rs`;
-full spec `benchmarks/dial_addressability_gate_2026-09-04.md`): a REGRESSION tier (bars = the
-reference metric's own end-of-range behaviour) and an absolute CONTRACT tier (C1-C6 —
-identity in-band, nothing scores above a perfect copy, the negative tail works, per-codec
-floors resolve). **Per user rule 2026-09-04, dial addressability is a HARD ship gate — "any
+full spec `benchmarks/dial_addressability_gate_2026-09-04.md`). **Current tier
+definitions, checked 2026-09-07:** REGRESSION is carried by A7r's per-codec
+floor representability against the mentor on the same instrument. A1–A6's
+score-value pins are report-only by default. CONTRACT is C1–C6: monotonicity,
+flat/dead-zone fraction, negative-tail sign, identity in-band and nothing
+scoring above a perfect copy. **Per user rule 2026-09-04, dial addressability is a HARD ship gate — "any
 model that limits dial range cannot ship" — independent of this scorecard's five gates.** A
 bake can pass G-RANK/G-DIAL/G-STEER/G-RD/G-TARGET and still fail G-ADDR's CONTRACT tier (the
 shipped SDR dial itself fails two of six contract rows).
@@ -57,10 +59,18 @@ neither key can see a contract failure. **Fixed at the owner**: a candidate (or 
 that MEASURES a G-ADDR CONTRACT-tier fail is now an absolute selectability veto in
 `--select`, and `A7r`'s per-codec floor-representability folds into `--floor-basis all`'s
 floor count. `--floor-basis legacy` reproduces the pre-fix rule byte-for-byte, audit only.
-Full record + before/after re-runs: `benchmarks/select_gaddr_prefilter_2026-09-06.md`. **A
-ship candidate takes BOTH exams** — this scorecard's five gates, AND a clean (or at least
-non-vetoing) G-ADDR CONTRACT tier — and `--select` now enforces the second automatically
-instead of silently ignoring it.
+Full record + before/after re-runs: `benchmarks/select_gaddr_prefilter_2026-09-06.md`.
+
+**Qualification clarification, 2026-09-07:** a non-vetoing research selection is
+insufficient for shipping. `dial_addressability::Verdict::shippable()` requires
+**both REGRESSION and CONTRACT to PASS**; missing probes and failed per-codec
+floors do not qualify. The five product gates above are required as well.
+`freeze_check --select` enforces measured contract failures but can still choose
+a recipe with INCOMPLETE coverage and failed A7r floors. The later
+[`board_ladder_ruler_2026-09-06.md`](../benchmarks/board_ladder_ruler_2026-09-06.md)
+§5–6 demonstrates exactly that on its selected fast-class recipe. Report
+research selection and product qualification separately; the absence of a
+NOT-SHIPPABLE badge is not a qualification certificate.
 
 ## Tuning with the scorecard (not just picking)
 

@@ -29,10 +29,17 @@ The compute was fine. The orchestration around it was the whole loss.
                       REPLICATION FLOOR is on by default: k>=2 or not
                       selectable, so plan k>=2 seeds per arm.)
 7. REVIEW FOREGROUND read the endgame's tables + doc DRAFT; judge; finalize
-8. PUSH + VERIFY     jj bookmark set main -r @ && jj git push --bookmark main
-                     scripts/verify_push.sh <sha>   # paste its OK line VERBATIM
-9. CLEAN UP          workspace forget + rm -rf; drop your .workongoing line
+8. PUSH + VERIFY     scripts/safe_push.sh -r <reviewed-revision>
+                     scripts/verify_push.sh <sha>   # verify the reviewed commit
+9. CLOSE OUT        record artifacts and remaining decisions; preserve work
 ```
+
+**Updated 2026-09-07 to match the September 5–6 push rule in `CLAUDE.md`.**
+The old direct bookmark-move sequence could discard other lanes' commits.
+Use `safe_push.sh`; if it refuses, reconcile ancestry rather than overriding
+the refusal. Follow the workspace `AGENTS.md` for checkout cleanup: do not
+create worktrees, and rescue modified/untracked files before any removal.
+This playbook is not authorization to push or delete unrelated work.
 
 `scripts/verify_push.sh` (appendix W, C4) is the required form of step 8's
 verification: it fetches, ancestry-tests, and prints ONE line
@@ -361,9 +368,9 @@ Terminal checklist:
 
 ```bash
 just lint-scripts                              # any script you added
-jj bookmark set main -r @ && jj git push --bookmark main
+scripts/safe_push.sh -r <reviewed-revision>
 scripts/verify_push.sh <sha>                   # paste the VERIFY-PUSH OK line
-jj workspace forget <name> && rm -rf <path>    # mandatory on merge
+# Record artifact locations and follow the workspace's preservation rules.
 ```
 
 ---

@@ -1,5 +1,14 @@
 # ITERATION_PROTOCOL.md — fast, replicable experiment cycles (2026-07-02)
 
+**Chronology note, 2026-09-07:** the July measurements and infrastructure
+recipes below are historical. Use [`WAVE_PLAYBOOK.md`](WAVE_PLAYBOOK.md) for
+current orchestration and recipe selection, and
+[`MODEL_SELECTION_SCORECARD.md`](MODEL_SELECTION_SCORECARD.md) for product
+qualification, including the September G-ADDR requirements. A selected research
+recipe is not automatically a qualified codec-target dial. The efficiency and
+pre-registration principles below still apply; old host names and timings are
+not a description of today's available compute.
+
 How to run zensim training experiments quickly WITHOUT giving up the
 reproducibility/holdout discipline in `docs/DATA_SPLITS.md`. Written after a
 day that exposed every slow path: 80-min cells (full per-epoch eval), whole

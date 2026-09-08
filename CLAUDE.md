@@ -1,5 +1,17 @@
 # zensim
 
+**Current entry point:** [`SESSION-RESUME.md`](SESSION-RESUME.md). For the
+one user-facing score and current profile/bake mapping, read
+[`docs/CODEC_TARGET_METRIC.md`](docs/CODEC_TARGET_METRIC.md). Dated findings
+below may be superseded; check the later correction and the implementation
+before treating an old measurement or instruction as current.
+
+**User preference clarified 2026-09-07:** prefer Rust for canonical
+implementations; keep Python for fast invention and independent references.
+The ownership rules below do not ban new experimental methods. Canonical status
+does not prove correctness or authorize deleting an unverified replacement;
+see [cleanup plan §0](docs/PLAN_CRUFT_PURGE_2026-09-06.md#0-establish-correctness-before-choosing-what-survives).
+
 Workspace with three crates: `zensim` (library), `zensim-regress` (regression testing binary), `zensim-validate` (validation binary).
 
 **Feature-gap map (read before feature work):**
@@ -2118,15 +2130,19 @@ metrics assumed absent, negative-value + diffmap-coherence requirements dropped)
 
 Users type a target zensim; the codec tunes to hit it, using the diffmap to close
 the loop. Every metric decision serves this:
-- **Monotone in codec quality** (so target-hitting converges) + **bounded [0,100]**.
+- **Monotone in perceived codec quality** (so target-hitting converges), with
+  **identity at 100 and a working negative tail**. This is the product contract,
+  not a claim that every current profile passes it on every input.
 - **NEGATIVE zensim values MUST work** — inputs worse than the worst codec output
   score BELOW 0 (do NOT clamp at 0; the lower spline extrapolation + profile
   `extrapolate_score` carry it). Negative-tail training data:
   `canonical-2026-07-15/train/kadis_negrich.parquet` (negative-rich).
-- **The diffmap MUST match the scalar** — `DiffmapResult.diffmap()` must reflect
-  the SAME model as `.score()`, so the per-block "where to adjust" signal drives
-  the closed loop. Currently INCOHERENT (diffmap uses per-scale SSIM weights,
-  scalar uses the 372-feat model) — this is the #1 closed-loop blocker.
+- **The diffmap MUST serve the scalar** — its per-block "where to adjust"
+  signal must improve the score the loop targets. The July legacy-map mismatch
+  is historical; model-sensitive maps and later loop experiments exist. Grade
+  the actual scorer/map pair with the current coherence and codec-loop
+  instruments; see `docs/MODEL_SELECTION_SCORECARD.md` and
+  `docs/STEERING_PAIR.md` (including its August 29 adoption update).
 
 ### Evaluation north stars (priority order)
 

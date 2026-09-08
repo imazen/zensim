@@ -1,22 +1,33 @@
 # Full-eval — one comprehensive Rust eval per bake → machine-readable JSON
 
-`scripts/run_full_eval.sh` runs the **entire model exam** through the canonical
+`scripts/run_full_eval.sh` runs the **offline evaluation and coherence measurements** through the canonical
 Rust owners and emits one machine-readable JSON per bake. No Python touches any
 statistic — every number comes from the Rust binaries that already own it
 (`bake_verdict` → `zenstats::panel` for the rank+dial+corruption math,
 `diffmap_block_coherence` for M3). The JSON is the input the summer-gauntlet
 dashboard consumes for its scatter/scorecard panels.
 
+**Scope correction, 2026-09-07:** this wrapper does not run the real-codec
+G-RD/G-TARGET legs. Its output also does not establish G-ADDR qualification
+unless the compatible ladder, negative-tail and identity measurements are
+present and pass. Use [`MODEL_SELECTION_SCORECARD.md`](MODEL_SELECTION_SCORECARD.md)
+for the complete product exam. The September board's operative addressability
+block is `dial_ladder`; `dial.curves` still describes its canonical grid.
+
 ## Usage
 
 ```sh
-scripts/run_full_eval.sh <bake.bin> <name> [regime=720]
+scripts/run_full_eval.sh <bake.bin> <name> [regime=720] [features-root]
 ```
 
-- `<bake.bin>` — a ZNPR v3 bake (any width; the scorer reads its own `n_inputs`).
+- `<bake.bin>` — a ZNPR v3 bake; the scorer gathers its declared feature IDs.
 - `<name>` — the label embedded in the JSON and used for the output filename.
-- `regime` — `720` (default) or `372`. Selects which pre-extracted corpora,
-  dial grid, and corruption grid `bake_verdict` scores against (`--regime`).
+- `regime` — `720` (default), `372`, `924` or `944`; a legacy evaluation
+  preset, not a feature identity. Since September 5 the wrapper resolves the
+  feature root through `bake_verdict --print-features-root` from the bake's
+  declaration/provenance; an explicit fourth argument or
+  `ZENSIM_FEATURES_ROOT` takes precedence. A provenance-free bake needs an
+  explicit root. See [`FEATURE_SET_IDS.md`](FEATURE_SET_IDS.md).
 
 Output: `/mnt/v/output/zensim/reports/fulleval/<name>.fulleval.json`
 (+ `<name>.verdict.md`, the human `bake_verdict` report, alongside).

@@ -147,10 +147,15 @@ for.
 
 ### 4.1 The two rows that move, and why — measured, not reasoned
 
-* **C2** (*no dial-grid cell out-scores a perfect copy*, bar ≤ 0.05) gets **easier**:
+* **C2** (*flat/clamp dead-zone fraction*, bar ≤ 0.05) gets **easier**:
   `W10L9PH_s4007_packed` 0.09081 → **0.03060**, `LSTAR3_s4043_packed` 0.12420 →
   **0.04590**, `LSTAR3__I__i5012_p4041_packed` 0.06444 → **0.01998**. The ladder is
-  floor-dense, so proportionally fewer of its cells sit near the ceiling clamp.
+  floor-dense, so the fraction classified as tied changes with the sampled
+  population. **Correction 2026-09-07:** the earlier label confused C2 with
+  C6. The actual verdict's C2 value equals `measured.grid.tied`; C6 tests the
+  absolute count `n_above_identity` against zero. On `W10L9PH_s4007_packed`,
+  C5/C6 are NOT MEASURED on both rulers because no identity probe was supplied.
+  These C2 changes therefore do not establish fewer above-identity violations.
 * **C1** (*monotonicity*, bar ≥ 0.93) gets **harder**: `A2b_l0.002` 0.97852 →
   **0.91712**. The ladder samples q 0..30 at step 1, so it holds far more
   near-flat adjacent pairs for a dial to wobble on.

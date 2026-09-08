@@ -1,6 +1,13 @@
 # zensim research guide
 
-> **⚠ STALE — REWRITE PENDING (banner 2026-07-18):** the bakes inventory + Workflow A below are Tuner-trail/228-feature-era fossils (wrong architecture, wrong corpus roots). Use `docs/TOP_MODELS_COOKBOOK.md` for training workflows and `canonical-2026-05-21/` for corpora. Corpus-location tables below are still mostly valid; verify paths before use.
+> **Historical research guide (reviewed 2026-09-07).** The inventory, commands
+> and corpus recommendations below describe the May era. Start at
+> [`SESSION-RESUME.md`](SESSION-RESUME.md), then use
+> [`docs/WAVE_PLAYBOOK.md`](docs/WAVE_PLAYBOOK.md) for the current workflow and
+> [`docs/DATA_SPLITS.md`](docs/DATA_SPLITS.md) / [`docs/DATASET_HISTORY.md`](docs/DATASET_HISTORY.md)
+> for data provenance and later retractions. Do not choose a corpus root from
+> this historical table or assume its deleted decode caches can be restored
+> without changing the decoder era.
 
 If you just want to compute zensim on an image pair, the
 [README](README.md) is enough. **This doc is for researchers,
@@ -23,7 +30,7 @@ pointer to the doc + code path with copy-paste-ready commands.
 | **Add a new training target metric** | "Methodology shift" section below | (trainer source — `--target-column` not yet wired; in flight) |
 | **Onboard as an AI agent** | Read [CLAUDE.md](CLAUDE.md) end-to-end, then return here | — |
 | **Read the changelog** | [CHANGELOG.md](CHANGELOG.md) | — |
-| **Restore session state** | [CONTEXT-HANDOFF.md](CONTEXT-HANDOFF.md) | — |
+| **Current product and science** | [SESSION-RESUME.md](SESSION-RESUME.md) | — |
 
 ## Corpus map
 
@@ -270,7 +277,7 @@ against them via `gh issue create -R imazen/zenanalyze ...` instead.
 
 - [README.md](README.md) — public-facing speed + correlation + quick-start
 - [CHANGELOG.md](CHANGELOG.md) — every shipped change
-- [CONTEXT-HANDOFF.md](CONTEXT-HANDOFF.md) — session-handoff state
+- [SESSION-RESUME.md](SESSION-RESUME.md) — current product, science and navigation
 - [CLAUDE.md](CLAUDE.md) — AI-agent operational guide (large; bundles methodology + workflow + gotchas)
 - [docs/](docs/) — paper notes, literature reviews, long-form design docs
 - [benchmarks/](benchmarks/) — every experiment's methodology + results (76+ docs as of 2026-05-16)

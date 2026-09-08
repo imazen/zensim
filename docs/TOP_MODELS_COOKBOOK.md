@@ -1,5 +1,14 @@
 # TOP MODELS COOKBOOK — the science + exact reproduction paths (2026-07-18)
 
+> **Current-reading note (2026-09-07):** this is a dated recipe/evidence
+> archive with later addenda. Current integration and bake identities live in
+> [`CODEC_TARGET_METRIC.md`](CODEC_TARGET_METRIC.md); current unresolved choices
+> are in [`OPEN_DECISIONS_2026-09-06.md`](OPEN_DECISIONS_2026-09-06.md).
+> In particular, §1b's September 5 restriction to 372-wide serving was closed
+> by the feature-plan work. C/CHdr's remaining train/serve toggle mismatch is a
+> separate defect. Evaluate by declared feature IDs and era, not by choosing
+> `--regime 944` for every model. A board selection is not ship qualification.
+
 > **★ CANDIDATES-OF-RECORD (frozen by user 2026-08-28; shipped default remains B):**
 > SDR **`W10L9PH_s4004_packed`** (61ebc456…; SPH1 recipe = W10L9 purity views +
 > family-clean tbig HF leg; the balance campaign's sole full-eligibility pass,
@@ -12,8 +21,9 @@
 > **372-era record** (v1 feature space, 372col corpora). The current era is **944**
 > (folded+append+append2): its record — frozen bar, arm results, corrections, the
 > seed-ensemble waves, and the stabilized ceiling (`C_co3a_s1301`) — lives in
-> **`benchmarks/sota944_campaign_2026-08-03.md`**, and every new evaluation goes through
-> `bake_verdict --regime 944` (see `SESSION-RESUME.md` entry points). **Cross-era numbers
+> **`benchmarks/sota944_campaign_2026-08-03.md`**. Its original runs used
+> `bake_verdict --regime 944`; current evaluation resolves the bake's actual
+> feature identity and matching root (see `SESSION-RESUME.md`). **Cross-era numbers
 > are NOT directly comparable**: evals are era-tagged (different feature widths, corpora
 > re-extractions, and eval slices; only CID22 val — same 4,292 pairs every era — bridges,
 > per the campaign doc's era-bridge section). The science, pitfalls, and reproduction

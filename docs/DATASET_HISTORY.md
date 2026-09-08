@@ -3513,9 +3513,13 @@ badges is on a LEGACY/FAIR-NOTED cell; every one of the 10 lost is VERIFIED-FAIR
 
 **The switch is DIRECTIONAL PER ROW, not uniformly stricter** — the most misreadable
 fact here. **C1** (`mono`) gets **harder** (the ladder samples q 0..30 at step 1, so far
-more near-flat adjacent rungs: `A2b_l0.002` 0.97852 → 0.91712 against 0.93); **C2** (*no
-cell out-scores a perfect copy*) gets **easier** (floor-dense sampling puts fewer cells
-near the ceiling clamp: `W10L9PH_s4007_packed` 0.09081 → 0.03060 against 0.05).
+more near-flat adjacent rungs: `A2b_l0.002` 0.97852 → 0.91712 against 0.93); **C2**
+(*flat/clamp dead-zone fraction*) gets **easier** (`W10L9PH_s4007_packed`
+0.09081 → 0.03060 against 0.05). **Corrected 2026-09-07 against code and the
+saved verdict:** these are `measured.grid.tied` fractions, affected by the
+sampling population. The earlier “no cell out-scores a perfect copy” label
+belongs to C6, which counts violations against a zero bar. That cell's C5/C6
+remain NOT MEASURED on both instruments; no identity improvement was measured.
 
 **`freeze_check --select`'s pick does NOT move** — `11e243eb0b86`
 (`fc2_372_S228_H128_s4004/5/6`) under `--gaddr-block canonical`, `auto` and `ladder`
