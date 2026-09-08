@@ -12,11 +12,32 @@ use std::{
 use zensim::{BakeScorer, RgbSlice, Zensim, ZensimProfile};
 use zensim_target::{CodecKind, TargetSpec, target_search, target_search_with_bake};
 
+#[path = "demo_matrix/bounds.rs"]
+mod bounds;
+
 #[derive(Parser)]
 struct Args {
     /// Opaque sRGB PNG source. Repeat for each reference; missing inputs fail.
-    #[arg(long, required = true)]
+    #[arg(long, required_unless_present = "source_manifest")]
     source: Vec<PathBuf>,
+    /// Content-pinned source/family/split manifest for the bounds protocol.
+    #[arg(long, conflicts_with = "source")]
+    source_manifest: Option<PathBuf>,
+    /// Fit calibration from training sources; emits no steering verdict.
+    #[arg(long, requires = "source_manifest", conflicts_with = "calibration")]
+    fit_calibration: bool,
+    /// Frozen training calibration; measures bounds before any steering.
+    #[arg(long, requires = "source_manifest")]
+    calibration: Option<PathBuf>,
+    /// Ladder probes including endpoints (JXL uses log-distance spacing).
+    #[arg(long, default_value_t = 21)]
+    bound_steps: usize,
+    /// Independent full encode/decode/score budgets for the bounds protocol.
+    #[arg(long, value_delimiter = ',', default_value = "1,2,3")]
+    budgets: Vec<u32>,
+    /// Additional targets taken in original score units from measured outputs.
+    #[arg(long, default_value_t = 5)]
+    witness_targets: usize,
     /// Standalone candidate bake; complete embedded head/spline executes in Rust.
     #[arg(long)]
     bake: Vec<PathBuf>,
@@ -86,6 +107,9 @@ fn rss_kib() -> Option<u64> {
 }
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.source_manifest.is_some() {
+        return bounds::run(&args);
+    }
     ensure!(
         !args.targets.is_empty() && !args.codecs.is_empty(),
         "empty matrix"
@@ -164,6 +188,7 @@ fn main() -> Result<()> {
                         tolerance: args.tolerance,
                         max_iterations: args.max_iterations,
                         profile,
+                        seed: None,
                     };
                     let start = Instant::now();
                     let run = match candidate.as_mut() {

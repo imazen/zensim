@@ -136,6 +136,7 @@ fn main() -> Result<()> {
         tolerance: cli.tolerance,
         max_iterations: cli.max_iterations,
         profile,
+        seed: None,
     };
 
     if !cli.quiet {

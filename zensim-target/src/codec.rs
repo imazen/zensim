@@ -69,10 +69,9 @@ pub mod jpeg {
 
     impl CodecBackend for Jpeg {
         fn quality_range(&self) -> (f32, f32) {
-            // zenjpeg's ApproxJpegli is approximately 1.0..=100.0.
-            // Floor above 5 keeps the search away from outputs the
-            // encoder will refuse outright.
-            (5.0, 99.0)
+            // Full documented ApproxJpegli range; low-q settings may
+            // saturate to byte-identical encodes, measured by the harness.
+            (0.0, 100.0)
         }
 
         fn encode_decode(
@@ -84,7 +83,7 @@ pub mod jpeg {
         ) -> Result<(Vec<u8>, Vec<u8>)> {
             use zenjpeg::encoder::{ChromaSubsampling, EncoderConfig, PixelLayout, Quality};
 
-            let q = knob.clamp(1.0, 100.0);
+            let q = knob.clamp(0.0, 100.0);
             let config = EncoderConfig::ycbcr(Quality::ApproxJpegli(q), ChromaSubsampling::Quarter);
             let mut enc = config
                 .encode_from_bytes(width, height, PixelLayout::Rgb8Srgb)
@@ -123,7 +122,7 @@ pub mod webp {
 
     impl CodecBackend for Webp {
         fn quality_range(&self) -> (f32, f32) {
-            (1.0, 100.0)
+            (0.0, 100.0)
         }
 
         fn encode_decode(
@@ -235,7 +234,7 @@ pub mod avif {
 }
 
 // --------------------------------------------------------------------
-// zenjxl backend (encode only — decode plumbing left as follow-up)
+// zenjxl backend (fixed VarDCT distance family; separate from native map loops)
 // --------------------------------------------------------------------
 
 #[cfg(feature = "zenjxl")]
@@ -252,7 +251,7 @@ pub mod jxl {
             // jxl distance: 0.0 ≈ mathematically lossless, ~15 = very lossy.
             // Floor above 0 because jxl-encoder 0.3 panics at exactly 0.0
             // (divide-by-zero in vardct/ac_context.rs).
-            (0.01, 15.0)
+            (0.01, 25.0)
         }
 
         fn lower_quality_means_higher_score(&self) -> bool {

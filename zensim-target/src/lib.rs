@@ -89,6 +89,17 @@ pub struct TargetSpec {
     pub max_iterations: u32,
     /// Profile to use for scoring.
     pub profile: ZensimProfile,
+    /// Training-only starting knob and local slope. Never fit from this
+    /// evaluation image's encodes or bound probes. `None` uses bisection.
+    pub seed: Option<SeedEstimate>,
+}
+
+/// Codec/scorer-specific prediction fitted on separate training images.
+#[derive(Debug, Clone, Copy)]
+pub struct SeedEstimate {
+    pub knob: f32,
+    /// Change in zensim score per native knob unit (negative for distance).
+    pub score_per_knob: f32,
 }
 
 impl Default for TargetSpec {
@@ -103,6 +114,7 @@ impl Default for TargetSpec {
             // --profile default follow the same alias. Current score contract:
             // docs/CODEC_TARGET_METRIC.md in the parent repository.
             profile: ZensimProfile::codec_target(),
+            seed: None,
         }
     }
 }
@@ -223,6 +235,16 @@ fn search(
     let backend = codec::backend_for(codec);
     let (q_lo_native, q_hi_native) = backend.quality_range();
     let inverted = backend.lower_quality_means_higher_score();
+    if let Some(seed) = spec.seed
+        && (!seed.knob.is_finite()
+            || seed.knob < q_lo_native
+            || seed.knob > q_hi_native
+            || !seed.score_per_knob.is_finite()
+            || seed.score_per_knob.abs() < 1e-6
+            || (seed.score_per_knob < 0.0) != inverted)
+    {
+        bail!("seed must be in the codec range with a finite, correctly oriented nonzero slope");
+    }
 
     // Initial probe at the midpoint of the range.
     let src_pixels: &[[u8; 3]] = bytemuck::cast_slice(rgb);
@@ -235,15 +257,14 @@ fn search(
     let mut best_idx: Option<usize> = None;
     let mut best_encoded: Vec<u8> = Vec::new();
 
-    // Bracket-safeguarded secant (zensim goal criterion 4 / plan §5 C9; the
-    // README's requested "secant or Brent's-method update"). Env-gated,
-    // default OFF ⇒ pure bisection, unchanged. The secant interpolates the two
-    // most-recent probes toward f(q)=achieved−target=0 but is ACCEPTED only
-    // when it lands strictly inside the live [q_lo,q_hi] bracket — so it can
-    // only converge faster, never escape the bisection guarantees.
-    let use_secant = std::env::var("ZENSIM_TARGET_SECANT")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+    // A seeded run uses the training slope for its second probe and measured
+    // secants thereafter. Unseeded runs retain the historical environment
+    // switch. Safeguarding keeps proposals inside the current interval; it
+    // does not prove convergence or monotonicity of a real codec/scorer pair.
+    let use_secant = spec.seed.is_some()
+        || std::env::var("ZENSIM_TARGET_SECANT")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
     let mut sec_a: Option<(f32, f32)> = None; // (q, f=achieved−target), older
     let mut sec_b: Option<(f32, f32)> = None; // newer
 
@@ -254,17 +275,24 @@ fn search(
     };
     for iter in 0..budget {
         let q_bisect = (q_lo + q_hi) * 0.5;
-        let q_mid = if use_secant {
+        let q_mid = if let Some(seed) = spec.seed
+            && iter == 0
+        {
+            seed.knob
+        } else if let Some(seed) = spec.seed
+            && iter == 1
+        {
+            let previous = &probes[0];
+            let proposed =
+                previous.knob + (spec.target - previous.achieved_score) / seed.score_per_knob;
+            guarded_knob(proposed, q_lo, q_hi, q_bisect)
+        } else if use_secant {
             if let (Some((qa, fa)), Some((qb, fb))) = (sec_a, sec_b) {
                 let denom = fb - fa;
-                if denom.abs() > 1e-6 {
+                let slope = denom / (qb - qa);
+                if denom.abs() > 1e-6 && slope.is_finite() && (slope < 0.0) == inverted {
                     let qs = qb - fb * (qb - qa) / denom;
-                    let (blo, bhi) = (q_lo.min(q_hi), q_lo.max(q_hi));
-                    if qs.is_finite() && qs > blo && qs < bhi {
-                        qs
-                    } else {
-                        q_bisect
-                    }
+                    guarded_knob(qs, q_lo, q_hi, q_bisect)
                 } else {
                     q_bisect
                 }
@@ -367,6 +395,14 @@ fn search(
     ))
 }
 
+fn guarded_knob(proposed: f32, low: f32, high: f32, fallback: f32) -> f32 {
+    if proposed.is_finite() && proposed > low && proposed < high {
+        proposed
+    } else {
+        fallback
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn finalize(
     codec: CodecKind,
@@ -404,6 +440,79 @@ fn build_zensim(profile: ZensimProfile) -> Zensim {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(feature = "zenjpeg")]
+    fn calibrated_seed_drives_the_real_first_encode() {
+        let rgb: Vec<u8> = (0..32 * 32 * 3)
+            .map(|i| ((i * 37 + i / 13) % 256) as u8)
+            .collect();
+        let backend = codec::backend_for(CodecKind::Jpeg);
+        let (encoded, decoded) = backend.encode_decode(&rgb, 32, 32, 42.25).unwrap();
+        let a = RgbSlice::try_new(bytemuck::cast_slice::<u8, [u8; 3]>(&rgb), 32, 32).unwrap();
+        let b = RgbSlice::try_new(bytemuck::cast_slice::<u8, [u8; 3]>(&decoded), 32, 32).unwrap();
+        let target = Zensim::new(ZensimProfile::D)
+            .compute(&a, &b)
+            .unwrap()
+            .score() as f32;
+        let spec = TargetSpec {
+            target,
+            max_iterations: 3,
+            tolerance: 0.,
+            profile: ZensimProfile::D,
+            seed: Some(SeedEstimate {
+                knob: 42.25,
+                score_per_knob: 1.,
+            }),
+        };
+        let r = target_search(&rgb, 32, 32, CodecKind::Jpeg, spec).unwrap();
+        assert_eq!(r.encoded, encoded);
+        assert_eq!(r.final_knob, 42.25);
+        assert_eq!(r.iterations, 1);
+        assert!(r.converged);
+        let unseeded = target_search(
+            &rgb,
+            32,
+            32,
+            CodecKind::Jpeg,
+            TargetSpec {
+                seed: None,
+                max_iterations: 1,
+                ..spec
+            },
+        )
+        .unwrap();
+        assert_eq!(unseeded.final_knob, 50.);
+        assert_ne!(unseeded.encoded, r.encoded);
+        for seed in [
+            SeedEstimate {
+                knob: 101.,
+                score_per_knob: 1.,
+            },
+            SeedEstimate {
+                knob: 42.,
+                score_per_knob: -1.,
+            },
+            SeedEstimate {
+                knob: f32::NAN,
+                score_per_knob: 1.,
+            },
+        ] {
+            assert!(
+                target_search(
+                    &rgb,
+                    32,
+                    32,
+                    CodecKind::Jpeg,
+                    TargetSpec {
+                        seed: Some(seed),
+                        ..spec
+                    }
+                )
+                .is_err()
+            );
+        }
+    }
     #[test]
     fn invalid_requests_refuse_before_encoding() {
         for spec in [

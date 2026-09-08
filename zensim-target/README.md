@@ -142,6 +142,42 @@ MIT/Apache-2.0.
 
 ## Candidate and actual-loop measurements
 
+For new steering comparisons use the [September 8 bounds protocol](../docs/TARGET_STEERING_PROTOCOL_2026-09-08.md).
+The explicit-source mode below is a historical diagnostic; requests without
+feasibility evidence cannot establish targeting failure.
+
+The bounds mode requires a source JSON with `corpus_commit`,
+`split_manifest_sha256` and `sources`, each containing `path`, `sha256`, `origin`,
+`family`, `split` (`train` or `validate`) and `content_class`. Prepare it from the
+canonical imazen/imazen-26 origin/family and variant manifests, verifying source
+bytes. Fit and evaluate with the **same binary**, scorer and codec settings:
+
+```bash
+demo_matrix --source-manifest train.json --fit-calibration \
+  --codecs jxl,jpeg,webp --bound-steps 21 --out calibration
+demo_matrix --source-manifest validate.json --calibration calibration/calibration.json \
+  --codecs jxl,jpeg,webp --bound-steps 21 --budgets 1,2,3 --out validation
+python3 scripts/v_next/rd_probe_analyze_2026-07-18.py --target-loop validation
+```
+
+Build JXL support explicitly (`--features zenjxl`). Repeat identical `--bake`
+arguments for calibration and evaluation. The Rust fit takes median scores
+per native knob, records its monotone-envelope adjustments, and predicts a
+starting knob and local slope. This simple research baseline does not replace
+codec-native content predictors. `TargetSpec::seed` carries the prediction into
+the existing search: initial seed, training-slope correction, then measured
+secant. No evaluation bounds enter those decisions.
+
+The example encodes each bound ladder once and scores all models on the same
+reconstructions. It saves the bitstreams and extrema, saturation hashes,
+inversions, bound cost and excluded fixed requests. Only witnessed targets enter
+steering comparisons. Additional targets use actual ladder scores in their
+original units; each model therefore has its own target population. Compare
+policies **within a model**, not cross-model medians as if they had identical
+requests. Product comparisons still require common feasible requests and
+independent judged quality. The protocol reserves terminal test data; this
+development instrument accepts `validate`, never `test`, for evaluation.
+
 `target_search_with_bake` accepts a reusable `zensim::BakeScorer` and shares the
 same controller as named profiles. It executes complete embedded heads/splines
 and attached scorer composition. Its result has `profile: None`; named results

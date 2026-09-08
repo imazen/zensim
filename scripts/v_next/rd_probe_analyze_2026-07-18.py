@@ -110,6 +110,8 @@ def target_loop_main():
         raise SystemExit("target-loop matrix incomplete; refusing a success summary")
     rows = [json.loads(line) for line in (root / "measurements.jsonl").read_text().splitlines()]
     inp = json.loads((root / "INPUTS.json").read_text())
+    if inp.get("schema") == "reachable-target-v1":
+        return reachable_target_summary(root, inp, rows)
     expected = len(inp["sources"]) * len(inp["codecs"]) * len(inp["targets"]) * (2 + len(inp["bakes"]))
     if len(rows) != expected or any("achieved" not in r for r in rows):
         raise SystemExit("missing/failed target-loop cells")
@@ -150,7 +152,8 @@ def target_loop_main():
                  "overshoots_beyond_tolerance": sum(r["error"] > inp["tolerance"] for r in rr),
                  "targets_outside_observed_score_range": sum(not min(p["score"] for p in r["probes"]) <= r["target"] <= max(p["score"] for p in r["probes"]) for r in rr),
                  "process_peak_rss_kib": max(r["process_peak_rss_kib"] for r in rr),
-                 "G_TARGET_diagnostic": "pass" if inp["max_iterations"] <= 3 and st.median(errors) <= 2 else "fail" if inp["max_iterations"] <= 3 else "outside_three_pass_gate"}
+                 "legacy_three_pass_screen": "pass" if inp["max_iterations"] <= 3 and st.median(errors) <= 2 else "fail" if inp["max_iterations"] <= 3 else "outside_three_pass_gate",
+                 "G_TARGET_qualification": "unmeasured: no per-image feasibility bounds; legacy screen superseded 2026-09-08"}
             result["summary"].append(q)
             text.append(f"| {codec} | {model} | {q['hits']}/{q['n']} | {q['median_abs_error']:.3f} | {q['p95_abs_error']:.3f} | {q['median_passes']:.1f} | {q['median_loop_ms']:.2f} | {q['median_score_ms']:.3f} |")
         # Each distinct reconstruction appears once in the RD comparison. Target
@@ -171,6 +174,118 @@ def target_loop_main():
     text.extend(rdtext)
     (root / "analysis_summary.json").write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
     (root / "analysis_summary.md").write_text("\n".join(text) + "\n")
+    print("\n".join(text))
+
+
+def reachable_target_summary(root, inp, rows):
+    """Summarize witnessed targets only, checking the entire declared matrix.
+
+    The bound oracle never contributes controller probes or seed choices.
+    Independent judge values are observations, not a matched-RD qualification.
+    """
+    import hashlib, json
+    if inp["fit_calibration"]:
+        raise SystemExit("calibration data cannot be summarized as steering evaluation")
+    complete = json.loads((root / "COMPLETE").read_text())
+    bounds = [json.loads(line) for line in (root / "bounds.jsonl").read_text().splitlines()]
+    expected_bounds = {(s, c, m) for s in range(len(inp["source_manifest"]["sources"]))
+                       for c in inp["codecs"] for m in inp["models"]}
+    bound_keys = [(b["source"], b["codec"], b["model"]) for b in bounds]
+    by_id = {b["id"]: b for b in bounds}
+    if set(bound_keys) != expected_bounds or len(bound_keys) != len(expected_bounds) or len(by_id) != len(bounds):
+        raise SystemExit("missing/duplicate/mismatched bound cells")
+    expected = {(b["id"], t, k, p) for b in bounds for t in b["steering_targets"]
+                for k in inp["budgets"] for p in inp["policies"]}
+    keys = [(r["bound_id"], r["target"], r["pass_budget"], r["policy"]) for r in rows]
+    if len(keys) != len(expected) or set(keys) != expected or complete["measurements"] != len(rows):
+        raise SystemExit("missing/duplicate/mismatched steering cells")
+    for b in bounds:
+        if len(b["probes"]) != inp["bound_steps"]:
+            raise SystemExit("incomplete bound ladder")
+        measured = [p["score"] for p in b["probes"]]
+        if (min(measured), max(measured)) != (b["attained_min"], b["attained_max"]):
+            raise SystemExit("bound extrema mismatch")
+        if any(not any(abs(s-t) <= inp["tolerance"] + 1e-5 for s in measured) for t in b["steering_targets"]):
+            raise SystemExit("unwitnessed target admitted to steering")
+    for r in rows:
+        b = by_id[r["bound_id"]]
+        if (r["source"],r["codec"],r["model"]) != (b["source"],b["codec"],b["model"]):
+            raise SystemExit("steering/bound identity mismatch")
+        if r["target_status"] != "witnessed" or not 1 <= r["passes"] <= r["pass_budget"] or len(r["probes"]) != r["passes"]:
+            raise SystemExit("invalid feasibility or pass accounting")
+        if not all(math.isfinite(r[k]) for k in ("achieved","error","target","loop_seconds","ssim2","butteraugli_pnorm3")):
+            raise SystemExit("nonfinite measurement")
+        if abs(r["achieved"] - r["target"] - r["error"]) > 1e-4:
+            raise SystemExit("error arithmetic mismatch")
+    def stats(group):
+        errors = sorted(abs(r["error"]) for r in group)
+        return {"n":len(group), "sources":len({r["origin"] for r in group}),
+                "families":len({r["family"] for r in group}),
+                "median_abs_error":st.median(errors),
+                "p95_abs_error":errors[math.ceil(.95*len(errors))-1], "worst_abs_error":max(errors),
+                "median_signed_error":st.median(r["error"] for r in group),
+                "hits":{str(t):sum(abs(r["error"]) <= t for r in group) for t in (.5,1.,2.)},
+                "undershoots_beyond_tolerance":sum(r["error"] < -inp["tolerance"] for r in group),
+                "median_passes":st.median(r["passes"] for r in group),
+                "median_loop_ms":1000*st.median(r["loop_seconds"] for r in group),
+                "median_bytes":st.median(r["bytes"] for r in group)}
+    groups = defaultdict(list)
+    by_class = defaultdict(list)
+    by_position = defaultdict(list)
+    for r in rows:
+        key = (r["codec"],r["model"],r["pass_budget"],r["policy"])
+        groups[key].append(r)
+        by_class[(*key,r["content_class"])].append(r)
+        b = by_id[r["bound_id"]]
+        position = ("lower_endpoint" if abs(r["target"]-b["attained_min"]) <= 1e-5
+                    else "upper_endpoint" if abs(r["target"]-b["attained_max"]) <= 1e-5 else "interior")
+        by_position[(*key,position)].append(r)
+    summary = [{"codec":c,"model":m,"budget":k,"policy":p,**stats(g)}
+               for (c,m,k,p),g in sorted(groups.items())]
+    classes = [{"codec":c,"model":m,"budget":k,"policy":p,"class":cl,**stats(g)}
+               for (c,m,k,p,cl),g in sorted(by_class.items())]
+    positions = [{"codec":c,"model":m,"budget":k,"policy":p,"position":pos,**stats(g)}
+                 for (c,m,k,p,pos),g in sorted(by_position.items())]
+    # Paired errors are aggregated within source family first. Repeated target
+    # requests are not independent samples and there are too few families in a
+    # smoke run to justify a universal uncertainty/qualification statement.
+    paired = []
+    indexed = {key:r for key,r in zip(keys,rows)}
+    for c in inp["codecs"]:
+        for m in inp["models"]:
+            for k in inp["budgets"]:
+                delta = defaultdict(list)
+                for r in groups[(c,m,k,"train_curve")]:
+                    base = indexed[(r["bound_id"],r["target"],k,"midpoint")]
+                    delta[r["family"]].append(abs(r["error"])-abs(base["error"]))
+                family_means = {f:st.mean(v) for f,v in delta.items()}
+                paired.append({"codec":c,"model":m,"budget":k,
+                    "family_mean_error_deltas":family_means,
+                    "mean_family_delta":st.mean(family_means.values()),
+                    "families_improved":sum(v<0 for v in family_means.values())})
+    coverage = defaultdict(lambda:defaultdict(int))
+    for b in bounds:
+        for r in b["requests"]:
+            coverage[(b["codec"],b["model"])][r["status"]] += 1
+    result = {"schema":inp["schema"],"cells":len(rows),"bound_cells":len(bounds),
+              "input_sha256":hashlib.sha256((root/"INPUTS.json").read_bytes()).hexdigest(),
+              "measurement_sha256":hashlib.sha256((root/"measurements.jsonl").read_bytes()).hexdigest(),
+              "bounds_sha256":hashlib.sha256((root/"bounds.jsonl").read_bytes()).hexdigest(),
+              "summary":summary,"by_content_class":classes,"by_target_position":positions,"paired":paired,
+              "fixed_request_coverage":[{"codec":c,"model":m,**counts} for (c,m),counts in sorted(coverage.items())],
+              "qualification":"unqualified scalar experiment; native diffmap and full-range coverage remain separate",
+              "uncertainty":"source-family paired descriptive deltas; no significance or universal tolerance claim"}
+    text = ["# Reachable-target scalar steering", "",
+            "Only witnessed attainable targets enter these errors. Fixed requests without a witness are counted separately.",
+            "Bounds are offline evaluation work; controllers use only frozen train calibration and their own probes.", "",
+            "| codec | model | budget | policy | n | median error | p95 error | hits ±1 | median ms |",
+            "|---|---|---:|---|---:|---:|---:|---:|---:|"]
+    for s in summary:
+        label = s["model"] if not s["model"].startswith("bake:") else s["model"][:17]
+        text.append(f"| {s['codec']} | {label} | {s['budget']} | {s['policy']} | {s['n']} | {s['median_abs_error']:.3f} | {s['p95_abs_error']:.3f} | {s['hits']['1.0']} | {s['median_loop_ms']:.2f} |")
+    text += ["", "No perceptual tolerance or native diffmap/RD qualification is established by this experiment."]
+    (root/"analysis_summary.json").write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
+    (root/"analysis_summary.md").write_text("\n".join(text)+"\n")
     print("\n".join(text))
 
 

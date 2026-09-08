@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added — attainable-target research instrument (2026-09-08)
+
+The unpublished `zensim-target::TargetSpec` accepts an optional `SeedEstimate`
+(starting knob and local score slope). The existing controller uses this
+training prediction, then measured secant corrections. `demo_matrix` can
+measure per-image codec bounds, fit a Rust training-only calibration, and
+compare 1/2/3-shot policies on witnessed targets from separate source families.
+The artifact binds input/model/binary identities and records oracle cost and
+excluded fixed requests. JPEG/WebP adapters now include q=0; JPEG includes
+q=100, and the fixed JXL distance family extends to 25. This is a scalar
+controller instrument, not native diffmap or model qualification.
+
 ### Added — candidate serving and evaluation (2026-09-07)
 
 `zensim::BakeScorer<'a>` borrows caller-owned `zenpredict::Model` values.

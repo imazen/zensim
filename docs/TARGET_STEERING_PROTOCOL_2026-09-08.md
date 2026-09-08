@@ -68,8 +68,9 @@ binary, source/split and probe identities; mismatches must fail.
   canonical origin membership and family separation; exclude disagreements
   for the initial experiment. Pin the latest manifest bytes. Read measured
   render URLs from the August 30 index; do not derive them by extension swap.
-- First baseline: a training-only median inverse curve per codec and scorer,
-  with its local slope. Compare the same images/targets with midpoint search.
+- First baseline: median training score at each native knob, followed by an
+  explicitly recorded monotone running envelope; invert that curve per codec
+  and scorer, with its local slope. Compare the same images/targets with midpoint search.
   This bounded baseline is not a replacement for the existing codec-specific
   content predictors. Fit future predictor/heuristic choices on train only;
   use source-family-disjoint validation for development. Reserve terminal

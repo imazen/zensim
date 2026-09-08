@@ -3592,3 +3592,32 @@ floor gates. Eight-source missing supervision is insufficient; no new model is
 qualified and no loss/head/feature removal is justified. See the complete
 [control record](../benchmarks/cleanup_scientific_controls_2026-09-07.md) and
 [actual target-loop record](../benchmarks/cleanup_target_loop_2026-09-07.md).
+
+## 2026-09-08 — bounds and train-calibrated steering replace the unbounded screen
+
+**RE-FRAMED:** the September 7 fixed-target midpoint runs mixed attainable and
+unwitnessed requests. Their legacy median-error screen cannot establish model
+failure. User ruling: bound each image/codec first, train codec-specific seeds
+only on imazen/imazen-26 training sources, compare 1/2/3 shots, and include JXL,
+JPEG and WebP diffmaps before deeper AVIF expansion.
+
+The new Rust instrument has 12 calibration and 8 validation origins, separated
+by both canonical digit and family rules, with verified 256-longest-side
+`cleanpicker-ladder11@2026-08-23` bytes. Corpus authority is the separate
+imazen/imazen-26 repository; its August 27 family extension and August 30 URL
+correction postdate the old codec-corpus guidance. These steering measurements
+do not train a new metric, change historical splits, or erase old metric-model
+sharing/provenance defects.
+
+**STANDS, bounded measurement:** 2,730 actual scalar steering cells, 162 with
+negative targets, run only where a bound-ladder output witnesses feasibility.
+Of 360 fixed requests, 95 have witnesses, 151 lie outside the measured envelope
+and 114 remain unwitnessed inside it. Unwitnessed is not synonymous with
+impossible. Training calibration improves tail errors and ±1 hit rates at three
+passes on all three codecs for B, while WebP's median gets worse. See the
+[full record](../benchmarks/target_steering_bounds_2026-09-08.md).
+
+Native diffmap qualification remains separate: existing JXL/JPEG/WebP/AVIF
+owners and research branches were found, with stale scorer pins, conditional
+map engagement and different pass accounting. The complete composed-model map
+surface remains work; no native-map gain or product tolerance is established.

@@ -1,9 +1,18 @@
 # Model-selection scorecard — the five-gate closed-loop exam (2026-07-18)
 
-**September 7 measurement update:** the existing `zensim-target` controller now
+**September 8 correction — user ruling:** steering evaluation must first
+establish each image's attained codec range, then compare 1/2/3-shot policies
+using codec-specific calibration fitted only on imazen-26 training families.
+The [current protocol](TARGET_STEERING_PROTOCOL_2026-09-08.md) defines witnessed
+feasibility, separate oracle cost, source-family splits and native diffmap work
+accounting. The July median <=2 screen is historical, not a validated product
+tolerance. Unwitnessed requests cannot be used to declare steering failure.
+
+**September 7 measurement record:** the existing `zensim-target` controller now
 accepts complete candidate `BakeScorer` models. The [360-cell actual-loop
 record](../benchmarks/cleanup_target_loop_2026-09-07.md) measures targets, bytes,
-passes and independent judges, and fails the three-pass error screen. Its
+passes and independent judges, and misses the legacy three-pass error screen.
+That mixed feasible/unwitnessed aggregate does not establish model failure. Its
 scalar-q interpolation is diagnostic; it makes no encoder-RDO gain claim.
 The codec-native starting-quality/RDO instruments below remain distinct work.
 No product gate inherits a pass from the three-seed training reproductions.
@@ -31,7 +40,7 @@ the same gates (HDR swaps the corpora/judges — see §HDR).
 | **G-DIAL** | monotone calibrated dial? | dial panel (quarantined_v2 grid) | G1 p5≤25 ∧ p95≥85; G3 mono ≥0.93 | incl. |
 | **G-STEER** | can its diffmap steer? | `diffmap_block_coherence --bake` (M2 ceiling + M3 deployable map; fold per family) | M2 ≥0.99; M3 ≥0.70 | ~3 min |
 | **G-RD** | saves real bytes at equal *judged* quality? | probe matrix + independent judge panel (`rd_probe_2026-07-18.sh` + analyze) | ≥0% on ALL judges (no gaming regression), photos | ~30 min |
-| **G-TARGET** | codec hits its dial fast? | probe residuals | med \|achieved−T\| ≤2 within ≤3 passes | incl. |
+| **G-TARGET** | codec hits attainable targets fast? | per-image bounds + frozen train-calibrated 1/2/3-shot probes | current protocol: witnessed-target error/tails/coverage and explicit cost; product tolerance not yet established | incl. + separately reported bound oracle |
 
 Operational notes (learned the hard way — see `benchmarks/rd_probe_results_2026-07-18.md`):
 
@@ -49,9 +58,10 @@ Operational notes (learned the hard way — see `benchmarks/rd_probe_results_202
 - **Steer-mass pre-screen (free):** `closed_loop.diffmap_basic_fraction` in the metrics
   sidecar. A candidate with low basic-block mass is structurally capped as a steerer BEFORE
   any training investment (B = 0.62 → 0.66 M3 ceiling; **BHdr = 0.43** — worse).
-- Both codecs' distance/starting-q tables are legacy-V0_2-seeded until re-seeded; G-TARGET
-  numbers improve (fewer passes) after re-seeding, but equal-quality byte comparisons are
-  unaffected (same tables for every candidate).
+- The July statement that both codecs' tables are legacy-V0_2-seeded is stale.
+  Later JXL/JPEG/WebP/AVIF work added several profile-specific tables and heads.
+  Pin the actual table, scorer and codec revision; never infer compatibility
+  from its filename or an old status paragraph. Refit on train only.
 
 ## G-DIAL vs G-ADDR — and the cross-bake selection rule (2026-09-06)
 

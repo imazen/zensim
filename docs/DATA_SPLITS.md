@@ -98,6 +98,20 @@ row change, or target change creates a new dated file.
 
 ### 2a. Least-significant-digit origin rule (imazen-26 family)
 
+**September 8 chronology correction for new steering calibration:** imazen-26
+moved to `imazen/imazen-26` on August 23; the `codec-corpus` copy is explicitly
+superseded. The newer August 27 `manifests/split_map_family.tsv` groups shared
+content (patent pages, screenshot viewports, generator families), assigning a
+family by its lowest origin ID. It changes 175 origin assignments; totals are
+1084 train / 661 validate / 415 test. `origin_split.py` below implements the
+older individual-origin rule, not that family extension. The September 8
+steering experiment requires both assignments to agree and enforces disjoint
+families, a conservative intersection which preserves existing restrictions.
+Use the canonical manifests and measured render-URL index at pinned revision
+`187fbf338ce08e8e6654db7f04ddae58d5263da2` (also retained in the
+experiment's source manifest; the corpus repository is the authority).
+Historical tables are not retrospectively relabeled by this correction.
+
 **Source of truth: `zenmetrics/scripts/picker/origin_split.py::split_of` —
 import it, never re-implement.** Set by the user 2026-06-26.
 

@@ -24,7 +24,7 @@ objectives. B/C/D can be replaced; good rank alone is not product readiness.
 | Research selection / product qualification | `freeze_check --select` / `--qualify` | Distinct claims; missing or failed product evidence never passes |
 | Board rendering | `scripts/v_next/gauntlet.py` | Stored owner results; shared negative/positive axes, board gates |
 | Contribution / real compute cost | `bake_contrib`, existing extraction benchmarks | Declared IDs; actual passes, buffers, time and memory |
-| Actual target loop | `zensim-target::target_search{,_with_bake}`, `demo_matrix` | Encoded bytes, achieved error, passes, time and independent judges |
+| Actual target loop | `zensim-target::target_search{,_with_bake}`, `demo_matrix` | Per-image witnessed bounds, frozen train calibration, 1/2/3 shots, encoded bytes, error/tails, time and independent judges; native map loops separately |
 | Ladder encoding / extraction / training pairs | `canonical_corpus/build_ladder_grid.sh`, `build_dial372_instruments.py`, `build_ladder_tv_pairs.py` | Original source splits, encoder/decoder/feature identities, distinct floors, keyed row order |
 | Detached completion | `harvest_bakes.sh`, `await_artifacts.sh` | Final evaluated artifacts, heartbeat, failure state and idempotent endgame |
 
@@ -65,7 +65,9 @@ Inspect `../zenpapers` and later summaries before fundamental changes.
    Label historical integrity/memorization guards. Selection cannot qualify a
    model: qualification requires measured G-ADDR plus the scorecard's separate
    product gates and matching provenance. Record failed, incomplete or qualified.
-7. Measure actual encode/decode/score loops on the same source bytes and budgets.
+7. Follow the [current steering protocol](TARGET_STEERING_PROTOCOL_2026-09-08.md):
+   establish attained bounds before judging steering, fit seeds only on canonical
+   imazen-26 training families, and measure 1/2/3-shot encode/decode/score loops.
    Report target errors/undershoot, failure to converge, bytes, passes, latency
    and memory. Use independent judges and matched-quality RD comparisons.
    A model's own scalar or cached q curve cannot prove an encoding improvement.
