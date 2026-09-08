@@ -3621,3 +3621,29 @@ Native diffmap qualification remains separate: existing JXL/JPEG/WebP/AVIF
 owners and research branches were found, with stale scorer pins, conditional
 map engagement and different pass accounting. The complete composed-model map
 surface remains work; no native-map gain or product tolerance is established.
+
+## 2026-09-08 — canonical native corruption input packet
+
+**STANDS, generation complete; training admission incomplete.** The September 6
+nonlinear HGB and Rust ZCTH results supersede the September 5 linear-head
+separability/guard proposal. Historical detection does not certify the old
+inspo-tree source split or foreign JPEG anchors.
+
+The existing native fixture owner and Python corpus owner now generate a
+separate canonical JSON-manifest packet. Generator math is pinned to
+codec-corpus `8e10d4d7` (the old local `3e7a8a22` omitted later real bugs), with
+zenpng IO and current zenjpeg q10/q20 4:2:0 anchors. The same canonical 12 train /
+8 validation families yield 8,580 / 5,720 complete 372-feature rows, formula 1,
+libm root form. All source/producer hashes and original pixels are retained.
+
+Inert attempts are noncorrupt labels, with catalog identity preserved. The
+raw tables retain 823 / 345 repeated source/pixel pairs and deliberately remain
+**failed C10**; they are not approved training views. A separate 456 / 304-row
+honest JXL/AVIF scalar-bound supplement re-decodes retained native bitstreams
+with the same extractor. No new classifier fit or terminal-label evaluation.
+
+See [registration](CANONICAL_CORRUPTION_2026-09-08.md) and
+[complete input record](../benchmarks/canonical_corruption_2026-09-08.md) for
+hashes, controls, original/final producer snapshots and remaining deduplication,
+T0 content audit, current surface-feature parity and fit/calibration partition
+work. Artifact root: `/mnt/v/output/zensim/canonical-corruption-2026-09-08/`.

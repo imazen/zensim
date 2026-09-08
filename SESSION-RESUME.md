@@ -4,6 +4,19 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
+Latest September 8 continuation: [canonical corruption input generation](benchmarks/canonical_corruption_2026-09-08.md)
+is complete: 12 train / 8 validation origins, 14,300 retained catalog/anchor
+rows plus 760 current-native honest JXL/AVIF feature rows. No new fit or model
+qualification. The September 6 nonlinear HGB already superseded the older
+linear separability/guard hypothesis; reuse its existing estimator/exporter
+and Rust ZCTH serving. Before fitting, deduplicate source/pixel pairs (raw
+catalogs still fail C10), complete T0 content audit and public-surface feature
+parity, and register exact fit/calibration/evaluation source identities. The
+corruption gate's discontinuity and current native adapters' explicit rejection
+of corruption companions remain product work. The prior native intervention
+and RD findings remain negative/mixed; do not substitute corruption detection
+or restoration coherence for useful allocation evidence.
+
 The end user controls one target score. The codec chooses parameters and must
 reach useful quality across codecs/content, near-lossless settings and codec
 floors with few passes, small output, low latency and low memory. Negative

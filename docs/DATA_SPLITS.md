@@ -12,6 +12,15 @@ Companion docs: `~/work/zen/DATA_PROVENANCE.md` (where data lives),
 `docs/EVAL_PANEL_REQUIREMENT.md` (two-panel eval), CLAUDE.md ("CID22 is
 VALIDATION-ONLY", contamination rules).
 
+September 8 derived-input entry: the [canonical corruption packet](CANONICAL_CORRUPTION_2026-09-08.md)
+inherits the existing native-targeting 12 training / 8 validation origin and
+family assignments, including all corruption attempts, anchors and honest
+codec renditions. It does not define a new random split. Raw catalog tables
+retain duplicates for audit and are not yet admitted training views. Any fit
+must separately register probability-calibration origins within the training
+families; all eight validation origins stay evaluation-only. No terminal origin
+is present. [Counts, hashes and pending admission gates](../benchmarks/canonical_corruption_2026-09-08.md).
+
 ---
 
 ## 1. Principles (apply to every dataset)

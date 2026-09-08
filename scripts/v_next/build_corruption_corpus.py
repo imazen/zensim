@@ -42,6 +42,8 @@ Usage:
       [--nfeat 372|720] [--resume]
 """
 import argparse, os, glob, subprocess, shutil, sys, tempfile
+import csv, hashlib, importlib.util, json
+from pathlib import Path
 import numpy as np, pyarrow as pa, pyarrow.parquet as pq
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None  # sources include legit 100+ MP scans, not attacks
@@ -75,7 +77,7 @@ def maybe_downsize(ref_path, tmpdir):
         return ref_path
 
 
-def run_extract(pairs_tsv, out_csv):
+def run_extract(pairs_tsv, out_csv, env=None):
     """Invoke the width's extractor. THE one place that knows each binary's argv.
 
     `extract_features_372col` (the canonical 372 owner, 2026-09-04) takes named
@@ -88,7 +90,185 @@ def run_extract(pairs_tsv, out_csv):
         argv = [EXTRACT, "--corpus", "pairs", "--path", pairs_tsv, "--out", out_csv]
     else:
         argv = [EXTRACT, pairs_tsv, out_csv]
-    return subprocess.run(argv, capture_output=True, text=True)
+    return subprocess.run(argv, capture_output=True, text=True, env=env)
+
+
+def file_sha(path):
+    with open(path, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def canonical_sources(source_path, family_path):
+    """Validate the frozen source manifest against both canonical split owners."""
+    zen = Path(__file__).resolve().parents[3]
+    split_path = zen / "zenmetrics/scripts/picker/origin_split.py"
+    spec = importlib.util.spec_from_file_location("origin_split", split_path)
+    split = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(split)
+    manifest = json.loads(Path(source_path).read_text())
+    require(file_sha(family_path) == manifest["split_manifest_sha256"], "family manifest SHA mismatch")
+    with open(family_path) as f:
+        families = {r["id"]: r for r in csv.DictReader(f, delimiter="\t")}
+    sources = manifest["sources"]
+    require(bool(sources), "empty source manifest")
+    origins, pixels, seen_families = set(), set(), set()
+    for s in sources:
+        origin = s["origin"]
+        require(origin not in origins and s["sha256"] not in pixels, "duplicate source")
+        require(s["family"] not in seen_families, "duplicate source family")
+        origins.add(origin); pixels.add(s["sha256"]); seen_families.add(s["family"])
+        require(split.origin_id(s["path"]) == origin, "path/origin mismatch")
+        role = {"train": "train", "validate": "val"}.get(s["split"])
+        require(role is not None and split.split_of(origin) == role,
+                "source is terminal or disagrees with origin split")
+        family = families[origin]
+        require(family["split"] == s["split"],
+                "family split mismatch")
+        require((family["family"] or f"origin:{origin}") == s["family"], "family identity mismatch")
+        require(s["content_class"] in ("photo", "screen", "graphic", "document"), "unknown class")
+        require(file_sha(s["path"]) == s["sha256"], "source SHA mismatch")
+    require(len({s["split"] for s in sources}) == 1, "mixed source roles")
+    return manifest, file_sha(split_path)
+
+
+def canonical_corpus(a):
+    """Native-only, retained-pixel, complete-row path registered September 8."""
+    require(a.nfeat == 372 and a.limit == 0, "canonical mode requires full 372-column extraction")
+    require(a.artifacts_dir and a.family_manifest and a.producer_json,
+            "canonical mode requires --artifacts-dir, --family-manifest, --producer-json")
+    root, output = Path(a.artifacts_dir), Path(a.out)
+    require(not root.exists() and not output.exists(), "canonical outputs must be fresh")
+    manifest, split_owner_sha = canonical_sources(a.sources_json, a.family_manifest)
+    source_manifest_sha = file_sha(a.sources_json)
+    producer = json.loads(Path(a.producer_json).read_text())
+    require(producer["generator_sha256"] == file_sha(GEN), "generator binary SHA mismatch")
+    require(producer["extractor_sha256"] == file_sha(EXTRACT), "extractor binary SHA mismatch")
+    require(producer["feature_ids"] == list(range(372)), "unexpected feature contract")
+    require(producer["formula_revision"] == 1 and producer["root_form"] == "libm",
+            "this registered corpus requires revision 1 / libm")
+    require(bool(producer["source_files_sha256"]) and bool(producer["codec_revisions"]),
+            "missing producer source provenance")
+    for path, expected in producer["source_files_sha256"].items():
+        require(file_sha(path) == expected, f"producer source changed: {path}")
+    env = dict(os.environ, ZENSIM_FORMULA_REV="1", ZENSIM_ROOT_FORM="libm", RAYON_NUM_THREADS="8")
+    root.mkdir(parents=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    (root / "SOURCES.json").write_text(Path(a.sources_json).read_text())
+    (root / "PRODUCER.json").write_text(Path(a.producer_json).read_text())
+    summaries = []
+    writer = None
+    try:
+        for source in manifest["sources"]:
+            origin = source["origin"]
+            dest = root / origin
+            cmd = [GEN, "corruption", "--in", source["path"], "--out", str(dest),
+                   "--ref-id", origin, "--class", source["content_class"], "--seed", "1"]
+            result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+            (root / f"{origin}.generator.log").write_text(result.stdout + result.stderr)
+            require(result.returncode == 0, f"generator failed: {origin}")
+            done = json.loads((dest / "COMPLETE.json").read_text())
+            generated = json.loads((dest / "_MANIFEST.json").read_text())
+            require(file_sha(dest / "_MANIFEST.json") == done["manifest_sha256"], "generator manifest mismatch")
+            require(generated["origin"] == origin and generated["content_class"] == source["content_class"],
+                    "generated source identity mismatch")
+            require(generated["source_sha256"] == done["source_sha256"] == source["sha256"],
+                    "generated source SHA mismatch")
+            require(generated["generator_revision"] == producer["generator_revision"], "generator revision mismatch")
+            require(file_sha(dest / "reference.png") == generated["reference_png_sha256"], "reference PNG mismatch")
+            records = generated["records"]
+            require(len(records) == done["catalog_entries"] + 2 and done["full_encodes"] == 2
+                    and done["independent_anchor_decodes"] == 2, "incomplete generator counts")
+            require(len({r["filename"] for r in records}) == len(records), "duplicate generated filename")
+            require(sorted(r["quality"] for r in records if r["kind"] == "honest_anchor") == [10, 20],
+                    "missing or duplicate anchors")
+            require(sum(r.get("inert", False) for r in records) == done["inert_entries"], "inert count mismatch")
+            require(len(list(dest.glob("*.png"))) == done["png_files"] == len(records) + 1,
+                    "incomplete PNG outputs")
+            pairs = dest / "pairs.tsv"
+            labels = []
+            with pairs.open("w") as f:
+                f.write("ref_path\tdist_path\thuman_score\n")
+                for i, r in enumerate(records):
+                    name = r["filename"]
+                    require(Path(name).name == name and name.endswith(".png"), "invalid PNG filename")
+                    p = dest / name
+                    entry = r.get("entry", {})
+                    params = entry.get("params", {})
+                    corrupt = r["kind"] == "corruption"
+                    require(corrupt or r["kind"] == "honest_anchor", "unknown generated kind")
+                    require(type(r["is_corruption"]) is bool, "invalid corruption label")
+                    require(file_sha(p) == r["png_sha256"], "generated PNG SHA mismatch")
+                    if corrupt:
+                        require(entry["ref_id"] == origin and r["pixels_changed"] >= 0,
+                                "corruption entry identity mismatch")
+                        require(r["is_corruption"] == (r["pixels_changed"] > 0)
+                                and r["inert"] == (r["pixels_changed"] == 0), "inert label mismatch")
+                    else:
+                        require(not r["is_corruption"] and r["quality"] in (10, 20), "anchor label mismatch")
+                        require(file_sha(p.with_suffix(".jpg")) == r["encoded_sha256"], "anchor bytes mismatch")
+                    f.write(f"{dest / 'reference.png'}\t{p}\t{i}\n")
+                    labels.append(dict(
+                        ref_id=origin, ref_basename=origin, source_family=source["family"],
+                        split=source["split"], content_class=source["content_class"],
+                        is_corruption=int(r["is_corruption"]), kind=r["kind"],
+                        family=entry.get("family_name", "honest_anchor"),
+                        region=json.dumps(params.get("region", "whole"), sort_keys=True),
+                        severity=json.dumps(params.get("severity", r.get("quality")), sort_keys=True),
+                        params_json=json.dumps(entry, sort_keys=True), inert=r.get("inert", False),
+                        pixels_sha256=r["pixels_sha256"], png_sha256=file_sha(p),
+                        source_sha256=source["sha256"], filename=str(p), row_id=f"{origin}:{i}"))
+            fcsv = dest / "features.csv"
+            result = run_extract(str(pairs), str(fcsv), env=env)
+            (dest / "extraction.log").write_text(result.stdout + result.stderr)
+            require(result.returncode == 0, f"extraction failed: {origin}")
+            rows = {}
+            with fcsv.open() as f:
+                reader = csv.DictReader(f)
+                require(reader.fieldnames == ["ref_basename", "human_score", *FEATCOLS], "feature header mismatch")
+                for row in reader:
+                    require(None not in row and None not in row.values(), "malformed feature row")
+                    key = float(row["human_score"])
+                    require(np.isfinite(key) and key.is_integer() and 0 <= key < len(labels), "invalid feature key")
+                    key = int(key)
+                    require(key not in rows, "duplicate feature key")
+                    values = np.array([float(row[c]) for c in FEATCOLS], dtype=np.float32)
+                    require(np.all(np.isfinite(values)), "nonfinite feature row")
+                    rows[key] = values
+            require(set(rows) == set(range(len(labels))), "missing feature rows")
+            values = np.stack([rows[i] for i in range(len(labels))])
+            table = pa.table({**{c: pa.array(values[:, i]) for i, c in enumerate(FEATCOLS)},
+                              **{k: pa.array([r[k] for r in labels]) for k in labels[0]}})
+            if writer is None:
+                writer = pq.ParquetWriter(output, table.schema, compression="zstd")
+            writer.write_table(table)
+            summaries.append(dict(origin=origin, rows=len(labels),
+                                  positives=sum(r["is_corruption"] for r in labels),
+                                  inert=sum(r["inert"] for r in labels),
+                                  unique_pixels=len({r["pixels_sha256"] for r in labels}),
+                                  manifest_sha256=done["manifest_sha256"], features_sha256=file_sha(fcsv)))
+            print(f"{origin}: {summaries[-1]}", flush=True)
+    finally:
+        if writer is not None:
+            writer.close()
+    # A partial parquet is diagnostic output, never an accepted dataset.
+    require(file_sha(a.sources_json) == source_manifest_sha, "source manifest changed")
+    canonical_sources(a.sources_json, a.family_manifest)
+    require(file_sha(GEN) == producer["generator_sha256"] and file_sha(EXTRACT) == producer["extractor_sha256"],
+            "tool binary changed during generation")
+    for path, expected in producer["source_files_sha256"].items():
+        require(file_sha(path) == expected, f"producer source changed: {path}")
+    require(len(summaries) == len(manifest["sources"]), "incomplete sources")
+    complete = dict(schema="canonical-corruption-corpus-v1", sources=summaries,
+                    rows=sum(s["rows"] for s in summaries), full_encodes=2 * len(summaries),
+                    independent_anchor_decodes=2 * len(summaries),
+                    source_manifest_sha256=source_manifest_sha, split_owner_sha256=split_owner_sha,
+                    producer=producer, parquet=str(output), parquet_sha256=file_sha(output))
+    (root / "COMPLETE.json").write_text(json.dumps(complete, indent=2) + "\n")
 
 
 def parse_name(stem):
@@ -170,7 +350,12 @@ def process_ref(ref_path, ref_id, cclass, tmpdir):
 def main():
     global GEN, EXTRACT, MAX_DIM
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sources", required=True)
+    sources = ap.add_mutually_exclusive_group(required=True)
+    sources.add_argument("--sources", help="historical TSV mode, unchanged pixels/anchors")
+    sources.add_argument("--sources-json", help="canonical frozen JSON manifest, native IO/anchors")
+    ap.add_argument("--artifacts-dir")
+    ap.add_argument("--family-manifest")
+    ap.add_argument("--producer-json")
     ap.add_argument("--out", required=True)
     ap.add_argument("--gen", default=GEN)
     ap.add_argument("--extract", default=EXTRACT)
@@ -184,6 +369,9 @@ def main():
     NFEAT = a.nfeat
     FEATCOLS = [f"f{i}" for i in range(NFEAT)]
     GEN, EXTRACT, MAX_DIM = a.gen, a.extract, a.max_dim
+    if a.sources_json:
+        canonical_corpus(a)
+        return
     print(f"nfeat={NFEAT} extractor={EXTRACT}", flush=True)
     srcs = [l.rstrip("\n").split("\t") for l in open(a.sources) if l.strip()]
     if a.limit:

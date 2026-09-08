@@ -28,7 +28,7 @@ ssim2-rayon = ["fast-ssim2/rayon"]
 # the size and the quality axis (USER RULE "IMAZEN-ONLY IMAGING/CODEC SOFTWARE",
 # 2026-09-02). ERA HAZARD: it does NOT reproduce the ImageMagick-era fixtures —
 # see the example's module doc before regenerating anything.
-m3-fixtures = ["dep:zenpng", "dep:zenjpeg", "dep:zenresize", "dep:zenpixels", "dep:zenpixels-convert", "dep:enough"]
+m3-fixtures = ["dep:zenpng", "dep:zenjpeg", "dep:zenresize", "dep:zenpixels", "dep:zenpixels-convert", "dep:enough", "dep:corruption-corpus", "dep:serde_json", "dep:sha2"]
 
 # Enables the `extract_features_372col_omni` example. As of V11-DECODER-FIX
 # (task #195, 2026-05-20) this feature pulls direct zenavif + zenjxl path
@@ -85,6 +85,9 @@ sdr944-extract = ["dep:png", "zensim/feature-regime-v2"]
 cc = "1"
 
 [dependencies]
+corruption-corpus = { git = "https://github.com/imazen/codec-corpus", rev = "8e10d4d765667c1c49d74413878fc4bfb46dcf8d", optional = true, default-features = false }
+serde_json = { version = "1", optional = true }
+sha2 = { version = "0.11", optional = true }
 png = { version = "0.18.1", optional = true }
 # zensim-bench is internal tooling (not published).
 # `deprecated-profiles` keeps `ZensimProfile::A` available for `zwe_zenbench`,

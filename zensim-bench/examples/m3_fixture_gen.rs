@@ -67,6 +67,9 @@ use zenresize::{Filter, PixelDescriptor, ResizeConfig, Resizer};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
+#[path = "m3_fixture_gen/corruption.rs"]
+mod corruption;
+
 /// An RGB8 image: packed `w * h * 3` bytes.
 struct Rgb8 {
     w: u32,
@@ -148,7 +151,7 @@ fn mitchell_fit(src: &Rgb8, max: u32) -> Res<Rgb8> {
     let out_h = ((f64::from(src.h) * scale).round() as u32).max(1);
 
     let mut rgba = Vec::with_capacity(src.px.len() / 3 * 4);
-    for p in src.px.chunks_exact(3) {
+    for p in src.px.as_chunks::<3>().0 {
         rgba.extend_from_slice(&[p[0], p[1], p[2], 255]);
     }
     let cfg = ResizeConfig::builder(src.w, src.h, out_w, out_h)
@@ -157,7 +160,12 @@ fn mitchell_fit(src: &Rgb8, max: u32) -> Res<Rgb8> {
         .build();
     let out = Resizer::new(&cfg).resize(&rgba);
 
-    let px: Vec<u8> = out.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let px: Vec<u8> = out
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .collect();
     Ok(Rgb8 {
         w: out_w,
         h: out_h,
@@ -192,6 +200,9 @@ fn need(args: &[String], key: &str) -> Res<String> {
 fn main() -> Res<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = args.first().map(String::as_str).unwrap_or("");
+    if mode == "corruption" {
+        return corruption::run(&args);
+    }
     let inp = PathBuf::from(need(&args, "--in")?);
     let outp = PathBuf::from(need(&args, "--out")?);
 
