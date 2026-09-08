@@ -927,3 +927,22 @@ The broad historical-bake score correction is recorded explicitly in the
 [feature-plan audit](../benchmarks/feature_plan_cleanup_2026-09-07.md). Fresh
 wall-time evidence was rejected for contention; the useful cheap-wide features
 and buffered compatibility paths remain.
+
+### Remaining admission and target-loop interface registration — September 7
+
+Before implementation: extend the unpublished validation loader's existing
+column-discovery owner to accept CSV header names and expose header-only feature
+inspection to trainer admission. Admission checks the selected IDs against
+actual columns and each resolved producer, including per-file manifests and
+formula/decoder stamps. Historical replay records unresolved semantics but
+cannot excuse missing requested columns or malformed declarations. Dense tables
+remain explicitly refused by callers that have not migrated; no zero-fill claim.
+
+The unpublished standalone `zensim-target` tool will expose
+`target_search_with_bake(..., &mut zensim::BakeScorer)` for the actual candidate
+measurement caller, sharing the existing search controller. `TargetResult.profile`
+becomes optional so a candidate cannot be mislabeled as B. Named-profile calls
+preserve their profile; the candidate experiment records the complete model/head
+composition by content hash. No supported `zensim` signature is removed.
+The existing demo matrix will accept explicit sources/candidates and emit
+measurement artifacts; it must fail on missing inputs rather than skip them.
