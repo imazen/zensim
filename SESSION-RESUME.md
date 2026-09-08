@@ -73,3 +73,15 @@ validation pilots, 54 target cases, source/model/driver/family rejection checks
 and independent decoded-pixel integrity checks pass. AVIF's stateful map uses
 the previous complete decode; its first shot has no consumed map. Full 12/8
 family matrix is next, then model qualification and native JPEG/WebP work.
+
+Later September 8: the full AVIF 12-train/8-validation matrix and independent
+judges are COMPLETE. [Instrument record](benchmarks/native_probe_instrument_2026-09-08.md)
+links the codec report: 504 cases, 28/80 joint witnesses; three-shot calibrated
+scalar/neutral 28/28 hits ±1 versus active 24/28. Fixed-CQ active maps modestly
+help SSIMULACRA2 but worsen Butteraugli in every content class; no spatial
+benefit or model qualification. Artifact `RESULT_COMPLETE.json` supersedes
+the launch-time pending text in `SOURCE_PINNED.json`. Judge-pair identity,
+duplicate/missing controls pass, with JXL/AVIF numerical results preserved.
+The September 7 H+rav1e floor-data control already completed and failed all five
+floor gates; do not repeat the older September 6 proposal as new work. Continue
+with useful native allocation/model qualification and JPEG/WebP integration.

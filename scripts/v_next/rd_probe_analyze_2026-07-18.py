@@ -443,17 +443,29 @@ def native_target_summary(root, inp, rows):
                 b = index[(r["origin"],r["target"],base,"train_curve",budget)]
                 family[r["family"]].append(abs(r["signed_error"])-abs(b["signed_error"]))
             paired.append({"baseline":base,"budget":budget,"family_mean_abs_error_delta":{f:st.mean(v) for f,v in family.items()}})
+    # Judge the exact reference/decoded pairs, including unselected search arms.
+    expected_pairs = {str(root / f"{origin}-{arm}-{i}.png"): sources[origin]["path"]
+                      for (origin, arm), ladder in ladders.items() for i, _ in enumerate(ladder)}
+    expected_pairs.update({str(root / r["decoded"]): sources[r["origin"]]["path"] for r in rows})
     judges = {}
     for name, file, col, sign in (("ssim2","judge_ssim2.tsv","ssim2",1),
                                   ("butter","judge_butteraugli.tsv","butteraugli_pnorm3",-1)):
         if not (root / file).exists():
             continue
+        seen_pairs = set()
         with (root / file).open() as f:
             for r in csv.DictReader(f, delimiter="\t"):
+                path = r["dist_path"]
+                if (path not in expected_pairs or path in seen_pairs
+                        or r["ref_path"] != expected_pairs[path]):
+                    raise SystemExit("independent judge pair identity mismatch")
+                seen_pairs.add(path)
                 value = float(r[col])
                 if not math.isfinite(value):
                     raise SystemExit("nonfinite independent judge")
                 judges.setdefault(r["dist_path"], {})[name] = sign * value
+        if seen_pairs != set(expected_pairs):
+            raise SystemExit("incomplete independent judge pair matrix")
     CLASS.update({s: v["content_class"] for s,v in sources.items()})
     cells = []
     for (origin, arm), ladder in ladders.items():
@@ -494,6 +506,14 @@ def native_target_summary(root, inp, rows):
             "|---|---|---:|---:|---:|---:|---:|---:|"]
     for s in summary:
         text.append(f"| {s['arm']} | {s['policy']} | {s['budget']} | {s['median_abs_error']:.3f} | {s['p95_abs_error']:.3f} | {s['hits']['1.0']}/{s['n']} | {s['mean_full_encodes']:.2f} | {s['median_total_ms']:.2f} |")
+    if rd:
+        text += ["", "Independent matched-quality byte savings versus the scalar bound ladder (positive is smaller).",
+                 "These sparse interpolations include a sampling effect: even an identical scalar output at a new knob can differ from the ladder interpolation. They do not isolate the causal map effect.", "",
+                 "| active output | judge | content | points | median byte savings |",
+                 "|---|---|---|---:|---:|"]
+        for r in rd:
+            if r["baseline"] == "scalar" and r["arm"] in ("active", "active-target-3"):
+                text.append(f"| {r['arm']} | {r['judge']} | {r['class']} | {r['n']} | {100*r['median_saved_fraction']:.3f}% |")
     text += ["", result["qualification"], "", result["cost_scope"], "", result["rd_scope"]]
     (root/"analysis_summary.json").write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
     (root/"analysis_summary.md").write_text("\n".join(text)+"\n")

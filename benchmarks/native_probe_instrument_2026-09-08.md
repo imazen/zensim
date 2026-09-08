@@ -1,7 +1,7 @@
 # Shared native targeting instrument — September 8, 2026
 
-Status: instrument pilot passed; full AVIF development matrix and model
-qualification remain incomplete.
+Status: pilot and full AVIF development matrix complete. Spatial benefit fails
+this screen; replacement-model qualification remains incomplete.
 
 The unpublished `zensim-target::native_probe` owner now handles source/family
 validation, train-only seed calibration, premeasured attained bounds, fixed
@@ -45,7 +45,34 @@ threads. Each codec call is exactly one complete encode. Map comparisons are
 separate from the shared outer scalar comparison and terminal decode/score;
 unused final maps are counted but never described as consumed maps.
 
-Next: freeze/pin the adapter and shared owner together, fit all 12 canonical
-training families, evaluate all eight validation families, judge emitted pixels
-with SSIMULACRA2/Butteraugli, then address model and spatial utility failures.
-No replacement model is qualified by this instrument change.
+## Completed pinned 12/8-family matrix
+
+The adapter/shared-owner Git closure is pinned and pushed. The full AVIF
+[study](https://github.com/imazen/zenavif/blob/main/benchmarks/zensim_native_targeting_2026-09-08.md)
+records 612 train bounds, 408 validation bounds and 504 target cases. Only
+28/80 requested targets have joint witnesses, including two negative targets.
+Calibrated scalar/neutral hit 28/28 within ±1 by three encodes; active hits
+24/28, with p95 absolute error 2.175 versus scalar 0.849. The 52 unresolved
+requests cannot be called codec-impossible from this sparse grid.
+
+Independent judges cover all 912 validation outputs. Fixed-CQ active steering
+slightly improves SSIMULACRA2 but costs 1.8–4.8% more bytes at interpolated
+matched Butteraugli quality across the four content classes. Active three-shot
+outputs worsen SSIMULACRA2 in all classes. These sparse comparisons require
+direct confirmation; first-shot interpolation differences are sampling effects,
+not map benefit (all 56 first-shot active outputs equal scalar exactly).
+All 168 neutral target outputs also equal scalar exactly.
+
+The analyzer now includes both independent judge results in its Markdown and
+rejects wrong reference identities, duplicate or missing judge pairs. Three
+new rejection controls pass. Every previous JSON result remains unchanged for
+the AVIF matrix and the 810-case JXL regression fixture. Training/validation
+commands and judges are COMPLETE; `RESULT_COMPLETE.json` pins final evidence.
+The Windows copy under `~/work/zensim-validation-2026-09-08/avif-native-targeting/`
+contains the compact report and reproducibility records.
+
+Chronology correction for the next model step: the September 7
+[paired H+rav1e control](cleanup_scientific_controls_2026-09-07.md) already
+completed the earlier missing-codec floor-data experiment. All five floor gates
+still fail. Do not repeat the September 6 proposal as if it were unperformed.
+No replacement model is qualified by these instrument or controller results.
