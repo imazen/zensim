@@ -536,13 +536,15 @@ def interventions_main():
         raise SystemExit("intervention validation requires Python assertions enabled")
     inp = json.loads((root / "INPUTS.json").read_text())
     done = json.loads((root / "COMPLETE.json").read_text())
-    assert inp["schema"] in ("native-jxl-interventions-v1", "native-jxl-interventions-v2")
-    native_png = inp["schema"] == "native-jxl-interventions-v2"
-    coarse = native_png and inp["region_mode"] == "coarse4"
+    assert inp["schema"] in ("native-jxl-interventions-v1", "native-jxl-interventions-v2", "native-jxl-allocation-v1")
+    native_png = inp["schema"] != "native-jxl-interventions-v1"
+    policy = inp["schema"] == "native-jxl-allocation-v1"
+    coarse = native_png and inp["region_mode"] in ("coarse4", "coarse-policy")
     factors = [("up",1.2),("down",0.8)] if coarse else [("up",1.1),("down",0.9)]
     if native_png:
         assert inp["png_io"] == "zenpng-0.1.4-packed-opaque-rgb8-v1"
-        assert inp["region_mode"] in ("transform", "coarse4")
+        assert inp["region_mode"] in ("transform", "coarse4", "coarse-policy")
+        assert policy == (inp["region_mode"] == "coarse-policy")
         assert np.allclose(inp["raw_q_factors"], [factors[1][1], factors[0][1]], rtol=0, atol=1e-6)
     else:
         # Historical v1 artifacts only. New runs never use foreign image IO.
@@ -618,7 +620,7 @@ def interventions_main():
     compatibility = json.loads((root / "COMPATIBILITY.json").read_text())
     assert compatibility["version_stdout"].startswith("djxl v0.12.")
     expected_compatibility = {(o, d, n) for o, d in groups
-                              for n in ("baseline", "r0-down", "r0-up")}
+                              for n in (("baseline", "neutral", "active") if policy else ("baseline", "r0-down", "r0-up"))}
     assert len(compatibility["decodes"]) == done["libjxl_compatibility_decodes"] == len(expected_compatibility)
     compat_index = {str(root/f"o_{o}-d{d:g}"/f"{n}.jxl"): (o, d, n)
                     for o, d, n in expected_compatibility}
@@ -709,6 +711,95 @@ def interventions_main():
         else:
             count = min(16, len(regions))
             indices = [i*(len(regions)-1)//max(1,count-1) for i in range(count)]
+        if policy:
+            from fractions import Fraction
+            assert completion[key]["sampled_regions"] == 0
+            raw = requested[(*key,"baseline")]
+            cuts = {Fraction(2,3),Fraction(3,2)}
+            for q in set(int(v) for v in raw):
+                for n in range(1,255):
+                    value = Fraction(2*n+1,2*q)
+                    if Fraction(2,3) < value < Fraction(3,2):
+                        cuts.add(value)
+            expected_states, seen = [], set()
+            for value in sorted(cuts):
+                field = bytes(max(1,min(255,(2*int(q)*value.numerator+value.denominator)//(2*value.denominator))) for q in raw)
+                if field not in seen:
+                    seen.add(field)
+                    expected_states.append((value,field))
+            states = json.loads((cell/"scalar_states.json").read_text())
+            assert 1 <= len(states) == len(expected_states) <= 4096
+            controls = []
+            for i,(record,(value,field)) in enumerate(zip(states,expected_states)):
+                assert Fraction(record["numerator"],record["denominator"]) == value
+                name = "baseline" if field == bytes(raw) else f"scalar-{i}"
+                assert record["state_index"] == i and record["name"] == name
+                assert record["requested_q_sha256"] == sha(field)
+                assert bytes(requested[(*key,name)]) == field
+                row = by_name[name]
+                if name != "baseline": assert row["intervention"] == {"scalar":record}
+                for k in ["global_scale","scale","inv_scale"]: assert row["work"][k] == base["work"][k]
+                controls.append(row)
+            assert len({r["name"] for r in states}) == len(states)
+            assert set(by_name) == {r["name"] for r in states} | {"neutral","active"}
+            bounds = json.loads((cell/"SCALAR_BOUNDS.json").read_text())
+            expected_bounds = {"states":len(states),"before_map_and_policy":True,
+                "score_min":min(r["work"]["score"] for r in controls),"score_max":max(r["work"]["score"] for r in controls),
+                "bytes_min":min(r["work"]["bytes"] for r in controls),"bytes_max":max(r["work"]["bytes"] for r in controls)}
+            assert bounds == expected_bounds
+            proof = json.loads((cell/"POLICY.json").read_text())
+            assert proof["bounds_visible_to_policy"] is False and proof["runtime_full_encodes"] == 2 and proof["runtime_maps"] == 1
+            assert proof["control_encodes"] == len(states)-1
+            area = sum(g["area"] for g in regions)
+            for name,zero in [("neutral",True),("active",False)]:
+                record = proof[name]
+                densities = [0. if zero else g["map_density"] for g in regions]
+                center = sum(g["area"]*d for g,d in zip(regions,densities))/area
+                dispersion = sum(g["area"]*abs(d-center) for g,d in zip(regions,densities))/area
+                factors = [1. if dispersion <= 1e-20 else 1.+0.2*max(-1.,min(1.,(d-center)/dispersion)) for d in densities]
+                field = np.full(len(raw),np.nan)
+                for group,factor in zip(regions,factors):
+                    for i in group["transform_indices"]:
+                        r = transforms[i]
+                        for y in range(r["y"],r["y"]+r["blocks_y"]):
+                            for x in range(r["x"],r["x"]+r["blocks_x"]):
+                                j=y*bx+x
+                                assert np.isnan(field[j])
+                                field[j]=int(raw[j])*factor
+                assert np.isfinite(field).all()
+                normalization = sum(int(q) for q in raw)/sum(float(v) for v in field)
+                wanted = np.clip(np.floor(field*normalization+0.5),1,255).astype(np.uint8)
+                assert record["zero_map"] == zero
+                assert abs(record["center"]-center) < 1e-12 and abs(record["mean_absolute_deviation"]-dispersion) < 1e-12
+                assert np.allclose(record["factors"],factors,rtol=0,atol=1e-12)
+                assert abs(record["normalization"]-normalization) < 1e-12
+                assert np.array_equal(wanted,requested[(*key,name)]) and sha(wanted.tobytes()) == record["requested_q_sha256"]
+            active = by_name["active"]
+            assert active["intervention"] == {"allocation":proof["active"]}
+            for k in ["global_scale","scale","inv_scale"]: assert active["work"][k] == base["work"][k]
+            def qualities(row):
+                path=str(cell/f"{row['work']['name']}.png")
+                return {"D":row["work"]["score"],"ssim2":judges["ssim2"][path],"negative_butteraugli":judges["butteraugli"][path]}
+            aq, size = qualities(active),active["work"]["bytes"]
+            covered = bounds["score_min"] <= aq["D"] <= bounds["score_max"] and bounds["bytes_min"] <= size <= bounds["bytes_max"]
+            budget = [r for r in controls if r["work"]["bytes"] <= size]
+            comparisons = {}
+            for metric in aq:
+                best = max((qualities(r)[metric] for r in budget),default=None)
+                at_quality = [r["work"]["bytes"] for r in controls if qualities(r)[metric] >= aq[metric]]
+                comparisons[metric] = {"active_quality":aq[metric],"best_scalar_quality_at_budget":best,
+                    "gain_at_budget":None if best is None else aq[metric]-best,
+                    "minimum_scalar_bytes_at_quality":min(at_quality) if at_quality else None}
+            best_d = max(budget,key=lambda r:(r["work"]["score"],-r["work"]["bytes"])) if budget else None
+            dominating = [r["work"]["name"] for r in budget if all(qualities(r)[m] >= aq[m] for m in aq)]
+            results.append({"origin":key[0],"class":sources[key[0]]["content_class"],"distance":key[1],
+                "scalar_states":len(states),"bounds":bounds,"covered":covered,"active_bytes":size,
+                "active_score":aq["D"],"comparisons":comparisons,"dominating_scalar_outputs":dominating,
+                "best_D_scalar_at_budget":None if best_d is None else {"name":best_d["work"]["name"],"bytes":best_d["work"]["bytes"],"qualities":qualities(best_d)},
+                "requested_blocks_changed":int(np.sum(requested[(*key,"active")] != raw)),
+                "actual_blocks_changed":int(np.sum(actual[(*key,"active")] != actual[(*key,"baseline")])),
+                "pixels_changed":int(np.sum(np.any(pixels[(*key,"active")] != pixels[(*key,"baseline")],axis=2)))})
+            continue
         assert completion[key]["sampled_regions"] == count
         assert set(by_name) == {"baseline", "neutral"} | {f"r{i}-{side}" for i in indices for side in ["up", "down"]}
         central, cell_samples = [], []
@@ -792,6 +883,31 @@ def interventions_main():
         summary["central_differences"] = central
         results.append(summary)
         samples.extend(cell_samples)
+    if policy:
+        covered_cells = [c for c in results if c["covered"]]
+        gains = {m:[c["comparisons"][m]["gain_at_budget"] for c in covered_cells] for m in ["D","ssim2","negative_butteraugli"]}
+        class_gains = {cls:[c["comparisons"]["D"]["gain_at_budget"] for c in covered_cells if c["class"] == cls] for cls in {s["content_class"] for s in sources.values()}}
+        criteria = {"all_cells_covered":len(covered_cells)==len(results),
+            "D_noninferior":all(v >= -0.05-1e-5 for v in gains["D"]),
+            "ssim2_noninferior":all(v >= -0.1-1e-6 for v in gains["ssim2"]),
+            "butteraugli_noninferior":all(v >= -0.005-1e-6 for v in gains["negative_butteraugli"]),
+            "every_class_positive_median_D":all(v and st.median(v)>1e-5 for v in class_gains.values()),
+            "half_cells_D_gain_0.05":sum(v>=0.05-1e-5 for v in gains["D"]) >= len(results)/2}
+        result={"schema":"native-jxl-allocation-analysis-v1","inputs":inp,"work":done,"compatibility":compatibility,
+            "judge_pairs_per_metric":len(rows),"verified_neutral_cells":len(groups),"cells":results,
+            "screen_criteria":criteria,"advance_to_broader_evaluation":all(criteria.values()),"model_qualified":False,
+            "scope":"Exhaustive declared local raw-field rescaling comparator; no interpolation, full-codec optimum or general targeting qualification."}
+        lines=["# Coarse JXL allocation against exact local scalar states","",result["scope"],"",
+            "| Origin | Class | d | Scalar states | D gain at bytes | SSIM2 gain | −BA gain | Covered |",
+            "|---|---|---:|---:|---:|---:|---:|---|"]
+        for c in results:
+            fmt=lambda m: "unmatched" if c["comparisons"][m]["gain_at_budget"] is None else f"{c['comparisons'][m]['gain_at_budget']:+.6f}"
+            lines.append(f"| {c['origin']} | {c['class']} | {c['distance']:g} | {c['scalar_states']} | {fmt('D')} | {fmt('ssim2')} | {fmt('negative_butteraugli')} | {c['covered']} |")
+        lines += ["",f"Advance fixed policy: {result['advance_to_broader_evaluation']}. Model qualified: false.",json.dumps(criteria,sort_keys=True)]
+        (root/"analysis_summary.json").write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
+        (root/"analysis_summary.md").write_text("\n".join(lines)+"\n")
+        print("\n".join(lines))
+        return
     result = {"schema":"native-jxl-interventions-analysis-v2" if native_png else "native-jxl-interventions-analysis-v1","inputs":inp,"work":done,
         "compatibility":compatibility,
         "judge_pairs_per_metric":len(rows),"verified_neutral_cells":len(groups),

@@ -4,7 +4,25 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest September 8 continuation: [coarse JXL intervention screen](benchmarks/zensim_coarse_interventions_2026-09-08.md)
+Latest September 8 continuation: [actual coarse JXL allocation policy](benchmarks/zensim_coarse_allocation_2026-09-08.md)
+**fails its preregistered independent-judge screen**. All eight 256 cells improve
+D versus every locally reachable globally rescaled raw field, but photo 2010/d3
+loses 0.021502 Butteraugli and screen 8206/d1 loses 0.143189 SSIM2. The separately
+registered 512 software check reveals further losses. This fixed D+policy does
+not advance; no validation or terminal families were spent, and no model is
+qualified. The comparator exhausts a declared local integer-field domain, not
+ordinary global-scale/distance control or the full codec optimum. Policy inputs
+exclude measured bounds/judges. All 249 primary encodes and 498 judge values
+reproduce exactly; 36 analyzer / 11 CLI refusals and local CI-closure checks pass.
+Artifacts: `/mnt/v/output/zensim/jxl-coarse-allocation-2026-09-08/`, mirrored to
+`~/work/zensim-validation-2026-09-08/jxl-coarse-allocation/` with an HTML report
+and original/active/failed-judge scalar comparator gallery. Next separate model
+preferences from allocation-rule effects using supported existing candidate maps
+under a registered fixed rule, and strengthen the ordinary scalar comparator
+before any product RD claim. Do not simply repeat this failed D policy or sweep
+its gain against these outcomes. The EXR admission question remains unanswered.
+
+Previous September 8 continuation: [coarse JXL intervention screen](benchmarks/zensim_coarse_interventions_2026-09-08.md)
 finishes native PNG IO and whole-transform 4×4 grouping in the existing codec
 instrument. Coarse / ±20% gives expected D direction in 244/256 probes at 256
 and 245/256 at 512; independent judges mostly agree. Map mass predicts response

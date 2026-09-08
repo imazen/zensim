@@ -3698,3 +3698,16 @@ together; no matched-RD or qualification claim. Source/PNG hashes, whole-transfo
 coverage, complete independent judges, final-code reproduction and negative
 controls are retained in the [screen record](../benchmarks/zensim_coarse_interventions_2026-09-08.md).
 The separate canonical corruption refit remains unfitted pending EXR admission.
+
+
+## 2026-09-08 — actual coarse JXL allocation policy screen
+
+**STANDS, failed training-family policy screen; no fit or qualification.** The
+same four canonical families and existing 256/512 PNG variants feed a fixed
+coarse-density policy. Before its map is applied, every distinct local globally
+rescaled integer raw field in [2/3,3/2] is encoded and scored. This does not
+exhaust other codec controls. All eight 256 cells improve D at budget, but
+Butteraugli/SSIM2 noninferiority fails; 512 engineering coverage has further
+losses. No separate validation or terminal family participates. The 249-encode
+primary and all 498 judge values reproduce; 36 analysis and 11 CLI refusal
+controls pass. [Failed policy record](../benchmarks/zensim_coarse_allocation_2026-09-08.md).
