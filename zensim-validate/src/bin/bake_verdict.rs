@@ -4051,6 +4051,70 @@ fn feature_set_block(model: &Model, root: &Path) -> serde_json::Value {
     })
 }
 
+// Qualification must cover every model and every table, not just the primary
+// model/root label. Unknown historical declarations remain measurable but cannot
+// become a provenance pass. Reuse the table-admission and feature-set owners.
+fn composition_feature_sets(
+    ens: &Ensemble,
+    paths: &[PathBuf],
+    scoring: &serde_json::Value,
+) -> serde_json::Value {
+    use zensim_validate::feature_set as fs;
+    let inspect = |model: &Model, role: &str| {
+        let era = fs::bake_declared_training_set(model)
+            .map(|id| id.era().to_owned())
+            .unwrap_or_else(|| zensim::feature_set_id::ERA_UNKNOWN.to_owned());
+        let bake = fs::bake_feature_set_ref(model, &era);
+        let ids = bake
+            .as_ref()
+            .map(|b| b.slots.iter_slots().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let admission = fs::admit_training_tables(paths, None, Some(&ids), Some(usize::MAX))
+            .unwrap_or_else(|e| serde_json::json!({"qualified_provenance":false,"error":e}));
+        let mut mismatches = Vec::new();
+        if let Ok(b) = &bake {
+            for path in paths {
+                match fs::table_feature_set_ref(path) {
+                    Ok(Some(t)) => mismatches.extend(
+                        fs::check(b, &t)
+                            .into_iter()
+                            .map(|m| format!("{}: {}", path.display(), m.detail)),
+                    ),
+                    Ok(None) => mismatches.push(format!("{}: unknown producer", path.display())),
+                    Err(e) => mismatches.push(e),
+                }
+            }
+        }
+        let repro: serde_json::Value = model
+            .metadata()
+            .get_utf8("zentrain.repro")
+            .ok()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        let historical = !repro["table_admission"]["historical_replay"].is_null();
+        let qualified = !paths.is_empty()
+            && !historical
+            && repro["table_admission"]["qualified_provenance"] == true
+            && bake.is_ok()
+            && fs::registry().formula_revision(&era).is_some()
+            && mismatches.is_empty()
+            && admission["qualified_provenance"] == true;
+        serde_json::json!({"role":role,"feature_set_id":bake.ok().map(|b| b.id.to_string()),
+            "mismatches":mismatches,"historical_replay":historical,
+            "training_admission":repro["table_admission"],
+            "table_admission":admission,"qualified_provenance":qualified})
+    };
+    let mut members: Vec<_> = ens.models.iter().map(|m| inspect(m, "member")).collect();
+    match &ens.corruption_head {
+        Some(CompanionHead::Znpr(model)) => members.push(inspect(model, "corruption")),
+        Some(CompanionHead::Tree(_)) => members.push(serde_json::json!({
+            "role":"corruption","qualified_provenance":false,
+            "reason":"tree companion has no declared training/decoder era admission; runtime servability is a separate check"})),
+        None => {},
+    }
+    serde_json::json!({"scoring":scoring,"members":members})
+}
+
 /// Complete artifact identity for this evaluator's own resolved inputs.
 /// Used both by --print-inputs (no scoring) and the result, so orchestration
 /// never duplicates corpus-slot or default-path policy.
@@ -4094,6 +4158,26 @@ fn evaluation_input_identity(
         .filter_map(|p| p.as_ref().map(|(_, path)| path.clone())),
     );
     paths.extend(args.reference_truth.as_ref().map(|(p, _)| p.clone()));
+    // Hash declarations even when admission fails before it can report their
+    // interpreted values. Adding/removing/changing an unknown table's decoder
+    // sidecar must invalidate reuse too. These are the table_metadata owner's
+    // three supported declaration locations; absent files are recorded as null.
+    for table in corpora.iter().map(|(_, p, _, _)| p).chain(
+        [&args.dial_grid, &args.corruption_grid]
+            .into_iter()
+            .chain(args.ramp_grid.iter())
+            .chain(args.negtail_probe.iter())
+            .chain(args.identity_probe.iter()),
+    ) {
+        paths.extend([
+            table
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join("_MANIFEST.json"),
+            PathBuf::from(format!("{}.manifest.json", table.display())),
+            PathBuf::from(format!("{}._MANIFEST.json", table.display())),
+        ]);
+    }
     for member in members {
         paths.push(PathBuf::from(format!("{}.spec.json", member.display())));
     }
@@ -4956,13 +5040,26 @@ fn main() -> ExitCode {
             "deadband_score":ens.corruption_threshold,
         })),
     });
-    let input_identity = match evaluation_input_identity(&args, &corpus_prov, &members) {
+    let mut input_identity = match evaluation_input_identity(&args, &corpus_prov, &members) {
         Ok(identity) => identity,
         Err(e) => {
             eprintln!("bake_verdict: input identity: {e}");
             return ExitCode::from(2);
         }
     };
+    let mut feature_tables: Vec<_> = corpus_prov.iter().map(|(_, p, _, _)| p.clone()).collect();
+    feature_tables.extend(
+        args.negtail_probe
+            .iter()
+            .chain(args.identity_probe.iter())
+            .cloned(),
+    );
+    feature_tables.sort();
+    feature_tables.dedup();
+    let feature_set_composition = composition_feature_sets(&ens, &feature_tables, &scoring);
+    // Reuse identity includes declarations as interpreted by admission, so a
+    // changed per-file formula/decoder stamp cannot reuse a stale verdict.
+    input_identity["feature_set_composition"] = feature_set_composition.clone();
     if args.print_inputs {
         println!(
             "{}",
@@ -6394,6 +6491,7 @@ Run the dedicated q-sweep harness for those._\n",
             // table's id had to be INFERRED, and every disagreement between
             // them. The board reads this; it recomputes nothing.
             "feature_set": feature_set_block(model, &args.features_root),
+            "feature_set_composition": feature_set_composition,
             "n_inputs": n_inputs,
             // Architecture + in/out modifiers (transforms, winsor bounds, spline,
             // heads) — the structured `zenpredict inspect`.

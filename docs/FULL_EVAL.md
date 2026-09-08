@@ -65,6 +65,15 @@ survive interruptions. JSON writes are atomic and output stems are locked.
 `harvest_bakes.sh` calls this owner once and copies its verdict for legacy
 consumers. It never treats file existence as proof of a completed evaluation.
 
+`feature_set_composition` binds provenance to the complete scoring identity.
+Every member and companion needs compatible training admission and evaluation
+table declarations; a known primary cannot cover an unknown leg. Historical
+replay cannot qualify. The current tree companion format lacks the required
+training/decoder admission record, so it remains unqualified even though Rust
+can serve it. Root and both supported per-file sidecar locations are hashed,
+including their absence, even when malformed/unknown declarations stop admission.
+Adding or changing a decoder sidecar therefore invalidates a historical verdict.
+
 Environment overrides: `ZENSIM_M3_FIXTURES`, `ZENSIM_M3_CONTENT` (three names),
 `ZENSIM_FULLEVAL_OUT`, `ZENSIM_BAKE_VERDICT` and `ZENSIM_DIFFMAP_BIN`.
 `CARGO_TARGET_DIR` is honored. `ZENSIM_M3_ONLY=1` remains an alias for the

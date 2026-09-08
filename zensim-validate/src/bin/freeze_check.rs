@@ -2905,26 +2905,23 @@ fn qualification_report(v: &serde_json::Value) -> serde_json::Value {
         if surface { "pass" } else { "not_measured" },
         "Complete composed scorer used by evaluation".into(),
     );
-    let fs = &v["feature_set"];
-    let known = fs["bake"].as_str().is_some() && fs["table"].as_str().is_some();
-    let compatible = known && fs["mismatches"].as_array().is_some_and(|m| m.is_empty());
-    let replay = !v["repro"]["table_admission"]["historical_replay"].is_null();
-    add(
-        "Table provenance",
-        if replay {
-            "fail"
-        } else if compatible {
-            "pass"
-        } else {
-            "not_measured"
-        },
-        if replay {
-            "Explicit historical replay cannot qualify a new model"
-        } else {
-            "Require declared compatible feature and decoder eras; see feature_set"
-        }
-        .into(),
-    );
+    let composition = &v["feature_set_composition"];
+    let expected = v["scoring"]["members"]
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or(0)
+        + usize::from(!v["scoring"]["corruption"].is_null());
+    let provenance = composition["members"].as_array();
+    let complete = expected > 0
+        && composition["scoring"] == v["scoring"]
+        && provenance.is_some_and(|m| m.len() == expected);
+    let compatible =
+        complete && provenance.is_some_and(|m| m.iter().all(|p| p["qualified_provenance"] == true));
+    let replay = !v["repro"]["table_admission"]["historical_replay"].is_null()
+        || provenance.is_some_and(|m| m.iter().any(|p| p["historical_replay"] == true));
+    add("Table provenance", if replay { "fail" } else if compatible { "pass" } else { "not_measured" },
+        if replay { "Explicit historical replay in the scorer cannot qualify a new model" }
+        else { "Require compatible feature/formula/decoder declarations for every table, model and companion; see feature_set_composition" }.into());
     let source = &v["dial_ladder_source"];
     let source_valid = source["path"]
         .as_str()
@@ -5433,11 +5430,13 @@ mod qualification_tests {
         assert_eq!(qualification_report(&json!({}))["status"], "incomplete");
         let sha = "a".repeat(64);
         let mut v = json!({"name":"candidate", "bake_sha256":sha,
-            "scoring":{"surface":"zensim::BakeScorer"},
+            "scoring":{"surface":"zensim::BakeScorer","members":[{"sha256":sha}]},
             "feature_set":{"bake":"declared", "table":"declared", "mismatches":[]},
             "dial_ladder":{"contract":"PASS", "regression":"PASS", "measured":{"codec_floor":
                 (["avif-rav1e","avif-svt","jpeg","jxl","webp"].iter().map(|c| json!({"codec":c,"state":"pass"})).collect::<Vec<_>>())}}
         });
+        v["feature_set_composition"] =
+            json!({"scoring":v["scoring"],"members":[{"qualified_provenance":true}]});
         let path =
             std::env::temp_dir().join(format!("zensim-qualification-{}.json", std::process::id()));
         let mut artifact = json!({"bake_sha256":sha,"scoring":v["scoring"],"gates":{}});
@@ -5454,6 +5453,39 @@ mod qualification_tests {
                 "artifact":{"path":path,"sha256":hash}});
         }
         assert_eq!(qualification_report(&v)["status"], "qualified");
+        let mut unknown_companion = v.clone();
+        unknown_companion["scoring"]["members"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"sha256":"unknown-member"}));
+        assert_eq!(
+            qualification_report(&unknown_companion)["status"],
+            "incomplete"
+        );
+        // Isolate provenance from the other stale-composition findings above.
+        // A known primary does not confer admission on an unknown companion.
+        unknown_companion["feature_set_composition"]["scoring"] =
+            unknown_companion["scoring"].clone();
+        unknown_companion["feature_set_composition"]["members"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"qualified_provenance":false}));
+        let report = qualification_report(&unknown_companion);
+        let provenance = report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["gate"] == "Table provenance")
+            .unwrap();
+        assert_eq!(provenance["state"], "not_measured");
+        let mut missing_provenance = v.clone();
+        missing_provenance["feature_set_composition"]["members"][0]["qualified_provenance"] =
+            json!(false);
+        assert_eq!(
+            qualification_report(&missing_provenance)["status"],
+            "incomplete"
+        );
+
         std::fs::write(&path, "{}").unwrap();
         assert_eq!(qualification_report(&v)["status"], "incomplete");
         v["dial_ladder"]["contract"] = json!("FAIL");
