@@ -6,7 +6,8 @@
 //! into the distorted image there (the limit of "spend unlimited bits on this
 //! block"), rescore, and record ΔS = score_refined − score_base. A coherent
 //! diffmap has `diffmap_block_sum` rank-agreeing with ΔS — it IS the scalar's
-//! spatial gradient. We also report SSE-per-block (the codec's PSNR default) as
+//! spatial guidance. A finite intervention can cross nonlinearities, so this is
+//! not a proof of an exact pixel gradient. We also report SSE-per-block as
 //! the bar the diffmap must beat.
 //!
 //! `SROCC(diffmap_block, ΔS)` ≈ 1 → the diffmap points exactly where the scalar
@@ -21,18 +22,19 @@
 //! ## `--bake <path>` mode (requires the `custom-profiles` feature)
 //!
 //! Measures coherence for an ARBITRARY bake (e.g. the 156→128→1 MLP "winner" or
-//! an additive basic-156) instead of the shipped profile. The bake is mounted as
-//! a `ZensimProfile::Custom` and scored through the production features→score
-//! runtime (`score_features_with_profile`: bake forward + spline). Reports three
-//! numbers per pair (2026-07-18, the additive-vs-MLP decision instrumentation):
+//! an additive basic-156) instead of the shipped profile. `BakeScorer` owns
+//! declared feature extraction, complete scoring and finite sensitivities.
+//! Every block intervention is scored through its pixel surface. M1/M3 are
+//! historical signal-fold controls; M3a measures attribution density. Reports:
 //!
 //! - **M1** `SROCC(current_diffmap_block, ΔS_bake)` — how well the SHIPPED
 //!   per-pixel diffmap predicts where refining raises THIS bake's scalar.
 //! - **M2** `SROCC(Σ_k s_k·Δf_k(block), ΔS_bake)` — the GRADIENT/LINEARIZATION
 //!   ceiling: `s_k = ∂score/∂f_k` via central differences at the base image,
 //!   applied to the true per-block feature deltas. For an additive bake this is
-//!   exact (≈1 up to spline ties); for an MLP it caps ANY gradient-based
-//!   diffmap — if M2 is low, no per-pixel map can serve that bake's closed loop.
+//!   exact within a linear region; nonlinear heads, splines, gates and the
+//!   pixel identity override can make finite interventions differ. A low M2
+//!   diagnoses that approximation, rather than proving steering impossible.
 //! - **SSE** `SROCC(sse_block, ΔS_bake)` — the codec PSNR default bar.
 //!
 //! ```sh
@@ -41,13 +43,6 @@
 //! ```
 
 use zensim::{DiffmapWeighting, RgbSlice, Zensim, ZensimProfile};
-
-#[cfg(feature = "custom-profiles")]
-static BAKE_BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-#[cfg(feature = "custom-profiles")]
-fn bake_bytes_static() -> &'static [u8] {
-    BAKE_BYTES.get().expect("bake bytes set before profile use")
-}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -243,148 +238,35 @@ fn run_bake_mode(
     block: usize,
     weighting: DiffmapWeighting,
 ) {
-    use zensim::profile::ProfileParams;
-    use zensim::score_features_with_profile;
-
-    let bytes = std::fs::read(bake_path).expect("read bake");
-    let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake header");
-    // CALLER width, not `n_inputs()`. Every use of `n_in` below is
-    // caller-space: the vector handed to `score_features_with_profile`, the
-    // finite-difference gradient length, the extraction width, and the
-    // f0-155 / f156-371 / f372+ block-mass ranges. Since dead-column pruning
-    // (`ae852b1b`) a packed 944 bake is a 667-INPUT MODEL THAT STILL ACCEPTS
-    // 944 FEATURES, so `n_inputs()` (667) is not a regime and this function
-    // would take the "unsupported bake layout" path below — emitting NO M3
-    // and NO M3a, silently. That is a selection-visible failure now that a
-    // missing M3a means UNMEASURED ⇒ NOT SELECTABLE (campaign appendix E.4),
-    // so it must not be reachable for a pruned bake. Identical to
-    // `n_inputs()` on every unpruned bake (the transform array is dense).
-    // Hazard class: campaign appendix E.9.
-    let n_in = model.caller_input_width();
-    if model.n_inputs() != n_in {
-        println!(
-            "  bake is PRUNED: layer0_in_dim={}, caller feature width={n_in} (routing on the latter)",
-            model.n_inputs()
-        );
-    }
-    // M3 supports the v1 layouts (n_in ≤ 372), the combined v1+v2 layout
-    // (720 = 372 v1 ++ 348 v2), the folded-append 924 regime (f0-155
-    // folded basic, f156-371 STRUCTURAL ZEROS, f372-719 v2, f720-923 append),
-    // and the folded-append2 944 regime (924 ++ f924-943 append2, SOTA-944).
-    // Any other width — e.g. an ext504 bake (156 basic ++ 348 v2) — puts the
-    // v2 block at a different offset, so the fold and the dropped-mass are
-    // undefined for it. Skip cleanly rather than panic.
-    if n_in > 372 && n_in != 720 && n_in != 924 && n_in != 944 {
-        println!(
-            "  M3 skipped: unsupported bake layout (n_inputs={n_in}; the diffmap fold supports n_inputs ≤ 372, 720, 924, or 944)"
-        );
-        return;
-    }
-    let folded924 = n_in == 924 || n_in == 944;
-    BAKE_BYTES.set(bytes).expect("bake bytes set once");
-
-    // Feature pipeline sized to the bake: basic-only bakes (n_in ≤ 156) skip the
-    // IW pyramid (cheaper per-block loop); 372-input bakes need the full set.
-    let params = ProfileParams::builder()
-        .mlp(bake_bytes_static)
-        .skip_score_mapping(true)
-        .extrapolate_score(true)
-        .extended_features(true)
-        .compute_iw_features(n_in > 300)
-        .build();
-    let params: &'static ProfileParams = Box::leak(Box::new(params));
-    let profile = ZensimProfile::Custom {
-        params,
-        name: "bake-under-test",
-    };
-    let z = Zensim::new(profile);
-
-    let rs = RgbSlice::new(rpx, w, h);
-    // Feature extraction closure, regime-matched to the bake:
-    //  - 924 (folded+append): the CANONICAL streaming extractor — bit-identical
-    //    to the ext924 parquets, INCLUDING the f156-371 structural zeros. Using
-    //    the extended path here would feed real iw/masked values into weights
-    //    that only ever saw zeros in training (noise injection, wrong regime).
-    //  - otherwise: extended (+v2 concat for a >372 combined bake).
-    #[cfg(feature = "feature-regime-v2")]
-    let mut v2_scratch = zensim::feature_v2::V2Scratch::new();
-    // `mut` is load-bearing only when the v2 branch (below) captures
-    // `v2_scratch` mutably; without the feature the closure is Fn and
-    // clippy flags the mut — cfg the allow, not the mut.
-    #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
-    let mut feats_of = |dist: &[[u8; 3]]| -> Vec<f64> {
-        let ds = RgbSlice::new(dist, w, h);
-        #[cfg(feature = "feature-regime-v2")]
-        if folded924 {
-            // 944 = the same canonical streaming extractor with the append2
-            // block toggled on (bit-identical f0..f923; the bf944 executor's
-            // exact recipe). Toggle-dependent width matches n_in below.
-            // ZENSIM_APPEND2_DSTACT=1 (appendix X, X-I1): honor the BANDVIS
-            // dst-activity toggle exactly as `v2_ab_extract` does, so an
-            // ON-definition arm's M3a is measured on ON-definition features.
-            // Default (env unset) is byte-stable OFF — identical toggles to
-            // before this change.
-            let dstact_on = n_in == 944
-                && std::env::var("ZENSIM_APPEND2_DSTACT")
-                    .map(|v| v == "1")
-                    .unwrap_or(false);
-            let toggles = zensim::feature_v2::V2NewFeatureToggles {
-                append2_block: n_in == 944,
-                append2_dst_activity: dstact_on,
-                ..Default::default()
-            };
-            return z
-                .compute_folded720_append_features_streaming(&rs, &ds, toggles, &mut v2_scratch)
-                .expect("folded-append 924/944 features")
-                .features()
-                .to_vec();
-        }
-        let base = z
-            .compute_extended_features(&rs, &ds)
-            .expect("base features");
-        #[cfg_attr(not(feature = "feature-regime-v2"), allow(unused_mut))]
-        let mut feats = base.features().to_vec();
-        #[cfg(feature = "feature-regime-v2")]
-        if n_in > feats.len() {
-            let v2 = z
-                .compute_v2_features(&rs, &ds)
-                .expect("v2 features (build with --features feature-regime-v2 for combined bakes)");
-            feats.extend_from_slice(v2.features());
-        }
-        feats
-    };
-    let base_feats = feats_of(dpx);
     assert!(
-        base_feats.len() >= n_in,
-        "bake wants {n_in} inputs, extractor produced {} — for a >372 combined \
-         bake, build the example with --features feature-regime-v2",
-        base_feats.len()
+        std::env::var("ZENSIM_APPEND2_DSTACT").as_deref() != Ok("1"),
+        "extraction semantics must be declared in the bake; ZENSIM_APPEND2_DSTACT no longer overrides them"
     );
-    let score = |feats: &[f64]| -> f64 {
-        score_features_with_profile(profile, &feats[..n_in], w as u32, h as u32)
-            .expect("bake forward")
+    let bytes = std::fs::read(bake_path).expect("read bake");
+    let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+    let mut pixel_scorer = zensim::BakeScorer::new(&model).expect("servable candidate");
+    let mut sensitivity_scorer = zensim::BakeScorer::new(&model).expect("servable candidate");
+    let rs = RgbSlice::new(rpx, w, h);
+    let mut compare = |dist: &[[u8; 3]]| {
+        pixel_scorer
+            .compute(&rs, &RgbSlice::new(dist, w, h), None)
+            .expect("candidate pixel comparison")
     };
-    let base_score = score(&base_feats);
-
-    // s_k = ∂score/∂f_k at the base image (central differences through the full
-    // runtime: transforms + MLP/linear forward + spline).
-    let mut s = vec![0f64; n_in];
-    let mut probe = base_feats.clone();
-    for k in 0..n_in {
-        // Folded-924: f156-371 are STRUCTURAL ZEROS in this regime — never
-        // probed (the deployed runtime cannot vary them; probing them measures
-        // untrained-weight noise, not the model).
-        if folded924 && (156..372).contains(&k) {
-            continue;
-        }
-        let eps = (base_feats[k].abs() * 1e-3).max(1e-5);
-        probe[k] = base_feats[k] + eps;
-        let up = score(&probe);
-        probe[k] = base_feats[k] - eps;
-        let dn = score(&probe);
-        probe[k] = base_feats[k];
-        s[k] = (up - dn) / (2.0 * eps);
-    }
+    let base = compare(dpx);
+    let base_score = base.score();
+    let base_feats = base.features().to_vec();
+    // This is an identity-indexed row from the serving plan, not the dense
+    // caller width or layer-0 input count. Declared IDs own extraction.
+    let n_in = base_feats.len();
+    let folded924 = n_in > 720;
+    println!(
+        "  BakeScorer: layer0_in_dim={}, caller_width={}, identity_extent={n_in}",
+        model.n_inputs(),
+        model.caller_input_width()
+    );
+    let s = sensitivity_scorer
+        .score_features_fd_gradient(&base_feats, w as u32, h as u32, None)
+        .expect("complete candidate sensitivities");
     let grad_zero = s.iter().filter(|v| v.abs() < 1e-12).count();
 
     // ── gradient-mass diagnostic (ZENSIM_GRAD_MASS=1) ────────────────────
@@ -505,30 +387,10 @@ fn run_bake_mode(
         );
     }
 
-    // Combined append-only bakes (n_in > 372): the scalar path (score + s_k)
-    // works, but the runtime diffmap generator (`compute_with_diffmap`, used
-    // for M1/M1b/M3 below) is hardwired to the ≤372 feature space — it cannot
-    // fold the v2 block (f372+) into the per-pixel map yet. Rather than panic,
-    // report the scalar-side coherence diagnostics and point at the corpus-
-    // level foldable-mass proxy. M2 (linearization ceiling) is ≈1.0 for any
-    // LeakyReLU MLP (piecewise-linear ⇒ exact local gradient), so the open
-    // question is purely M3-deployed = whether the fold, once extended to read
-    // v2, reaches that ceiling. See benchmarks/v2_trainability_ab_2026-07-19.md
-    // (v2_combined_steer_mass.py: 100% foldable for the coherence-maxed model).
-    // Combined append-only bake (n_in > 372 = v1-372 ++ v2): the v2 block's
-    // gradient `s[372..]` now folds into a per-pixel map via
-    // `Zensim::compute_v2_diffmap` (task #48), so M3 below reads v2. The v1
-    // masked/iw/peak (f156-371) remain non-spatializable in the v1 fold, so
-    // that share of the gradient still can't be deployed — reported here.
-    // Non-spatializable v1 mass — the share of THIS bake's gradient on the
-    // f156-371 masked/iw/peak block, which the v1 fold cannot spatialize into the
-    // per-pixel map, so M3 is STRUCTURALLY BLIND to it. Reported for EVERY bake
-    // (0.0% for a basic-156 bake; the real fraction for a 372 bake that leans on
-    // iw/masked; the v1 share for a 720 bake whose v2 f372+ versions DO fold).
-    // This is the number that lets a LOW M3 be read correctly: a bake with high
-    // dropped-mass has a structurally-capped M3 (it uses pooled features the map
-    // can't carry), which is a DIFFERENT thing from an incoherent map. Widened +
-    // always-emitted 2026-07-26 (stats review §Rec-8); previously only n_in>372.
+    // M3 is the historical signal fold. It omits v1 pooled and append
+    // integrands; the later M3a attribution path below has broader coverage.
+    // Report omitted raw sensitivity for that control without treating it as
+    // a bound on finite intervention error or full-model map utility.
     {
         let total: f64 = s.iter().map(|v| v.abs()).sum::<f64>().max(1e-30);
         let hi = n_in.min(372);
@@ -573,7 +435,11 @@ fn run_bake_mode(
         // makes the map high where refining raises the score (the "refine-here"
         // polarity M1/M3 share). compute_v2_diffmap folds Σ w·M with whatever
         // weights it's given; the steering weight is `-∂score/∂f`.
-        Some(s[372..720].iter().map(|&x| -x).collect::<Vec<f64>>())
+        let mut weights = vec![0.0; 348];
+        for (weight, sensitivity) in weights.iter_mut().zip(&s[372..n_in.min(720)]) {
+            *weight = -sensitivity;
+        }
+        Some(weights)
     } else {
         None
     };
@@ -590,8 +456,8 @@ fn run_bake_mode(
     // not depend on the bake's scalar. `compute_with_diffmap` on the custom
     // bake would try to SCORE it (needs all n_in features; the streaming path
     // only extracts ≤372 → fails for a 720 bake), so the maps are built with a
-    // v1 profile. The bake (`z`) is used only for the ground-truth `delta_s` /
-    // `s_k` below. The v2 contribution is added separately via `compute_v2_diffmap`.
+    // v1 profile. BakeScorer supplies ground-truth `delta_s` and `s_k`.
+    // The v2 contribution is added separately via `compute_v2_diffmap`.
     let z_map = Zensim::new(ZensimProfile::latest_preview());
     let diff = z_map
         .compute_with_diffmap(&rs, &dist_slice, weighting)
@@ -782,10 +648,11 @@ fn run_bake_mode(
                     scratch[y * w + x] = rpx[y * w + x];
                 }
             }
-            // Regime-matched refined features (extended+v2 concat, or the
-            // canonical folded-append 924 path) — same closure as base_feats.
-            let rfeats = feats_of(&scratch);
-            delta_s[b] = score(&rfeats) - base_score;
+            // Re-run the served pixel path, including its identity override.
+            // A zero feature row alone cannot establish pixel identity.
+            let refined = compare(&scratch);
+            let rfeats = refined.features();
+            delta_s[b] = refined.score() - base_score;
             lin_pred[b] = (0..n_in).map(|k| s[k] * (rfeats[k] - base_feats[k])).sum();
             if attr_diag {
                 for k in 0..n_in.min(156) {
@@ -879,7 +746,7 @@ fn run_bake_mode(
         pearson(&dmap_all_block, &delta_s)
     );
     println!(
-        "  M3  SROCC(model_sensitivity_map,   ΔS_bake) = {m3:+.4}   PLCC {:+.4}   (bake's own s_k — deployable)",
+        "  M3  SROCC(model_sensitivity_map,   ΔS_bake) = {m3:+.4}   PLCC {:+.4}   (historical signal fold with candidate sensitivities)",
         pearson(&dmap_model_block, &delta_s)
     );
     // ── E-JBU A/B report (protocol 2026-07-30) ──────────────────────────────

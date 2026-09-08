@@ -321,6 +321,66 @@ impl<'a> BakeScorer<'a> {
         Ok(score)
     }
 
+    /// Local feature sensitivities of this complete candidate's served score.
+    ///
+    /// The result uses the input row's identity layout, including zero
+    /// sensitivity for unread IDs. Each component is the central difference
+    /// of [`Self::score_features`] with step `max(abs(feature) * 1e-3, 1e-5)`.
+    /// The existing predictor buffers are reused for every forward. All heads,
+    /// splines, codec calibration, ensemble members, final disposition and
+    /// corruption gates participate; negative scores are preserved.
+    ///
+    /// These are local finite secants. A tree boundary, clamp or other
+    /// nonsmooth head need not have a derivative, and a zero local sensitivity
+    /// does not prove that a finite pixel intervention has no effect. Pixel
+    /// attribution must also account for the feature integrands it supports.
+    /// Dimensions and codec hint stay fixed for all probes. The pixel-identity
+    /// override belongs to [`Self::compute`], not an arbitrary feature row.
+    ///
+    /// # Errors
+    /// Rejects a nonfinite row, base score, perturbed input or probe result,
+    /// and propagates model/feature-layout errors without replacing them with
+    /// zero sensitivities.
+    pub fn score_features_fd_gradient(
+        &mut self,
+        features: &[f64],
+        width: u32,
+        height: u32,
+        codec_hint: Option<&str>,
+    ) -> Result<Vec<f64>, ZensimError> {
+        let invalid = || ZensimError::ModelForwardFailed {
+            reason: "candidate sensitivity requires finite inputs, scores and probes",
+        };
+        if features.iter().any(|f| !f.is_finite())
+            || !self
+                .score_features(features, width, height, codec_hint)?
+                .is_finite()
+        {
+            return Err(invalid());
+        }
+        let mut probe = features.to_vec();
+        let mut gradient = Vec::with_capacity(features.len());
+        for (k, &value) in features.iter().enumerate() {
+            let eps = (value.abs() * 1e-3).max(1e-5);
+            let hi = value + eps;
+            let lo = value - eps;
+            if !hi.is_finite() || !lo.is_finite() {
+                return Err(invalid());
+            }
+            probe[k] = hi;
+            let up = self.score_features(&probe, width, height, codec_hint)?;
+            probe[k] = lo;
+            let down = self.score_features(&probe, width, height, codec_hint)?;
+            probe[k] = value;
+            let sensitivity = (up - down) / (2.0 * eps);
+            if !up.is_finite() || !down.is_finite() || !sensitivity.is_finite() {
+                return Err(invalid());
+            }
+            gradient.push(sensitivity);
+        }
+        Ok(gradient)
+    }
+
     #[cfg(feature = "feature-regime-v2")]
     fn plan(&self) -> Result<crate::feature_plan::Plan, ZensimError> {
         use crate::feature_plan::Plan;

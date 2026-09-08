@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added — complete candidate sensitivities (2026-09-08)
+
+`BakeScorer::score_features_fd_gradient` computes local finite sensitivities
+through the complete configured score, including heads, splines, codec
+calibration, ensemble and corruption gating. It preserves identity-indexed
+feature rows and negative scores, reuses predictor state, and refuses failed
+or nonfinite probes. At discontinuities these are finite secants.
+
+The coherence example now extracts and scores through `BakeScorer`, including
+pixel identity for block interventions. It no longer guesses feature layouts
+from input counts, truncates declared-ID rows, or overrides baked extraction
+semantics with the old append2 environment toggle. Historical signal-fold
+controls remain distinct from attribution and model qualification.
+
 ### Added — attainable-target research instrument (2026-09-08)
 
 The unpublished `zensim-target::TargetSpec` accepts an optional `SeedEstimate`

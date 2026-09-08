@@ -40,6 +40,82 @@ fn declared_ids_are_gathered_and_short_or_malformed_rows_refuse() {
     }
 }
 
+fn assert_gradient(actual: &[f64], expected: &[f64]) {
+    assert_eq!(actual.len(), expected.len());
+    for (i, (&got, &want)) in actual.iter().zip(expected).enumerate() {
+        // Predictor arithmetic is f32; the finite probe is performed in f64.
+        assert!((got - want).abs() < 0.002, "gradient[{i}]: {got} vs {want}");
+    }
+}
+
+#[test]
+fn candidate_sensitivities_preserve_feature_ids_and_negative_scores() {
+    let model = linear(json!([{"key":"zentrain.feature_ids","type":"utf8","text":"1 3"}]));
+    let mut scorer = BakeScorer::new(&model).unwrap();
+    for row in [[99., 2., 99., 7.], [99., -2., 99., -7.]] {
+        let gradient = scorer
+            .score_features_fd_gradient(&row, 64, 64, None)
+            .unwrap();
+        assert_gradient(&gradient, &[0., 2., 0., 3.]);
+    }
+    assert!(
+        scorer
+            .score_features_fd_gradient(&[1., 2.], 64, 64, None)
+            .is_err()
+    );
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX] {
+        // Also reject nonfinite values in an unconsumed slot, rather than
+        // manufacturing a sensitivity from undefined inputs/probes.
+        assert!(
+            scorer
+                .score_features_fd_gradient(&[bad, 2., 99., 7.], 64, 64, None)
+                .is_err()
+        );
+    }
+    assert_gradient(
+        &scorer
+            .score_features_fd_gradient(&[99., 2., 99., 7.], 64, 64, None)
+            .unwrap(),
+        &[0., 2., 0., 3.],
+    );
+}
+
+#[test]
+fn candidate_sensitivities_include_ensemble_and_corruption_discontinuities() {
+    let models = [linear(json!([])), linear_bias(json!([]), 5.)];
+    let mut weighted = BakeScorer::ensemble(&models, Some(&[0.25, 0.75])).unwrap();
+    assert_gradient(
+        &weighted
+            .score_features_fd_gradient(&[5., 5.], 64, 64, None)
+            .unwrap(),
+        &[2., 3.],
+    );
+    let mut gated = BakeScorer::ensemble(&models, None)
+        .unwrap()
+        .with_linear_corruption_head(&models[0], 20.)
+        .unwrap();
+    assert_gradient(
+        &gated
+            .score_features_fd_gradient(&[4., 4.], 64, 64, None)
+            .unwrap(),
+        &[0., 0.],
+    );
+    assert_gradient(
+        &gated
+            .score_features_fd_gradient(&[-2., -7.], 64, 64, None)
+            .unwrap(),
+        &[2., 3.],
+    );
+    // Exactly at the deadband, central probes straddle a score jump. Return
+    // the finite secant, visibly unlike the ungated gradient; do not silently
+    // ignore the companion or label this an analytic derivative.
+    let crossing = gated
+        .score_features_fd_gradient(&[5., 5.], 64, 64, None)
+        .unwrap();
+    assert!((crossing[0] - 2501.).abs() < 0.002);
+    assert!((crossing[1] - 2501.5).abs() < 0.002);
+}
+
 #[test]
 fn malformed_present_metadata_is_not_treated_as_absent() {
     assert!(BakeScorer::new(&linear(json!([]))).is_ok());
@@ -100,6 +176,16 @@ fn spline_endpoints_negative_tail_and_upper_cap_use_the_runtime_contract() {
     // Network is 2*x + 3*y - 5; spline maps [0,10] to [0,100].
     for (x, expected) in [(0., -50.), (2.5, 0.), (5., 50.), (7.5, 100.), (10., 100.)] {
         assert_eq!(s.score_features(&[x, 0.], 64, 64, None).unwrap(), expected);
+    }
+    for (row, expected) in [
+        ([-1., 1.], [20., 30.]),
+        ([5., 1.], [20., 30.]),
+        ([10., 10.], [0., 0.]),
+    ] {
+        assert_gradient(
+            &s.score_features_fd_gradient(&row, 64, 64, None).unwrap(),
+            &expected,
+        );
     }
 }
 
@@ -260,6 +346,17 @@ fn dense_minmax_head_uses_transform_clamp_pin_and_spline_in_order() {
             zensim::score_math::tanh_output_pin(raw, 10., zensim::det_math::active_pow_form());
         assert_eq!(got.to_bits(), expected.to_bits());
     }
+    // Here the active min-max piece is x-y+4. The independent pin
+    // derivative checks that sensitivities follow the replacement head,
+    // rather than the unused MLP's [2, 3] weights.
+    let logistic = 1. / (1. + (-3.0_f64 / 10.).exp());
+    let pin_slope = 10. * logistic * (1. - logistic);
+    assert_gradient(
+        &scorer
+            .score_features_fd_gradient(&[99., 1., 99., 2.], 0, 0, None)
+            .unwrap(),
+        &[0., pin_slope, 0., -pin_slope],
+    );
 }
 
 #[test]
@@ -406,6 +503,18 @@ fn codec_affine_and_final_disposition_are_part_of_the_returned_score() {
             .unwrap(),
         -55.
     );
+    assert_gradient(
+        &scorer
+            .score_features_fd_gradient(&[-2., -7.], 0, 0, Some("JPEG"))
+            .unwrap(),
+        &[4., 6.],
+    );
+    assert_gradient(
+        &scorer
+            .score_features_fd_gradient(&[-2., -7.], 0, 0, Some("unknown"))
+            .unwrap(),
+        &[2., 3.],
+    );
     let params = zensim_validate::bake_runtime::post_mode_params("clamp").unwrap();
     let mut clamped = scorer.with_score_disposition(&params).unwrap();
     assert_eq!(
@@ -413,6 +522,12 @@ fn codec_affine_and_final_disposition_are_part_of_the_returned_score() {
             .score_features(&[-2., -7.], 0, 0, Some("jpg"))
             .unwrap(),
         0.
+    );
+    assert_gradient(
+        &clamped
+            .score_features_fd_gradient(&[-2., -7.], 0, 0, Some("jpg"))
+            .unwrap(),
+        &[0., 0.],
     );
     assert!(zensim_validate::bake_runtime::post_mode_params("clmap").is_err());
 }

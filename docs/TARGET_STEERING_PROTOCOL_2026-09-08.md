@@ -15,6 +15,41 @@ no new universal perceptual error bar is established here.
 
 ## Preregistered instrument change
 
+### Complete candidate sensitivities — September 8 shipping goal
+
+The active goal includes a qualified model, Rust scalar/spatial serving and
+actual JXL/AVIF/JPEG/WebP targeting, with supported HDR/color/alpha behavior.
+The reuse audit and earlier scalar experiments do not complete that goal.
+
+Concrete current caller: `zensim/examples/diffmap_block_coherence.rs`;
+subsequent native caller: JXL's existing attribution loop. Before implementation,
+register this additive signature on the existing `BakeScorer` owner:
+
+```rust
+pub fn score_features_fd_gradient(
+    &mut self, features: &[f64], width: u32, height: u32,
+    codec_hint: Option<&str>,
+) -> Result<Vec<f64>, ZensimError>;
+```
+
+It differentiates the complete `score_features` operation, including output
+disposition, ensembles and corruption companions, in identity feature layout.
+Use the existing central-difference step `max(abs(f[k])*1e-3, 1e-5)`. Reject
+nonfinite inputs, scores or probe results; never convert a failed model into a
+zero gradient. At nonsmooth heads/gates this is a finite local secant, not a
+claim of differentiability or of finite-block accuracy.
+
+The coherence caller must extract through `BakeScorer::compute`, preserve the
+full declared-ID row, and score finite pixel interventions through that same
+pixel surface (including its identity rule). Remove input-count routing and
+manual structural-zero assumptions there. Existing M1/M3 signal-fold controls
+remain historical comparators; the signed attribution owner remains M3a.
+No quality/qualification threshold changes are authorized by this instrument
+repair. Validate linear known derivatives, dense layout, head/spline/affine
+composition, active gates, negative scores and sequential-surface parity.
+
+### Earlier scalar bounds/calibration instrument
+
 Owner: `zensim-target`, extending its existing search and `demo_matrix`.
 Concrete caller: the imazen-26 calibration/steering experiment. Unpublished API
 delta, registered before implementation: `TargetSpec` gains an optional
