@@ -1,16 +1,61 @@
-# Canonical corruption refit preparation — September 8, 2026
+# Canonical corruption refit — September 8, 2026
 
-The canonical single-fit path is implemented and its data is prepared, but
-**no canonical image-data candidate has been fit or qualified**. The remaining
-content-admission gap is fingerprinting/contextual review of 30 UPIQ HDR
-references. The user subsequently directed **`zenextras/zenexr` over the Rust
+**Latest result: content admission is complete; the first canonical head fits
+and has exact Rust feature-row parity, but complete pixel serving is refused.**
+Seed 4101 produces 100 trees / 6,100 nodes in a 204,790-byte ZCTH. Across 13,892
+rows, raw decision error is 0 ulp, probability error is 0 and the fire set has
+zero disagreements. The pixel audit then refuses the head's 372 declared
+features because D's fast extraction plan does not compute all of them. No
+`SCREEN.json` or `COMPLETE.json` exists for this seed; seeds 4103/4107 have not
+run. This is a serving-plan incompatibility, not a measured quality verdict.
+
+The user directed **`zenextras/zenexr` over the Rust
 `exr` crate**, explicitly authorizing that dependency. This replaces the
 unpushed custom zenbitmaps port; its tests, source and pixels remain preserved
 in `native-exr-port-2026-09-08/`. The replacement matches all 98 saved fixtures
 and all 30 reference outputs exactly; [validation and decoder contract](../../zenextras/benchmarks/zenexr_validation_2026-09-08.md).
-No fingerprinting/contextual admission or image-data fit follows from parity. This decoder
+The subsequent reference screen and contextual review are recorded below. This decoder
 work is separate from HDR training inputs: imazen-26 already has 76 HDR PNGs
 and 1,140 scale variants. [Confirmed source binding](../docs/TARGET_STEERING_PROTOCOL_2026-09-08.md#existing-hdr-png-inputs--user-correction-september-8).
+
+## Completion of the remaining reference audit
+
+The same audit owner adds `--native-linear`: PNG/EXR decoded through zenpng and
+zenexr, linear BT.709 luminance, per-image peak normalization and a fixed log
+transform, Lanczos f32 to 9×8, shared dHash comparison order. The
+[registration](../docs/CANONICAL_CORRUPTION_REFIT_2026-09-08.md) predates results.
+The existing untagged training PNGs require an explicit, per-file recorded
+sRGB interpretation matching their training recipe; default unknown-transfer
+refusal remains. No HDR units or perceptual-quality claim follows from this
+content fingerprint. Original EXR metadata remains in the audit.
+
+All 12 sources × 30 HDR references complete with **zero strict <=10 flags**,
+minimum distance 15. Two <=16 matches involve origin 6068, a two-column paper:
+reference 14 is nighttime buildings and a statue/fountain; reference 15 shows
+people with laptops in a room opening onto a bright terrace. Visual review
+finds distinct content; no exclusion. The original source-family split stays
+fixed. The hash remains crop-blind and is not a proof against every transform.
+
+The full earlier 12 × 182 SDR audit reproduces byte-for-byte, both TSV and JSON.
+Three unit tests cover bit order, exposure invariance, unrelated data and
+invalid numerics/geometry. Two CLI exact-image positives and nine refusals pass;
+Clippy and formatting pass. A complete admission receipt binds 445 files,
+including original references, the prior SDR review, new HDR review, input
+identities, registration, controls and decoder binary. Human scores and distorted
+holdout images were not read. The fit manifest changes only the admission pin.
+
+New packet: `/mnt/v/output/zensim/canonical-corruption-refit-final-2026-09-08/`.
+`CONTENT_ADMISSION.json`, `FIT_MANIFEST.json`, `hdr-audit.hashes.json`,
+`HDR_CLOSE_PAIR_REVIEW.json`, `CONTROLS.json` and `fit/seed-4101/` retain the
+complete result and failed pixel-audit log. Earlier preparation artifacts below
+remain immutable. `thiserror` and its derive companion move from 2.0.19 to
+2.0.20 to meet the pinned zenexr dependency; no other locked package changes.
+
+Next: extend the existing `BakeScorer::plan` using supported complete-model
+requirements, preserving revision and unsupported-feature rejection. Verify
+pixel/cache/stored-feature parity and cost before rerunning the registered fit.
+Do not truncate the head, weaken coverage checks, alter the feature schema or
+claim validation from the feature-array parity result alone.
 
 ## Source admission
 
@@ -112,7 +157,6 @@ preparation manifest deliberately has no usable admission hash yet.
 | Calibration Parquet | `83712144f9a58d9d73a58d7e1cd71a2587254cef7c081640f7722fae6b9501b9` |
 | Evaluation Parquet | `f53e4c22e5cd55f4e567931f6fd6bd01c72371cb3cf14768405f9d049fb9a696` |
 
-Next: finish EXR reference admission, then execute the registered three-seed
-canonical fit and its Rust evaluation. If that permission remains pending,
-continue independent native spatial-allocation work; do not repeatedly rebuild
-the same admitted SDR packet or silently waive HDR reference coverage.
+The earlier preparation stage ended awaiting EXR reference admission. The
+later completion and first-fit serving refusal above supersede that pending
+status; do not rerun the admission packet without changed inputs or code.

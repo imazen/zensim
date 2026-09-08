@@ -4,14 +4,48 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
+Latest continuation: **the declared content-admission audit is complete**.
+All 12 training sources were checked against the remaining 30 UPIQ HDR
+references: zero strict flags; two looser paper-versus-photograph matches were
+reviewed as distinct. The earlier 182-reference SDR audit reproduces exactly.
+The first canonical corruption head (seed 4101, 100 trees) trained and matches
+Rust on all 13,892 feature rows, but the full pixel audit correctly refuses it:
+the head declares 372 features and D's extraction plan does not compute them
+all. No development scorecard or product qualification is complete.
+[Admission and first-fit record](benchmarks/canonical_corruption_refit_2026-09-08.md).
+
+Remaining work, in order:
+
+1. Extend the existing `BakeScorer`/`Plan` composition to compute the complete
+   supported companion feature requirements. Keep unsupported-ID and revision
+   refusals; prove pixel/cache/stored-row equality and measure added extraction
+   cost. Then rerun the registered three-seed fit and Rust pixel screen.
+2. Repair base-model identity, near-lossless and codec-floor preferences using
+   the strongest existing candidates and native-codec evidence. A corruption
+   gate or monotone calibration cannot repair the base model's rank inversions.
+3. Prove JXL spatial benefit against a strong ordinary scalar controller at
+   matched quality/bytes, with the complete frozen model and independent judges.
+   Separate model-preference failures from allocation-rule failures; retain the
+   already failed fixed-D policy rather than retuning it on observed outcomes.
+4. Finish train-family calibrated, separate-validation 1/2/3-shot scalar/spatial
+   targeting for JXL, then AVIF, JPEG and WebP. Measure attained ranges before
+   judging steering, keep bounds out of runtime, and count every encode/map.
+5. Freeze and qualify the full Rust artifact: perceptual/dial/tail behavior,
+   supported SDR/HDR/color/alpha, latency/memory, spatial RD and terminal tests;
+   deliver the reproducible recipe, examples, manifests and gauntlet report.
+
+The immediate HDR task was a protected-reference overlap check, not a new HDR
+training pipeline. HDR development PNGs already exist. That admission dependency
+is now closed; the next work belongs to model serving, accuracy and JXL steering.
+
 Latest user direction: EXR belongs in **`zenextras/zenexr`, wrapping the Rust
 `exr` crate**. This explicitly authorizes that dependency and supersedes the
 earlier pending exception question. The custom zenbitmaps port is retired from
 the active checkout; its verified source checkpoint and results remain archived.
 The replacement reproduces all 98 saved fixtures and all 30 UPIQ HDR references
 bit-for-bit (124,609,944 f32 samples). [Wrapper contract and validation](../zenextras/benchmarks/zenexr_validation_2026-09-08.md).
-Content fingerprinting/contextual admission remains incomplete; decoder parity
-does not qualify a model or authorize holdout training.
+The later fingerprinting/contextual review is complete as recorded above;
+decoder parity alone does not qualify a model or authorize holdout training.
 
 The preceding user correction still applies: HDR development uses the existing imazen-26
 `variant/png-v3` inputs: **76 HDR PNGs**, all locally present and byte-verified
@@ -21,7 +55,7 @@ local. [Source binding and chronology](docs/TARGET_STEERING_PROTOCOL_2026-09-08.
 The separate UPIQ EXRs are holdout-overlap references, not a missing HDR
 training corpus. The earlier port checkpoint is preserved at
 `/mnt/v/output/zensim/native-exr-port-2026-09-08/`; active EXR implementation
-now uses zenexr. No new model has been fit or qualified.
+now uses zenexr. One new corruption head has been fit; no model is qualified.
 
 Previous September 8 continuation: [actual coarse JXL allocation policy](benchmarks/zensim_coarse_allocation_2026-09-08.md)
 **fails its preregistered independent-judge screen**. All eight 256 cells improve

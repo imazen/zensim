@@ -30,6 +30,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+#[path = "../content_clusters/dhash_bits.rs"]
+mod dhash_bits;
+#[path = "check_holdout_overlap/native_linear.rs"]
+mod native_linear;
 #[path = "check_holdout_overlap/native_png.rs"]
 mod native_png;
 
@@ -62,19 +66,27 @@ struct Args {
     out_tsv: PathBuf,
 
     /// Native PNG decode/resample era, with strict coverage and input hashes.
-    #[arg(long)]
+    #[arg(long, group = "native_mode", conflicts_with = "native_linear")]
     native_png: bool,
 
-    #[arg(long, requires = "native_png")]
+    /// Exposure-normalized linear-luminance PNG/EXR audit, a separate hash era.
+    #[arg(long, group = "native_mode", conflicts_with = "native_png")]
+    native_linear: bool,
+
+    /// Interpret untagged PNG samples as sRGB only when the source recipe says so.
+    #[arg(long, requires = "native_linear")]
+    assume_untagged_srgb: bool,
+
+    #[arg(long, requires = "native_mode")]
     expected_training: Option<usize>,
 
-    #[arg(long, requires = "native_png")]
+    #[arg(long, requires = "native_mode")]
     expected_holdout: Option<usize>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    if args.native_png {
+    if args.native_png || args.native_linear {
         return native_png::run(&args);
     }
 

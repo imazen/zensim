@@ -73,3 +73,36 @@ both decoded-pixel hashes; check every row, require nonnull keys and **zero**
 duplicates. Keep the original `(f0,target)` diagnostic and unchanged default
 behavior for historical tables. The key columns come from the verified Rust
 audit, not filenames inferred after fitting. Preserve raw-table C10 failures.
+
+## Remaining HDR reference screen, registered before fingerprint results
+
+Use the existing audit owner with a private `--native-linear` mode for exactly
+12 training PNG sources against the 30 original UPIQ EXRs. Decode with zenpng
+and the user-selected zenextras/zenexr, pinned to `109a9ec36727`. Both sides use
+the same new fingerprint era: BT.709 linear luminance, nonnegative Y normalized
+by its image maximum, `ln(1 + 255*Y/maxY)`, zenresize Lanczos f32 downsampling to
+9×8 and the existing horizontal comparison bit order. The maximum only removes
+exposure units; no absolute-nit interpretation or display-quality claim occurs.
+All-black images yield the zero fingerprint. Reject nonfinite values, alpha,
+unknown primaries/transfer and unsupported layouts explicitly. The 30 saved
+headers were inspected before this choice: all omit chromaticities, so the EXR
+BT.709 default applies. No fingerprint/nearest-neighbor result informed it.
+
+Keep the earlier PNG hash era and results unchanged. Require complete source
+hashes/counts and fresh outputs, retain all pairs <=16, and review every strict
+<=10 flag and looser <=16 match contextually. Check exact-image and exposure
+invariance, unrelated content and malformed/coverage failures before admission.
+This remains a crop-blind review aid; also inspect source-family provenance.
+The screen does not read human scores or distorted holdout images, change the
+training split or expand HDR model-development work. Its sole purpose is to
+finish the already-required protected-reference coverage for the prepared fit.
+
+Input-contract clarification before reference fingerprints: the exact-PNG
+control correctly refused the existing cleanpicker RGB8 PNG's unspecified
+transfer. These source bytes are interpreted as sRGB by the registered native
+targeting/extraction recipe. Add an explicit `--assume-untagged-srgb` opt-in for
+this caller, recorded per input. It applies only to PNGs lacking ICC, gAMA,
+sRGB and cICP metadata, never to EXR or tagged/contradictory color metadata.
+The default still refuses unknown transfer; retain that refusal control. This
+declares the existing source interpretation rather than silently overriding a
+profile or changing the fingerprint threshold after outcomes.

@@ -3737,3 +3737,19 @@ luminance metadata and associated alpha remain explicit.
 No human scores or distorted holdout images were read, no image-data model was
 fit, and no content-admission decision follows from pixel parity. The remaining
 reference fingerprinting/contextual audit still governs corruption-head fitting.
+
+## 2026-09-08 — reference admission completed; first head fit hits serving guard
+
+The remaining 12-source × 30-UPIQ-HDR screen completes through zenexr with zero
+strict flags. Two looser matches are visually distinct paper/photograph pairs.
+The prior 182-SDR-reference audit reproduces exactly. Full declared coverage
+and its reviews are bound in `CONTENT_ADMISSION.json`; no source is excluded.
+The existing source-family split, crop-blind limitation and protected labels
+remain unchanged. HDR development still uses the existing imazen-26 PNGs.
+
+The registered seed 4101 trains on 5,504 fit rows and calibrates on 2,709
+separate-origin rows. The exported head matches Python in Rust on all 13,892
+prepared rows (including the 5,679 separate evaluation rows), but the full
+pixel audit correctly rejects unsupported companion feature coverage in D's
+fast extraction plan. No pixel scorecard or model qualification is produced;
+the next two seeds are not run. [Evidence and next serving task](../benchmarks/canonical_corruption_refit_2026-09-08.md).

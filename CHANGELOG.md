@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Add an explicit PNG/EXR linear-luminance mode to the existing reference
+  overlap audit, using pinned zenexr, exact coverage, source metadata and
+  declared untagged-PNG interpretation. The previous PNG hash era is unchanged.
+
 - Add `BakeScorer::score_features_with_identity` for cached pair records with
   independently verified decoded-pixel identity. It preserves the same exact
   identity score as SDR/HDR pixel scoring while ordinary feature rows retain

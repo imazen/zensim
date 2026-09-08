@@ -72,6 +72,8 @@ sha2 = "0.11.0"
 zenflate = "0.4.0"
 # Native content-admission mode; the legacy audit remains available for replay.
 zenpng = { workspace = true }
+zenexr = { git = "https://github.com/imazen/zenextras", rev = "109a9ec367278a93751f7701f8536358e5d3f5cd" }
+zenpixels = { workspace = true }
 zenresize = { workspace = true }
 zenpixels-convert = { version = ">=0.2.16, <0.4.0", default-features = false }
 enough = { workspace = true }

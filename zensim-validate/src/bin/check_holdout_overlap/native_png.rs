@@ -1,4 +1,4 @@
-//! Strict native PNG audit; no legacy image decoder/resizer executes here.
+//! Shared strict native audit; no legacy image decoder/resizer executes here.
 use super::Args;
 use anyhow::{Context, Result, ensure};
 use rayon::prelude::*;
@@ -10,8 +10,7 @@ use std::io::Write;
 use std::path::Path;
 use zenpixels_convert::PixelBufferConvertTypedExt;
 
-#[path = "../../content_clusters/dhash_bits.rs"]
-mod dhash_bits;
+use super::dhash_bits;
 
 fn fingerprint(path: &Path) -> Result<Value> {
     let bytes = fs::read(path).with_context(|| path.display().to_string())?;
@@ -87,13 +86,20 @@ pub(super) fn run(args: &Args) -> Result<()> {
         "training source coverage: {} != {nt}",
         sources.len()
     );
+    let fingerprint_fn = |path: &Path| {
+        if args.native_linear {
+            super::native_linear::fingerprint(path, args.assume_untagged_srgb)
+        } else {
+            fingerprint(path)
+        }
+    };
     let training = sources
         .par_iter()
-        .map(|p| fingerprint(Path::new(p)))
+        .map(|p| fingerprint_fn(Path::new(p)))
         .collect::<Result<Vec<_>>>()?;
     let holdout = holdout_paths
         .par_iter()
-        .map(|p| fingerprint(p))
+        .map(|p| fingerprint_fn(p))
         .collect::<Result<Vec<_>>>()?;
     let h = |v: &Value| v["dhash"].as_u64().expect("fingerprint hash");
     let path = |v: &Value| v["path"].as_str().expect("fingerprint path").to_owned();
@@ -123,7 +129,18 @@ pub(super) fn run(args: &Args) -> Result<()> {
         }
     }
     let strict = close.iter().filter(|r| r["strict_flag"] == true).count();
-    let report = json!({"schema":"native-png-dhash-audit-v1","hash_era":"bt709-encoded-luma-zenresize-lanczos-gray8-v1",
+    let (schema, era) = if args.native_linear {
+        (
+            "native-linear-dhash-audit-v1",
+            "bt709-peak-normalized-log255-luma-zenresize-lanczos-f32-v1",
+        )
+    } else {
+        (
+            "native-png-dhash-audit-v1",
+            "bt709-encoded-luma-zenresize-lanczos-gray8-v1",
+        )
+    };
+    let report = json!({"schema":schema,"hash_era":era,
         "threshold":args.threshold,"review_threshold":16,"training":training,"holdout":holdout,
         "close_pairs":close,"strict_flags":strict,"admission_approved":false});
     // Only complete results are written; create_new protects existing evidence.

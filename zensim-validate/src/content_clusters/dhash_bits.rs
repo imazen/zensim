@@ -1,5 +1,5 @@
 //! Shared bit ordering; callers own and identify decode/resample semantics.
-pub(super) fn from_luma9x8(pixels: &[u8; 72]) -> u64 {
+pub(super) fn from_luma9x8<T: PartialOrd>(pixels: &[T; 72]) -> u64 {
     let mut hash = 0;
     for y in 0..8 {
         for x in 0..8 {
