@@ -3647,3 +3647,21 @@ See [registration](CANONICAL_CORRUPTION_2026-09-08.md) and
 hashes, controls, original/final producer snapshots and remaining deduplication,
 T0 content audit, current surface-feature parity and fit/calibration partition
 work. Artifact root: `/mnt/v/output/zensim/canonical-corruption-2026-09-08/`.
+
+## 2026-09-08 — canonical corruption public-surface parity and frozen-head screen
+
+**STANDS, bounded development screen; no new fit.** All 15,060 canonical and
+native honest rows now have exact complete Rust pixel/cache/stored-f32 score
+agreement and exact original-table f32 feature parity. The first prototype's
+678 identity disagreements exposed omitted cached identity context: pixel100
+was correct, and raw zero features cannot prove identity. The new explicit
+identity-aware cache surface preserves supported pixel and raw-feature behavior.
+
+Deduplicated validation detection is 5,022/5,353, and strict below-q20 ordering
+improves from 1,945 to 5,280/5,353. However eight of 304 honest native codec
+outputs—all near-lossless JXL—are incorrectly lowered from 97.77–98.54 to zero.
+Newer `real_bug` detection is 204/317. The frozen historical D+HGB is therefore
+not shippable; these inputs do not establish independent held-out validation of
+its old training recipe. T0 content admission, approved deduplicated training
+views and exact fit/calibration identities remain incomplete. See the
+[serving record](../benchmarks/canonical_corruption_serving_2026-09-08.md).

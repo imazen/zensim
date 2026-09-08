@@ -40,6 +40,47 @@ fn declared_ids_are_gathered_and_short_or_malformed_rows_refuse() {
     }
 }
 
+#[test]
+fn cached_pair_identity_matches_pixels_without_treating_zero_rows_as_proof() {
+    let metadata = json!([{"key":"zentrain.feature_ids","type":"utf8","text":"0 1"}]);
+    let model = linear_bias(metadata.clone(), 80.);
+    let head = linear_bias(metadata, -5.);
+    let mut scorer = BakeScorer::new(&model)
+        .unwrap()
+        .with_linear_corruption_head(&head, 10.)
+        .unwrap();
+    let pixels = vec![[17, 35, 80]; 64];
+    let image = RgbSlice::new(&pixels, 8, 8);
+    let pixel = scorer.compute(&image, &image, None).unwrap();
+    assert_eq!(pixel.score(), 100.);
+    assert_eq!(
+        scorer
+            .score_features_with_identity(pixel.features(), 8, 8, None, true)
+            .unwrap(),
+        pixel.score()
+    );
+    // The same raw zero features without identity proof must still fire the
+    // companion. An inferred "zero = identity" shortcut would fail this.
+    assert_eq!(scorer.score_features(&[0., 0.], 8, 8, None).unwrap(), 0.);
+    assert_eq!(
+        scorer
+            .score_features_with_identity(&[0., 0.], 8, 8, None, false)
+            .unwrap(),
+        0.
+    );
+    assert_eq!(
+        scorer
+            .score_features_with_identity(&[-30., -30.], 8, 8, None, false)
+            .unwrap(),
+        -70.
+    );
+    assert!(
+        scorer
+            .score_features_with_identity(&[], 8, 8, None, false)
+            .is_err()
+    );
+}
+
 fn assert_gradient(actual: &[f64], expected: &[f64]) {
     assert_eq!(actual.len(), expected.len());
     for (i, (&got, &want)) in actual.iter().zip(expected).enumerate() {

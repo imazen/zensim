@@ -69,6 +69,7 @@ use zenpixels::{PixelBuffer, PixelDescriptor};
 /// consumer needs them. A format that is *detected but not built* returns
 /// [`DecodeError::UnsupportedFormat`] — it is never treated as a decode
 /// failure, and never silently skipped.
+#[allow(clippy::match_like_matches_macro)] // Preserve readable per-codec feature gates.
 pub fn is_supported(format: ImageFormat) -> bool {
     match format {
         ImageFormat::Jpeg | ImageFormat::Png => true,
@@ -389,7 +390,7 @@ fn pixelbuffer_to_rgb8(pb: &PixelBuffer) -> Result<Vec<u8>, String> {
         for row in 0..h {
             let start = row * stride;
             let src = &data[start..start + w * 4];
-            for px in src.chunks_exact(4) {
+            for px in src.as_chunks::<4>().0 {
                 out.extend_from_slice(&px[..3]);
             }
         }

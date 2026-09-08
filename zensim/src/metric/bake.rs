@@ -239,6 +239,35 @@ impl<'a> BakeScorer<'a> {
         Ok(self)
     }
 
+    /// Score extracted features with independently verified pixel identity.
+    ///
+    /// Set `pixels_identical` only after proving byte-identical decoded pixels
+    /// in the same encoding and geometry. A zero feature row, equal source
+    /// names or a perceptual hash is not such proof. True returns exactly 100
+    /// before inference, matching [`Self::compute`] and [`Self::compute_hdr`].
+    /// False delegates to [`Self::score_features`], including the complete
+    /// configured model, calibration, ensemble and corruption composition.
+    ///
+    /// This entry supports cached pair records that preserve identity evidence.
+    /// Call [`Self::score_features`] when only the feature row is known.
+    ///
+    /// # Errors
+    /// For nonidentical pairs, returns the same errors as [`Self::score_features`].
+    pub fn score_features_with_identity(
+        &mut self,
+        features: &[f64],
+        width: u32,
+        height: u32,
+        codec_hint: Option<&str>,
+        pixels_identical: bool,
+    ) -> Result<f64, ZensimError> {
+        if pixels_identical {
+            Ok(100.0)
+        } else {
+            self.score_features(features, width, height, codec_hint)
+        }
+    }
+
     /// Score an identity-layout feature row using the bake's declared IDs.
     ///
     /// The caller must supply features at the bake's extraction revision and
@@ -645,14 +674,12 @@ impl<'a> BakeScorer<'a> {
             plan.toggles(),
             &mut self.pixel_scratch,
         )?;
-        if images_byte_identical(source, distorted) {
-            return Ok(100.0);
-        }
-        self.score_features(
+        self.score_features_with_identity(
             features.features(),
             source.width() as u32,
             source.height() as u32,
             codec_hint,
+            images_byte_identical(source, distorted),
         )
     }
 
@@ -697,14 +724,12 @@ impl<'a> BakeScorer<'a> {
             #[cfg(feature = "feature-regime-v2")]
             Some(&plan),
         );
-        if result.is_identical() {
-            return Ok(result);
-        }
-        result.score = self.score_features(
+        result.score = self.score_features_with_identity(
             result.features(),
             source.width() as u32,
             source.height() as u32,
             codec_hint,
+            result.is_identical(),
         )?;
         Ok(result)
     }

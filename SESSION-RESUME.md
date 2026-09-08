@@ -4,18 +4,21 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest September 8 continuation: [canonical corruption input generation](benchmarks/canonical_corruption_2026-09-08.md)
-is complete: 12 train / 8 validation origins, 14,300 retained catalog/anchor
-rows plus 760 current-native honest JXL/AVIF feature rows. No new fit or model
-qualification. The September 6 nonlinear HGB already superseded the older
-linear separability/guard hypothesis; reuse its existing estimator/exporter
-and Rust ZCTH serving. Before fitting, deduplicate source/pixel pairs (raw
-catalogs still fail C10), complete T0 content audit and public-surface feature
-parity, and register exact fit/calibration/evaluation source identities. The
-corruption gate's discontinuity and current native adapters' explicit rejection
-of corruption companions remain product work. The prior native intervention
-and RD findings remain negative/mixed; do not substitute corruption detection
-or restoration coherence for useful allocation evidence.
+Latest September 8 continuation: [canonical corruption serving screen](benchmarks/canonical_corruption_serving_2026-09-08.md)
+is complete on all 15,060 canonical/native rows, with exact pixel, cached and
+stored-f32 feature/score parity. New `BakeScorer::score_features_with_identity`
+carries proven pixel identity; raw zero features remain insufficient evidence.
+Frozen D+HGB detects 93.82% of unique validation corruptions and orders 98.64%
+below q20, but incorrectly sends eight near-lossless JXL outputs to zero and
+detects only 64.35% of the newer real-bug family. **No new fit or qualification.**
+Before fitting, finish T0 content admission, construct source/pixel-deduplicated
+views (raw catalogs still fail C10), and register exact family-level fit /
+calibration / evaluation identities. Extend the existing corruption trainer:
+its legacy CV-ensemble report describes a different model than its exported
+single fit. Evaluate the exact exported artifact through Rust. Corruption-gate
+discontinuity and native adapters' rejection of companions remain product work.
+Prior native intervention and RD findings remain negative/mixed; corruption
+detection or restoration coherence does not prove useful spatial allocation.
 
 The end user controls one target score. The codec chooses parameters and must
 reach useful quality across codecs/content, near-lossless settings and codec

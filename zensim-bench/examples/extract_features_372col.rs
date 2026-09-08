@@ -51,6 +51,9 @@ use zensim::{ZensimConfig, compute_zensim_with_config};
 #[path = "shared/zen_decode.rs"]
 mod zen_decode;
 
+#[path = "extract_features_372col/audit.rs"]
+mod audit;
+
 #[derive(Debug, Clone)]
 struct Pair {
     reference: PathBuf,
@@ -65,6 +68,8 @@ struct Pair {
     extra_targets: Vec<(String, f64)>,
 }
 
+type FeatureRow = (String, f64, Vec<(String, f64)>, Vec<f64>);
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut corpus: Option<String> = None;
@@ -72,6 +77,9 @@ fn main() {
     let mut out: Option<PathBuf> = None;
     let mut max_pairs: usize = usize::MAX;
     let mut allow_failures: usize = 0;
+    let mut audit_out = None;
+    let mut audit_bake = None;
+    let mut audit_head = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--corpus" => corpus = Some(args.next().unwrap()),
@@ -81,6 +89,9 @@ fn main() {
             // How many pairs may fail extraction before the run aborts.
             // Default 0 — see the NO GRACEFUL SKIPS block below.
             "--allow-failures" => allow_failures = args.next().unwrap().parse().unwrap(),
+            "--audit-jsonl" => audit::take_path(&mut audit_out, args.next()),
+            "--audit-bake" => audit::take_path(&mut audit_bake, args.next()),
+            "--audit-corruption-head" => audit::take_path(&mut audit_head, args.next()),
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -90,6 +101,12 @@ fn main() {
     let corpus = corpus.expect("--corpus REQUIRED (konjnd or aic3)");
     let path = path.expect("--path REQUIRED");
     let out = out.expect("--out REQUIRED");
+    let audit = audit::Config::load(audit_out, audit_bake, audit_head, &out, allow_failures)
+        .expect("audit configuration");
+    assert!(
+        audit.is_none() || matches!(corpus.as_str(), "pairs" | "pairs-tsv"),
+        "audit requires explicit pairs or pairs-tsv input"
+    );
 
     let pairs: Vec<Pair> = match corpus.as_str() {
         "konjnd" => load_konjnd(&path, max_pairs),
@@ -113,6 +130,9 @@ fn main() {
     };
 
     let n_total = pairs.len();
+    if audit.is_some() {
+        audit::validate_pairs_input(&path, &pairs, max_pairs).expect("audit pair coverage");
+    }
     eprintln!("Loaded {n_total} pairs from {corpus}");
     if n_total == 0 {
         eprintln!("no pairs loaded; exiting");
@@ -123,7 +143,7 @@ fn main() {
     let progress = AtomicUsize::new(0);
     let log_every = (n_total / 20).max(1);
 
-    let scored: Vec<Result<(String, f64, Vec<(String, f64)>, Vec<f64>), String>> = pairs
+    let scored: Vec<_> = pairs
         .par_iter()
         .map(|kp| {
             let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
@@ -133,7 +153,13 @@ fn main() {
                 let eta = (n_total - p) as f64 / rate;
                 eprintln!("  {corpus} {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
             }
-            extract_features(kp)
+            let hashes = audit.as_ref().map(|_| audit::file_hashes(kp)).transpose()?;
+            let row = extract_features(kp)?;
+            let record = audit
+                .as_ref()
+                .map(|a| a.score(kp, &row.3, hashes.as_ref().unwrap()))
+                .transpose()?;
+            Ok::<_, String>((row, record))
         })
         .collect();
 
@@ -143,11 +169,17 @@ fn main() {
     // chain instead of buried in the loop body. (This function used to
     // `.flatten()` an `Option` — a corpus could lose 30 % of its rows and the
     // only trace was a smaller row count in the "scored N/M" line.)
-    let mut rows: Vec<(String, f64, Vec<(String, f64)>, Vec<f64>)> = Vec::new();
+    let mut rows: Vec<FeatureRow> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
+    let mut audits = Vec::new();
     for r in scored {
         match r {
-            Ok(row) => rows.push(row),
+            Ok((row, record)) => {
+                rows.push(row);
+                if let Some(record) = record {
+                    audits.push(record);
+                }
+            }
             Err(e) => failures.push(e),
         }
     }
@@ -198,10 +230,10 @@ fn main() {
 
     // Write CSV
     use std::io::{BufWriter, Write};
-    if let Some(parent) = out.parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent).expect("create output dir");
-        }
+    if let Some(parent) = out.parent()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent).expect("create output dir");
     }
     let f = std::fs::File::create(&out).expect("create output CSV");
     let mut w = BufWriter::with_capacity(1 << 20, f);
@@ -225,6 +257,9 @@ fn main() {
         writeln!(w).unwrap();
     }
     w.flush().unwrap();
+    if let Some(audit) = &audit {
+        audit.write(&audits, n_total).expect("write complete audit");
+    }
     eprintln!(
         "Wrote {} rows × {n_feat} features to {}",
         rows.len(),
@@ -242,7 +277,7 @@ fn main() {
 /// corpus was dropped without a word, and (b) decodes an XYB JPEG as an
 /// ordinary JPEG, producing wrong pixels that still parse. See the module doc
 /// of `shared/zen_decode.rs`.
-fn extract_features(kp: &Pair) -> Result<(String, f64, Vec<(String, f64)>, Vec<f64>), String> {
+fn extract_features(kp: &Pair) -> Result<FeatureRow, String> {
     let src = zen_decode::decode_rgb8_path(&kp.reference).map_err(|e| format!("reference: {e}"))?;
     let dst = zen_decode::decode_rgb8_path(&kp.distorted).map_err(|e| format!("distorted: {e}"))?;
     if src.width != dst.width || src.height != dst.height {
@@ -266,12 +301,16 @@ fn extract_features(kp: &Pair) -> Result<(String, f64, Vec<(String, f64)>, Vec<f
     }
     let src_pixels: Vec<[u8; 3]> = src
         .pixels
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| [c[0], c[1], c[2]])
         .collect();
     let dst_pixels: Vec<[u8; 3]> = dst
         .pixels
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| [c[0], c[1], c[2]])
         .collect();
     let mut config = ZensimConfig::default();
@@ -287,15 +326,6 @@ fn extract_features(kp: &Pair) -> Result<(String, f64, Vec<(String, f64)>, Vec<f
         features,
     ))
 }
-
-/// KonFiG-IQA (Men/Lin/Jenadeleh/Saupe 2021): 10 sources x 7 distortions x
-/// 12 levels @ 0.25 JND (Part A) + motion blur x 30 levels @ 0.1 JND
-/// (Part B). Levels are calibrated to uniform JND spacing BY DESIGN, so the
-/// per-stimulus target comes from the level index directly — no Thurstonian
-/// reconstruction needed for ingestion. Emits human_score = 1 - q/3.2 (a
-/// [0,1] quality scale, rank-identical to the JND grid) + a native `q_jnd`
-/// extra target column. Level 0 = pristine copy → identity anchor rows.
-/// `path` = the KonFiG-IQA root (contains IMAGES/).
 
 /// Generic (ref, dist) pairs from a TSV with header columns `ref_path`,
 /// `dist_path`, optional `human_score` (default 0), optional extra numeric
@@ -357,6 +387,14 @@ fn load_pairs_tsv(tsv: &Path, max: usize) -> Vec<Pair> {
     pairs
 }
 
+/// KonFiG-IQA (Men/Lin/Jenadeleh/Saupe 2021): 10 sources x 7 distortions x
+/// 12 levels @ 0.25 JND (Part A) + motion blur x 30 levels @ 0.1 JND
+/// (Part B). Levels are calibrated to uniform JND spacing BY DESIGN, so the
+/// per-stimulus target comes from the level index directly — no Thurstonian
+/// reconstruction needed for ingestion. Emits human_score = 1 - q/3.2 (a
+/// [0,1] quality scale, rank-identical to the JND grid) + a native `q_jnd`
+/// extra target column. Level 0 = pristine copy → identity anchor rows.
+/// `path` = the KonFiG-IQA root (contains IMAGES/).
 fn load_konfig(base: &Path, max: usize) -> Vec<Pair> {
     let images = base.join("IMAGES");
     let mut pairs = Vec::new();
@@ -832,7 +870,8 @@ fn load_cid22_train_tsv(path: &Path, max: usize) -> Vec<Pair> {
         _ => return Vec::new(),
     };
     let mut pairs = Vec::new();
-    for line in lines.flatten() {
+    for line in lines {
+        let line = line.expect("read corpus line");
         let cols: Vec<&str> = line.split('\t').collect();
         if cols.len() < 5 {
             continue;
@@ -893,7 +932,8 @@ fn load_pairs_tsv_positional(path: &Path, max: usize) -> Vec<Pair> {
         _ => return Vec::new(),
     };
     let mut pairs = Vec::new();
-    for line in lines.flatten() {
+    for line in lines {
+        let line = line.expect("read corpus line");
         let cols: Vec<&str> = line.split('\t').collect();
         if cols.len() < 3 {
             continue;
@@ -914,10 +954,10 @@ fn load_pairs_tsv_positional(path: &Path, max: usize) -> Vec<Pair> {
         };
         let mut extra_targets = Vec::new();
         for extra in cols.iter().skip(4) {
-            if let Some((name, val)) = extra.split_once('=') {
-                if let Ok(v) = val.parse::<f64>() {
-                    extra_targets.push((name.to_string(), v));
-                }
+            if let Some((name, val)) = extra.split_once('=')
+                && let Ok(v) = val.parse::<f64>()
+            {
+                extra_targets.push((name.to_string(), v));
             }
         }
         pairs.push(Pair {
@@ -951,7 +991,8 @@ fn load_qsweep_tsv(path: &Path, max: usize) -> Vec<Pair> {
         _ => return Vec::new(),
     };
     let mut pairs = Vec::new();
-    for line in lines.flatten() {
+    for line in lines {
+        let line = line.expect("read corpus line");
         let cols: Vec<&str> = line.split('\t').collect();
         if cols.len() < 5 {
             continue;

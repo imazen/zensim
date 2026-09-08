@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Add `BakeScorer::score_features_with_identity` for cached pair records with
+  independently verified decoded-pixel identity. It preserves the same exact
+  identity score as SDR/HDR pixel scoring while ordinary feature rows retain
+  their complete model inference, including corruption composition.
+
 - Extend the existing RD analyzer to validate native complete-encode targeting, bound coverage, emitted-byte identity and separate reconstruction/map costs.
 
 - The unpublished `zensim-target` tool now exposes its shared median/envelope `SeedCurve` and candidate search with a native codec backend. Built-in adapters keep their feature checks; native JXL experiments can reuse the same Rust controller and training calibration without copying them.

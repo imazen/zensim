@@ -62,7 +62,7 @@ verify-all = ["verify-avif", "verify-jxl", "verify-webp"]
 # notably zenjpeg, which is XYB-aware where the `image` crate is not. An alias
 # for `verify-all` rather than a parallel dep list, so the extractor and
 # `verify_bitstream_decode` are guaranteed to build the SAME decoders.
-zen-decode = ["verify-all"]
+zen-decode = ["verify-all", "dep:serde_json", "dep:sha2"]
 
 # Test-only: the fixture ENCODERS for `tests/zen_decode_formats.rs`. The gates
 # synthesise their own AVIF / JXL / XYB-JPEG / WebP / PNG fixtures rather than
