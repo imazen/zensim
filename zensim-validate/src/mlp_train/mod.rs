@@ -26,6 +26,9 @@
 //! validation-only — their per-epoch SROCC is logged and the best
 //! model is the one with the highest validation mean.
 
+mod capabilities;
+pub use capabilities::validate_training_capabilities;
+
 use rayon::prelude::*;
 use std::time::Instant;
 use zenpredict::FeatureTransform;
@@ -2068,208 +2071,12 @@ pub fn train_mlp_strategy(
     konjnd_agg: Option<&KonjndAggregationPool<'_>>,
     triplets: Option<&TripletPool>,
 ) -> Vec<u8> {
-    // EX-2 std-pool head dispatch (scalar fallback path). Pool-head
-    // backprop has not been SIMD-fused yet; we trade ~1.7× per-pair
-    // time for the architectural lift (GMSD's std-pooling +
-    // Butteraugli's p-norm + IW-style pooling) per
-    // `PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md §3`. NiN composes with
-    // pool-head via the same per-prediction grad-scatter pattern as
-    // the standard head (the per-prediction grad is added to the
-    // RankNet `dl_dy` before routing through `backprop_step_pool_head`);
-    // parallel-batch over chunks is out of scope for the v0 prod
-    // wire-in (the sequential mini-batch path covers V_22-mix-LARGE's
-    // K=256 recipe at h=128 in ~25 min wall on the 7950X — fast enough
-    // that a SIMD/par-chunks port is queued, not load-bearing).
-    // `--nonneg-distance` normalization + reachability, ahead of every head
-    // branch. ReLU is not a preference here, it is what makes `h(0⃗) = 0⃗` and
-    // `h >= 0` true, so the flag OWNS `leaky_alpha` rather than asking the
-    // caller to keep two knobs consistent. The refusals below are for
-    // combinations whose guarantee this implementation does NOT establish —
-    // failing loud is this dispatcher's established response to that class.
-    let nonneg_hp;
-    let hyperparams = if hyperparams.nonneg_distance {
-        assert!(
-            !hyperparams.skip_connection,
-            "--nonneg-distance is incompatible with --skip-connection: the skip term \
-             `x · w_skip` is sign-free (scale-only standardized features are \
-             sign-free), so it breaks `raw <= pin` and the C6 guarantee the flag \
-             exists to establish. Drop one of the two."
-        );
-        assert!(
-            !(hyperparams.pool_head
-                || hyperparams.hybrid_head
-                || hyperparams.per_sample_alpha_head),
-            "--nonneg-distance is implemented on the plain n_features → n_hidden → 1 \
-             path only. The pool/hybrid/alpha heads reduce through additional \
-             parameters (reducer_w, rank_w, the alpha gate) whose sign constraints \
-             this build does not establish, so the non-negativity guarantee would be \
-             claimed and not held. Drop --nonneg-distance or drop the head flag."
-        );
-        assert!(
-            hyperparams.n_hidden_layers <= 1,
-            "--nonneg-distance is implemented on the 1-hidden-layer plain path only \
-             (--n-hidden-layers {} was requested). Depth >= 2 routes through the \
-             alpha-head owner, which this flag refuses.",
-            hyperparams.n_hidden_layers
-        );
-        assert!(
-            hyperparams.nonneg_pin.is_finite(),
-            "--nonneg-pin must be finite; got {}",
-            hyperparams.nonneg_pin
-        );
-        // The pin is baked through `as f32`. A value that does not round-trip
-        // makes `raw(identity) == pin` true in the trainer and FALSE at the f64
-        // comparison every gate uses — the "bit-exactly" claim would quietly
-        // become "to within an f32 rounding". Refuse, as an unrepresentable
-        // `--leaky-alpha` is refused. (Review 2026-09-06.)
-        assert!(
-            hyperparams.nonneg_pin as f32 as f64 == hyperparams.nonneg_pin,
-            "--nonneg-pin {} does not round-trip through f32 (bakes as {}). The pin \
-             is stored as an f32 bias, so a value like this makes `raw(identity) == \
-             pin` false at f64 and quietly downgrades the guarantee. Use an \
-             f32-exact value.",
-            hyperparams.nonneg_pin,
-            hyperparams.nonneg_pin as f32 as f64
-        );
-        nonneg_hp = MlpHyperparams {
-            leaky_alpha: 0.0,
-            ..hyperparams.clone()
-        };
-        &nonneg_hp
-    } else {
-        hyperparams
-    };
-
-    // The pool and hybrid heads implement NO absolute term — they read
-    // `g.loss_mode` only to log it. Before the polarity owner that was merely a
-    // silent discard; with it, a `:mse`/`:both` group would flip their RankNet
-    // and ladder signs on the strength of a flag they throw away, inverting the
-    // bake against its own parent with nothing to anchor it. Refuse, which is
-    // this dispatcher's established answer to the class. (Review 2026-09-06.)
-    if (hyperparams.pool_head || hyperparams.hybrid_head)
-        && groups.iter().any(|g| g.loss_mode.has_mse())
-    {
-        panic!(
-            "--pool-head / --hybrid-head implement no absolute term — they read a \
-             group's loss mode only to log it. A `:mse`/`:both` group would flip \
-             this run's output polarity (and with it the RankNet target and the TV \
-             ladder hinge) on the strength of a term that never fires, inverting \
-             the bake with nothing to anchor it. Drop the head flag, or make the \
-             groups `:rank`."
-        );
-    }
-
-    let head_flags = (hyperparams.pool_head as u8)
-        + (hyperparams.hybrid_head as u8)
-        + (hyperparams.per_sample_alpha_head as u8);
-    assert!(
-        head_flags <= 1,
-        "pool_head / hybrid_head / per_sample_alpha_head are mutually exclusive"
+    let effective = validate_training_capabilities(
+        hyperparams,
+        groups.iter().any(|g| g.loss_mode.has_mse()),
+        triplets.map_or(0, |t| t.responses.len()),
     );
-
-    // Loss-term reachability gates. These MUST live here, in the
-    // dispatcher, ahead of every head branch — the versions they replace
-    // sat INSIDE `train_mlp_per_sample_alpha_head` and tested
-    // `!per_sample_alpha_head`, which is unreachable there by
-    // construction. So they were dead code that could never fire, and
-    // their doc ("trainer panics if set on other heads") was false:
-    // `--mse-weight` on a non-α head silently trained pure rank and threw
-    // the flag away. Found 2026-07-15 by a `should_panic` test that did
-    // not panic.
-    if hyperparams.monotonicity_reg > 0.0 && !hyperparams.per_sample_alpha_head {
-        panic!(
-            "--monotonicity-reg is only wired on the per_sample_alpha_head \
-             path (set --per-sample-alpha-head)."
-        );
-    }
-    if hyperparams.mse_weight > 0.0
-        && !hyperparams.per_sample_alpha_head
-        && !groups.iter().any(|g| g.loss_mode.has_mse())
-    {
-        // On the plain path the absolute term is opt-in PER GROUP, so a
-        // run that sets the weight but flags no group would train pure
-        // rank and ignore the flag — exactly the silent failure above.
-        panic!(
-            "--mse-weight is set but no group opted into an absolute term. \
-             On the plain path the regression term is per-group: append \
-             `:mse` or `:both` to a --group spec (or use \
-             --per-sample-alpha-head)."
-        );
-    }
-    // The rest of the STRATEGY family is in the SAME silent-no-op class, and
-    // was unguarded until 2026-09-04: `ema`, `hard_pair`, `dro` and
-    // `listwise` are read ONLY inside `train_mlp_per_sample_alpha_head`, so
-    // setting one on any other head threw it away without a word.
-    //
-    // Found while scoping the subset-quality study: `--ema-decay` looked like
-    // the natural lever for reducing seed variance — its own CLI doc says
-    // "seed-variance reduction" — and it would have silently done nothing on
-    // the path every board bake trains through. That failure mode reads as
-    // "EMA does not help" when the truth is "EMA never ran".
-    //
-    // Wiring them through means threading a weight-EMA / DRO / listwise step
-    // into three more training loops, a real change to the optimizer and the
-    // bake path. Failing loud is this file's established response to the class
-    // (see the guards above) and is the honest interim state.
-    for (name, on, flag) in [
-        ("--ema-decay", hyperparams.ema_decay > 0.0, "ema_decay"),
-        (
-            "--hard-pair-frac",
-            hyperparams.hard_pair_frac > 0.0,
-            "hard_pair_frac",
-        ),
-        ("--dro-eta", hyperparams.dro_eta > 0.0, "dro_eta"),
-        (
-            "--listwise-weight",
-            hyperparams.listwise_weight > 0.0,
-            "listwise_weight",
-        ),
-    ] {
-        if on && !hyperparams.per_sample_alpha_head {
-            panic!(
-                "{name} ({flag}) is only wired on the per_sample_alpha_head path; this run \
-                 has per_sample_alpha_head=false, so the flag would be silently ignored and \
-                 the bake would be byte-identical to a run that never set it. Add \
-                 --per-sample-alpha-head, or drop the flag."
-            );
-        }
-    }
-    // Same silent-no-op class as the two guards above: the triplet step lives
-    // ONLY inside `train_mlp_per_sample_alpha_head`, so a run that loads a
-    // triplet pool but does NOT set --per-sample-alpha-head silently ignores it
-    // and produces a bake byte-identical to a no-triplet run. Measured
-    // 2026-07-16: depth_v6 (--triplet-weight 0.5, plain 2-layer) == depth_v2
-    // byte-for-byte. Fail loud instead of throwing the flag away.
-    // Same silent-no-op class as the guards above, and missed until 2026-09-06:
-    // `use_2layer` / `use_skip` are read at exactly two lines in this file, both
-    // inside `train_mlp_per_sample_alpha_head`. A run that asked for depth 2 or a
-    // skip connection on any other head got a 1-layer, skip-less net and a bake
-    // byte-identical to one that never asked.
-    for (name, on) in [
-        ("--n-hidden-layers >= 2", hyperparams.n_hidden_layers >= 2),
-        ("--skip-connection", hyperparams.skip_connection),
-    ] {
-        if on && !hyperparams.per_sample_alpha_head {
-            panic!(
-                "{name} is only wired on the per_sample_alpha_head path; this run has \
-                 per_sample_alpha_head=false, so the architecture flag would be \
-                 silently ignored and the bake would be byte-identical to a run that \
-                 never set it. Add --per-sample-alpha-head, or drop the flag."
-            );
-        }
-    }
-    let triplet_requested = hyperparams.triplet_weight > 0.0
-        && triplets.map(|t| !t.responses.is_empty()).unwrap_or(false);
-    if triplet_requested && !hyperparams.per_sample_alpha_head {
-        panic!(
-            "--triplet-weight/-stimuli/-responses are only wired on the \
-             per_sample_alpha_head path; this run has per_sample_alpha_head=false so the \
-             loaded triplet pool ({} responses) would be silently ignored (the bake would \
-             be byte-identical to a no-triplet run). Set --per-sample-alpha-head, or drop \
-             the triplet flags.",
-            triplets.map(|t| t.responses.len()).unwrap_or(0),
-        );
-    }
+    let hyperparams = &effective;
 
     if hyperparams.per_sample_alpha_head {
         return train_mlp_per_sample_alpha_head(
@@ -2283,24 +2090,6 @@ pub fn train_mlp_strategy(
             konjnd_agg,
             tv,
             triplets,
-        );
-    }
-    if anchor.is_some() && hyperparams.anchor_loss_weight > 0.0 {
-        eprintln!(
-            "WARNING: --anchor-loss-weight is only wired on the per-sample-α head; \
-             anchor data ignored on this head."
-        );
-    }
-    if pjnd_anchor.is_some() && hyperparams.pjnd_passthrough_weight > 0.0 {
-        eprintln!(
-            "WARNING: --pjnd-passthrough-weight is only wired on the per-sample-α head; \
-             pjnd anchor data ignored on this head."
-        );
-    }
-    if konjnd_agg.is_some() && hyperparams.konjnd_aggregation_weight > 0.0 {
-        eprintln!(
-            "WARNING: --konjnd-aggregation-weight is only wired on the per-sample-α head; \
-             konjnd-aggregation pool ignored on this head."
         );
     }
     if hyperparams.hybrid_head {

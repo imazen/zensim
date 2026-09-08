@@ -59,6 +59,11 @@ fn col_block_to_f64(
     out: &mut Vec<f64>,
 ) -> Result<(), String> {
     let end = start + block_len;
+    if col.null_count() > 0 && (start..end).any(|i| col.is_null(i)) {
+        return Err(format!(
+            "{path:?}: null feature value in rows {start}..{end}"
+        ));
+    }
     match col.data_type() {
         DataType::Float64 => {
             let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
@@ -216,10 +221,40 @@ struct LoadedCommon {
 /// Reading a dense table is a separate, registered step (the row has to become
 /// id-indexed end to end, not merely wider). Until it lands, "refuse" is the
 /// correct answer and "truncate" never was.
+fn validate_feature_column_names<'a>(
+    path: &Path,
+    names: impl Iterator<Item = &'a str>,
+) -> Result<(), String> {
+    let mut seen = std::collections::BTreeMap::new();
+    let mut family = None;
+    for name in names {
+        let parsed = ["feat_", "f"].into_iter().find_map(|prefix| {
+            name.strip_prefix(prefix)
+                .and_then(|id| id.parse::<usize>().ok())
+                .map(|id| (prefix, id))
+        });
+        let Some((prefix, id)) = parsed else { continue };
+        if name != format!("{prefix}{id}") {
+            return Err(format!("{path:?}: noncanonical feature ID {name:?}"));
+        }
+        if let Some(old) = seen.insert(id, name) {
+            return Err(format!(
+                "{path:?}: duplicate feature ID {id}: {old:?} and {name:?}"
+            ));
+        }
+        if family.is_some_and(|old| old != prefix) {
+            return Err(format!("{path:?}: mixed fN and feat_N feature aliases"));
+        }
+        family = Some(prefix);
+    }
+    Ok(())
+}
+
 fn feature_column_run(
     path: &std::path::Path,
     arrow_fields: &[std::sync::Arc<arrow::datatypes::Field>],
 ) -> Result<(&'static str, usize, usize), String> {
+    validate_feature_column_names(path, arrow_fields.iter().map(|f| f.name().as_str()))?;
     let n_arrow_cols = arrow_fields.len();
     let (prefix, f0) = ["f", "feat_"]
         .iter()
@@ -278,6 +313,7 @@ fn feature_column_run_by_name(
     names: &[String],
     prefix: &str,
 ) -> Result<Vec<usize>, String> {
+    validate_feature_column_names(path, names.iter().map(String::as_str))?;
     let idx = |n: &str| names.iter().position(|x| x == n);
     let mut out = Vec::new();
     let mut fi = 0usize;
@@ -1889,6 +1925,22 @@ mod feature_column_run_tests {
     use arrow::datatypes::{DataType, Field};
     use std::path::Path;
     use std::sync::Arc;
+
+    #[test]
+    fn ambiguous_ids_and_null_features_are_refused() {
+        for names in [
+            vec!["f0", "f0"],
+            vec!["f0", "feat_0"],
+            vec!["f0", "feat_1"],
+            vec!["f00"],
+        ] {
+            assert!(
+                validate_feature_column_names(Path::new("bad.parquet"), names.into_iter()).is_err()
+            );
+        }
+        let col = Float32Array::from(vec![Some(1.0), None]);
+        assert!(col_block_to_f64(Path::new("bad.parquet"), &col, 0, 2, &mut Vec::new()).is_err());
+    }
 
     fn fields(names: &[&str]) -> Vec<Arc<Field>> {
         names

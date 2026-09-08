@@ -133,6 +133,11 @@ struct Args {
     #[arg(long, required_unless_present = "manifest")]
     group: Vec<String>,
 
+    /// Replay a recorded recipe with unresolved/mixed historical table eras.
+    /// The reason and findings are embedded; this cannot qualify a new model.
+    #[arg(long, value_name = "REASON")]
+    historical_replay: Option<String>,
+
     /// Number of hidden units in the single hidden layer. Default 128
     /// matches the V0_16 ship recipe. Other tested architectures:
     /// h=32 (V0_4 placeholder, too small), h=64 (V0_5, AIC-4-friendly
@@ -494,6 +499,15 @@ struct Args {
     /// aggressively without re-testing.
     #[arg(long, default_value_t = 0.05, value_name = "FLOAT")]
     auto_transforms_min_lift: f64,
+
+    /// Keep the top N eligible screen rows by lift; 0 keeps all. Ties retain TSV order.
+    #[arg(long, default_value_t = 0)]
+    auto_transforms_max_features: usize,
+
+    /// Ignore screen IDs at or above this bound; 0 uses the training width.
+    /// Use 228 to replay the old V_20 converter's default.
+    #[arg(long, default_value_t = 0)]
+    auto_transforms_max_feature_idx: usize,
 
     /// Name of the column in each group CSV to use as the regression
     /// target. Default `human_score` matches every V_X bake through
@@ -1715,6 +1729,7 @@ fn load_auto_transforms_from_screen(
     tsv_path: &PathBuf,
     min_lift: f64,
     n_features: usize,
+    max_features: usize,
     transforms: &mut [zenpredict::FeatureTransform],
     params: &mut [Vec<f32>],
 ) -> usize {
@@ -1752,7 +1767,11 @@ fn load_auto_transforms_from_screen(
     let params_col = col("params_csv");
     let lift_col = col("lift");
 
-    let mut loaded = 0usize;
+    assert!(
+        min_lift.is_finite(),
+        "--auto-transforms-min-lift must be finite"
+    );
+    let mut eligible = Vec::new();
     // map_while stops on Err — flatten() would infinite-loop on a
     // sticky read error (per clippy::lines_filter_map_ok).
     for line in lines.map_while(Result::ok) {
@@ -1772,7 +1791,7 @@ fn load_auto_transforms_from_screen(
         let Ok(lift) = cells[lift_col].trim().parse::<f64>() else {
             continue;
         };
-        if lift < min_lift {
+        if !lift.is_finite() || lift < min_lift {
             continue;
         }
         let token = cells[xform_col].trim();
@@ -1797,9 +1816,16 @@ fn load_auto_transforms_from_screen(
                 .filter_map(|s| s.trim().parse::<f32>().ok())
                 .collect()
         };
+        eligible.push((idx, lift, transform, parsed_params));
+    }
+    eligible.sort_by(|a, b| b.1.total_cmp(&a.1)); // stable: original TSV order breaks ties
+    if max_features > 0 {
+        eligible.truncate(max_features);
+    }
+    let loaded = eligible.len();
+    for (idx, _, transform, parsed_params) in eligible {
         transforms[idx] = transform;
         params[idx] = parsed_params;
-        loaded += 1;
     }
     loaded
 }
@@ -2517,6 +2543,220 @@ fn apply_manifest_to_args(
     cfg.post_training_steps.clone()
 }
 
+/// CLI-only capabilities (data sources and the GPU adapter). Shared head/loss
+/// checks live in mlp_train::validate_training_capabilities.
+fn preflight_cli_capabilities(args: &Args, matches: &clap::ArgMatches, want_gpu: bool) {
+    // See `keep_features_unsupported_flag` / `group_l1_unsupported_flag`
+    // above for the up-to-date support table and rationale (2026-09-04,
+    // `benchmarks/fastclass_distill_wave_2026-09-04.md` §7.6/§7.7) — fail
+    // loud rather than shipping a bake whose spec claims a subset it
+    // never trained.
+    if args.keep_features.is_some()
+        && let Some(name) = keep_features_unsupported_flag(
+            args.pool_head,
+            args.hybrid_head,
+            args.per_sample_alpha_head,
+            args.n_hidden_layers,
+            want_gpu,
+        )
+    {
+        eprintln!(
+            "FATAL: --keep-features is implemented on the plain n_features→n_hidden→1 path \
+             and on --per-sample-alpha-head (1-layer and --n-hidden-layers >= 2) only; {name} \
+             does not train through either of those, so the emitted bake would not actually \
+             honor the kept-feature subset it claims."
+        );
+        std::process::exit(1);
+    }
+    if (args.coarse_decay > 0.0 || args.coarse_l2_mult != 1.0)
+        && let Some(name) = coarse_decay_unsupported_flag(
+            args.pool_head,
+            args.hybrid_head,
+            args.per_sample_alpha_head,
+            want_gpu,
+        )
+    {
+        eprintln!(
+            "FATAL: --coarse-decay / --coarse-l2-mult are applied by \
+             apply_post_adam_penalties, which is called ONLY from the plain \
+             n_features\u{2192}n_hidden\u{2192}1 training loop; {name} routes through a path that \
+             never calls it, so the flag would be silently ignored and the bake would be \
+             byte-identical to a run that never set it \u{2014} while its embedded repro argv \
+             claimed the regularizer. Drop the flag, or drop {name}."
+        );
+        std::process::exit(1);
+    }
+    if args.group_l1 > 0.0
+        && let Some(name) = group_l1_unsupported_flag(
+            args.pool_head,
+            args.hybrid_head,
+            args.per_sample_alpha_head,
+            args.n_hidden_layers,
+            want_gpu,
+        )
+    {
+        eprintln!(
+            "FATAL: --group-l1 is implemented on the plain n_features→n_hidden→1 path only; \
+             {name} routes layer-1 weights through a different owner (or a different code \
+             path) and would silently ignore it."
+        );
+        std::process::exit(1);
+    }
+
+    for (flag, active, supplied) in [
+        (
+            "--anchor-loss-weight",
+            args.anchor_loss_weight > 0.0,
+            args.anchor_parquet.is_some(),
+        ),
+        (
+            "--pjnd-passthrough-weight",
+            args.pjnd_passthrough_weight > 0.0,
+            args.pjnd_passthrough_parquet.is_some(),
+        ),
+        (
+            "--konjnd-aggregation-weight",
+            args.konjnd_aggregation_weight > 0.0,
+            args.konjnd_aggregation_parquet.is_some(),
+        ),
+        (
+            "--cross-codec-eq-weight",
+            args.cross_codec_eq_weight > 0.0,
+            args.cross_codec_eq_parquet.is_some(),
+        ),
+        (
+            "--triplet-weight",
+            args.triplet_weight > 0.0,
+            args.triplet_stimuli.is_some() && args.triplet_responses.is_some(),
+        ),
+        (
+            "--tv-weight",
+            args.tv_weight > 0.0,
+            args.tv_pairs_file.is_some(),
+        ),
+    ] {
+        assert!(
+            !active || supplied,
+            "{flag} requires its data source; no loss would execute"
+        );
+    }
+    assert!(
+        (args.cross_codec_rank_preserve_weight <= 0.0 && args.dynamic_range_floor_weight <= 0.0)
+            || (args.cross_codec_eq_weight > 0.0 && args.cross_codec_eq_parquet.is_some()),
+        "--cross-codec-rank-preserve-weight / --dynamic-range-floor-weight require active --cross-codec-eq-weight and its parquet"
+    );
+    if !want_gpu {
+        return;
+    }
+    assert!(
+        matches!(
+            args.gpu_runtime.to_ascii_lowercase().trim(),
+            "cuda" | "wgpu" | "gpucpu"
+        ),
+        "--gpu-runtime must be cpu, cuda, wgpu or gpucpu"
+    );
+    assert!(
+        args.per_sample_alpha_head,
+        "--gpu-runtime requires --per-sample-alpha-head"
+    );
+    // These knobs never reach GpuHparams or the GPU training loop. Check
+    // requested behavior, including manifest defaults, before reading any rows.
+    for (flag, active) in [
+        ("--nonneg-distance", args.nonneg_distance),
+        (
+            "--pool-head / --hybrid-head",
+            args.pool_head || args.hybrid_head,
+        ),
+        (
+            "--n-hidden-layers (GPU requires 1)",
+            args.n_hidden_layers != 1,
+        ),
+        ("--skip-connection", args.skip_connection),
+        (
+            "--tv-pairs-file",
+            args.tv_pairs_file.is_some() && args.tv_weight > 0.0,
+        ),
+        ("--norm-in-norm-weight", args.norm_in_norm_weight > 0.0),
+        (
+            "--init-seed / --sample-seed",
+            args.init_seed.is_some() || args.sample_seed.is_some(),
+        ),
+        ("--pair-sampling", args.pair_sampling != "uniform"),
+        ("--stratified-bands", args.stratified_bands > 0),
+        ("--ema-decay", args.ema_decay > 0.0),
+        ("--hard-pair-frac", args.hard_pair_frac > 0.0),
+        ("--dro-eta", args.dro_eta > 0.0),
+        ("--listwise-weight", args.listwise_weight > 0.0),
+        ("--triplet-weight", args.triplet_weight > 0.0),
+        ("--sigma-weighted-mse", args.sigma_weighted_mse),
+        ("--pwrc-pair-weight", args.pwrc_pair_weight),
+        (
+            "quality-band boosts",
+            args.low_q_boost != 1.0 || args.mid_q_boost != 1.0 || args.high_q_boost != 1.0,
+        ),
+        (
+            "--monotone-cbc / feature-mask / strict / pin-during-training",
+            args.monotone_cbc
+                || args.monotone_feature_mask.is_some()
+                || args.monotone_strict
+                || args.monotone_pin_during_training,
+        ),
+        ("--qat-fine-tune-epochs", args.qat_fine_tune_epochs > 0),
+        (
+            "--out-dtype (GPU bakes f32)",
+            !args.out_dtype.eq_ignore_ascii_case("f32"),
+        ),
+        (
+            "--konjnd-aggregation-weight",
+            args.konjnd_aggregation_weight > 0.0,
+        ),
+        ("--dump-checkpoints-every", args.dump_checkpoints_every > 0),
+        ("--identity-rows", args.identity_rows > 0),
+        (
+            "transforms without --tanh-output-head-scale",
+            args.tanh_output_head_scale <= 0.0
+                && (!args.feature_transform.is_empty() || args.auto_transforms.is_some()),
+        ),
+        (
+            "withinref sampling / per-group MSE-only loss",
+            args.group
+                .iter()
+                .any(|s| parse_group_spec(s).is_ok_and(|g| g.4 || g.5 == GroupLossMode::Mse)),
+        ),
+        (
+            "--early-stop-patience",
+            args.early_stop_patience != 0
+                && (explicit(matches, "early_stop_patience") || args.early_stop_patience != 50),
+        ),
+        (
+            "--val-policy",
+            explicit(matches, "val_policy") || args.val_policy != "min",
+        ),
+        (
+            "--val-aggregate",
+            explicit(matches, "val_aggregate") || args.val_aggregate != "geomean3",
+        ),
+        ("--group-eval-cap", args.group_eval_cap > 0),
+    ] {
+        assert!(
+            !active,
+            "{flag} is unsupported by --gpu-runtime; use the CPU trainer or remove the option"
+        );
+    }
+    assert!(
+        (1..=1024).contains(&args.hidden),
+        "GPU --hidden must be in 1..=1024"
+    );
+    let capacity = 2 * args.minibatch_size.max(512);
+    assert!(
+        (2 * args.gpu_minibatch_k_aux.max(1)).max(args.dynamic_range_probe_n.max(2)) <= capacity,
+        "GPU auxiliary batch exceeds main scratch capacity"
+    );
+    eprintln!(
+        "[capabilities] GPU trains all epochs and emits the final f32 checkpoint; no validation selection or early stopping; minibatch is at least 512. CPU defaults for these controls do not apply."
+    );
+}
+
 fn main() {
     // We parse via ArgMatches (not Args::parse) so --manifest can apply
     // its recorded fields as DEFAULTS while letting explicit CLI flags
@@ -2665,6 +2905,134 @@ fn main() {
             eprintln!("--val-aggregate: {e}");
             std::process::exit(2);
         });
+
+    // Resolve capabilities before opening tables or allocating CPU/GPU state.
+    let group_modes: Vec<_> = args
+        .group
+        .iter()
+        .map(|spec| {
+            parse_group_spec(spec).unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(2)
+            })
+        })
+        .collect();
+    let gpu_runtime_str = args.gpu_runtime.trim().to_ascii_lowercase();
+    let want_gpu = !gpu_runtime_str.is_empty() && gpu_runtime_str != "cpu";
+    preflight_cli_capabilities(&args, &matches, want_gpu);
+    let out_dtype = match args.out_dtype.to_ascii_lowercase().as_str() {
+        "f32" => zenpredict::WeightDtype::F32,
+        "f16" => zenpredict::WeightDtype::F16,
+        "i8" => zenpredict::WeightDtype::I8,
+        other => {
+            eprintln!("--out-dtype must be one of f32 / f16 / i8, got {other:?}");
+            std::process::exit(2);
+        }
+    };
+    let mut hyperparams = MlpHyperparams {
+        nonneg_distance: args.nonneg_distance,
+        nonneg_pin: args.nonneg_pin,
+        n_hidden: args.hidden,
+        n_epochs: args.epochs,
+        pairs_per_epoch: args.pairs_per_epoch,
+        initial_lr: args.lr,
+        leaky_alpha: args.leaky_alpha,
+        seed: args.seed,
+        pair_sampling: if args.pair_sampling == "stratified" {
+            mlp_train::PairSampling::Stratified
+        } else {
+            mlp_train::PairSampling::Uniform
+        },
+        init_seed: args.init_seed,
+        sample_seed: args.sample_seed,
+        log_every: args.log_every,
+        dump_checkpoints_every: args.dump_checkpoints_every,
+        dump_checkpoints_dir: args.dump_checkpoints_dir.clone(),
+        l2_lambda: args.l2,
+        early_stop_patience: args.early_stop_patience,
+        validation_policy: val_policy,
+        val_aggregate,
+        low_q_boost: args.low_q_boost,
+        mid_q_boost: args.mid_q_boost,
+        high_q_boost: args.high_q_boost,
+        out_dtype,
+        feature_transforms: None,
+        feature_transform_params: None,
+        minibatch_size: args.minibatch_size.max(1),
+        parallel_batch: args.parallel_batch,
+        pwrc_pair_weight: args.pwrc_pair_weight,
+        pwrc_sensory_threshold: args.pwrc_sensory_threshold,
+        pwrc_band_weights: args.pwrc_band_weights.clone(),
+        norm_in_norm_weight: args.norm_in_norm_weight,
+        norm_in_norm_p: args.norm_in_norm_p,
+        norm_in_norm_q: args.norm_in_norm_q,
+        pool_head: args.pool_head,
+        hybrid_head: args.hybrid_head,
+        per_sample_alpha_head: args.per_sample_alpha_head,
+        skip_connection: args.skip_connection,
+        n_hidden_layers: args.n_hidden_layers,
+        mse_weight: args.mse_weight,
+        sigma_weighted_mse: args.sigma_weighted_mse,
+        ema_decay: args.ema_decay,
+        hard_pair_frac: args.hard_pair_frac,
+        hard_pair_max_delta: args.hard_pair_max_delta,
+        stratified_bands: args.stratified_bands,
+        dro_eta: args.dro_eta,
+        listwise_weight: args.listwise_weight,
+        listwise_size: args.listwise_size,
+        listwise_frac: args.listwise_frac,
+        triplet_weight: args.triplet_weight,
+        triplet_frac: args.triplet_frac,
+        triplet_tau: args.triplet_tau,
+        triplet_sigma: args.triplet_sigma,
+        ranknet_weight: args.ranknet_weight,
+        monotonicity_reg: args.monotonicity_reg,
+        monotone_cbc: args.monotone_cbc,
+        monotone_feature_pin: None,
+        monotone_strict: args.monotone_strict,
+        monotone_pin_during_training: args.monotone_pin_during_training,
+        qat_fine_tune_epochs: args.qat_fine_tune_epochs,
+        qat_tau: args.qat_tau,
+        group_eval_cap: args.group_eval_cap,
+        monotonicity_margin: args.monotonicity_margin,
+        anchor_loss_weight: args.anchor_loss_weight,
+        anchor_target_score: args.anchor_target_score,
+        anchor_step_p: args.anchor_step_p,
+        cross_codec_eq_weight: args.cross_codec_eq_weight,
+        cross_codec_eq_step_p: args.cross_codec_eq_step_p,
+        cross_codec_rank_preserve_weight: args.cross_codec_rank_preserve_weight,
+        dynamic_range_floor_weight: args.dynamic_range_floor_weight,
+        dynamic_range_sigma_threshold: args.dynamic_range_sigma_threshold,
+        dynamic_range_step_p: args.dynamic_range_step_p,
+        dynamic_range_probe_n: args.dynamic_range_probe_n,
+        tanh_output_head_scale: args.tanh_output_head_scale,
+        pjnd_passthrough_weight: args.pjnd_passthrough_weight,
+        pjnd_passthrough_step_p: args.pjnd_passthrough_step_p,
+        pjnd_passthrough_target_score: args.pjnd_passthrough_target_score,
+        konjnd_aggregation_weight: args.konjnd_aggregation_weight,
+        konjnd_aggregation_step_p: args.konjnd_aggregation_step_p,
+        konjnd_aggregation_samples_per_ref: args.konjnd_aggregation_samples_per_ref,
+        konjnd_aggregation_refs_per_step: args.konjnd_aggregation_refs_per_step,
+    };
+
+    hyperparams = mlp_train::validate_training_capabilities(
+        &hyperparams,
+        args.identity_rows > 0
+            || group_modes
+                .iter()
+                .any(|g| matches!(g.5, GroupLossMode::Mse | GroupLossMode::Both)),
+        0, // Pool has not been opened; requesting the loss already requires its head.
+    );
+
+    let table_admission = zensim_validate::feature_set::admit_training_tables(
+        &group_modes.iter().map(|g| g.1.clone()).collect::<Vec<_>>(),
+        args.historical_replay.as_deref(),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2)
+    });
+    eprintln!("[table-admission] {table_admission}");
 
     // DATA-INTEGRITY GUARD (2026-05-25, task #215): refuse to TRAIN on a mock
     // target column. The kadid/tid iwssim corruption happened because a
@@ -2825,7 +3193,12 @@ fn main() {
             let n_loaded = load_auto_transforms_from_screen(
                 tsv_path,
                 args.auto_transforms_min_lift,
-                n_features,
+                if args.auto_transforms_max_feature_idx == 0 {
+                    n_features
+                } else {
+                    n_features.min(args.auto_transforms_max_feature_idx)
+                },
+                args.auto_transforms_max_features,
                 &mut transforms,
                 &mut params,
             );
@@ -3041,16 +3414,6 @@ fn main() {
         }
     };
 
-    let out_dtype = match args.out_dtype.to_ascii_lowercase().as_str() {
-        "f32" => zenpredict::WeightDtype::F32,
-        "f16" => zenpredict::WeightDtype::F16,
-        "i8" => zenpredict::WeightDtype::I8,
-        other => {
-            eprintln!("--out-dtype must be one of f32 / f16 / i8, got {other:?}");
-            std::process::exit(2);
-        }
-    };
-
     // Parse the per-feature monotone sign mask (if supplied).
     let monotone_feature_pin: Option<Vec<bool>> = args.monotone_feature_mask.as_ref().map(|path| {
         let txt = std::fs::read_to_string(path).unwrap_or_else(|e| {
@@ -3086,91 +3449,9 @@ fn main() {
         pin
     });
 
-    let hyperparams = MlpHyperparams {
-        nonneg_distance: args.nonneg_distance,
-        nonneg_pin: args.nonneg_pin,
-        n_hidden: args.hidden,
-        n_epochs: args.epochs,
-        pairs_per_epoch: args.pairs_per_epoch,
-        initial_lr: args.lr,
-        leaky_alpha: args.leaky_alpha,
-        seed: args.seed,
-        pair_sampling: if args.pair_sampling == "stratified" {
-            mlp_train::PairSampling::Stratified
-        } else {
-            mlp_train::PairSampling::Uniform
-        },
-        init_seed: args.init_seed,
-        sample_seed: args.sample_seed,
-        log_every: args.log_every,
-        dump_checkpoints_every: args.dump_checkpoints_every,
-        dump_checkpoints_dir: args.dump_checkpoints_dir.clone(),
-        l2_lambda: args.l2,
-        early_stop_patience: args.early_stop_patience,
-        validation_policy: val_policy,
-        val_aggregate,
-        low_q_boost: args.low_q_boost,
-        mid_q_boost: args.mid_q_boost,
-        high_q_boost: args.high_q_boost,
-        out_dtype,
-        feature_transforms: feature_transforms.clone(),
-        feature_transform_params: feature_transform_params.clone(),
-        minibatch_size: args.minibatch_size.max(1),
-        parallel_batch: args.parallel_batch,
-        pwrc_pair_weight: args.pwrc_pair_weight,
-        pwrc_sensory_threshold: args.pwrc_sensory_threshold,
-        pwrc_band_weights: args.pwrc_band_weights.clone(),
-        norm_in_norm_weight: args.norm_in_norm_weight,
-        norm_in_norm_p: args.norm_in_norm_p,
-        norm_in_norm_q: args.norm_in_norm_q,
-        pool_head: args.pool_head,
-        hybrid_head: args.hybrid_head,
-        per_sample_alpha_head: args.per_sample_alpha_head,
-        skip_connection: args.skip_connection,
-        n_hidden_layers: args.n_hidden_layers,
-        mse_weight: args.mse_weight,
-        sigma_weighted_mse: args.sigma_weighted_mse,
-        ema_decay: args.ema_decay,
-        hard_pair_frac: args.hard_pair_frac,
-        hard_pair_max_delta: args.hard_pair_max_delta,
-        stratified_bands: args.stratified_bands,
-        dro_eta: args.dro_eta,
-        listwise_weight: args.listwise_weight,
-        listwise_size: args.listwise_size,
-        listwise_frac: args.listwise_frac,
-        triplet_weight: args.triplet_weight,
-        triplet_frac: args.triplet_frac,
-        triplet_tau: args.triplet_tau,
-        triplet_sigma: args.triplet_sigma,
-        ranknet_weight: args.ranknet_weight,
-        monotonicity_reg: args.monotonicity_reg,
-        monotone_cbc: args.monotone_cbc,
-        monotone_feature_pin,
-        monotone_strict: args.monotone_strict,
-        monotone_pin_during_training: args.monotone_pin_during_training,
-        qat_fine_tune_epochs: args.qat_fine_tune_epochs,
-        qat_tau: args.qat_tau,
-        group_eval_cap: args.group_eval_cap,
-        monotonicity_margin: args.monotonicity_margin,
-        anchor_loss_weight: args.anchor_loss_weight,
-        anchor_target_score: args.anchor_target_score,
-        anchor_step_p: args.anchor_step_p,
-        cross_codec_eq_weight: args.cross_codec_eq_weight,
-        cross_codec_eq_step_p: args.cross_codec_eq_step_p,
-        cross_codec_rank_preserve_weight: args.cross_codec_rank_preserve_weight,
-        dynamic_range_floor_weight: args.dynamic_range_floor_weight,
-        dynamic_range_sigma_threshold: args.dynamic_range_sigma_threshold,
-        dynamic_range_step_p: args.dynamic_range_step_p,
-        dynamic_range_probe_n: args.dynamic_range_probe_n,
-        tanh_output_head_scale: args.tanh_output_head_scale,
-        pjnd_passthrough_weight: args.pjnd_passthrough_weight,
-        pjnd_passthrough_step_p: args.pjnd_passthrough_step_p,
-        pjnd_passthrough_target_score: args.pjnd_passthrough_target_score,
-        konjnd_aggregation_weight: args.konjnd_aggregation_weight,
-        konjnd_aggregation_step_p: args.konjnd_aggregation_step_p,
-        konjnd_aggregation_samples_per_ref: args.konjnd_aggregation_samples_per_ref,
-        konjnd_aggregation_refs_per_step: args.konjnd_aggregation_refs_per_step,
-    };
+    hyperparams.feature_transforms = feature_transforms.clone();
+    hyperparams.feature_transform_params = feature_transform_params.clone();
+    hyperparams.monotone_feature_pin = monotone_feature_pin;
 
     println!(
         "Training: {} groups, {n_features} features, {hyperparams:?}",
@@ -3625,8 +3906,7 @@ fn main() {
     // GPU trainer dispatch (task #166, 2026-05-19). Only active when
     // the user passes `--gpu-runtime <name>` AND the recipe is
     // GPU-supported (per-sample-α head, no aux losses, no TV).
-    let gpu_runtime_str = args.gpu_runtime.trim().to_ascii_lowercase();
-    let want_gpu = !gpu_runtime_str.is_empty() && gpu_runtime_str != "cpu";
+
     // Scale-mass regularizer: build the per-feature L2 multiplier and hand it
     // to the trainer via the module global (uniform when mult == 1.0). Coarse
     // scales are s2/s3 of each region: basic 78..156, v2 546..720, append
@@ -3673,63 +3953,6 @@ fn main() {
         *zensim_validate::mlp_train::GROUP_L1_LAMBDA.lock().unwrap() = args.group_l1;
         println!("[group-l1] group-lasso prox ON: lambda {}", args.group_l1);
     }
-    // See `keep_features_unsupported_flag` / `group_l1_unsupported_flag`
-    // above for the up-to-date support table and rationale (2026-09-04,
-    // `benchmarks/fastclass_distill_wave_2026-09-04.md` §7.6/§7.7) — fail
-    // loud rather than shipping a bake whose spec claims a subset it
-    // never trained.
-    if args.keep_features.is_some()
-        && let Some(name) = keep_features_unsupported_flag(
-            args.pool_head,
-            args.hybrid_head,
-            args.per_sample_alpha_head,
-            args.n_hidden_layers,
-            want_gpu,
-        )
-    {
-        eprintln!(
-            "FATAL: --keep-features is implemented on the plain n_features→n_hidden→1 path \
-             and on --per-sample-alpha-head (1-layer and --n-hidden-layers >= 2) only; {name} \
-             does not train through either of those, so the emitted bake would not actually \
-             honor the kept-feature subset it claims."
-        );
-        std::process::exit(1);
-    }
-    if (args.coarse_decay > 0.0 || args.coarse_l2_mult != 1.0)
-        && let Some(name) = coarse_decay_unsupported_flag(
-            args.pool_head,
-            args.hybrid_head,
-            args.per_sample_alpha_head,
-            want_gpu,
-        )
-    {
-        eprintln!(
-            "FATAL: --coarse-decay / --coarse-l2-mult are applied by \
-             apply_post_adam_penalties, which is called ONLY from the plain \
-             n_features\u{2192}n_hidden\u{2192}1 training loop; {name} routes through a path that \
-             never calls it, so the flag would be silently ignored and the bake would be \
-             byte-identical to a run that never set it \u{2014} while its embedded repro argv \
-             claimed the regularizer. Drop the flag, or drop {name}."
-        );
-        std::process::exit(1);
-    }
-    if args.group_l1 > 0.0
-        && let Some(name) = group_l1_unsupported_flag(
-            args.pool_head,
-            args.hybrid_head,
-            args.per_sample_alpha_head,
-            args.n_hidden_layers,
-            want_gpu,
-        )
-    {
-        eprintln!(
-            "FATAL: --group-l1 is implemented on the plain n_features→n_hidden→1 path only; \
-             {name} routes layer-1 weights through a different owner (or a different code \
-             path) and would silently ignore it."
-        );
-        std::process::exit(1);
-    }
-
     // `--nonneg-distance` establishes `raw(identity) == pin` in STANDARDIZED
     // space: the caller's zero vector standardizes to zero only if every active
     // feature transform maps 0 to 0. `winsor_p99` with `lo > 0` does not — it
@@ -3882,24 +4105,6 @@ fn main() {
     }
 
     let bake_bytes = if want_gpu {
-        if !args.per_sample_alpha_head {
-            eprintln!(
-                "--gpu-runtime requires --per-sample-alpha-head (Phase 1 GPU MVP only ports the \
-                 per-sample-α head)."
-            );
-            std::process::exit(2);
-        }
-        if tv_regularizer.is_some() {
-            eprintln!("--gpu-runtime is incompatible with --tv-pairs-file (Phase 2 work).");
-            std::process::exit(2);
-        }
-        if hyperparams.norm_in_norm_weight > 0.0 {
-            eprintln!(
-                "--gpu-runtime is incompatible with --norm-in-norm-weight \
-                 (Phase 2+ work). Run with the default CPU path."
-            );
-            std::process::exit(2);
-        }
         // Phase 2 (2026-05-19, task #169): anchor, cross-codec-eq,
         // rank-preserve, and σ-floor aux losses are GPU-supported via
         // dedicated CubeCL kernels in `zensim-train-gpu`. We thread the
@@ -4184,6 +4389,10 @@ fn main() {
         serde_json::json!({
             "schema": 1,
             "tool": "zensim_mlp_train",
+            "table_admission": table_admission,
+            "backend": if want_gpu { gpu_runtime_str.as_str() } else { "cpu" },
+            "checkpoint_policy": if want_gpu { "final epoch; no early stopping" } else { "CPU validation selection; see argv" },
+            "effective_minibatch": if want_gpu { args.minibatch_size.max(512) } else { args.minibatch_size.max(1) },
             // argv reproduces every hyperparameter + transform verbatim.
             "argv": std::env::args().collect::<Vec<String>>(),
             "cwd": std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
@@ -4329,6 +4538,16 @@ fn main() {
                 eprintln!("FATAL: could not embed zentrain.repro into the bake: {e:?}");
                 std::process::exit(4);
             });
+    let bake_bytes = if let Some(revision) = table_admission["formula_revision"].as_u64() {
+        zenpredict_bake::append_metadata_utf8(
+            &bake_bytes,
+            "zentrain.formula_revision",
+            &revision.to_string(),
+        )
+        .expect("validated formula revision metadata")
+    } else {
+        bake_bytes
+    };
     // FEATURE-SET ID (docs/FEATURE_SET_IDS.md §6.1): stamp the bake with the
     // PRODUCER id of the tables it TRAINED on, so a later verdict can say
     // which extractor era its coefficients were fit against instead of
@@ -4781,5 +5000,67 @@ mod csv_load_equivalence_tests {
             (Ok(_), Err(e)) => panic!("parallel succeeded but sequential errored: {e}"),
             (Err(e), Ok(_)) => panic!("sequential succeeded but parallel errored: {e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod capability_preflight_tests {
+    use super::*;
+
+    fn args(extra: &[&str]) -> (Args, clap::ArgMatches) {
+        let mut argv = vec![
+            "zensim_mlp_train",
+            "--group",
+            "probe:/definitely/missing.parquet:1:0:both",
+            "--out",
+            "/tmp/not-written.bin",
+        ];
+        argv.extend_from_slice(extra);
+        let matches = Args::command().try_get_matches_from(argv).unwrap();
+        (Args::from_arg_matches(&matches).unwrap(), matches)
+    }
+
+    #[test]
+    fn gpu_refuses_unimplemented_recipes_before_opening_data() {
+        for extra in [
+            vec!["--ema-decay", "0.9"],
+            vec!["--n-hidden-layers", "2"],
+            vec!["--sample-seed", "41"],
+            vec!["--qat-fine-tune-epochs", "5"],
+            vec!["--early-stop-patience", "10"],
+            vec!["--feature-transform", "signed_cbrt:0"],
+        ] {
+            let mut cli = vec!["--gpu-runtime", "gpucpu", "--per-sample-alpha-head"];
+            cli.extend(extra);
+            let (a, m) = args(&cli);
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    preflight_cli_capabilities(&a, &m, true)
+                }))
+                .is_err()
+            );
+        }
+        let (a, m) = args(&["--gpu-runtime", "gpucpu", "--per-sample-alpha-head"]);
+        preflight_cli_capabilities(&a, &m, true); // validation defaults normalize to final epoch
+    }
+
+    #[test]
+    fn screen_cap_threshold_id_bound_and_stable_ties() {
+        let path = std::env::temp_dir().join(format!("zensim-screen-{}.tsv", std::process::id()));
+        std::fs::write(&path, "feat_idx\tbest_transform\tparams_csv\tlift\n0\tsigned_cbrt\t\t0.05\n1\tsigned_cbrt\t\t0.2\n2\tsigned_cbrt\t\t0.2\n3\tidentity\t\t0.9\n4\tsigned_cbrt\t\t0.9\n5\tsigned_cbrt\t\tNaN\n").unwrap();
+        let mut transforms = vec![zenpredict::FeatureTransform::Identity; 6];
+        let mut params = vec![vec![]; 6];
+        let n = load_auto_transforms_from_screen(&path, 0.05, 4, 1, &mut transforms, &mut params);
+        assert_eq!(n, 1);
+        assert_eq!(transforms[1], zenpredict::FeatureTransform::SignedCbrt);
+        assert!(
+            transforms
+                .iter()
+                .enumerate()
+                .all(|(i, t)| i == 1 || *t == zenpredict::FeatureTransform::Identity)
+        );
+        let n = load_auto_transforms_from_screen(&path, 0.05, 4, 0, &mut transforms, &mut params);
+        assert_eq!(n, 3); // inclusive threshold, no top-N cap
+        std::fs::remove_file(path).unwrap();
     }
 }

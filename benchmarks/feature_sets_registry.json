@@ -91,43 +91,50 @@
    "build_commit": null,
    "root": "/mnt/v/zen/zensim-training/2026-05-15-full-features",
    "label": "STORED-ERA 372 (2026-05-15 root \u2014 masked/IW f228..371 from the thread-dependent window)",
-   "note": "f228..371 was a function of RAYON_NUM_THREADS; does not reproduce at its own build commit. docs/DATASET_HISTORY.md \u00a73.27."
+   "note": "f228..371 was a function of RAYON_NUM_THREADS; does not reproduce at its own build commit. docs/DATASET_HISTORY.md \u00a73.27.",
+   "formula_revision": 1
   },
   "v1cur": {
    "build_commit": "ea16c7eef1befa38e8500f721dde2801084cd3fc",
    "root": "/mnt/v/zen/zensim-training/2026-08-30-full-features-372",
    "label": "current-extractor 372 (2026-08-30 root, build_commit ea16c7ee)",
-   "note": "the DEFAULT --features-root since 2026-08-30. Six of its fourteen corpora are byte-copies of the v1pre root (aic4 pre-fix, unrefreshable) \u2014 eval_annotations `eval372-current-root-copied-corpora-2026-08-30`."
+   "note": "the DEFAULT --features-root since 2026-08-30. Six of its fourteen corpora are byte-copies of the v1pre root (aic4 pre-fix, unrefreshable) \u2014 eval_annotations `eval372-current-root-copied-corpora-2026-08-30`.",
+   "formula_revision": 1
   },
   "ext720": {
    "build_commit": null,
    "root": "/mnt/v/zen/zensim-training/ext720-canonical-2026-07-22",
    "label": "720 folded+append (ext720-canonical-2026-07-22)",
-   "note": "both waves extracted PRE pool-SIMD (commits <= 9e7516d7)."
+   "note": "both waves extracted PRE pool-SIMD (commits <= 9e7516d7).",
+   "formula_revision": 1
   },
   "ext924": {
    "build_commit": "0b3d16b04b19",
    "root": "/mnt/v/zen/zensim-training/ext924-canonical-2026-07-27",
    "label": "924 folded+append STREAMING (ext924-canonical-2026-07-27)",
-   "note": "C5 streaming-only rev, ZENSIM_AB_MODE=foldapp."
+   "note": "C5 streaming-only rev, ZENSIM_AB_MODE=foldapp.",
+   "formula_revision": 1
   },
   "ext944": {
    "build_commit": "ec3bdd6acd489d3d7ba9122bd9f5d97c186c175f",
    "root": "/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01",
    "label": "944 campaign root (ext944-canonical-2026-08-01)",
-   "note": "the SOTA-944 campaign root; the era 78 of the 97 fair board cells' dial grids belong to."
+   "note": "the SOTA-944 campaign root; the era 78 of the 97 fair board cells' dial grids belong to.",
+   "formula_revision": 1
   },
   "era2r4": {
    "build_commit": "75c09149e6c32fc84a07aa9bc144daa92fb3ac11",
    "root": "/mnt/v/zen/zensim-training/ext944-era2r4-2026-09-01",
    "label": "era-2 wave-r4 944 re-extraction (ext944-era2r4-2026-09-01)",
-   "note": "MEASURED vs ext944: bit-identical everywhere except f720..923, max abs 7.2e-9 (~/tmp/gaddrinst_RESUME.md finding 1). The root itself is POOLS (f156..371 live); its foldapp2_views/ subdir is the ZEROED derived view \u2014 two feature sets, one era, one directory tree."
+   "note": "MEASURED vs ext944: bit-identical everywhere except f720..923, max abs 7.2e-9 (~/tmp/gaddrinst_RESUME.md finding 1). The root itself is POOLS (f156..371 live); its foldapp2_views/ subdir is the ZEROED derived view \u2014 two feature sets, one era, one directory tree.",
+   "formula_revision": 1
   },
   "pools": {
    "build_commit": null,
    "root": "/mnt/v/zen/zensim-training/r1b-pools944-2026-08-30",
    "label": "944 all-pools-live era (r1b/wlin7 pools944, 2026-08-30)",
-   "note": "944-wide with f156..371 LIVE \u2014 the reason bake_verdict has to ask the ROOT what regime it is instead of inferring from the width."
+   "note": "944-wide with f156..371 LIVE \u2014 the reason bake_verdict has to ask the ROOT what regime it is instead of inferring from the width.",
+   "formula_revision": 1
   },
   "unknown": {
    "build_commit": null,
@@ -139,7 +146,8 @@
    "build_commit": "4fbd8ff8f8f0b66ca28a8dea41016646c1f505f4",
    "root": "/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC",
    "label": "post-option-C 372 (2026-09-05 root) -- the era the SHIPPED runtime extracts",
-   "note": "56bbcda2 (2026-08-30 15:43, 'STAGE 1 of the C rollout') removed v1's phantom pooled columns, so every non-tight width moved. The v1cur root was built at ea16c7ee, 2026-08-30 13:21 -- TWO HOURS EARLIER -- so v1cur is one era BEHIND the runtime. Measured on CSIQ: basic f0..155 differs on 120,804 of 135,096 cells, max |d| 4.536785 (benchmarks/d_ship_flip_2026-09-05.md section 3). Eight of the fourteen corpora are current-extractor reads here; six are byte-copies carried from v1cur, era-stamped per file in _MANIFEST.json."
+   "note": "56bbcda2 (2026-08-30 15:43, 'STAGE 1 of the C rollout') removed v1's phantom pooled columns, so every non-tight width moved. The v1cur root was built at ea16c7ee, 2026-08-30 13:21 -- TWO HOURS EARLIER -- so v1cur is one era BEHIND the runtime. Measured on CSIQ: basic f0..155 differs on 120,804 of 135,096 cells, max |d| 4.536785 (benchmarks/d_ship_flip_2026-09-05.md section 3). Eight of the fourteen corpora are current-extractor reads here; six are byte-copies carried from v1cur, era-stamped per file in _MANIFEST.json.",
+   "formula_revision": 1
   },
   "v1postc_rev2": {
    "build_commit": "88477e3845eccbb18f874c86fcf14c7a11c1e663",
@@ -149,7 +157,8 @@
    "produced_by": "zenfleet JobKind::Feature, run s3://zentrain/jobs/rev2feat372-20260906, image ghcr.io/imazen/zenfleet-worker:exec-featrev2glibc-88477e38 (glibc, on purpose)",
    "rev2_era_count_caveat": "AS EXTRACTED this root predates era `v1detroot` (F18, the libc-dependent pooled 4th/8th roots), registered on FormulaRevision::Rev2 on 2026-09-06. So the note above is correct ABOUT THIS ROOT -- three eras is what revision 2 declared when these bytes were produced -- and WRONG about revision 2 today, which declares four. A fresh `ZENSIM_FORMULA_REV=2` extraction from a post-2026-09-06 binary will NOT reproduce this root: it additionally moves the 144 L4/L8 slots at 372 by up to one ULP each. Reproduce these bytes with `ZENSIM_ROOT_FORM=libm`. See benchmarks/libc_determinism_2026-09-06.md.",
    "cid22_decoder_caveat": "v1postc's cid22/kadid/tid/pipal legs come from `zensim-validate --extract-only`, which decodes with the third-party `image` crate (main.rs:830/854/1720/1744). This root decodes with the imazen codecs, so its cid22 differs from v1postc's on EXACTLY the 536 .jpg rows of 4,292 (100 % of jpg, 0 % of png), ~360 of 372 slots each, max |delta| 9.5e-3. kadid (png) and tid (bmp) are bit-exact because both decoders give identical pixels there.",
-   "libc_caveat": "Built with GLIBC deliberately. The musl build of the same source differs on the 144 L4/L8 pooled-moment slots -- powf is not correctly rounded and musl's pow disagrees with glibc's on 0.069 % of inputs (glibc 2.36 vs 2.43 measured bit-identical on 400,000 samples). Record: benchmarks/libm_pow_nondeterminism_2026-09-06.md."
+   "libc_caveat": "Built with GLIBC deliberately. The musl build of the same source differs on the 144 L4/L8 pooled-moment slots -- powf is not correctly rounded and musl's pow disagrees with glibc's on 0.069 % of inputs (glibc 2.36 vs 2.43 measured bit-identical on 400,000 samples). Record: benchmarks/libm_pow_nondeterminism_2026-09-06.md.",
+   "formula_revision": 2
   },
   "era2r4_rev2": {
    "build_commit": "88477e3845eccbb18f874c86fcf14c7a11c1e663",
@@ -157,7 +166,8 @@
    "label": "era2r4 944 (folded720append2) at zensim FORMULA REVISION 2",
    "note": "The 944 counterpart of v1postc_rev2. Here freecomp (F5) IS reachable -- the append block exists -- so all THREE revision-2 eras are live, and the blast radius is F4's 36 zeroed-pool slots + F17's 12 + F5's 11, not the 372 root's 12. Produced by the same fleet run family (s3://zentrain/jobs/rev2feat944-20260906) over the SAME staged pixels as v1postc_rev2, so the two roots are joinable row-for-row per corpus.",
    "rev2_era_count_caveat": "Same as v1postc_rev2: AS EXTRACTED this root predates era `v1detroot` (F18), registered on FormulaRevision::Rev2 on 2026-09-06. At 944 that era moves 156 slots -- the 144 v1 L4/L8 pools plus the 12 v2 ssim_dev4 cells -- by up to one ULP each, so a fresh ZENSIM_FORMULA_REV=2 extraction will NOT reproduce these bytes. Use ZENSIM_ROOT_FORM=libm to reproduce them. See benchmarks/libc_determinism_2026-09-06.md.",
-   "produced_by": "zenfleet JobKind::Feature, image ghcr.io/imazen/zenfleet-worker:exec-featrev2glibc-88477e38"
+   "produced_by": "zenfleet JobKind::Feature, image ghcr.io/imazen/zenfleet-worker:exec-featrev2glibc-88477e38",
+   "formula_revision": 2
   }
  },
  "sets": {

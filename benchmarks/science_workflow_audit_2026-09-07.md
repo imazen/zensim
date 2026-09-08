@@ -197,3 +197,38 @@ with the root review and seven target/site/regression documents.
 Local per-file coverage, hashes, original-message extraction and detailed audit
 notes are preserved under `~/tmp/zensim-science-audit-2026-09-07/`. Private
 memory/transcript bodies were not copied into the repository.
+
+### Trainer admission and reproduction continuation
+
+The candidate-surface increment is pushed as `7cbc2458f420`. The next increment
+moves existing trainer capability guards before data loading and preserves the
+same guard owner at library dispatch. Unsupported CPU auxiliary losses now
+refuse instead of warning and disappearing. The GPU adapter refuses options it
+cannot execute and records its actual final-epoch checkpoint policy and minimum
+batch size. CPU defaults that do not apply to GPU are identified explicitly.
+
+Parquet admission now rejects duplicate IDs, mixed aliases and null features;
+gapped dense tables continue to refuse until an identity-preserving reader is
+available. Training resolves every group root through the existing feature-set
+registry before reading rows. Unknown/mixed eras require a reason-bearing
+`--historical-replay`, embedded in the bake, and remain unqualified provenance.
+Formula revisions are recorded in that same registry, not inferred from width.
+The Rust transform-screen loader gained stable top-N and ID-bound options;
+the redundant V_20 converter is retired at `7cbc2458` with its recipe preserved.
+
+**Reproduction split audit, before training:** the frozen September 6 control's
+CID22 training origins have zero overlap with the gold validation origins;
+bigcodec also has zero overlap with the registered held-out origin sets.
+KADID is an old train==eval guard. The canonical KonJND dense leg includes the
+JPEG validation origins, so **its KonJND result is a memorization/anchor read,
+not held-out generalization**. TID's old evaluator surfaces are superseded by
+the August 29 train-only ruling. The unchanged recipe is replayed only to test
+training preservation. These findings cannot be waived into a new-model pass.
+
+The three seeds remain 4004/4005/4006, 372 identity columns with 228 selected,
+H128, 120 epochs, 50,000 pairs per epoch. Packing uses the exact frozen
+negative-rich plus identity anchor and the existing Rust pack owner. Evaluation
+uses the Rust surface on the pinned post-C root and the named ladder/probes.
+New artifacts will live in `cleanup-validation-2026-09-07`; original bakes and
+verdicts remain untouched. The wave owner now refuses existence-only reuse,
+retains exact argv, and returns failure when any cell fails.

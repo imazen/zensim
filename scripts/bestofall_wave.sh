@@ -24,7 +24,7 @@ set -euo pipefail
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${ZL_BIN:-$WS/target/release}"
 OUT="${ZL_OUT:-/mnt/v/output/zensim/best-of-all-2026-09-06}"
-INSTR="$OUT/instruments"
+INSTR="${ZL_INSTR:-/mnt/v/output/zensim/best-of-all-2026-09-06/instruments}"
 CANON=/mnt/v/zen/zensim-training/canonical-2026-05-21/train
 POSTC=/mnt/v/zen/zensim-training/2026-09-05-full-features-372-postC
 LADDER=/mnt/v/output/zensim/ladder-2026-09-05/instruments
@@ -48,9 +48,11 @@ say() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$HB"; }
 # exists, and returns non-zero so the caller's `||` fires.
 step() {
   local what="$1" artifact="$2"; shift 2
-  if ! "$@"; then
-    say "STEP FAILED ($what) rc=$? — see $OUT/logs/"
-    return 1
+  local rc=0
+  "$@" || rc=$?
+  if (( rc != 0 )); then
+    say "STEP FAILED ($what) rc=$rc — see $OUT/logs/"
+    return "$rc"
   fi
   if [[ -n "$artifact" && ! -s "$artifact" ]]; then
     say "STEP FAILED ($what) — produced no $artifact"
@@ -133,7 +135,13 @@ cell() {
   local packed="$OUT/bakes/${name}_packed.bin"
   local byid="$OUT/bakes/${name}_byid.bin"
 
-  if [[ -f "$OUT/verdicts/${name}.fulleval.json" ]]; then say "SKIP $name (already harvested)"; return 0; fi
+  # Historical outputs are immutable evidence. Existence alone never proves
+  # a cell matches this trainer, recipe and input set. Reproduction uses a
+  # fresh ZL_OUT; final evaluation stages have their own validated reuse.
+  if [[ -e "$raw" || -e "$OUT/verdicts/${name}.fulleval.json" ]]; then
+    say "REFUSED $name: existing artifacts; choose a fresh ZL_OUT to reproduce"
+    return 1
+  fi
 
   say "TRAIN $name"
   local -a argv=()
@@ -143,7 +151,9 @@ cell() {
   esac
   mapfile -t -O "${#argv[@]}" argv < <(common)
   mapfile -t -O "${#argv[@]}" argv < <(arm_extra "$arm")
-  argv+=(--seed "$seed" --out "$raw")
+  argv+=(--seed "$seed" --out "$raw" --historical-replay
+    "Reproduce frozen best-of-all September 6 recipe; canonical May training and post-C evaluation are historical instruments, not new-model qualification")
+  printf '%s\n' "${argv[@]}" > "$OUT/logs/${name}.argv.txt"
   step train "$raw" "${ZL_RUNHEAVY:-$HOME/work/zen/scripts/run-heavy}" --mem 16G --jobs 8 -- \
      "$BIN/zensim_mlp_train" "${argv[@]}" > "$OUT/logs/${name}.train.log" 2>&1 || return 1
 
@@ -164,19 +174,6 @@ cell() {
   # knot is the top one and identity lands at exactly 100. The control gets the
   # identical chain — its raw(identity) is NOT the argmax, and what that costs
   # it is the measurement.
-  # ONE pack step, against the negrich dial anchor CONCATENATED with the 21-row
-  # identity anchor, so `fit_spline_knots` gets a knot at (raw(identity), 100)
-  # in the same pass that quantizes and prunes — QUANTIZE-then-CALIBRATE kept.
-  #
-  # `shared-anchor` is the more elegant home for a second anchor (it takes
-  # --anchor repeatably) but it asserts a SINGLE-LAYER linear bake and these are
-  # 228 -> H -> 1 MLPs. Merging the anchors up front is the same fit.
-  #
-  # 21 of 2,021 rows = 1.04 %, which owns fit_spline_knots' >= p99 top bin
-  # exactly as the id100 lane sized it; n = 38 spills and displaces the top real
-  # knot. Under --nonneg-distance raw(identity) is the ARGMAX by construction,
-  # so that knot is the top one. The control gets the identical chain — its
-  # raw(identity) is NOT the argmax, and what that costs it is the measurement.
   say "PACK $name"
   step pack "$packed" "$BIN/bake_dial_refit" pack --in "$raw" --out "$packed" --neg-tail \
       --anchor "$ANCHOR" --target-col ssim2_gpu \
@@ -229,11 +226,13 @@ case "${1:-all}" in
   all)
     rm -f "$OUT/WAVE.done"
     say "WAVE START"
+    failed=0
     for arm in ${ZL_ARMS:-A_plain B_nonneg C_lad05 D_lad20 E_plainlad F_nonneg32}; do
       for seed in 4004 4005 4006; do
-        cell "$arm" "$seed" || say "CELL FAILED $arm $seed (continuing)"
+        cell "$arm" "$seed" || { say "CELL FAILED $arm $seed (continuing)"; failed=$((failed + 1)); }
       done
     done
+    if (( failed > 0 )); then say "WAVE FAILED: $failed cells"; exit 1; fi
     say "WAVE COMPLETE"
     date -u +%Y-%m-%dT%H:%M:%SZ > "$OUT/WAVE.done"
     ;;

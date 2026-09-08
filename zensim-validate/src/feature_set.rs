@@ -498,6 +498,7 @@ fn json_string_field(txt: &str, key: &str) -> Option<String> {
 /// The parsed registry.
 #[derive(Debug)]
 pub struct Registry {
+    formula_revisions: BTreeMap<String, u8>,
     sets: BTreeMap<String, RegisteredSet>,
     /// The LAYOUT-FREE spelling of every declared key → that key. Built at
     /// load time so a canonical id resolves to an append-only legacy entry.
@@ -510,6 +511,11 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// Arithmetic revision of a recorded table era; absent remains unknown.
+    pub fn formula_revision(&self, era: &str) -> Option<u8> {
+        self.formula_revisions.get(era).copied()
+    }
+
     /// A registered set by any spelling of its key.
     ///
     /// **Registry keys are APPEND-ONLY and were all written in the legacy
@@ -584,6 +590,19 @@ pub fn registry() -> &'static Registry {
 fn parse_registry(txt: &str) -> Result<Registry, String> {
     let v: serde_json::Value =
         serde_json::from_str(txt).map_err(|e| format!("feature_sets_registry.json: {e}"))?;
+    let formula_revisions = v
+        .get("eras")
+        .and_then(|x| x.as_object())
+        .into_iter()
+        .flat_map(|eras| eras.iter())
+        .filter_map(|(era, value)| {
+            value
+                .get("formula_revision")
+                .and_then(|x| x.as_u64())
+                .filter(|n| matches!(n, 1 | 2))
+                .map(|n| (era.clone(), n as u8))
+        })
+        .collect();
     let mut token_slots = BTreeMap::new();
     if let Some(map) = v.get("compute_tokens").and_then(|x| x.as_object()) {
         for (k, e) in map {
@@ -740,6 +759,7 @@ fn parse_registry(txt: &str) -> Result<Registry, String> {
         }
     }
     Ok(Registry {
+        formula_revisions,
         sets,
         layout_free_keys,
         roots,
@@ -1093,5 +1113,99 @@ mod derive_regime_tests {
             );
             assert!(d.regime > hi, "f{hi} must fit in regime {}", d.regime);
         }
+    }
+}
+
+/// Admit all training/selection table roots before reading their rows. Replay
+/// preserves historical recipes while recording every unresolved era; it
+/// never turns incompatible data into a qualification pass.
+pub fn admit_training_tables(
+    paths: &[std::path::PathBuf],
+    replay: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    if replay.is_some_and(|s| s.trim().is_empty()) {
+        return Err("--historical-replay requires a nonempty reason and recorded recipe".into());
+    }
+    let mut tables = Vec::new();
+    let mut issues = Vec::new();
+    let mut eras = std::collections::BTreeSet::new();
+    let mut revisions = std::collections::BTreeSet::new();
+    for path in paths {
+        let root = path.parent().unwrap_or(Path::new("."));
+        if let Ok(bytes) = std::fs::read(root.join("_MANIFEST.json")) {
+            let manifest: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|e| format!("{}: invalid manifest: {e}", root.display()))?;
+            if let Some(id) = manifest.get("feature_set_id") {
+                let valid = id.as_str().and_then(FeatureSetId::parse).is_some();
+                if !valid {
+                    return Err(format!("{}: malformed feature_set_id", root.display()));
+                }
+            }
+        }
+        let resolved = root_feature_set_ref(root);
+        if let Some(r) = &resolved {
+            eras.insert(r.id.era().to_owned());
+            if r.slots.is_empty() {
+                issues.push(format!("{}: producer slots are unknown", path.display()));
+            }
+            if let Some(rev) = registry().formula_revision(r.id.era()) {
+                revisions.insert(rev);
+            } else {
+                issues.push(format!("{}: formula revision is unknown", path.display()));
+            }
+        } else {
+            issues.push(format!(
+                "{}: feature-set identity is unknown",
+                path.display()
+            ));
+        }
+        tables.push(serde_json::json!({
+            "path": path, "feature_set_id": resolved.as_ref().map(|r| r.id.to_string()),
+            "inferred": resolved.as_ref().map(|r| r.inferred),
+            "source": resolved.as_ref().map(|r| &r.source),
+        }));
+    }
+    if eras.len() > 1 {
+        issues.push(format!("mixed table eras: {eras:?}"));
+    }
+    if !issues.is_empty() && replay.is_none() {
+        return Err(format!(
+            "table admission refused: {}. Resolve provenance, or use --historical-replay REASON for an explicitly unqualified recorded recipe",
+            issues.join("; ")
+        ));
+    }
+    let revision = if revisions.len() == 1 && issues.is_empty() {
+        revisions.first().copied()
+    } else {
+        None
+    };
+    Ok(
+        serde_json::json!({"tables": tables, "issues": issues, "historical_replay": replay,
+        "formula_revision": revision, "qualified_provenance": issues.is_empty() && replay.is_none()}),
+    )
+}
+
+#[cfg(test)]
+mod training_admission_tests {
+    use super::*;
+    #[test]
+    fn unknown_and_mixed_eras_require_explicit_replay() {
+        let unknown = vec![std::path::PathBuf::from("/not-registered/features.parquet")];
+        assert!(admit_training_tables(&unknown, None).is_err());
+        let replay = admit_training_tables(&unknown, Some("reproduce frozen recipe")).unwrap();
+        assert_eq!(replay["qualified_provenance"], false);
+        assert!(replay["formula_revision"].is_null());
+        let paths: Vec<_> = registry()
+            .roots
+            .keys()
+            .filter(|p| {
+                p.contains("2026-09-05-full-features-372-postC")
+                    || p.contains("canonical-2026-05-21/train")
+            })
+            .map(|p| Path::new(p).join("probe.parquet"))
+            .collect();
+        assert_eq!(paths.len(), 2);
+        assert!(admit_training_tables(&paths, None).is_err());
+        assert!(admit_training_tables(&paths, Some("fixed historical control")).is_ok());
     }
 }

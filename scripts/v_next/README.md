@@ -16,7 +16,7 @@ owners, retired July pipelines and their frozen source revision.
 |---|---|
 | Compute IW-SSIM on the safesyn corpus | [`compute_iwssim_on_safesyn.py`](compute_iwssim_on_safesyn.py) |
 | Run IW-SSIM on a fleet | The zenfleet job system (`zenmetrics/scripts/jobsys/`) — CLAUDE.md forbids hand-rolled fleet orchestration. `vastai_iwssim/` was committed in 5ccea813 and later deleted; its deployment plan is gone too. |
-| Screen per-feature transforms (V_20 IS pipeline) | [`v0_20_feature_transform_greedy_screen.py`](v0_20_feature_transform_greedy_screen.py) → [`v0_20_screen_to_trainer_args.py`](v0_20_screen_to_trainer_args.py) |
+| Screen per-feature transforms (V_20 IS pipeline) | [`v0_20_feature_transform_greedy_screen.py`](v0_20_feature_transform_greedy_screen.py) → Rust trainer `--auto-transforms` |
 | Distill V_20b (contrastive pre-train + fine-tune) | [`v0_20b/`](v0_20b/) (subdirectory; see its own README) |
 | Affine-calibrate a bake (distance → score) | `cargo run --release -p zensim-validate --bin affine_calibrate` — the Rust owner since 2026-06-18. (`affine_calibrate_znpr_v2.py` was deleted; this row pointed at it long after.) |
 | Build the interactive comparison-site data | [`build_site_data.py`](build_site_data.py) + [`build_scatter_data.py`](build_scatter_data.py) |
@@ -43,7 +43,6 @@ owners, retired July pipelines and their frozen source revision.
 | Script | Role |
 |---|---|
 | `v0_20_feature_transform_greedy_screen.py` | For each feature column, try every `FeatureTransform` and report the one with maximum Pearson lift over identity. Output: TSV with `feat_idx, best_transform, params_csv, lift, ...`. Run against any per-pair features CSV. |
-| `v0_20_screen_to_trainer_args.py` | Convert the screen TSV into `--feature-transform TOKEN:IDX[:PARAMS]` flags. The Rust trainer loads the TSV with `--auto-transforms`, but does not yet expose this helper's top-N `--max-features` cap. Keep it until that behavior and callers migrate; the earlier claim of complete redundancy was premature. |
 | `v0_20_parse_reeval_logs.py` | Parse `dataset_metric_baseline` per-corpus eval logs + collate full Mohammadi panel rows into a consolidated comparison markdown. |
 | `v0_20_extract_statistical_panels.py` | Same as parse_reeval_logs but reads training-time validation logs + emits the full panel structure. |
 | `v0_20_low_n_band_analysis.py` | For (corpus, band) cells with n < 100, compute the empirical SROCC ceiling and rank bakes by mean SROCC. |
@@ -114,3 +113,10 @@ spline writers remain pending recipe and runtime-boundary comparisons.
 - **Parquet preferred for >50 MB**: zstd-3 compression per CLAUDE.md "Parquet vs TSV". CSV/TSV is fine for <50 MB human-readable inputs.
 - **JSON pipeline for bakes**: ad-hoc Python wire-format emitters are banned per CLAUDE.md "JSON pipeline mandate". All bake-side serialization goes through `zenpredict-bake <input.json> <output.bin>`.
 - **Logs to /tmp** for one-shot runs; commit to `benchmarks/<name>_<date>.log` for runs producing ship-relevant data.
+
+The Rust screen loader now supports `--auto-transforms-max-features N` (stable
+top N by lift) and `--auto-transforms-max-feature-idx N`. To replay the retired
+V_20 converter, use `--auto-transforms-min-lift 0.05
+--auto-transforms-max-feature-idx 228`; a top-N value of 0 keeps all eligible
+rows. Non-finite lifts are rejected from selection. Historical recipes and the
+converter's source remain in revision `7cbc2458`.
