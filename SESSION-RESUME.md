@@ -85,3 +85,21 @@ duplicate/missing controls pass, with JXL/AVIF numerical results preserved.
 The September 7 H+rav1e floor-data control already completed and failed all five
 floor gates; do not repeat the older September 6 proposal as new work. Continue
 with useful native allocation/model qualification and JPEG/WebP integration.
+
+Later September 8 JPEG continuation: complete-candidate binding now runs in the
+existing Zq loop (`__zensim-research`, recovered `zq_rd_probe`). The first trace
+exposed old AQ defects: unit scales clamped real strengths to 0.20 and the last
+strip skipped the controller. Both are repaired, along with a fractional-q
+clamp panic near 100. [JPEG record](https://github.com/imazen/zenjpeg/blob/main/benchmarks/zensim_candidate_binding_2026-09-08.md):
+one train family, exact D, 444/q80; scalar and neutral 77.438789 / 16,864 B,
+active repeat 77.314751 / 16,795 B. All 832 blocks controlled; current maps,
+JPEGs and pixels repeat exactly. SSIMULACRA2 and Butteraugli both show the small
+quality loss, so no RD benefit is claimed. Eighteen Zq tests pass before/after,
+22 AQ tests, two Clippy routes, API snapshot check and ten rejection controls
+pass. Artifacts: `/mnt/v/output/zensim/jpeg-candidate-binding-2026-09-08/final/`;
+Windows bundle under `~/work/zensim-validation-2026-09-08/jpeg-candidate-binding/`.
+This is fixed-seed engagement, not calibrated targeting: two corrections cost
+three full encodes, and its existing `targets_met` flag checks only the score
+floor. Reuse the shared Rust native owner for actual JPEG 1/2/3-shot bounds and
+train calibration; WebP binding and competitive model/spatial qualification
+remain incomplete. No training or terminal holdout was performed in this step.

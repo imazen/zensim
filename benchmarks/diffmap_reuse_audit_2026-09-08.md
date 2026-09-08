@@ -173,3 +173,16 @@ At source `394239df` (with only empty local descendants), ran:
 the existing slot coverage, sum preservation, fused/standalone, folded-944,
 binned and stale/recycled-buffer contracts. It does not test an unimplemented
 composed-candidate map surface or establish a codec RD/performance improvement.
+
+## Later September 8: JPEG candidate binding and actual AQ repairs
+
+The recovered JPEG experiment now runs through complete candidate scoring and
+current attribution in the existing Zq loop. [Codec result](https://github.com/imazen/zenjpeg/blob/main/benchmarks/zensim_candidate_binding_2026-09-08.md),
+commit `3d4ad0d77ecb`: no process-global profile/gradient cache, explicit candidate
+seed, scalar/neutral/active arms and independently verified returned bytes.
+The first pass trace found old neutral clamping and missing final-strip callback
+bugs. After repair all 832 blocks of the training control reach the callback;
+neutral is byte-exact, active changes maps/bytes/pixels reproducibly. The 69-byte
+saving also lowers D, SSIMULACRA2 and Butteraugli quality, so this is engagement
+and controller correctness evidence, not improved RD or model qualification.
+Actual train-calibrated bounds/budgets and WebP binding are still required.
