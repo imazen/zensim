@@ -3723,3 +3723,17 @@ the current family split. No fitting, scoring or terminal pixel read occurred.
 This is the HDR development source path. UPIQ's separate 30 EXRs serve protected
 holdout-content admission and must not be described as needed to obtain HDR
 training images. [Binding, exact revisions and chronology](TARGET_STEERING_PROTOCOL_2026-09-08.md#existing-hdr-png-inputs--user-correction-september-8).
+
+
+## 2026-09-08 — EXR ownership correction, after the HDR PNG binding
+
+The user explicitly selected `zenextras/zenexr` wrapping the Rust `exr` crate.
+This resolves the earlier exception question and supersedes the unpushed custom
+zenbitmaps EXR reader, whose verified source checkpoint remains archived.
+The replacement preserves all 124,609,944 f32 samples across 98 saved independent
+fixtures and 30 UPIQ HDR reference outputs. Source windows, chromaticities,
+luminance metadata and associated alpha remain explicit.
+[Decoder contract and parity record](../../zenextras/benchmarks/zenexr_validation_2026-09-08.md).
+No human scores or distorted holdout images were read, no image-data model was
+fit, and no content-admission decision follows from pixel parity. The remaining
+reference fingerprinting/contextual audit still governs corruption-head fitting.

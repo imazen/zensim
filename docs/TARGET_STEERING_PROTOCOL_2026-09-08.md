@@ -526,3 +526,9 @@ presented as necessary to obtain HDR training images or expand the HDR source
 corpus. Existing prepared corruption-head views remain governed by their own
 registered complete-admission requirement. Neither substituting unrelated HDR
 PNGs for UPIQ references nor silently dropping UPIQ coverage is valid.
+
+Later September 8 user direction explicitly selects the Rust `exr` crate via
+`zenextras/zenexr` for EXR decoding. The custom zenbitmaps reader is retired from
+the active checkout. The wrapper matches all 98 saved fixtures and all 30 UPIQ
+reference outputs exactly; [contract and validation](../../zenextras/benchmarks/zenexr_validation_2026-09-08.md).
+Fingerprinting and contextual review are still required for complete admission.

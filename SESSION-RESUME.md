@@ -4,16 +4,24 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest user correction: HDR development uses the existing imazen-26
+Latest user direction: EXR belongs in **`zenextras/zenexr`, wrapping the Rust
+`exr` crate**. This explicitly authorizes that dependency and supersedes the
+earlier pending exception question. The custom zenbitmaps port is retired from
+the active checkout; its verified source checkpoint and results remain archived.
+The replacement reproduces all 98 saved fixtures and all 30 UPIQ HDR references
+bit-for-bit (124,609,944 f32 samples). [Wrapper contract and validation](../zenextras/benchmarks/zenexr_validation_2026-09-08.md).
+Content fingerprinting/contextual admission remains incomplete; decoder parity
+does not qualify a model or authorize holdout training.
+
+The preceding user correction still applies: HDR development uses the existing imazen-26
 `variant/png-v3` inputs: **76 HDR PNGs**, all locally present and byte-verified
 against branch LFS payload OIDs, with **38 train / 20 validate / 18 terminal**
 origins under the family manifest. The active 1,140-image HDR scale set is also
 local. [Source binding and chronology](docs/TARGET_STEERING_PROTOCOL_2026-09-08.md#existing-hdr-png-inputs--user-correction-september-8).
 The separate UPIQ EXRs are holdout-overlap references, not a missing HDR
-training corpus. Native EXR code and its successful port tests are preserved
-in the zenbitmaps checkout and `/mnt/v/output/zensim/native-exr-port-2026-09-08/`;
-further EXR implementation is paused. Content admission remains incomplete;
-no new model has been fit or qualified.
+training corpus. The earlier port checkpoint is preserved at
+`/mnt/v/output/zensim/native-exr-port-2026-09-08/`; active EXR implementation
+now uses zenexr. No new model has been fit or qualified.
 
 Previous September 8 continuation: [actual coarse JXL allocation policy](benchmarks/zensim_coarse_allocation_2026-09-08.md)
 **fails its preregistered independent-judge screen**. All eight 256 cells improve
@@ -31,8 +39,9 @@ and original/active/failed-judge scalar comparator gallery. Next separate model
 preferences from allocation-rule effects using supported existing candidate maps
 under a registered fixed rule, and strengthen the ordinary scalar comparator
 before any product RD claim. Do not simply repeat this failed D policy or sweep
-its gain against these outcomes. The earlier EXR exception question was unanswered; the native port now decodes
-those references, while fingerprinting/contextual admission remain unfinished.
+its gain against these outcomes. The EXR reader question was subsequently
+resolved by the user direction above; fingerprinting/contextual admission
+remain unfinished.
 
 Previous September 8 continuation: [coarse JXL intervention screen](benchmarks/zensim_coarse_interventions_2026-09-08.md)
 finishes native PNG IO and whole-transform 4×4 grouping in the existing codec
@@ -48,7 +57,7 @@ refusals pass; final/local CI-closure checks pass. All evidence is retained at
 Next spatial work: preregister an actual coarse allocation policy in the same
 owner and test matched quality/bytes before separate-family 1/2/3-shot targeting.
 Do not repeat the completed intervention screens or treat oracle-probe cost as
-runtime cost. The corruption refit EXR question below is still unanswered.
+runtime cost. The earlier corruption-refit EXR question is resolved above.
 
 Previous September 8 continuation: [canonical refit preparation](benchmarks/canonical_corruption_refit_2026-09-08.md)
 adds native content admission and a trainer mode that exports and evaluates the
@@ -58,10 +67,9 @@ The source/pixel-deduplicated fit / calibration / evaluation views contain
 5,504 / 2,709 / 5,679 rows and pass explicit full-key Parquet checks. An invented
 800-row numeric fixture has exact weighted-HGB export parity in Rust. **No
 canonical image-data fit yet:** 30 UPIQ HDR EXR references remain unaudited. The
-existing EXR owners use `image::open`, contrary to the current native-only rule;
-a limited reference-fingerprinting exception was asked asynchronously and is
-pending. Do not infer approval from elapsed time. If still pending, continue
-independent spatial-allocation work rather than rerunning the same SDR audit.
+reader question at that stage was pending. The user later explicitly selected
+`zenextras/zenexr` over the Rust `exr` crate. Use that owner to finish the
+remaining reference admission; do not repeat the completed SDR audit.
 
 Previous September 8 continuation: [canonical corruption serving screen](benchmarks/canonical_corruption_serving_2026-09-08.md)
 is complete on all 15,060 canonical/native rows, with exact pixel, cached and

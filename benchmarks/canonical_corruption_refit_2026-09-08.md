@@ -3,9 +3,12 @@
 The canonical single-fit path is implemented and its data is prepared, but
 **no canonical image-data candidate has been fit or qualified**. The remaining
 content-admission gap is fingerprinting/contextual review of 30 UPIQ HDR
-references. A later native zenbitmaps EXR port successfully decoded all 30;
-its tests and pixels are preserved in `native-exr-port-2026-09-08/`. No foreign
-reader was used on these references, and no exception was assumed. This decoder
+references. The user subsequently directed **`zenextras/zenexr` over the Rust
+`exr` crate**, explicitly authorizing that dependency. This replaces the
+unpushed custom zenbitmaps port; its tests, source and pixels remain preserved
+in `native-exr-port-2026-09-08/`. The replacement matches all 98 saved fixtures
+and all 30 reference outputs exactly; [validation and decoder contract](../../zenextras/benchmarks/zenexr_validation_2026-09-08.md).
+No fingerprinting/contextual admission or image-data fit follows from parity. This decoder
 work is separate from HDR training inputs: imazen-26 already has 76 HDR PNGs
 and 1,140 scale variants. [Confirmed source binding](../docs/TARGET_STEERING_PROTOCOL_2026-09-08.md#existing-hdr-png-inputs--user-correction-september-8).
 
