@@ -64,7 +64,6 @@ pub fn backend_for(codec: CodecKind) -> Box<dyn CodecBackend> {
 #[cfg(feature = "zenjpeg")]
 pub mod jpeg {
     use super::*;
-    use ::image::ImageDecoder;
 
     pub struct Jpeg;
 
@@ -96,39 +95,17 @@ pub mod jpeg {
                 .finish()
                 .map_err(|e| anyhow::anyhow!("zenjpeg finish: {e}"))?;
 
-            // Decode via the `image` crate (zune-jpeg backend).
-            let cursor = std::io::Cursor::new(&encoded);
-            let decoder = ::image::codecs::jpeg::JpegDecoder::new(cursor)
-                .map_err(|e| anyhow::anyhow!("jpeg decode init: {e}"))?;
-            let (dw, dh) = decoder.dimensions();
-            if dw != width || dh != height {
-                bail!("decoded jpeg dimensions {dw}x{dh} != source {width}x{height}");
+            let decoded = zenjpeg::decoder::Decoder::new()
+                .output_format(zenjpeg::decoder::PixelFormat::Rgb)
+                .decode(&encoded, enough::Unstoppable)
+                .map_err(|e| anyhow::anyhow!("zenjpeg decode: {e}"))?;
+            if decoded.width() != width || decoded.height() != height {
+                bail!("decoded JPEG dimensions differ from source");
             }
-            let color = decoder.color_type();
-            let mut buf = vec![0u8; decoder.total_bytes() as usize];
-            decoder
-                .read_image(&mut buf)
-                .map_err(|e| anyhow::anyhow!("jpeg decode read: {e}"))?;
-            let rgb_out = match color {
-                ::image::ColorType::Rgb8 => buf,
-                ::image::ColorType::L8 => {
-                    let mut out = Vec::with_capacity(buf.len() * 3);
-                    for px in buf {
-                        out.push(px);
-                        out.push(px);
-                        out.push(px);
-                    }
-                    out
-                }
-                ::image::ColorType::Rgba8 => {
-                    let mut out = Vec::with_capacity((buf.len() / 4) * 3);
-                    for ch in buf.chunks_exact(4) {
-                        out.extend_from_slice(&ch[..3]);
-                    }
-                    out
-                }
-                other => bail!("unexpected jpeg color type {other:?}"),
-            };
+            let rgb_out = decoded
+                .pixels_u8()
+                .ok_or_else(|| anyhow::anyhow!("zenjpeg decoder did not return RGB8"))?
+                .to_vec();
             Ok((encoded, rgb_out))
         }
     }
@@ -246,7 +223,7 @@ pub mod avif {
             for row in 0..h {
                 let start = row * stride;
                 let row_slice = &data[start..start + bpr_in];
-                for px in row_slice.chunks_exact(4) {
+                for px in row_slice.as_chunks::<4>().0 {
                     out.extend_from_slice(&px[..3]);
                 }
             }
@@ -344,7 +321,7 @@ pub mod jxl {
             for row in 0..h {
                 let start = row * stride;
                 let row_slice = &data[start..start + bpr_in];
-                for px in row_slice.chunks_exact(4) {
+                for px in row_slice.as_chunks::<4>().0 {
                     out.extend_from_slice(&px[..3]);
                 }
             }
@@ -385,19 +362,36 @@ pub mod png {
             let encoded = zenpng::encode_rgb8(img, None, &cfg, &Unstoppable, &Unstoppable)
                 .map_err(|e| anyhow::anyhow!("zenpng encode: {e:?}"))?;
 
-            let img = ::image::load_from_memory_with_format(&encoded, ::image::ImageFormat::Png)
-                .map_err(|e| anyhow::anyhow!("png decode: {e}"))?;
-            let rgb_img = img.to_rgb8();
-            if rgb_img.width() != width || rgb_img.height() != height {
-                bail!(
-                    "decoded png dimensions {}x{} != source {}x{}",
-                    rgb_img.width(),
-                    rgb_img.height(),
-                    width,
-                    height
-                );
+            let dec = zenpng::decode(&encoded, &zenpng::PngDecodeConfig::strict(), &Unstoppable)?;
+            let pb = dec.pixels;
+            if pb.width() != width || pb.height() != height {
+                bail!("decoded PNG dimensions differ from source");
             }
-            Ok((encoded, rgb_img.into_raw()))
+            let view = pb.as_slice();
+            let data = view.as_strided_bytes();
+            let desc = pb.descriptor();
+            let gray = desc.layout_compatible(zenpixels::PixelDescriptor::GRAY8);
+            let channels = if gray {
+                1
+            } else if desc.layout_compatible(zenpixels::PixelDescriptor::RGB8) {
+                3
+            } else if desc.layout_compatible(zenpixels::PixelDescriptor::RGBA8) {
+                4
+            } else {
+                bail!("unexpected PNG reconstruction format {desc:?}");
+            };
+            let mut decoded = Vec::with_capacity(rgb.len());
+            for row in 0..height as usize {
+                let start = row * view.stride();
+                for px in data[start..start + width as usize * channels].chunks_exact(channels) {
+                    if gray {
+                        decoded.extend_from_slice(&[px[0]; 3]);
+                    } else {
+                        decoded.extend_from_slice(&px[..3]);
+                    }
+                }
+            }
+            Ok((encoded, decoded))
         }
     }
 }

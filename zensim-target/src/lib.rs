@@ -81,7 +81,7 @@ impl CodecKind {
 /// User-facing target spec.
 #[derive(Debug, Clone, Copy)]
 pub struct TargetSpec {
-    /// Desired zensim score in `0..=100`.
+    /// Desired finite zensim score; negative targets are allowed.
     pub target: f32,
     /// Convergence tolerance (`|achieved - target| <= tolerance` → ship).
     pub tolerance: f32,
@@ -123,7 +123,7 @@ pub struct TargetResult {
     pub codec: CodecKind,
     pub target: f32,
     pub tolerance: f32,
-    pub profile: ZensimProfile,
+    pub profile: Option<ZensimProfile>,
     /// Encoded bytes (best probe).
     pub encoded: Vec<u8>,
     /// Final achieved zensim score.
@@ -149,6 +149,65 @@ pub fn target_search(
     codec: CodecKind,
     spec: TargetSpec,
 ) -> Result<TargetResult> {
+    let scorer = build_zensim(spec.profile);
+    search(
+        rgb,
+        width,
+        height,
+        codec,
+        spec,
+        Some(spec.profile),
+        |a, b| Ok(scorer.compute(a, b)?.score() as f32),
+    )
+}
+
+/// Search with the complete Rust candidate scorer, including its heads and spline.
+/// Input is tightly packed sRGB RGB8, with exactly `width * height * 3` bytes.
+/// `spec.profile` is ignored; the result records `profile: None`.
+pub fn target_search_with_bake(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    codec: CodecKind,
+    spec: TargetSpec,
+    scorer: &mut zensim::BakeScorer<'_>,
+) -> Result<TargetResult> {
+    search(rgb, width, height, codec, spec, None, |a, b| {
+        Ok(scorer.compute(a, b, Some(codec.extension()))?.score() as f32)
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn search(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    codec: CodecKind,
+    spec: TargetSpec,
+    profile: Option<ZensimProfile>,
+    mut score: impl FnMut(&RgbSlice<'_>, &RgbSlice<'_>) -> Result<f32>,
+) -> Result<TargetResult> {
+    if width == 0
+        || height == 0
+        || !spec.target.is_finite()
+        || !spec.tolerance.is_finite()
+        || spec.tolerance < 0.0
+        || spec.max_iterations == 0
+    {
+        bail!(
+            "nonzero dimensions/pass budget, finite target, and finite nonnegative tolerance required"
+        );
+    }
+    let enabled = match codec {
+        CodecKind::Jpeg => cfg!(feature = "zenjpeg"),
+        CodecKind::Webp => cfg!(feature = "zenwebp"),
+        CodecKind::Avif => cfg!(feature = "zenavif"),
+        CodecKind::Jxl => cfg!(feature = "zenjxl"),
+        CodecKind::Png => cfg!(feature = "zenpng"),
+    };
+    if !enabled {
+        bail!("codec {codec:?} is not enabled in this build");
+    }
     let expected = (width as usize)
         .checked_mul(height as usize)
         .and_then(|n| n.checked_mul(3))
@@ -161,16 +220,11 @@ pub fn target_search(
         );
     }
 
-    if codec.is_lossless_only() {
-        return target_search_lossless(rgb, width, height, codec, spec);
-    }
-
     let backend = codec::backend_for(codec);
     let (q_lo_native, q_hi_native) = backend.quality_range();
     let inverted = backend.lower_quality_means_higher_score();
 
     // Initial probe at the midpoint of the range.
-    let zensim = build_zensim(spec.profile);
     let src_pixels: &[[u8; 3]] = bytemuck::cast_slice(rgb);
     let scratch_src = RgbSlice::try_new(src_pixels, width as usize, height as usize)
         .map_err(|e| anyhow::anyhow!("rgb slice for reference image: {e:?}"))?;
@@ -193,7 +247,12 @@ pub fn target_search(
     let mut sec_a: Option<(f32, f32)> = None; // (q, f=achieved−target), older
     let mut sec_b: Option<(f32, f32)> = None; // newer
 
-    for iter in 0..spec.max_iterations {
+    let budget = if codec.is_lossless_only() {
+        1
+    } else {
+        spec.max_iterations
+    };
+    for iter in 0..budget {
         let q_bisect = (q_lo + q_hi) * 0.5;
         let q_mid = if use_secant {
             if let (Some((qa, fa)), Some((qb, fb))) = (sec_a, sec_b) {
@@ -228,10 +287,11 @@ pub fn target_search(
         let dst_pixels: &[[u8; 3]] = bytemuck::cast_slice(&decoded_rgb);
         let dst = RgbSlice::try_new(dst_pixels, width as usize, height as usize)
             .map_err(|e| anyhow::anyhow!("rgb slice for decoded image: {e:?}"))?;
-        let result = zensim
-            .compute(&scratch_src, &dst)
-            .with_context(|| format!("zensim compute on iter {iter}"))?;
-        let achieved = result.score() as f32;
+        let achieved =
+            score(&scratch_src, &dst).with_context(|| format!("zensim compute on iter {iter}"))?;
+        if !achieved.is_finite() {
+            bail!("nonfinite score on iteration {iter}");
+        }
         if use_secant {
             sec_a = sec_b;
             sec_b = Some((q_mid, achieved - spec.target));
@@ -261,6 +321,7 @@ pub fn target_search(
             return Ok(finalize(
                 codec,
                 spec,
+                profile,
                 encoded,
                 achieved,
                 q_mid,
@@ -294,10 +355,11 @@ pub fn target_search(
     Ok(finalize(
         codec,
         spec,
+        profile,
         best_encoded,
         best_probe.achieved_score,
         best_probe.knob,
-        spec.max_iterations,
+        budget,
         probes,
         width,
         height,
@@ -305,42 +367,11 @@ pub fn target_search(
     ))
 }
 
-fn target_search_lossless(
-    rgb: &[u8],
-    width: u32,
-    height: u32,
-    codec: CodecKind,
-    spec: TargetSpec,
-) -> Result<TargetResult> {
-    let backend = codec::backend_for(codec);
-    let (encoded, decoded_rgb) = backend
-        .encode_decode(rgb, width, height, 100.0)
-        .with_context(|| format!("lossless {codec:?} encode/decode"))?;
-    let zensim = build_zensim(spec.profile);
-    let src_pixels: &[[u8; 3]] = bytemuck::cast_slice(rgb);
-    let scratch_src = RgbSlice::try_new(src_pixels, width as usize, height as usize)
-        .map_err(|e| anyhow::anyhow!("rgb slice for reference image: {e:?}"))?;
-    let dst_pixels: &[[u8; 3]] = bytemuck::cast_slice(&decoded_rgb);
-    let dst = RgbSlice::try_new(dst_pixels, width as usize, height as usize)
-        .map_err(|e| anyhow::anyhow!("rgb slice for decoded image: {e:?}"))?;
-    let result = zensim.compute(&scratch_src, &dst)?;
-    let achieved = result.score() as f32;
-    let probes = vec![ProbeRecord {
-        iteration: 0,
-        knob: 100.0,
-        achieved_score: achieved,
-        byte_count: encoded.len(),
-    }];
-    let converged = (achieved - spec.target).abs() <= spec.tolerance;
-    Ok(finalize(
-        codec, spec, encoded, achieved, 100.0, 1, probes, width, height, converged,
-    ))
-}
-
 #[allow(clippy::too_many_arguments)]
 fn finalize(
     codec: CodecKind,
     spec: TargetSpec,
+    profile: Option<ZensimProfile>,
     encoded: Vec<u8>,
     achieved: f32,
     knob: f32,
@@ -354,7 +385,7 @@ fn finalize(
         codec,
         target: spec.target,
         tolerance: spec.tolerance,
-        profile: spec.profile,
+        profile,
         encoded,
         achieved_score: achieved,
         final_knob: knob,
@@ -368,4 +399,52 @@ fn finalize(
 
 fn build_zensim(profile: ZensimProfile) -> Zensim {
     Zensim::new(profile)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn invalid_requests_refuse_before_encoding() {
+        for spec in [
+            TargetSpec {
+                max_iterations: 0,
+                ..TargetSpec::default()
+            },
+            TargetSpec {
+                target: f32::NAN,
+                ..TargetSpec::default()
+            },
+            TargetSpec {
+                tolerance: -1.0,
+                ..TargetSpec::default()
+            },
+        ] {
+            assert!(target_search(&[0; 12], 2, 2, CodecKind::Png, spec).is_err());
+        }
+        assert!(target_search(&[], 0, 0, CodecKind::Png, TargetSpec::default()).is_err());
+    }
+    #[cfg(feature = "zenpng")]
+    #[test]
+    fn candidate_and_named_loop_share_lossless_controller_and_report_unreachable_target() {
+        let bytes = include_bytes!(
+            "../../zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin"
+        );
+        let model = zenpredict::Model::from_bytes(bytes).unwrap();
+        let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+        let rgb: Vec<u8> = (0..32 * 32 * 3).map(|i| (i * 31) as u8).collect();
+        let spec = TargetSpec {
+            target: -10.0,
+            profile: ZensimProfile::D,
+            ..TargetSpec::default()
+        };
+        let a = target_search(&rgb, 32, 32, CodecKind::Png, spec).unwrap();
+        let b = target_search_with_bake(&rgb, 32, 32, CodecKind::Png, spec, &mut scorer).unwrap();
+        assert_eq!(a.encoded, b.encoded);
+        assert_eq!(a.achieved_score, b.achieved_score);
+        assert_eq!(a.profile, Some(ZensimProfile::D));
+        assert_eq!(b.profile, None);
+        assert_eq!(b.iterations, 1);
+        assert!(!b.converged);
+    }
 }

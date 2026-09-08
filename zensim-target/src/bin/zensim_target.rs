@@ -26,8 +26,8 @@ struct Cli {
     /// webp, gif, ...).
     input: PathBuf,
 
-    /// Desired zensim score in `0..=100`.
-    #[arg(short, long, default_value_t = 70.0)]
+    /// Desired finite zensim score; negative targets are allowed.
+    #[arg(short, long, allow_hyphen_values = true, default_value_t = 70.0)]
     target: f32,
 
     /// Codec to use: zenjpeg | zenwebp | zenavif | zenjxl | zenpng.

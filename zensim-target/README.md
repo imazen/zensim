@@ -94,7 +94,7 @@ fn encode_at_target(rgb: &[u8], width: u32, height: u32) -> anyhow::Result<Targe
 Inspect `converged`, `achieved_score`, `final_knob`, `iterations`, and `probes`
 before using the returned `encoded` bytes. Supply finite target/tolerance
 values, a nonnegative tolerance, and at least one iteration; those constraints
-are not validated by the current helper.
+are validated before encoding. Negative targets are allowed.
 
 ## Search behavior and limitations
 
@@ -139,3 +139,32 @@ They do not certify today's library default or current codec adapters.
 This internal, unpublished crate is **AGPL-3.0-only or Imazen commercial**
 because it links the codec crates. The `zensim` metric library remains
 MIT/Apache-2.0.
+
+## Candidate and actual-loop measurements
+
+`target_search_with_bake` accepts a reusable `zensim::BakeScorer` and shares the
+same controller as named profiles. It executes complete embedded heads/splines
+and attached scorer composition. Its result has `profile: None`; named results
+have `Some(profile)`. Pin every model/companion by hash for comparisons.
+
+The existing `demo_matrix` now takes explicit PNG sources and standalone bakes:
+
+```bash
+cargo run --release --manifest-path zensim-target/Cargo.toml --example demo_matrix -- \
+  --source /path/to/reference.png --bake /path/to/candidate.bin \
+  --codecs jpeg,webp,avif --targets=-10,30,70,90,99 --out /path/to/fresh-results
+```
+
+It compares B/D/candidates through actual encode/decode/score loops, writes
+bitstreams, input identities and per-probe JSONL, and measures target errors,
+bytes, passes and wall time. Independent SSIMULACRA2, Butteraugli pnorm3 and
+fixed-B judgments follow the timed loop. It verifies final bitstream and score
+reproduction. Sources must be opaque RGB8/RGBA8 sRGB PNGs; the example uses the
+Imazen PNG decoder. JPEG and PNG adapters now also use Imazen decoders. This
+changes the JPEG measurement instrument relative to its old foreign decoder.
+
+Missing inputs, unsupported builds and runtime errors fail; an unreachable
+target is retained as a measured `converged=false` result. Scoring samples
+exclude encoding/judges, and recorded VmHWM is cumulative process peak memory.
+Quiet, repeated runs are needed for performance claims. Raw measurements do not
+automatically qualify a model or establish matched-quality RD superiority.
