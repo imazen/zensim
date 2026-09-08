@@ -115,10 +115,11 @@ struct Cli {
 enum Cmd {
     /// Fit + inject an output-calibration spline for an ARBITRARY spline-less
     /// bake (incl. MLPs) — the generic sibling of `shared-anchor`, which is
-    /// linear-only. Forwards through `zenpredict::Predictor` (transform-safe
-    /// `predict_transformed` dispatch), fits the shared `fit_spline_knots`,
+    /// linear-only. Forwards through `zensim::BakeScorer` with output
+    /// calibration removed (heads/pin preserved), fits `fit_spline_knots`,
     /// re-emits every layer VERBATIM (f32/f16 dtypes preserved) with only the
-    /// spline metadata entry added. Rank-invariant by construction.
+    /// spline metadata entry added. Use --replace-existing for a refit.
+    /// Calibration can introduce ties/caps; evaluate the emitted bake.
     /// Added 2026-07-18 to give the Ebothg winner MLP a dial (scorecard P1).
     AddSpline(AddSplineArgs),
     /// Extend ONLY the output spline's top by a training-fitted concave
@@ -434,6 +435,13 @@ fn forward_raw(row: &[f64], ops: &[FwOp], lin: &LinearBake) -> f64 {
 // parquet feature reader
 // --------------------------------------------------------------------------
 
+/// The identity table width needed to reach every declared input ID.
+fn identity_row_width(model: &Model) -> usize {
+    zensim::declared_feature_ids(model)
+        .and_then(|ids| ids.into_iter().max())
+        .map_or(model.caller_input_width(), |id| usize::from(id) + 1)
+}
+
 /// Read column `idx` of `batch` as f64 regardless of f32/f64 storage
 /// (nulls → NaN). Mirrors `rescore_parquet::col_f64`.
 fn col_f64(batch: &RecordBatch, idx: usize) -> Vec<f64> {
@@ -680,16 +688,21 @@ struct AddSplineArgs {
     /// Percentile-edge count for `fit_spline_knots`.
     #[arg(long, default_value_t = 18)]
     n_edges: usize,
+    /// Replace an existing output spline; fit on the pre-calibration surface.
+    #[arg(long)]
+    replace_existing: bool,
+    /// Remove repeated zero-target knots to preserve a negative tail.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    neg_tail: bool,
 }
 
 fn cmd_add_spline(a: &AddSplineArgs) -> Result<(), String> {
     let bytes = std::fs::read(&a.input).map_err(|e| format!("read {:?}: {e}", a.input))?;
     let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
-    if spline::extract(&model).is_some() {
+    if spline::extract(&model).is_some() && !a.replace_existing {
         return Err(
             "bake already carries an output-calibration spline — add-spline is for \
-             spline-less bakes (use shared-anchor semantics for a refit, which would \
-             otherwise compound two splines)"
+             spline-less bakes (use --replace-existing for a refit)"
                 .into(),
         );
     }
@@ -700,29 +713,22 @@ fn cmd_add_spline(a: &AddSplineArgs) -> Result<(), String> {
             model.feature_bounds().len()
         ));
     }
-    let n_in = model.caller_input_width();
-
-    // Forward the anchor through the PRODUCTION predictor (transform-safe).
+    let mut scorer = zensim::BakeScorer::new(&model)
+        .map_err(|e| e.to_string())?
+        .without_output_calibration();
+    let n_in = identity_row_width(&model);
     let (feats, tgt) = read_features(&a.anchor, &a.feat_prefix, n_in, &a.target_col);
-    let transformed = model.has_nontrivial_feature_transforms();
-    let mut predictor = zenpredict::Predictor::new(&model);
-    let mut preds = Vec::with_capacity(feats.len());
-    let mut xbuf = vec![0f32; n_in];
-    for row in &feats {
-        for (d, s) in xbuf.iter_mut().zip(row.iter()) {
-            *d = *s as f32;
-        }
-        let out = if transformed {
-            predictor.predict_transformed(&xbuf)
-        } else {
-            predictor.predict(&xbuf)
-        }
-        .map_err(|e| format!("predictor forward: {e:?}"))?;
-        preds.push(out[0] as f64);
-    }
+    let preds = feats
+        .iter()
+        .map(|row| {
+            scorer
+                .score_features(row, 0, 0, None)
+                .map_err(|e| e.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let tgt_scaled: Vec<f64> = tgt.iter().map(|&t| t * a.target_scale).collect();
 
-    let (cx, cy) = fit_spline_knots(&preds, &tgt_scaled, a.n_edges, true);
+    let (cx, cy) = fit_spline_knots(&preds, &tgt_scaled, a.n_edges, a.neg_tail);
     if cx.len() < 2 {
         return Err(format!("anchor fit produced only {} knots (<2)", cx.len()));
     }
@@ -1262,7 +1268,7 @@ struct GateArgs {
 fn cmd_gate(a: &GateArgs) -> Result<bool, String> {
     let bytes = std::fs::read(&a.bake).map_err(|e| format!("read {:?}: {e}", a.bake))?;
     let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
-    let n = model.caller_input_width();
+    let n = identity_row_width(&model);
     let sp = spline::extract(&model).ok_or("bake has no output_calibration_spline")?;
     let klo = sp.xs[0];
     let khi = sp.xs[sp.xs.len() - 1];
@@ -1288,7 +1294,15 @@ fn cmd_gate(a: &GateArgs) -> Result<bool, String> {
                 .map_err(|e| e.to_string())
         })
         .collect::<Result<_, _>>()?;
-    let dial: Vec<f64> = raw.iter().map(|&r| spline::apply(r, &sp)).collect();
+    let mut full_scorer = zensim::BakeScorer::new(&model).map_err(|e| e.to_string())?;
+    let dial = feats
+        .iter()
+        .map(|row| {
+            full_scorer
+                .score_features(row, 0, 0, None)
+                .map_err(|e| e.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let ntotal = raw.len();
 
     // G-RANGE — the HARD gate. Raw preds outside [klo, khi] extrapolate
@@ -3584,28 +3598,7 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
         let bytes = std::fs::read(p).map_err(|e| format!("read {p:?}: {e}"))?;
         models.push(Model::from_bytes(&bytes).map_err(|e| format!("parse bake {p:?}: {e:?}"))?);
     }
-    // CALLER width, not the internal layer-0 width (fixed 2026-09-01, hybrid
-    // lane). Two facts made the old `n_inputs()` reading wrong on both counts:
-    //
-    //  * it SIZED the input buffer, so a dead-column-PRUNED bake
-    //    (`n_inputs` 667, `caller_input_width` 944) was handed the first 667
-    //    columns of a 944-wide row — a prefix, which the repo's own pruning
-    //    rule forbids in as many words ("size every feature vector by
-    //    caller_input_width()"); and
-    //  * it REFUSED a pruned + unpruned pair whose caller widths agree, which
-    //    `bake_verdict`'s `Ensemble` accepts — so this function did not in fact
-    //    "mirror bake_verdict's contract exactly" as its own doc comment
-    //    claims. It does now: same field, same refusal.
-    let n_in = models[0].caller_input_width();
-    for (p, m) in members.iter().zip(models.iter()).skip(1) {
-        if m.caller_input_width() != n_in {
-            return Err(format!(
-                "ensemble member {p:?} has caller_input_width={} but member 0 has {n_in} — \
-                 averaging across feature regimes is the column-mixing this repo bans",
-                m.caller_input_width()
-            ));
-        }
-    }
+    let n_in = models.iter().map(identity_row_width).max().unwrap();
     // Weights: same validation and normalisation as `bake_verdict`.
     let weights: Option<Vec<f64>> = if a.ensemble_weights.is_empty() {
         None
@@ -3627,7 +3620,7 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
             return Err("--ensemble-weights must be finite and >= 0".into());
         }
         let sum: f64 = a.ensemble_weights.iter().sum();
-        if sum.is_nan() || sum <= 0.0 {
+        if !sum.is_finite() || sum <= 0.0 {
             return Err("--ensemble-weights must not sum to zero".into());
         }
         Some(a.ensemble_weights.iter().map(|w| w / sum).collect())
@@ -3639,42 +3632,48 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
     // (single accumulator, single divide-by-one is skipped below).
     let k = models.len();
     let mut acc = vec![0f64; g.feature_rows.len()];
-    for (mi, model) in models.iter().enumerate() {
-        let wi = weights.as_ref().map(|w| w[mi]);
-        if wi == Some(0.0) {
-            continue;
+    if a.score_units {
+        let mut scorer =
+            zensim::BakeScorer::ensemble(&models, weights.as_deref()).map_err(|e| e.to_string())?;
+        for (out, row) in acc.iter_mut().zip(&g.feature_rows) {
+            *out = scorer
+                .score_features(row, 0, 0, None)
+                .map_err(|e| e.to_string())?;
         }
-        let transformed = model.has_nontrivial_feature_transforms();
-        let mut predictor = zenpredict::Predictor::new(model);
-        let mut xbuf = vec![0f32; n_in];
-        let mut scorer = zensim::BakeScorer::new(model).map_err(|e| e.to_string())?;
-        let gather = zensim_validate::bake_runtime::CallerGather::for_model(model);
-        for (i, row) in g.feature_rows.iter().enumerate() {
-            let p0: f64 = if a.score_units {
-                scorer
-                    .score_features(row, 0, 0, None)
-                    .map_err(|e| e.to_string())?
-            } else {
-                gather.fill(&mut xbuf, row);
-                let p = if transformed {
-                    predictor.predict_transformed(&xbuf)
-                } else {
-                    predictor.predict(&xbuf)
+    } else {
+        for (mi, model) in models.iter().enumerate() {
+            let wi = weights.as_ref().map(|w| w[mi]);
+            if wi == Some(0.0) {
+                continue;
+            }
+            let transformed = model.has_nontrivial_feature_transforms();
+            let mut predictor = zenpredict::Predictor::new(model);
+            let mut xbuf = vec![0f32; model.caller_input_width()];
+            zensim::BakeScorer::new(model).map_err(|e| e.to_string())?;
+            let gather = zensim_validate::bake_runtime::CallerGather::for_model(model);
+            for (i, row) in g.feature_rows.iter().enumerate() {
+                let p0: f64 = {
+                    gather.fill(&mut xbuf, row);
+                    let p = if transformed {
+                        predictor.predict_transformed(&xbuf)
+                    } else {
+                        predictor.predict(&xbuf)
+                    }
+                    .map_err(|e| format!("predictor forward: {e:?}"))?;
+                    p[0] as f64
+                };
+                match wi {
+                    Some(w) => acc[i] += w * p0,
+                    None if k == 1 => acc[i] = p0,
+                    None => acc[i] += p0,
                 }
-                .map_err(|e| format!("predictor forward: {e:?}"))?;
-                p[0] as f64
-            };
-            match wi {
-                Some(w) => acc[i] += w * p0,
-                None if k == 1 => acc[i] = p0,
-                None => acc[i] += p0,
             }
         }
-    }
-    if k > 1 && weights.is_none() {
-        let kf = k as f64;
-        for v in acc.iter_mut() {
-            *v /= kf;
+        if k > 1 && weights.is_none() {
+            let kf = k as f64;
+            for v in acc.iter_mut() {
+                *v /= kf;
+            }
         }
     }
 
@@ -5571,6 +5570,60 @@ mod tests {
         let mut w = ArrowWriter::try_new(f, schema, None).unwrap();
         w.write(&batch).unwrap();
         w.close().unwrap();
+    }
+
+    #[test]
+    fn add_spline_fits_the_served_pin_and_refit_does_not_compound_it() {
+        let dir = std::env::temp_dir().join(format!("zensim-refit-pin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let corpus = dir.join("anchor.parquet");
+        write_gate_corpus(&corpus);
+        let source = dir.join("pin.bin");
+        let recipe = serde_json::json!({"schema_hash":0,
+            "scaler_mean":[0.,0.,0.],"scaler_scale":[1.,1.,1.],
+            "metadata":[{"key":"zentrain.tanh_output_head","type":"f32","f32":[1.0]}],
+            "layers":[{"in_dim":3,"out_dim":1,"activation":"identity","dtype":"f32",
+                "weights":[1.0,0.0,0.0],"biases":[0.0]}]});
+        // Numeric metadata wire type; the payload is one little-endian f32.
+        let mut recipe = recipe;
+        recipe["metadata"][0]["type"] = serde_json::json!("numeric");
+        std::fs::write(
+            &source,
+            zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap(),
+        )
+        .unwrap();
+        let mut args = AddSplineArgs {
+            input: source,
+            out: dir.join("fitted.bin"),
+            anchor: corpus,
+            target_col: "human_score".into(),
+            feat_prefix: "f".into(),
+            target_scale: 100.,
+            n_edges: 4,
+            replace_existing: false,
+            neg_tail: true,
+        };
+        cmd_add_spline(&args).unwrap();
+        let first = std::fs::read(&args.out).unwrap();
+        let model = Model::from_bytes(&first).unwrap();
+        let sp = spline::extract(&model).unwrap();
+        assert_eq!(sp.xs.len(), 3);
+        assert!(
+            sp.xs.iter().all(|&x| x > 50. && x < 100.),
+            "the old first-output fit used 0.2..0.7 instead of the pinned coordinate"
+        );
+        assert_eq!(sp.ys, vec![25., 45., 65.]);
+        args.input = args.out.clone();
+        args.out = dir.join("refitted.bin");
+        assert!(cmd_add_spline(&args).is_err());
+        args.replace_existing = true;
+        cmd_add_spline(&args).unwrap();
+        assert_eq!(
+            first,
+            std::fs::read(&args.out).unwrap(),
+            "refitting compounded the old spline"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     fn gate_args(bake: PathBuf, corpus: PathBuf) -> GateArgs {

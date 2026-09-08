@@ -15,6 +15,7 @@
 /// Encode PCHIP knots into the `zentrain.output_calibration_spline` payload:
 /// `[u32 n_knots, n_knots × (x: f32 LE, y: f32 LE)]`.
 pub fn spline_payload(xs: &[f64], ys: &[f64]) -> Vec<u8> {
+    assert_eq!(xs.len(), ys.len(), "spline coordinate lengths differ");
     let nk = xs.len();
     let mut p = Vec::with_capacity(4 + 8 * nk);
     p.extend_from_slice(&(nk as u32).to_le_bytes());
@@ -22,6 +23,10 @@ pub fn spline_payload(xs: &[f64], ys: &[f64]) -> Vec<u8> {
         p.extend_from_slice(&(xs[i] as f32).to_le_bytes());
         p.extend_from_slice(&(ys[i] as f32).to_le_bytes());
     }
+    assert!(
+        crate::output_calibration_spline::parse_payload(&p).is_some(),
+        "spline is invalid after f32 serialization (non-finite or collapsed knots)"
+    );
     p
 }
 
@@ -97,6 +102,15 @@ pub fn fit_spline_knots(
     n_edges: usize,
     neg_tail: bool,
 ) -> (Vec<f64>, Vec<f64>) {
+    // Invalid/empty anchors cannot produce a bake. Callers already refuse a
+    // fit with fewer than two knots; do not panic indexing empty bins.
+    if preds.len() != tgt.len()
+        || preds.len() < 2
+        || n_edges < 2
+        || preds.iter().chain(tgt).any(|v| !v.is_finite())
+    {
+        return (Vec::new(), Vec::new());
+    }
     let mut sorted = preds.to_vec();
     sorted.sort_by(f64::total_cmp);
     let edges: Vec<f64> = (0..n_edges)
@@ -120,6 +134,10 @@ pub fn fit_spline_knots(
         .filter(|&i| preds[i] >= edges[n_edges - 1])
         .collect();
     push_bin(&hi, preds, tgt, &mut kx, &mut ky);
+
+    if kx.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
 
     // strictly-increasing-x, non-decreasing-y monotone filter.
     let mut cx = vec![kx[0]];
@@ -247,5 +265,59 @@ mod neg_tail_dedup_tests {
             zeros.len() > 1,
             "control: the pre-fix predicate must have had a run to collapse"
         );
+    }
+}
+
+#[cfg(test)]
+mod historical_fit_tests {
+    use super::*;
+
+    #[test]
+    fn v47_recorded_fitter_knots_and_f32_payload_match() {
+        let v: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/v47_spline_fit.json")).unwrap();
+        let numbers = |v: &serde_json::Value| {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_f64().unwrap())
+                .collect::<Vec<_>>()
+        };
+        let preds = numbers(&v["predictions"]);
+        let targets = numbers(&v["targets"]);
+        for case in v["cases"].as_array().unwrap() {
+            let (xs, ys) =
+                fit_spline_knots(&preds, &targets, 18, case["neg_tail"].as_bool().unwrap());
+            let expected_x = numbers(&case["xs"]);
+            assert_eq!(xs.len(), expected_x.len());
+            for (a, b) in xs.iter().zip(expected_x) {
+                assert!((a - b).abs() < 1e-14);
+            }
+            assert_eq!(ys, numbers(&case["ys"]));
+            let hex = spline_payload(&xs, &ys)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
+            assert_eq!(hex, case["payload_hex"].as_str().unwrap());
+        }
+    }
+
+    #[test]
+    fn invalid_anchor_cannot_produce_knots() {
+        for (preds, tgt, edges) in [
+            (vec![], vec![], 18),
+            (vec![1., 2.], vec![1.], 18),
+            (vec![1., 2.], vec![1., 2.], 1),
+            (vec![1., f64::NAN], vec![1., 2.], 18),
+            (vec![1., 2.], vec![1., f64::INFINITY], 18),
+        ] {
+            assert!(fit_spline_knots(&preds, &tgt, edges, true).0.is_empty());
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid after f32 serialization")]
+    fn distinct_f64_knots_that_collapse_in_the_bake_are_refused() {
+        spline_payload(&[1.0, 1.0 + 1e-9], &[0.0, 100.0]);
     }
 }

@@ -13,7 +13,7 @@
 # in cross_codec_variants/<variant>.conf that sets ONLY the knobs it changes
 # (plus its historical rationale header). The eleven original entry points remain
 # as thin shims that exec this driver, so every command line quoted in
-# benchmarks/*.md and in run_v9_full_pipeline.sh still works unchanged. That
+# benchmarks/*.md still works unchanged. The retired V9 full pipeline is preserved in git. That
 # thin-wrapper shape is the same one _picker_lib.py already proved in-repo.
 #
 # EQUIVALENCE IS GATED, NOT ASSUMED. scripts/v_next/tests/test_cross_codec_seed_argv.sh

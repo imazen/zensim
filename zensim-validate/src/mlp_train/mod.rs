@@ -10326,17 +10326,10 @@ fn train_mlp_per_sample_alpha_head(
         }
     });
 
-    // Post-training output calibration spline (V9-style, matching
-    // scripts/v_next/calibrate_v9_spline.py). When anchor data is
-    // available, forward the anchor rows through the best weights,
-    // group by target_score, take median prediction per band, build
-    // strictly-increasing PCHIP knots. The spline payload is saved
-    // as a sidecar file via ZENSIM_SPLINE_SIDECAR env var.
-    //
-    // The actual injection into the bake requires zenpredict-bake's
-    // JSON pipeline (the existing Python script calls `zenpredict bake`
-    // on a modified JSON). The sidecar approach lets the caller script
-    // handle the injection.
+    // Post-training quantile calibration uses the packed/projected network.
+    // The abandoned May band-median writers are archived; this later recipe
+    // replaced their degenerate narrow-pin fits. See the dated spline-owner
+    // record and `bake_dial_refit add-spline` for explicit artifact refits.
     if anchor_active
         && !std_anchor_features.is_empty()
         && let Some(a) = anchor

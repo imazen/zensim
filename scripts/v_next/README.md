@@ -120,3 +120,10 @@ V_20 converter, use `--auto-transforms-min-lift 0.05
 --auto-transforms-max-feature-idx 228`; a top-N value of 0 keeps all eligible
 rows. Non-finite lifts are rejected from selection. Historical recipes and the
 converter's source remain in revision `7cbc2458`.
+
+### Calibration owner (September 7, 2026)
+
+Use `bake_dial_refit pack` for quantize-then-calibrate, or `add-spline` for a
+pre-calibration surface fit (`--replace-existing` for a refit). Always name the
+training anchor. The four May/V47 Python writers and V9 full pipeline are
+archived; see [recipe and boundary evidence](../../benchmarks/spline_owner_cleanup_2026-09-07.md).

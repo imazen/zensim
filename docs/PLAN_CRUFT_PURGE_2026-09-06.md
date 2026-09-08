@@ -46,7 +46,7 @@ ablation closes its hypothesis and preserves the useful component.
 - [x] Migrate candidate-evaluation callers and remove alternate runtime dispatch.
 - [x] Explicit validated evaluation stages and artifact-identity reuse; harvest
   invokes the owner once; qualification distinguishes failure from missing data.
-- [ ] Complete transform-screen option migration and remaining spline-writer
+- [x] Complete transform-screen option migration and remaining spline-writer
   consolidation with historical recipe and boundary evidence.
 - [ ] Enforce trainer capabilities before CPU/GPU work; enforce feature IDs and
   semantic revisions at table admission; preserve honest historical replay.
@@ -907,3 +907,13 @@ of the measuring owner's JSON artifact. Missing or stale evidence is incomplete,
 never pass. Known failures remain failures even when other evidence is missing.
 The board may display this report, but must not synthesize qualification from
 composite or from the absence of a failing badge.
+
+### Spline-writer completion — September 7 continuation
+
+The transform-screen top-N/max-ID semantics landed in `6822f095`. The four
+remaining spline writers and obsolete V9 full pipeline are now archived after
+caller checks; current generic fitting uses the actual Rust pre-calibration
+surface. Historical fit and runtime-boundary differences, the exact f32
+V47 primitive fixture and intentional corrections are recorded in
+[the spline-owner audit](../benchmarks/spline_owner_cleanup_2026-09-07.md).
+The distinct equal-count training fitter remains a named recipe.
