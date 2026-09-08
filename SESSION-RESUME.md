@@ -103,3 +103,30 @@ three full encodes, and its existing `targets_met` flag checks only the score
 floor. Reuse the shared Rust native owner for actual JPEG 1/2/3-shot bounds and
 train calibration; WebP binding and competitive model/spatial qualification
 remain incomplete. No training or terminal holdout was performed in this step.
+
+
+Later September 8 WebP continuation: [complete-candidate binding and accounting
+repairs](https://github.com/imazen/zenwebp/blob/main/benchmarks/zensim_candidate_binding_2026-09-08.md)
+are pushed in `8aa8a7858b97`. The existing segment loop now accepts the exact Rust
+bake through `__zensim-research`; registry 0.2 and the separate recompress A
+calibration remain intact. One-pass targeting is measured and strict, encode
+counts are actual, ship-band flags are truthful, and finite negatives are valid.
+All five old failures were observed in regression tests before repair; hard-floor
+selection has its own observed failing control. Local 354 library, 15 targeting,
+33 validation tests, two Clippy routes, release/API/format checks pass.
+
+One canonical training family, D/q80/m4: scalar and neutral select 73.673485 /
+16,040 B; active selects 72.955315 / 15,728 B. The fixed-q neutral correction is
+byte/pixel/map exact; active quantizer 11→14 is consumed and repeats exactly.
+All 208 macroblocks, including the partial edge, have explicit map/segment traces.
+Both independent judges see quality loss with the smaller active file. Thirteen
+full encodes, nine maps, two non-neutral map uses across active+repeat and five
+terminal comparisons are counted; ten CLI rejection controls pass. Full result:
+`/mnt/v/output/zensim/webp-candidate-binding-2026-09-08/`; Windows copy under
+`~/work/zensim-validation-2026-09-08/webp-candidate-binding/`.
+
+All four codec owners now have an exact complete-candidate binding and native
+engagement evidence. Useful spatial RD, a competitive qualified model, JPEG/WebP
+train-calibrated witnessed bounds and actual 1/2/3-shot validation remain required.
+Do not repeat binding screens as model qualification. No training or terminal
+holdout was performed in this continuation.

@@ -186,3 +186,21 @@ neutral is byte-exact, active changes maps/bytes/pixels reproducibly. The 69-byt
 saving also lowers D, SSIMULACRA2 and Butteraugli quality, so this is engagement
 and controller correctness evidence, not improved RD or model qualification.
 Actual train-calibrated bounds/budgets and WebP binding are still required.
+
+
+## Later September 8: WebP complete binding and honest work accounting
+
+The existing segment owner now binds exact complete Rust candidate scoring and
+cached binned attribution: [WebP record](https://github.com/imazen/zenwebp/blob/main/benchmarks/zensim_candidate_binding_2026-09-08.md),
+commit `8aa8a7858b97`. Scalar, zero-override and active controls retain exact
+bitstreams, decoded pixels, actual segment maps and quantizer indices. The native
+active control changes a quantizer 11→14 and repeats exactly; the fixed-q neutral
+correction preserves bytes and pixels. Its 312-byte saving also lowers quality
+for D, SSIMULACRA2 and Butteraugli, so engagement is established without an RD claim.
+
+The same investigation repaired one-pass measurement/strictness, early-stop full
+encode accounting, ship-band selection/flags and negative-target validation.
+All old defects were reproduced with failing tests first. Registry 0.2 and the
+separate recompress A calibration are preserved. All four recovered codec owners
+now bind complete candidate scoring; JPEG/WebP realistic bounds/calibration and
+useful spatial/model qualification remain unfinished.
