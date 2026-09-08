@@ -330,3 +330,26 @@ screen. This conservative sparse-ladder rule does not prove gaps impossible.
 Report wider error bands, signed undershoot, tail error, selected emitted bytes,
 complete cost and matched SSIMULACRA2/Butteraugli outcomes. This is development
 validation, not terminal qualification or a newly justified perceptual tolerance.
+
+## Native finite-block analysis extension — September 8 (before outcome analysis)
+
+The existing `rd_probe_analyze_2026-07-18.py` owner will accept
+`--interventions <directory>` for the codec-owned `native-jxl-interventions-v1`
+instrument. Codec registration: sibling
+`jxl-encoder/docs/zensim-native-interventions-2026-09-08.md`.
+No scoring/controller/statistics implementation is replaced. Use SciPy's
+Spearman implementation for rank summaries; preserve constant/insufficient
+samples explicitly rather than returning a fabricated correlation.
+
+Before deriving results, verify completion and expected cell/probe coverage,
+source and emitted-byte/pixel/quantizer hashes, actual global quantizer constancy,
+neutral-repeat identity, source-clipped transform regions, deterministic raster
+sampling, requested local changes and observed local/nonlocal quantizer changes.
+Both independent judges must cover every exact reference/distorted pair without
+duplicates/nonfinite values. Include rejection controls for altered counts,
+quantizer records, image hashes and judge identities. Record native scalar and
+judge deltas for both directions. Rank associations use central local differences
+per actual log-quantizer change and report map mass, density and byte cost
+separately within each image/distance. Flat quantizers and nonpositive rate
+changes stay visible. This mechanism evidence is not a targeting or RD release
+gate; no acceptance threshold is fitted after inspecting outcomes.

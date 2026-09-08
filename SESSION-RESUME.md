@@ -130,3 +130,27 @@ engagement evidence. Useful spatial RD, a competitive qualified model, JPEG/WebP
 train-calibrated witnessed bounds and actual 1/2/3-shot validation remain required.
 Do not repeat binding screens as model qualification. No training or terminal
 holdout was performed in this continuation.
+
+Later September 8 native JXL finite-block continuation:
+[intervention record](https://github.com/imazen/jxl-encoder/blob/main/benchmarks/zensim_native_interventions_2026-09-08.md).
+Codec instrument/report pushed as `feab1d7fd734c89212b449a1945cf1e6e7bf81e4`.
+Four train families, distances 1/3, 16 native transform regions with ±10%
+quantizer changes: 272 complete probes reproduce bytes/pixels/scores/maps and
+both independent judges exactly. Separate 272-probe 512-long-edge multi-group
+coverage passes; 48 total libjxl 0.12 compatibility checks complete. The existing
+RD analyzer's new `--interventions` mode passes 19 rejection controls, preserves
+older analysis functions, and verifies all source/byte/pixel/quantizer/judge
+identities. Six CLI controls and local release/Clippy/format/script checks pass.
+
+Restoration coherence does not establish useful native marginal allocation:
+primary map-mass/D-response rank associations range from −0.259 to 0.676.
+222/256 interventions affect pixels outside their selected region even though
+captured quantizer changes stay local. Seven interventions preserve the final
+quantizer field but change pixels; native thresholds also depend on the incoming
+field. CfL is frozen here. Do not treat final quantizer identity as a no-op or
+these response secants as isolated quantizer gradients. No model/policy change
+or qualification. Artifacts: `/mnt/v/output/zensim/jxl-native-interventions-2026-09-08/`;
+Windows copy under `~/work/zensim-validation-2026-09-08/jxl-native-interventions/`.
+Next spatial hypothesis: preregister a coarse-region/rate-cost intervention
+before tuning allocation. Model qualification and JPEG/WebP actual targeting
+remain open; no new training or terminal holdout in this packet.

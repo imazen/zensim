@@ -520,7 +520,238 @@ def native_target_summary(root, inp, rows):
     print("\n".join(text))
 
 
+def interventions_main():
+    """Validate and summarize the registered native finite-quantizer experiment."""
+    import argparse
+    import hashlib
+    import json
+    from pathlib import Path
+    import numpy as np
+    from PIL import Image
+    from scipy.stats import spearmanr
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--interventions", type=Path, required=True)
+    root = ap.parse_args().interventions.resolve()
+    if not __debug__:
+        raise SystemExit("intervention validation requires Python assertions enabled")
+    inp = json.loads((root / "INPUTS.json").read_text())
+    done = json.loads((root / "COMPLETE.json").read_text())
+    assert inp["schema"] == "native-jxl-interventions-v1"
+    assert inp["model_sha256"] == "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6"
+    rows = [json.loads(line) for line in (root / "measurements.jsonl").read_text().splitlines()]
+    assert len(rows) == done["full_encodes"] == done["independent_decodes"] == done["ordinary_scalar_pixel_comparisons"]
+    sources = {s["origin"]: s for s in inp["sources"]}
+    assert len(sources) == len(inp["sources"]) == 4
+    assert len({s["family"] for s in sources.values()}) == 4
+    assert len({s["content_class"] for s in sources.values()}) == 4
+    sha = lambda b: hashlib.sha256(b).hexdigest()
+    for source in sources.values():
+        assert source["split"] == "train" and sha(Path(source["path"]).read_bytes()) == source["sha256"]
+    groups = defaultdict(list)
+    pixels, requested, actual, expected_pairs = {}, {}, {}, {}
+    for row in rows:
+        source = sources[row["origin"]]
+        assert row["class"] == source["content_class"]
+        key = (row["origin"], row["distance"])
+        assert key[1] in (1., 3.)
+        cell = root / f"o_{key[0]}-d{key[1]:g}"
+        assert Path(row["cell"]).resolve() == cell
+        work = row["work"]
+        name = work["name"]
+        assert Path(name).name == name
+        identity = (*key, name)
+        assert identity not in pixels
+        width, height = row["width"], row["height"]
+        rgb = (cell / f"{name}.rgb8").read_bytes()
+        assert len(rgb) == width * height * 3 and sha(rgb) == work["decoded_sha256"]
+        with Image.open(cell / f"{name}.png") as im:
+            assert im.mode == "RGB" and im.size == (width, height) and im.tobytes() == rgb
+        encoded = (cell / f"{name}.jxl").read_bytes()
+        assert len(encoded) == work["bytes"] and sha(encoded) == work["encoded_sha256"]
+        for field, suffix, cache in [("requested_q_sha256", "requested-q.u8", requested),
+                                     ("actual_q_sha256", "actual-q.u8", actual)]:
+            value = (cell / f"{name}.{suffix}").read_bytes()
+            assert len(value) == ((width+7)//8) * ((height+7)//8)
+            assert min(value) >= 1 and sha(value) == work[field]
+            cache[identity] = np.frombuffer(value, dtype=np.uint8)
+        pixels[identity] = np.frombuffer(rgb, dtype=np.uint8).reshape(height, width, 3)
+        assert all(math.isfinite(work[k]) for k in ["score", "scale", "inv_scale", "encode_seconds", "decode_seconds", "score_seconds"])
+        assert all(work[k] >= 0 for k in ["encode_seconds", "decode_seconds", "score_seconds"])
+        assert work["full_encodes"] == work["independent_decodes"] == work["scalar_pixel_comparisons"] == 1
+        assert work["internal_reconstructions"] == work["map_evaluations"] == 0
+        path = str(cell / f"{name}.png")
+        expected_pairs[path] = {"ref_path": source["path"], "dist_path": path,
+            "origin": key[0], "arm": name, "bytes": str(work["bytes"])}
+        groups[key].append(row)
+    assert len(groups) == len(done["cells"]) == done["additional_scored_maps"] == 8
+    assert set(groups) == {(o, d) for o in sources for d in (1., 3.)}
+    completion = {(v["origin"], v["distance"]): v for v in done["cells"]}
+    assert len(completion) == 8
+    assert done["internal_reconstructions"] == 0
+    compatibility = json.loads((root / "COMPATIBILITY.json").read_text())
+    assert compatibility["version_stdout"].startswith("djxl v0.12.")
+    expected_compatibility = {(o, d, n) for o, d in groups
+                              for n in ("baseline", "r0-down", "r0-up")}
+    assert len(compatibility["decodes"]) == done["libjxl_compatibility_decodes"] == len(expected_compatibility)
+    compat_index = {str(root/f"o_{o}-d{d:g}"/f"{n}.jxl"): (o, d, n)
+                    for o, d, n in expected_compatibility}
+    seen_compatibility = set()
+    for record in compatibility["decodes"]:
+        identity = compat_index[record["encoded"]]
+        assert identity not in seen_compatibility
+        seen_compatibility.add(identity)
+        assert sha(Path(record["encoded"]).read_bytes()) == record["encoded_sha256"]
+        o, d, n = identity
+        decoded = root/"compatibility"/f"{o}-d{d:g}-{n}.png"
+        assert record["decoded"] == str(decoded)
+        with Image.open(decoded) as im:
+            primary = pixels[identity]
+            assert im.mode == "RGB" and im.size == (primary.shape[1], primary.shape[0])
+            assert sha(im.tobytes()) == record["decoded_sha256"]
+            difference = int(np.max(np.abs(np.array(im).astype(int) - primary.astype(int))))
+            assert difference == record["primary_max_abs_rgb8_difference"]
+    with (root / "judge_pairs.tsv").open() as f:
+        pairs = list(csv.DictReader(f, delimiter="\t"))
+    assert len(pairs) == len(expected_pairs) and len({p["dist_path"] for p in pairs}) == len(pairs)
+    assert all(p == expected_pairs[p["dist_path"]] for p in pairs)
+    judges = {}
+    for metric, column, sign in [("ssim2", "ssim2", 1), ("butteraugli", "butteraugli_pnorm3", -1)]:
+        with (root / f"judge_{metric}.tsv").open() as f:
+            panel = list(csv.DictReader(f, delimiter="\t"))
+        assert len(panel) == len(rows) and len({r["dist_path"] for r in panel}) == len(rows)
+        assert {r["dist_path"] for r in panel} == set(expected_pairs)
+        for r in panel:
+            assert all(r[k] == v for k, v in expected_pairs[r["dist_path"]].items())
+            assert math.isfinite(float(r[column]))
+        judges[metric] = {r["dist_path"]: sign * float(r[column]) for r in panel}
+
+    def corr(xs, ys):
+        if len(xs) < 3 or len(set(xs)) < 2 or len(set(ys)) < 2:
+            return None
+        value = float(spearmanr(xs, ys).statistic)
+        assert math.isfinite(value)
+        return value
+
+    results, samples = [], []
+    for key, rr in sorted(groups.items()):
+        cell = root / f"o_{key[0]}-d{key[1]:g}"
+        by_name = {r["work"]["name"]: r for r in rr}
+        assert len(by_name) == len(rr) == completion[key]["full_encodes"]
+        base, neutral = by_name["baseline"], by_name["neutral"]
+        for field in ["encoded_sha256", "decoded_sha256", "actual_q_sha256", "requested_q_sha256", "score", "global_scale", "scale", "inv_scale"]:
+            assert base["work"][field] == neutral["work"][field]
+        width, height = base["width"], base["height"]
+        bx = (width+7)//8
+        regions = json.loads((cell / "regions.json").read_text())
+        assert len(regions) == completion[key]["transform_regions"]
+        covered_image = np.zeros((height, width), dtype=np.uint8)
+        for region in regions:
+            x0, y0 = region["x"]*8, region["y"]*8
+            x1, y1 = min(width, x0+region["blocks_x"]*8), min(height, y0+region["blocks_y"]*8)
+            assert 0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height
+            assert region["area"] == (x1-x0)*(y1-y0)
+            assert math.isfinite(region["map_mass"]) and math.isfinite(region["map_density"])
+            assert abs(region["map_density"] * region["area"] - region["map_mass"]) < 1e-10
+            covered_image[y0:y1, x0:x1] += 1
+        assert np.all(covered_image == 1)
+        count = min(16, len(regions))
+        indices = [i*(len(regions)-1)//max(1,count-1) for i in range(count)]
+        assert completion[key]["sampled_regions"] == count
+        assert set(by_name) == {"baseline", "neutral"} | {f"r{i}-{side}" for i in indices for side in ["up", "down"]}
+        central, cell_samples = [], []
+        baseline_id = (*key, "baseline")
+        for index in indices:
+            region = regions[index]
+            covered = {y*bx+x for y in range(region["y"], region["y"]+region["blocks_y"])
+                       for x in range(region["x"], region["x"]+region["blocks_x"])}
+            mask = np.array([i in covered for i in range(len(actual[baseline_id]))])
+            x0, y0 = region["x"]*8, region["y"]*8
+            x1, y1 = min(width,x0+region["blocks_x"]*8), min(height,y0+region["blocks_y"]*8)
+            pair = {}
+            for side, factor in [("up",1.1),("down",0.9)]:
+                name = f"r{index}-{side}"
+                row, identity = by_name[name], (*key, name)
+                work, intervention = row["work"], row["intervention"]
+                assert intervention["region_index"] == index and intervention["region"] == region
+                assert abs(intervention["factor"]-factor) < 1e-6
+                for field in ["global_scale", "scale", "inv_scale"]:
+                    assert work[field] == base["work"][field]
+                assert np.array_equal(requested[identity][~mask], requested[baseline_id][~mask])
+                delta = requested[identity].astype(int) - requested[baseline_id].astype(int)
+                assert np.all(delta[mask] >= 0) if side == "up" else np.all(delta[mask] <= 0)
+                changed = actual[identity] != actual[baseline_id]
+                assert intervention["changed_inside"] == int(np.sum(changed & mask))
+                assert intervention["changed_outside"] == int(np.sum(changed & ~mask))
+                log_change = float(np.mean(np.log(actual[identity][mask].astype(float) / actual[baseline_id][mask])))
+                assert abs(log_change-intervention["mean_log_actual_q_change"]) < 1e-12
+                score_change = work["score"]-base["work"]["score"]
+                assert abs(score_change-intervention["score_change"]) < 1e-5
+                assert work["bytes"]-base["work"]["bytes"] == intervention["byte_change"]
+                changed_pixels = np.any(pixels[identity] != pixels[baseline_id], axis=2)
+                inside = int(np.sum(changed_pixels[y0:y1,x0:x1]))
+                path, baseline_path = str(cell/f"{name}.png"), str(cell/"baseline.png")
+                sample = {"origin":key[0],"distance":key[1],"region_index":index,"side":side,
+                    **intervention,"native_score_delta":score_change,"byte_delta":intervention["byte_change"],
+                    "pixels_changed_inside":inside,"pixels_changed_outside":int(np.sum(changed_pixels))-inside,
+                    **{metric+"_quality_delta":panel[path]-panel[baseline_path] for metric,panel in judges.items()}}
+                pair[side] = sample
+                cell_samples.append(sample)
+            span = pair["up"]["mean_log_actual_q_change"] - pair["down"]["mean_log_actual_q_change"]
+            if span > 1e-12:
+                derivative = {"region_index":index,"map_mass":region["map_mass"],"map_density":region["map_density"],
+                    **{field: (pair["up"][field]-pair["down"][field])/span for field in
+                       ["native_score_delta","byte_delta","ssim2_quality_delta","butteraugli_quality_delta"]}}
+                central.append(derivative)
+        summary = {"origin":key[0],"class":sources[key[0]]["content_class"],"distance":key[1],
+            "interventions":len(cell_samples),"central_samples":len(central),
+            "actual_quantizer_inert":sum(s["changed_inside"]+s["changed_outside"] == 0 for s in cell_samples),
+            "pixel_inert":sum(s["pixels_changed_inside"]+s["pixels_changed_outside"] == 0 for s in cell_samples),
+            "captured_quantizer_inert_but_pixels_changed":sum(
+                s["changed_inside"]+s["changed_outside"] == 0
+                and s["pixels_changed_inside"]+s["pixels_changed_outside"] > 0 for s in cell_samples),
+            "quantizer_changes_outside_region":sum(s["changed_outside"] > 0 for s in cell_samples),
+            "pixel_changes_outside_region":sum(s["pixels_changed_outside"] > 0 for s in cell_samples),
+            "nonpositive_central_byte_derivatives":sum(c["byte_delta"] <= 0 for c in central),
+            "rank_associations":{},"direction":{}}
+        for metric in ["native_score_delta","ssim2_quality_delta","butteraugli_quality_delta"]:
+            signs = [s[metric] * (1 if s["mean_log_actual_q_change"] > 0 else -1)
+                     for s in cell_samples if abs(s["mean_log_actual_q_change"]) > 1e-12]
+            eps = 1e-5 if metric == "native_score_delta" else 1e-6
+            summary["direction"][metric] = {"positive":sum(v>eps for v in signs),
+                "negative":sum(v < -eps for v in signs),"flat":sum(abs(v)<=eps for v in signs),"epsilon":eps}
+            for predictor in ["map_mass","map_density"]:
+                summary["rank_associations"][predictor+"_vs_"+metric] = corr(
+                    [c[predictor] for c in central], [c[metric] for c in central])
+                positive_rate = [c for c in central if c["byte_delta"] > 0]
+                summary["rank_associations"][predictor+"_vs_"+metric+"_per_byte"] = corr(
+                    [c[predictor] for c in positive_rate], [c[metric]/c["byte_delta"] for c in positive_rate])
+        summary["central_differences"] = central
+        results.append(summary)
+        samples.extend(cell_samples)
+    result = {"schema":"native-jxl-interventions-analysis-v1","inputs":inp,"work":done,
+        "compatibility":compatibility,
+        "judge_pairs_per_metric":len(rows),"verified_neutral_cells":len(groups),
+        "cells":results,"interventions":samples,
+        "conclusion":"Mechanism evidence only; no model qualification, target-attainment or matched-RD claim."}
+    text = ["# Native JXL finite-block interventions", "",
+        "All encoded/pixel/quantizer hashes, neutral repeats, region/probe coverage and independent judge identities verified.", "",
+        "Central differences divide the up-minus-down score/byte difference by actual mean log-quantizer span. Butteraugli is negated so positive means quality improvement.", "",
+        "| Origin | Class | Distance | D direction positive/negative/flat | Mass vs D derivative | Density vs D gain/byte |", "|---|---|---:|---:|---:|---:|"]
+    for cell in results:
+        direction = cell["direction"]["native_score_delta"]
+        values = cell["rank_associations"]
+        fmt = lambda v: "undefined" if v is None else f"{v:.3f}"
+        text.append(f"| {cell['origin']} | {cell['class']} | {cell['distance']:g} | {direction['positive']}/{direction['negative']}/{direction['flat']} | {fmt(values['map_mass_vs_native_score_delta'])} | {fmt(values['map_density_vs_native_score_delta_per_byte'])} |")
+    text += ["", result["conclusion"], "Flat quantizers, nonpositive byte derivatives and changes outside the selected region remain explicit in JSON. Correlations describe this fixed training-family screen; they are not release gates."]
+    (root/"analysis_summary.json").write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
+    (root/"analysis_summary.md").write_text("\n".join(text)+"\n")
+    print("\n".join(text))
+
+
 def main():
+    if "--interventions" in sys.argv:
+        return interventions_main()
     if "--target-loop" in sys.argv:
         return target_loop_main()
     judges = load_judges()
