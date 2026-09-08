@@ -4141,6 +4141,21 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
         usize,
     ),
 ) -> crate::metric::ZensimResult {
+    // Reference construction already reflect-pads sub-pyramid images. The
+    // retained attribution walk must see the same distorted geometry, just
+    // like ordinary cached scoring; otherwise its scale-0 widths disagree.
+    if distorted.width() < crate::metric::MIN_PYRAMID_DIM
+        || distorted.height() < crate::metric::MIN_PYRAMID_DIM
+    {
+        let padded = crate::metric::reflect_pad_to_min(distorted);
+        return compute_zensim_streaming_with_ref_and_attr_planes(
+            precomputed,
+            &padded,
+            config,
+            weights,
+            on_scale,
+        );
+    }
     let width = distorted.width();
     let height = distorted.height();
     let padded_width = pyramid_plane_stride(width);

@@ -326,7 +326,9 @@ impl<'a> BakeScorer<'a> {
     /// The result uses the input row's identity layout, including zero
     /// sensitivity for unread IDs. Each component is the central difference
     /// of [`Self::score_features`] with step `max(abs(feature) * 1e-3, 1e-5)`.
-    /// The existing predictor buffers are reused for every forward. All heads,
+    /// Predictor buffers are reused within each worker. Unread IDs skip their
+    /// forwards; threaded builds evaluate large read sets in independent
+    /// column groups with unchanged per-forward arithmetic. All heads,
     /// splines, codec calibration, ensemble members, final disposition and
     /// corruption gates participate; negative scores are preserved.
     ///
@@ -358,27 +360,139 @@ impl<'a> BakeScorer<'a> {
         {
             return Err(invalid());
         }
-        let mut probe = features.to_vec();
-        let mut gradient = Vec::with_capacity(features.len());
-        for (k, &value) in features.iter().enumerate() {
+        // Validate every requested perturbation before skipping an unread ID.
+        // The shortcut cannot hide overflow in an otherwise unused column.
+        for &value in features {
             let eps = (value.abs() * 1e-3).max(1e-5);
-            let hi = value + eps;
-            let lo = value - eps;
-            if !hi.is_finite() || !lo.is_finite() {
+            if !(value + eps).is_finite() || !(value - eps).is_finite() {
                 return Err(invalid());
             }
-            probe[k] = hi;
-            let up = self.score_features(&probe, width, height, codec_hint)?;
-            probe[k] = lo;
-            let down = self.score_features(&probe, width, height, codec_hint)?;
+        }
+        let mut reads = vec![false; features.len()];
+        self.mark_feature_reads(&mut reads);
+        let indices: Vec<usize> = reads
+            .iter()
+            .enumerate()
+            .filter_map(|(i, read)| read.then_some(i))
+            .collect();
+        let mut values = vec![0.0; indices.len()];
+        #[cfg(feature = "threads")]
+        let parallel = if indices.len() >= 128 && rayon::current_num_threads() > 1 {
+            use rayon::prelude::*;
+            let chunk = indices.len().div_ceil(rayon::current_num_threads().min(8));
+            values
+                .par_chunks_mut(chunk)
+                .enumerate()
+                .try_for_each(|(i, out)| {
+                    let mut worker = self.fork_predictor_state()?;
+                    worker.fd_gradient_into(
+                        features,
+                        &indices[i * chunk..i * chunk + out.len()],
+                        out,
+                        (width, height),
+                        codec_hint,
+                    )
+                })?;
+            true
+        } else {
+            false
+        };
+        #[cfg(not(feature = "threads"))]
+        let parallel = false;
+        if !parallel {
+            self.fd_gradient_into(features, &indices, &mut values, (width, height), codec_hint)?;
+        }
+        let mut gradient = vec![0.0; features.len()];
+        for (id, value) in indices.into_iter().zip(values) {
+            gradient[id] = value;
+        }
+        Ok(gradient)
+    }
+
+    // Conservative declaration-based read set. Do not infer zero influence
+    // from an observed zero gradient, input value or layer coefficient.
+    fn mark_feature_reads(&self, reads: &mut [bool]) {
+        if self.weights.as_ref().is_none_or(|w| w[0] != 0.0) {
+            for pos in 0..self.layout.width() {
+                if let Some(id) = self.layout.slot_at(pos)
+                    && let Some(read) = reads.get_mut(usize::from(id))
+                {
+                    *read = true;
+                }
+            }
+        }
+        for (i, member) in self.members.iter().enumerate() {
+            if self.weights.as_ref().is_none_or(|w| w[i + 1] != 0.0) {
+                member.mark_feature_reads(reads);
+            }
+        }
+        #[cfg(feature = "corruption-head")]
+        if let Some(head) = &self.corruption {
+            match head {
+                Companion::Tree(h, _) => {
+                    for &id in h.declared_feature_ids() {
+                        if let Some(read) = reads.get_mut(usize::from(id)) {
+                            *read = true;
+                        }
+                    }
+                }
+                Companion::Linear(h, _) => h.mark_feature_reads(reads),
+            }
+        }
+    }
+
+    // Each parallel column group owns its predictor buffers. Model bytes and
+    // parsed metadata stay shared; no pixel scratch or stale numeric state is
+    // copied. Reconstruct the whole composition, including its disposition.
+    #[cfg(feature = "threads")]
+    fn fork_predictor_state(&self) -> Result<Self, ZensimError> {
+        let mut fork = Self::with_metadata(self.model, Arc::clone(&self.metadata))?;
+        fork.disposition = self.disposition;
+        fork.weights = self.weights.clone();
+        fork.members = self
+            .members
+            .iter()
+            .map(Self::fork_predictor_state)
+            .collect::<Result<_, _>>()?;
+        #[cfg(feature = "corruption-head")]
+        {
+            fork.corruption = match &self.corruption {
+                Some(Companion::Tree(h, t)) => Some(Companion::Tree(h, *t)),
+                Some(Companion::Linear(h, t)) => {
+                    Some(Companion::Linear(Box::new(h.fork_predictor_state()?), *t))
+                }
+                None => None,
+            };
+        }
+        Ok(fork)
+    }
+
+    fn fd_gradient_into(
+        &mut self,
+        features: &[f64],
+        indices: &[usize],
+        output: &mut [f64],
+        dimensions: (u32, u32),
+        codec_hint: Option<&str>,
+    ) -> Result<(), ZensimError> {
+        let mut probe = features.to_vec();
+        for (&k, result) in indices.iter().zip(output) {
+            let value = features[k];
+            let eps = (value.abs() * 1e-3).max(1e-5);
+            probe[k] = value + eps;
+            let up = self.score_features(&probe, dimensions.0, dimensions.1, codec_hint)?;
+            probe[k] = value - eps;
+            let down = self.score_features(&probe, dimensions.0, dimensions.1, codec_hint)?;
             probe[k] = value;
             let sensitivity = (up - down) / (2.0 * eps);
             if !up.is_finite() || !down.is_finite() || !sensitivity.is_finite() {
-                return Err(invalid());
+                return Err(ZensimError::ModelForwardFailed {
+                    reason: "candidate sensitivity requires finite inputs, scores and probes",
+                });
             }
-            gradient.push(sensitivity);
+            *result = sensitivity;
         }
-        Ok(gradient)
+        Ok(())
     }
 
     #[cfg(feature = "feature-regime-v2")]
@@ -593,6 +707,117 @@ impl<'a> BakeScorer<'a> {
             codec_hint,
         )?;
         Ok(result)
+    }
+
+    /// Cache the SDR reference for [`Self::compute_with_ref_and_attribution`].
+    /// Reuse this cache for comparisons against the same source image.
+    ///
+    /// # Errors
+    /// Refuses a formula mismatch, HDR input or invalid source dimensions.
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    pub fn precompute_reference(
+        &self,
+        source: &impl ImageSource,
+    ) -> Result<crate::PrecomputedReference, ZensimError> {
+        self.check_pixel_revision()?;
+        Zensim::new(ZensimProfile::B).precompute_reference(source)
+    }
+
+    /// Compare SDR pixels and spatialize this complete candidate's score.
+    ///
+    /// Uses the same declared feature plan and complete scoring composition
+    /// as [`Self::compute`], with retained extraction buffers and a cached
+    /// reference. No caller-supplied or first-image gradient is used.
+    /// `precomputed` must come from [`Self::precompute_reference`] for this
+    /// same `source`; dimensions are checked, source identity is the caller's
+    /// contract. Reuse `session` across comparisons to reuse scratch buffers.
+    ///
+    /// `bin` sets the map grid in source pixels. Aligned rectangle integrals
+    /// remain exact for that density; unaligned queries interpolate within
+    /// bins. Inspect the result's unsupported feature IDs and corruption-gate
+    /// flag: local finite sensitivities and supported integrands do not prove
+    /// accuracy for a finite pixel edit. Identity returns score 100 and a zero
+    /// map. Negative scores retain their original scale.
+    ///
+    /// # Errors
+    /// Refuses `bin == 0`, invalid inputs/cache dimensions, HDR, a formula
+    /// mismatch, or failed/nonfinite candidate scoring and sensitivities.
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_with_ref_and_attribution(
+        &mut self,
+        source: &impl ImageSource,
+        precomputed: &crate::PrecomputedReference,
+        distorted: &impl ImageSource,
+        codec_hint: Option<&str>,
+        session: &mut crate::Fused944Session,
+        bin: usize,
+    ) -> Result<crate::ScoredAttribution, ZensimError> {
+        if bin == 0 {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "attribution bin must be nonzero",
+            });
+        }
+        self.check_pixel_revision()?;
+        validate_pair(source, distorted)?;
+        validate_ref_match(precomputed, distorted)?;
+        check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
+        let plan = self.plan()?;
+        let params = ZensimProfile::B.params();
+        let config = config_from_params(params, true);
+        #[cfg(feature = "corruption-head")]
+        let has_corruption_gate = self.corruption.is_some();
+        #[cfg(not(feature = "corruption-head"))]
+        let has_corruption_gate = false;
+        if images_byte_identical(source, distorted) {
+            let result = identical_result_at(&config, plan.walk_width());
+            return Ok(crate::ScoredAttribution {
+                sensitivities: vec![0.0; result.features().len()],
+                result,
+                attribution: crate::attribution::zero_attribution(
+                    source.width(),
+                    source.height(),
+                    bin,
+                ),
+                unsupported_feature_ids: Vec::new(),
+                has_corruption_gate,
+            });
+        }
+        let (mut features, mean_offset) = session.planned_features(source, distorted, &plan)?;
+        features.truncate(
+            plan.walk_width()
+                .max(crate::fold_engine::v1_feature_width(&config)),
+        );
+        let (_, raw_distance) =
+            score_v1_layout_features(&mut features, params.weights, &config, config.num_scales);
+        let score = self.score_features(
+            &features,
+            source.width() as u32,
+            source.height() as u32,
+            codec_hint,
+        )?;
+        let sensitivities = self.score_features_fd_gradient(
+            &features,
+            source.width() as u32,
+            source.height() as u32,
+            codec_hint,
+        )?;
+        let (spatial, unsupported_feature_ids) =
+            crate::attribution::candidate_map_sensitivities(&plan, &sensitivities);
+        let (_, attribution) = Zensim::new(ZensimProfile::B).attribution_from_retention_binned(
+            precomputed,
+            distorted,
+            &spatial,
+            session,
+            bin,
+        )?;
+        Ok(crate::ScoredAttribution {
+            result: ZensimResult::new(score, raw_distance, features, ZensimProfile::B, mean_offset),
+            attribution,
+            sensitivities,
+            unsupported_feature_ids,
+            has_corruption_gate,
+        })
     }
 }
 

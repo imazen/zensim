@@ -522,10 +522,10 @@ pub use source::{
 // fused folded-944 entry inside it additionally needs `feature-regime-v2` —
 // gate the re-export on BOTH, else a `feature-regime-v2`-only build fails
 // to compile (caught 2026-08-05 by the Profile C folded-944 test build).
-#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
-pub use attribution::Fused944Session;
 #[cfg(feature = "custom-profiles")]
 pub use attribution::{AttributionResult, AttributionSession};
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+pub use attribution::{Fused944Session, ScoredAttribution};
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
 pub use streaming::{PrecomputedReference, ZensimScratch};
 

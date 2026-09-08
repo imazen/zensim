@@ -152,6 +152,8 @@ pub(crate) fn compute_fold_backed(
         config.allow_multithreading,
         scratch,
         plan,
+        #[cfg(feature = "custom-profiles")]
+        None,
     )?;
     // The fold emits its regime's width with `f372..` structurally zero. Keep
     // whichever is WIDER: the config's v1 width (a prefix, which the linear

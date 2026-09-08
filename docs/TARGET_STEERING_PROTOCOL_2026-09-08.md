@@ -48,6 +48,54 @@ No quality/qualification threshold changes are authorized by this instrument
 repair. Validate linear known derivatives, dense layout, head/spline/affine
 composition, active gates, negative scores and sequential-surface parity.
 
+### Candidate score/map binding — registered before implementation
+
+The coherence example and the recovered native JXL loop are concrete callers.
+Add the following on `BakeScorer`, gated by `custom-profiles` and
+`feature-regime-v2`, using existing reference and retention owners:
+
+```rust
+pub fn precompute_reference(&self, source: &impl ImageSource)
+    -> Result<PrecomputedReference, ZensimError>;
+pub fn compute_with_ref_and_attribution(
+    &mut self, source: &impl ImageSource, precomputed: &PrecomputedReference,
+    distorted: &impl ImageSource, codec_hint: Option<&str>,
+    session: &mut Fused944Session, bin: usize,
+) -> Result<ScoredAttribution, ZensimError>;
+```
+
+`ScoredAttribution` is an opaque returned object, exported under those same
+features. Its exact read-only accessors are `result() -> &ZensimResult`,
+`attribution() -> &AttributionResult`, `sensitivities() -> &[f64]`,
+`unsupported_feature_ids() -> &[usize]` and `has_corruption_gate() -> bool`.
+The last two make approximation limits visible at the call boundary; zero
+local sensitivity is never proof that a finite intervention is inert.
+
+Use the existing planned fold with retention hooks, complete `BakeScorer`
+sensitivities and existing binned attribution assembly. The returned scalar
+and consumed feature values must match ordinary `compute` exactly. Keep
+negative scores and pixel identity. Reuse sessions and reference caches;
+no process-global model or first-image gradient. Reference caches must be
+built by this surface from the same source image. Spatial coverage must
+explicitly distinguish unimplemented integrands from reference-only and
+SDR structural-zero terms. Unsupported extraction variants must refuse or
+report their unsupported terms, never silently use default feature semantics.
+SDR attribution does not imply an HDR attribution qualification.
+
+Before native evidence: test plan/score/consumed-feature parity on shipped
+bakes and composed fixtures, binned/per-pixel consistency, session reuse,
+identity, tiny/odd sizes, negative outputs, unsupported slots and declared
+formula/activity variants. Existing attribution tests protect legacy callers.
+
+The first C smoke timing exposed roughly 250 ms in the complete
+score/sensitivity/map call at 256 pixels. Before native use, allow only exact
+finite-probe acceleration: skip IDs absent from every active member/head,
+validate nonfinite probes before that shortcut, and parallelize independent
+columns with private predictor state when threading is available. Preserve
+per-forward arithmetic and composition order. Gate against an explicit
+sequential complete-surface oracle, including ensembles; record measured
+timing separately from correctness and avoid a new scoring implementation.
+
 ### Earlier scalar bounds/calibration instrument
 
 Owner: `zensim-target`, extending its existing search and `demo_matrix`.

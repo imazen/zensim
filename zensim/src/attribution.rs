@@ -1,4 +1,11 @@
-//! Attribution-density steering map (task #67, C1) — `custom-profiles` research API.
+//! Attribution-density steering maps — `custom-profiles` API.
+//!
+//! `BakeScorer::compute_with_ref_and_attribution` binds a candidate's
+//! complete score, declared feature extraction and sensitivities to the
+//! retained, binned map owner. Its result reports unsupported spatial terms
+//! and discontinuous corruption gating. The basic-block construction below
+//! underlies both that route and the earlier caller-supplied-gradient APIs;
+//! the full route also covers v2, append and append2 integrands.
 //!
 //! Builds a per-pixel **attribution density** `D(x, y)` for a scalar model's
 //! gradient `s_k = ∂score/∂f_k` over the BASIC feature block (f0-155: 13 slots
@@ -75,9 +82,11 @@
 //!
 //! # Honest approximations / blind spots
 //!
-//! 1. **f156-371 (peak/masked/iw) and any block beyond are NOT spatialized**
-//!    — same structural blind spot as the signal fold. The harness prints the
-//!    dropped `|s_k|` mass per bake.
+//! 1. **f156-371 (peak/masked/iw) and f944+ have no integrands here.**
+//!    The candidate result reports locally active unsupported IDs, including
+//!    extraction variants whose matching retained integrands are unavailable.
+//!    Reference-only features and SDR highlight structural zeros contribute
+//!    exactly zero. The full map covers supported f372-943 terms.
 //! 2. **Blur bleed** (C2b MEASURED): refining block `B` also changes signals
 //!    within the blur radius outside `B`. The pure-window-supported signals
 //!    (ssim `d`; v2 contrast/texture) ARE spread over their blur window via
@@ -133,10 +142,7 @@ const BAND_ROWS: usize = 32;
 #[cfg(feature = "feature-regime-v2")]
 mod layout_ends {
     /// End of the basic block (`f0-155`) = start of the v1 pooled block.
-    /// Not referenced by the slicing itself (the basic path bounds-checks its
-    /// own lookups), but it completes the layout description and is exercised
-    /// by `attribution_covers_expected_slots_per_width`.
-    #[allow(dead_code)]
+    /// Used by the candidate coverage report and the per-width coverage gate.
     pub(crate) const BLOCK_END_BASIC: usize = 156;
     /// End of the v1 peak/masked/IW pooled block (`f156-371`) = start of v2.
     /// Structurally NOT spatialized (module blind spot 1).
@@ -1463,6 +1469,32 @@ mod tests {
     use crate::profile::ProfileParams;
     use crate::{RgbSlice, Zensim, ZensimProfile};
     use std::sync::OnceLock;
+
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn candidate_coverage_distinguishes_variants_reference_only_and_missing_integrands() {
+        use crate::feature_plan::Plan;
+        use crate::feature_set_id::SlotSet;
+        let wanted = SlotSet::from_slots([0, 156, 377, 924, 926, 927, 944]);
+        let mut plan = Plan::derive(&wanted, 960).unwrap();
+        let mut sensitivities = vec![0.; 960];
+        for id in [0, 156, 377, 924, 926, 927, 944] {
+            sensitivities[id] = -1.;
+        }
+        let (spatial, missing) = candidate_map_sensitivities(&plan, &sensitivities);
+        assert_eq!(missing, [156, 944]);
+        assert_eq!(spatial[377], -1.);
+        assert_eq!(spatial[924], -1.);
+        assert_eq!(spatial[926], 0.); // Reference-only luma.
+        assert_eq!(spatial[927], 0.); // SDR highlight structural zero.
+        plan.compute.append2_dst_activity = true;
+        let (_, missing) = candidate_map_sensitivities(&plan, &sensitivities);
+        assert_eq!(missing, [156, 924, 944]);
+        plan.compute.v2_blocks = false;
+        let (spatial, missing) = candidate_map_sensitivities(&plan, &sensitivities);
+        assert_eq!(missing, [156, 377, 924, 944]);
+        assert_eq!(spatial.len(), 156); // No stale retention is consulted.
+    }
 
     /// Extended-features test profile (all channels/scales active, default
     /// blur/scale config — the same knobs every shipped profile uses).
@@ -3227,6 +3259,126 @@ impl Fused944Session {
     pub fn new() -> Self {
         Self::default()
     }
+
+    pub(crate) fn planned_features(
+        &mut self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        plan: &crate::feature_plan::Plan,
+    ) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
+        // Basic-only maps use the cached v1 owner. Cheap free extras do not
+        // populate the v2 retention cells; they are reported as unsupported
+        // below rather than read from stale/default accumulators.
+        let retention = (!plan.toggles().v1_only).then_some(&mut self.retention);
+        crate::feature_v2::compute_folded_v1_372_streaming_impl(
+            source,
+            distorted,
+            Some(120_000_000),
+            true,
+            &mut self.scratch,
+            Some(plan),
+            retention,
+        )
+    }
+}
+
+/// A complete candidate comparison and its local spatial attribution.
+///
+/// The candidate's declared feature plan and complete score produce the
+/// sensitivities used by the map. Attribution remains a local approximation
+/// of finite pixel changes; inspect [`Self::unsupported_feature_ids`] and
+/// [`Self::has_corruption_gate`] when evaluating or consuming it.
+#[cfg(feature = "feature-regime-v2")]
+#[non_exhaustive]
+pub struct ScoredAttribution {
+    pub(crate) result: crate::ZensimResult,
+    pub(crate) attribution: AttributionResult,
+    pub(crate) sensitivities: Vec<f64>,
+    pub(crate) unsupported_feature_ids: Vec<usize>,
+    pub(crate) has_corruption_gate: bool,
+}
+
+#[cfg(feature = "feature-regime-v2")]
+impl ScoredAttribution {
+    /// The complete served score and its identity-indexed feature row.
+    pub fn result(&self) -> &crate::ZensimResult {
+        &self.result
+    }
+
+    /// Signed score-gain density for supported integrands.
+    pub fn attribution(&self) -> &AttributionResult {
+        &self.attribution
+    }
+
+    /// Complete finite sensitivities, including unsupported spatial terms.
+    pub fn sensitivities(&self) -> &[f64] {
+        &self.sensitivities
+    }
+
+    /// Locally nonzero sensitivities whose integrands this map cannot serve.
+    ///
+    /// Reference-only and SDR structural-zero terms are deliberately excluded.
+    /// A missing ID is not proof that a finite intervention has no effect:
+    /// a clamp or gate may have zero local sensitivity and still be crossed.
+    pub fn unsupported_feature_ids(&self) -> &[usize] {
+        &self.unsupported_feature_ids
+    }
+
+    /// Whether the complete score includes a discontinuous corruption gate.
+    /// Central probes include that gate, but cannot guarantee that a finite
+    /// block edit stays on the same side of it.
+    pub fn has_corruption_gate(&self) -> bool {
+        self.has_corruption_gate
+    }
+}
+
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) fn candidate_map_sensitivities(
+    plan: &crate::feature_plan::Plan,
+    sensitivities: &[f64],
+) -> (Vec<f64>, Vec<usize>) {
+    use crate::feature_defs::{Form, def_at};
+    use crate::feature_v2::{APPEND2_PER_SCALE, idx_append2};
+    let toggles = plan.toggles();
+    let mut spatial = sensitivities.to_vec();
+    let mut unsupported = Vec::new();
+    for (id, value) in spatial.iter_mut().enumerate() {
+        if *value == 0.0 {
+            continue;
+        }
+        let reference_only =
+            def_at(id, crate::NUM_SCALES).is_some_and(|def| def.signal.form == Form::ReferenceOnly);
+        let append2_slot = (BLOCK_END_APPEND..BLOCK_END_APPEND2)
+            .contains(&id)
+            .then(|| (id - BLOCK_END_APPEND) % APPEND2_PER_SCALE);
+        let sdr_zero = matches!(
+            append2_slot,
+            Some(idx_append2::HL_BIN1 | idx_append2::HL_BIN2)
+        );
+        if reference_only || sdr_zero {
+            *value = 0.0;
+            continue;
+        }
+        let missing = (BLOCK_END_BASIC..BLOCK_END_V1_POOLS).contains(&id)
+            || id >= BLOCK_END_APPEND2
+            || (toggles.v1_only && id >= BLOCK_END_V1_POOLS)
+            || (toggles.append2_dst_activity && append2_slot.is_some());
+        if missing {
+            unsupported.push(id);
+            *value = 0.0;
+        }
+    }
+    // Avoid pass B when no supported v2 integrand is active, including a
+    // basic-only plan after reuse of a session that previously held v2 data.
+    if spatial.iter().skip(BLOCK_END_V1_POOLS).all(|s| *s == 0.0) {
+        spatial.truncate(BLOCK_END_BASIC);
+    }
+    (spatial, unsupported)
+}
+
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) fn zero_attribution(width: usize, height: usize, bin: usize) -> AttributionResult {
+    BinAccum::new(width, height, bin).into_result()
 }
 
 impl crate::metric::Zensim {
@@ -4044,6 +4196,22 @@ impl crate::metric::Zensim {
             &mut session.scratch,
             &mut session.retention,
         )?;
+        let (result, attribution) =
+            self.attribution_from_retention_binned(precomputed, distorted, s, session, bin)?;
+        Ok((result, v2res, attribution))
+    }
+
+    // Shared binned assembly for legacy folded-944 and complete candidates.
+    // Extraction has already populated this session's retained cells.
+    #[cfg(feature = "feature-regime-v2")]
+    pub(crate) fn attribution_from_retention_binned(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        session: &mut Fused944Session,
+        bin: usize,
+    ) -> Result<(crate::ZensimResult, AttributionResult), ZensimError> {
         let width = distorted.width();
         let height = distorted.height();
         let mut accum = BinAccum::new(width, height, bin);
@@ -4071,6 +4239,6 @@ impl crate::metric::Zensim {
                 &mut accum,
             );
         }
-        Ok((result, v2res, accum.into_result()))
+        Ok((result, accum.into_result()))
     }
 }

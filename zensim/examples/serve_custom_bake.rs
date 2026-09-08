@@ -2,13 +2,11 @@
 //! (`BakeScorer::compute`), so "is this candidate servable?" is a MEASUREMENT
 //! rather than an inference from reading `profile.rs`.
 //!
-//! Written for `benchmarks/fastclass2_campaign_2026-09-05.md` gate G7. The
-//! kernel lane (`benchmarks/kernel_fastclass_2026-09-05.md` §4 and commit
-//! `8817f379`) established that `BakeScorer::compute` emits a **372-layout**
-//! vector with `free_extras: Off`, so a 944-declared bake is refused and a
-//! 156/228-slice bake at the v1-372 layout should serve. This example checks
-//! the second half on real pixels instead of taking it on trust — the
-//! `d_ship_flip` lane found the 944 refusal exactly this way.
+//! Originally written for `benchmarks/fastclass2_campaign_2026-09-05.md`
+//! gate G7. Since September 7, `BakeScorer` serves declared feature IDs and
+//! complete candidate composition through the shared extraction plan,
+//! including supported wide bakes. No input-count guess selects a layout.
+//! `diffmap_block_coherence --bake` also exercises the bound score/map surface.
 //!
 //! ```sh
 //! cargo run --release --example serve_custom_bake \

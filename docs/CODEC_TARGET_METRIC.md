@@ -89,6 +89,30 @@ using the same pixel/color/alpha interpretation. Use the HDR absolute-luminance
 API for HDR; sending HDR through an SDR pixel path does not establish a common
 SDR/HDR scale.
 
+For a dynamic candidate, use `BakeScorer` for both the scalar and the map.
+With `custom-profiles` and `feature-regime-v2`, an SDR codec loop can reuse
+its parsed model, reference cache and session:
+
+```rust
+let mut scorer = zensim::BakeScorer::new(&model)?;
+let reference = scorer.precompute_reference(&source)?;
+let mut session = zensim::Fused944Session::new();
+// Repeat for each decoded reconstruction against this source.
+let scored = scorer.compute_with_ref_and_attribution(
+    &source, &reference, &reconstruction, Some("jxl"), &mut session, 8,
+)?;
+let achieved_score = scored.result().score();
+let first_block_gain = scored.attribution().query_rect(0, 0, 8, 8);
+```
+
+The complete configured model supplies the sensitivities, including heads,
+splines, ensemble and corruption gating. Inspect `unsupported_feature_ids()`
+and `has_corruption_gate()` before interpreting the map. Attribution is a
+local approximation; finite block edits and actual encoded outputs establish
+whether it helps. The [September 8 binding record](../benchmarks/candidate_attribution_serving_2026-09-08.md)
+includes exact score/feature gates and full coherence grids, with their tails.
+Those checks do not establish codec improvements or model qualification.
+
 Existing callers and their algorithm owners, checked in the sibling source:
 
 | Consumer | Entry point / owner | What it controls |

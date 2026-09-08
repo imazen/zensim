@@ -531,3 +531,218 @@ fn codec_affine_and_final_disposition_are_part_of_the_returned_score() {
     );
     assert!(zensim_validate::bake_runtime::post_mode_params("clmap").is_err());
 }
+
+fn spatial_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+    let src: Vec<_> = (1..=w * h)
+        .map(|i| {
+            [
+                (i % 239) as u8,
+                ((i * 7) % 251) as u8,
+                ((i * 13) % 253) as u8,
+            ]
+        })
+        .collect();
+    let dst = src
+        .iter()
+        .enumerate()
+        .map(|(i, p)| [p[0] / 2, p[1].saturating_add((i % 17) as u8), p[2]])
+        .collect();
+    (src, dst)
+}
+
+#[test]
+fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
+    let bakes: &[&[u8]] = &[
+        include_bytes!("../../zensim/weights/v47_strict_qat_native_byid_2026-09-06.bin"),
+        include_bytes!(
+            "../../zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin"
+        ),
+        include_bytes!("../../zensim/weights/c_sdr_purity944_byid_2026-09-07.bin"),
+        include_bytes!("../../zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin"),
+    ];
+    // Reuse across candidates and geometries, including C -> basic-only D.
+    let mut session = zensim::Fused944Session::new();
+    for (w, h) in [(96, 80), (71, 65), (31, 47), (1, 1)] {
+        let (src, dst) = spatial_pair(w, h);
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        for (i, bytes) in bakes.iter().enumerate() {
+            let model = Model::from_bytes(bytes).unwrap();
+            let mut scorer = BakeScorer::new(&model).unwrap();
+            let expected = scorer.compute(&rs, &ds, Some("jpeg")).unwrap();
+            let pre = scorer.precompute_reference(&rs).unwrap();
+            let full = scorer
+                .compute_with_ref_and_attribution(&rs, &pre, &ds, Some("jpeg"), &mut session, 1)
+                .unwrap();
+            let binned = scorer
+                .compute_with_ref_and_attribution(&rs, &pre, &ds, Some("jpeg"), &mut session, 8)
+                .unwrap();
+            for result in [&full, &binned] {
+                assert_eq!(
+                    result.result().score().to_bits(),
+                    expected.score().to_bits(),
+                    "bake {i}, {w}x{h}"
+                );
+                assert_eq!(
+                    result.result().features(),
+                    expected.features(),
+                    "bake {i}, {w}x{h}"
+                );
+                assert_eq!(
+                    result.result().raw_distance().to_bits(),
+                    expected.raw_distance().to_bits()
+                );
+                assert!(!result.has_corruption_gate());
+                if i >= 2 {
+                    assert!(
+                        result.unsupported_feature_ids().is_empty(),
+                        "bake {i}: {:?}",
+                        result.unsupported_feature_ids()
+                    );
+                }
+                assert!(result.attribution().density().iter().all(|x| x.is_finite()));
+            }
+            for y in (0..h).step_by(8) {
+                for x in (0..w).step_by(8) {
+                    let a = full
+                        .attribution()
+                        .query_rect(x, y, (x + 8).min(w), (y + 8).min(h));
+                    let b = binned
+                        .attribution()
+                        .query_rect(x, y, (x + 8).min(w), (y + 8).min(h));
+                    assert!(
+                        (a - b).abs() <= 1e-5 * a.abs().max(1e-6),
+                        "bake {i}, {w}x{h} bin {x},{y}: {a} vs {b}"
+                    );
+                }
+            }
+            let repeat = scorer
+                .compute_with_ref_and_attribution(&rs, &pre, &ds, Some("jpeg"), &mut session, 8)
+                .unwrap();
+            assert_eq!(
+                repeat.attribution().density(),
+                binned.attribution().density()
+            );
+            assert_eq!(repeat.sensitivities(), binned.sensitivities());
+            let identity = scorer
+                .compute_with_ref_and_attribution(&rs, &pre, &rs, None, &mut session, 8)
+                .unwrap();
+            assert_eq!(identity.result().score(), 100.);
+            assert_eq!(identity.result().raw_distance(), 0.);
+            assert!(identity.result().features().iter().all(|x| *x == 0.));
+            assert!(identity.attribution().density().iter().all(|x| *x == 0.));
+            assert!(identity.sensitivities().iter().all(|x| *x == 0.));
+        }
+    }
+}
+
+#[test]
+fn candidate_attribution_reports_unsupported_terms_and_complete_gating() {
+    let (src, dst) = spatial_pair(96, 80);
+    let rs = RgbSlice::new(&src, 96, 80);
+    let ds = RgbSlice::new(&dst, 96, 80);
+    let mut session = zensim::Fused944Session::new();
+    let model = linear(json!([{"key":"zentrain.feature_ids","type":"utf8","text":"3 156"}]));
+    let mut scorer = BakeScorer::new(&model).unwrap();
+    let pre = scorer.precompute_reference(&rs).unwrap();
+    let scored = scorer
+        .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
+        .unwrap();
+    assert_eq!(scored.unsupported_feature_ids(), &[156]);
+    assert!(scored.result().score() < 0.);
+    assert_eq!(
+        scored.result().score(),
+        scorer.compute(&rs, &ds, None).unwrap().score()
+    );
+
+    // Reference-only luma and an HDR-gated SDR zero have exactly zero
+    // distorted-image contributions, even though the model reads them.
+    let refs = linear(json!([{"key":"zentrain.feature_ids","type":"utf8","text":"926 927"}]));
+    let mut ref_scorer = BakeScorer::new(&refs).unwrap();
+    let scored = ref_scorer
+        .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
+        .unwrap();
+    assert!(scored.unsupported_feature_ids().is_empty());
+    assert!(scored.attribution().density().iter().all(|x| *x == 0.));
+
+    let models = [linear_bias(json!([]), 5.), linear_bias(json!([]), 15.)];
+    let mut gated = BakeScorer::ensemble(&models, Some(&[0.25, 0.75]))
+        .unwrap()
+        .with_linear_corruption_head(&model, 20.)
+        .unwrap();
+    let scored = gated
+        .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
+        .unwrap();
+    assert!(scored.has_corruption_gate());
+    assert_eq!(scored.result().score(), 0.);
+    assert_eq!(
+        scored.result().score(),
+        gated.compute(&rs, &ds, None).unwrap().score()
+    );
+    assert!(scored.attribution().density().iter().all(|x| *x == 0.));
+    assert!(
+        gated
+            .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 0)
+            .is_err()
+    );
+}
+
+#[test]
+fn accelerated_candidate_sensitivities_match_sequential_complete_surface() {
+    let models = [
+        Model::from_bytes(include_bytes!(
+            "../../zensim/weights/c_sdr_purity944_byid_2026-09-07.bin"
+        ))
+        .unwrap(),
+        Model::from_bytes(include_bytes!(
+            "../../zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin"
+        ))
+        .unwrap(),
+    ];
+    let (src, dst) = spatial_pair(96, 80);
+    let mut scorer = BakeScorer::ensemble(&models, Some(&[0.75, 0.25])).unwrap();
+    let row = scorer
+        .compute(
+            &RgbSlice::new(&src, 96, 80),
+            &RgbSlice::new(&dst, 96, 80),
+            Some("jpeg"),
+        )
+        .unwrap()
+        .features()
+        .to_vec();
+    fn check(scorer: &mut BakeScorer<'_>, row: &[f64]) {
+        // Deliberately call the public scalar surface twice for EVERY ID,
+        // including unread ones. This is the unoptimized independent oracle.
+        let mut expected = vec![0.; row.len()];
+        for (i, out) in expected.iter_mut().enumerate() {
+            let eps = (row[i].abs() * 1e-3).max(1e-5);
+            let mut up = row.to_vec();
+            let mut down = row.to_vec();
+            up[i] += eps;
+            down[i] -= eps;
+            *out = (scorer.score_features(&up, 96, 80, Some("jpeg")).unwrap()
+                - scorer.score_features(&down, 96, 80, Some("jpeg")).unwrap())
+                / (2. * eps);
+        }
+        for threads in [1, 4] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            let actual = pool
+                .install(|| scorer.score_features_fd_gradient(row, 96, 80, Some("jpeg")))
+                .unwrap();
+            for (i, (a, b)) in actual.iter().zip(&expected).enumerate() {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "thread count {threads}, feature {i}"
+                );
+            }
+        }
+    }
+    check(&mut scorer, &row);
+    let head = linear(json!([]));
+    let mut gated = scorer.with_linear_corruption_head(&head, 20.).unwrap();
+    check(&mut gated, &row);
+}

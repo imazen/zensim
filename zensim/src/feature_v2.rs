@@ -7788,6 +7788,7 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
     // literal rather than reconstructed from a plan, so the default path is
     // the SAME code, not merely an equivalent one.
     plan: Option<&crate::feature_plan::Plan>,
+    #[cfg(feature = "custom-profiles")] retention: Option<&mut FoldRetention>,
 ) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
@@ -7824,6 +7825,8 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
             scratch,
             FoldWalkExtras {
                 mean_offset: Some(&mut mo),
+                #[cfg(feature = "custom-profiles")]
+                retention,
                 ..Default::default()
             },
         );
@@ -7839,6 +7842,8 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
         scratch,
         FoldWalkExtras {
             mean_offset: Some(&mut mo),
+            #[cfg(feature = "custom-profiles")]
+            retention,
             ..Default::default()
         },
     );

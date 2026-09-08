@@ -14,7 +14,7 @@ objectives. B/C/D can be replaced; good rank alone is not product readiness.
 | Feature definitions / read-set planning | `zensim::feature_defs`, `feature_set_id`, `Plan::for_bake` | Actual consumed IDs versus canonical extraction; era, SIMD, geometry and feature-build checks |
 | New candidate inference | `zensim::BakeScorer` | Complete heads/splines/composition; cached-row and pixel/HDR parity |
 | Named-profile inference | `zensim::Zensim` | Profile/bake identity and supported pixel contract |
-| Spatial attribution / rectangle queries | `zensim/src/attribution.rs`, retained extraction in `feature_v2` | Signed score-unit density, covered integrands, scalar/feature parity, binned and stale-session contracts; bind candidate sensitivities to complete `BakeScorer` composition |
+| Spatial attribution / rectangle queries | `zensim/src/attribution.rs`, retained extraction in `feature_v2` | `BakeScorer::compute_with_ref_and_attribution` binds complete candidate scoring; signed score-unit density, explicit integrand coverage, scalar/feature parity and reusable binned sessions |
 | MLP training / capability admission | `zensim_mlp_train`, `mlp_train::capabilities` | Explicit recipe, table declarations, source-disjoint selection, reproducible random streams |
 | Transform selection | Trainer `--auto-transforms` | Declared score/method, top-N and parameter bounds; preserve independent screen references |
 | Serialize / inspect ZNPR v3 | `zenpredict-bake` | Versioned metadata and final artifact hashes |

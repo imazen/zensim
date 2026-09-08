@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added — candidate score and spatial attribution (2026-09-08)
+
+With `custom-profiles` and `feature-regime-v2`, `BakeScorer` now provides
+`precompute_reference` and `compute_with_ref_and_attribution`. The latter
+returns `ScoredAttribution`: the complete served comparison, signed binned
+attribution, complete sensitivities, locally unsupported feature IDs and a
+corruption-gate flag. It uses the candidate's extraction plan and existing
+retention buffers. Reference-only and SDR highlight-zero terms are explicit;
+HDR spatial attribution is not claimed by this SDR entry.
+
+Finite sensitivities skip undeclared IDs and use independent predictor state
+for parallel column groups, preserving sequential complete-score arithmetic.
+The coherence example consumes the bound candidate map. The retained basic
+attribution walk also now pads small distorted images to match its already
+padded reference cache, fixing a width-mismatch panic.
+
 ### Added — complete candidate sensitivities (2026-09-08)
 
 `BakeScorer::score_features_fd_gradient` computes local finite sensitivities

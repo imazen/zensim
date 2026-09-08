@@ -252,6 +252,34 @@ fn run_bake_mode(
             .compute(&rs, &RgbSlice::new(dist, w, h), None)
             .expect("candidate pixel comparison")
     };
+    #[cfg(feature = "feature-regime-v2")]
+    let (base_spatial, candidate_ms) = {
+        let pre = sensitivity_scorer
+            .precompute_reference(&rs)
+            .expect("candidate reference");
+        let mut session = zensim::Fused944Session::new();
+        let start = std::time::Instant::now();
+        let result = sensitivity_scorer
+            .compute_with_ref_and_attribution(
+                &rs,
+                &pre,
+                &RgbSlice::new(dpx, w, h),
+                None,
+                &mut session,
+                1,
+            )
+            .expect("candidate score and attribution");
+        let elapsed = start.elapsed().as_secs_f64() * 1e3;
+        println!(
+            "  candidate unsupported spatial IDs: {:?}; corruption gate: {}",
+            result.unsupported_feature_ids(),
+            result.has_corruption_gate()
+        );
+        (result, elapsed)
+    };
+    #[cfg(feature = "feature-regime-v2")]
+    let base = base_spatial.result();
+    #[cfg(not(feature = "feature-regime-v2"))]
     let base = compare(dpx);
     let base_score = base.score();
     let base_feats = base.features().to_vec();
@@ -264,6 +292,9 @@ fn run_bake_mode(
         model.n_inputs(),
         model.caller_input_width()
     );
+    #[cfg(feature = "feature-regime-v2")]
+    let s = base_spatial.sensitivities().to_vec();
+    #[cfg(not(feature = "feature-regime-v2"))]
     let s = sensitivity_scorer
         .score_features_fd_gradient(&base_feats, w as u32, h as u32, None)
         .expect("complete candidate sensitivities");
@@ -586,18 +617,7 @@ fn run_bake_mode(
     let ms_attr = t_attr.elapsed().as_secs_f64() * 1e3;
     let attr_block_basic = attr.block_sums(block);
     #[cfg(feature = "feature-regime-v2")]
-    let mut ms_attr_full = 0.0f64;
-    #[cfg(feature = "feature-regime-v2")]
-    let attr_block: Vec<f64> = if n_in > 372 {
-        let t_full = std::time::Instant::now();
-        let full = z_map
-            .compute_attribution_density_full(&rs, &dist_slice, &s[..n_in])
-            .expect("full attribution density");
-        ms_attr_full = t_full.elapsed().as_secs_f64() * 1e3;
-        full.block_sums(block)
-    } else {
-        attr_block_basic.clone()
-    };
+    let attr_block = base_spatial.attribution().block_sums(block);
     #[cfg(not(feature = "feature-regime-v2"))]
     let attr_block: Vec<f64> = attr_block_basic.clone();
     #[cfg(feature = "feature-regime-v2")]
@@ -897,11 +917,7 @@ fn run_bake_mode(
         }
     );
     #[cfg(feature = "feature-regime-v2")]
-    let full_note = if attr_has_v2 {
-        format!(" | full (basic+v2+append) {ms_attr_full:.1} ms")
-    } else {
-        String::new()
-    };
+    let full_note = format!(" | candidate score+sensitivities+map {candidate_ms:.1} ms");
     #[cfg(not(feature = "feature-regime-v2"))]
     let full_note = String::new();
     println!(
