@@ -2,9 +2,12 @@
 
 The canonical single-fit path is implemented and its data is prepared, but
 **no canonical image-data candidate has been fit or qualified**. The remaining
-content-admission gap is 30 UPIQ HDR reference EXRs. Existing local EXR owners
-delegate to `image::open`; no native EXR decoder was found. A narrowly scoped
-exception for reference fingerprinting has been requested, not assumed.
+content-admission gap is fingerprinting/contextual review of 30 UPIQ HDR
+references. A later native zenbitmaps EXR port successfully decoded all 30;
+its tests and pixels are preserved in `native-exr-port-2026-09-08/`. No foreign
+reader was used on these references, and no exception was assumed. This decoder
+work is separate from HDR training inputs: imazen-26 already has 76 HDR PNGs
+and 1,140 scale variants. [Confirmed source binding](../docs/TARGET_STEERING_PROTOCOL_2026-09-08.md#existing-hdr-png-inputs--user-correction-september-8).
 
 ## Source admission
 

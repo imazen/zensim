@@ -489,3 +489,40 @@ coverage and a descriptive scale check, not promotion or a larger independent
 validation set. Preserve all outcomes, direct scalar-state comparisons, native
 PNG/JXL hashes, exact neutral controls and independent judges. Keep results
 separate; they cannot overturn the registered 256 screening failure.
+
+
+## Existing HDR PNG inputs — user correction, September 8
+
+Use the existing imazen/imazen-26 `variant/png-v3` branch for HDR development.
+The exact branch revision is `b1faae550eba4d29efee1de1a32954ef11a0e1ed`;
+canonical main remains `187fbf338ce08e8e6654db7f04ddae58d5263da2`.
+All **76 HDR PNGs** exist locally under `/mnt/v/output/imazen-26-png-v3/`, and
+all 76 match their branch Git LFS SHA-256 OID and size (4,060,580,493 bytes).
+Git blob hashes name the small LFS pointer text, not the PNG payload; the
+verification uses the pointer's payload OID. The indexed URL supplies each
+render basename, including EXIF-rotated dimensions; do not derive filenames.
+
+The August 27 family manifest gives **38 train / 20 validate / 18 terminal**
+origins. Later August 30 URL corrections do not replace that family rule with
+individual-id splits. The 1,140 local variants in the active
+`hdr-grid-15scale@2026-08-23` set are the byte-level successor to the June 14
+set; they retain its origin membership and therefore must also inherit these
+family roles. Historical selection of all 76 does not authorize fitting on
+validation/terminal families. Use the prepared scale set for bounded HDR codec
+experiments, with native PNG decoding and explicit PQ/cICP interpretation.
+Source binding verifies bytes/membership only; metadata/pixel serving checks,
+codec experiments and model qualification remain to run. No terminal image was
+decoded, displayed, scored or used for fitting in this binding audit.
+
+`/mnt/v/output/zensim/imazen26-hdr-png-binding-2026-09-08/INPUTS.json` contains
+all exact paths, URLs, payload hashes, sizes and family roles. The PNG index SHA
+is `384c6011c5b53814336a171c61d80c3e83b3938d21e606b72d7b4f1b095aeb83`;
+the family map SHA is
+`9d07a0f63ef5fa167c5333535010f44b4ab9a087f04e560521b6d1aa1961820c`.
+
+The separate 30 UPIQ HDR EXRs are protected holdout references for content-overlap
+admission, not the HDR development corpus. Their decoder work must not be
+presented as necessary to obtain HDR training images or expand the HDR source
+corpus. Existing prepared corruption-head views remain governed by their own
+registered complete-admission requirement. Neither substituting unrelated HDR
+PNGs for UPIQ references nor silently dropping UPIQ coverage is valid.

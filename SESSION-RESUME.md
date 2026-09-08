@@ -4,7 +4,18 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest September 8 continuation: [actual coarse JXL allocation policy](benchmarks/zensim_coarse_allocation_2026-09-08.md)
+Latest user correction: HDR development uses the existing imazen-26
+`variant/png-v3` inputs: **76 HDR PNGs**, all locally present and byte-verified
+against branch LFS payload OIDs, with **38 train / 20 validate / 18 terminal**
+origins under the family manifest. The active 1,140-image HDR scale set is also
+local. [Source binding and chronology](docs/TARGET_STEERING_PROTOCOL_2026-09-08.md#existing-hdr-png-inputs--user-correction-september-8).
+The separate UPIQ EXRs are holdout-overlap references, not a missing HDR
+training corpus. Native EXR code and its successful port tests are preserved
+in the zenbitmaps checkout and `/mnt/v/output/zensim/native-exr-port-2026-09-08/`;
+further EXR implementation is paused. Content admission remains incomplete;
+no new model has been fit or qualified.
+
+Previous September 8 continuation: [actual coarse JXL allocation policy](benchmarks/zensim_coarse_allocation_2026-09-08.md)
 **fails its preregistered independent-judge screen**. All eight 256 cells improve
 D versus every locally reachable globally rescaled raw field, but photo 2010/d3
 loses 0.021502 Butteraugli and screen 8206/d1 loses 0.143189 SSIM2. The separately
@@ -20,7 +31,8 @@ and original/active/failed-judge scalar comparator gallery. Next separate model
 preferences from allocation-rule effects using supported existing candidate maps
 under a registered fixed rule, and strengthen the ordinary scalar comparator
 before any product RD claim. Do not simply repeat this failed D policy or sweep
-its gain against these outcomes. The EXR admission question remains unanswered.
+its gain against these outcomes. The earlier EXR exception question was unanswered; the native port now decodes
+those references, while fingerprinting/contextual admission remain unfinished.
 
 Previous September 8 continuation: [coarse JXL intervention screen](benchmarks/zensim_coarse_interventions_2026-09-08.md)
 finishes native PNG IO and whole-transform 4×4 grouping in the existing codec

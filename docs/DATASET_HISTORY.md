@@ -3711,3 +3711,15 @@ Butteraugli/SSIM2 noninferiority fails; 512 engineering coverage has further
 losses. No separate validation or terminal family participates. The 249-encode
 primary and all 498 judge values reproduce; 36 analysis and 11 CLI refusal
 controls pass. [Failed policy record](../benchmarks/zensim_coarse_allocation_2026-09-08.md).
+
+
+## 2026-09-08 — existing HDR PNG development inputs, user correction
+
+The canonical imazen-26 `variant/png-v3` branch has all 76 HDR PNG companions;
+all 76 local payloads match branch LFS SHA-256 OIDs and sizes. The family split
+is 38 train / 20 validation / 18 terminal. The active August 23 15-scale set
+(1,140 files) is also local; it retains June's pixels and membership and inherits
+the current family split. No fitting, scoring or terminal pixel read occurred.
+This is the HDR development source path. UPIQ's separate 30 EXRs serve protected
+holdout-content admission and must not be described as needed to obtain HDR
+training images. [Binding, exact revisions and chronology](TARGET_STEERING_PROTOCOL_2026-09-08.md#existing-hdr-png-inputs--user-correction-september-8).
