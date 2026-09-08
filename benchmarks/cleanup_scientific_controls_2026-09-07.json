@@ -1,0 +1,2242 @@
+{
+  "registration": "11123107b26a",
+  "seeds": [
+    {
+      "seed": 4004,
+      "H_control": {
+        "cid22": 0.8756234680879948,
+        "konjnd_guard": 0.5029577070293557,
+        "composite": 0.8619953141477333,
+        "bake_sha256": "f432f3837f9cf4f8d9de08773815def37ffaf400731f75af1186a4e23fccbe73",
+        "bake_bytes": 59719,
+        "contract": "PASS",
+        "regression": "FAIL",
+        "checks": [
+          {
+            "bar": 100.0,
+            "cmp": "\u2265",
+            "id": "A1",
+            "incumbent": null,
+            "measured": 100.0,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "ceiling \u2014 pooled dial max"
+          },
+          {
+            "bar": -64.326595,
+            "cmp": "\u2264",
+            "id": "A2",
+            "incumbent": null,
+            "measured": -102.95024242229357,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "floor \u2014 pooled dial min"
+          },
+          {
+            "bar": 93.9743354,
+            "cmp": "\u2265",
+            "id": "A3",
+            "incumbent": null,
+            "measured": 94.08025114816137,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "robust ceiling \u2014 dial p95"
+          },
+          {
+            "bar": -16.252150599999997,
+            "cmp": "\u2264",
+            "id": "A4",
+            "incumbent": null,
+            "measured": -18.179138163504312,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "robust floor \u2014 dial p5"
+          },
+          {
+            "bar": 164.326595,
+            "cmp": "\u2265",
+            "id": "A5",
+            "incumbent": null,
+            "measured": 202.95024242229357,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "reach (max \u2212 min)"
+          },
+          {
+            "bar": 110.226486,
+            "cmp": "\u2265",
+            "id": "A6",
+            "incumbent": null,
+            "measured": 112.25938931166567,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "dynamic range (p95 \u2212 p5)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "A7r",
+            "incumbent": null,
+            "measured": 5.0,
+            "note": "K=3 lowest steps per `(image, codec)` ladder on `dial_grid_372col_ladder.parquet`; a ladder is REPRESENTED when the dial is strictly increasing across those steps AND into the next one up, and no bottom step sits within 1e-9 of the instrument minimum -102.9502 (1 ladder(s) attain it \u2014 a sole holder, which is a genuine floor, not a clamp). Value = number of codecs whose fraction is below the MENTOR's own on the same cells; 5 of 5 codecs graded.",
+            "state": "fail",
+            "tier": "regression",
+            "what": "floor representability \u2014 lowest configurable settings resolve, per codec"
+          },
+          {
+            "bar": null,
+            "cmp": "\u2264",
+            "id": "A8r",
+            "incumbent": null,
+            "measured": -73.67485740247533,
+            "note": "REPORT-ONLY \u2014 no bar, gates nothing. Pooled min -207.4172 / p1 -73.6749 (probe n=2000, reference truth min -770.6197 / p1 -187.1314). This instrument carries NO codec identity \u2014 its rows are KADIS distortion types, not codec output \u2014 so it cannot answer the ruling's question (\"the lowest configurable settings per codec\") and is reported rather than barred. The per-DISTORTION-family reading is measured in benchmarks/d_peaks_lambda_sweep_2026-09-05.md \u00a74-\u00a76.",
+            "state": "not_measured",
+            "tier": "report-only",
+            "what": "negative tail \u2014 pooled probe min / p1 (REPORT-ONLY, no bar)"
+          },
+          {
+            "bar": 0.93,
+            "cmp": "\u2265",
+            "id": "C1",
+            "incumbent": null,
+            "measured": 0.9512272872170864,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "monotonicity (registered G3 bar)"
+          },
+          {
+            "bar": 0.05,
+            "cmp": "\u2264",
+            "id": "C2",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "flat/clamp dead-zone (registered G3 bar)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": ">",
+            "id": "C3",
+            "incumbent": null,
+            "measured": 0.5115,
+            "note": "probe n=2000, every row's reference metric is negative; CLAUDE.md: \"NEGATIVE zensim values MUST work \u2026 do NOT clamp at 0\"",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative values WORK \u2014 some row of an all-negative-truth probe scores < 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "<",
+            "id": "C4",
+            "incumbent": null,
+            "measured": -207.41716766357422,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative tail \u2014 deepest probe dial is below 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C5",
+            "incumbent": 96.24115978721524,
+            "measured": 0.0,
+            "note": "band [97.5, 100.0]; identity dial min/med/max 100.0000 / 100.0000 / 100.0000 over n=38 (ref == dist yields all-zero features for every image; identity dial = dial(0-vector))",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 dial(ref==dist) inside the registered band"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C6",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "0 of 9593 cells above identity",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 no dial-grid cell out-scores a perfect copy"
+          }
+        ],
+        "measured": {
+          "codec_floor": [
+            {
+              "bottom_medians": [
+                -17.932355027347104,
+                -15.819215665936431,
+                -15.349372372619438
+              ],
+              "codec": "avif-rav1e",
+              "dial_min": -61.70447042624595,
+              "n_fail_clamp": 0,
+              "n_fail_order": 32,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "7/39 ladders represented (0.1795 vs mentor 0.6410); failures: 32 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.5652173913043478,
+              "report_n_at_floor": 23,
+              "represented_frac": 0.1794871794871795,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6410256410256411,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                -51.70028852843652,
+                -41.888544580972486,
+                -37.000826641144286
+              ],
+              "codec": "avif-svt",
+              "dial_min": -102.95024242229357,
+              "n_fail_clamp": 0,
+              "n_fail_order": 6,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "33/39 ladders represented (0.8462 vs mentor 1.0000); failures: 6 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.9230769230769231,
+              "report_n_at_floor": 52,
+              "represented_frac": 0.8461538461538461,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                21.70759333497774,
+                20.362862012421058,
+                23.67704476343632
+              ],
+              "codec": "jpeg",
+              "dial_min": -21.87296334818281,
+              "n_fail_clamp": 0,
+              "n_fail_order": 21,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "18/39 ladders represented (0.4615 vs mentor 0.6667); failures: 21 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.46153846153846156,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6666666666666666,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                17.255249021105826,
+                19.477179302352486,
+                20.65949935195405
+              ],
+              "codec": "jxl",
+              "dial_min": -53.18569358542094,
+              "n_fail_clamp": 0,
+              "n_fail_order": 18,
+              "n_ladders": 26,
+              "n_too_short": 0,
+              "note": "8/26 ladders represented (0.3077 vs mentor 0.9615); failures: 18 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.3076923076923077,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.9615384615384616,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                -6.852842331253476,
+                14.207047151954443,
+                16.76712467761589
+              ],
+              "codec": "webp",
+              "dial_min": -47.70198610130216,
+              "n_fail_clamp": 0,
+              "n_fail_order": 3,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "36/39 ladders represented (0.9231 vs mentor 1.0000); failures: 3 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.0,
+              "report_n_at_floor": 1,
+              "represented_frac": 0.9230769230769231,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            }
+          ],
+          "grid": {
+            "dynamic_range": 112.25938931166567,
+            "max": 100.0,
+            "min": -102.95024242229357,
+            "mono": 0.9512272872170864,
+            "n": 9593,
+            "p5": -18.179138163504312,
+            "p95": 94.08025114816137,
+            "reach": 202.95024242229357,
+            "tied": 0.0
+          },
+          "negtail": {
+            "frac_below_zero": 0.5115,
+            "min": -207.41716766357422,
+            "n": 2000,
+            "p1": -73.67485740247533,
+            "p5": -57.12234519308974,
+            "truth_min": -770.619744,
+            "truth_p1": -187.13142578999998
+          }
+        },
+        "exact_verdict": {
+          "rank": true,
+          "dial": true,
+          "corruption": true,
+          "per_pair": true,
+          "gates": true,
+          "composite": true
+        },
+        "exact_gaddr": {
+          "checks": true,
+          "measured": true,
+          "contract": true,
+          "regression": true
+        },
+        "coherence": {
+          "m3_coherence": 0.638678,
+          "m3_n": 27,
+          "m3a_coherence": 0.852522,
+          "m3a_n": 27
+        },
+        "qualification": {
+          "bake_sha256": "f432f3837f9cf4f8d9de08773815def37ffaf400731f75af1186a4e23fccbe73",
+          "checks": [
+            {
+              "detail": "Complete composed scorer used by evaluation",
+              "gate": "Rust surface",
+              "state": "pass"
+            },
+            {
+              "detail": "Explicit historical replay in the scorer cannot qualify a new model",
+              "gate": "Table provenance",
+              "state": "fail"
+            },
+            {
+              "detail": "Require the preserved ladder artifact and the same complete scorer",
+              "gate": "Ladder evidence",
+              "state": "pass"
+            },
+            {
+              "detail": "Operative ladder instrument; missing tiers cannot pass",
+              "gate": "G-ADDR contract",
+              "state": "pass"
+            },
+            {
+              "detail": "Operative ladder instrument; missing tiers cannot pass",
+              "gate": "G-ADDR regression",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: avif-rav1e",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: avif-svt",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: jpeg",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: jxl",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: webp",
+              "state": "fail"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-RANK",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-DIAL",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-STEER",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-RD",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-TARGET",
+              "state": "not_measured"
+            }
+          ],
+          "name": "cleanup_H_control_s4004",
+          "research_selection_is_qualification": false,
+          "schema": 1,
+          "status": "failed"
+        }
+      },
+      "H_plus_rav1e": {
+        "cid22": 0.87571737916855,
+        "konjnd_guard": 0.5302832892285633,
+        "composite": 0.864902373410494,
+        "bake_sha256": "c4c9514abce456e09609489453744ece6a9ad0c2cb51e3b5bf642ce77727ef20",
+        "bake_bytes": 58614,
+        "contract": "PASS",
+        "regression": "FAIL",
+        "checks": [
+          {
+            "bar": 100.0,
+            "cmp": "\u2265",
+            "id": "A1",
+            "incumbent": null,
+            "measured": 100.0,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "ceiling \u2014 pooled dial max"
+          },
+          {
+            "bar": -64.326595,
+            "cmp": "\u2264",
+            "id": "A2",
+            "incumbent": null,
+            "measured": -108.89033725885756,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "floor \u2014 pooled dial min"
+          },
+          {
+            "bar": 93.9743354,
+            "cmp": "\u2265",
+            "id": "A3",
+            "incumbent": null,
+            "measured": 93.89851049800352,
+            "note": "",
+            "state": "fail",
+            "tier": "report-only",
+            "what": "robust ceiling \u2014 dial p95"
+          },
+          {
+            "bar": -16.252150599999997,
+            "cmp": "\u2264",
+            "id": "A4",
+            "incumbent": null,
+            "measured": -15.066376577804,
+            "note": "",
+            "state": "fail",
+            "tier": "report-only",
+            "what": "robust floor \u2014 dial p5"
+          },
+          {
+            "bar": 164.326595,
+            "cmp": "\u2265",
+            "id": "A5",
+            "incumbent": null,
+            "measured": 208.89033725885756,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "reach (max \u2212 min)"
+          },
+          {
+            "bar": 110.226486,
+            "cmp": "\u2265",
+            "id": "A6",
+            "incumbent": null,
+            "measured": 108.96488707580752,
+            "note": "",
+            "state": "fail",
+            "tier": "report-only",
+            "what": "dynamic range (p95 \u2212 p5)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "A7r",
+            "incumbent": null,
+            "measured": 5.0,
+            "note": "K=3 lowest steps per `(image, codec)` ladder on `dial_grid_372col_ladder.parquet`; a ladder is REPRESENTED when the dial is strictly increasing across those steps AND into the next one up, and no bottom step sits within 1e-9 of the instrument minimum -108.8903 (1 ladder(s) attain it \u2014 a sole holder, which is a genuine floor, not a clamp). Value = number of codecs whose fraction is below the MENTOR's own on the same cells; 5 of 5 codecs graded.",
+            "state": "fail",
+            "tier": "regression",
+            "what": "floor representability \u2014 lowest configurable settings resolve, per codec"
+          },
+          {
+            "bar": null,
+            "cmp": "\u2264",
+            "id": "A8r",
+            "incumbent": null,
+            "measured": -73.85774805021131,
+            "note": "REPORT-ONLY \u2014 no bar, gates nothing. Pooled min -160.7812 / p1 -73.8577 (probe n=2000, reference truth min -770.6197 / p1 -187.1314). This instrument carries NO codec identity \u2014 its rows are KADIS distortion types, not codec output \u2014 so it cannot answer the ruling's question (\"the lowest configurable settings per codec\") and is reported rather than barred. The per-DISTORTION-family reading is measured in benchmarks/d_peaks_lambda_sweep_2026-09-05.md \u00a74-\u00a76.",
+            "state": "not_measured",
+            "tier": "report-only",
+            "what": "negative tail \u2014 pooled probe min / p1 (REPORT-ONLY, no bar)"
+          },
+          {
+            "bar": 0.93,
+            "cmp": "\u2265",
+            "id": "C1",
+            "incumbent": null,
+            "measured": 0.9471894591435555,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "monotonicity (registered G3 bar)"
+          },
+          {
+            "bar": 0.05,
+            "cmp": "\u2264",
+            "id": "C2",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "flat/clamp dead-zone (registered G3 bar)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": ">",
+            "id": "C3",
+            "incumbent": null,
+            "measured": 0.4275,
+            "note": "probe n=2000, every row's reference metric is negative; CLAUDE.md: \"NEGATIVE zensim values MUST work \u2026 do NOT clamp at 0\"",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative values WORK \u2014 some row of an all-negative-truth probe scores < 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "<",
+            "id": "C4",
+            "incumbent": null,
+            "measured": -160.7811737689377,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative tail \u2014 deepest probe dial is below 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C5",
+            "incumbent": 96.24115978721524,
+            "measured": 0.0,
+            "note": "band [97.5, 100.0]; identity dial min/med/max 100.0000 / 100.0000 / 100.0000 over n=38 (ref == dist yields all-zero features for every image; identity dial = dial(0-vector))",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 dial(ref==dist) inside the registered band"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C6",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "0 of 9593 cells above identity",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 no dial-grid cell out-scores a perfect copy"
+          }
+        ],
+        "measured": {
+          "codec_floor": [
+            {
+              "bottom_medians": [
+                -14.514386093516304,
+                -14.693222733300324,
+                -14.683341679086194
+              ],
+              "codec": "avif-rav1e",
+              "dial_min": -67.12319960802795,
+              "n_fail_clamp": 0,
+              "n_fail_order": 33,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "6/39 ladders represented (0.1538 vs mentor 0.6410); failures: 33 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.5652173913043478,
+              "report_n_at_floor": 23,
+              "represented_frac": 0.15384615384615385,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6410256410256411,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                -48.83842476901173,
+                -35.797587229902305,
+                -31.878960842126006
+              ],
+              "codec": "avif-svt",
+              "dial_min": -108.89033725885756,
+              "n_fail_clamp": 0,
+              "n_fail_order": 5,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "34/39 ladders represented (0.8718 vs mentor 1.0000); failures: 5 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.8461538461538461,
+              "report_n_at_floor": 52,
+              "represented_frac": 0.8717948717948718,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                21.263685794246705,
+                20.99254634789119,
+                19.29203487442614
+              ],
+              "codec": "jpeg",
+              "dial_min": -25.87207253310477,
+              "n_fail_clamp": 0,
+              "n_fail_order": 18,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "21/39 ladders represented (0.5385 vs mentor 0.6667); failures: 18 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.5384615384615384,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6666666666666666,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                22.648445397401332,
+                22.99606307314118,
+                24.0386034353893
+              ],
+              "codec": "jxl",
+              "dial_min": -47.47135390377758,
+              "n_fail_clamp": 0,
+              "n_fail_order": 16,
+              "n_ladders": 26,
+              "n_too_short": 0,
+              "note": "10/26 ladders represented (0.3846 vs mentor 0.9615); failures: 16 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.38461538461538464,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.9615384615384616,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                -3.9915199783651545,
+                13.475888709800333,
+                16.954883507789546
+              ],
+              "codec": "webp",
+              "dial_min": -52.05879066693624,
+              "n_fail_clamp": 0,
+              "n_fail_order": 3,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "36/39 ladders represented (0.9231 vs mentor 1.0000); failures: 3 unordered, 0 on the clamp",
+              "report_frac_at_floor": 1.0,
+              "report_n_at_floor": 1,
+              "represented_frac": 0.9230769230769231,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            }
+          ],
+          "grid": {
+            "dynamic_range": 108.96488707580752,
+            "max": 100.0,
+            "min": -108.89033725885756,
+            "mono": 0.9471894591435555,
+            "n": 9593,
+            "p5": -15.066376577804,
+            "p95": 93.89851049800352,
+            "reach": 208.89033725885756,
+            "tied": 0.0
+          },
+          "negtail": {
+            "frac_below_zero": 0.4275,
+            "min": -160.7811737689377,
+            "n": 2000,
+            "p1": -73.85774805021131,
+            "p5": -55.11300522335061,
+            "truth_min": -770.619744,
+            "truth_p1": -187.13142578999998
+          }
+        },
+        "coherence": {
+          "m3_coherence": 0.632711,
+          "m3_n": 27,
+          "m3a_coherence": 0.830485,
+          "m3a_n": 27
+        },
+        "qualification": {
+          "bake_sha256": "c4c9514abce456e09609489453744ece6a9ad0c2cb51e3b5bf642ce77727ef20",
+          "checks": [
+            {
+              "detail": "Complete composed scorer used by evaluation",
+              "gate": "Rust surface",
+              "state": "pass"
+            },
+            {
+              "detail": "Explicit historical replay in the scorer cannot qualify a new model",
+              "gate": "Table provenance",
+              "state": "fail"
+            },
+            {
+              "detail": "Require the preserved ladder artifact and the same complete scorer",
+              "gate": "Ladder evidence",
+              "state": "pass"
+            },
+            {
+              "detail": "Operative ladder instrument; missing tiers cannot pass",
+              "gate": "G-ADDR contract",
+              "state": "pass"
+            },
+            {
+              "detail": "Operative ladder instrument; missing tiers cannot pass",
+              "gate": "G-ADDR regression",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: avif-rav1e",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: avif-svt",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: jpeg",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: jxl",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: webp",
+              "state": "fail"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-RANK",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-DIAL",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-STEER",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-RD",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-TARGET",
+              "state": "not_measured"
+            }
+          ],
+          "name": "cleanup_H_plus_rav1e_s4004",
+          "research_selection_is_qualification": false,
+          "schema": 1,
+          "status": "failed"
+        }
+      },
+      "paired_cid22_delta": 9.391108055512021e-05
+    },
+    {
+      "seed": 4005,
+      "H_control": {
+        "cid22": 0.8751356423627459,
+        "konjnd_guard": 0.520951380666789,
+        "composite": 0.8636169486120366,
+        "bake_sha256": "9b8c1aa7b3681f4fa38fe595cebab6d1b3f9af97eff7bddb26ad2f3aa87f6ce7",
+        "bake_bytes": 61156,
+        "contract": "PASS",
+        "regression": "FAIL",
+        "checks": [
+          {
+            "bar": 100.0,
+            "cmp": "\u2265",
+            "id": "A1",
+            "incumbent": null,
+            "measured": 100.0,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "ceiling \u2014 pooled dial max"
+          },
+          {
+            "bar": -64.326595,
+            "cmp": "\u2264",
+            "id": "A2",
+            "incumbent": null,
+            "measured": -97.37955040346283,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "floor \u2014 pooled dial min"
+          },
+          {
+            "bar": 93.9743354,
+            "cmp": "\u2265",
+            "id": "A3",
+            "incumbent": null,
+            "measured": 94.00438497426407,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "robust ceiling \u2014 dial p95"
+          },
+          {
+            "bar": -16.252150599999997,
+            "cmp": "\u2264",
+            "id": "A4",
+            "incumbent": null,
+            "measured": -18.440286464876824,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "robust floor \u2014 dial p5"
+          },
+          {
+            "bar": 164.326595,
+            "cmp": "\u2265",
+            "id": "A5",
+            "incumbent": null,
+            "measured": 197.37955040346282,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "reach (max \u2212 min)"
+          },
+          {
+            "bar": 110.226486,
+            "cmp": "\u2265",
+            "id": "A6",
+            "incumbent": null,
+            "measured": 112.44467143914089,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "dynamic range (p95 \u2212 p5)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "A7r",
+            "incumbent": null,
+            "measured": 5.0,
+            "note": "K=3 lowest steps per `(image, codec)` ladder on `dial_grid_372col_ladder.parquet`; a ladder is REPRESENTED when the dial is strictly increasing across those steps AND into the next one up, and no bottom step sits within 1e-9 of the instrument minimum -97.3796 (1 ladder(s) attain it \u2014 a sole holder, which is a genuine floor, not a clamp). Value = number of codecs whose fraction is below the MENTOR's own on the same cells; 5 of 5 codecs graded.",
+            "state": "fail",
+            "tier": "regression",
+            "what": "floor representability \u2014 lowest configurable settings resolve, per codec"
+          },
+          {
+            "bar": null,
+            "cmp": "\u2264",
+            "id": "A8r",
+            "incumbent": null,
+            "measured": -71.4352186182385,
+            "note": "REPORT-ONLY \u2014 no bar, gates nothing. Pooled min -131.3283 / p1 -71.4352 (probe n=2000, reference truth min -770.6197 / p1 -187.1314). This instrument carries NO codec identity \u2014 its rows are KADIS distortion types, not codec output \u2014 so it cannot answer the ruling's question (\"the lowest configurable settings per codec\") and is reported rather than barred. The per-DISTORTION-family reading is measured in benchmarks/d_peaks_lambda_sweep_2026-09-05.md \u00a74-\u00a76.",
+            "state": "not_measured",
+            "tier": "report-only",
+            "what": "negative tail \u2014 pooled probe min / p1 (REPORT-ONLY, no bar)"
+          },
+          {
+            "bar": 0.93,
+            "cmp": "\u2265",
+            "id": "C1",
+            "incumbent": null,
+            "measured": 0.9485708213792371,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "monotonicity (registered G3 bar)"
+          },
+          {
+            "bar": 0.05,
+            "cmp": "\u2264",
+            "id": "C2",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "flat/clamp dead-zone (registered G3 bar)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": ">",
+            "id": "C3",
+            "incumbent": null,
+            "measured": 0.5535,
+            "note": "probe n=2000, every row's reference metric is negative; CLAUDE.md: \"NEGATIVE zensim values MUST work \u2026 do NOT clamp at 0\"",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative values WORK \u2014 some row of an all-negative-truth probe scores < 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "<",
+            "id": "C4",
+            "incumbent": null,
+            "measured": -131.3282763772879,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative tail \u2014 deepest probe dial is below 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C5",
+            "incumbent": 96.24115978721524,
+            "measured": 0.0,
+            "note": "band [97.5, 100.0]; identity dial min/med/max 100.0000 / 100.0000 / 100.0000 over n=38 (ref == dist yields all-zero features for every image; identity dial = dial(0-vector))",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 dial(ref==dist) inside the registered band"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C6",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "0 of 9593 cells above identity",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 no dial-grid cell out-scores a perfect copy"
+          }
+        ],
+        "measured": {
+          "codec_floor": [
+            {
+              "bottom_medians": [
+                -17.27023126067686,
+                -16.33078182833138,
+                -15.824370084002519
+              ],
+              "codec": "avif-rav1e",
+              "dial_min": -67.9927691607869,
+              "n_fail_clamp": 0,
+              "n_fail_order": 33,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "6/39 ladders represented (0.1538 vs mentor 0.6410); failures: 33 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.5652173913043478,
+              "report_n_at_floor": 23,
+              "represented_frac": 0.15384615384615385,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6410256410256411,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                -51.3234553712445,
+                -41.464507445719406,
+                -35.81367240715085
+              ],
+              "codec": "avif-svt",
+              "dial_min": -97.37955040346283,
+              "n_fail_clamp": 0,
+              "n_fail_order": 8,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "31/39 ladders represented (0.7949 vs mentor 1.0000); failures: 8 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.8846153846153846,
+              "report_n_at_floor": 52,
+              "represented_frac": 0.7948717948717948,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                21.466563738107137,
+                21.113094648585587,
+                22.862843213293388
+              ],
+              "codec": "jpeg",
+              "dial_min": -20.680764473979927,
+              "n_fail_clamp": 0,
+              "n_fail_order": 17,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "22/39 ladders represented (0.5641 vs mentor 0.6667); failures: 17 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.5641025641025641,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6666666666666666,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                20.866790953069174,
+                23.610180808302292,
+                23.22996292233641
+              ],
+              "codec": "jxl",
+              "dial_min": -57.55360579632826,
+              "n_fail_clamp": 0,
+              "n_fail_order": 15,
+              "n_ladders": 26,
+              "n_too_short": 0,
+              "note": "11/26 ladders represented (0.4231 vs mentor 0.9615); failures: 15 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.4230769230769231,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.9615384615384616,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                -2.416129630553197,
+                12.944287906888755,
+                16.45525438973565
+              ],
+              "codec": "webp",
+              "dial_min": -52.59738475698921,
+              "n_fail_clamp": 0,
+              "n_fail_order": 5,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "34/39 ladders represented (0.8718 vs mentor 1.0000); failures: 5 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.0,
+              "report_n_at_floor": 1,
+              "represented_frac": 0.8717948717948718,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            }
+          ],
+          "grid": {
+            "dynamic_range": 112.44467143914089,
+            "max": 100.0,
+            "min": -97.37955040346283,
+            "mono": 0.9485708213792371,
+            "n": 9593,
+            "p5": -18.440286464876824,
+            "p95": 94.00438497426407,
+            "reach": 197.37955040346282,
+            "tied": 0.0
+          },
+          "negtail": {
+            "frac_below_zero": 0.5535,
+            "min": -131.3282763772879,
+            "n": 2000,
+            "p1": -71.4352186182385,
+            "p5": -57.86942782442449,
+            "truth_min": -770.619744,
+            "truth_p1": -187.13142578999998
+          }
+        },
+        "exact_verdict": {
+          "rank": true,
+          "dial": true,
+          "corruption": true,
+          "per_pair": true,
+          "gates": true,
+          "composite": true
+        },
+        "exact_gaddr": {
+          "checks": true,
+          "measured": true,
+          "contract": true,
+          "regression": true
+        }
+      },
+      "H_plus_rav1e": {
+        "cid22": 0.8741849493287522,
+        "konjnd_guard": 0.5302768685237869,
+        "composite": 0.8636160258314189,
+        "bake_sha256": "5c3cdbff9226532ac3d25569ebd073216417ec6677dc756b4ab6b94901cff06e",
+        "bake_bytes": 62298,
+        "contract": "PASS",
+        "regression": "FAIL",
+        "checks": [
+          {
+            "bar": 100.0,
+            "cmp": "\u2265",
+            "id": "A1",
+            "incumbent": null,
+            "measured": 100.0,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "ceiling \u2014 pooled dial max"
+          },
+          {
+            "bar": -64.326595,
+            "cmp": "\u2264",
+            "id": "A2",
+            "incumbent": null,
+            "measured": -108.46857480885012,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "floor \u2014 pooled dial min"
+          },
+          {
+            "bar": 93.9743354,
+            "cmp": "\u2265",
+            "id": "A3",
+            "incumbent": null,
+            "measured": 94.01398539022937,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "robust ceiling \u2014 dial p95"
+          },
+          {
+            "bar": -16.252150599999997,
+            "cmp": "\u2264",
+            "id": "A4",
+            "incumbent": null,
+            "measured": -17.10455589857766,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "robust floor \u2014 dial p5"
+          },
+          {
+            "bar": 164.326595,
+            "cmp": "\u2265",
+            "id": "A5",
+            "incumbent": null,
+            "measured": 208.46857480885012,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "reach (max \u2212 min)"
+          },
+          {
+            "bar": 110.226486,
+            "cmp": "\u2265",
+            "id": "A6",
+            "incumbent": null,
+            "measured": 111.11854128880702,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "dynamic range (p95 \u2212 p5)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "A7r",
+            "incumbent": null,
+            "measured": 5.0,
+            "note": "K=3 lowest steps per `(image, codec)` ladder on `dial_grid_372col_ladder.parquet`; a ladder is REPRESENTED when the dial is strictly increasing across those steps AND into the next one up, and no bottom step sits within 1e-9 of the instrument minimum -108.4686 (1 ladder(s) attain it \u2014 a sole holder, which is a genuine floor, not a clamp). Value = number of codecs whose fraction is below the MENTOR's own on the same cells; 5 of 5 codecs graded.",
+            "state": "fail",
+            "tier": "regression",
+            "what": "floor representability \u2014 lowest configurable settings resolve, per codec"
+          },
+          {
+            "bar": null,
+            "cmp": "\u2264",
+            "id": "A8r",
+            "incumbent": null,
+            "measured": -79.20399335922126,
+            "note": "REPORT-ONLY \u2014 no bar, gates nothing. Pooled min -158.4880 / p1 -79.2040 (probe n=2000, reference truth min -770.6197 / p1 -187.1314). This instrument carries NO codec identity \u2014 its rows are KADIS distortion types, not codec output \u2014 so it cannot answer the ruling's question (\"the lowest configurable settings per codec\") and is reported rather than barred. The per-DISTORTION-family reading is measured in benchmarks/d_peaks_lambda_sweep_2026-09-05.md \u00a74-\u00a76.",
+            "state": "not_measured",
+            "tier": "report-only",
+            "what": "negative tail \u2014 pooled probe min / p1 (REPORT-ONLY, no bar)"
+          },
+          {
+            "bar": 0.93,
+            "cmp": "\u2265",
+            "id": "C1",
+            "incumbent": null,
+            "measured": 0.9471894591435555,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "monotonicity (registered G3 bar)"
+          },
+          {
+            "bar": 0.05,
+            "cmp": "\u2264",
+            "id": "C2",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "flat/clamp dead-zone (registered G3 bar)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": ">",
+            "id": "C3",
+            "incumbent": null,
+            "measured": 0.55,
+            "note": "probe n=2000, every row's reference metric is negative; CLAUDE.md: \"NEGATIVE zensim values MUST work \u2026 do NOT clamp at 0\"",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative values WORK \u2014 some row of an all-negative-truth probe scores < 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "<",
+            "id": "C4",
+            "incumbent": null,
+            "measured": -158.48797586136178,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative tail \u2014 deepest probe dial is below 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C5",
+            "incumbent": 96.24115978721524,
+            "measured": 0.0,
+            "note": "band [97.5, 100.0]; identity dial min/med/max 100.0000 / 100.0000 / 100.0000 over n=38 (ref == dist yields all-zero features for every image; identity dial = dial(0-vector))",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 dial(ref==dist) inside the registered band"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C6",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "0 of 9593 cells above identity",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 no dial-grid cell out-scores a perfect copy"
+          }
+        ],
+        "measured": {
+          "codec_floor": [
+            {
+              "bottom_medians": [
+                -15.827586311579829,
+                -12.747999932370387,
+                -12.714280070494087
+              ],
+              "codec": "avif-rav1e",
+              "dial_min": -69.2724108030882,
+              "n_fail_clamp": 0,
+              "n_fail_order": 32,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "7/39 ladders represented (0.1795 vs mentor 0.6410); failures: 32 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.5652173913043478,
+              "report_n_at_floor": 23,
+              "represented_frac": 0.1794871794871795,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6410256410256411,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                -51.17874995942799,
+                -40.01467957475338,
+                -34.90821405401092
+              ],
+              "codec": "avif-svt",
+              "dial_min": -108.46857480885012,
+              "n_fail_clamp": 0,
+              "n_fail_order": 5,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "34/39 ladders represented (0.8718 vs mentor 1.0000); failures: 5 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.8846153846153846,
+              "report_n_at_floor": 52,
+              "represented_frac": 0.8717948717948718,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                22.647575763124024,
+                22.459385706234023,
+                23.527919380495856
+              ],
+              "codec": "jpeg",
+              "dial_min": -22.658157749099892,
+              "n_fail_clamp": 0,
+              "n_fail_order": 16,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "23/39 ladders represented (0.5897 vs mentor 0.6667); failures: 16 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.5897435897435898,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6666666666666666,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                16.64717582200768,
+                19.249157431112703,
+                20.20780229627916
+              ],
+              "codec": "jxl",
+              "dial_min": -53.81766354366251,
+              "n_fail_clamp": 0,
+              "n_fail_order": 17,
+              "n_ladders": 26,
+              "n_too_short": 0,
+              "note": "9/26 ladders represented (0.3462 vs mentor 0.9615); failures: 17 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.34615384615384615,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.9615384615384616,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                0.7803126243613345,
+                12.729748259885136,
+                15.489120622854777
+              ],
+              "codec": "webp",
+              "dial_min": -46.43468373408609,
+              "n_fail_clamp": 0,
+              "n_fail_order": 5,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "34/39 ladders represented (0.8718 vs mentor 1.0000); failures: 5 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.0,
+              "report_n_at_floor": 1,
+              "represented_frac": 0.8717948717948718,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            }
+          ],
+          "grid": {
+            "dynamic_range": 111.11854128880702,
+            "max": 100.0,
+            "min": -108.46857480885012,
+            "mono": 0.9471894591435555,
+            "n": 9593,
+            "p5": -17.10455589857766,
+            "p95": 94.01398539022937,
+            "reach": 208.46857480885012,
+            "tied": 0.0
+          },
+          "negtail": {
+            "frac_below_zero": 0.55,
+            "min": -158.48797586136178,
+            "n": 2000,
+            "p1": -79.20399335922126,
+            "p5": -62.03099412841773,
+            "truth_min": -770.619744,
+            "truth_p1": -187.13142578999998
+          }
+        },
+        "coherence": {
+          "m3_coherence": 0.625767,
+          "m3_n": 27,
+          "m3a_coherence": 0.837941,
+          "m3a_n": 27
+        },
+        "qualification": {
+          "bake_sha256": "5c3cdbff9226532ac3d25569ebd073216417ec6677dc756b4ab6b94901cff06e",
+          "checks": [
+            {
+              "detail": "Complete composed scorer used by evaluation",
+              "gate": "Rust surface",
+              "state": "pass"
+            },
+            {
+              "detail": "Explicit historical replay in the scorer cannot qualify a new model",
+              "gate": "Table provenance",
+              "state": "fail"
+            },
+            {
+              "detail": "Require the preserved ladder artifact and the same complete scorer",
+              "gate": "Ladder evidence",
+              "state": "pass"
+            },
+            {
+              "detail": "Operative ladder instrument; missing tiers cannot pass",
+              "gate": "G-ADDR contract",
+              "state": "pass"
+            },
+            {
+              "detail": "Operative ladder instrument; missing tiers cannot pass",
+              "gate": "G-ADDR regression",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: avif-rav1e",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: avif-svt",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: jpeg",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: jxl",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: webp",
+              "state": "fail"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-RANK",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-DIAL",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-STEER",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-RD",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-TARGET",
+              "state": "not_measured"
+            }
+          ],
+          "name": "cleanup_H_plus_rav1e_s4005",
+          "research_selection_is_qualification": false,
+          "schema": 1,
+          "status": "failed"
+        }
+      },
+      "paired_cid22_delta": -0.0009506930339936437
+    },
+    {
+      "seed": 4006,
+      "H_control": {
+        "cid22": 0.8722911383836088,
+        "konjnd_guard": 0.4715229206397083,
+        "composite": 0.8575078118623117,
+        "bake_sha256": "3085e4915903da1c213b3d26a336111c6e62e2591e90f20bcbb8f7122f352a72",
+        "bake_bytes": 60025,
+        "contract": "PASS",
+        "regression": "FAIL",
+        "checks": [
+          {
+            "bar": 100.0,
+            "cmp": "\u2265",
+            "id": "A1",
+            "incumbent": null,
+            "measured": 100.0,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "ceiling \u2014 pooled dial max"
+          },
+          {
+            "bar": -64.326595,
+            "cmp": "\u2264",
+            "id": "A2",
+            "incumbent": null,
+            "measured": -99.67277659600207,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "floor \u2014 pooled dial min"
+          },
+          {
+            "bar": 93.9743354,
+            "cmp": "\u2265",
+            "id": "A3",
+            "incumbent": null,
+            "measured": 93.9412823127924,
+            "note": "",
+            "state": "fail",
+            "tier": "report-only",
+            "what": "robust ceiling \u2014 dial p95"
+          },
+          {
+            "bar": -16.252150599999997,
+            "cmp": "\u2264",
+            "id": "A4",
+            "incumbent": null,
+            "measured": -13.534000946816786,
+            "note": "",
+            "state": "fail",
+            "tier": "report-only",
+            "what": "robust floor \u2014 dial p5"
+          },
+          {
+            "bar": 164.326595,
+            "cmp": "\u2265",
+            "id": "A5",
+            "incumbent": null,
+            "measured": 199.67277659600205,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "reach (max \u2212 min)"
+          },
+          {
+            "bar": 110.226486,
+            "cmp": "\u2265",
+            "id": "A6",
+            "incumbent": null,
+            "measured": 107.47528325960918,
+            "note": "",
+            "state": "fail",
+            "tier": "report-only",
+            "what": "dynamic range (p95 \u2212 p5)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "A7r",
+            "incumbent": null,
+            "measured": 5.0,
+            "note": "K=3 lowest steps per `(image, codec)` ladder on `dial_grid_372col_ladder.parquet`; a ladder is REPRESENTED when the dial is strictly increasing across those steps AND into the next one up, and no bottom step sits within 1e-9 of the instrument minimum -99.6728 (1 ladder(s) attain it \u2014 a sole holder, which is a genuine floor, not a clamp). Value = number of codecs whose fraction is below the MENTOR's own on the same cells; 5 of 5 codecs graded.",
+            "state": "fail",
+            "tier": "regression",
+            "what": "floor representability \u2014 lowest configurable settings resolve, per codec"
+          },
+          {
+            "bar": null,
+            "cmp": "\u2264",
+            "id": "A8r",
+            "incumbent": null,
+            "measured": -84.59932347896924,
+            "note": "REPORT-ONLY \u2014 no bar, gates nothing. Pooled min -213.1486 / p1 -84.5993 (probe n=2000, reference truth min -770.6197 / p1 -187.1314). This instrument carries NO codec identity \u2014 its rows are KADIS distortion types, not codec output \u2014 so it cannot answer the ruling's question (\"the lowest configurable settings per codec\") and is reported rather than barred. The per-DISTORTION-family reading is measured in benchmarks/d_peaks_lambda_sweep_2026-09-05.md \u00a74-\u00a76.",
+            "state": "not_measured",
+            "tier": "report-only",
+            "what": "negative tail \u2014 pooled probe min / p1 (REPORT-ONLY, no bar)"
+          },
+          {
+            "bar": 0.93,
+            "cmp": "\u2265",
+            "id": "C1",
+            "incumbent": null,
+            "measured": 0.9485708213792371,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "monotonicity (registered G3 bar)"
+          },
+          {
+            "bar": 0.05,
+            "cmp": "\u2264",
+            "id": "C2",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "flat/clamp dead-zone (registered G3 bar)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": ">",
+            "id": "C3",
+            "incumbent": null,
+            "measured": 0.406,
+            "note": "probe n=2000, every row's reference metric is negative; CLAUDE.md: \"NEGATIVE zensim values MUST work \u2026 do NOT clamp at 0\"",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative values WORK \u2014 some row of an all-negative-truth probe scores < 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "<",
+            "id": "C4",
+            "incumbent": null,
+            "measured": -213.14861297607422,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative tail \u2014 deepest probe dial is below 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C5",
+            "incumbent": 96.24115978721524,
+            "measured": 0.0,
+            "note": "band [97.5, 100.0]; identity dial min/med/max 100.0000 / 100.0000 / 100.0000 over n=38 (ref == dist yields all-zero features for every image; identity dial = dial(0-vector))",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 dial(ref==dist) inside the registered band"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C6",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "0 of 9593 cells above identity",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 no dial-grid cell out-scores a perfect copy"
+          }
+        ],
+        "measured": {
+          "codec_floor": [
+            {
+              "bottom_medians": [
+                -11.295489251072826,
+                -10.04184758426785,
+                -10.877032678970227
+              ],
+              "codec": "avif-rav1e",
+              "dial_min": -69.12542997565582,
+              "n_fail_clamp": 0,
+              "n_fail_order": 33,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "6/39 ladders represented (0.1538 vs mentor 0.6410); failures: 33 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.30434782608695654,
+              "report_n_at_floor": 23,
+              "represented_frac": 0.15384615384615385,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6410256410256411,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                -54.014627113858126,
+                -44.21650089724633,
+                -34.312334260267164
+              ],
+              "codec": "avif-svt",
+              "dial_min": -99.67277659600207,
+              "n_fail_clamp": 0,
+              "n_fail_order": 8,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "31/39 ladders represented (0.7949 vs mentor 1.0000); failures: 8 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.8461538461538461,
+              "report_n_at_floor": 52,
+              "represented_frac": 0.7948717948717948,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                21.622615129363957,
+                21.33752051392282,
+                23.56817662704665
+              ],
+              "codec": "jpeg",
+              "dial_min": -23.893392664814925,
+              "n_fail_clamp": 0,
+              "n_fail_order": 18,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "21/39 ladders represented (0.5385 vs mentor 0.6667); failures: 18 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.5384615384615384,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6666666666666666,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                20.047572460813942,
+                23.791036063264308,
+                24.459518344609368
+              ],
+              "codec": "jxl",
+              "dial_min": -57.07846239734661,
+              "n_fail_clamp": 0,
+              "n_fail_order": 16,
+              "n_ladders": 26,
+              "n_too_short": 0,
+              "note": "10/26 ladders represented (0.3846 vs mentor 0.9615); failures: 16 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.38461538461538464,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.9615384615384616,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                3.6151365353945586,
+                14.646724597406033,
+                18.064264601602286
+              ],
+              "codec": "webp",
+              "dial_min": -53.92318590876299,
+              "n_fail_clamp": 0,
+              "n_fail_order": 4,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "35/39 ladders represented (0.8974 vs mentor 1.0000); failures: 4 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.0,
+              "report_n_at_floor": 1,
+              "represented_frac": 0.8974358974358975,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            }
+          ],
+          "grid": {
+            "dynamic_range": 107.47528325960918,
+            "max": 100.0,
+            "min": -99.67277659600207,
+            "mono": 0.9485708213792371,
+            "n": 9593,
+            "p5": -13.534000946816786,
+            "p95": 93.9412823127924,
+            "reach": 199.67277659600205,
+            "tied": 0.0
+          },
+          "negtail": {
+            "frac_below_zero": 0.406,
+            "min": -213.14861297607422,
+            "n": 2000,
+            "p1": -84.59932347896924,
+            "p5": -61.906678906741675,
+            "truth_min": -770.619744,
+            "truth_p1": -187.13142578999998
+          }
+        },
+        "exact_verdict": {
+          "rank": true,
+          "dial": true,
+          "corruption": true,
+          "per_pair": true,
+          "gates": true,
+          "composite": true
+        },
+        "exact_gaddr": {
+          "checks": true,
+          "measured": true,
+          "contract": true,
+          "regression": true
+        }
+      },
+      "H_plus_rav1e": {
+        "cid22": 0.8758308712823297,
+        "konjnd_guard": 0.4957894822443129,
+        "composite": 0.8611723771069111,
+        "bake_sha256": "543f5a278f97d82218ec0710cddda881fa7e3c87f8687e3a4a0a4d468b331f4b",
+        "bake_bytes": 60268,
+        "contract": "PASS",
+        "regression": "FAIL",
+        "checks": [
+          {
+            "bar": 100.0,
+            "cmp": "\u2265",
+            "id": "A1",
+            "incumbent": null,
+            "measured": 100.0,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "ceiling \u2014 pooled dial max"
+          },
+          {
+            "bar": -64.326595,
+            "cmp": "\u2264",
+            "id": "A2",
+            "incumbent": null,
+            "measured": -122.96949712450491,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "floor \u2014 pooled dial min"
+          },
+          {
+            "bar": 93.9743354,
+            "cmp": "\u2265",
+            "id": "A3",
+            "incumbent": null,
+            "measured": 93.8811935094105,
+            "note": "",
+            "state": "fail",
+            "tier": "report-only",
+            "what": "robust ceiling \u2014 dial p95"
+          },
+          {
+            "bar": -16.252150599999997,
+            "cmp": "\u2264",
+            "id": "A4",
+            "incumbent": null,
+            "measured": -14.680485066056466,
+            "note": "",
+            "state": "fail",
+            "tier": "report-only",
+            "what": "robust floor \u2014 dial p5"
+          },
+          {
+            "bar": 164.326595,
+            "cmp": "\u2265",
+            "id": "A5",
+            "incumbent": null,
+            "measured": 222.96949712450493,
+            "note": "",
+            "state": "pass",
+            "tier": "report-only",
+            "what": "reach (max \u2212 min)"
+          },
+          {
+            "bar": 110.226486,
+            "cmp": "\u2265",
+            "id": "A6",
+            "incumbent": null,
+            "measured": 108.56167857546696,
+            "note": "",
+            "state": "fail",
+            "tier": "report-only",
+            "what": "dynamic range (p95 \u2212 p5)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "A7r",
+            "incumbent": null,
+            "measured": 5.0,
+            "note": "K=3 lowest steps per `(image, codec)` ladder on `dial_grid_372col_ladder.parquet`; a ladder is REPRESENTED when the dial is strictly increasing across those steps AND into the next one up, and no bottom step sits within 1e-9 of the instrument minimum -122.9695 (1 ladder(s) attain it \u2014 a sole holder, which is a genuine floor, not a clamp). Value = number of codecs whose fraction is below the MENTOR's own on the same cells; 5 of 5 codecs graded.",
+            "state": "fail",
+            "tier": "regression",
+            "what": "floor representability \u2014 lowest configurable settings resolve, per codec"
+          },
+          {
+            "bar": null,
+            "cmp": "\u2264",
+            "id": "A8r",
+            "incumbent": null,
+            "measured": -86.15885439437815,
+            "note": "REPORT-ONLY \u2014 no bar, gates nothing. Pooled min -210.3631 / p1 -86.1589 (probe n=2000, reference truth min -770.6197 / p1 -187.1314). This instrument carries NO codec identity \u2014 its rows are KADIS distortion types, not codec output \u2014 so it cannot answer the ruling's question (\"the lowest configurable settings per codec\") and is reported rather than barred. The per-DISTORTION-family reading is measured in benchmarks/d_peaks_lambda_sweep_2026-09-05.md \u00a74-\u00a76.",
+            "state": "not_measured",
+            "tier": "report-only",
+            "what": "negative tail \u2014 pooled probe min / p1 (REPORT-ONLY, no bar)"
+          },
+          {
+            "bar": 0.93,
+            "cmp": "\u2265",
+            "id": "C1",
+            "incumbent": null,
+            "measured": 0.9500584422484327,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "monotonicity (registered G3 bar)"
+          },
+          {
+            "bar": 0.05,
+            "cmp": "\u2264",
+            "id": "C2",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "flat/clamp dead-zone (registered G3 bar)"
+          },
+          {
+            "bar": 0.0,
+            "cmp": ">",
+            "id": "C3",
+            "incumbent": null,
+            "measured": 0.463,
+            "note": "probe n=2000, every row's reference metric is negative; CLAUDE.md: \"NEGATIVE zensim values MUST work \u2026 do NOT clamp at 0\"",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative values WORK \u2014 some row of an all-negative-truth probe scores < 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "<",
+            "id": "C4",
+            "incumbent": null,
+            "measured": -210.36309051513672,
+            "note": "",
+            "state": "pass",
+            "tier": "contract",
+            "what": "negative tail \u2014 deepest probe dial is below 0"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C5",
+            "incumbent": 96.24115978721524,
+            "measured": 0.0,
+            "note": "band [97.5, 100.0]; identity dial min/med/max 100.0000 / 100.0000 / 100.0000 over n=38 (ref == dist yields all-zero features for every image; identity dial = dial(0-vector))",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 dial(ref==dist) inside the registered band"
+          },
+          {
+            "bar": 0.0,
+            "cmp": "\u2264",
+            "id": "C6",
+            "incumbent": null,
+            "measured": 0.0,
+            "note": "0 of 9593 cells above identity",
+            "state": "pass",
+            "tier": "contract",
+            "what": "identity \u2014 no dial-grid cell out-scores a perfect copy"
+          }
+        ],
+        "measured": {
+          "codec_floor": [
+            {
+              "bottom_medians": [
+                -18.1260513580125,
+                -10.986668440521807,
+                -13.86053607391559
+              ],
+              "codec": "avif-rav1e",
+              "dial_min": -67.21843377872128,
+              "n_fail_clamp": 0,
+              "n_fail_order": 31,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "8/39 ladders represented (0.2051 vs mentor 0.6410); failures: 31 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.5217391304347826,
+              "report_n_at_floor": 23,
+              "represented_frac": 0.20512820512820512,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6410256410256411,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                -48.97906085684182,
+                -35.744593508203394,
+                -28.17472559516439
+              ],
+              "codec": "avif-svt",
+              "dial_min": -122.96949712450491,
+              "n_fail_clamp": 0,
+              "n_fail_order": 7,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "32/39 ladders represented (0.8205 vs mentor 1.0000); failures: 7 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.8653846153846154,
+              "report_n_at_floor": 52,
+              "represented_frac": 0.8205128205128205,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                23.06791229002916,
+                22.68359270553622,
+                24.217663129927992
+              ],
+              "codec": "jpeg",
+              "dial_min": -20.39140004900069,
+              "n_fail_clamp": 0,
+              "n_fail_order": 18,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "21/39 ladders represented (0.5385 vs mentor 0.6667); failures: 18 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.5384615384615384,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.6666666666666666,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                22.14019246569247,
+                24.297685658412096,
+                23.617194550618276
+              ],
+              "codec": "jxl",
+              "dial_min": -49.45221268545816,
+              "n_fail_clamp": 0,
+              "n_fail_order": 16,
+              "n_ladders": 26,
+              "n_too_short": 0,
+              "note": "10/26 ladders represented (0.3846 vs mentor 0.9615); failures: 16 unordered, 0 on the clamp",
+              "report_frac_at_floor": null,
+              "report_n_at_floor": 0,
+              "represented_frac": 0.38461538461538464,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 0.9615384615384616,
+              "state": "fail"
+            },
+            {
+              "bottom_medians": [
+                -1.3218960517337832,
+                13.812245921259372,
+                17.504345319158997
+              ],
+              "codec": "webp",
+              "dial_min": -49.45369327733561,
+              "n_fail_clamp": 0,
+              "n_fail_order": 4,
+              "n_ladders": 39,
+              "n_too_short": 0,
+              "note": "35/39 ladders represented (0.8974 vs mentor 1.0000); failures: 4 unordered, 0 on the clamp",
+              "report_frac_at_floor": 0.0,
+              "report_n_at_floor": 1,
+              "represented_frac": 0.8974358974358975,
+              "represented_frac_incumbent": null,
+              "represented_frac_reference": 1.0,
+              "state": "fail"
+            }
+          ],
+          "grid": {
+            "dynamic_range": 108.56167857546696,
+            "max": 100.0,
+            "min": -122.96949712450491,
+            "mono": 0.9500584422484327,
+            "n": 9593,
+            "p5": -14.680485066056466,
+            "p95": 93.8811935094105,
+            "reach": 222.96949712450493,
+            "tied": 0.0
+          },
+          "negtail": {
+            "frac_below_zero": 0.463,
+            "min": -210.36309051513672,
+            "n": 2000,
+            "p1": -86.15885439437815,
+            "p5": -58.12440805705942,
+            "truth_min": -770.619744,
+            "truth_p1": -187.13142578999998
+          }
+        },
+        "coherence": {
+          "m3_coherence": 0.561689,
+          "m3_n": 27,
+          "m3a_coherence": 0.837167,
+          "m3a_n": 27
+        },
+        "qualification": {
+          "bake_sha256": "543f5a278f97d82218ec0710cddda881fa7e3c87f8687e3a4a0a4d468b331f4b",
+          "checks": [
+            {
+              "detail": "Complete composed scorer used by evaluation",
+              "gate": "Rust surface",
+              "state": "pass"
+            },
+            {
+              "detail": "Explicit historical replay in the scorer cannot qualify a new model",
+              "gate": "Table provenance",
+              "state": "fail"
+            },
+            {
+              "detail": "Require the preserved ladder artifact and the same complete scorer",
+              "gate": "Ladder evidence",
+              "state": "pass"
+            },
+            {
+              "detail": "Operative ladder instrument; missing tiers cannot pass",
+              "gate": "G-ADDR contract",
+              "state": "pass"
+            },
+            {
+              "detail": "Operative ladder instrument; missing tiers cannot pass",
+              "gate": "G-ADDR regression",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: avif-rav1e",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: avif-svt",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: jpeg",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: jxl",
+              "state": "fail"
+            },
+            {
+              "detail": "All five required codec families must be measured",
+              "gate": "Codec floor: webp",
+              "state": "fail"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-RANK",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-DIAL",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-STEER",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-RD",
+              "state": "not_measured"
+            },
+            {
+              "detail": "Missing content-bound product evidence",
+              "gate": "G-TARGET",
+              "state": "not_measured"
+            }
+          ],
+          "name": "cleanup_H_plus_rav1e_s4006",
+          "research_selection_is_qualification": false,
+          "schema": 1,
+          "status": "failed"
+        }
+      },
+      "paired_cid22_delta": 0.003539732898720893
+    }
+  ],
+  "arms": {
+    "H_control": {
+      "cid22": {
+        "mean": 0.8743500829447832,
+        "sample_sd": 0.0017997035906075652
+      },
+      "konjnd_guard": {
+        "mean": 0.498477336111951,
+        "sample_sd": 0.02501696340146669
+      },
+      "composite": {
+        "mean": 0.8610400248740272,
+        "sample_sd": 0.0031646202227207775
+      },
+      "floor_fractions": {
+        "avif-rav1e": [
+          0.1794871794871795,
+          0.15384615384615385,
+          0.15384615384615385
+        ],
+        "avif-svt": [
+          0.8461538461538461,
+          0.7948717948717948,
+          0.7948717948717948
+        ],
+        "jpeg": [
+          0.46153846153846156,
+          0.5641025641025641,
+          0.5384615384615384
+        ],
+        "jxl": [
+          0.3076923076923077,
+          0.4230769230769231,
+          0.38461538461538464
+        ],
+        "webp": [
+          0.9230769230769231,
+          0.8717948717948718,
+          0.8974358974358975
+        ]
+      }
+    },
+    "H_plus_rav1e": {
+      "cid22": {
+        "mean": 0.875244399926544,
+        "sample_sd": 0.0009192642665977543
+      },
+      "konjnd_guard": {
+        "mean": 0.518783213332221,
+        "sample_sd": 0.01991315550869917
+      },
+      "composite": {
+        "mean": 0.8632302587829414,
+        "sample_sd": 0.0018946847410463705
+      },
+      "floor_fractions": {
+        "avif-rav1e": [
+          0.15384615384615385,
+          0.1794871794871795,
+          0.20512820512820512
+        ],
+        "avif-svt": [
+          0.8717948717948718,
+          0.8717948717948718,
+          0.8205128205128205
+        ],
+        "jpeg": [
+          0.5384615384615384,
+          0.5897435897435898,
+          0.5384615384615384
+        ],
+        "jxl": [
+          0.38461538461538464,
+          0.34615384615384615,
+          0.38461538461538464
+        ],
+        "webp": [
+          0.9230769230769231,
+          0.8717948717948718,
+          0.8974358974358975
+        ]
+      }
+    }
+  },
+  "training_scope": "explicit historical replay; CID22 49-reference held-out rank; KonJND/KADID overlapping guards are not held out",
+  "paired_cid22_delta": {
+    "mean": 0.0008943169817607899,
+    "sample_sd": 0.0023497805151359245
+  }
+}

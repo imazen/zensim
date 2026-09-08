@@ -1,5 +1,13 @@
 # Model-selection scorecard — the five-gate closed-loop exam (2026-07-18)
 
+**September 7 measurement update:** the existing `zensim-target` controller now
+accepts complete candidate `BakeScorer` models. The [360-cell actual-loop
+record](../benchmarks/cleanup_target_loop_2026-09-07.md) measures targets, bytes,
+passes and independent judges, and fails the three-pass error screen. Its
+scalar-q interpolation is diagnostic; it makes no encoder-RDO gain claim.
+The codec-native starting-quality/RDO instruments below remain distinct work.
+No product gate inherits a pass from the three-seed training reproductions.
+
 **Admission prerequisite — user ruling 2026-09-07:** a new model must execute
 and serve entirely in Rust through a zensim surface API. Evaluate through that
 API, including multi-head/corruption routing, splines and final composition.

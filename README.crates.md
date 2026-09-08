@@ -130,8 +130,8 @@ cargo run --release --manifest-path zensim-target/Cargo.toml --bin zensim-target
     input.png --target 70 --codec zenjpeg --profile codec-target --output out.jpg
 ```
 
-The explicit profile matters: the library defaults to B, while the CLI still
-defaults to historical `tuner-v4`. JPEG, WebP, AVIF and PNG are enabled by
+The CLI and library default to `codec-target` (currently B). Use
+`--profile tuner-v4` to reproduce the earlier CLI default. JPEG, WebP, AVIF and PNG are enabled by
 default; JXL encode/decode requires `--features zenjxl` before `--`.
 The historical May 18 demo matrix at
 [`benchmarks/zensim_target_demo_2026-05-18.md`](https://github.com/imazen/zensim/blob/main/benchmarks/zensim_target_demo_2026-05-18.md):
@@ -224,14 +224,14 @@ reproducing scores. Current checkout mapping, checked September 7:
 | `B` (**default** — `codec_target()`) | SDR linear ensemble + dial spline; 95 IDs | 2,012 B |
 | `BHdr` | HDR linear ensemble on absolute-luminance features; 133 IDs | 5,331 B |
 | `D` | Fast SDR linear profile + id100/negative-tail spline; 28 IDs | 1,420 B |
-| `C` / `CHdr` | SDR/HDR candidates; 944-wide bakes, activity-toggle discrepancy remains | 149,343 / 180,195 B |
+| `C` / `CHdr` | SDR/HDR candidates; 667 / 697 declared IDs, canonical activity semantics | 151,785 / 182,826 B |
 | `A` (**deprecated**) | Prior MLP profile; 285 IDs | 26,456 B |
 | `PreviewV0_1` / `PreviewV0_2` | Original 228-weight linear profiles, retained for compatibility | In-source arrays |
 
 Exact filenames, hashes, serving limitations and evaluation records are in the
 [integration guide](https://github.com/imazen/zensim/blob/main/docs/CODEC_TARGET_METRIC.md).
 
-`ZensimProfile::codec_target()` and `latest_preview()` both return `B` — the canonical production codec-target the zen codecs dial against (the deprecated `latest()` also returns `B`). `A` (the prior default, the v47 MLP) is now `#[deprecated]` and lives behind the default-on `deprecated-profiles` feature — build with `--no-default-features` to drop it. To load your own bake, construct `ZensimProfile::Custom { params, name }` via [`ProfileParams::builder()`](https://docs.rs/zensim/latest/zensim/profile/struct.ProfileParams.html). Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+`ZensimProfile::codec_target()` and `latest_preview()` both return `B` — the canonical production codec-target the zen codecs dial against (the deprecated `latest()` also returns `B`). `A` (the prior default, the v47 MLP) is now `#[deprecated]` and lives behind the default-on `deprecated-profiles` feature — build with `--no-default-features` to drop it. For dynamically loaded candidates, `zensim::BakeScorer` borrows a parsed model and serves the complete head/spline/ensemble/corruption composition; evaluation uses that same surface. Static custom profiles remain available through `ZensimProfile::Custom` and `ProfileParams::builder()`. Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
 
 **`D` dial-era v2 (2026-09-05).** `D`'s bake changed from `d_sdr_add156_dense_dial_2026-08-31.bin` to `d_sdr_add156_id100_negrich_dial_2026-09-05.bin`. **The forward pass is byte-identical** (both strip to the same weight bytes), so rank and speed do not move — pooled SROCC is bit-identical on 11 of 14 canonical corpora and within a monotone remap's tie residue on the other three (`kadid` −1.3e-7, `live` +5.8e-7, `tid` +7.9e-6); CID22 is 0.863380 before and after. What changes is the **dial**: a perfect copy now reads **100.000** instead of 96.116, the dial-grid top moves 96.05 → 99.38 (p95 95.28 → 95.52) and the bottom −12.20 → −57.17 (p5 9.52 → 8.83), reach 108.25 → 156.55, and the deepest negative-tail probe row −100.0 → −213.1 — negative scores work further out, which is the product contract, not a regression. No grid cell out-scores identity, before or after (0 of 4,424). **Stored `zensim-d` dial values predate this and must be re-read, not rescaled** — the remap is a PCHIP spline, not an affine. Details + gates: [`benchmarks/d_ship_flip_2026-09-05.md`](benchmarks/d_ship_flip_2026-09-05.md).
 
@@ -367,3 +367,19 @@ Developed with Claude (Anthropic). Not all code manually reviewed. Review critic
 [imageflow-dotnet]: https://github.com/imazen/imageflow-dotnet
 [imageflow-node]: https://github.com/imazen/imageflow-node
 [imageflow-go]: https://github.com/imazen/imageflow-go
+
+### Candidate models for research and serving
+
+Use `zensim::BakeScorer` for a caller-owned `zenpredict::Model`. It reuses
+prediction state and returns the complete model score, including configured
+heads, splines, blends and corruption gates. `compute` scores SDR pixels and
+returns the score with its features; `compute_hdr` uses the explicit HDR
+encoding; `score_features` scores admitted cached rows. The user still controls
+one target score. Model metadata and disposition are model-author settings.
+
+New candidates must be evaluated through this same Rust surface. See
+[the workflow](docs/WAVE_PLAYBOOK.md), [feature identity](docs/FEATURE_SET_IDS.md)
+and [evaluation contract](docs/FULL_EVAL.md). The `serve_custom_bake` example
+loads models without leaked bytes or a static loader. Formula revision is
+validated; candidate pixel scoring refuses if the process's SSIM luminance
+form differs from the bake's revision (`ZENSIM_FORMULA_REV`).

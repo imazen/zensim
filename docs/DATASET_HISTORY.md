@@ -3557,3 +3557,38 @@ resolves 4/4 with no missing-id banner.
 Record: `benchmarks/board_ladder_ruler_2026-09-06.md`; plan:
 `docs/PLAN_BOARD_LADDER_RULER_2026-09-06.md`; gate doc §19; CLAUDE.md G-ADDR +
 dashboard paragraphs corrected in place.
+
+
+## September 7, 2026 — cleanup reproduction and rav1e floor-data control
+
+**STANDS, bounded historical replay.** Three A_plain and three H_anchorlad
+seeds exactly reproduce their September 6 verdict and ladder panels through
+the cleaned Rust training/packing/surface path. The documented KonJND/KADID
+source overlap remains an integrity/memorization guard, not a held-out result.
+A_plain CID22 held-out SROCC is 0.889095 ± 0.002369 across seeds.
+
+The preregistered eight-source rav1e control produced 280/280 encodes and
+extractions, 272 nonidentity training rows, and 2,010 added TV pairs. The
+4,520-row/four-codec and 204,746-pair old prefixes remain exact; combined
+rows/pairs are 4,792/206,756. Source origin splits are train, original bytes
+are preserved, and nearest CID22 gold dHash distances are 20–24. Normalization
+uses unclamped SSIMULACRA2/100 and `ref_basename = image_id`.
+
+Artifacts: `/mnt/v/output/zensim/cleanup-floor-control-2026-09-07/`.
+`instruments/rav1e_train_norm.parquet` SHA-256
+`d28cde382d02c5d0d7b227cbc6bdf1f811b6f0c62fa2212acbcfe6ecfe012a6f`;
+combined `ladder_anchor_train_norm.parquet`
+`0b2c11ad3efb534da98d8bafa71f2f9b6aed323deea499fc0c819d8e7f98a492`;
+combined TV pairs `f92d47281c7f354cfb93053041da3f561e17c3e7beffa0b056a45f3e0041bb25`.
+ENCODING_INPUTS, TRAINING_INPUTS, CONTROL_MANIFEST and INPUTS_AFTER pin the
+actual sources, binaries, tables and pairing. The extractor's build commit
+is unknown: its SHA does not establish a qualified new decoder/feature era.
+The pre-launch A_plain manifest omitted H-only TV files; actual trainer input
+hashes and byte-exact historical TV reconstruction provide the additional check.
+
+Paired H versus H+rav1e CID22 delta is +0.000894 ± 0.002350 (sample SD, three
+seeds). Both pass identity/negative-tail contract; all six fail all five codec
+floor gates. Eight-source missing supervision is insufficient; no new model is
+qualified and no loss/head/feature removal is justified. See the complete
+[control record](../benchmarks/cleanup_scientific_controls_2026-09-07.md) and
+[actual target-loop record](../benchmarks/cleanup_target_loop_2026-09-07.md).

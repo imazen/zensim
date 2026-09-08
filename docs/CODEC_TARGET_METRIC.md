@@ -59,8 +59,8 @@ TOML under [`weights/manifests/`](../zensim/weights/manifests/).
 |---|---|---|
 | **B** (`zensim-b`) | `b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin` · `a96a5a66…` | Default SDR scorer; `codec_target()` and `latest_preview()` |
 | **BHdr** (`zensim-b-hdr`) | `bhdr_linear_shaped_cvvdpmix_byid_2026-09-06.bin` · `8461ac55…` | Default HDR route through the absolute-luminance entry points |
-| **C** (`zensim-c`) | `c_sdr_purity944_2026-08-29.bin` · `61ebc456…` | Available SDR candidate; not the default |
-| **CHdr** (`zensim-c-hdr`) | `c_hdr_l1t1944_2026-08-29.bin` · `0a437d99…` | Available HDR candidate; BHdr remains the default |
+| **C** (`zensim-c`) | `c_sdr_purity944_byid_2026-09-07.bin` · `996dfbb1…` | Available SDR candidate; not the default |
+| **CHdr** (`zensim-c-hdr`) | `c_hdr_l1t1944_byid_2026-09-07.bin` · `3ea640d3…` | Available HDR candidate; BHdr remains the default |
 | **D** (`zensim-d`) | `d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin` · `cd1098b4…` | Fast SDR profile; 28 declared feature IDs, 1,420-byte bake |
 | **A** (`zensim-a`) | `v47_strict_qat_native_byid_2026-09-06.bin` · `de0ddb3d…` | Deprecated profile |
 | `PreviewV0_1`, `PreviewV0_2` | In-source weight arrays | Historical compatibility profiles |
@@ -71,11 +71,11 @@ preserved served scores relative to their prior bakes. See
 [dense bake flip](../benchmarks/dense_bake_flip_2026-09-06.md) and the
 [build-feature serving fix](../benchmarks/dense_serving_ungate_2026-09-06.md).
 
-**C and CHdr can now be served through `Zensim::compute`.** The older
-“944-wide bakes cannot be served” limitation was closed by the feature-plan
-work. Their remaining defect is different: the serving `append2_dst_activity`
-toggle disagrees with training. Changing that behavior and densifying those
-two profiles remain open in [D3](OPEN_DECISIONS_2026-09-06.md#d3-profile-c--chdr-serving-toggle-append2_dst_activity).
+**C/CHdr now declare their consumed IDs and use canonical training activity
+semantics.** The September 7 correction changes their pixel scores; it is not
+a score-preserving conversion relative to the old mismatched serving path.
+The full consumed-feature census, dense/wide gates and HDR evidence are in
+[the planner correction record](../benchmarks/feature_plan_cleanup_2026-09-07.md).
 
 Do not identify feature semantics by vector width. Bakes declare IDs; producer
 and consumer must also agree on feature revision and decoder/extraction

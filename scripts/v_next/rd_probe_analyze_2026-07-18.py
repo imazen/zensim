@@ -92,7 +92,91 @@ def fmt_saved(saved, drivers, judges=("ssim2", "butter", "zensim")):
     return "\n".join(lines)
 
 
+def target_loop_main():
+    """Read actual demo_matrix outputs; reuse the existing matched-judge owner.
+
+    The sparse q curves are a diagnostic interpolation, not an RDO gain claim.
+    No extrapolation; retain out-of-range/unreachable cases in target summaries.
+    """
+    import argparse, json
+    from pathlib import Path
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--target-loop", type=Path, required=True)
+    ap.add_argument("--baseline", default="B")
+    ap.add_argument("--screen-source", action="append", type=int, default=[])
+    args = ap.parse_args()
+    root = args.target_loop
+    if not (root / "COMPLETE").is_file():
+        raise SystemExit("target-loop matrix incomplete; refusing a success summary")
+    rows = [json.loads(line) for line in (root / "measurements.jsonl").read_text().splitlines()]
+    inp = json.loads((root / "INPUTS.json").read_text())
+    expected = len(inp["sources"]) * len(inp["codecs"]) * len(inp["targets"]) * (2 + len(inp["bakes"]))
+    if len(rows) != expected or any("achieved" not in r for r in rows):
+        raise SystemExit("missing/failed target-loop cells")
+    expected_keys = {(s, c, m, t) for s in range(len(inp["sources"]))
+                     for c in inp["codecs"] for m in inp["profiles"] + [Path(b["path"]).stem for b in inp["bakes"]]
+                     for t in inp["targets"]}
+    keys = [(r["source"], r["codec"], r["model"], r["target"]) for r in rows]
+    if len(set(keys)) != len(keys) or set(keys) != expected_keys:
+        raise SystemExit("duplicate/mismatched target-loop cells")
+    CLASS.update({str(i): "screen" for i in args.screen_source})
+    result = {"instrument": "rd_probe_analyze target-loop", "baseline": args.baseline,
+              "cells": len(rows), "max_iterations": inp["max_iterations"],
+              "input_sha256": __import__("hashlib").sha256((root / "INPUTS.json").read_bytes()).hexdigest(),
+              "measurement_sha256": __import__("hashlib").sha256((root / "measurements.jsonl").read_bytes()).hexdigest(),
+              "summary": [], "matched_judge": [],
+              "limitation": "four-source scalar-quality-controller diagnostic; sparse log-byte interpolation without extrapolation; no encoder-RDO intervention or qualified RD improvement"}
+    text = ["# Actual codec-target loop", "",
+            "Targets use each model's own dial. Independent judges are reported separately.",
+            "Sparse matched-quality interpolation is diagnostic; this controller changes only q, not codec RDO.", "",
+            "| codec | model | hits / n | median abs error | p95 abs error | median passes | median loop ms | median score ms |",
+            "|---|---|---:|---:|---:|---:|---:|---:|"]
+    rdtext = []
+    for codec in inp["codecs"]:
+        group = [r for r in rows if r["codec"] == codec]
+        models = sorted({r["model"] for r in group})
+        if args.baseline not in models:
+            raise SystemExit("baseline absent")
+        for model in models:
+            rr = [r for r in group if r["model"] == model]
+            errors = sorted(abs(r["error"]) for r in rr)
+            q = {"codec": codec, "model": model, "n": len(rr), "hits": sum(r["converged"] for r in rr),
+                 "median_abs_error": st.median(errors), "p95_abs_error": errors[math.ceil(.95*len(errors))-1],
+                 "median_passes": st.median(r["passes"] for r in rr),
+                 "median_loop_ms": 1000*st.median(r["loop_seconds"] for r in rr),
+                 "median_score_ms": 1000*st.median(st.median(r["score_seconds"]) for r in rr),
+                 "median_bytes": st.median(r["bytes"] for r in rr),
+                 "undershoots_beyond_tolerance": sum(r["error"] < -inp["tolerance"] for r in rr),
+                 "overshoots_beyond_tolerance": sum(r["error"] > inp["tolerance"] for r in rr),
+                 "targets_outside_observed_score_range": sum(not min(p["score"] for p in r["probes"]) <= r["target"] <= max(p["score"] for p in r["probes"]) for r in rr),
+                 "process_peak_rss_kib": max(r["process_peak_rss_kib"] for r in rr),
+                 "G_TARGET_diagnostic": "pass" if inp["max_iterations"] <= 3 and st.median(errors) <= 2 else "fail" if inp["max_iterations"] <= 3 else "outside_three_pass_gate"}
+            result["summary"].append(q)
+            text.append(f"| {codec} | {model} | {q['hits']}/{q['n']} | {q['median_abs_error']:.3f} | {q['p95_abs_error']:.3f} | {q['median_passes']:.1f} | {q['median_loop_ms']:.2f} | {q['median_score_ms']:.3f} |")
+        # Each distinct reconstruction appears once in the RD comparison. Target
+        # hit statistics above retain every preregistered requested target.
+        distinct = {(r["source"], r["model"], r["encoded_sha256"]): r for r in group}
+        cells, judges = [], {}
+        for r in distinct.values():
+            key = r["encoded"]
+            cells.append({"image": str(r["source"]), "label": r["model"], "bytes": r["bytes"], "dist_path": key})
+            judges[key] = {"ssim2": r["ssim2"], "butter": -r["butteraugli_pnorm3"], "zensim": r["fixed_b"]}
+        saved = helpful(cells, args.baseline, judges, codec)
+        rdtext.extend(["", f"## {codec}: diagnostic bytes at matched judge quality versus {args.baseline}",
+                     "Out-of-range comparisons are omitted, never extrapolated.",
+                     fmt_saved(saved, [m for m in models if m != args.baseline])])
+        for (judge, model, cls), values in sorted(saved.items()):
+            result["matched_judge"].append({"codec":codec,"judge":judge,"model":model,"class":cls,
+                "n":len(values),"median_saved_fraction":st.median(values),"values":values})
+    text.extend(rdtext)
+    (root / "analysis_summary.json").write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
+    (root / "analysis_summary.md").write_text("\n".join(text) + "\n")
+    print("\n".join(text))
+
+
 def main():
+    if "--target-loop" in sys.argv:
+        return target_loop_main()
     judges = load_judges()
     out = ["# diffmap-RD probe analysis — auto-generated\n"]
 

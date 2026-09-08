@@ -648,18 +648,11 @@ if (DATA) (function failurePanelTest() {
   const tabs = attachedTables(isFail);
   if (tabs.length !== 1) { fail('failure panel: expected 1 attached comparison table, got ' + tabs.length); return; }
   const rows = tabs[0];
-  // The page's own default-visible rule. Kept in lockstep with gauntlet.js's `_DEFVIS`:
-  // curated, not dominated, no knob-end failure — AND, since the 2026-09-04 fairness
-  // pass, not LEGACY (the default view is VERIFIED-FAIR + FAIR-NOTED). A stale copy of
-  // this rule here does not catch a bug, it INVENTS one, which is exactly what happened
-  // when the default changed: the panel drew 6 rows and the harness demanded 16.
-  const anyFair = DATA.bakes.some(b => b.fair && b.fair.tier);
-  const vis = CMPMODE ? DATA.bakes.filter(b => CMPSET.indexOf(b.name) >= 0)
-    : DATA.bakes.filter(b => b.curated
-    && !(b.dominated_by && b.dominated_by.length)
-    && !(b.knob_end_fail && b.knob_end_fail.length)
-    && (!anyFair || (b.fair && b.fair.tier !== 'LEGACY')));
-  const nVis = vis.length || DATA.bakes.length;
+  // Check rendering against the user's actual selection. Duplicating the
+  // default-selection policy here made a harmless preset change invent a
+  // missing-row failure. Selection behavior is exercised by the compare gates.
+  const selectedNames = vm.runInContext('Array.from(state.visible)', sandbox);
+  const nVis = selectedNames.length;
   if (rows.length - 1 !== nVis)
     fail('failure comparison rows ' + (rows.length - 1) + ' != visible bakes ' + nVis);
   const hdr = rows[0].children.map(cellText).map(s => s.trim());

@@ -67,7 +67,7 @@ Read first, in this order: `SESSION-RESUME.md` → this doc → `docs/WAVE_PLAYB
 | buckets | `zentrain` (writes), `codec-corpus` (read-only), `zenfuzz` — unchanged names | `RUNNING_JOBS.md:197-198` |
 | what moved | `zentrain` on LAN = 2,984 objects / 494 MB vs 1,850 GB on R2 — "the cutover is proven end-to-end but the corpus is still R2-resident" | `lan-storage-2026-08.md:127-137` |
 | R2 rundown | proposal registered, **no deletions performed, user-gated** | `lan-storage-2026-08.md:165, 199-212`; `DATA_PROVENANCE.md:1330` |
-| roster (neutral ids) | Nomad servers: `dev`, `tower`, `r7900x`; Nomad clients (G-N1): `r7900x`, `i265`, `r3500`; systemd `zen-worker` enrolled: `r7900x` (stopped), `i265` (stopped), `r3500` (stopped), `r5900xt` (running), `tower` (basement tier), `mac` (idle-only); `i134`/`r5600g` intermittent, down after the failed G-P1; `wsl` = operator seat | `homefleet/zenmetrics/ORCHESTRATION-2026-08.md:27-43, 113-116`; `NODES.md:188-199` |
+| roster (neutral ids) | Nomad servers: `dev`, `tower`, `r7900x`; Nomad clients (G-N1): `r7900x`, `i265`, `r3500`; systemd `zen-worker` enrolled: `r7900x` (stopped), `i265` (stopped), `r3500` (stopped), `r5900xt` (running), `tower` (storage-host tier), `mac` (idle-only); `i134`/`r5600g` intermittent, down after the failed G-P1; `wsl` = operator seat | `homefleet/zenmetrics/ORCHESTRATION-2026-08.md:27-43, 113-116`; `NODES.md:188-199` |
 | GPU | the Nomad GPU jobspec pins `r7900x` as "the only GPU box"; the appendix-Z/Z.R record has an RTX 3070 (node-2) + RTX 2080 doing the rescue — the card inventory is inconsistent across docs (§1.4 #8) | `fleetbench-gpuscore.nomad.hcl:9-26`; campaign Z.R0 |
 | GPU metric truth | GPU-ness = metric-name suffix `-gpu`/`_gpu` → `ResourceClass::Gpu`; **`zensim-gpu` panics by design in the current executor tag** | `zenfleet-core/src/job.rs:287-309`; `scripts/jobsys/fleet.env:44-49` |
 | images | CPU `ghcr.io/imazen/zenfleet-worker:exec`; GPU `:exec-gpu-zensimv2-0953c94671`; executors must be built `--target x86_64-unknown-linux-musl` (a glibc-drift binary shipped and would not start) | `fleet.env:50-81` |
@@ -660,7 +660,7 @@ sudo docker run --rm --gpus all \
   -e ZEN_RUN=jobs/hdrgrid-sf-gpu-20260807 \
   -e ZEN_MANIFEST_URI=s3://zentrain/jobs/hdrgrid-sf-gpu-20260807/manifest.json \
   -e ZEN_CONTROL_KEY=jobs/hdrgrid-sf-gpu-20260807/control.json \
-  -e ZEN_REQUIRE_GPU=1 -e ZEN_WORKER=<host> -e ZEN_PROVIDER=basement \
+  -e ZEN_REQUIRE_GPU=1 -e ZEN_WORKER=<host> -e ZEN_PROVIDER=storage-host \
   --entrypoint /usr/local/bin/fleet-entrypoint.sh \
   ghcr.io/imazen/zenfleet-worker:exec-gpu-avifgen-66e3c417
 ```
@@ -1249,16 +1249,16 @@ overlapped). Fleet roll onto images at the fixed tip in progress.
 
 **TOWER INCIDENT — corrected narrative (2026-08-26T21:12Z)**: dockerd on tower
 had died at some earlier point (cause UNCONFIRMED — the OOM traces are Aug-6
-memcg kills, unrelated), but on Unraid **containers survive dockerd via their
-containerd shims** — the store and Plex kept running; only the docker CLI was
+memcg kills, unrelated), but on storage-host OS **containers survive dockerd via their
+containerd shims** — the store and media-service kept running; only the docker CLI was
 dead. My `rc.docker start` "restore" then recreated the stack and KILLED the
 surviving store shim (`zen-lanstore` exited 137, :3900 went dark ~2 min, six
 workers rode it out on backoff). `docker start zen-lanstore` + ~15 s SeaweedFS
 warmup restored it; workers unaffected (restart policies + claim TTLs).
-**Plex was never down** — the "0 processes" read was pgrep's 15-char comm
+**media-service was never down** — the "0 processes" read was pgrep's 15-char comm
 truncation, a gotcha this repo already documents and I re-learned live.
 Decisions: tower stays OUT of the worker fleet (media priority; daemon-level
-fragility observed); LESSON: on Unraid, `docker info` failing does NOT mean
+fragility observed); LESSON: on storage-host OS, `docker info` failing does NOT mean
 services are down — check shims (`pgrep -f`) before any restart, and a stack
 restart is itself a service-interrupting act.
 
@@ -1299,7 +1299,7 @@ PUT 500s → all six workers wrote NOTHING for ~2h (i134: `skipped=142307
 rows=0` — claims unwritable). Reads stayed fine, which is why monitoring
 looked half-alive. ROOT CAUSE of the fill: the `coefficient` NAS share had
 **1.2T parked on cache** (mover not run) + today's ~200G of diffmap blobs +
-16.6G migration. FIX: workers stopped (no-op passes), **Unraid mover started**
+16.6G migration. FIX: workers stopped (no-op passes), **storage-host OS mover started**
 (coefficient cache→array; 21T free there) — frees ~1.2T; the store keeps its
 NVMe layout and gains the ~300G the remaining diffmap corpus needs. Fleet
 relaunch gated on a space-watcher (≥80G free). LESSONS: (a) the store's disk
@@ -1550,7 +1550,7 @@ and was removed (config backup kept on-box); worker zen-score-l5070 launched
 via lan_score_launch.sh (KIND=gpu → --gpus all + ZEN_REQUIRE_GPU=1,
 ZEN_MEMORY=16g, ZEN_CAPABILITY=gpu) on hdrgrid-diffmap-20260807 with the
 invariant-carrying exec-gpu-399abe82; (4) fleet_sentinel.sh (zenmetrics
-3ee0ace7) re-armed WITH --runlist so drain-stall/space/store/plex/tower
+3ee0ace7) re-armed WITH --runlist so drain-stall/space/store/media-service/tower
 conditions each EXIT and invoke the supervisor — no silent log lines.
 First-cell gate: boot log + artifact landing check armed; scale-up
 (i134 gpu + cpu boxes) only after it passes.
@@ -1613,7 +1613,7 @@ measured judgment-free park/restart cycles, the mechanical pair is automated
 recovery, initial state probed from reality since arming-while-parked is the
 normal moment). The supervisor is invoked ONLY for judgment: parked-and-
 still-dead >8 ticks (abnormal outage), >8 cycles (thrash), cycle-ssh
-failures, drain-complete, space-gate, tower/plex, budget. This keeps the
+failures, drain-complete, space-gate, tower/media-service, budget. This keeps the
 user's "Claude handles all conditions" directive at the DECISION layer while
 killing the per-transition wake churn the latency discipline bans. Armed on
 the wsl worker + diffmap runlist.
@@ -1662,16 +1662,16 @@ My first array-direct design mounted `/mnt/user/coefficient/zenstore-data2` —
 a USER-SHARE path. With `shareUseCache=yes`, shfs lands NEW writes on the
 CACHE first: the store's "array" volumes were cache blocks all along, the
 fleet filled the cache to 100% (844K free — a real hazard for every other
-appdata service incl. Plex's DB), and a relocation `mv` through the same
+appdata service incl. media-service's DB), and a relocation `mv` through the same
 shfs path died writing tiny `.vif` files, leaving split volume triplets.
-**Recovery (store down ~10 min, workers retried by design, Plex 200
+**Recovery (store down ~10 min, workers retried by design, media-service 200
 throughout)**: partial dest files removed (71, sources intact), the complete
 cache-resident files relocated to a DIRECT DISK path
 (`/mnt/disk1/coefficient/zenstore-data2` — bypasses shfs and the cache
 entirely; 11T free), orphaned idx/vif colocated with their dat, container
 recreated with /data2 → the direct path. Probes green; cache back to 21G
 free and now FLAT from the store's side (all new volumes land on disk1).
-**LESSON (permanent): on Unraid, `/mnt/user/...` is NEVER an array path for
+**LESSON (permanent): on storage-host OS, `/mnt/user/...` is NEVER an array path for
 new writes when the share caches — direct-to-array means `/mnt/diskN/...`
 (or `/mnt/user0/...`). And never bulk-`mv` through shfs onto a nearly-full
 cache: partial-file splits are the failure mode.**
@@ -1707,7 +1707,7 @@ Chain of causes, each fixed at its owner, in order found:
 **Verified steady state (02:50-02:55Z)**: 5/5 workers landing sidecars
 (36 chunks/4 min), done 95,764→100,271 (+4,507/~10 min ≈ 450 cells/min),
 gap 93,303 (ETA ≈ 3.5 h), disk1 22→36G (~25 MB/s), cache FLAT at 25G and
-rising, sentinel auto-cycled the wsl GPU worker back (cycle 2), Plex 200
+rising, sentinel auto-cycled the wsl GPU worker back (cycle 2), media-service 200
 through the whole arc. Queued on DRAIN-COMPLETE: migrate the /data cache
 volumes to disk1 in a store-stopped window; then the diffmap writeback.
 

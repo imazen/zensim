@@ -1,4 +1,4 @@
-# Tower basement server vs local box — v2 720-feature extraction throughput (2026-07-20)
+# Tower storage-host server vs local box — v2 720-feature extraction throughput (2026-07-20)
 
 Directional box-capacity benchmark (n=40 real aic3 pairs, ~1-5 MP, 3 runs best-of;
 NOT a source-informing sweep — a relative CPU comparison). The real 720-feature
@@ -7,11 +7,11 @@ runtime CPU dispatch picking each box's best SIMD tier.
 
 ## Boxes
 
-| | Local | Tower (basement) |
+| | Local | Tower (storage-host) |
 |---|---|---|
 | CPU | AMD Ryzen 9 7950X (Zen4, 16C/32T) | AMD Threadripper 2950X (Zen1+, 16C/32T) |
 | SIMD tier used | **AVX512** (magetypes `v4x`) | **AVX2** (`v4`) — no AVX512 |
-| Env | WSL2, 28 threads visible, RAM 59 GiB | Unraid OS 7.3.1 bare metal, 32T, 62 GiB |
+| Env | WSL2, 28 threads visible, RAM 59 GiB | storage-host OS OS 7.3.1 bare metal, 32T, 62 GiB |
 | Reach | — | `root@tower` (passwordless key), glibc 2.43 |
 | Load during run | 2.4–4.9 (shared w/ agents) | 1.5–1.7 |
 

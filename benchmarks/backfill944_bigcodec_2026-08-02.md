@@ -44,7 +44,7 @@ scale-out.
    `ab_decode` instrument). Today's codec siblings decode identically to the
    2026-07-27 image; the new binary is byte-faithful to the old one.
 3. **Worker attribution.** The bf924 ledger rows for the mismatching cells:
-   all `worker=tower-unraid` (Threadripper 2950X = Zen1, **AVX2-only**), while
+   all `worker=storage-worker` (Threadripper 2950X = Zen1, **AVX2-only**), while
    the smoke ran on AVX-512.
 4. **Tier proof (the `tier_proof` instrument).** The o_9736.png.scale192x192
    cell (tower-made in bf924), re-extracted with the NEW image:
@@ -65,7 +65,7 @@ extractor. Any uniform-tier re-extraction fails G-BF1 structurally.
 | bf924 worker | cells | SIMD tier |
 |---|--:|---|
 | lilith-lianli (7900X Zen4) | 229,064 | v4x (AVX-512) |
-| tower-unraid (TR 2950X Zen1) | 129,648 | v4 (AVX2) |
+| storage-worker (TR 2950X Zen1) | 129,648 | v4 (AVX2) |
 | zen-node-2 = node-2 (i5-13400F) | 97,170 | v4 |
 | lilith-mac (M4 Pro) + mac-login-test + mac-debug | 31,317 + 170 + 32 | neon |
 | wsl-smoke (7950X Zen4) | 2,772 | v4x |
@@ -146,7 +146,7 @@ measured equivalence classes (all verified by bitwise gates in this wave):
 | class | boxes (bf924-era worker names) | cells attributed |
 |---|---|--:|
 | amdv4x (AMD Zen4, AVX-512) | lianli (`lilith-lianli`), wsl (`wsl-smoke`→`wsl-944`) | 231,836 |
-| amdv4 (AMD Zen1/Zen3, AVX2) | tower (`tower-unraid`), node-3 (`zen-node-3`) | 129,648 |
+| amdv4 (AMD Zen1/Zen3, AVX2) | tower (`storage-worker`), node-3 (`zen-node-3`) | 129,648 |
 | intelv4 (Intel RaptorLake/ArrowLake, AVX2) | node-2 (`zen-node-2`), i265 | 97,170 |
 | neon (Apple M4 Pro) | mac (`lilith-mac` + test names) | 31,519 |
 

@@ -302,7 +302,15 @@ whole 120-epoch run; `tid`'s 3,000 rows are re-covered ~2.6 times *per epoch*.
 
 ---
 
-## 6. Remote training (Hetzner) — HETZNER-FIRST for all slow work
+## 6. Compute placement — current LAN workflow
+
+**September 7 chronology correction:** the July Hetzner-first instruction
+below is historical. Use current LAN/local capacity through the resource-capped
+workspace `run-heavy` owner; use [WAVE_PLAYBOOK.md](WAVE_PLAYBOOK.md) for
+orchestration. Four obsolete Hetzner launchers were retired; the unique derived-
+table builder remains. No external fleet is provisioned or retired implicitly.
+
+### Historical July placement rule
 
 Per user 2026-07-02 (twice): **ALL slow work runs on Hetzner train boxes by
 default** — trainer cells, sweeps, corpus/parquet builds, anything minutes-

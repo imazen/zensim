@@ -3878,7 +3878,7 @@ blobs already present (verified, not re-copied). **6 of 7 bigcodec datasets are 
 + fetchable via tar+index on the LAN store** (each proven by hashing a real member offset from
 both stores); `zenjpeg_lossy` has tars but NO index exists anywhere (needs building). Four
 `encodes/` plain-GET prefixes deferred (2.77 M objects; bytes covered by tars; do tower-LOCALLY
-after the Unraid mover — running 3 d 21 h — drains). Capacity: array 20 T free (42 %);
+after the storage-host OS mover — running 3 d 21 h — drains). Capacity: array 20 T free (42 %);
 SeaweedFS writes round-robin across tiers ⇒ NVMe cache took +210 GiB (849 G free) — first
 snapshot said untouched, corrected in the doc.
 

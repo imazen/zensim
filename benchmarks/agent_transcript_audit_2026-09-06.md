@@ -659,7 +659,7 @@ A `†` marks a row whose "final report" is **not a report**: a platform error s
 Thirty-one items, judged by four sub-lanes against each agent's own report and then
 re-verified. Household and secret items carry **location only** — no value, no address, no
 name — per the privacy rule; the substance of each is in §2 and §3. Everything a lane
-classified as regex noise (the `token`-as-`X64V4Token` class, the "plex"-inside-"complex"
+classified as regex noise (the `token`-as-`X64V4Token` class, the product-name-inside-a-type-name
 class, failing-first test cycles) is excluded rather than padded in.
 
 | sev | agent:line | category | what it is |
@@ -690,7 +690,7 @@ class, failing-first test cycles) is excluded rather than padded in.
 | **MED** | `ada9c85fe5989436a:L(final)` | DEVIATION | read-only inventory killed by session quota; deliverable never produced (§4) |
 | **MED** | `aee46a54cb2199b3b:L(end of transcript)` | DIED-MID-FLIGHT | read-only inventory killed by session quota; deliverable never produced (§4) |
 | **LOW** | `a1ee1f8a916af1aa2:L185` | SECRET (noise) | regex noise — `archmage::X64V4Token` matched the secret pattern |
-| **LOW** | `a541ac3f35916f6eb:L970` | HOUSEHOLD (noise) | regex noise — "plex" inside `clippy::type_complexity` |
+| **LOW** | `a541ac3f35916f6eb:L970` | HOUSEHOLD (noise) | regex noise — a product-name substring inside `clippy::type_complexity` |
 | **LOW** | `a907d66178e4d2731:L278` | tool-friction (gh-guard false positive) | gh-guard false positive on a local `CLAUDE.md` edit containing `main@origin` (§9) |
 | **LOW** | `a9df2d4b27329f551:L838` | DESTRUCTIVE (jj op restore) | `jj op restore` failed on a corrupt op object and changed nothing; real fix was a normal rebase |
 | **LOW** | `aa838df668a2f89cf:L53` | HOUSEHOLD (noise) | regex noise — this audit lane; the "hit" is the detector's own pattern text |

@@ -6,7 +6,7 @@ For every --group parquet (or every `--group` in a fulleval's embedded
 zentrain.repro argv), extract CONTENT ids per family and intersect with every
 registered eval surface of the same family. Any overlap is a hard error unless
 the (group, surface) pair is a registered GUARD (train==val by design, e.g.
-the kadid/tid full-set integrity rows) — those print WARN.
+the registered historical KADID integrity rows) — those print WARN.
 
 Content-id rules (family -> extraction):
   imazen26  leading numeric origin stem of ref_basename (origin_split family)
@@ -38,8 +38,6 @@ SURFACES = [
     ("imazen26", "ext_hfnlproxy@372(terminal)", f"{ROOT372}/ext_hfnlproxy.parquet"),
     ("kadid", "kadid_select", f"{EXT944}/ext_kadid_select_2026-08-29.parquet"),
     ("kadid", "kadid_terminal", f"{EXT944}/ext_kadid_terminal_2026-08-29.parquet"),
-    ("tid", "tid_select", f"{EXT944}/ext_tid_select_2026-08-29.parquet"),
-    ("tid", "tid_terminal", f"{EXT944}/ext_tid_terminal_2026-08-29.parquet"),
     ("konjnd", "konjnd_jpeg(select+terminal)", f"{EXT944}/ext_konjnd_jpeg_val.parquet"),
     ("cid22", "cid22_49ref_gold", f"{ROOT372}/cid22_features_372col_2026-05-15.parquet"),
 ]
@@ -48,7 +46,6 @@ SURFACES = [
 # guards: report WARN, not error. Everything else overlapping is an ERROR.
 GUARDS = [
     ("ext_kadid.parquet", "kadid_select"), ("ext_kadid.parquet", "kadid_terminal"),
-    ("ext_tid.parquet", "tid_select"), ("ext_tid.parquet", "tid_terminal"),
     ("konjnd_dense", "konjnd_jpeg(select+terminal)"),
 ]
 
@@ -117,6 +114,9 @@ def main():
         fam = family_of(g)
         if fam is None:
             print(f"ok       {b}: no registered eval-surface family (train-only estate)")
+            continue
+        if fam == "tid":
+            print(f"ok       {b}: T2 train-only (user ruling 2026-08-29); no TID eval surface")
             continue
         gids = ids_of(g, fam)
         if fam == "kadis":

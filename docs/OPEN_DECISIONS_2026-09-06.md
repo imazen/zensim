@@ -39,6 +39,10 @@ Four-way compare (shipped D · constrained MLP · guarded D · fast-class MLP): 
 
 ## D3. Profile C / CHdr serving toggle (`append2_dst_activity`)
 
+**Closed September 7:** serve canonical activity OFF, declare C/CHdr IDs,
+and retire both old plan derivations. [Evidence](../benchmarks/feature_plan_cleanup_2026-09-07.md).
+The options below are the earlier decision record.
+
 **Evidence.** `from_block_profile`'s `everything` fallback serves C/CHdr with `append2_dst_activity: true`; their training extraction ran it OFF (production verdict 2026-08-02). Measured on one CID22 pair: C 0.866 and CHdr 0.311 zensim points of train/serve skew. Pre-existing; exposed by densify. It blocks densifying C/CHdr and deleting the last two dead paths (`from_block_profile`, `wide_bake_v2_read`). C/CHdr are candidate profiles behind a default-on feature.
 - inventory: https://github.com/imazen/zensim/blob/main/benchmarks/cruft_inventory_2026-09-06.md
 - plan: https://github.com/imazen/zensim/blob/main/docs/PLAN_CRUFT_PURGE_2026-09-06.md
@@ -50,6 +54,11 @@ Four-way compare (shipped D · constrained MLP · guarded D · fast-class MLP): 
 ---
 
 ## D4. The corruption head: public API and wiring
+
+**September 7 update:** complete corruption composition now serves through
+`BakeScorer`, including tree and linear heads, and candidate evaluation uses
+that surface. [Implementation record](PLAN_CRUFT_PURGE_2026-09-06.md).
+The older named-profile proposal below is not the implemented API contract.
 
 **Evidence.** The right head class is a gradient-boosted tree on D's 156+peaks features: 98.9 % detection / 1.23 % honest FP / 2.38 % near-lossless FP at T = 0.9, no dial guard needed (the logistic: 86.0 / 11.4 / 50.0); leaving the top chromatic families out of training buys −4.3 pt FP / +12.9 pt detection at matched FP. Servable: `ZCTH` v1 format, Rust evaluator bit-exact vs sklearn (0 ulp decision function on 35,607 rows), 659 ns/compare (0.63× D's own forward), `bake_verdict --corruption-head` reproduces the gate end-to-end (671/672). Wired into evaluation; NOT into the runtime (doc-hidden behind feature `corruption-head`, public-API delta zero).
 - serving: https://github.com/imazen/zensim/blob/main/benchmarks/corruption_head_serving_2026-09-06.md · plan §3 (signatures): https://github.com/imazen/zensim/blob/main/docs/PLAN_CORRHEAD_SERVING_2026-09-06.md

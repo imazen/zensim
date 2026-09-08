@@ -30,29 +30,25 @@ import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 
-CLASS = {
-    'lilith-lianli': 'amdv4x', 'wsl-smoke': 'amdv4x', 'wsl-944': 'amdv4x',
-    'tower-unraid': 'amdv4', 'zen-node-3': 'amdv4',
-    'zen-node-2': 'intelv4', 'i265': 'intelv4',
-    'lilith-mac': 'neon', 'mac-login-test': 'neon', 'mac-debug': 'neon',
-    'lilith-mac-gapfix': 'neon', 'lilith-mac-manual': 'neon',
-    'lilith-mac-manual2': 'neon', 'lilith-mac-manual3': 'neon',
-}
-# bf924 worker -> the bf944-era worker(s) that are the SAME physical box.
-SAME_BOX = {
-    'tower-unraid': {'tower-unraid'},
-    'zen-node-2': {'zen-node-2'},
-    'zen-node-3': {'zen-node-3'},
-    'i265': {'i265'},
-    'lilith-lianli': {'lilith-lianli'},
-    'wsl-smoke': {'wsl-944'},
-    'lilith-mac': {'lilith-mac', 'lilith-mac-gapfix'},
-    'mac-login-test': {'lilith-mac', 'lilith-mac-gapfix'},
-    'mac-debug': {'lilith-mac', 'lilith-mac-gapfix'},
-}
+# Historical private aliases belong in local configuration, not public source.
+# Schema: {"classes":{"worker-a":"amdv4"},"same_box":{"worker-a":["worker-a"]}}
+# BF944_WORKERS can point to the preserved campaign's mapping on another host.
+def worker_maps():
+    import json, os
+    path = Path(os.environ.get("BF944_WORKERS", Path.home() / ".config/zensim/bf944_workers.json"))
+    data = json.loads(path.read_text())
+    classes, same = data["classes"], data["same_box"]
+    if not isinstance(classes, dict) or not isinstance(same, dict):
+        raise ValueError("worker mapping must contain classes and same_box objects")
+    if any(v not in {"amdv4", "amdv4x", "intelv4", "neon"} for v in classes.values()):
+        raise ValueError("unknown extraction vendor/SIMD class")
+    if any(not isinstance(v, list) or any(w not in classes for w in v) for v in same.values()):
+        raise ValueError("same_box entries must list known workers")
+    return classes, {k: set(v) for k, v in same.items()}
 
 
 def main() -> int:
+    classes, same_box = worker_maps()
     id_map = sys.argv[1] if len(sys.argv) > 1 else '/home/lilith/tmp/bigcodec944/id_map2.parquet'
     ledgers = Path(sys.argv[2] if len(sys.argv) > 2 else '/home/lilith/tmp/bf944_join/ledgers')
     out = sys.argv[3] if len(sys.argv) > 3 else '/home/lilith/tmp/bf944_join/matched_ledger.parquet'
@@ -81,16 +77,16 @@ def main() -> int:
     ):
         cands = cand.get(i4, []) + cand.get(i4p, [])
         pick = None
-        boxes = SAME_BOX.get(w924, set())
+        boxes = same_box.get(w924, set())
         for c in cands:
             if c[1] in boxes:
                 pick = c
                 stats['exact_worker'] += 1
                 break
         if pick is None:
-            cls = CLASS[w924]
+            cls = classes[w924]
             for c in cands:
-                if CLASS.get(c[1]) == cls:
+                if classes.get(c[1]) == cls:
                     pick = c
                     stats['vendor_class'] += 1
                     break

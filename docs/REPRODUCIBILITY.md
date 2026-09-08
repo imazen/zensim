@@ -1,6 +1,16 @@
 # Reproducibility spine — how a zensim number stays true
 
-## Reports: `bake_verdict --html` is the ONLY report path (2026-07-16, user directive)
+## Current report ownership — September 7, 2026
+
+`bake_verdict` owns scientific scores/statistics and its single-bake HTML report.
+The existing `scripts/v_next/gauntlet.py` owns the multi-bake board; it renders
+stored owner results and is the authorized dashboard. `run_full_eval.sh` owns
+content-bound evaluation stages and reuse. `freeze_check --qualify` is separate
+from research selection. This later workflow supersedes the July "only HTML
+path" wording below while retaining its ban on duplicate report/statistic
+implementations. See [WAVE_PLAYBOOK](WAVE_PLAYBOOK.md).
+
+## Historical July report rule
 
 **Ad-hoc HTML/dashboard report scripts are BANNED.** The canonical, comprehensive
 report is `bake_verdict --html [--compare <ref-bake>]` — it emits the full

@@ -54,15 +54,15 @@ ablation closes its hypothesis and preserves the useful component.
   derivation retirement, with the serving census and feature-build matrix.
 - [x] Consolidate repeated feature/era metadata; retire unused positional
   training surfaces and the stale JS example after caller checks.
-- [ ] Slim current instructions; consolidate workflow docs; move completed root
+- [x] Slim current instructions; consolidate workflow docs; move completed root
   documents and retire obsolete launch tools while retaining their evidence.
-- [ ] Close the bounded compute/implementation ablation review using existing
+- [x] Close the bounded compute/implementation ablation review using existing
   results and any necessary discriminating measurements; run the all-codec
   floor-coverage control, including rav1e, without assuming qualification.
-- [ ] Reproduce competitive training from recorded recipes on the cleaned path;
+- [x] Reproduce competitive training from recorded recipes on the cleaned path;
   evaluate the emitted bakes through the Rust API and report held-out quality,
   identity/floors, serving cost and actual target-loop behavior separately.
-- [ ] Run required checks, resolve regressions, push and verify every increment,
+- [x] Run required checks, resolve regressions, push and verify every increment,
   and leave a complete execution/evidence record.
 
 **API delta registered before implementation:** a reusable `BakeScorer<'a>`
@@ -953,3 +953,56 @@ The trainer/metadata checklist items are complete. See the [implementation and
 verification record](../benchmarks/trainer_admission_cleanup_2026-09-07.md).
 Unknown decoder declarations do not confer qualified provenance; historical
 replay remains explicitly unqualified.
+
+### Current documentation and launch-tool consolidation — September 7
+
+CLAUDE is now the concise working-rules file; WAVE_PLAYBOOK is the current
+workflow/tool map; RESEARCH and ITERATION_PROTOCOL point there. Original dated
+notes are retained under `docs/history` (exact originals in Git). Completed
+root reports/plans were moved there and Markdown links updated. Contracts for
+splits, feature identity, reproducibility and selection remain separate owners.
+The later TID train-only ruling now reaches the split checker. C/CHdr and
+corruption decisions have explicit completion updates.
+
+Four unused Hetzner launchers are retired after caller checks. The unique
+`rebuild_derived.py` stays. The historical worker selector reads preserved
+private aliases from local configuration; mapping equality was checked. The
+full linter's 26 pre-existing private-identifier hits are resolved without
+exemptions, and all 604 remaining script checks pass. Model/data evidence and
+unique compiled experimental consumers remain; no bulk deletion of bakes,
+profiler evidence or data was justified by the caller/storage audit.
+
+
+### Scientific completion — September 7 local / September 8 UTC
+
+The bounded scientific checklist items are complete. Nine actual fits completed:
+three unchanged A_plain seeds and three unchanged H_anchorlad seeds exactly
+reproduce their September 6 verdict/ladder panels; three paired H+rav1e seeds
+measure the missing-codec data control. CID22 means are 0.889095, 0.874350 and
+0.875244 respectively. All six H models pass the identity/negative-tail contract
+but still fail all five codec-floor regression gates. No new winner is qualified.
+See [the registered controls and full seed results](../benchmarks/cleanup_scientific_controls_2026-09-07.md).
+
+The [360-cell actual-loop record](../benchmarks/cleanup_target_loop_2026-09-07.md)
+reports emitted bytes, reconstruction/score checks, target errors, passes,
+latency/memory and independent judges. It fails the three-pass target-error
+screen and makes no encoder-RDO or contended performance claim. This evidence
+does not justify feature/head/loss deletion; buffered/shared-feature paths retain
+real callers and remain deliberately supported under the user's compute priority.
+
+Qualification now requires compatible training and evaluation admission for
+every ensemble member/companion. Root and per-file sidecar hashes invalidate
+reuse even when admission is unknown or fails early. Historical replay and
+unstamped tree companions cannot acquire a provenance pass from the primary.
+The actual known-primary/unknown-companion and decoder-sidecar controls pass.
+The latest full evaluations preserve all six scientific panels, complete all
+27 coherence cells, and receive the explicit owner decision `failed`.
+
+
+### Final acceptance record
+
+The operative checklist is complete; [the completion record](../benchmarks/cleanup_completion_2026-09-07.md)
+links the exact removals, retained conditional work, nine training fits, target
+loops, final CI/board checks and evidence locations. A completed cleanup does
+not confer model qualification. Superseded proposal/status paragraphs above
+remain dated history, not another pending work queue.

@@ -1,99 +1,44 @@
-# Start here — zensim’s current product and science
+# Start here — one target score, one development path
 
-**Reviewed 2026-09-07 against checkout `0205c45c`, September 6 results, and the
-Claude session through September 7.** This is the navigation page. Dated
-measurement records remain the evidence; an old “current state” paragraph is
-not a new ruling. The earlier version of this page remains in Git history.
+Reviewed September 7, 2026. [CLAUDE.md](CLAUDE.md) contains current working rules;
+[WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
+Older operational notes are in [docs/history](docs/history/).
 
-## The product
+The end user controls one target score. The codec chooses parameters and must
+reach useful quality across codecs/content, near-lossless settings and codec
+floors with few passes, small output, low latency and low memory. Negative
+scores are valid. A rank correlation or research composite cannot establish
+that behavior. B remains `codec_target()`; D is the explicit fast profile.
+B/C/D may be replaced: there are no consumers calibrated to their current
+scores. [The integration guide](docs/CODEC_TARGET_METRIC.md) owns the mapping.
 
-The user controls **one target score**. The codec/picker chooses its own
-parameters and reaches that quality with few passes, small output, low latency
-and low memory use. The score must remain useful across codecs and content,
-including near-lossless settings and each codec’s actual floor. Negative
-scores are valid; there is no arbitrary required negative depth. A stronger
-rank correlation alone does not establish a better user dial.
+Every new model must execute and serve entirely in Rust through a zensim API,
+and evaluation must call that API, including heads, corruption and splines.
+`BakeScorer` now provides that dynamic surface. Python remains useful for
+invention and independent numerical references.
 
-Read [`docs/CODEC_TARGET_METRIC.md`](docs/CODEC_TARGET_METRIC.md) for current
-integration, profile/bake mapping, and real consumer behavior. **B remains the
-`codec_target()` / `latest_preview()` default; D is an explicit fast profile.**
-The September 5 change updated D’s own calibration, not the default alias.
-**Later user ruling, September 7:** no consumers have calibrated to B/C/D;
-all may be improved or replaced. Their present defaults are descriptive,
-not a requirement to preserve their scores. Every new model must execute and
-serve fully in Rust through a zensim surface API, and evaluation must use that
-API—including all heads, corruption gates and splines.
+| Question | Current answer / evidence |
+|---|---|
+| Can we train after cleanup? | Three A_plain seeds exactly reproduce all measured verdict and ladder fields. Three H_anchorlad seeds also reproduce every earlier verdict and ladder field; three paired rav1e additions complete the floor-data control. [Reproduction](benchmarks/cleanup_training_reproduction_2026-09-07.md); [paired controls](benchmarks/cleanup_scientific_controls_2026-09-07.md). These historical recipes have documented split limits. |
+| How does target search behave? | [360 real codec loops](benchmarks/cleanup_target_loop_2026-09-07.md) completed; every model/codec group misses the three-pass median-error bar. Eight passes help AVIF more than JPEG/WebP. No qualified RD gain is established. |
+| Is good rank enough? | No. A_plain retains identity and all-codec floor failures. Qualification reports failure/incomplete evidence separately from research selection. No new common-dial winner is established. |
+| Can candidates serve their whole model? | Yes, through `BakeScorer`: declared IDs, validated metadata, heads, pin, spline, codec affine, ensemble and corruption composition. [Execution plan](docs/PLAN_CRUFT_PURGE_2026-09-06.md). Pixel luminance revision must still match the process. |
+| What happened to C/CHdr? | Both use explicit IDs and canonical activity semantics. The old training/serving mismatch is fixed; two alternate planners are retired. Pixel scores intentionally change. [984-case feature census and HDR/matrix evidence](benchmarks/feature_plan_cleanup_2026-09-07.md). |
+| Where do I train and evaluate? | `zensim_mlp_train` → `bake_dial_refit` → `run_full_eval.sh` → `freeze_check`. Admission now checks actual headers, IDs and declarations before work. [Trainer cleanup](benchmarks/trainer_admission_cleanup_2026-09-07.md). |
+| What owns calibration? | Rust `bake_dial_refit`, with pre-calibration coordinates and final full-surface evaluation. Four historical writers are retired with recipe/boundary evidence. [Spline record](benchmarks/spline_owner_cleanup_2026-09-07.md). |
+| Which data are valid? | [DATA_SPLITS](docs/DATA_SPLITS.md), later [DATASET_HISTORY](docs/DATASET_HISTORY.md) entries, actual manifests and the [shared index](../DATA_PROVENANCE.md). Width is not an era. TID is train-only; historical KonJND/KADID overlaps are guards, not holdouts. |
+| Where is the board? | `scripts/v_next/gauntlet.py` renders stored owner verdicts to `/mnt/v/output/zensim/reports/summer_gauntlet{_fair}.html`. Codec-q score charts include negative scores; product qualification appears before composite. |
+| Why keep buffered/full features? | Remaining callers and numerical differences prohibit blanket retirement. Free/shared features are not removed on coefficient counts. The contended extraction benchmark was excluded, not presented as a speedup. |
 
-## What the latest evidence establishes
+The authorized cleanup is complete: [execution and validation record](benchmarks/cleanup_completion_2026-09-07.md); [original checklist](docs/PLAN_CRUFT_PURGE_2026-09-06.md).
+The [transcript/memory audit](benchmarks/science_workflow_audit_2026-09-07.md)
+records chronology and bounded confidence in Rust/Python equivalence. Scientific
+controls and actual-loop measurements have their own result records; a passing
+code migration cannot inherit an unmeasured product gate.
 
-| Question | Current answer | Evidence |
-|---|---|---|
-| Is there a useful fast scorer? | Yes: D is served, with 28 declared feature IDs; the compared ADD156/D lineage meets all five codec-floor bars under the operative `resolvable` rule. This is not a claim of universal perceptual superiority. | [D dial change](benchmarks/d_ship_flip_2026-09-05.md), [current ladder comparison](benchmarks/board_ladder_ruler_2026-09-06.md) |
-| Is a stronger common dial ready to replace it? | No unified winner has been established. The constrained MLP improves several human-rank axes at roughly D’s measured speed but still misses codec floors and trades KonJND. | [September 6 decisions, D1](docs/OPEN_DECISIONS_2026-09-06.md), [best-of-all record](benchmarks/best_of_all_2026-09-06.md) |
-| Does “selected” mean qualified to ship? | No. The current selector can pick a recipe with incomplete G-ADDR coverage or failed codec floors. Product qualification requires both G-ADDR tiers plus the other scorecard gates. | [ladder selection result §6](benchmarks/board_ladder_ruler_2026-09-06.md), [scorecard](docs/MODEL_SELECTION_SCORECARD.md) |
-| Can wide/subset models be served? | The feature-plan work closed the old width-only refusal. A/B/BHdr/D use explicit-ID bakes. C/CHdr still have an unresolved train/serve activity-toggle mismatch; their densification is pending. | [feature-system design/results](docs/FEATURE_SYSTEM_DESIGN_2026-09-05.md), [dense serving](benchmarks/dense_serving_ungate_2026-09-06.md), [D3](docs/OPEN_DECISIONS_2026-09-06.md) |
-| Is revision 2 the shipped default? | No. Deterministic roots/power and bounded-feature changes have measured opt-in paths. Default behavior and the remaining predictor-transform exposure are separate decisions. | [D2/D5](docs/OPEN_DECISIONS_2026-09-06.md), [score arithmetic owner](benchmarks/score_owner_consolidation_2026-09-06.md) |
-
-The original Claude session’s last user question was whether we have something
-really good, because the accumulated choices were overwhelming. The later
-September 7 ruling above and cleanup authorization now govern this work;
-other September 6 memo proposals are not automatically adopted.
-
-## One route through the work
-
-**Current cleanup plan:** [the cruft purge, September 7 revision](docs/PLAN_CRUFT_PURGE_2026-09-06.md#current-cleanup-plan--2026-09-07)
-names the deletion batches, owner migrations, feature/recipe ablations and
-completion checks. Its §0 separates demonstrated parity from unresolved
-replacement claims. **Prefer Rust for canonical implementations; keep Python
-for fast invention and independent references.** New-model evaluation requires
-the Rust surface first. The listed cleanup changes are authorized. Check
-`../zenpapers` before fundamental research changes and prioritize feature
-ablations only when they remove compute or resolve a named scientific failure.
-The [first execution batch](docs/PLAN_CRUFT_PURGE_2026-09-06.md#execution-record--first-batch-september-7)
-retires 14 obsolete tools, consolidates the board, aligns the targeting CLI
-default and adds `just full-eval` / `just compare`. The Rust surface migration
-and evidence-dependent removals remain open.
-
-1. **Define the product claim and cheapest discriminating experiment.** Pin the
-   baseline, one lever, data split, feature/decoder era, decision rule and cost
-   budget. Use [`docs/WAVE_PLAYBOOK.md`](docs/WAVE_PLAYBOOK.md); the July
-   [`ITERATION_PROTOCOL`](docs/ITERATION_PROTOCOL.md) contains historical cost
-   measurements and the enduring efficiency principles.
-2. **Resolve the bake and data before computing.** Read
-   [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md),
-   [`docs/FEATURE_SET_IDS.md`](docs/FEATURE_SET_IDS.md), and the relevant
-   [`DATASET_HISTORY`](docs/DATASET_HISTORY.md) corrections. Use the canonical
-   owners in `CLAUDE.md`; do not infer semantics from a 372/944 width.
-3. **Evaluate through the zensim surface and qualify separately.**
-   `bake_verdict` owns the statistics; its separate scoring adapter still needs
-   the surface integration tracked in cleanup-plan §1a.
-   `scripts/run_full_eval.sh` adds coherence. Neither alone runs the real
-   codec RD/target exam. Grade G-ADDR on the named ladder and compatible identity
-   and negative probes. Missing measurements stay missing. Follow
-   [`MODEL_SELECTION_SCORECARD`](docs/MODEL_SELECTION_SCORECARD.md).
-4. **Interpret in the existing board.** The fair board is
-   `/mnt/v/output/zensim/reports/summer_gauntlet_fair.html`; the full historical
-   board is `summer_gauntlet.html` beside it. Generator:
-   `scripts/v_next/bandwise_dashboard.py --fulleval-dir …`; run
-   `scripts/v_next/gauntlet_gates.sh <html>` on every regenerated board.
-   Codec curves use `dial.curves`; floor qualification uses `dial_ladder`.
-   Keep their instrument identities visible.
-5. **Publish a decision, not just a winner.** State what improves for the user,
-   what still fails, what is unmeasured, and the smallest next test. Consult
-   [`OPEN_DECISIONS_2026-09-06`](docs/OPEN_DECISIONS_2026-09-06.md) for changes
-   that have not been adopted. Push only through `scripts/safe_push.sh` when
-   pushing is part of the authorized task; follow workspace preservation rules.
-
-## Chronology and lookup
-
-- May’s Tuner/JND conventions and July’s additive-only arguments are historical.
-  Later retractions and code take precedence over their opening summaries.
-- The August [SOTA campaign](benchmarks/sota944_campaign_2026-08-03.md) and
-  [balance campaign](benchmarks/balance_campaign_2026-08-28.md) retain the runs.
-  [`TOP_MODELS_COOKBOOK`](docs/TOP_MODELS_COOKBOOK.md) is a dated recipe archive.
-- September 5’s `distinct` floor result and September 6’s operative
-  `resolvable` result answer different questions. Always name the rule,
-  margin and instrument alongside the value.
-- [Science/workflow audit](benchmarks/science_workflow_audit_2026-09-07.md)
-  records this review’s evidence, coverage and prioritized cleanup.
-  [`benchmarks/INDEX.md`](benchmarks/INDEX.md) indexes prior experiments.
+Use the existing capped `run-heavy` owner for heavy work and
+`scripts/safe_push.sh` for every push. Data/bake evidence is preserved under
+`/mnt/v/output/zensim/cleanup-*-2026-09-07/`; private audit and retired sources
+are under `~/tmp/zensim-science-audit-2026-09-07/`. Choose fresh output paths
+for reproductions. Do not overwrite historical results or infer completion
+from a filename without its content identity.

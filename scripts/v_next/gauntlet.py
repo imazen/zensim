@@ -21,7 +21,7 @@ and emits ONE self-contained, offline HTML page with:
 ENSEMBLE rows (2026-08-04): a fulleval JSON carrying ``model.kind == "ensemble"`` (stamped by
 ``scripts/promote_fulleval.py --members``) renders an ``ens×k`` marker everywhere the bake is
 named, and its Model-details card leads with a warning that the architecture/repro shown is the
-ANCHOR member. An ensemble is an evaluation FUNCTION, not a shippable artifact — its rank/dial/
+ANCHOR member. An ensemble is a Rust-servable composition — its rank/dial/
 corruption numbers come from the identical verdict invocation as every single-bake row and are
 directly comparable, but ``m3_coherence``/``m3a_coherence`` are **null** because the coherence
 instrument loads one ZNPR. Null renders as an em-dash (NOT MEASURED) and is excluded from column
@@ -1187,8 +1187,6 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         # renders coverage beside the seed and every earlier row reads NOT MEASURED.
         # Absent is NOT MEASURED, never a zero.
         fair["coverage"] = (o.get("repro") or {}).get("sample_coverage")
-        if isinstance(o.get("qualification"), dict):
-            fair["qualification"] = o["qualification"]
         # G-ADDR: the six axes every cell already stores (dial p5/p95/reach/DR/mono/tied)
         # against the registry's bars, PLUS the emitted `dial.addressability` block when
         # a verdict carries one (the gate landed 2026-09-04; no board cell has it yet).
@@ -1378,9 +1376,16 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
             "gates": o.get("gates") or {},
             "model": model,
-            "repro": o.get("repro"),
+            # Only model-card fields are embedded. Coverage already lives in
+            # fair.coverage; table admission is read by qualification. Complete
+            # reproduction metadata remains in the preserved source verdict.
+            "repro": {k: v for k, v in repro_o.items() if k in {
+                "source", "seed", "epochs", "trainer_head_at_train",
+                "timestamp_epoch", "inputs", "argv",
+            }} if repro_o else None,
             "annotations": matched_ann,
             "fair": fair,
+            "qualification": o.get("qualification") if isinstance(o.get("qualification"), dict) else None,
             "gaddrCanon": gcanon,
             "gaddr": dict({"cells": gcells, "pass": gpass, "fail": gfail,
                            "emitted": bool(gmeta)}, **(gmeta or {"src": "derived",
@@ -1869,9 +1874,15 @@ const CURATED_ALL=DATA.bakes.filter(b=>b.curated&&!DOM(b)).map(b=>b.name);
 // default compare set excludes knob-end failers (dial cannot reach/span the
 // top zone — G-GRAN semantics); they stay toggleable + in 'curated+knobfail'.
 const CURATED=DATA.bakes.filter(b=>b.curated&&!DOM(b)&&!KNOBFAIL(b)).map(b=>b.name);
-// DEFAULT VIEW = VERIFIED-FAIR (user request 2026-09-04). Curated ∩ fair when that
-// is non-empty, else the whole fair set — never an empty board.
+// Default: product comparators within the fair set; fall back to fair research
+// curation when those rows are absent. Historical rows remain explicitly selectable.
+const PRODUCT_NAMES=['b_sdr_linear_cid80_inclwinsor_dense_dial@cur372',
+  'b_sdr_linear_cid80_inclwinsor_dense_dial','d_id100_negrich@did100lane',
+  'BOA_H_anchorlad_s4004','BOA_H_anchorlad_s4005','BOA_H_anchorlad_s4006'];
+const PRODUCT_SET=DATA.bakes.filter(b=>PRODUCT_NAMES.includes(b.name)).map(b=>b.name);
 const _DEFVIS=(()=>{const f=new Set(FAIRSET);
+  const product=PRODUCT_SET.filter(n=>f.has(n));
+  if(product.length)return product;
   const c=CURATED.filter(n=>f.has(n));
   return c.length?c:(FAIRSET.length?FAIRSET:DATA.bakes.map(b=>b.name));})();
 const state={shapeNorm:true,visible:new Set(_DEFVIS),
@@ -2143,8 +2154,8 @@ const f2=v=>v==null||!isFinite(v)?'—':(+v).toFixed(2);
 const pct=v=>v==null||!isFinite(v)?'—':(v*100).toFixed(1)+'%';
 
 // ---- ENSEMBLE marker. An equal-weight ensemble of k bakes is an evaluation
-// FUNCTION, not a shippable artifact: there is no single ZNPR, so M3/M3a are
-// not computable (they render as an em-dash = NOT MEASURED, never a low score)
+// composition. BakeScorer can serve it in Rust; the current single-ZNPR
+// coherence instrument has not measured it (em-dash, never a low score)
 // and the model-details card describes the ANCHOR member only. Flag set by
 // scripts/promote_fulleval.py --members (model.kind / model.members).
 const isEns=b=>!!(b.model&&b.model.kind==='ensemble');
@@ -2154,7 +2165,7 @@ const ensBadge=b=>isEns(b)?el('span',{style:'font-size:9px;font-weight:700;lette
   +'padding:0 4px;margin-left:5px;border-radius:7px;vertical-align:1px;white-space:nowrap;'
   +'background:color-mix(in srgb, var(--warn) 34%, var(--surface-1));border:1px solid var(--border)',
   title:'equal-weight ensemble of '+ensK(b)+' bakes — an evaluation function, not a single '
-    +'shippable bake; M3/M3a not computable',text:'ens×'+ensK(b)}):null;
+    +'ZNPR; Rust serving is supported, M3/M3a not measured by this instrument',text:'ens×'+ensK(b)}):null;
 // DOMINATED marker (board-integrity pass 2026-08-04): strictly beaten by a same-class
 // sibling on every measured floor axis + composite. Cells stay on the board (never
 // deleted) but render dimmed, default-off, behind the 'dominated' chip.
@@ -2265,6 +2276,8 @@ function renderBar(){
   const bar=$('#bar');bar.innerHTML='';
   const mk=(t,fn,title)=>{const x=el('button',{class:'btn',text:t});if(title)x.setAttribute('title',title);x.onclick=fn;return x;};
   bar.append(
+    mk('target models',()=>{state.visible=new Set(PRODUCT_SET);rerender();renderBar();},
+      'B, D and the constrained three-seed challenger where present. Read product qualification before composite.'),
     mk('VERIFIED-FAIR',()=>{state.visible=new Set(VFAIRSET);rerender();renderBar();},
        'only rows that pass EVERY fairness criterion AND are a replicated seed group (k>=2). '+VFAIRSET.length+' rows.'),
     mk('fair (incl. unreplicated)',()=>{state.visible=new Set(FAIRSET);rerender();renderBar();},
@@ -2272,7 +2285,7 @@ function renderBar(){
     mk('legacy / unverified',()=>{state.visible=new Set(DATA.bakes.filter(b=>TIER(b)==='LEGACY').map(b=>b.name));rerender();renderBar();},
        'ONLY the rows that fail a fairness criterion — each badged with which one. Nothing is deleted; these rows keep every stat.'),
     mk('curated',()=>{state.visible=new Set(CURATED.length?CURATED:DATA.bakes.map(b=>b.name));rerender();renderBar();},
-      'the default set: era flagships + campaign arm candidates/leaders + ensembles'),
+      'research set: era flagships + campaign arm candidates/leaders + ensembles'),
     mk('curated+knobfail',()=>{state.visible=new Set(CURATED_ALL);rerender();renderBar();},
       'curated including knob-end failers (dial cannot reach/span the top zone)'),
     mk('sprint bests',()=>{state.visible=new Set((DATA.sprintBest||[]).map(x=>x.n));rerender();renderBar();},
@@ -2502,6 +2515,7 @@ function fsid(b){return b.fsid?(b.fsid+(b.fsidInferred?' (inferred)':'')):
   ('NOT RECORDED — width '+b.regime+' is an alias, not an identity');}
 const COLS=[
   ['name','bake',true,b=>b.name],
+  ['qualification','product qualification',true,b=>b.qualification?b.qualification.status:'not evaluated'],
   // FAIRNESS (2026-09-04). `fair` = the tier glyph; `k` = seed-group size; `cmean` =
   // the group's MEAN composite with its spread — the honest estimator against
   // best-of-k, never labelled definitive (per-seed values on hover).
@@ -2594,7 +2608,7 @@ if(LT){COLS.push(
   ['loop3','3shot ±2',false,b=>{const c=ltCell(b,'k3_emit_best');return c?c.within2:null;}],
   ['loop3err','3shot med|err|',false,b=>{const c=ltCell(b,'k3_emit_best');return c!=null&&c.med_abs_err!=null?c.med_abs_err:null;}]);}
 function fmtCell(key,v,b){
-  if(key==='name'||key==='regime'||key==='fair')return v;
+  if(key==='name'||key==='regime'||key==='fair'||key==='qualification')return v;
   if(key==='k')return v==null?'—':(v===1?'1 ⚠':String(v));
   if(key==='cspread')return v==null?'—':f3(v);
   if(key&&key.charAt(0)==='w'&&key.length===2)return v==null?'—':v;
@@ -2638,9 +2652,9 @@ function renderTable(){
     +'measured zero. Greyed row = reject-gate (CID22&lt;0.84 or nonphoto&lt;0.80). '
     +'<b>ens×k</b> = an equal-weight ENSEMBLE of k bakes, scored through the identical verdict invocation '
     +'as every single-bake row: rank/dial/corruption numbers are directly comparable, but an ensemble is an '
-    +'<b>evaluation function, not a shippable artifact</b> — there is no single ZNPR, so <b>M3a/M3 are not '
-    +'computable for it</b> (the coherence instrument loads one bake) and its Model-details card describes '
-    +'the ANCHOR member only. Distillation to a single bake is pending. '
+    +'<b>Rust-servable composition</b>. The current coherence instrument loads one ZNPR, so '
+    +'<b>M3a/M3 are not measured for this composition</b>; the Model-details card describes '
+    +'the ANCHOR member only. Composition identity and product qualification are separate evidence. '
     +'Rows list EVERY promoted cell (dimmed = hidden from charts; click a row to toggle it). '
     +'Hidden-by-default grid cells carry the same scalar stats as curated ones — only embedded '
     +'scatter data is curated-set-only (see the scatter section). '
@@ -2710,6 +2724,8 @@ function renderTable(){
       const v=c[3](b);
       const td=el('td',{class:(c[0]==='name'||c[0]==='regime')?'lbl':'',text:fmtCell(c[0],v,b)});
       if(c[0]==='name'){td.textContent='';nameInto(td,b,b.is_stub?' ✳':'');}
+      if(c[0]==='qualification'){td.title='Read from the qualification owner; research composite does not confer a pass.';
+        td.style.color=v==='qualified'?'var(--good)':v==='failed'?'var(--critical)':'var(--warn)';}
       if(c[0]==='gates'){td.setAttribute('title',gateTitle(b));td.style.cursor='help';
         td.style.fontFamily='ui-monospace,monospace';td.style.letterSpacing='1px';}
       // ---- fairness layer cells (2026-09-04) ----

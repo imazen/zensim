@@ -28,7 +28,7 @@ zensim-side training/eval work.
 
 ### ⇒ LIVE FILL STATUS (2026-07-22) — the fleet is filling T-big multi-codec NOW
 
-A **3-worker zenfleet** (`dev` + `tower-unraid` + `node2`, bucket `zentrain`, job-pool
+A **3-worker zenfleet** (`dev` + `storage-worker` + `node2`, bucket `zentrain`, job-pool
 `s3://zentrain/jobs/_pool/runlist.tsv`, 54 tar-boxes) is grinding the bigcodec multi-codec
 720-feature backfill "to 100%" (concurrent zenmetrics session; DO NOT disrupt). Codecs in
 the pool: **zenjxl-lossy/VarDCT (24 boxes), zenjxl-modular (10), zenwebp (9), zenavif SDR
