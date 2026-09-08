@@ -65,3 +65,11 @@ This is engagement only, not RD or competitive-model qualification. Next: AVIF
 attained bounds and train-only calibrated actual 1/2/3-encode loops through the
 shared Rust search, then matched-quality judging. No new model training or
 terminal holdout was performed in this continuation.
+
+Shared native probe owner added after the AVIF binding: unpublished tool feature
+`zensim-target/native-probe`, with codec-owned adapter for AVIF. See
+`benchmarks/native_probe_instrument_2026-09-08.md`: 51-bound/119-encode train and
+validation pilots, 54 target cases, source/model/driver/family rejection checks
+and independent decoded-pixel integrity checks pass. AVIF's stateful map uses
+the previous complete decode; its first shot has no consumed map. Full 12/8
+family matrix is next, then model qualification and native JPEG/WebP work.

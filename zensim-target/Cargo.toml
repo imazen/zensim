@@ -19,6 +19,7 @@ publish = false
 
 [features]
 default = ["zenjpeg", "zenwebp", "zenavif", "zenpng"]
+native-probe = ["dep:zenpredict", "dep:serde_json", "dep:sha2", "zensim/custom-profiles"]
 # Each codec is opt-in so a build that only needs one doesn't pull the rest.
 zenjpeg = ["dep:zenjpeg"]
 zenwebp = ["dep:zenwebp"]
@@ -27,6 +28,9 @@ zenjxl  = ["dep:zenjxl", "dep:zencodec"]
 zenpng  = ["dep:zenpng"]
 
 [dependencies]
+zenpredict = { version = "0.2.0", git = "https://github.com/imazen/zenanalyze", rev = "05de3cbc44b19d8769077d99710b0146c761d6df", optional = true }
+serde_json = { version = "1", optional = true }
+sha2 = { version = "0.10", optional = true }
 serde = { version = "1", features = ["derive"] }
 zensim = { path = "../zensim", features = ["imgref"] }
 # Historical/experimental trail profiles (PreviewV0_5* / tuner variants),

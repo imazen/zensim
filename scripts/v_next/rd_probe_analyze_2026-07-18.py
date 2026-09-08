@@ -110,7 +110,7 @@ def target_loop_main():
         raise SystemExit("target-loop matrix incomplete; refusing a success summary")
     rows = [json.loads(line) for line in (root / "measurements.jsonl").read_text().splitlines()]
     inp = json.loads((root / "INPUTS.json").read_text())
-    if inp.get("schema") == "native-jxl-target-v1":
+    if inp.get("schema") in ("native-jxl-target-v1", "native-codec-target-v1"):
         return native_target_summary(root, inp, rows)
     if inp.get("schema") == "reachable-target-v1":
         return reachable_target_summary(root, inp, rows)
@@ -305,6 +305,11 @@ def native_target_summary(root, inp, rows):
     sources = {s["origin"]: s for s in inp["sources"]["sources"]}
     arms = inp["arms"]
     tol = inp["tolerance"]
+    shared = inp["schema"] == "native-codec-target-v1"
+    ladder_size = len(inp["quality_knots"]) if shared else 21
+    codec = inp.get("codec", "jxl")
+    if shared and codec != "avif":
+        raise SystemExit("shared native accounting is only qualified for the AVIF adapter")
     ladders = defaultdict(list)
     for b in bounds:
         ladders[(b["origin"], b["arm"])].append(b)
@@ -313,9 +318,38 @@ def native_target_summary(root, inp, rows):
             or complete["bounds"] != len(bounds)):
         raise SystemExit("missing/duplicate/mismatched native bounds")
     for ladder in ladders.values():
-        if (len(ladder) != 21 or len({b["knob"] for b in ladder}) != 21
+        if (len(ladder) != ladder_size or len({b["knob"] for b in ladder}) != ladder_size
                 or not all(math.isfinite(b["score"]) for b in ladder)):
             raise SystemExit("incomplete/nonfinite native ladder")
+    if shared:
+        for record in bound_rows:
+            b, work = record["bound"], record["work"]
+            n = inp["bound_encodes"][b["arm"]]
+            if (len(work) != n or len(record["bound_probe_scores"]) != n
+                    or b["seed_score"] != record["bound_probe_scores"][0]
+                    or b["score"] != record["bound_probe_scores"][-1]
+                    or b["knob"] not in inp["quality_knots"]
+                    or any(w["knob"] != b["knob"] for w in work)):
+                raise SystemExit("bound encode/seed-score accounting mismatch")
+            count = int(b["arm"] != "scalar")
+            for i, w in enumerate(work):
+                if (w["internal_reconstructions"] != 0 or w["native_pixel_comparisons"] != count
+                        or w["map_evaluations"] != count or not 0 <= w["consumed_maps"] <= int(i > 0 and b["arm"] == "active")):
+                    raise SystemExit("bound map accounting mismatch")
+            if work[-1]["encoded_sha256"] != b["encoded_sha256"]:
+                raise SystemExit("bound emitted state mismatch")
+    # Independent judges must see the pixels decoded by the measured backend.
+    from PIL import Image
+    def verify_pixels(file, expected):
+        with Image.open(file) as image:
+            if image.mode != "RGB" or hashlib.sha256(image.tobytes()).hexdigest() != expected:
+                raise SystemExit("native decoded pixels changed")
+    for (origin, arm), ladder in ladders.items():
+        for i, b in enumerate(ladder):
+            encoded = (root / f"{origin}-{arm}-{i}.{codec}").read_bytes()
+            if len(encoded) != b["bytes"] or hashlib.sha256(encoded).hexdigest() != b["encoded_sha256"]:
+                raise SystemExit("native bound bytes changed")
+            verify_pixels(root / f"{origin}-{arm}-{i}.png", b["decoded_sha256"])
     admitted, coverage_keys, extrema = set(), set(), []
     coverage_counts = defaultdict(lambda: defaultdict(int))
     for c in coverage:
@@ -358,10 +392,12 @@ def native_target_summary(root, inp, rows):
                 or n != len(r["native_work"]) or n != r["search_pixel_comparisons"]
                 or r["terminal_decodes"] != 1 or r["terminal_pixel_comparisons"] != 1):
             raise SystemExit("native complete-encode accounting mismatch")
-        for probe, work in zip(r["probes"], r["native_work"]):
-            count = 0 if r["arm"] == "scalar" else 3
-            if (probe["knob"] != work["knob"] or any(work[k] != count for k in
-                    ("internal_reconstructions", "native_pixel_comparisons", "map_evaluations"))):
+        for i, (probe, work) in enumerate(zip(r["probes"], r["native_work"])):
+            count = 0 if r["arm"] == "scalar" else (1 if shared else 3)
+            recon = 0 if shared else count
+            if (probe["knob"] != work["knob"] or work["internal_reconstructions"] != recon
+                    or work["native_pixel_comparisons"] != count or work["map_evaluations"] != count
+                    or (shared and not 0 <= work["consumed_maps"] <= int(i > 0 and r["arm"] == "active"))):
                 raise SystemExit("native map/reconstruction engagement mismatch")
         if (not all(math.isfinite(r[k]) for k in ("target", "achieved", "signed_error", "total_seconds"))
                 or abs(r["achieved"] - r["target"] - r["signed_error"]) > 1e-4
@@ -372,6 +408,8 @@ def native_target_summary(root, inp, rows):
         encoded = (root / r["bitstream"]).read_bytes()
         if len(encoded) != r["bytes"] or hashlib.sha256(encoded).hexdigest() != r["encoded_sha256"]:
             raise SystemExit("native emitted bytes changed")
+        selected = next(w for w in r["native_work"] if w["encoded_sha256"] == r["encoded_sha256"])
+        verify_pixels(root / r["decoded"], selected["decoded_sha256"])
     def stats(group):
         errors = sorted(abs(r["signed_error"]) for r in group)
         return {"n":len(group), "families":len({r["family"] for r in group}),
@@ -385,6 +423,7 @@ def native_target_summary(root, inp, rows):
                 "native_reconstructions":sum(w["internal_reconstructions"] for r in group for w in r["native_work"]),
                 "native_pixel_comparisons":sum(w["native_pixel_comparisons"] for r in group for w in r["native_work"]),
                 "map_evaluations":sum(w["map_evaluations"] for r in group for w in r["native_work"]),
+                "consumed_non_neutral_maps":sum(w.get("consumed_maps",0) for r in group for w in r["native_work"]),
                 "search_pixel_comparisons":sum(r["search_pixel_comparisons"] for r in group),
                 "terminal_decodes_and_comparisons":len(group),
                 "process_peak_rss_kib":max(r["process_peak_rss_kib"] for r in group)}
@@ -433,7 +472,7 @@ def native_target_summary(root, inp, rows):
         raise SystemExit("incomplete independent judge matrix")
     rd = []
     for baseline in ("scalar", "neutral"):
-        for (judge, label, cls), values in sorted(helpful(cells, baseline, judges, "jxl").items()):
+        for (judge, label, cls), values in sorted(helpful(cells, baseline, judges, codec).items()):
             rd.append({"baseline":baseline,"judge":judge,"arm":label,"class":cls,"n":len(values),
                        "median_saved_fraction":st.median(values),"mean_saved_fraction":st.mean(values),"values":values})
     result = {"schema":inp["schema"],"cells":len(rows),"bound_cells":len(bounds),
@@ -443,14 +482,14 @@ def native_target_summary(root, inp, rows):
               "requested_targets":len(coverage),"jointly_witnessed_targets":len(admitted),
               "coverage_by_arm":dict(coverage_counts),
               "negative_witnessed_targets":sum(t < 0 for _,t in admitted),"matched_judge":rd,
-              "offline_validation_bound_cost":{"full_encodes":len(bounds),"scalar_comparisons":len(bounds),
+              "offline_validation_bound_cost":{"full_encodes":sum(len(r["work"]) for r in bound_rows),"scalar_comparisons":sum(len(r["work"]) for r in bound_rows),
                   "internal_reconstructions":sum(w["internal_reconstructions"] for r in bound_rows for w in r["work"]),
                   "native_pixel_comparisons":sum(w["native_pixel_comparisons"] for r in bound_rows for w in r["work"]),
                   "map_evaluations":sum(w["map_evaluations"] for r in bound_rows for w in r["work"])},
               "qualification":"unqualified native development screen; sparse coverage, eight families, no universal perceptual tolerance",
               "cost_scope":"total ms = search plus terminal decode/score, excludes offline bounds/calibration and output PNG writes; map finite feature probes are not extra pixel comparisons",
               "rd_scope":"sparse per-image log-byte interpolation without extrapolation; deduplicated target outputs, independent judges; direct matched-quality confirmation required"}
-    text = ["# Native JXL target steering", "", f"{len(admitted)}/{len(coverage)} targets witnessed across all arms; {len(rows)} cases on {len(sources)} validation families.", "",
+    text = [f"# Native {codec.upper()} target steering", "", f"{len(admitted)}/{len(coverage)} targets witnessed across all arms; {len(rows)} cases on {len(sources)} validation families.", "",
             "| arm | policy | budget | median error | p95 error | hits ±1 | mean encodes | median total ms |",
             "|---|---|---:|---:|---:|---:|---:|---:|"]
     for s in summary:

@@ -269,3 +269,64 @@ independent-judge interpolation owner. The [native result](https://github.com/im
 retains narrow witnessed coverage and mixed RD as release limitations. A ±1
 controller tolerance here is an experimental band, not a perceptual acceptance
 threshold. No new product tolerance has been established.
+
+### Shared native probe owner and AVIF actual-encode study (September 8)
+
+Before implementation: move reusable source-manifest, calibration, bounds,
+coverage and emitted-byte verification orchestration from the existing JXL
+research instrument into `zensim-target::native_probe`, behind the additive
+`native-probe` tool feature. This unpublished tooling surface has a concrete
+caller in `zenavif/examples/zensim_cq_rd/targeting.rs`; the JXL driver remains a
+reproduction reference until ported. Scoring and search remain existing owners.
+
+Exact new public signatures (tooling only):
+
+```rust
+pub trait NativeProbeBackend: codec::CodecBackend {
+    fn take_work(&self) -> Vec<NativeProbeWork>;
+}
+pub trait NativeProbeCodec {
+    fn codec(&self) -> CodecKind;
+    fn configuration(&self) -> &str;
+    fn quality_knots(&self) -> &[f32];
+    fn bound_encodes(&self, arm: &str) -> usize;
+    fn backend<'a>(&'a self, arm: &str, model: &'a zenpredict::Model,
+        scratch: &Path, bake: &Path) -> Result<Box<dyn NativeProbeBackend + 'a>>;
+    fn decode(&self, encoded: &[u8], width: u32, height: u32) -> Result<Vec<u8>>;
+}
+pub fn fit(codec: &impl NativeProbeCodec, sources: &Path,
+    bake: &Path, output: &Path) -> Result<()>;
+pub fn evaluate(codec: &impl NativeProbeCodec, sources: &Path,
+    calibration: &Path, bake: &Path, output: &Path) -> Result<()>;
+```
+
+`decode` returns exactly width*height*3 tightly packed opaque sRGB8 bytes.
+`NativeProbeWork` is the serialized per-complete-encode accounting record:
+public fields `knob: f32`, `encode_seconds: f64`, `decode_seconds: f64`,
+`internal_reconstructions: usize`, `native_pixel_comparisons: usize`,
+`map_evaluations: usize`, `consumed_maps: usize`, `native_loop_ms: f64`,
+`encoded_sha256: String`, `decoded_sha256: String`. Each backend call must perform
+exactly one full encode and decode; model maps may use that decoded image but
+must report their extra scalar/map work. Fixed arms are scalar/neutral/active.
+
+AVIF uses 17 integer CQ knots spanning 1..255, speed 6, Zenravif, 4:4:4,
+8-bit opaque RGB, one encoder thread, formula revision 1, bin 8 and the existing
+zerosum gain-10/factor-1.15 rule. Scalar has no map work; neutral computes maps
+with gain 0; active uses the preceding reconstruction's map. One-shot active
+therefore has no consumed spatial map. State resets for every target case and
+every bound CQ. Bounds record one encode for scalar and three for neutral/active;
+every encode and map is counted, and the final emitted state is measured.
+Calibration always uses each bound sequence's FIRST decode score, since the
+first actual encode has no preceding reconstruction. Train-only median curves
+and slopes are from the existing Rust `SeedCurve`; the existing shared search
+compares midpoint and calibrated seeds at actual budgets 1/2/3.
+
+Use the existing 12 train / 8 validation imazen-26 canonical family manifests.
+Finish all per-image/arm ladders before target evaluation; pass no attained
+bound, image optimum or validation-fitted seed to the controller. Preserve the
+existing fixed requests [-10,30,70,90,99] plus five neutral-ladder score quantiles;
+report all coverage and only count jointly witnessed ±1 requests in the error
+screen. This conservative sparse-ladder rule does not prove gaps impossible.
+Report wider error bands, signed undershoot, tail error, selected emitted bytes,
+complete cost and matched SSIMULACRA2/Butteraugli outcomes. This is development
+validation, not terminal qualification or a newly justified perceptual tolerance.

@@ -33,6 +33,8 @@
 #![forbid(unsafe_code)]
 
 pub mod codec;
+#[cfg(feature = "native-probe")]
+pub mod native_probe;
 mod seed_curve;
 pub use seed_curve::SeedCurve;
 
