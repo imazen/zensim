@@ -1,5 +1,14 @@
 # Full-eval — one comprehensive Rust eval per bake → machine-readable JSON
 
+**September 7 scoring update:** all candidate scores are returned by
+`zensim::BakeScorer`. The verdict's `scoring` block records the surface version,
+member hashes, blend weights and corruption-head hash/deadband. A supplied
+corruption head now affects rank and dial scores as well as its auxiliary
+report. Earlier reports remain historical instruments. Cached-row evaluation
+requires the recorded extraction/decoder era; byte-format validation is shared
+with serving. Pixel verification uses `serve_custom_bake` without static
+loaders or leaked models.
+
 `scripts/run_full_eval.sh` runs the **offline evaluation and coherence measurements** through the canonical
 Rust owners and emits one machine-readable JSON per bake. No Python touches any
 statistic — every number comes from the Rust binaries that already own it

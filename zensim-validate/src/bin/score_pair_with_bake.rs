@@ -11,18 +11,9 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use zenpredict::{Model, Predictor};
-use zensim::{ZensimConfig, compute_zensim_with_config};
-
-// DEDUP-M (2026-05-26): per-row dispatch + extract_* helpers moved to
-// `zensim_validate::bake_runtime`. Bit-exact f32 ±1e-6.
-use zensim_validate::bake_runtime::{
-    self, extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale,
-    score_with_bake_alloc,
-};
-
-// DEDUP-M (2026-05-26): `score_with_bake` is now `score_with_bake_alloc`
-// imported from `zensim_validate::bake_runtime`. Bit-exact f32 ±1e-6.
+use zenpredict::Model;
+use zensim::{BakeScorer, RgbSlice};
+use zensim_validate::bake_runtime::post_mode_params;
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -58,13 +49,20 @@ fn main() -> ExitCode {
     let src_pixels: Vec<[u8; 3]> = src.pixels().map(|p| p.0).collect();
     let dst_pixels: Vec<[u8; 3]> = dst.pixels().map(|p| p.0).collect();
 
-    // Compute features with both extended + IW pools (372-feat superset).
-    let mut config = ZensimConfig::default();
-    config.extended_features = true;
-    config.compute_iw_features = true;
-    let result =
-        compute_zensim_with_config(&src_pixels, &dst_pixels, w, h, config).expect("zensim compute");
-    let features: Vec<f64> = result.features().to_vec();
+    let model = Model::from_bytes(&std::fs::read(&bake).expect("read bake")).expect("parse bake");
+    let params = post_mode_params(&bake_post).expect("invalid bake-post");
+    let mut scorer = BakeScorer::new(&model)
+        .expect("invalid score metadata")
+        .with_score_disposition(&params)
+        .expect("invalid score disposition");
+    let result = scorer
+        .compute(
+            &RgbSlice::new(&src_pixels, w, h),
+            &RgbSlice::new(&dst_pixels, dst.width() as usize, dst.height() as usize),
+            None,
+        )
+        .expect("candidate pixel scoring");
+    let features = result.features();
 
     // EVAL-ACCEL bit-exact verification helper: optionally dump the
     // computed feature vector in the predict_features_with_bake wire
@@ -75,7 +73,7 @@ fn main() -> ExitCode {
         let mut buf = Vec::with_capacity(8 + n_features * 4);
         buf.extend_from_slice(&(n_features as u32).to_le_bytes());
         buf.extend_from_slice(&1u32.to_le_bytes()); // n_rows
-        for &v in &features {
+        for &v in features {
             buf.extend_from_slice(&(v as f32).to_le_bytes());
         }
         std::fs::write(path, &buf).expect("write --dump-features-to");
@@ -87,28 +85,7 @@ fn main() -> ExitCode {
         );
     }
 
-    // Load bake.
-    let bake_bytes = std::fs::read(&bake).expect("read bake");
-    let model = Model::from_bytes(&bake_bytes).expect("parse ZNPR bake");
-    let n_inputs = model.caller_input_width();
-    let has_transforms = model.has_nontrivial_feature_transforms();
-    let psa = extract_per_sample_alpha_head(&model);
-    let hyb = extract_hybrid_head(&model);
-    let tanh_pin_scale = extract_tanh_output_head_scale(&model);
-    let output_spline = zensim_validate::output_calibration_spline::extract(&model);
-
-    let mut predictor = Predictor::new(&model);
-    let raw = score_with_bake_alloc(
-        &mut predictor,
-        has_transforms,
-        psa.as_ref(),
-        hyb.as_ref(),
-        tanh_pin_scale,
-        output_spline.as_ref(),
-        n_inputs,
-        &features,
-    );
-    let score = bake_runtime::apply_post_mode(raw, &bake_post);
+    let score = result.score();
     println!("{:.6}", score);
     ExitCode::SUCCESS
 }

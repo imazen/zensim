@@ -1260,10 +1260,6 @@ struct GateArgs {
 }
 
 fn cmd_gate(a: &GateArgs) -> Result<bool, String> {
-    use zensim_validate::bake_runtime::{
-        extract_hybrid_head, extract_minmax_head, extract_per_sample_alpha_head,
-        extract_tanh_output_head_scale, score_row, score_row_minmax,
-    };
     let bytes = std::fs::read(&a.bake).map_err(|e| format!("read {:?}: {e}", a.bake))?;
     let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
     let n = model.caller_input_width();
@@ -1281,33 +1277,17 @@ fn cmd_gate(a: &GateArgs) -> Result<bool, String> {
     // linear-only local forward that asserted `n_layers == 1` — the reason
     // G-RANGE read "NOT EVALUABLE (inherited MLP tool gap)" for every MLP
     // candidate of the SOTA-944 campaign.
-    let per_sample_alpha = extract_per_sample_alpha_head(&model);
-    let hybrid = extract_hybrid_head(&model);
-    let minmax = extract_minmax_head(&model);
-    let tanh_pin = extract_tanh_output_head_scale(&model);
-    let has_transforms = model.has_nontrivial_feature_transforms();
-    let mut predictor = zenpredict::Predictor::new(&model);
-    let gather = zensim_validate::bake_runtime::CallerGather::for_model(&model);
-    let mut scratch = vec![0f32; n];
+    let mut scorer = zensim::BakeScorer::new(&model)
+        .map_err(|e| e.to_string())?
+        .without_output_calibration();
     let raw: Vec<f64> = feats
         .iter()
-        .map(|row| match minmax.as_ref() {
-            // Min-max bakes REPLACE the layer forward — bypass the Predictor
-            // (same branch shape as bake_verdict::score_grid_one).
-            Some(mm) => score_row_minmax(&model, mm, tanh_pin, None, row),
-            None => score_row(
-                &mut predictor,
-                has_transforms,
-                per_sample_alpha.as_ref(),
-                hybrid.as_ref(),
-                tanh_pin,
-                None,
-                &gather,
-                &mut scratch,
-                row,
-            ),
+        .map(|row| {
+            scorer
+                .score_features(row, 0, 0, None)
+                .map_err(|e| e.to_string())
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
     let dial: Vec<f64> = raw.iter().map(|&r| spline::apply(r, &sp)).collect();
     let ntotal = raw.len();
 
@@ -1894,22 +1874,10 @@ fn verbatim_layers(model: &Model) -> Result<Vec<PackLayer>, String> {
 /// the bits, not a 6-decimal print (which would hide a difference below
 /// 5e-7 and let a non-identical bake ship).
 fn forward_scored_raw(bytes: &[u8], feats: &[Vec<f64>]) -> Result<Vec<f64>, String> {
-    use zensim_validate::bake_runtime::{
-        extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale,
-        score_with_bake_alloc,
-    };
-    let model = Model::from_bytes(bytes).map_err(|e| format!("parse bake: {e:?}"))?;
+    let model = Model::from_bytes(bytes).map_err(|e| format!("parse bake: {e}"))?;
     let n_inputs = model.caller_input_width();
-    let has_transforms = model.has_nontrivial_feature_transforms();
-    let psa = extract_per_sample_alpha_head(&model);
-    let hyb = extract_hybrid_head(&model);
-    let pin = extract_tanh_output_head_scale(&model);
-    let sp = spline::extract(&model);
-    // A DENSE bake declares ids into a caller-width row that is WIDER than its
-    // own input count; `score_with_bake_alloc` gathers. So the row length that
-    // must match is the DECLARING width, not `n_inputs`.
-    let dense = zensim_validate::bake_runtime::CallerGather::for_model(&model).is_dense();
-    let mut predictor = zenpredict::Predictor::new(&model);
+    let dense = zensim::declared_feature_ids(&model).is_some();
+    let mut scorer = zensim::BakeScorer::new(&model).map_err(|e| e.to_string())?;
     let mut out = Vec::with_capacity(feats.len());
     let mut row_f64: Vec<f64> = Vec::new();
     for row in feats {
@@ -1921,16 +1889,11 @@ fn forward_scored_raw(bytes: &[u8], feats: &[Vec<f64>]) -> Result<Vec<f64>, Stri
         }
         row_f64.clear();
         row_f64.extend(row.iter().map(|s| (*s as f32) as f64));
-        out.push(score_with_bake_alloc(
-            &mut predictor,
-            has_transforms,
-            psa.as_ref(),
-            hyb.as_ref(),
-            pin,
-            sp.as_ref(),
-            n_inputs,
-            &row_f64,
-        ));
+        out.push(
+            scorer
+                .score_features(&row_f64, 0, 0, None)
+                .map_err(|e| e.to_string())?,
+        );
     }
     Ok(out)
 }
@@ -1988,42 +1951,24 @@ fn emit_packed(
 /// * each score is round-tripped through its `%.6f` print (the Python fit
 ///   knots on the subprocess's 6-decimal stdout).
 fn forward_scored_6dec(bytes: &[u8], feats: &[Vec<f64>]) -> Result<Vec<f64>, String> {
-    use zensim_validate::bake_runtime::{
-        extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale,
-        score_with_bake_alloc,
-    };
-    let model = Model::from_bytes(bytes).map_err(|e| format!("parse packed bake: {e:?}"))?;
-    // Caller width, NOT n_inputs(): a pruned bake's layer-0 in_dim is
-    // smaller than the vector its callers hand it.
+    let model = Model::from_bytes(bytes).map_err(|e| format!("parse bake: {e}"))?;
     let n_inputs = model.caller_input_width();
-    let has_transforms = model.has_nontrivial_feature_transforms();
-    let psa = extract_per_sample_alpha_head(&model);
-    let hyb = extract_hybrid_head(&model);
-    let pin = extract_tanh_output_head_scale(&model);
-    let sp = spline::extract(&model);
-    let mut predictor = zenpredict::Predictor::new(&model);
+    let dense = zensim::declared_feature_ids(&model).is_some();
+    let mut scorer = zensim::BakeScorer::new(&model).map_err(|e| e.to_string())?;
     let mut out = Vec::with_capacity(feats.len());
-    let mut row_f64 = vec![0f64; n_inputs];
+    let mut row_f64 = Vec::new();
     for row in feats {
-        if row.len() != n_inputs {
+        if !dense && row.len() != n_inputs {
             return Err(format!(
                 "feature row has {} values, bake expects {n_inputs}",
                 row.len()
             ));
         }
-        for (d, s) in row_f64.iter_mut().zip(row.iter()) {
-            *d = (*s as f32) as f64;
-        }
-        let y = score_with_bake_alloc(
-            &mut predictor,
-            has_transforms,
-            psa.as_ref(),
-            hyb.as_ref(),
-            pin,
-            sp.as_ref(),
-            n_inputs,
-            &row_f64,
-        );
+        row_f64.clear();
+        row_f64.extend(row.iter().map(|s| (*s as f32) as f64));
+        let y = scorer
+            .score_features(&row_f64, 0, 0, None)
+            .map_err(|e| e.to_string())?;
         out.push(round_6dec(y));
     }
     Ok(out)
@@ -3701,48 +3646,16 @@ fn cmd_predict(a: &PredictArgs) -> Result<(), String> {
         }
         let transformed = model.has_nontrivial_feature_transforms();
         let mut predictor = zenpredict::Predictor::new(model);
-        let gather = zensim_validate::bake_runtime::CallerGather::for_model(model);
         let mut xbuf = vec![0f32; n_in];
-        // `--score-units`: the SAME post-network dispatch `bake_verdict`'s
-        // scorer runs, through the shared owner — nothing re-implemented here.
-        let (psa, hyb, tanh, ospline, mmh) = if a.score_units {
-            (
-                zensim_validate::bake_runtime::extract_per_sample_alpha_head(model),
-                zensim_validate::bake_runtime::extract_hybrid_head(model),
-                zensim_validate::bake_runtime::extract_tanh_output_head_scale(model),
-                zensim_validate::output_calibration_spline::extract(model),
-                zensim_validate::bake_runtime::extract_minmax_head(model),
-            )
-        } else {
-            (None, None, None, None, None)
-        };
+        let mut scorer = zensim::BakeScorer::new(model).map_err(|e| e.to_string())?;
+        let gather = zensim_validate::bake_runtime::CallerGather::for_model(model);
         for (i, row) in g.feature_rows.iter().enumerate() {
             let p0: f64 = if a.score_units {
-                match mmh.as_ref() {
-                    Some(mm) => zensim_validate::bake_runtime::score_row_minmax(
-                        model,
-                        mm,
-                        tanh,
-                        ospline.as_ref(),
-                        row,
-                    ),
-                    None => zensim_validate::bake_runtime::score_row(
-                        &mut predictor,
-                        transformed,
-                        psa.as_ref(),
-                        hyb.as_ref(),
-                        tanh,
-                        ospline.as_ref(),
-                        &gather,
-                        &mut xbuf,
-                        row,
-                    ),
-                }
+                scorer
+                    .score_features(row, 0, 0, None)
+                    .map_err(|e| e.to_string())?
             } else {
-                let take = n_in.min(row.len());
-                for (d, s) in xbuf[..take].iter_mut().zip(row[..take].iter()) {
-                    *d = *s as f32;
-                }
+                gather.fill(&mut xbuf, row);
                 let p = if transformed {
                     predictor.predict_transformed(&xbuf)
                 } else {

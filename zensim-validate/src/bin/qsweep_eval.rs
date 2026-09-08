@@ -67,14 +67,11 @@ use std::process::ExitCode;
 use arrow::array::{Array, Float32Array, Float64Array, Int32Array, Int64Array, StringArray};
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-use zenpredict::{Model, Predictor};
+use zenpredict::Model;
 
-// DEDUP-M (2026-05-26): `score_row` + `extract_*` helpers moved to
-// `zensim_validate::bake_runtime`. Bit-exact, f32 ±1e-6 on representative
-// inputs (see benchmarks/dedup_M_score_row_evidence/).
+// CLI-policy and diagnostic metadata adapters; the model executes in BakeScorer.
 use zensim_validate::bake_runtime::{
-    self, CallerGather, extract_hybrid_head, extract_per_sample_alpha_head,
-    extract_tanh_output_head_scale, score_row,
+    self, extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale,
 };
 
 /// Selected input mode, parsed from the CLI.
@@ -452,24 +449,23 @@ fn evaluate_bake(
         }
     );
 
-    let mut predictor = Predictor::new(&model);
-    let gather = CallerGather::for_model(&model);
-    let mut buf = vec![0.0f32; n_inputs];
+    let params = bake_runtime::post_mode_params(post_mode).expect("invalid bake-post");
+    let mut scorer = zensim::BakeScorer::new(&model)
+        .expect("invalid score metadata")
+        .with_score_disposition(&params)
+        .expect("invalid score disposition");
+    assert_eq!(
+        feature_rows.len(),
+        manifest.len(),
+        "feature/manifest row count differs"
+    );
     let scores: Vec<f64> = feature_rows
         .iter()
-        .map(|row| {
-            let raw = score_row(
-                &mut predictor,
-                has_transforms,
-                per_sample_alpha.as_ref(),
-                hybrid.as_ref(),
-                tanh_pin_scale,
-                output_spline.as_ref(),
-                &gather,
-                &mut buf,
-                row,
-            );
-            bake_runtime::apply_post_mode(raw, post_mode)
+        .zip(manifest)
+        .map(|(row, (_, codec, _))| {
+            scorer
+                .score_features(row, 0, 0, Some(codec))
+                .expect("invalid feature row")
         })
         .collect();
     assert_eq!(

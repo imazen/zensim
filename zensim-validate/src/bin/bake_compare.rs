@@ -43,9 +43,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use zenpredict::{Model, Predictor};
+use zenpredict::Model;
 
-use zensim_validate::bake_runtime;
 use zensim_validate::panel::{Decision, DecisiveOutcome, PanelStats, compute_panel, decisive};
 use zensim_validate::parquet_loader;
 
@@ -292,34 +291,15 @@ fn score_corpus(bake: &LoadedBake, feature_rows: &[Vec<f64>]) -> Result<Vec<f64>
     // path.
     let model = Model::from_bytes(&bake.bytes)
         .map_err(|e| format!("parse bake {} during scoring: {e:?}", bake.label))?;
-    let has_transforms = model.has_nontrivial_feature_transforms();
-    let n_inputs = model.caller_input_width();
-    let per_sample_alpha_head = bake_runtime::extract_per_sample_alpha_head(&model);
-    let hybrid_head = bake_runtime::extract_hybrid_head(&model);
-    // Hoisted per bake, never per row. `Positional` for every bake that
-    // shipped before 2026-09-06, so this moves no number; a bake that
-    // DECLARES `zentrain.feature_ids` now gets the ids it asked for instead
-    // of whatever sat at those positions.
-    let gather = bake_runtime::CallerGather::for_model(&model);
-    let mut predictor = Predictor::new(&model);
-    let mut scratch = vec![0.0f32; n_inputs];
-    let scores: Vec<f64> = feature_rows
+    let mut scorer = zensim::BakeScorer::new(&model).map_err(|e| e.to_string())?;
+    feature_rows
         .iter()
         .map(|row| {
-            bake_runtime::score_row(
-                &mut predictor,
-                has_transforms,
-                per_sample_alpha_head.as_ref(),
-                hybrid_head.as_ref(),
-                None,
-                None,
-                &gather,
-                &mut scratch[..],
-                row,
-            )
+            scorer
+                .score_features(row, 0, 0, None)
+                .map_err(|e| e.to_string())
         })
-        .collect();
-    Ok(scores)
+        .collect()
 }
 
 // ============================================================================

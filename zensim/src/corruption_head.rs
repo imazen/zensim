@@ -1369,6 +1369,33 @@ mod wiring_tests {
         );
 
         let head = oracle_head(r_corrupt.features(), r_honest.features());
+        // The dynamic candidate surface returns the FINAL gated score on
+        // both cached rows and pixels. This fixture proves wiring, not skill.
+        let model = crate::mlp::Model::from_bytes(include_bytes!(
+            "../weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin"
+        ))
+        .unwrap();
+        let mut candidate = crate::BakeScorer::new(&model)
+            .unwrap()
+            .with_corruption_head(&head, None)
+            .unwrap();
+        for (pixels, expected) in [(&corrupt, 0.0), (&honest, r_honest.score())] {
+            let result = candidate
+                .compute(
+                    &crate::RgbSlice::new(&refimg, W, H),
+                    &crate::RgbSlice::new(pixels, W, H),
+                    None,
+                )
+                .unwrap();
+            assert_eq!(result.score().to_bits(), expected.to_bits());
+            assert_eq!(
+                candidate
+                    .score_features(result.features(), W as u32, H as u32, None)
+                    .unwrap()
+                    .to_bits(),
+                expected.to_bits()
+            );
+        }
         let z = crate::Zensim::new(ZensimProfile::D)
             .with_corruption_head(head)
             .expect("f0..f227 is servable by D");

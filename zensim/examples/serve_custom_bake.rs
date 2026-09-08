@@ -1,10 +1,10 @@
 //! Serve an arbitrary ZNPR bake through the PRODUCTION scoring path
-//! (`Zensim::compute`), so "is this candidate servable?" is a MEASUREMENT
+//! (`BakeScorer::compute`), so "is this candidate servable?" is a MEASUREMENT
 //! rather than an inference from reading `profile.rs`.
 //!
 //! Written for `benchmarks/fastclass2_campaign_2026-09-05.md` gate G7. The
 //! kernel lane (`benchmarks/kernel_fastclass_2026-09-05.md` §4 and commit
-//! `8817f379`) established that `Zensim::compute` emits a **372-layout**
+//! `8817f379`) established that `BakeScorer::compute` emits a **372-layout**
 //! vector with `free_extras: Off`, so a 944-declared bake is refused and a
 //! 156/228-slice bake at the v1-372 layout should serve. This example checks
 //! the second half on real pixels instead of taking it on trust — the
@@ -28,7 +28,7 @@
 //!   -- --census <ref.png> <dist.png> [--fulleval-dir DIR] [PATH|DIR]...
 //! ```
 //!
-//! Walks many bakes through the SAME `Zensim::compute` entry the single-bake
+//! Walks many bakes through the SAME `BakeScorer::compute` entry the single-bake
 //! mode uses — one implementation, not two — and prints a TSV row per bake
 //! plus a SERVED/REFUSED summary. This is the filesystem tier of the
 //! servability contract (user directive 2026-09-05: *"also make sure
@@ -39,40 +39,7 @@
 //! A REFUSED row is the contract failing, not the tool: every bake whose read
 //! set is registered feature ids at a supported revision must serve.
 
-use std::sync::RwLock;
-use zensim::profile::ProfileParams;
-use zensim::{RgbSlice, Zensim, ZensimProfile};
-
-// A `ProfileParams` needs an `fn() -> &'static [u8]`, which cannot capture —
-// so the census parks the current bake here and scores sequentially. A
-// `OnceLock` (the single-bake original) can only ever hold one.
-static CUR: RwLock<Option<&'static [u8]>> = RwLock::new(None);
-fn bake_bytes() -> &'static [u8] {
-    CUR.read().expect("poisoned").expect("bake set before use")
-}
-fn set_bake(bytes: Vec<u8>) {
-    // Leaked deliberately: the profile's `fn` pointer hands out `'static`.
-    let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
-    *CUR.write().expect("poisoned") = Some(leaked);
-}
-
-/// The custom profile that wraps whatever bake is currently parked in [`CUR`].
-/// One construction, shared by both modes.
-fn custom_profile() -> ZensimProfile {
-    let params: &'static ProfileParams = Box::leak(Box::new(
-        ProfileParams::builder()
-            .mlp(bake_bytes)
-            .extended_features(true)
-            .compute_iw_features(true)
-            .skip_score_mapping(true)
-            .extrapolate_score(true)
-            .build(),
-    ));
-    ZensimProfile::Custom {
-        name: "servability-census",
-        params,
-    }
-}
+use zensim::{BakeScorer, RgbSlice};
 
 fn load_rgb(path: &str) -> (Vec<[u8; 3]>, u32, u32) {
     let img = image::open(path)
@@ -90,13 +57,16 @@ fn census_one(path: &str, rs: &RgbSlice<'_>, ds: &RgbSlice<'_>) -> (bool, String
         Ok(b) => b,
         Err(e) => return (false, format!("{path}\t-\t-\tUNREADABLE\t{e}")),
     };
-    let declared = match zenpredict::Model::from_bytes(&bytes) {
-        Ok(m) => m.caller_input_width(),
+    let model = match zenpredict::Model::from_bytes(&bytes) {
+        Ok(m) => m,
         Err(e) => return (false, format!("{path}\t-\t-\tNOT_A_ZNPR\t{e:?}")),
     };
-    set_bake(bytes);
-    let z = Zensim::new(custom_profile());
-    match z.compute(rs, ds) {
+    let mut z = match BakeScorer::new(&model) {
+        Ok(z) => z,
+        Err(e) => return (false, format!("{path}\t-\t-\tREFUSED\t{e}")),
+    };
+    let declared = model.caller_input_width();
+    match z.compute(rs, ds, None) {
         Ok(res) => (
             true,
             format!(
@@ -132,33 +102,51 @@ fn collect_bins(root: &std::path::Path, out: &mut Vec<String>) {
 /// A narrow scan rather than a serde dep, matching the rest of this repo's
 /// registry readers.
 fn bakes_from_fullevals(dir: &str) -> Vec<String> {
+    use sha2::{Digest, Sha256};
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        eprintln!("# fulleval dir unreadable: {dir}");
-        return out;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
+    let mut local = Vec::new();
+    collect_bins(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("weights"),
+        &mut local,
+    );
+    let by_sha: std::collections::HashMap<String, String> = local
+        .into_iter()
+        .filter_map(|p| {
+            std::fs::read(&p).ok().map(|b| {
+                (
+                    Sha256::digest(b)
+                        .iter()
+                        .map(|x| format!("{x:02x}"))
+                        .collect::<String>(),
+                    p,
+                )
+            })
+        })
+        .collect();
+    let rd = std::fs::read_dir(dir).unwrap_or_else(|e| panic!("census root {dir}: {e}"));
+    for e in rd {
+        let p = e.expect("read census entry").path();
         if !p.to_string_lossy().ends_with(".fulleval.json") {
             continue;
         }
-        let Ok(txt) = std::fs::read_to_string(&p) else {
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&p).expect("read verdict"))
+                .unwrap_or_else(|e| panic!("malformed verdict {}: {e}", p.display()));
+        let Some(path) = value.get("bake").and_then(|v| v.as_str()) else {
             continue;
         };
-        // Narrow scan: take the first `"bake":` whose value is a PATH. A
-        // fulleval can carry a nested `"bake": { ... }` object (the board
-        // census found one), and a naive first-match reads its first key as
-        // the path — so require a `/`.
-        for rest in txt.split("\"bake\":").skip(1) {
-            let Some(a) = rest.find('"') else { continue };
-            let Some(b) = rest[a + 1..].find('"') else {
-                continue;
-            };
-            let v = &rest[a + 1..a + 1 + b];
-            if v.contains('/') {
-                out.push(v.to_string());
-                break;
-            }
+        if !std::path::Path::new(path).is_file()
+            && let Some(resolved) = value
+                .get("bake_sha256")
+                .and_then(|v| v.as_str())
+                .and_then(|sha| by_sha.get(sha))
+        {
+            eprintln!(
+                "# resolved missing historical bake by recorded SHA256: {path} -> {resolved}"
+            );
+            out.push(resolved.clone());
+        } else {
+            out.push(path.to_string());
         }
     }
     out.sort();
@@ -180,6 +168,11 @@ fn census(args: &[String]) {
         } else {
             collect_bins(std::path::Path::new(rest[k]), &mut paths);
             k += 1;
+        }
+    }
+    for p in &mut paths {
+        if let Ok(c) = std::fs::canonicalize(&*p) {
+            *p = c.display().to_string();
         }
     }
     paths.sort();
@@ -214,6 +207,9 @@ fn census(args: &[String]) {
             eprintln!("#   {r}");
         }
     }
+    if refused != 0 {
+        std::process::exit(1);
+    }
 }
 
 fn main() {
@@ -239,8 +235,8 @@ fn main() {
         ),
         Err(e) => println!("  NOT a loadable ZNPR: {e:?}"),
     }
-    set_bake(bytes);
-    let z = Zensim::new(custom_profile());
+    let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+    let mut z = BakeScorer::new(&model).expect("invalid score metadata");
 
     let (r, w, h) = load_rgb(&ref_path);
     let (d, dw, dh) = load_rgb(&dist_path);
@@ -249,7 +245,7 @@ fn main() {
     let rs = RgbSlice::new(&r, w as usize, h as usize);
     let ds = RgbSlice::new(&d, w as usize, h as usize);
     // The whole point: this is the PRODUCTION entry point, not a training one.
-    match z.compute(&rs, &ds) {
+    match z.compute(&rs, &ds, None) {
         Ok(res) => println!(
             "SERVED  score={:.6}  raw_distance={:.6}  emitted={}",
             res.score(),
@@ -258,7 +254,7 @@ fn main() {
         ),
         Err(e) => println!("REFUSED by Zensim::compute: {e:?}"),
     }
-    match z.compute(&rs, &rs) {
+    match z.compute(&rs, &rs, None) {
         Ok(res) => println!("IDENTITY (ref vs ref) score={:.6}", res.score()),
         Err(e) => println!("IDENTITY REFUSED: {e:?}"),
     }

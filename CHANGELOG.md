@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Added — candidate serving and evaluation (2026-09-07)
+
+`zensim::BakeScorer<'a>` borrows caller-owned `zenpredict::Model` values.
+`new`, `ensemble`, `with_score_disposition`, `with_corruption_head` and
+`with_linear_corruption_head` validate a complete model; `compute`,
+`compute_hdr` and `score_features` execute it. Predictor buffers are reused.
+The pixel result includes the final composed score; negative scores remain
+available. Corruption methods require `corruption-head`; HDR requires
+`feature-regime-v2`. No static loader or leaked allocation is needed.
+
+Model-author diagnostics use the hidden `metadata`,
+`without_output_calibration` and `score_network_output` methods. The hidden
+`bake_metadata` module owns validated wire decoding: `ScoreMetadata`,
+`OutputCalibrationSpline`, `MinMaxHeadMeta`, `PerSampleAlphaMeta`,
+`HybridHeadMeta`, `parse_bake_metadata`, and `parse_output_calibration_spline`.
+Their fields are format views consumed by baking/diagnostic adapters; the
+complete API delta is recorded in the generated public/internal snapshots.
+
+### Fixed — candidate scoring correctness (2026-09-07)
+
+Candidate evaluation uses the zensim surface, including all enabled heads,
+splines and corruption gating. Verdicts record this scoring instrument and
+all member/head hashes. Previously the corruption head affected only its
+auxiliary report, `bake_compare`/`ensemble_score_rows` omitted calibration,
+and `predict_features_with_bake` truncated dense input rows before gathering.
+These are intentional instrument corrections; historical reports are retained.
+Malformed present metadata, unknown revisions and incompatible ensembles now
+refuse. Dense extraction honors the bake's revision. Min-max models apply the
+output pin before the spline, matching training; no shipped bake has this head.
+
 ### QUEUED BREAKING CHANGES — the cruft purge (`zensim` 0.3.0, 2026-09-06)
 
 <!-- Batched for one 0.3.0 release. NOTHING here has landed; each item lands

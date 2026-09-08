@@ -270,6 +270,9 @@ pub mod source;
 // evaluation tooling in `zensim-validate` scores runtime-loaded bake bytes
 // and MUST reach the product's own arithmetic rather than mirror it.
 // Internal machinery, not product surface.
+/// Internal wire-format views used by the Rust baking and diagnostics tools.
+#[doc(hidden)]
+pub mod bake_metadata;
 #[doc(hidden)]
 pub mod score_math;
 pub(crate) mod ssim_form;
@@ -473,7 +476,7 @@ pub mod research;
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::ZensimError;
 pub use metric::{
-    FeatureView, Zensim, ZensimResult, dissimilarity_to_score, score_to_dissimilarity,
+    BakeScorer, FeatureView, Zensim, ZensimResult, dissimilarity_to_score, score_to_dissimilarity,
 };
 
 #[doc(hidden)]

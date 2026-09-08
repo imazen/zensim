@@ -283,6 +283,8 @@ impl Plan {
     /// LAYOUT is `Model::caller_input_width()` — never `n_inputs()`, which is
     /// the pruned internal width and is a third, different number.
     pub(crate) fn for_bake(model: &crate::mlp::Model) -> Result<Plan, PlanError> {
+        let revision = crate::feature_layout::formula_revision(model)
+            .map_err(|_| PlanError::UnreadableBake)?;
         let ns = crate::NUM_SCALES;
         let layout_width = model.caller_input_width();
         let layout = crate::feature_layout::declared_layout(model);
@@ -313,11 +315,12 @@ impl Plan {
         // So a non-identity layout is derived in ID space instead. Phase 5
         // unifies the two once `from_block_profile_agrees_with_the_id_space_
         // derivation` has held across the whole bake census.
-        let plan = if layout.is_identity() {
+        let mut plan = if layout.is_identity() {
             Plan::normalized(ComputeSet::from_block_profile(model), layout)
         } else {
             Plan::derive_with_layout(&want, layout)?
         };
+        plan.compute.formula_revision = revision;
         // **The SERVING-plan footprint policy, applied to both branches.**
         // `fold_engine::pools_mode_for_need` owns the rule that `Off` is never
         // the right answer for a served v1 walk: `Off` and `Peaks` compute the

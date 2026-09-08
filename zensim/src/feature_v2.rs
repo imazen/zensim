@@ -1956,17 +1956,7 @@ pub(crate) struct ComputeSet {
 pub(crate) fn bake_formula_revision(
     model: &crate::mlp::Model,
 ) -> crate::feature_defs::FormulaRevision {
-    use crate::feature_defs::FormulaRevision;
-    match model
-        .metadata()
-        .get_utf8("zentrain.formula_revision")
-        .ok()
-        .map(str::trim)
-    {
-        Some("1") | Some("rev1") | Some("Rev1") => FormulaRevision::Rev1,
-        Some("2") | Some("rev2") | Some("Rev2") => FormulaRevision::Rev2,
-        _ => crate::ssim_form::SHIPPED_REVISION,
-    }
+    crate::feature_layout::formula_revision(model).unwrap_or(crate::ssim_form::SHIPPED_REVISION)
 }
 
 /// [`bake_formula_revision`], for consumers outside the crate (the verdict

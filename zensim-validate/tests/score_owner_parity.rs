@@ -97,47 +97,27 @@ fn rows(model: &Model, n: usize) -> Vec<Vec<f64>> {
         s ^= s << 17;
         (s >> 11) as f64 / ((1u64 << 53) as f64)
     };
+    let ids = zensim::declared_feature_ids(model).unwrap_or_else(|| (0..width as u16).collect());
     (0..n)
         .map(|_| {
-            (0..width)
-                .map(|i| {
-                    // The caller row is identity-laid-out and can be wider than
-                    // the packed layer-0; index the stats defensively.
-                    let j = i.min(inner.saturating_sub(1));
-                    let m = *mean.get(j).unwrap_or(&0.0) as f64;
-                    let sd = *scale.get(j).unwrap_or(&1.0) as f64;
-                    m + (next() * 6.0 - 3.0) * if sd == 0.0 { 1.0 } else { sd }
-                })
-                .collect()
+            let mut row = vec![0.; ids.iter().copied().max().unwrap() as usize + 1];
+            for (j, &id) in ids.iter().enumerate() {
+                let j = j.min(inner.saturating_sub(1));
+                let m = mean[j] as f64;
+                let sd = scale[j] as f64;
+                row[id as usize] = m + (next() * 6. - 3.) * if sd == 0. { 1. } else { sd };
+            }
+            row
         })
         .collect()
 }
 
 /// Score `rows` through the validate runtime exactly as `bake_verdict` does.
 fn score_all(model: &Model, feature_rows: &[Vec<f64>]) -> Vec<f64> {
-    let psa = bake_runtime::extract_per_sample_alpha_head(model);
-    let hyb = bake_runtime::extract_hybrid_head(model);
-    let pin = bake_runtime::extract_tanh_output_head_scale(model);
-    let spline = ocs::extract(model);
-    let gather = CallerGather::for_model(model);
-    let has_transforms = model.has_nontrivial_feature_transforms();
-    let mut predictor = Predictor::new(model);
-    let mut scratch = vec![0.0f32; model.caller_input_width()];
+    let mut scorer = zensim::BakeScorer::new(model).unwrap();
     feature_rows
         .iter()
-        .map(|row| {
-            bake_runtime::score_row(
-                &mut predictor,
-                has_transforms,
-                psa.as_ref(),
-                hyb.as_ref(),
-                pin,
-                spline.as_ref(),
-                &gather,
-                &mut scratch[..],
-                row,
-            )
-        })
+        .map(|row| scorer.score_features(row, 0, 0, None).unwrap())
         .collect()
 }
 
@@ -244,6 +224,7 @@ fn post_dispatch_adapter_is_bit_identical_to_the_owner() {
     let has_transforms = model.has_nontrivial_feature_transforms();
     let mut predictor = Predictor::new(&model);
     let mut scratch = vec![0.0f32; model.caller_input_width()];
+    let scorer = zensim::BakeScorer::new(&model).unwrap();
     let form = active_pow_form();
     let other = match form {
         PowForm::LibmPowf => PowForm::PureRust,
@@ -265,13 +246,7 @@ fn post_dispatch_adapter_is_bit_identical_to_the_owner() {
         let owner_pin = score_math::tanh_output_pin(owner_head, pin, form);
         let owner_full =
             score_math::pchip_eval_capped(owner_pin, &spline.xs, &spline.ys, &spline.derivs);
-        let adapter = bake_runtime::score_from_network_output(
-            out,
-            Some(&psa),
-            None,
-            Some(pin),
-            Some(&spline),
-        );
+        let adapter = scorer.score_network_output(out, None).unwrap();
         assert_eq!(
             adapter.to_bits(),
             owner_full.to_bits(),

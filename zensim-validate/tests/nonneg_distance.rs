@@ -20,8 +20,8 @@
 //! used ReLU would let `h` go negative, `w₂·h` go positive, and `raw` exceed
 //! the pin — which these tests would catch.
 
-use zenpredict::{Activation, Model, Predictor, WeightDtype};
-use zensim_validate::bake_runtime::score_with_bake_alloc;
+use zenpredict::{Activation, Model, WeightDtype};
+use zensim::BakeScorer;
 use zensim_validate::mlp_train::{
     FeatureRows, GroupLossMode, MlpHyperparams, TrainingGroup, ValidationPolicy, train_mlp_strategy,
 };
@@ -109,9 +109,8 @@ fn train_nonneg(dtype: WeightDtype, pin: f64, nonneg: bool) -> Vec<u8> {
 
 fn score(bytes: &'static [u8], x: &[f64]) -> f64 {
     let model = Model::from_bytes(bytes).expect("bake loads");
-    let n = model.caller_input_width();
-    let mut p = Predictor::new(&model);
-    score_with_bake_alloc(&mut p, false, None, None, None, None, n, x)
+    let mut scorer = BakeScorer::new(&model).unwrap();
+    scorer.score_features(x, 0, 0, None).unwrap()
 }
 
 /// `raw(0⃗) == pin`, BIT-exactly, at every dtype that ships.
@@ -154,8 +153,7 @@ fn nonneg_distance_output_never_exceeds_the_pin() {
     let bytes: &'static [u8] =
         Box::leak(train_nonneg(WeightDtype::F32, PIN, true).into_boxed_slice());
     let model = Model::from_bytes(bytes).expect("bake loads");
-    let n = model.caller_input_width();
-    let mut p = Predictor::new(&model);
+    let mut scorer = BakeScorer::new(&model).unwrap();
     let mut next = rng_stream(777);
     let scales = [1.0f64, 1e-30, 1e-6, 3.0, 1e3, 1e12];
     let mut lowest = f64::INFINITY;
@@ -164,7 +162,7 @@ fn nonneg_distance_output_never_exceeds_the_pin() {
     for scale in scales {
         for _ in 0..20_000 {
             let x: Vec<f64> = (0..N_FEATURES).map(|_| next() * scale).collect();
-            let y = score_with_bake_alloc(&mut p, false, None, None, None, None, n, &x);
+            let y = scorer.score_features(&x, 0, 0, None).unwrap();
             if y.is_finite() {
                 lowest = lowest.min(y);
                 if y == PIN {

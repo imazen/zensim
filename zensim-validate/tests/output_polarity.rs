@@ -24,10 +24,8 @@
 //! was run as a stripped variant with that import and `output_polarity_owner_
 //! maps_conventions_to_signs` removed.)
 
-use zenpredict::{Model, Predictor};
-use zensim_validate::bake_runtime::{
-    extract_hybrid_head, extract_per_sample_alpha_head, score_with_bake_alloc,
-};
+use zenpredict::Model;
+use zensim::BakeScorer;
 use zensim_validate::mlp_train::{
     FeatureRows, GroupLossMode, MlpHyperparams, OutputPolarity, TrainingGroup, ValidationPolicy,
     train_mlp_strategy,
@@ -116,24 +114,10 @@ fn raw_output_correlation(hyper: MlpHyperparams, loss_mode: GroupLossMode) -> f6
     );
     let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
     let model = Model::from_bytes(leaked).expect("bake loads");
-    let psa = extract_per_sample_alpha_head(&model);
-    let hyb = extract_hybrid_head(&model);
-    let n_inputs = model.caller_input_width();
-    let mut predictor = Predictor::new(&model);
+    let mut scorer = BakeScorer::new(&model).unwrap();
     let preds: Vec<f64> = feats
         .iter()
-        .map(|f| {
-            score_with_bake_alloc(
-                &mut predictor,
-                false,
-                psa.as_ref(),
-                hyb.as_ref(),
-                None,
-                None,
-                n_inputs,
-                f,
-            )
-        })
+        .map(|row| scorer.score_features(row, 0, 0, None).unwrap())
         .collect();
     spearman(&preds, &quality)
 }

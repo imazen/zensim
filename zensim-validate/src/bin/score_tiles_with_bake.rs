@@ -16,30 +16,9 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use zenpredict::{Model, Predictor};
-use zensim::{ZensimConfig, compute_zensim_with_config};
-use zensim_validate::bake_runtime::{
-    extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale,
-    score_with_bake_alloc,
-};
-
-fn cfg() -> ZensimConfig {
-    let mut c = ZensimConfig::default();
-    c.extended_features = true;
-    c.compute_iw_features = true;
-    c
-}
-
-fn apply_post(raw: f64, mode: &str) -> f64 {
-    if raw.is_nan() {
-        return f64::NAN;
-    }
-    match mode {
-        "raw" | "extrapolate" => raw,
-        "clamp" => raw.clamp(0.0, 100.0),
-        _ => raw.clamp(0.0, 100.0),
-    }
-}
+use zenpredict::Model;
+use zensim::{BakeScorer, RgbSlice};
+use zensim_validate::bake_runtime::post_mode_params;
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -65,6 +44,11 @@ fn main() -> ExitCode {
 
     let src = image::open(&ref_path).expect("open ref").to_rgb8();
     let dst = image::open(&dist_path).expect("open dist").to_rgb8();
+    assert_eq!(
+        src.dimensions(),
+        dst.dimensions(),
+        "image dimensions differ"
+    );
     let w = src.width() as usize;
     let h = src.height() as usize;
     let sp: Vec<[u8; 3]> = src.pixels().map(|p| p.0).collect();
@@ -72,28 +56,18 @@ fn main() -> ExitCode {
 
     let bake_bytes = std::fs::read(&bake).expect("read bake");
     let model = Model::from_bytes(&bake_bytes).expect("parse bake");
-    let n_inputs = model.caller_input_width();
-    let has_tx = model.has_nontrivial_feature_transforms();
-    let psa = extract_per_sample_alpha_head(&model);
-    let hyb = extract_hybrid_head(&model);
-    let pin = extract_tanh_output_head_scale(&model);
-    let spline = zensim_validate::output_calibration_spline::extract(&model);
-    let mut predictor = Predictor::new(&model);
-
+    let params = post_mode_params(&bake_post).expect("invalid bake-post");
+    let mut scorer = BakeScorer::new(&model)
+        .expect("invalid score metadata")
+        .with_score_disposition(&params)
+        .expect("invalid score disposition");
     let mut score_region = |s: &[[u8; 3]], d: &[[u8; 3]], rw: usize, rh: usize| -> Option<f64> {
-        let res = compute_zensim_with_config(s, d, rw, rh, cfg()).ok()?;
-        let feats = res.features().to_vec();
-        let raw = score_with_bake_alloc(
-            &mut predictor,
-            has_tx,
-            psa.as_ref(),
-            hyb.as_ref(),
-            pin,
-            spline.as_ref(),
-            n_inputs,
-            &feats,
-        );
-        Some(apply_post(raw, &bake_post))
+        Some(
+            scorer
+                .compute(&RgbSlice::new(s, rw, rh), &RgbSlice::new(d, rw, rh), None)
+                .ok()?
+                .score(),
+        )
     };
 
     // Global score (whole image).

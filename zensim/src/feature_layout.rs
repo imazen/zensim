@@ -45,6 +45,29 @@
 
 use crate::feature_set_id::{FeatureSetId, SlotSet};
 
+/// Resolve a bake's arithmetic era. Absence is the registered pre-stamp
+/// legacy era; a present unknown value is never a request for that default.
+pub(crate) fn formula_revision(
+    model: &crate::mlp::Model,
+) -> Result<crate::feature_defs::FormulaRevision, crate::ZensimError> {
+    use crate::feature_defs::FormulaRevision;
+    if model.metadata().get("zentrain.formula_revision").is_none() {
+        return Ok(crate::ssim_form::SHIPPED_REVISION);
+    }
+    match model
+        .metadata()
+        .get_utf8("zentrain.formula_revision")
+        .ok()
+        .map(str::trim)
+    {
+        Some("1" | "rev1" | "Rev1") => Ok(FormulaRevision::Rev1),
+        Some("2" | "rev2" | "Rev2") => Ok(FormulaRevision::Rev2),
+        _ => Err(crate::ZensimError::ModelLoadFailed {
+            reason: "unknown zentrain.formula_revision",
+        }),
+    }
+}
+
 /// A declared mapping from feature ids to positions in an emitted vector.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Layout {

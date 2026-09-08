@@ -27,127 +27,9 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use zenpredict::{Model, Predictor};
-
-// DEDUP-M (2026-05-26): per-row dispatch + extract_per_sample_alpha_head /
-// extract_hybrid_head / extract_tanh_output_head_scale moved to
-// `zensim_validate::bake_runtime`. The EXP-CROSS-CODEC-V11-E per-codec
-// affine step (alpha + beta * y) is unique to this bin and stays here.
-use zensim_validate::bake_runtime::{
-    self, HybridHeadDispatch, PerSampleAlphaHeadDispatch, extract_hybrid_head,
-    extract_per_sample_alpha_head, extract_tanh_output_head_scale, score_with_bake_alloc,
-};
-
-type PerCodecAffine = Option<(f32, f32)>;
-
-/// Parse the `zentrain.per_codec_calibration` payload and return the
-/// `(alpha, beta)` for the given codec name (case-insensitive,
-/// alias-aware). Returns `None` when the metadata is absent, the
-/// codec is unknown, or the payload is malformed.
-fn extract_per_codec_affine(model: &Model, codec_hint: Option<&str>) -> PerCodecAffine {
-    let hint = codec_hint?;
-    let lower = hint.to_ascii_lowercase();
-    let canon: &str = match lower.as_str() {
-        "jpeg" | "jpg" | "zenjpeg" | "mozjpeg" | "libjpeg" => "jpeg",
-        "webp" | "zenwebp" => "webp",
-        "avif" | "zenavif" => "avif",
-        "jxl" | "zenjxl" | "jpegxl" | "jpeg-xl" => "jxl",
-        "png" | "zenpng" => "png",
-        other => other,
-    };
-    let md = model.metadata();
-    let entry = md.get("zentrain.per_codec_calibration")?;
-    let payload = entry.value;
-    if payload.len() < 4 {
-        return None;
-    }
-    let n_codecs = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
-    let mut off = 4usize;
-    for _ in 0..n_codecs {
-        if off + 4 > payload.len() {
-            return None;
-        }
-        let name_len = u32::from_le_bytes([
-            payload[off],
-            payload[off + 1],
-            payload[off + 2],
-            payload[off + 3],
-        ]) as usize;
-        off += 4;
-        if off + name_len + 8 > payload.len() {
-            return None;
-        }
-        let name = std::str::from_utf8(&payload[off..off + name_len])
-            .ok()?
-            .to_ascii_lowercase();
-        off += name_len;
-        let alpha = f32::from_le_bytes([
-            payload[off],
-            payload[off + 1],
-            payload[off + 2],
-            payload[off + 3],
-        ]);
-        off += 4;
-        let beta = f32::from_le_bytes([
-            payload[off],
-            payload[off + 1],
-            payload[off + 2],
-            payload[off + 3],
-        ]);
-        off += 4;
-        if name == canon && alpha.is_finite() && beta.is_finite() && beta > 0.0 {
-            return Some((alpha, beta));
-        }
-    }
-    None
-}
-
-// DEDUP-M (2026-05-26): extract_per_sample_alpha_head, extract_hybrid_head,
-// extract_tanh_output_head_scale now imported from bake_runtime above.
-
-/// DEDUP-M (2026-05-26): delegates head/pin/spline dispatch to the shared
-/// `score_with_bake_alloc`, then applies the EXP-CROSS-CODEC-V11-E
-/// per-codec affine (unique to this bin). Bit-exact f32 ±1e-6.
-#[allow(clippy::too_many_arguments)]
-fn score_with_bake(
-    predictor: &mut Predictor<'_>,
-    has_transforms: bool,
-    psa: Option<&PerSampleAlphaHeadDispatch>,
-    hyb: Option<&HybridHeadDispatch>,
-    tanh_pin_scale: Option<f64>,
-    output_spline: Option<&zensim_validate::output_calibration_spline::OutputCalibrationSpline>,
-    per_codec_affine: PerCodecAffine,
-    f32_scratch: &mut [f32],
-    features_row: &[f32],
-) -> f64 {
-    // Replicate the per-row pre-fill (this bin's input is &[f32] not &[f64];
-    // the shared helper takes &[f64], so widen one row at a time).
-    let n_inputs = f32_scratch.len();
-    let take = n_inputs.min(features_row.len());
-    // Use the shared score_with_bake_alloc which allocates its own
-    // f32 buffer; here we widen the source to f64 in-place once.
-    let row_f64: Vec<f64> = features_row[..take].iter().map(|&v| v as f64).collect();
-    let y_after_spline = score_with_bake_alloc(
-        predictor,
-        has_transforms,
-        psa,
-        hyb,
-        tanh_pin_scale,
-        output_spline,
-        n_inputs,
-        &row_f64,
-    );
-    // Suppress unused-scratch warning — kept in the signature for
-    // call-site compatibility with the pre-DEDUP-M plumbing in main.
-    let _ = f32_scratch;
-    // EXP-CROSS-CODEC-V11-E (2026-05-20): per-codec post-spline affine.
-    if let Some((alpha, beta)) = per_codec_affine
-        && !y_after_spline.is_nan()
-    {
-        return (alpha as f64) + (beta as f64) * y_after_spline;
-    }
-    y_after_spline
-}
+use zenpredict::Model;
+use zensim::BakeScorer;
+use zensim_validate::bake_runtime::post_mode_params;
 
 fn parse_features_arg(s: &str) -> Result<(usize, usize, Vec<f32>), String> {
     let vals: Result<Vec<f32>, _> = s.split_whitespace().map(|t| t.parse::<f32>()).collect();
@@ -318,16 +200,12 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let n_inputs = model.caller_input_width();
-    let has_transforms = model.has_nontrivial_feature_transforms();
-    let psa = extract_per_sample_alpha_head(&model);
-    let hyb = extract_hybrid_head(&model);
-    let tanh_pin_scale = extract_tanh_output_head_scale(&model);
-    let output_spline = zensim_validate::output_calibration_spline::extract(&model);
-    let per_codec_affine = extract_per_codec_affine(&model, codec_hint.as_deref());
-
-    let mut predictor = Predictor::new(&model);
-    let mut scratch = vec![0.0f32; n_inputs];
+    let params = post_mode_params(&bake_post).expect("invalid bake-post");
+    let mut scorer = BakeScorer::new(&model)
+        .expect("invalid score metadata")
+        .with_score_disposition(&params)
+        .expect("invalid score disposition");
+    let mut row_f64 = Vec::with_capacity(n_features_in);
 
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
@@ -337,18 +215,11 @@ fn main() -> ExitCode {
         let start = row_idx * n_features_in;
         let end = start + n_features_in;
         let row = &feature_buf[start..end];
-        let raw = score_with_bake(
-            &mut predictor,
-            has_transforms,
-            psa.as_ref(),
-            hyb.as_ref(),
-            tanh_pin_scale,
-            output_spline.as_ref(),
-            per_codec_affine,
-            &mut scratch,
-            row,
-        );
-        let score = bake_runtime::apply_post_mode(raw, &bake_post);
+        row_f64.clear();
+        row_f64.extend(row.iter().map(|&x| f64::from(x)));
+        let score = scorer
+            .score_features(&row_f64, 0, 0, codec_hint.as_deref())
+            .expect("invalid feature row");
         if writeln!(out, "{score:.6}").is_err() {
             return ExitCode::FAILURE;
         }

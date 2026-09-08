@@ -104,6 +104,7 @@
 //! scale count, then mapped to a 0–100 score via:
 //! `score = 100 - a · distance^b` (default a=18.0, b=0.7).
 
+use crate::bake_metadata::*;
 use crate::det_math::{DetPow, active_pow_form};
 use crate::error::ZensimError;
 
@@ -584,7 +585,7 @@ pub fn score_features_fd_gradient_with_profile(
     let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::ModelLoadFailed {
         reason: "Model::from_bytes failed to parse the bake header or layer table",
     })?;
-    let bundle = cached_bake_metadata(bytes, &model);
+    let bundle = cached_bake_metadata(bytes, &model)?;
     if bundle.minmax_head.is_some() {
         return Ok(seq_fallback(&mut probe));
     }
@@ -1234,6 +1235,9 @@ pub struct ClassifiedResult {
 
 use crate::profile::{ProfileParams, ZensimProfile};
 use crate::source::ImageSource;
+
+mod bake;
+pub use bake::BakeScorer;
 
 /// Metric configuration. Methods on this struct are the primary API.
 ///
@@ -3970,101 +3974,12 @@ pub(crate) fn dispose_mlp_raw(raw: f64, params: &crate::profile::ProfileParams) 
 // and is owned once by `crate::score_math::POOL_STD_FLOOR` (it used to be
 // declared here TWICE, once per head, and a third time in `zensim-validate`).
 
-const PER_SAMPLE_ALPHA_HEAD_KEY: &str = "zentrain.per_sample_alpha_head";
-
-/// EXP-CROSS-CODEC-V4 (2026-05-19): tanh-pinned output head metadata
-/// key. Payload is `[scale: f32 LE]` (4 bytes). When present, the
-/// runtime wraps the per-sample-α head's raw output as
-/// `y_score = 100 · σ(y_pre / scale)` — no post-hoc affine needed,
-/// output is natively pinned to [0, 100].
-const TANH_OUTPUT_HEAD_KEY: &str = "zentrain.tanh_output_head";
-
-/// Parse the `zentrain.tanh_output_head` payload — a single f32 LE
-/// (4 bytes) encoding the sigmoid pin scale. Returns `None` if the
-/// payload length is wrong or the scale is non-positive / non-finite.
-fn parse_tanh_output_head_scale(payload: &[u8]) -> Option<f64> {
-    if payload.len() != 4 {
-        return None;
-    }
-    let scale = f32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as f64;
-    if scale.is_finite() && scale > 0.0 {
-        Some(scale)
-    } else {
-        None
-    }
-}
-
 /// Apply the tanh-pinned [0, 100] sigmoid wrap: `y_score = 100 · σ(y_pre / scale)`.
 /// Matches `zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3_with_tanh`
 /// at training time and bit-exact with the train-time pin (single-precision sigmoid
 /// pin via clamp [−30, 30] in y_pre/scale, sigmoid in f64).
 fn apply_tanh_output_pin(y_pre: f64, scale: f64) -> f64 {
     crate::score_math::tanh_output_pin(y_pre, scale, active_pow_form())
-}
-
-/// EXP-CROSS-CODEC-V9 (2026-05-20): post-network PCHIP spline calibration
-/// metadata key. Payload is `[n_knots: u32 LE, n_knots × (x: f32 LE, y: f32 LE)]`,
-/// i.e. `4 + 8·n_knots` bytes. Knots must be sorted strictly increasing by x.
-/// When present, the runtime applies a monotone cubic Hermite (PCHIP)
-/// interpolation to the post-tanh-pin score: `y_calibrated = pchip(y_pinned)`.
-const OUTPUT_CALIBRATION_SPLINE_KEY: &str = "zentrain.output_calibration_spline";
-
-/// Parsed PCHIP spline payload: parallel `xs` and `ys` arrays plus the
-/// precomputed monotone-Hermite slopes per knot (Fritsch–Carlson).
-#[derive(Clone, Debug)]
-struct OutputCalibrationSpline {
-    xs: Vec<f64>,
-    ys: Vec<f64>,
-    /// Per-knot derivative (length == xs.len()).
-    derivs: Vec<f64>,
-}
-
-/// Parse the `zentrain.output_calibration_spline` payload. Returns
-/// `None` if the byte layout is wrong, knots are not strictly
-/// increasing in x, or n_knots < 2.
-fn parse_output_calibration_spline(payload: &[u8]) -> Option<OutputCalibrationSpline> {
-    if payload.len() < 4 {
-        return None;
-    }
-    let n = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
-    if n < 2 {
-        return None;
-    }
-    let expected = 4 + 8 * n;
-    if payload.len() != expected {
-        return None;
-    }
-    let mut xs = Vec::with_capacity(n);
-    let mut ys = Vec::with_capacity(n);
-    for i in 0..n {
-        let off = 4 + i * 8;
-        let x = f32::from_le_bytes([
-            payload[off],
-            payload[off + 1],
-            payload[off + 2],
-            payload[off + 3],
-        ]) as f64;
-        let y = f32::from_le_bytes([
-            payload[off + 4],
-            payload[off + 5],
-            payload[off + 6],
-            payload[off + 7],
-        ]) as f64;
-        if !x.is_finite() || !y.is_finite() {
-            return None;
-        }
-        xs.push(x);
-        ys.push(y);
-    }
-    // Strictly increasing x. (All values were verified finite above, so
-    // `<=` is an exact rewrite of the previous NaN-aware `!(a > b)`.)
-    for i in 1..n {
-        if xs[i] <= xs[i - 1] {
-            return None;
-        }
-    }
-    let derivs = crate::score_math::pchip_derivs(&xs, &ys);
-    Some(OutputCalibrationSpline { xs, ys, derivs })
 }
 
 /// Evaluate the PCHIP spline at `x`, clamped to `≤ 100` on the UPPER
@@ -4110,63 +4025,11 @@ fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> 
 // Payload layout (little-endian):
 //   `[u32 k, u32 j, u32 n, w[k·j·n] f32, b[k·j] f32]`
 // so `12 + 4·(k·j·n + k·j)` bytes. `n` MUST equal the bake's `n_inputs`.
-const MINMAX_MONOTONE_HEAD_KEY: &str = "zentrain.minmax_monotone_head";
 
 /// Standardized-feature clamp applied before the min-max forward. Mirrors
 /// `train_minmax`'s `.clamp(-8.0, 8.0)` on the standardized feature vector so
 /// the shipped bake scores identically to the held-out eval that qualified it.
 const MINMAX_STD_CLAMP: f64 = 8.0;
-
-/// Parsed min-max monotone head: `k` outer-min groups × `j` inner-max pieces,
-/// each a sign-constrained linear over `n` standardized features.
-#[derive(Clone, Debug)]
-struct MinMaxHeadMeta {
-    k: usize,
-    j: usize,
-    n: usize,
-    /// Row-major `[g][h][f]`, length `k·j·n`.
-    w: Vec<f32>,
-    /// Row-major `[g][h]`, length `k·j`.
-    b: Vec<f32>,
-}
-
-/// Parse the `zentrain.minmax_monotone_head` payload. Returns `None` on any
-/// layout error (short buffer, zero dims, wrong total length).
-fn parse_minmax_head_meta(payload: &[u8]) -> Option<MinMaxHeadMeta> {
-    if payload.len() < 12 {
-        return None;
-    }
-    let rd_u32 = |o: usize| {
-        u32::from_le_bytes([payload[o], payload[o + 1], payload[o + 2], payload[o + 3]]) as usize
-    };
-    let (k, j, n) = (rd_u32(0), rd_u32(4), rd_u32(8));
-    if k == 0 || j == 0 || n == 0 {
-        return None;
-    }
-    let n_w = k.checked_mul(j)?.checked_mul(n)?;
-    let n_b = k.checked_mul(j)?;
-    let expected = 12usize.checked_add(4usize.checked_mul(n_w.checked_add(n_b)?)?)?;
-    if payload.len() != expected {
-        return None;
-    }
-    let rd_f32 =
-        |o: usize| f32::from_le_bytes([payload[o], payload[o + 1], payload[o + 2], payload[o + 3]]);
-    let mut w = Vec::with_capacity(n_w);
-    let mut off = 12;
-    for _ in 0..n_w {
-        w.push(rd_f32(off));
-        off += 4;
-    }
-    let mut b = Vec::with_capacity(n_b);
-    for _ in 0..n_b {
-        b.push(rd_f32(off));
-        off += 4;
-    }
-    if w.iter().chain(b.iter()).any(|v| !v.is_finite()) {
-        return None;
-    }
-    Some(MinMaxHeadMeta { k, j, n, w, b })
-}
 
 /// Min-max forward: `min_g max_h (w[g][h]·x + b[g][h])`. `x` is the clamped
 /// standardized feature vector (length `meta.n`). Mirrors
@@ -4191,89 +4054,6 @@ fn apply_minmax_runtime(x: &[f64], meta: &MinMaxHeadMeta) -> f64 {
         }
     }
     best_min
-}
-
-/// EXP-CROSS-CODEC-V11-E (2026-05-20): per-codec post-spline affine
-/// calibration metadata key.
-///
-/// Payload layout (little-endian):
-///   `[u32 n_codecs, n_codecs × (u32 name_len, name_len utf8 bytes, f32 alpha, f32 beta)]`
-///
-/// Applied AFTER the PCHIP spline (post all network forward + tanh-pin +
-/// spline). For each entry, the runtime applies
-/// `score_c = alpha_c + beta_c · spline(raw)` whenever the caller
-/// supplies a matching codec name. Generic / unknown codec hint:
-/// identity (alpha=0, beta=1).
-///
-/// The transform is monotone within codec (beta > 0 by construction),
-/// so within-codec rank ordering is bit-exact preserved; only the
-/// cross-codec systematic bias is adjusted toward consensus at JND
-/// landmarks.
-const PER_CODEC_CALIBRATION_KEY: &str = "zentrain.per_codec_calibration";
-
-/// One per-codec affine entry parsed from the metadata payload.
-#[derive(Clone, Debug)]
-struct PerCodecAffineEntry {
-    /// Lowercase ASCII codec name (matched case-insensitively).
-    name: String,
-    /// `score = alpha + beta · raw`. Beta is positive by construction.
-    alpha: f32,
-    beta: f32,
-}
-
-/// Parsed per-codec calibration payload.
-#[derive(Clone, Debug)]
-struct PerCodecCalibration {
-    entries: Vec<PerCodecAffineEntry>,
-}
-
-/// Parse the `zentrain.per_codec_calibration` payload. Returns
-/// `None` if the payload is malformed (truncated header, ragged
-/// entry, non-utf8 name, beta ≤ 0, non-finite alpha/beta).
-fn parse_per_codec_calibration(payload: &[u8]) -> Option<PerCodecCalibration> {
-    if payload.len() < 4 {
-        return None;
-    }
-    let n_codecs = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
-    let mut off = 4usize;
-    let mut entries: Vec<PerCodecAffineEntry> = Vec::with_capacity(n_codecs);
-    for _ in 0..n_codecs {
-        if off + 4 > payload.len() {
-            return None;
-        }
-        let name_len = u32::from_le_bytes([
-            payload[off],
-            payload[off + 1],
-            payload[off + 2],
-            payload[off + 3],
-        ]) as usize;
-        off += 4;
-        if off + name_len + 8 > payload.len() {
-            return None;
-        }
-        let name_bytes = &payload[off..off + name_len];
-        let name = std::str::from_utf8(name_bytes).ok()?.to_ascii_lowercase();
-        off += name_len;
-        let alpha = f32::from_le_bytes([
-            payload[off],
-            payload[off + 1],
-            payload[off + 2],
-            payload[off + 3],
-        ]);
-        off += 4;
-        let beta = f32::from_le_bytes([
-            payload[off],
-            payload[off + 1],
-            payload[off + 2],
-            payload[off + 3],
-        ]);
-        off += 4;
-        if !alpha.is_finite() || !beta.is_finite() || beta <= 0.0 {
-            return None;
-        }
-        entries.push(PerCodecAffineEntry { name, alpha, beta });
-    }
-    Some(PerCodecCalibration { entries })
 }
 
 /// Look up the per-codec affine for the given codec hint. Returns
@@ -4301,17 +4081,6 @@ fn lookup_per_codec_affine(cal: &PerCodecCalibration, codec_hint: &str) -> Optio
     None
 }
 
-/// Parsed per-sample α head metadata payload.
-struct PerSampleAlphaMeta {
-    w_alpha: Vec<f32>,
-    b_alpha: f32,
-    rank_w: Vec<f32>,
-    rank_b: f32,
-    reducer_w: [f32; 4],
-    reducer_b: f32,
-    p_norm: f32,
-}
-
 impl PerSampleAlphaMeta {
     /// Borrowed view for [`crate::score_math`], the owner of the arithmetic.
     /// Free — no allocation, no copy of either weight vector.
@@ -4326,40 +4095,6 @@ impl PerSampleAlphaMeta {
             p_norm: self.p_norm,
         }
     }
-}
-
-/// Parse the `zentrain.per_sample_alpha_head` payload. Returns
-/// `None` if the payload length doesn't match `(2·n_hidden + 8)·4`.
-fn parse_per_sample_alpha_meta(payload: &[u8], n_hidden: usize) -> Option<PerSampleAlphaMeta> {
-    let expected = (2 * n_hidden + 8) * 4;
-    if payload.len() != expected {
-        return None;
-    }
-    let mut floats: Vec<f32> = Vec::with_capacity(2 * n_hidden + 8);
-    for chunk in payload.as_chunks::<4>().0 {
-        floats.push(f32::from_le_bytes(*chunk));
-    }
-    let w_alpha: Vec<f32> = floats[..n_hidden].to_vec();
-    let b_alpha = floats[n_hidden];
-    let rank_w: Vec<f32> = floats[n_hidden + 1..2 * n_hidden + 1].to_vec();
-    let rank_b = floats[2 * n_hidden + 1];
-    let reducer_w = [
-        floats[2 * n_hidden + 2],
-        floats[2 * n_hidden + 3],
-        floats[2 * n_hidden + 4],
-        floats[2 * n_hidden + 5],
-    ];
-    let reducer_b = floats[2 * n_hidden + 6];
-    let p_norm = floats[2 * n_hidden + 7];
-    Some(PerSampleAlphaMeta {
-        w_alpha,
-        b_alpha,
-        rank_w,
-        rank_b,
-        reducer_w,
-        reducer_b,
-        p_norm,
-    })
 }
 
 /// Apply the per-sample-α runtime to a hidden vector `h`. Returns
@@ -4403,18 +4138,6 @@ fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
 //
 // The pool sigma floor is owned by `crate::score_math::POOL_STD_FLOOR`.
 
-const HYBRID_HEAD_KEY: &str = "zentrain.hybrid_head";
-
-/// Parsed hybrid-head metadata payload.
-struct HybridHeadMeta {
-    rank_w: Vec<f32>,
-    rank_b: f32,
-    alpha_logit: f32,
-    reducer_w: [f32; 4],
-    reducer_b: f32,
-    p_norm: f32,
-}
-
 impl HybridHeadMeta {
     /// Borrowed view for [`crate::score_math`] — see
     /// [`PerSampleAlphaMeta::params`].
@@ -4428,38 +4151,6 @@ impl HybridHeadMeta {
             p_norm: self.p_norm,
         }
     }
-}
-
-/// Parse the `zentrain.hybrid_head` payload. Returns `None` if the
-/// payload length doesn't match `(n_hidden + 8) · 4`.
-fn parse_hybrid_head_meta(payload: &[u8], n_hidden: usize) -> Option<HybridHeadMeta> {
-    let expected = (n_hidden + 8) * 4;
-    if payload.len() != expected {
-        return None;
-    }
-    let mut floats: Vec<f32> = Vec::with_capacity(n_hidden + 8);
-    for chunk in payload.as_chunks::<4>().0 {
-        floats.push(f32::from_le_bytes(*chunk));
-    }
-    let rank_w: Vec<f32> = floats[..n_hidden].to_vec();
-    let rank_b = floats[n_hidden];
-    let alpha_logit = floats[n_hidden + 1];
-    let reducer_w = [
-        floats[n_hidden + 2],
-        floats[n_hidden + 3],
-        floats[n_hidden + 4],
-        floats[n_hidden + 5],
-    ];
-    let reducer_b = floats[n_hidden + 6];
-    let p_norm = floats[n_hidden + 7];
-    Some(HybridHeadMeta {
-        rank_w,
-        rank_b,
-        alpha_logit,
-        reducer_w,
-        reducer_b,
-        p_norm,
-    })
 }
 
 /// Apply the hybrid-head runtime to a hidden vector `h`. Returns the
@@ -4562,43 +4253,22 @@ fn forward_one_bake(
     forward_one_bake_with_codec(bytes, features, width, height, None)
 }
 
-/// Lazily-parsed bake metadata bundle. One instance per distinct
-/// bake-bytes pointer, cached in [`bake_metadata_cache`] so the
-/// per-sample-α, hybrid-head, tanh-pin, PCHIP-spline, and per-codec
-/// calibration payloads only parse once.
-///
-/// Hot-loop motivation: encoder workloads call
-/// `forward_one_bake_with_codec` once per distorted candidate against
-/// a fixed `ProfileParams::mlp_bytes` slot. Re-parsing five metadata
-/// blobs every call burned a constant ~µs that this cache reclaims.
-///
-/// Each field is `Option<Arc<T>>` so cloning the bundle (to release
-/// the cache lock before forward dispatch) is cheap.
-struct CachedBakeMetadata {
-    per_sample_alpha: Option<std::sync::Arc<PerSampleAlphaMeta>>,
-    hybrid_head: Option<std::sync::Arc<HybridHeadMeta>>,
-    minmax_head: Option<std::sync::Arc<MinMaxHeadMeta>>,
-    tanh_pin_scale: Option<f64>,
-    output_spline: Option<std::sync::Arc<OutputCalibrationSpline>>,
-    per_codec_calibration: Option<std::sync::Arc<PerCodecCalibration>>,
-}
-
 /// Lookup the parsed metadata for `bytes` from the static interner,
 /// or parse it on first sight and cache. Keyed by the bytes' data
 /// pointer (bake byte slices always come from `&'static` slots via
 /// `ProfileParams::mlp_bytes`, so the pointer is stable and unique
 /// per slot).
 ///
-/// Returns an `Arc<CachedBakeMetadata>` — the caller drops the cache
+/// Returns an `Arc<ScoreMetadata>` — the caller drops the cache
 /// lock before doing the forward pass.
 fn cached_bake_metadata(
     bytes: &[u8],
     model: &crate::mlp::Model,
-) -> std::sync::Arc<CachedBakeMetadata> {
+) -> Result<std::sync::Arc<ScoreMetadata>, ZensimError> {
     use std::collections::HashMap;
     use std::sync::{Arc, OnceLock, RwLock};
 
-    static CACHE: OnceLock<RwLock<HashMap<usize, Arc<CachedBakeMetadata>>>> = OnceLock::new();
+    static CACHE: OnceLock<RwLock<HashMap<usize, Arc<ScoreMetadata>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
     let key = bytes.as_ptr() as usize;
 
@@ -4607,60 +4277,23 @@ fn cached_bake_metadata(
     if let Ok(read) = cache.read()
         && let Some(entry) = read.get(&key)
     {
-        return Arc::clone(entry);
+        return Ok(Arc::clone(entry));
     }
 
     // Slow path: parse + insert. Re-check after acquiring the write
     // lock — another thread may have raced ahead of us.
-    let n_hidden = model.n_outputs();
-    let metadata = model.metadata();
-    let per_sample_alpha = metadata
-        .get(PER_SAMPLE_ALPHA_HEAD_KEY)
-        .and_then(|entry| parse_per_sample_alpha_meta(entry.value, n_hidden))
-        .map(Arc::new);
-    let hybrid_head = if per_sample_alpha.is_some() {
-        None
-    } else {
-        metadata
-            .get(HYBRID_HEAD_KEY)
-            .and_then(|entry| parse_hybrid_head_meta(entry.value, n_hidden))
-            .map(Arc::new)
-    };
-    let minmax_head = metadata
-        .get(MINMAX_MONOTONE_HEAD_KEY)
-        .and_then(|entry| parse_minmax_head_meta(entry.value))
-        .map(Arc::new);
-    let tanh_pin_scale = metadata
-        .get(TANH_OUTPUT_HEAD_KEY)
-        .and_then(|entry| parse_tanh_output_head_scale(entry.value));
-    let output_spline = metadata
-        .get(OUTPUT_CALIBRATION_SPLINE_KEY)
-        .and_then(|entry| parse_output_calibration_spline(entry.value))
-        .map(Arc::new);
-    let per_codec_calibration = metadata
-        .get(PER_CODEC_CALIBRATION_KEY)
-        .and_then(|entry| parse_per_codec_calibration(entry.value))
-        .map(Arc::new);
-
-    let parsed = Arc::new(CachedBakeMetadata {
-        per_sample_alpha,
-        hybrid_head,
-        minmax_head,
-        tanh_pin_scale,
-        output_spline,
-        per_codec_calibration,
-    });
+    let parsed = std::sync::Arc::new(parse_bake_metadata(model)?);
 
     if let Ok(mut write) = cache.write() {
         // Idempotent: another thread's parse for the same key is also
         // valid; we just keep whichever Arc landed first.
         let entry = write.entry(key).or_insert_with(|| Arc::clone(&parsed));
-        return Arc::clone(entry);
+        return Ok(Arc::clone(entry));
     }
     // Poisoned lock — return the freshly parsed bundle without
     // caching. Forward correctness is preserved at the cost of one
     // re-parse next call.
-    parsed
+    Ok(parsed)
 }
 
 /// Same as [`forward_one_bake`] but accepts an optional codec hint
@@ -4680,22 +4313,29 @@ fn forward_one_bake_with_codec(
     let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::ModelLoadFailed {
         reason: "Model::from_bytes failed to parse the bake header or layer table",
     })?;
-    // Caller-facing width, NOT `n_inputs()`. They differ on any bake with
-    // variable-arity `feature_transforms`: a DEAD-COLUMN-PRUNED bake (one
-    // carrying `FeatureTransform::Drop`) stores fewer layer-0 rows than the
-    // feature vector its callers hand it, and `n_inputs()` is that smaller
-    // internal width. Sizing by `n_inputs()` here would send a pruned bake
-    // down the `n_inputs < features.len()` PREFIX branch below.
-    let n_inputs = model.caller_input_width();
-    let mut predictor = crate::mlp::Predictor::new(&model);
-    let needs_transforms = model.has_nontrivial_feature_transforms();
+    let bundle = cached_bake_metadata(bytes, &model)?;
+    let mut scorer = BakeScorer::with_metadata(&model, bundle)?;
+    scorer.score_features(features, width, height, codec_hint)
+}
 
-    // Lazy-parse the bake's metadata bundle (per-sample-α, hybrid
-    // head, tanh-pin, PCHIP spline, per-codec calibration). Cached
-    // by bake-bytes pointer in `cached_bake_metadata` so encoder
-    // hot loops over a fixed `ProfileParams::mlp_bytes` slot don't
-    // re-parse every call.
-    let bundle = cached_bake_metadata(bytes, &model);
+// One inference dispatch for named profiles, dynamically loaded bakes and eval.
+// The reusable surface owns these buffers; the named-profile adapter borrows them.
+#[allow(clippy::too_many_arguments)]
+fn forward_model_with_codec(
+    model: &crate::mlp::Model,
+    predictor: &mut crate::mlp::Predictor<'_>,
+    bundle: &ScoreMetadata,
+    layout: &crate::feature_layout::Layout,
+    gathered: &mut Vec<f64>,
+    f32_features: &mut Vec<f32>,
+    x_std: &mut Vec<f64>,
+    features: &[f64],
+    width: u32,
+    height: u32,
+    codec_hint: Option<&str>,
+) -> Result<f64, ZensimError> {
+    let n_inputs = model.caller_input_width();
+    let needs_transforms = model.has_nontrivial_feature_transforms();
     let per_sample_alpha = bundle.per_sample_alpha.as_deref();
     let hybrid_head = bundle.hybrid_head.as_deref();
     let tanh_pin_scale = bundle.tanh_pin_scale;
@@ -4740,8 +4380,6 @@ fn forward_one_bake_with_codec(
     // by `serving::tests::every_shipped_profile_scores_its_pinned_value` (which
     // runs under EVERY feature permutation, which is the point), and end to end
     // by `dense_layout_round_trip` + `scripts/serving_matrix.sh`.
-    let layout = crate::feature_layout::declared_layout(&model);
-    let mut gathered: Vec<f64> = Vec::new();
     let feats: &[f64] = if layout.is_identity() {
         features
     } else {
@@ -4757,8 +4395,8 @@ fn forward_one_bake_with_codec(
                 reason: "the bake declares feature ids this feature vector does not reach",
             });
         }
-        layout.gather(features, &mut gathered);
-        &gathered
+        layout.gather(features, gathered);
+        gathered.as_slice()
     };
 
     // Min-max monotone head (Sill 1998): the score REPLACES the layer forward,
@@ -4776,7 +4414,7 @@ fn forward_one_bake_with_codec(
         // only aligns for a 1:1 transform pipeline. A variable-arity bake
         // (expander, or pruned with `drop`) breaks the alignment AND panics
         // in the scalar `apply_with_params`; refuse instead.
-        if mm.n != n || feats.len() != n || model.caller_input_width() != n {
+        if mm.n != n || feats.len() < n || model.caller_input_width() != n {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "min-max head n does not match bake n_inputs / feature length",
             });
@@ -4785,7 +4423,7 @@ fn forward_one_bake_with_codec(
         let params = model.feature_transform_params();
         let mean = model.scaler_mean();
         let scale = model.scaler_scale();
-        let mut x_std = vec![0.0f64; n];
+        x_std.resize(n, 0.0);
         for (i, slot) in x_std.iter_mut().enumerate() {
             // transform in f32 (matches the trainer's `apply_with_params(x as f32)`)
             let raw = feats[i] as f32;
@@ -4799,7 +4437,8 @@ fn forward_one_bake_with_codec(
             let safe = if s == 0.0 { 1.0 } else { s };
             *slot = ((t - mean[i] as f64) / safe).clamp(-MINMAX_STD_CLAMP, MINMAX_STD_CLAMP);
         }
-        let y_pre = apply_minmax_runtime(&x_std, mm);
+        let raw = apply_minmax_runtime(x_std, mm);
+        let y_pre = tanh_pin_scale.map_or(raw, |scale| apply_tanh_output_pin(raw, scale));
         let y_after_spline = match output_spline {
             Some(spline) => apply_output_calibration_spline(y_pre, spline),
             None => y_pre,
@@ -4822,9 +4461,8 @@ fn forward_one_bake_with_codec(
             per_codec_affine,
         )
     };
-    let mut f32_features: Vec<f32> = Vec::new();
-    prep_bake_input_f32(feats, n_inputs, width, height, &mut f32_features)?;
-    dispatch(&mut predictor, &f32_features)
+    prep_bake_input_f32(feats, n_inputs, width, height, f32_features)?;
+    dispatch(predictor, f32_features)
 }
 
 /// Size a caller feature vector to a bake's declared input width and
@@ -4889,6 +4527,24 @@ fn bake_dispatch_one(
             reason: "Predictor::predict failed",
         })?
     };
+    finish_network_output(
+        out,
+        per_sample_alpha,
+        hybrid_head,
+        tanh_pin_scale,
+        output_spline,
+        per_codec_affine,
+    )
+}
+
+fn finish_network_output(
+    out: &[f32],
+    per_sample_alpha: Option<&PerSampleAlphaMeta>,
+    hybrid_head: Option<&HybridHeadMeta>,
+    tanh_pin_scale: Option<f64>,
+    output_spline: Option<&OutputCalibrationSpline>,
+    per_codec_affine: Option<(f32, f32)>,
+) -> Result<f64, ZensimError> {
     let y_pre = if let Some(meta) = per_sample_alpha {
         // `out` is the hidden vector h (n_hidden floats). Apply
         // the per-sample-α runtime formula.
@@ -4910,7 +4566,11 @@ fn bake_dispatch_one(
         }
         apply_hybrid_head_runtime(out, meta)
     } else {
-        out[0] as f64
+        out.first()
+            .copied()
+            .ok_or(ZensimError::ModelForwardFailed {
+                reason: "model has no score output",
+            })? as f64
     };
     let y_after_pin = if let Some(scale) = tanh_pin_scale {
         apply_tanh_output_pin(y_pre, scale)

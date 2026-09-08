@@ -13,20 +13,20 @@
 #   pub types (struct/enum/trait/alias)        17
 #   pub consts/statics                         10
 #   free functions                              8
-#   inherent methods                           46
+#   inherent methods                           48
 #   struct fields                              50
 #   enum variants                              14
 #   trait roster entries (type × trait)        51
 #   auto-trait-complete types                  17
 #
 # per-module pub lines:
-#   (root)                          119
+#   (root)                          121
 #   cvvdp_features                    2
 #   feature_v2                        4
 #   profile                          20
 #   xyb_lms_features                  2
 
-## items (147 lines)
+## items (149 lines)
 
 pub mod cvvdp_features
 pub const cvvdp_features::CVVDP_FEATURE_COUNT: usize
@@ -96,6 +96,8 @@ pub struct AttributionSession
 pub fn AttributionSession::new() -> Self
 pub fn AttributionSession::recycle(&mut self, AttributionResult)
 pub fn AttributionSession::reset(&mut self)
+pub fn BakeScorer<'a>::with_corruption_head(self, &'a crate::corruption_head::CorruptionHead, core::option::Option<f64>) -> core::result::Result<Self, ZensimError>
+pub fn BakeScorer<'a>::with_linear_corruption_head(self, &'a zenpredict::model::Model, f64) -> core::result::Result<Self, ZensimError>
 #[non_exhaustive] pub struct ClassifiedResult
 pub ClassifiedResult::classification: ErrorClassification
 pub ClassifiedResult::delta_stats: DeltaStats

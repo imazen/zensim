@@ -18,9 +18,9 @@
 //! (`std(x̃_k)·‖W0[k,:]‖₂` and the |W|-chain-propagated variant). Dead ⟺
 //! mean|Δ| < 1e-4 AND p95|Δ| < 1e-3 (score units); rank-dead ⟺ std(Δ) < 1e-4.
 //!
-//! Baseline scores are parity-gated against `bake_runtime::score_row`
+//! Baseline scores are parity-gated against `zensim::BakeScorer::score_features`
 //! (≤ 1e-6 per row) — the head/pin/spline tail is the SAME code
-//! (`bake_runtime::score_from_network_output`), so the tool cannot fork the
+//! (`zensim::BakeScorer::score_network_output`), so the tool cannot fork the
 //! scoring math. Min-max-head and expander-transform bakes are out of scope
 //! (loud bail). I8 layer-0 bakes use per-weight dequant (inference scales
 //! after accumulation) — the parity gate quantifies any drift; the shortlist
@@ -48,13 +48,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use rayon::prelude::*;
-use zenpredict::{Activation, Model, Predictor, WeightStorage, f16_bits_to_f32};
-use zensim_validate::bake_runtime::{
-    HybridHeadDispatch, PerSampleAlphaHeadDispatch, extract_hybrid_head, extract_minmax_head,
-    extract_per_sample_alpha_head, extract_tanh_output_head_scale, score_from_network_output,
-    score_row,
-};
-use zensim_validate::output_calibration_spline::{self, OutputCalibrationSpline};
+use zenpredict::{Activation, Model, WeightStorage, f16_bits_to_f32};
+use zensim::BakeScorer;
+use zensim_validate::bake_runtime::extract_minmax_head;
+
 use zensim_validate::panel::spearman;
 use zensim_validate::parquet_loader::load_parquet;
 
@@ -193,13 +190,6 @@ fn forward_from_z0(
     std::mem::swap(h_buf, out_buf);
 }
 
-struct Heads<'a> {
-    psa: Option<&'a PerSampleAlphaHeadDispatch>,
-    hybrid: Option<&'a HybridHeadDispatch>,
-    pin: Option<f64>,
-    spline: Option<&'a OutputCalibrationSpline>,
-}
-
 /// Per-row ablation result: baseline score + Δscore per input.
 struct RowResult {
     baseline: f64,
@@ -207,7 +197,12 @@ struct RowResult {
     xt: Vec<f32>,
 }
 
-fn ablate_row(layers: &[OwnedLayer], heads: &Heads<'_>, model: &Model, row: &[f64]) -> RowResult {
+fn ablate_row(
+    layers: &[OwnedLayer],
+    heads: &BakeScorer<'_>,
+    model: &Model,
+    row: &[f64],
+) -> RowResult {
     let n = layers[0].in_dim;
     let out = layers[0].out_dim;
     let mut xt = vec![0.0f32; n];
@@ -217,7 +212,9 @@ fn ablate_row(layers: &[OwnedLayer], heads: &Heads<'_>, model: &Model, row: &[f6
     let mut h = Vec::with_capacity(out.max(8));
     let mut o = Vec::with_capacity(out.max(8));
     forward_from_z0(layers, &z0, &mut h, &mut o);
-    let baseline = score_from_network_output(&o, heads.psa, heads.hybrid, heads.pin, heads.spline);
+    let baseline = heads
+        .score_network_output(&o, None)
+        .expect("network-output diagnostic");
     let mut deltas = vec![0.0f32; n];
     let mut z_abl = vec![0.0f32; out];
     for k in 0..n {
@@ -230,7 +227,9 @@ fn ablate_row(layers: &[OwnedLayer], heads: &Heads<'_>, model: &Model, row: &[f6
             z_abl[j] = z0[j] - x * wrow[j];
         }
         forward_from_z0(layers, &z_abl, &mut h, &mut o);
-        let s = score_from_network_output(&o, heads.psa, heads.hybrid, heads.pin, heads.spline);
+        let s = heads
+            .score_network_output(&o, None)
+            .expect("network-output diagnostic");
         deltas[k] = (s - baseline) as f32;
     }
     RowResult {
@@ -245,7 +244,7 @@ fn ablate_row(layers: &[OwnedLayer], heads: &Heads<'_>, model: &Model, row: &[f6
 /// per-input rank-1 update in `ablate_row`).
 fn block_ablated_score(
     layers: &[OwnedLayer],
-    heads: &Heads<'_>,
+    heads: &BakeScorer<'_>,
     model: &Model,
     row: &[f64],
     lo: usize,
@@ -269,7 +268,9 @@ fn block_ablated_score(
     let mut h = Vec::with_capacity(out.max(8));
     let mut o = Vec::with_capacity(out.max(8));
     forward_from_z0(layers, &z0, &mut h, &mut o);
-    score_from_network_output(&o, heads.psa, heads.hybrid, heads.pin, heads.spline)
+    heads
+        .score_network_output(&o, None)
+        .expect("network-output diagnostic")
 }
 
 /// Feature-family label per the registered aggregation keys (§C.3).
@@ -507,16 +508,8 @@ fn main() -> ExitCode {
         }
     }
 
-    let psa = extract_per_sample_alpha_head(&model);
-    let hybrid = extract_hybrid_head(&model);
-    let pin = extract_tanh_output_head_scale(&model);
-    let spline = output_calibration_spline::extract(&model);
-    let heads = Heads {
-        psa: psa.as_ref(),
-        hybrid: hybrid.as_ref(),
-        pin,
-        spline: spline.as_ref(),
-    };
+    let heads = BakeScorer::new(&model).expect("invalid score metadata");
+    let metadata = heads.metadata();
     let has_transforms = model.has_nontrivial_feature_transforms();
 
     // ---- load corpora --------------------------------------------------
@@ -577,9 +570,7 @@ fn main() -> ExitCode {
     // Parity gate vs the canonical per-row runtime.
     let mut parity_max = 0.0f64;
     let mut parity_violations = 0usize;
-    let mut predictor = Predictor::new(&model);
-    let gather = zensim_validate::bake_runtime::CallerGather::for_model(&model);
-    let mut scratch = vec![0.0f32; n_inputs];
+    let mut scorer = BakeScorer::new(&model).expect("invalid score metadata");
 
     for c in &data {
         let results: Vec<RowResult> = c
@@ -589,17 +580,9 @@ fn main() -> ExitCode {
             .collect();
         let mut base = Vec::with_capacity(results.len());
         for (row, r) in c.rows.iter().zip(&results) {
-            let canonical = score_row(
-                &mut predictor,
-                has_transforms,
-                psa.as_ref(),
-                hybrid.as_ref(),
-                pin,
-                spline.as_ref(),
-                &gather,
-                &mut scratch,
-                row,
-            );
+            let canonical = scorer
+                .score_features(row, 0, 0, None)
+                .expect("invalid feature row");
             let diff = (canonical - r.baseline).abs();
             if diff > parity_max {
                 parity_max = diff;
@@ -927,10 +910,10 @@ fn main() -> ExitCode {
             .iter()
             .map(|l| format!("{}x{}:{:?}", l.in_dim, l.out_dim, l.activation))
             .collect::<Vec<_>>(),
-        psa.is_some(),
-        hybrid.is_some(),
-        pin.is_some(),
-        spline.is_some(),
+        metadata.per_sample_alpha.is_some(),
+        metadata.hybrid_head.is_some(),
+        metadata.tanh_pin_scale.is_some(),
+        metadata.output_spline.is_some(),
         has_transforms,
         any_i8,
     );
@@ -1132,12 +1115,7 @@ mod tests {
         let bytes = fixture_bytes();
         let model = Model::from_bytes(&bytes).unwrap();
         let layers: Vec<OwnedLayer> = model.layers().map(|l| dequant_layer(&l)).collect();
-        let heads = Heads {
-            psa: None,
-            hybrid: None,
-            pin: None,
-            spline: None,
-        };
+        let heads = BakeScorer::new(&model).unwrap();
         for row in fixture_rows() {
             let r = ablate_row(&layers, &heads, &model, &row);
             // Input 1's W0 column is all-zero ⇒ removing it never moves z0.
@@ -1155,12 +1133,7 @@ mod tests {
         let bytes = fixture_bytes();
         let model = Model::from_bytes(&bytes).unwrap();
         let layers: Vec<OwnedLayer> = model.layers().map(|l| dequant_layer(&l)).collect();
-        let heads = Heads {
-            psa: None,
-            hybrid: None,
-            pin: None,
-            spline: None,
-        };
+        let heads = BakeScorer::new(&model).unwrap();
         let r = ablate_row(&layers, &heads, &model, &fixture_rows()[2]);
         assert!(r.deltas.iter().all(|&d| d == 0.0));
     }
@@ -1172,12 +1145,7 @@ mod tests {
         let bytes = fixture_bytes();
         let model = Model::from_bytes(&bytes).unwrap();
         let layers: Vec<OwnedLayer> = model.layers().map(|l| dequant_layer(&l)).collect();
-        let heads = Heads {
-            psa: None,
-            hybrid: None,
-            pin: None,
-            spline: None,
-        };
+        let heads = BakeScorer::new(&model).unwrap();
         for row in fixture_rows() {
             let r = ablate_row(&layers, &heads, &model, &row);
             let mut xt = vec![0.0f32; 3];
@@ -1189,12 +1157,12 @@ mod tests {
                 layer0_preact(&layers[0], &xt_abl, &mut z0);
                 let (mut h, mut o) = (Vec::new(), Vec::new());
                 forward_from_z0(&layers, &z0, &mut h, &mut o);
-                let full = score_from_network_output(&o, None, None, None, None);
+                let full = heads.score_network_output(&o, None).unwrap();
                 let mut z0_base = vec![0.0f32; 2];
                 layer0_preact(&layers[0], &xt, &mut z0_base);
                 let (mut h2, mut o2) = (Vec::new(), Vec::new());
                 forward_from_z0(&layers, &z0_base, &mut h2, &mut o2);
-                let base = score_from_network_output(&o2, None, None, None, None);
+                let base = heads.score_network_output(&o2, None).unwrap();
                 let rank1 = base + r.deltas[k] as f64;
                 assert!(
                     (full - rank1).abs() <= 1e-5,
@@ -1210,27 +1178,11 @@ mod tests {
         let bytes = fixture_bytes();
         let model = Model::from_bytes(&bytes).unwrap();
         let layers: Vec<OwnedLayer> = model.layers().map(|l| dequant_layer(&l)).collect();
-        let heads = Heads {
-            psa: None,
-            hybrid: None,
-            pin: None,
-            spline: None,
-        };
-        let mut predictor = Predictor::new(&model);
-        let mut scratch = vec![0.0f32; 3];
+        let heads = BakeScorer::new(&model).unwrap();
+        let mut scorer = BakeScorer::new(&model).unwrap();
         for row in fixture_rows() {
             let r = ablate_row(&layers, &heads, &model, &row);
-            let canonical = score_row(
-                &mut predictor,
-                model.has_nontrivial_feature_transforms(),
-                None,
-                None,
-                None,
-                None,
-                &zensim_validate::bake_runtime::CallerGather::Positional,
-                &mut scratch,
-                &row,
-            );
+            let canonical = scorer.score_features(&row, 0, 0, None).unwrap();
             assert!(
                 (canonical - r.baseline).abs() <= 1e-6,
                 "parity: canonical={canonical} decomposed={}",
@@ -1246,12 +1198,7 @@ mod tests {
         let bytes = fixture_bytes();
         let model = Model::from_bytes(&bytes).unwrap();
         let layers: Vec<OwnedLayer> = model.layers().map(|l| dequant_layer(&l)).collect();
-        let heads = Heads {
-            psa: None,
-            hybrid: None,
-            pin: None,
-            spline: None,
-        };
+        let heads = BakeScorer::new(&model).unwrap();
         let rows = fixture_rows();
         let mut mean_abs = [0.0f64; 3];
         let mut xt_sum = [0.0f64; 3];

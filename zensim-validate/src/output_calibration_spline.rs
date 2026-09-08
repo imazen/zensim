@@ -1,85 +1,28 @@
-//! EXP-CROSS-CODEC-V9 (2026-05-20): shared PCHIP-spline parsing +
-//! evaluation for the `zentrain.output_calibration_spline` metadata
-//! key. Mirrors `zensim::metric` private helpers so every bake-aware
-//! binary in `zensim-validate` can apply the calibration without
-//! re-implementing the PCHIP math.
+//! Calibration fitting and serialization for model-author tools.
 //!
-//! Payload layout: `[n_knots: u32 LE, n_knots × (x: f32 LE, y: f32
-//! LE)]`. Knots must be strictly increasing in x; n_knots >= 2.
-//!
-//! **Bit-exact with `zensim::metric::apply_output_calibration_spline` BY
-//! CONSTRUCTION** since 2026-09-06: both the derivative solve and the
-//! evaluation delegate to `zensim::score_math`, the one owner. Before that,
-//! the claim on this line was prose with no test behind it, and it was FALSE
-//! in the interior segment — see [`apply`]. What remains local is the wire
-//! format (parse/extract) and [`fit_monotone_spline`], which the product
-//! runtime has no counterpart for.
+//! Runtime wire parsing is owned by `zensim::bake_metadata`; spline arithmetic
+//! is owned by `zensim::score_math`. Candidate scores are evaluated through
+//! `zensim::BakeScorer`. The fitting recipes here produce the metadata that
+//! surface executes, including the negative tail and the upper cap.
 
 use zenpredict::Model;
 
-const KEY: &str = "zentrain.output_calibration_spline";
-
 /// Parsed PCHIP spline. `xs.len() == ys.len() == derivs.len()`.
-#[derive(Clone, Debug)]
-pub struct OutputCalibrationSpline {
-    pub xs: Vec<f64>,
-    pub ys: Vec<f64>,
-    pub derivs: Vec<f64>,
-}
+pub use zensim::bake_metadata::OutputCalibrationSpline;
 
 /// Read + parse the spline from a bake's metadata. Returns `None` if
-/// the key is absent or the payload is malformed.
+/// the key is absent. Malformed present score metadata is an error.
 pub fn extract(model: &Model) -> Option<OutputCalibrationSpline> {
-    let md = model.metadata();
-    let entry = md.get(KEY)?;
-    parse_payload(entry.value)
+    zensim::bake_metadata::parse_bake_metadata(model)
+        .expect("invalid score metadata")
+        .output_spline
+        .map(|s| (*s).clone())
 }
 
 /// Parse the raw payload bytes (used by tests + callers that already
 /// have the metadata blob).
 pub fn parse_payload(payload: &[u8]) -> Option<OutputCalibrationSpline> {
-    if payload.len() < 4 {
-        return None;
-    }
-    let n = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
-    if n < 2 {
-        return None;
-    }
-    let expected = 4 + 8 * n;
-    if payload.len() != expected {
-        return None;
-    }
-    let mut xs = Vec::with_capacity(n);
-    let mut ys = Vec::with_capacity(n);
-    for i in 0..n {
-        let off = 4 + i * 8;
-        let x = f32::from_le_bytes([
-            payload[off],
-            payload[off + 1],
-            payload[off + 2],
-            payload[off + 3],
-        ]) as f64;
-        let y = f32::from_le_bytes([
-            payload[off + 4],
-            payload[off + 5],
-            payload[off + 6],
-            payload[off + 7],
-        ]) as f64;
-        if !x.is_finite() || !y.is_finite() {
-            return None;
-        }
-        xs.push(x);
-        ys.push(y);
-    }
-    // Strictly increasing x. (All values were verified finite above, so
-    // `<=` is an exact rewrite of the previous NaN-aware `!(a > b)`.)
-    for i in 1..n {
-        if xs[i] <= xs[i - 1] {
-            return None;
-        }
-    }
-    let derivs = zensim::score_math::pchip_derivs(&xs, &ys);
-    Some(OutputCalibrationSpline { xs, ys, derivs })
+    zensim::bake_metadata::parse_output_calibration_spline(payload)
 }
 
 /// Apply the spline at `x`.

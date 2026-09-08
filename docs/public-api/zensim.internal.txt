@@ -9,19 +9,20 @@
 
 ## summary
 #
-#   pub modules                                 6
-#   pub types (struct/enum/trait/alias)        14
+#   pub modules                                 7
+#   pub types (struct/enum/trait/alias)        19
 #   pub consts/statics                          7
-#   free functions                             33
-#   inherent methods                          113
-#   struct fields                              66
+#   free functions                             35
+#   inherent methods                          127
+#   struct fields                              92
 #   enum variants                              25
-#   trait roster entries (type × trait)        88
-#   auto-trait-complete types                  12
+#   trait roster entries (type × trait)        98
+#   auto-trait-complete types                  17
 #
 # per-module pub lines:
-#   (root)                           28
+#   (root)                           33
 #   __bench_stages                    9
+#   bake_metadata                    43
 #   corruption_head                  70
 #   det_math                         13
 #   f64                               3
@@ -33,7 +34,7 @@
 #   score_math                       26
 #   source                            4
 
-## items (264 lines)
+## items (312 lines)
 
 pub const fn det_math::PowForm::for_revision(feature_v2::FormulaRevision) -> Self
 pub const ZENTRAIN_FEATURE_IDS_KEY: &str
@@ -51,6 +52,10 @@ pub enum research::RevisionRef
 pub fn f64::det_exp(self, det_math::PowForm) -> Self
 pub fn f64::det_log2(self, det_math::PowForm) -> Self
 pub fn f64::det_powf(self, Self, det_math::PowForm) -> Self
+pub fn BakeScorer<'a>::metadata(&self) -> &bake_metadata::ScoreMetadata
+pub fn BakeScorer<'a>::score_network_output(&self, &[f32], core::option::Option<&str>) -> core::result::Result<f64, ZensimError>
+pub fn BakeScorer<'a>::with_corruption_head(self, &'a corruption_head::CorruptionHead, core::option::Option<f64>) -> core::result::Result<Self, ZensimError>
+pub fn BakeScorer<'a>::without_output_calibration(self) -> Self
 pub fn BlurKernel::assert_fields_are_eq(&self)
 pub fn ErrorCategory::assert_fields_are_eq(&self)
 pub fn IwWeightKind::assert_fields_are_eq(&self)
@@ -73,6 +78,18 @@ pub fn __bench_stages::mul_into(&[f32], &[f32], &mut [f32])
 pub fn __bench_stages::sq_diff_sum(&[f32], &[f32]) -> f64
 pub fn __bench_stages::sq_sum_into(&[f32], &[f32], &mut [f32])
 pub fn __bench_stages::srgb_to_positive_xyb_planar_into(&[[u8; 3]], &mut [f32], &mut [f32], &mut [f32])
+pub fn bake_metadata::HybridHeadMeta::clone(&self) -> bake_metadata::HybridHeadMeta
+pub fn bake_metadata::HybridHeadMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn bake_metadata::MinMaxHeadMeta::clone(&self) -> bake_metadata::MinMaxHeadMeta
+pub fn bake_metadata::MinMaxHeadMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn bake_metadata::OutputCalibrationSpline::clone(&self) -> bake_metadata::OutputCalibrationSpline
+pub fn bake_metadata::OutputCalibrationSpline::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn bake_metadata::PerSampleAlphaMeta::clone(&self) -> bake_metadata::PerSampleAlphaMeta
+pub fn bake_metadata::PerSampleAlphaMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn bake_metadata::ScoreMetadata::clone(&self) -> bake_metadata::ScoreMetadata
+pub fn bake_metadata::ScoreMetadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn bake_metadata::parse_bake_metadata(&zenpredict::model::Model) -> core::result::Result<bake_metadata::ScoreMetadata, ZensimError>
+pub fn bake_metadata::parse_output_calibration_spline(&[u8]) -> core::option::Option<bake_metadata::OutputCalibrationSpline>
 pub fn bench_pu_xyb_dispatch(&[[f32; 3]], &mut [f32], &mut [f32], &mut [f32])
 pub fn bench_pu_xyb_scalar(&[[f32; 3]], &mut [f32], &mut [f32], &mut [f32])
 pub fn compute_zensim_with_config(&[[u8; 3]], &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
@@ -195,11 +212,17 @@ pub fn source::ColorPrimaries::assert_fields_are_eq(&self)
 pub fn source::GamutMapping::assert_fields_are_eq(&self)
 pub fn source::PixelFormat::assert_fields_are_eq(&self)
 pub mod __bench_stages
+pub mod bake_metadata
 pub mod corruption_head
 pub mod det_math
 pub mod fold_engine
 pub mod research
 pub mod score_math
+pub struct bake_metadata::HybridHeadMeta
+pub struct bake_metadata::MinMaxHeadMeta
+pub struct bake_metadata::OutputCalibrationSpline
+pub struct bake_metadata::PerSampleAlphaMeta
+pub struct bake_metadata::ScoreMetadata
 pub struct corruption_head::CorruptionHead
 pub struct corruption_head::CorruptionVerdict
 pub struct research::Extraction
@@ -209,6 +232,32 @@ pub struct score_math::HybridHeadParams<'a>
 pub struct score_math::PerSampleAlphaParams<'a>
 pub trait det_math::DetPow: core::marker::Copy
 pub ZensimProfile::LegacyLinearV0_2
+pub bake_metadata::HybridHeadMeta::alpha_logit: f32
+pub bake_metadata::HybridHeadMeta::p_norm: f32
+pub bake_metadata::HybridHeadMeta::rank_b: f32
+pub bake_metadata::HybridHeadMeta::rank_w: alloc::vec::Vec<f32>
+pub bake_metadata::HybridHeadMeta::reducer_b: f32
+pub bake_metadata::HybridHeadMeta::reducer_w: [f32; 4]
+pub bake_metadata::MinMaxHeadMeta::b: alloc::vec::Vec<f32>
+pub bake_metadata::MinMaxHeadMeta::j: usize
+pub bake_metadata::MinMaxHeadMeta::k: usize
+pub bake_metadata::MinMaxHeadMeta::n: usize
+pub bake_metadata::MinMaxHeadMeta::w: alloc::vec::Vec<f32>
+pub bake_metadata::OutputCalibrationSpline::derivs: alloc::vec::Vec<f64>
+pub bake_metadata::OutputCalibrationSpline::xs: alloc::vec::Vec<f64>
+pub bake_metadata::OutputCalibrationSpline::ys: alloc::vec::Vec<f64>
+pub bake_metadata::PerSampleAlphaMeta::b_alpha: f32
+pub bake_metadata::PerSampleAlphaMeta::p_norm: f32
+pub bake_metadata::PerSampleAlphaMeta::rank_b: f32
+pub bake_metadata::PerSampleAlphaMeta::rank_w: alloc::vec::Vec<f32>
+pub bake_metadata::PerSampleAlphaMeta::reducer_b: f32
+pub bake_metadata::PerSampleAlphaMeta::reducer_w: [f32; 4]
+pub bake_metadata::PerSampleAlphaMeta::w_alpha: alloc::vec::Vec<f32>
+pub bake_metadata::ScoreMetadata::hybrid_head: core::option::Option<alloc::sync::Arc<bake_metadata::HybridHeadMeta>>
+pub bake_metadata::ScoreMetadata::minmax_head: core::option::Option<alloc::sync::Arc<bake_metadata::MinMaxHeadMeta>>
+pub bake_metadata::ScoreMetadata::output_spline: core::option::Option<alloc::sync::Arc<bake_metadata::OutputCalibrationSpline>>
+pub bake_metadata::ScoreMetadata::per_sample_alpha: core::option::Option<alloc::sync::Arc<bake_metadata::PerSampleAlphaMeta>>
+pub bake_metadata::ScoreMetadata::tanh_pin_scale: core::option::Option<f64>
 pub corruption_head::CorruptionHeadError::BadMagic
 pub corruption_head::CorruptionHeadError::BadMagic::got: [u8; 4]
 pub corruption_head::CorruptionHeadError::DeclaredIdOutOfRange
@@ -300,7 +349,7 @@ pub score_math::PerSampleAlphaParams::reducer_b: f32
 pub score_math::PerSampleAlphaParams::reducer_w: [f32; 4]
 pub score_math::PerSampleAlphaParams::w_alpha: &'a [f32]
 
-## trait impls (40 types)
+## trait impls (45 types)
 
 BlurKernel: TrivialClone
 DiffmapOptions: TrivialClone
@@ -312,6 +361,11 @@ IwWeightKind: TrivialClone
 UnsupportedFormat: TrivialClone
 ZensimConfig: TrivialClone
 ZensimError: TrivialClone
+bake_metadata::HybridHeadMeta: Clone, Debug
+bake_metadata::MinMaxHeadMeta: Clone, Debug
+bake_metadata::OutputCalibrationSpline: Clone, Debug
+bake_metadata::PerSampleAlphaMeta: Clone, Debug
+bake_metadata::ScoreMetadata: Clone, Debug
 corruption_head::CorruptionHead: Clone, Debug
 corruption_head::CorruptionHeadError: Clone, Debug, Display, Eq, Error, PartialEq
 corruption_head::CorruptionVerdict: Clone, Copy, Debug, PartialEq, TrivialClone
@@ -345,4 +399,4 @@ source::StridedBytes<'a>: TrivialClone
 
 ## auto traits
 
-12 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+17 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

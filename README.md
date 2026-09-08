@@ -542,3 +542,19 @@ Developed with Claude (Anthropic). Not all code manually reviewed. Review critic
 [imageflow-dotnet]: https://github.com/imazen/imageflow-dotnet
 [imageflow-node]: https://github.com/imazen/imageflow-node
 [imageflow-go]: https://github.com/imazen/imageflow-go
+
+### Candidate models for research and serving
+
+Use `zensim::BakeScorer` for a caller-owned `zenpredict::Model`. It reuses
+prediction state and returns the complete model score, including configured
+heads, splines, blends and corruption gates. `compute` scores SDR pixels and
+returns the score with its features; `compute_hdr` uses the explicit HDR
+encoding; `score_features` scores admitted cached rows. The user still controls
+one target score. Model metadata and disposition are model-author settings.
+
+New candidates must be evaluated through this same Rust surface. See
+[the workflow](docs/WAVE_PLAYBOOK.md), [feature identity](docs/FEATURE_SET_IDS.md)
+and [evaluation contract](docs/FULL_EVAL.md). The `serve_custom_bake` example
+loads models without leaked bytes or a static loader. Formula revision is
+validated; candidate pixel scoring refuses if the process's SSIM luminance
+form differs from the bake's revision (`ZENSIM_FORMULA_REV`).

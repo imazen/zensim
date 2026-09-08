@@ -40,10 +40,10 @@ operative September 7 plan, not superseded status statements in the historical
 appendix. Conditional scientific removals must earn their evidence; a failed
 ablation closes its hypothesis and preserves the useful component.
 
-- [ ] Rust surface for dynamically loaded candidate bakes; shared validated
+- [x] Rust surface for dynamically loaded candidate bakes; shared validated
   head/spline decoding; reusable prediction state; pixel/cached-feature parity;
   complete corruption composition through the same API used by evaluation.
-- [ ] Migrate candidate-evaluation callers and remove alternate runtime dispatch.
+- [x] Migrate candidate-evaluation callers and remove alternate runtime dispatch.
 - [ ] Explicit validated evaluation stages and artifact-identity reuse; harvest
   invokes the owner once; qualification distinguishes failure from missing data.
 - [ ] Complete transform-screen option migration and remaining spline-writer
@@ -87,6 +87,54 @@ parity for unchanged recipes. Competitive rank is distinct from product
 qualification: these controls have known identity and codec-floor failures.
 Test the constrained challenger and the registered floor-data control as
 separate claims; do not silently waive failed target-dial gates.
+
+### Surface increment — September 7 continuation
+
+The registered candidate surface is implemented as `zensim::BakeScorer`.
+Exact public additions are enumerated in `CHANGELOG.md` and the generated
+API snapshots, including hidden wire-format views used by the existing
+calibration/diagnostic tools. `compute` returns a `ZensimResult` containing the
+final composed score and the exact features; `compute_hdr` and cached-row
+`score_features` return the same score scalar. The named profile APIs retain
+their signatures and pinned outputs.
+
+All candidate evaluation callers now execute this surface. The alternate
+`bake_runtime` forward/dispatch and duplicated metadata parsers are removed;
+its remaining functions adapt legacy CLI spellings and diagnostic data shapes.
+`serve_custom_bake` no longer leaks bytes or mutates a global loader.
+`bake_contrib` deliberately perturbs network activations for diagnostics,
+uses the surface's diagnostic tail, and gates its baseline against the full
+surface. Calibration fitting removes the output calibration explicitly and
+then evaluates the emitted artifact with the complete surface.
+
+Instrument corrections: corruption composition affects **all** verdict scores;
+the two older comparison/row tools now honor calibration; feature-stream
+scoring no longer truncates dense identity rows. Min-max heads now apply a
+present output pin before the spline. Unknown/malformed metadata refuses;
+dense plans honor per-bake global-contrast revisions. The existing SSIM
+kernels select their luminance form per process; candidate pixel scoring
+refuses a mismatch and names `ZENSIM_FORMULA_REV` instead of returning a mixed
+formula. This is an explicit serving requirement, not a claim that the
+per-request kernel migration has landed. Historical results retain their
+old instrument identity. No new competitive or product-qualified claim is
+made by this migration alone.
+
+Verification for this increment: full workspace tests; all-feature library
+421 passed / 6 explicitly ignored; ten candidate-surface tests plus the
+score-owner/polarity/nonnegative-distance and contribution gates; CI-exact
+`just clippy`; the serving matrix (eight feature arms, zero refusals or score
+drift); 486 distinct filesystem bakes served with zero refusals. A stale
+checkout path is resolved only by its recorded SHA-256 against preserved
+weights; unreadable or unservable entries now fail the census exit status.
+The API snapshot check passes; semver-checks against `902aa68f` reports
+196 passes, 58 skips and no required semver update.
+
+The fixed `A_plain_s4004_packed.bin` control, rescored on its recorded post-C
+root, exactly reproduces **every value** in `rank`, `dial`, `corruption`,
+`per_pair`, `gates`, `composite` and `features_root` from its stored verdict.
+Its composite remains `0.8727940159416271`. This establishes unchanged
+inference/statistics for the competitive control, not training reproduction
+or product qualification; those remain in the checklist above.
 
 ### Execution record — first batch, September 7
 

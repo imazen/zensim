@@ -49,7 +49,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use rayon::prelude::*;
-use zenpredict::{Model, Predictor};
+use zenpredict::Model;
 
 use zensim_validate::bands;
 /// The G-ADDR owner — also the home of the 2026-09-05 two-reference inversion
@@ -176,7 +176,7 @@ fn ds_auc(predicted: &[f64], human: &[f64], diff_threshold: f64) -> f64 {
 
 use zensim_validate::bake_runtime::{
     CallerGather, extract_hybrid_head, extract_minmax_head, extract_per_sample_alpha_head,
-    extract_tanh_output_head_scale, score_row, score_row_minmax,
+    extract_tanh_output_head_scale,
 };
 
 // ============================================================================
@@ -919,10 +919,9 @@ struct Args {
     /// `FloorRule::RESOLVABLE_MARGIN_DEFAULT`. Ignored by `distinct`/`spaced`.
     floor_margin: Option<f64>,
     /// `--corruption-head <bake.bin>`: companion corruption-head bake — the
-    /// shipping design's corruption owner (at 924 the dial's own ordering is
-    /// broken by design, distributional; the head trained on negrich carries
-    /// the gate). Scored on the same corruption grid; the dial-alone numbers
-    /// stay in the report for honesty. Absent → dial-only, unchanged.
+    /// final gate on EVERY returned score (rank, dial and corruption). The
+    /// corruption report also labels perceptual-only/head-only diagnostics.
+    /// Absent means the perceptual model alone.
     corruption_head: Option<PathBuf>,
     /// `--corruption-head-threshold <score>`: the DEPLOY deadband, in the
     /// head bake's own OUTPUT units. The registered composition is
@@ -1029,7 +1028,7 @@ DEFAULTS:\n\
     --ramp-grid     none (severity-ramp monotonicity section)\n\
     --compare       none (per-zone dial-agreement vs a reference bake)\n\
     --corruption-grid canonical grid (negative-tail gate; auto if present)\n\
-    --corruption-head none (companion head bake scored on the corruption grid)\n\
+    --corruption-head none (companion head gates every evaluated score)\n\
     --corruption-head-threshold 10.0 (deploy deadband in the head bake's output units)\n\
     --features-root /mnt/v/zen/zensim-training/2026-08-30-full-features-372\n\
                     (the CURRENT-extractor 372 root, default since 2026-08-30; the\n\
@@ -1685,15 +1684,11 @@ impl CompanionHead {
     /// Score every grid row, in the dial's units (higher = better quality).
     fn score_grid(&self, rows: &[Vec<f64>]) -> Vec<f64> {
         match self {
-            Self::Znpr(m) => {
-                let tf = m.has_nontrivial_feature_transforms();
-                let n = m.caller_input_width();
-                score_grid_one(m, tf, n, rows)
-            }
+            Self::Znpr(m) => score_grid_one(m, rows),
             Self::Tree(h) => rows
                 .iter()
                 .map(|r| {
-                    h.score_f64(r)
+                    h.score_f64(&r[..h.caller_input_width()])
                         .unwrap_or_else(|e| panic!("corruption head: {e}"))
                 })
                 .collect(),
@@ -1723,70 +1718,51 @@ fn load_companion_head(path: &std::path::Path) -> Result<CompanionHead, String> 
     }
 }
 
-fn score_grid_one(
-    model: &Model,
-    has_transforms: bool,
-    n_inputs: usize,
+fn score_grid_one(model: &Model, rows: &[Vec<f64>]) -> Vec<f64> {
+    score_rows_surface(std::slice::from_ref(model), None, None, rows)
+}
+
+fn candidate_surface<'a>(
+    models: &'a [Model],
+    weights: Option<&[f64]>,
+    companion: Option<(&'a CompanionHead, f64)>,
+) -> Result<zensim::BakeScorer<'a>, zensim::ZensimError> {
+    let scorer = zensim::BakeScorer::ensemble(models, weights)?;
+    match companion {
+        None => Ok(scorer),
+        Some((CompanionHead::Tree(head), threshold)) => {
+            scorer.with_corruption_head(head, Some(threshold))
+        }
+        Some((CompanionHead::Znpr(head), threshold)) => {
+            scorer.with_linear_corruption_head(head, threshold)
+        }
+    }
+}
+
+fn score_rows_surface(
+    models: &[Model],
+    weights: Option<&[f64]>,
+    companion: Option<(&CompanionHead, f64)>,
     rows: &[Vec<f64>],
 ) -> Vec<f64> {
-    let per_sample_alpha_head = extract_per_sample_alpha_head(model);
-    let hybrid_head = extract_hybrid_head(model);
-    let tanh_pin_scale = extract_tanh_output_head_scale(model);
-    let output_spline = zensim_validate::output_calibration_spline::extract(model);
-    let minmax_head = extract_minmax_head(model);
-    // The bake's declared layout, resolved ONCE per grid rather than per row.
-    // Identity for every bake that shipped before 2026-09-06, so the fill is
-    // byte-for-byte what it was; a bake declaring `zentrain.feature_ids` is
-    // GATHERED instead of sliced.
-    let gather = CallerGather::for_model(model);
-
-    // One row's prediction reads only that row (the `Predictor`'s scratch
-    // is fully overwritten per call, and every head/spline handle above is
-    // read-only), so splitting the rows across threads and writing each
-    // result back at its own index is BIT-IDENTICAL to the sequential
-    // loop — no accumulation order changes, no shared mutable state.
-    // `scripts/verify_verdict_identity.sh` gates that claim on every
-    // numeric field of a full `--full-json`.
-    let score_range = |predictor: &mut Predictor<'_>,
-                       scratch: &mut Vec<f32>,
-                       src: &[Vec<f64>],
-                       dst: &mut [f64]| {
-        for (out, row) in dst.iter_mut().zip(src.iter()) {
-            *out = match minmax_head.as_ref() {
-                // Min-max bakes REPLACE the layer forward — bypass the Predictor.
-                Some(mm) => {
-                    score_row_minmax(model, mm, tanh_pin_scale, output_spline.as_ref(), row)
-                }
-                None => score_row(
-                    predictor,
-                    has_transforms,
-                    per_sample_alpha_head.as_ref(),
-                    hybrid_head.as_ref(),
-                    tanh_pin_scale,
-                    output_spline.as_ref(),
-                    &gather,
-                    scratch,
-                    row,
-                ),
-            };
+    let score_range = |src: &[Vec<f64>], dst: &mut [f64]| {
+        let mut scorer = candidate_surface(models, weights, companion)
+            .unwrap_or_else(|e| panic!("candidate surface refused model: {e}"));
+        for (out, row) in dst.iter_mut().zip(src) {
+            *out = scorer
+                .score_features(row, 0, 0, None)
+                .unwrap_or_else(|e| panic!("candidate surface refused feature row: {e}"));
         }
     };
-
-    let mut out = vec![0.0f64; rows.len()];
+    let mut out = vec![0.0; rows.len()];
     if rows.len() < SCORE_PARALLEL_MIN_ROWS || rayon::current_num_threads() <= 1 {
-        let mut predictor = Predictor::new(model);
-        let mut scratch = vec![0.0f32; n_inputs];
-        score_range(&mut predictor, &mut scratch, rows, &mut out);
-        return out;
+        score_range(rows, &mut out);
+    } else {
+        zensim_validate::parallel::init();
+        out.par_chunks_mut(SCORE_CHUNK_ROWS)
+            .zip(rows.par_chunks(SCORE_CHUNK_ROWS))
+            .for_each(|(dst, src)| score_range(src, dst));
     }
-    zensim_validate::parallel::init();
-    out.par_chunks_mut(SCORE_CHUNK_ROWS)
-        .zip(rows.par_chunks(SCORE_CHUNK_ROWS))
-        .for_each(|(dst, src)| {
-            let mut predictor = Predictor::new(model);
-            let mut scratch = vec![0.0f32; n_inputs];
-            score_range(&mut predictor, &mut scratch, src, dst);
-        });
     out
 }
 
@@ -1818,6 +1794,8 @@ struct Ensemble {
     /// to differ here; the dispatch is per-member, never the primary's.
     has_transforms: Vec<bool>,
     n_inputs: usize,
+    corruption_head: Option<CompanionHead>,
+    corruption_threshold: f64,
     /// `None` = the historical equal-weight mean, accumulated exactly as before
     /// so pre-flag ensembles reproduce bit-for-bit. `Some(w)` = a convex blend
     /// with `Σw = 1` (normalised at parse time). Same ordering as `models`.
@@ -1835,43 +1813,20 @@ impl Ensemble {
         self.models.len()
     }
 
-    /// Mean (or convex blend) of the members' raw predictions, row by row.
+    /// Evaluate the complete ensemble through zensim's serving surface.
     fn score_rows(&self, rows: &[Vec<f64>]) -> Vec<f64> {
-        if self.models.len() == 1 && self.weights.is_none() {
-            // Bit-identical to the single-bake path by construction.
-            return score_grid_one(&self.models[0], self.has_transforms[0], self.n_inputs, rows);
-        }
-        if let Some(w) = &self.weights {
-            let mut acc = vec![0.0f64; rows.len()];
-            for ((m, &tf), &wi) in self
-                .models
-                .iter()
-                .zip(self.has_transforms.iter())
-                .zip(w.iter())
-            {
-                if wi == 0.0 {
-                    continue;
-                }
-                for (a, v) in acc
-                    .iter_mut()
-                    .zip(score_grid_one(m, tf, self.n_inputs, rows))
-                {
-                    *a += wi * v;
-                }
-            }
-            return acc;
-        }
-        let mut acc = vec![0.0f64; rows.len()];
-        for (m, &tf) in self.models.iter().zip(self.has_transforms.iter()) {
-            for (a, v) in acc
-                .iter_mut()
-                .zip(score_grid_one(m, tf, self.n_inputs, rows))
-            {
-                *a += v;
-            }
-        }
-        let k = self.models.len() as f64;
-        acc.iter().map(|a| a / k).collect()
+        score_rows_surface(
+            &self.models,
+            self.weights.as_deref(),
+            self.corruption_head
+                .as_ref()
+                .map(|h| (h, self.corruption_threshold)),
+            rows,
+        )
+    }
+    /// Explicit auxiliary diagnostic: the perceptual component before its gate.
+    fn score_rows_ungated(&self, rows: &[Vec<f64>]) -> Vec<f64> {
+        score_rows_surface(&self.models, self.weights.as_deref(), None, rows)
     }
 }
 
@@ -4693,12 +4648,41 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     }
+    let corruption_head = match args
+        .corruption_head
+        .as_ref()
+        .map(|p| load_companion_head(p))
+        .transpose()
+    {
+        Ok(head) => head,
+        Err(e) => {
+            eprintln!("bake_verdict: invalid corruption companion: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let corruption_threshold = match corruption_head
+        .as_ref()
+        .and_then(CompanionHead::baked_deadband_score)
+    {
+        Some(t) if !args.corruption_head_threshold_set => t,
+        _ => args.corruption_head_threshold,
+    };
+    if let Err(e) = candidate_surface(
+        &models,
+        args.ensemble_weights.as_deref(),
+        corruption_head.as_ref().map(|h| (h, corruption_threshold)),
+    ) {
+        eprintln!("bake_verdict: candidate surface refused model: {e}");
+        return ExitCode::from(2);
+    }
     let ens = Ensemble {
         has_transforms: models
             .iter()
             .map(|m| m.has_nontrivial_feature_transforms())
             .collect(),
         n_inputs,
+        corruption_head,
+        corruption_threshold,
         models,
         weights: args.ensemble_weights.clone(),
     };
@@ -5467,9 +5451,7 @@ Run the dedicated q-sweep harness for those._\n",
                 match parquet_loader::load_dial_grid(&args.dial_grid) {
                     Ok(grid) => {
                         let cand = ens.score_rows(&grid.feature_rows);
-                        let ref_tf = ref_model.has_nontrivial_feature_transforms();
-                        let ref_n = ref_model.caller_input_width();
-                        let refs = score_grid_one(&ref_model, ref_tf, ref_n, &grid.feature_rows);
+                        let refs = score_grid_one(&ref_model, &grid.feature_rows);
                         let zone = eval_report::zone_buckets(&cand, &refs, 5.0);
                         buf.push_str(&eval_report::zone_bucket_section(
                             &zone,
@@ -5514,7 +5496,7 @@ Run the dedicated q-sweep harness for those._\n",
                 // is exactly when the composition is undefined.
                 let mut dial_scores: Option<Vec<f64>> = None;
                 if gather_for_grids.accepts_row_width(grid.n_features, n_inputs) {
-                    let dial = ens.score_rows(&grid.feature_rows);
+                    let dial = ens.score_rows_ungated(&grid.feature_rows);
                     let stats = eval_report::corruption_gate(&grid.label, &dial);
                     dial_scores = Some(dial);
                     buf.push_str(&eval_report::corruption_gate_section(
@@ -5538,8 +5520,8 @@ Run the dedicated q-sweep harness for those._\n",
                 // freeze gate reads the HEAD's numbers; the dial-alone section
                 // above stays for honesty.
                 if let Some(head_path) = &args.corruption_head {
-                    match load_companion_head(head_path) {
-                        Ok(head) if head.caller_input_width() == grid.n_features => {
+                    match ens.corruption_head.as_ref() {
+                        Some(head) if head.caller_input_width() <= grid.n_features => {
                             let scores = head.score_grid(&grid.feature_rows);
                             let stats = eval_report::corruption_gate(&grid.label, &scores);
                             buf.push_str(&eval_report::corruption_gate_section(
@@ -5564,19 +5546,10 @@ Run the dedicated q-sweep harness for those._\n",
                             // `Args::corruption_head_threshold_set` for why
                             // the two are the same operating point and not
                             // the same f64.
-                            let thr = match head.baked_deadband_score() {
-                                Some(t) if !args.corruption_head_threshold_set => t,
-                                _ => args.corruption_head_threshold,
-                            };
-                            if let Some(dial) = dial_scores.as_ref() {
-                                // ONE owner for the composition — the same
-                                // function the runtime companion applies, so
-                                // a verdict and a served score cannot drift.
-                                let composed: Vec<f64> = dial
-                                    .iter()
-                                    .zip(scores.iter())
-                                    .map(|(&d, &h)| zensim::corruption_head::gate_score(d, h, thr))
-                                    .collect();
+                            let thr = ens.corruption_threshold;
+                            if dial_scores.is_some() {
+                                // Same composed surface as rank, dial and target callers.
+                                let composed = ens.score_rows(&grid.feature_rows);
                                 let cstats = eval_report::corruption_gate(&grid.label, &composed);
                                 corruption_deploy_threshold = thr;
                                 let title = format!(
@@ -5595,7 +5568,7 @@ Run the dedicated q-sweep harness for those._\n",
                                 );
                             }
                         }
-                        Ok(head) => buf.push_str(&format!(
+                        Some(head) => buf.push_str(&format!(
                             "\n## Corruption gate (head) — ⚠ SKIPPED (feature-count mismatch)\n\n\
                              Grid `{}` has {} feature columns; head `{}` ({}) expects {}.\n",
                             args.corruption_grid.display(),
@@ -5604,10 +5577,7 @@ Run the dedicated q-sweep harness for those._\n",
                             head.kind_label(),
                             head.caller_input_width()
                         )),
-                        Err(e) => buf.push_str(&format!(
-                            "\n## Corruption gate (head) — ⚠ FAILED to load `{}`\n\n`{e}`\n",
-                            head_path.display()
-                        )),
+                        None => unreachable!("companion validated before evaluation"),
                     }
                 }
             }
@@ -6263,7 +6233,18 @@ Run the dedicated q-sweep harness for those._\n",
             },
             Err(_) => repro_value,
         };
+        let scoring = json!({
+            "surface":"zensim::BakeScorer", "version":"2026-09-07",
+            "output":"complete calibrated score, including the corruption gate",
+            "members":members.iter().map(|p|json!({"path":p,"sha256":zensim_validate::train_manifest::sha256_file(p).ok()})).collect::<Vec<_>>(),
+            "ensemble_weights":ens.weights,
+            "corruption":args.corruption_head.as_ref().map(|p|json!({
+                "path":p,"sha256":zensim_validate::train_manifest::sha256_file(p).ok(),
+                "deadband_score":ens.corruption_threshold,
+            })),
+        });
         let full = json!({
+            "scoring":scoring,
             "bake": args.bake.display().to_string(),
             "bake_sha256": bake_sha,
             "name": name,
