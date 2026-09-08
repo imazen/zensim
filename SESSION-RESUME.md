@@ -43,3 +43,25 @@ Use the existing capped `run-heavy` owner for heavy work and
 are under `~/tmp/zensim-science-audit-2026-09-07/`. Choose fresh output paths
 for reproductions. Do not overwrite historical results or infer completion
 from a filename without its content identity.
+
+September 8 repository sync + AVIF binding continuation: all 75 immediate zen
+repos plus five external dependency/corpus repos fetched; 52 checkouts advanced
+or rebased, local changes rescued and five conflict sets resolved. Exact private
+recovery/status: `~/work/zensim-recovery-2026-09-08/sync-all/README.md`. Keep
+syncing before new work and use tight local checks; do not wait on CI.
+
+AVIF complete-candidate research binding pushed as `4777a30aa54aaab6534719f6026e4a18e91d60e3`. Exact-bake
+`BakeScorer` owns scalar and current spatial scores; first map feeds encode 2,
+unsupported terms fail, terminal bytes are decoded/scored independently. On the
+one training-family control, legacy gain 10 is inert (all blocks saturate then
+normalize to 1); existing zerosum engages and repeats byte/pixel/map-exactly.
+Neutral 79.368/18,355 B; active 80.287/19,573 B; three full encodes, three maps,
+four scalar comparisons including terminal. Six CLI rejection controls pass.
+See sibling `benchmarks/zensim_avif_loop_2026-08-07.md` September 8 addendum and
+`zensim_avif_candidate_binding_2026-09-08.json`. Artifacts at
+`/mnt/v/output/zensim/avif-candidate-binding-2026-09-08/`; Windows-readable copy
+under `~/work/zensim-validation-2026-09-08/avif-candidate-binding/`.
+This is engagement only, not RD or competitive-model qualification. Next: AVIF
+attained bounds and train-only calibrated actual 1/2/3-encode loops through the
+shared Rust search, then matched-quality judging. No new model training or
+terminal holdout was performed in this continuation.
