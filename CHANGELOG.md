@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Extend the existing RD analyzer to validate native complete-encode targeting, bound coverage, emitted-byte identity and separate reconstruction/map costs.
+
+- The unpublished `zensim-target` tool now exposes its shared median/envelope `SeedCurve` and candidate search with a native codec backend. Built-in adapters keep their feature checks; native JXL experiments can reuse the same Rust controller and training calibration without copying them.
+
 ### Added — candidate score and spatial attribution (2026-09-08)
 
 With `custom-profiles` and `feature-regime-v2`, `BakeScorer` now provides

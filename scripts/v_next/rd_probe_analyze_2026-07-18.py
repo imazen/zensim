@@ -110,6 +110,8 @@ def target_loop_main():
         raise SystemExit("target-loop matrix incomplete; refusing a success summary")
     rows = [json.loads(line) for line in (root / "measurements.jsonl").read_text().splitlines()]
     inp = json.loads((root / "INPUTS.json").read_text())
+    if inp.get("schema") == "native-jxl-target-v1":
+        return native_target_summary(root, inp, rows)
     if inp.get("schema") == "reachable-target-v1":
         return reachable_target_summary(root, inp, rows)
     expected = len(inp["sources"]) * len(inp["codecs"]) * len(inp["targets"]) * (2 + len(inp["bakes"]))
@@ -284,6 +286,176 @@ def reachable_target_summary(root, inp, rows):
         label = s["model"] if not s["model"].startswith("bake:") else s["model"][:17]
         text.append(f"| {s['codec']} | {label} | {s['budget']} | {s['policy']} | {s['n']} | {s['median_abs_error']:.3f} | {s['p95_abs_error']:.3f} | {s['hits']['1.0']} | {s['median_loop_ms']:.2f} |")
     text += ["", "No perceptual tolerance or native diffmap/RD qualification is established by this experiment."]
+    (root/"analysis_summary.json").write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
+    (root/"analysis_summary.md").write_text("\n".join(text)+"\n")
+    print("\n".join(text))
+
+
+def native_target_summary(root, inp, rows):
+    """Validate native work accounting and reuse matched-judge interpolation.
+
+    These are descriptive family-paired development measurements. Sparse
+    witnessed coverage and interpolation do not confer product qualification.
+    """
+    import hashlib, json
+    complete = json.loads((root / "COMPLETE").read_text())
+    bound_rows = [json.loads(line) for line in (root / "bounds.jsonl").read_text().splitlines()]
+    bounds = [r["bound"] for r in bound_rows]
+    coverage = json.loads((root / "coverage.json").read_text())
+    sources = {s["origin"]: s for s in inp["sources"]["sources"]}
+    arms = inp["arms"]
+    tol = inp["tolerance"]
+    ladders = defaultdict(list)
+    for b in bounds:
+        ladders[(b["origin"], b["arm"])].append(b)
+    if (len(sources) != len(inp["sources"]["sources"])
+            or set(ladders) != {(s, a) for s in sources for a in arms}
+            or complete["bounds"] != len(bounds)):
+        raise SystemExit("missing/duplicate/mismatched native bounds")
+    for ladder in ladders.values():
+        if (len(ladder) != 21 or len({b["knob"] for b in ladder}) != 21
+                or not all(math.isfinite(b["score"]) for b in ladder)):
+            raise SystemExit("incomplete/nonfinite native ladder")
+    admitted, coverage_keys, extrema = set(), set(), []
+    coverage_counts = defaultdict(lambda: defaultdict(int))
+    for c in coverage:
+        key = (c["origin"], c["target"])
+        if key in coverage_keys or c["origin"] not in sources:
+            raise SystemExit("duplicate/unknown native coverage")
+        coverage_keys.add(key)
+        witnessed = []
+        for arm in arms:
+            witness = any(abs(b["score"] - c["target"]) <= tol
+                          for b in ladders[(c["origin"], arm)])
+            if witness != c[arm + "_witnessed"]:
+                raise SystemExit("native coverage witness mismatch")
+            scores = [b["score"] for b in ladders[(c["origin"], arm)]]
+            status = ("witnessed" if witness else "outside_measured_envelope"
+                      if c["target"] < min(scores) or c["target"] > max(scores)
+                      else "unwitnessed_inside_envelope")
+            coverage_counts[arm][status] += 1
+            witnessed.append(witness)
+        if all(witnessed):
+            admitted.add(key)
+    expected_coverage = set()
+    for origin in sources:
+        scores = sorted({b["score"] for b in ladders[(origin, "neutral")]})
+        targets = set(inp["fixed_requests"]) | {scores[i * (len(scores)-1)//4] for i in range(5)}
+        expected_coverage.update((origin, t) for t in targets)
+        for arm in arms:
+            ss = [b["score"] for b in ladders[(origin, arm)]]
+            extrema.append({"origin":origin, "arm":arm, "attained_min":min(ss), "attained_max":max(ss)})
+    if coverage_keys != expected_coverage:
+        raise SystemExit("missing native coverage requests")
+    expected = {(s, t, a, p, k) for s, t in admitted for a in arms
+                for p in inp["policies"] for k in inp["budgets"]}
+    keys = [(r["origin"], r["target"], r["arm"], r["policy"], r["budget"]) for r in rows]
+    if len(keys) != len(expected) or set(keys) != expected or complete["cases"] != len(rows):
+        raise SystemExit("missing/duplicate/mismatched native steering cells")
+    for r in rows:
+        n = r["full_encodes"]
+        if (not 1 <= n <= r["budget"] or n != len(r["probes"])
+                or n != len(r["native_work"]) or n != r["search_pixel_comparisons"]
+                or r["terminal_decodes"] != 1 or r["terminal_pixel_comparisons"] != 1):
+            raise SystemExit("native complete-encode accounting mismatch")
+        for probe, work in zip(r["probes"], r["native_work"]):
+            count = 0 if r["arm"] == "scalar" else 3
+            if (probe["knob"] != work["knob"] or any(work[k] != count for k in
+                    ("internal_reconstructions", "native_pixel_comparisons", "map_evaluations"))):
+                raise SystemExit("native map/reconstruction engagement mismatch")
+        if (not all(math.isfinite(r[k]) for k in ("target", "achieved", "signed_error", "total_seconds"))
+                or abs(r["achieved"] - r["target"] - r["signed_error"]) > 1e-4
+                or not any(w["encoded_sha256"] == r["encoded_sha256"]
+                           and abs(p["score"] - r["achieved"]) <= 1e-5
+                           for p, w in zip(r["probes"], r["native_work"]))):
+            raise SystemExit("native terminal score/selection mismatch")
+        encoded = (root / r["bitstream"]).read_bytes()
+        if len(encoded) != r["bytes"] or hashlib.sha256(encoded).hexdigest() != r["encoded_sha256"]:
+            raise SystemExit("native emitted bytes changed")
+    def stats(group):
+        errors = sorted(abs(r["signed_error"]) for r in group)
+        return {"n":len(group), "families":len({r["family"] for r in group}),
+                "median_abs_error":st.median(errors), "p95_abs_error":errors[math.ceil(.95*len(errors))-1],
+                "worst_abs_error":max(errors), "hits":{str(t):sum(e <= t for e in errors) for t in (.25,.5,1.,2.)},
+                "undershoots_beyond_tolerance":sum(r["signed_error"] < -tol for r in group),
+                "mean_full_encodes":st.mean(r["full_encodes"] for r in group),
+                "median_total_ms":1000*st.median(r["total_seconds"] for r in group),
+                "median_bytes":st.median(r["bytes"] for r in group),
+                "full_encodes":sum(r["full_encodes"] for r in group),
+                "native_reconstructions":sum(w["internal_reconstructions"] for r in group for w in r["native_work"]),
+                "native_pixel_comparisons":sum(w["native_pixel_comparisons"] for r in group for w in r["native_work"]),
+                "map_evaluations":sum(w["map_evaluations"] for r in group for w in r["native_work"]),
+                "search_pixel_comparisons":sum(r["search_pixel_comparisons"] for r in group),
+                "terminal_decodes_and_comparisons":len(group),
+                "process_peak_rss_kib":max(r["process_peak_rss_kib"] for r in group)}
+    groups, classes = defaultdict(list), defaultdict(list)
+    for r in rows:
+        key = (r["arm"], r["policy"], r["budget"])
+        groups[key].append(r)
+        classes[(*key, r["class"])].append(r)
+    summary = [{"arm":a,"policy":p,"budget":k,**stats(g)} for (a,p,k),g in sorted(groups.items())]
+    by_class = [{"arm":a,"policy":p,"budget":k,"class":c,**stats(g)} for (a,p,k,c),g in sorted(classes.items())]
+    index = dict(zip(keys, rows))
+    paired = []
+    for base in ("scalar", "neutral"):
+        for budget in inp["budgets"]:
+            family = defaultdict(list)
+            for r in groups[("active", "train_curve", budget)]:
+                b = index[(r["origin"],r["target"],base,"train_curve",budget)]
+                family[r["family"]].append(abs(r["signed_error"])-abs(b["signed_error"]))
+            paired.append({"baseline":base,"budget":budget,"family_mean_abs_error_delta":{f:st.mean(v) for f,v in family.items()}})
+    judges = {}
+    for name, file, col, sign in (("ssim2","judge_ssim2.tsv","ssim2",1),
+                                  ("butter","judge_butteraugli.tsv","butteraugli_pnorm3",-1)):
+        if not (root / file).exists():
+            continue
+        with (root / file).open() as f:
+            for r in csv.DictReader(f, delimiter="\t"):
+                value = float(r[col])
+                if not math.isfinite(value):
+                    raise SystemExit("nonfinite independent judge")
+                judges.setdefault(r["dist_path"], {})[name] = sign * value
+    CLASS.update({s: v["content_class"] for s,v in sources.items()})
+    cells = []
+    for (origin, arm), ladder in ladders.items():
+        for i,b in enumerate(ladder):
+            cells.append({"image":origin,"label":arm,"bytes":b["bytes"],"dist_path":str(root/f"{origin}-{arm}-{i}.png")})
+    seen = set()
+    for r in rows:
+        if r["policy"] != "train_curve":
+            continue
+        key = (r["origin"],r["arm"],r["budget"],r["encoded_sha256"])
+        if key not in seen:
+            seen.add(key)
+            cells.append({"image":r["origin"],"label":f"{r['arm']}-target-{r['budget']}",
+                          "bytes":r["bytes"],"dist_path":str(root/r["decoded"])})
+    if judges and any(set(judges.get(c["dist_path"], {})) != {"ssim2","butter"} for c in cells):
+        raise SystemExit("incomplete independent judge matrix")
+    rd = []
+    for baseline in ("scalar", "neutral"):
+        for (judge, label, cls), values in sorted(helpful(cells, baseline, judges, "jxl").items()):
+            rd.append({"baseline":baseline,"judge":judge,"arm":label,"class":cls,"n":len(values),
+                       "median_saved_fraction":st.median(values),"mean_saved_fraction":st.mean(values),"values":values})
+    result = {"schema":inp["schema"],"cells":len(rows),"bound_cells":len(bounds),
+              "input_sha256":hashlib.sha256((root/"INPUTS.json").read_bytes()).hexdigest(),
+              "measurement_sha256":hashlib.sha256((root/"measurements.jsonl").read_bytes()).hexdigest(),
+              "summary":summary,"by_content_class":by_class,"paired":paired,"attained_bounds":extrema,
+              "requested_targets":len(coverage),"jointly_witnessed_targets":len(admitted),
+              "coverage_by_arm":dict(coverage_counts),
+              "negative_witnessed_targets":sum(t < 0 for _,t in admitted),"matched_judge":rd,
+              "offline_validation_bound_cost":{"full_encodes":len(bounds),"scalar_comparisons":len(bounds),
+                  "internal_reconstructions":sum(w["internal_reconstructions"] for r in bound_rows for w in r["work"]),
+                  "native_pixel_comparisons":sum(w["native_pixel_comparisons"] for r in bound_rows for w in r["work"]),
+                  "map_evaluations":sum(w["map_evaluations"] for r in bound_rows for w in r["work"])},
+              "qualification":"unqualified native development screen; sparse coverage, eight families, no universal perceptual tolerance",
+              "cost_scope":"total ms = search plus terminal decode/score, excludes offline bounds/calibration and output PNG writes; map finite feature probes are not extra pixel comparisons",
+              "rd_scope":"sparse per-image log-byte interpolation without extrapolation; deduplicated target outputs, independent judges; direct matched-quality confirmation required"}
+    text = ["# Native JXL target steering", "", f"{len(admitted)}/{len(coverage)} targets witnessed across all arms; {len(rows)} cases on {len(sources)} validation families.", "",
+            "| arm | policy | budget | median error | p95 error | hits ±1 | mean encodes | median total ms |",
+            "|---|---|---:|---:|---:|---:|---:|---:|"]
+    for s in summary:
+        text.append(f"| {s['arm']} | {s['policy']} | {s['budget']} | {s['median_abs_error']:.3f} | {s['p95_abs_error']:.3f} | {s['hits']['1.0']}/{s['n']} | {s['mean_full_encodes']:.2f} | {s['median_total_ms']:.2f} |")
+    text += ["", result["qualification"], "", result["cost_scope"], "", result["rd_scope"]]
     (root/"analysis_summary.json").write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
     (root/"analysis_summary.md").write_text("\n".join(text)+"\n")
     print("\n".join(text))

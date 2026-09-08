@@ -33,6 +33,8 @@
 #![forbid(unsafe_code)]
 
 pub mod codec;
+mod seed_curve;
+pub use seed_curve::SeedCurve;
 
 use anyhow::{Context, Result, bail};
 use zensim::{RgbSlice, Zensim, ZensimProfile};
@@ -162,6 +164,7 @@ pub fn target_search(
     spec: TargetSpec,
 ) -> Result<TargetResult> {
     let scorer = build_zensim(spec.profile);
+    let backend = enabled_backend(codec)?;
     search(
         rgb,
         width,
@@ -169,6 +172,7 @@ pub fn target_search(
         codec,
         spec,
         Some(spec.profile),
+        backend.as_ref(),
         |a, b| Ok(scorer.compute(a, b)?.score() as f32),
     )
 }
@@ -184,9 +188,42 @@ pub fn target_search_with_bake(
     spec: TargetSpec,
     scorer: &mut zensim::BakeScorer<'_>,
 ) -> Result<TargetResult> {
-    search(rgb, width, height, codec, spec, None, |a, b| {
+    let backend = enabled_backend(codec)?;
+    target_search_with_backend_and_bake(rgb, width, height, codec, spec, backend.as_ref(), scorer)
+}
+
+/// Use the shared candidate search with a codec's native encoder integration.
+/// Input is tightly packed sRGB RGB8, exactly `width * height * 3` bytes.
+/// `codec` identifies the model's codec hint and result label; `backend`
+/// supplies the actual configuration, knob range and independent decode.
+/// No built-in codec feature is required for an externally supplied backend.
+#[allow(clippy::too_many_arguments)]
+pub fn target_search_with_backend_and_bake(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    codec: CodecKind,
+    spec: TargetSpec,
+    backend: &dyn codec::CodecBackend,
+    scorer: &mut zensim::BakeScorer<'_>,
+) -> Result<TargetResult> {
+    search(rgb, width, height, codec, spec, None, backend, |a, b| {
         Ok(scorer.compute(a, b, Some(codec.extension()))?.score() as f32)
     })
+}
+
+fn enabled_backend(codec: CodecKind) -> Result<Box<dyn codec::CodecBackend>> {
+    let enabled = match codec {
+        CodecKind::Jpeg => cfg!(feature = "zenjpeg"),
+        CodecKind::Webp => cfg!(feature = "zenwebp"),
+        CodecKind::Avif => cfg!(feature = "zenavif"),
+        CodecKind::Jxl => cfg!(feature = "zenjxl"),
+        CodecKind::Png => cfg!(feature = "zenpng"),
+    };
+    if !enabled {
+        bail!("codec {codec:?} is not enabled in this build");
+    }
+    Ok(codec::backend_for(codec))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -197,6 +234,7 @@ fn search(
     codec: CodecKind,
     spec: TargetSpec,
     profile: Option<ZensimProfile>,
+    backend: &dyn codec::CodecBackend,
     mut score: impl FnMut(&RgbSlice<'_>, &RgbSlice<'_>) -> Result<f32>,
 ) -> Result<TargetResult> {
     if width == 0
@@ -210,16 +248,6 @@ fn search(
             "nonzero dimensions/pass budget, finite target, and finite nonnegative tolerance required"
         );
     }
-    let enabled = match codec {
-        CodecKind::Jpeg => cfg!(feature = "zenjpeg"),
-        CodecKind::Webp => cfg!(feature = "zenwebp"),
-        CodecKind::Avif => cfg!(feature = "zenavif"),
-        CodecKind::Jxl => cfg!(feature = "zenjxl"),
-        CodecKind::Png => cfg!(feature = "zenpng"),
-    };
-    if !enabled {
-        bail!("codec {codec:?} is not enabled in this build");
-    }
     let expected = (width as usize)
         .checked_mul(height as usize)
         .and_then(|n| n.checked_mul(3))
@@ -232,8 +260,10 @@ fn search(
         );
     }
 
-    let backend = codec::backend_for(codec);
     let (q_lo_native, q_hi_native) = backend.quality_range();
+    if !q_lo_native.is_finite() || !q_hi_native.is_finite() || q_lo_native > q_hi_native {
+        bail!("codec knob range must be finite and ordered");
+    }
     let inverted = backend.lower_quality_means_higher_score();
     if let Some(seed) = spec.seed
         && (!seed.knob.is_finite()
@@ -440,6 +470,93 @@ fn build_zensim(profile: ZensimProfile) -> Zensim {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_backend_is_used_without_a_builtin_codec_feature() {
+        use std::cell::RefCell;
+        struct Native {
+            calls: RefCell<Vec<f32>>,
+            range: (f32, f32),
+        }
+        impl codec::CodecBackend for Native {
+            fn quality_range(&self) -> (f32, f32) {
+                self.range
+            }
+            fn lower_quality_means_higher_score(&self) -> bool {
+                true
+            }
+            fn encode_decode(
+                &self,
+                rgb: &[u8],
+                _: u32,
+                _: u32,
+                knob: f32,
+            ) -> Result<(Vec<u8>, Vec<u8>)> {
+                self.calls.borrow_mut().push(knob);
+                Ok((knob.to_le_bytes().to_vec(), vec![0; rgb.len()]))
+            }
+        }
+        let model = zenpredict::Model::from_bytes(include_bytes!(
+            "../../zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin"
+        ))
+        .unwrap();
+        let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+        let rgb: Vec<u8> = (0..32 * 32 * 3)
+            .map(|i| ((i * 37 + i / 13) % 256) as u8)
+            .collect();
+        let black = vec![[0; 3]; 32 * 32];
+        let source = RgbSlice::new(bytemuck::cast_slice(&rgb), 32, 32);
+        let target = scorer
+            .compute(&source, &RgbSlice::new(&black, 32, 32), Some("jxl"))
+            .unwrap()
+            .score() as f32;
+        let spec = TargetSpec {
+            target,
+            tolerance: 0.,
+            max_iterations: 3,
+            seed: Some(SeedEstimate {
+                knob: 2.25,
+                score_per_knob: -10.,
+            }),
+            ..TargetSpec::default()
+        };
+        let backend = Native {
+            calls: RefCell::new(Vec::new()),
+            range: (0.01, 25.),
+        };
+        let result = target_search_with_backend_and_bake(
+            &rgb,
+            32,
+            32,
+            CodecKind::Jxl,
+            spec,
+            &backend,
+            &mut scorer,
+        )
+        .unwrap();
+        assert_eq!(*backend.calls.borrow(), [2.25]);
+        assert_eq!(result.encoded, 2.25f32.to_le_bytes());
+        assert_eq!(result.achieved_score, target);
+        assert_eq!(result.profile, None);
+        assert!(result.converged);
+        let bad = Native {
+            calls: RefCell::new(Vec::new()),
+            range: (f32::NAN, 25.),
+        };
+        assert!(
+            target_search_with_backend_and_bake(
+                &rgb,
+                32,
+                32,
+                CodecKind::Jxl,
+                spec,
+                &bad,
+                &mut scorer
+            )
+            .is_err()
+        );
+        assert!(bad.calls.borrow().is_empty());
+    }
 
     #[test]
     #[cfg(feature = "zenjpeg")]

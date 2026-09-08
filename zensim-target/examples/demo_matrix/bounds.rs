@@ -2,7 +2,7 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use zensim_target::SeedEstimate;
+use zensim_target::{SeedCurve, SeedEstimate};
 
 const SCHEMA: &str = "reachable-target-v1";
 const CONFIG: &str = "jpeg:ApproxJpegli0-100,420;webp:q0-100,method4;avif:q1-100,speed6;jxl:distance0.01-25,wrapper-default;png:lossless";
@@ -39,33 +39,12 @@ struct Calibration {
 struct Curve {
     codec: String,
     model: String,
-    /// Ascending native knob, with the declared score orientation.
-    points: Vec<(f32, f32)>,
-    adjusted_points: usize,
+    #[serde(flatten)]
+    seed_curve: SeedCurve,
 }
 impl Curve {
     fn seed(&self, target: f32) -> Result<SeedEstimate> {
-        // Choose the closest non-flat segment, interpolate/extrapolate using
-        // its slope, then clamp to the supported native range. No eval rows.
-        let pair = self
-            .points
-            .windows(2)
-            .filter(|p| (p[1].1 - p[0].1).abs() > 1e-5)
-            .min_by(|a, b| {
-                let distance = |p: &[(f32, f32)]| {
-                    let lo = p[0].1.min(p[1].1);
-                    let hi = p[0].1.max(p[1].1);
-                    (target - target.clamp(lo, hi)).abs()
-                };
-                distance(a).total_cmp(&distance(b))
-            })
-            .context("training curve is entirely flat; no usable seed slope")?;
-        let slope = (pair[1].1 - pair[0].1) / (pair[1].0 - pair[0].0);
-        Ok(SeedEstimate {
-            knob: (pair[0].0 + (target - pair[0].1) / slope)
-                .clamp(self.points[0].0, self.points.last().unwrap().0),
-            score_per_knob: slope,
-        })
+        self.seed_curve.estimate(target)
     }
 }
 
@@ -102,38 +81,12 @@ fn score(
     Ok(s)
 }
 
-fn median(v: &mut [f32]) -> f32 {
-    v.sort_by(f32::total_cmp);
-    let n = v.len();
-    (v[(n - 1) / 2] + v[n / 2]) * 0.5
-}
-
-fn fit(codec: &str, model: &str, rows: &[Vec<(f32, f32)>], inverted: bool) -> Curve {
-    let mut points: Vec<(f32, f32)> = (0..rows[0].len())
-        .map(|i| {
-            let mut values: Vec<_> = rows.iter().map(|r| r[i].1).collect();
-            (rows[0][i].0, median(&mut values))
-        })
-        .collect();
-    // Declared simple heuristic, not a least-squares/isotonic fit: median
-    // score per knob followed by a monotone running envelope. Record how
-    // much it changes, so a poor assumption is visible in the artifact.
-    let mut adjusted_points = 0;
-    for i in 1..points.len() {
-        let old = points[i].1;
-        points[i].1 = if inverted {
-            old.min(points[i - 1].1)
-        } else {
-            old.max(points[i - 1].1)
-        };
-        adjusted_points += usize::from(points[i].1 != old);
-    }
-    Curve {
+fn fit(codec: &str, model: &str, rows: &[Vec<(f32, f32)>], inverted: bool) -> Result<Curve> {
+    Ok(Curve {
         codec: codec.into(),
         model: model.into(),
-        points,
-        adjusted_points,
-    }
+        seed_curve: SeedCurve::fit(rows, inverted)?,
+    })
 }
 
 fn validate_split(sources: &SourceSet, calibration: Option<&Calibration>, fit: bool) -> Result<()> {
@@ -538,7 +491,7 @@ pub(super) fn run(args: &Args) -> Result<()> {
                         .lower_quality_means_higher_score(),
                 )
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         let c = Calibration {
             schema: SCHEMA.into(),
             binary_sha256: binary_sha,
@@ -582,8 +535,11 @@ mod tests {
         let curve = Curve {
             codec: "jxl".into(),
             model: "B".into(),
-            points: vec![(0.01, 100.), (1., 80.), (2., 80.), (10., -20.)],
-            adjusted_points: 0,
+            seed_curve: SeedCurve::fit(
+                &[vec![(0.01, 100.), (1., 80.), (2., 80.), (10., -20.)]],
+                true,
+            )
+            .unwrap(),
         };
         let seed = curve.seed(-10.).unwrap();
         assert!((seed.knob - 9.2).abs() < 1e-5);

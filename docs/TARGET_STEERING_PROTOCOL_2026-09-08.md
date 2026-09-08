@@ -96,6 +96,49 @@ per-forward arithmetic and composition order. Gate against an explicit
 sequential complete-surface oracle, including ensembles; record measured
 timing separately from correctness and avoid a new scoring implementation.
 
+### Native complete-encode calibration reuse — registered September 8
+
+Concrete caller: JXL's existing `zensim_diffmap_rd` example. Reuse the
+`zensim-target` search and median/envelope calibration owner for actual
+1/2/3 full encodes; do not copy that controller into each codec harness.
+The native adapter uses JXL's existing two-update map loop at each proposed
+distance, independently decodes through jxl-rs and records native work.
+No evaluation bounds or image-specific ladder seeds reach the controller.
+
+Add to the unpublished `zensim-target` tool library:
+
+```rust
+pub fn target_search_with_backend_and_bake(
+    rgb: &[u8], width: u32, height: u32, codec: CodecKind,
+    spec: TargetSpec, backend: &dyn codec::CodecBackend,
+    scorer: &mut zensim::BakeScorer<'_>,
+) -> anyhow::Result<TargetResult>;
+```
+
+The pre-existing packed-sRGB contract remains explicit; codec identity selects
+the model's codec hint and result label, while the supplied backend owns native
+configuration/range. Built-in wrappers retain enabled-feature checks. Add an
+opaque serializable `SeedCurve` with `fit(rows: &[Vec<(f32, f32)>], inverted:
+bool) -> anyhow::Result<Self>`, `estimate(target: f32) -> anyhow::Result<SeedEstimate>`,
+`points() -> &[(f32, f32)]` and `adjusted_points() -> usize`. Move the existing
+median/monotone-envelope/inverse-segment implementation there, preserving
+its arithmetic and artifact fields. Reject empty, nonfinite, misaligned or
+unordered input curves and unusable seed slopes. Existing source/split/model
+identity validation remains at the experiment boundary; `SeedCurve` alone
+cannot certify training provenance.
+
+The first native experiment reuses the already recorded 12 training and
+8 validation families. Freeze codec/model/arm calibration before validation;
+report fixed requests and five ladder-witnessed targets in original units,
+with error bands 0.25/0.5/1/2 and full tails/coverage. Compare budgets 1/2/3,
+midpoint versus frozen training seed, and neutral versus active H3. Include
+a scalar-only zero-update arm for the actual latency baseline; it does not
+pay for unused native maps. Regenerate the ladders with the final driver
+before fitting/evaluation. Keep
+full encodes, internal reconstructions, scores, maps, terminal verification,
+bytes, total time and memory separate. This extends the existing instrument;
+it does not establish a new universal perceptual tolerance or waive RD gates.
+
 ### Earlier scalar bounds/calibration instrument
 
 Owner: `zensim-target`, extending its existing search and `demo_matrix`.
@@ -214,3 +257,15 @@ The existing alternate JXL `zensim_backend.rs` bridge also clamps
 `100 - score` to 0..100; the dedicated `zensim_loop.rs` uses another loss
 conversion. Audit the actual selected route before claiming negative-target
 support. The generic scalar controller measured here never clamps scores.
+
+### Native JXL implementation result
+
+The preregistered native adapter and shared `SeedCurve` now run in the JXL RD
+example. Its new `--native-fit`/`--native-eval` modes regenerate train and
+validation ladders for the pinned driver/configuration; the historical target
+mode remains a separate experiment. `rd_probe_analyze_2026-07-18.py` validates
+its full matrix, emitted bytes and native work counts, then applies the existing
+independent-judge interpolation owner. The [native result](https://github.com/imazen/jxl-encoder/blob/main/benchmarks/zensim_native_targeting_2026-09-08.md)
+retains narrow witnessed coverage and mixed RD as release limitations. A ±1
+controller tolerance here is an experimental band, not a perceptual acceptance
+threshold. No new product tolerance has been established.

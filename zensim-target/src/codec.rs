@@ -4,7 +4,15 @@
 //! returns `(encoded_bytes, decoded_rgb8_bytes)` for scoring against the
 //! original.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
+#[cfg(any(
+    feature = "zenjpeg",
+    feature = "zenwebp",
+    feature = "zenavif",
+    feature = "zenjxl",
+    feature = "zenpng"
+))]
+use anyhow::bail;
 
 use crate::CodecKind;
 
