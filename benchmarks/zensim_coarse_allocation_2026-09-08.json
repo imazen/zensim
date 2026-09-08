@@ -1627,5 +1627,79 @@
         "half_cells_D_gain_0.05": true
       }
     }
+  },
+  "delivery_rebase": {
+    "incoming_commit": "c0aedb14e7b6457c454046ed2ef8ee510ba52b5f",
+    "rebase_clean": true,
+    "incoming_tests_preserved": true,
+    "incoming_lock_failed_locked_build": true,
+    "resolution": "Cargo offline resolution restores the graph required by local manifests and existing CI sibling pins; incoming lock saved separately",
+    "resolved_lock_equals_previous_validated_lock": true,
+    "binary_sha256": "d71d1512f3b802488746a9f3febb52830fd9ff84e7fd31971d73249443841a67",
+    "binary_exact": true,
+    "changed_package_records": [
+      [
+        "cubecl-common",
+        "0.10.0"
+      ],
+      [
+        "cubecl-ir",
+        "0.10.0"
+      ],
+      [
+        "cubecl-macros",
+        "0.10.0"
+      ],
+      [
+        "cubecl-macros-internal",
+        "0.10.0"
+      ],
+      [
+        "cubecl-zspace",
+        "0.10.0"
+      ],
+      [
+        "zenforks-cubecl",
+        "0.10.2"
+      ],
+      [
+        "zenforks-cubecl-core",
+        "0.10.2"
+      ],
+      [
+        "zenforks-cubecl-cpp",
+        "0.10.2"
+      ],
+      [
+        "zenforks-cubecl-cuda",
+        "0.10.2"
+      ],
+      [
+        "zenforks-cubecl-opt",
+        "0.10.2"
+      ],
+      [
+        "zenforks-cubecl-runtime",
+        "0.10.2"
+      ],
+      [
+        "zenforks-cubecl-wgpu",
+        "0.10.2"
+      ],
+      [
+        "zensim",
+        "0.3.0"
+      ],
+      [
+        "zensim-target",
+        "0.1.0"
+      ]
+    ],
+    "only_changed_compiler_source": [
+      "jxl-encoder/tests/it/high_bit_depth_int.rs"
+    ],
+    "incoming_test_source_sha256": "ee8c44915e98e2e67036cea94bf1603c526399633859056ab46d67849a0071a0",
+    "incoming_tests_passed": 2,
+    "rebased_pinned_clippy_routes_passed": 3
   }
 }

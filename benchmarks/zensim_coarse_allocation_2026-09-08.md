@@ -123,3 +123,13 @@ bitstreams/RGB/quantizers, native readback hashes, judge commands, negative
 controls and `REPRODUCTION.json` preserve the complete recipe and failure.
 Build features: `__expert,zensim-loop,ssim2-loop,parallel,__pre_quantized,__internal_recon_hook`.
 Analyze through the existing root owner with `--interventions <panel-directory>`.
+
+
+Delivery rebase note: remote JXL advanced to `c0aedb14` during this screen.
+Its new high-bit-depth sensitivity tests are preserved byte-for-byte. Its
+regenerated lockfile did not match the pinned sibling graph and failed a
+locked build; Cargo offline resolution restored the previously validated lock.
+The rebased release instrument is byte-identical to the measured binary, so no
+scientific result changed. The incoming lock, exact source comparison and
+rebase/build/check logs are retained in `REBASE_VERIFICATION.json` and the
+artifact packet. No force push or remote-history replacement was used.
