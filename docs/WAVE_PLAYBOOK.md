@@ -17,6 +17,8 @@ objectives. B/C/D can be replaced; good rank alone is not product readiness.
 | Named-profile inference | `zensim::Zensim` | Profile/bake identity and supported pixel contract |
 | Spatial attribution / rectangle queries | `zensim/src/attribution.rs`, retained extraction in `feature_v2` | `BakeScorer::compute_with_ref_and_attribution` binds complete candidate scoring; signed score-unit density, explicit integrand coverage, scalar/feature parity and reusable binned sessions |
 | MLP training / capability admission | `zensim_mlp_train`, `mlp_train::capabilities` | Explicit recipe, table declarations, source-disjoint selection, reproducible random streams |
+| Canonical corruption head fit | `train_corruption_head.py --canonical-manifest`, existing ZCTH exporter and `corrhead_parity` | Complete content admission; source/pixel keys; separate fit/calibration; exact exported single-fit Rust evaluation; `--prepare-only` never fits |
+| Native content overlap screen | `check_holdout_overlap --native-png` | Explicit hash era, exact counts, all original file identities, full close-pair review; unsupported formats leave admission incomplete |
 | Transform selection | Trainer `--auto-transforms` | Declared score/method, top-N and parameter bounds; preserve independent screen references |
 | Serialize / inspect ZNPR v3 | `zenpredict-bake` | Versioned metadata and final artifact hashes |
 | Quantize / calibrate / densify | `bake_dial_refit` | Quantize before calibration; spline-coordinate and boundary gates; final served bytes |

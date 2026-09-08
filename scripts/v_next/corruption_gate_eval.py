@@ -27,6 +27,7 @@ def audit_report(argv):
     ap.add_argument("--audit-jsonl", required=True)
     ap.add_argument("--inputs-json", required=True)
     ap.add_argument("--out-json", required=True)
+    ap.add_argument("--model-context", choices=["historical", "canonical-fit"], default="historical")
     a = ap.parse_args(argv)
     def require(ok, message):
         if not ok:
@@ -115,7 +116,9 @@ def audit_report(argv):
                 out[f"{name}_below_q{q}"] = rate([r["audit"][score] < anchors[(r["meta"]["role"], r["meta"]["origin"], f"anchor-q{q}")][score] for r in pos])
         return out
     result = dict(schema="canonical-corruption-serving-report-v1", model_qualified=False,
-                  claim="development screen of historical frozen models; no new fit or holdout qualification",
+                  claim=("development screen of historical frozen models; no new fit or holdout qualification"
+                         if a.model_context == "historical" else
+                         "development screen of exact canonical head fit composed with frozen base; no product qualification"),
                   audit_sha256=sha(a.audit_jsonl), inputs_sha256=sha(a.inputs_json), model_inputs=model_inputs,
                   complete_rows=len(rows), max_feature_abs_delta=max(r["audit"]["max_consumed_feature_abs_delta"] for r in rows),
                   max_score_abs_delta=max(abs(r["audit"]["pixel_composed_score"]-r["audit"]["cached_composed_score"]) for r in rows),

@@ -3665,3 +3665,22 @@ not shippable; these inputs do not establish independent held-out validation of
 its old training recipe. T0 content admission, approved deduplicated training
 views and exact fit/calibration identities remain incomplete. See the
 [serving record](../benchmarks/canonical_corruption_serving_2026-09-08.md).
+
+## 2026-09-08 — native source admission and canonical fit preparation
+
+**STANDS, preparation only.** Twelve training origins have zero strict dHash
+flags against 182 SDR reference entries, using a named native PNG/resample era;
+all four distance-14..16 matches were reviewed as distinct content. LIVE's 29
+BMP references now decode through the shared native owner with exact RGB/PNG
+reproduction. Thirty UPIQ HDR EXR references remain pending; no exception to
+the native-only rule or full content admission has been assumed.
+
+The explicit fit/calibration/evaluation roles contain 5,504 / 2,709 / 5,679
+source/pixel-unique rows. A single feature plus a binary label is an ambiguous
+duplicate surrogate: the full-feature collision check finds no label conflicts.
+The Parquet owner now supports a registered full-record key contract requiring
+zero duplicates; the old sampled default and raw failures remain intact.
+The trainer's canonical mode evaluates its exact exported single fit through
+Rust and refuses fitting without complete admission. Numeric-fixture export
+parity passes, but **no canonical image-data candidate has been fit**. See the
+[preparation record](../benchmarks/canonical_corruption_refit_2026-09-08.md).

@@ -30,6 +30,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+#[path = "check_holdout_overlap/native_png.rs"]
+mod native_png;
+
 #[derive(Parser, Debug)]
 #[command(version, about = "Stage-1 dHash-64 overlap detector")]
 struct Args {
@@ -57,10 +60,23 @@ struct Args {
     /// per training source).
     #[arg(long)]
     out_tsv: PathBuf,
+
+    /// Native PNG decode/resample era, with strict coverage and input hashes.
+    #[arg(long)]
+    native_png: bool,
+
+    #[arg(long, requires = "native_png")]
+    expected_training: Option<usize>,
+
+    #[arg(long, requires = "native_png")]
+    expected_holdout: Option<usize>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.native_png {
+        return native_png::run(&args);
+    }
 
     // 1. Enumerate CID22 references.
     let cid22_paths: Vec<PathBuf> = walk_image_dir(&args.cid22_refs)?

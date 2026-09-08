@@ -121,9 +121,8 @@ def make_classifier(name="logistic", seed=0):
     estimator exactly (`C=0.05, class_weight="balanced", max_iter=3000`), so the
     default path is unchanged.
 
-    Only `logistic` can be BAKED — `emit_znpr` writes one identity layer from
-    `coef_`/`intercept_`, which the non-linear forms do not have. `main()`
-    refuses `--bake-out` for them loudly rather than emitting a wrong head.
+    `logistic` exports through `emit_znpr`; `hgb` exports through `emit_zcth`.
+    The MLP forms have no serving format and cannot be baked.
     """
     if name == "logistic":
         return LogisticRegression(C=0.05, class_weight="balanced", max_iter=3000)
@@ -436,7 +435,179 @@ def emit_znpr(out_path, bake_bin, caller_width, feat_idx, mean, scale, coef,
     return out_path
 
 
+
+def fit_canonical_hgb(Z, y, fit, calibrate, weights, seed, hyperparameters):
+    """Fit one source-weighted estimator and its separate calibration leg."""
+    from sklearn.isotonic import IsotonicRegression
+    clf = make_classifier("hgb", seed).set_params(**hyperparameters)
+    sw = weights[fit] / weights[fit].mean()
+    clf.fit(Z[fit], y[fit], sample_weight=sw)
+    iso = IsotonicRegression(out_of_bounds="clip").fit(
+        clf.predict_proba(Z[calibrate])[:,1], y[calibrate], sample_weight=weights[calibrate])
+    return clf, iso
+
+
+def canonical_main(argv):
+    """Source-owned canonical fit; report the exact exported Rust composition."""
+    from pathlib import Path
+    import pandas as pd
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--canonical-manifest", required=True, type=Path)
+    ap.add_argument("--out-dir", required=True, type=Path)
+    ap.add_argument("--prepare-only", action="store_true")
+    a = ap.parse_args(argv)
+    def require(ok, message):
+        if not ok:
+            raise ValueError(message)
+    def pinned(spec):
+        require(set(spec) == {"path", "sha256"}, "invalid pinned input")
+        require(_sha256(spec["path"]) == spec["sha256"], "changed input: " + spec["path"])
+        return Path(spec["path"])
+    m = json.loads(a.canonical_manifest.read_text())
+    require(m["schema"] == "canonical-corruption-fit-v1", "canonical manifest schema")
+    require(m["feature_ids"] == list(range(372)) and m["formula_revision"] == 1
+            and m["root_form"] == "libm", "canonical feature contract")
+    require(not a.out_dir.exists(), "canonical output directory must be fresh")
+    ip = pinned(m["serving_inputs"]); audit_path = pinned(m["serving_audit"])
+    base = pinned(m["base_bake"]); extractor = pinned(m["extractor"])
+    parity_bin = pinned(m["parity_binary"])
+    inputs = json.loads(ip.read_text())
+    require(inputs["schema"] == "canonical-corruption-serving-inputs-v1", "serving input schema")
+    for path, digest in inputs["files_sha256"].items():
+        require(_sha256(path) == digest, "changed feature/source input: " + path)
+    require(m["pairs_tsv"] in inputs["files_sha256"], "unbound scoring pairs")
+    roles = m["origins"]
+    require(set(roles) == {"fit", "calibrate", "evaluate"}, "explicit three-role split required")
+    owner = {}
+    for role, origins in roles.items():
+        require(origins and len(origins) == len(set(origins)), "empty/duplicate origins")
+        for origin in origins:
+            require(origin not in owner, "origin appears in multiple roles")
+            owner[origin] = role
+    audit = {}
+    with audit_path.open() as f:
+        for line in f:
+            r = json.loads(line); key = r["human_score"]
+            require(key not in audit and key == int(key), "audit key")
+            audit[int(key)] = r
+    require(set(audit) == {r["index"] for r in inputs["records"]}, "audit coverage")
+    cols = [f"f{i}" for i in range(372)]
+    tables = {p: pd.read_parquet(p).set_index("row_id") for p in {r["source_table"] for r in inputs["records"]}}
+    require(all(t.index.is_unique for t in tables.values()), "ambiguous feature table keys")
+    rows, vectors, unique, families = [], [], {}, {}
+    for meta in inputs["records"]:
+        require(meta["label"] in (0, 1), "nonbinary corruption label")
+        origin = meta["origin"]; require(origin in owner, "undeclared origin")
+        role = owner[origin]
+        require((meta["role"] == "train") == (role != "evaluate"), "canonical corpus role mismatch")
+        family = meta["source_family"]
+        require(families.setdefault(family, role) == role, "source family crosses roles")
+        v = audit[meta["index"]]
+        require(v["reference"] == meta["reference"] and v["distorted"] == meta["distorted"], "audit path join")
+        require(not meta["label"] or not v["pixels_identical"], "positive identity label")
+        key = (origin, v["width"], v["height"], v["reference_pixels_sha256"], v["distorted_pixels_sha256"])
+        if key in unique:
+            require(rows[unique[key]]["label"] == meta["label"], "duplicate label conflict")
+            rows[unique[key]]["catalog_families"] = sorted(set(rows[unique[key]]["catalog_families"] + [meta["family"]]))
+            continue
+        unique[key] = len(rows)
+        row = dict(meta, fit_role=role, pixels_identical=v["pixels_identical"],
+                   width=v["width"], height=v["height"],
+                   reference_pixels_sha256=v["reference_pixels_sha256"],
+                   distorted_pixels_sha256=v["distorted_pixels_sha256"], catalog_families=[meta["family"]])
+        rows.append(row)
+        vectors.append(tables[meta["source_table"]].loc[meta["source_row_id"], cols].to_numpy(dtype=np.float32).astype(np.float64))
+    require(set(owner) == {r["origin"] for r in rows}, "declared origin coverage")
+    X = np.stack(vectors); y = np.array([r["label"] for r in rows], dtype=np.int64)
+    require(np.isfinite(X).all() and set(y) == {0, 1}, "finite binary training data")
+    masks = {role: np.array([r["fit_role"] == role for r in rows]) for role in roles}
+    for role, mask in masks.items():
+        require(set(y[mask]) == {0, 1}, "both classes required in " + role)
+    admission = None
+    if not a.prepare_only:
+        admission = json.loads(pinned(m["admission"]).read_text())
+        require(admission["schema"] == "canonical-corruption-content-admission-v1"
+                and admission["complete"] is True and not admission["unresolved"]
+                and set(admission["origins"]) == set(roles["fit"] + roles["calibrate"]), "content admission incomplete")
+        require(admission["coverage"] == {"cid22":49,"aic3":10,"aic4":5,"sdr25":5,
+                    "csiq":30,"live":29,"upiq-sdr":54,"upiq-hdr":30}
+                and bool(admission["files_sha256"]), "protected reference coverage incomplete")
+        for path, digest in admission["files_sha256"].items():
+            require(_sha256(path) == digest, "changed admission evidence: " + path)
+    a.out_dir.mkdir(parents=True)
+    np.savez_compressed(a.out_dir/"prepared.npz", X=X, y=y, **masks)
+    (a.out_dir/"rows.json").write_text(json.dumps(rows, indent=2)+"\n")
+    views = pd.DataFrame(X.astype(np.float32), columns=cols)
+    for name in ["origin", "width", "height", "reference_pixels_sha256", "distorted_pixels_sha256"]:
+        views[name] = [r[name] for r in rows]
+    views["human_score"] = y.astype(np.float32)
+    views["row_id"] = [r["index"] for r in rows]
+    contracts = {}
+    for role, mask in masks.items():
+        filename = role + ".parquet"
+        views[mask].to_parquet(a.out_dir/filename, index=False)
+        contracts[filename] = dict(duplicate_key_columns=["origin","width","height","reference_pixels_sha256","distorted_pixels_sha256"])
+    (a.out_dir/"contracts.json").write_text(json.dumps(contracts, indent=2)+"\n")
+    subprocess.run([sys.executable,str(Path(__file__).with_name("validate_parquet.py")),
+                    *[str(a.out_dir/(r+".parquet")) for r in masks],"--kind","train",
+                    "--contracts",str(a.out_dir/"contracts.json")],check=True)
+    preparation = dict(schema="canonical-corruption-preparation-v1", raw_rows=len(inputs["records"]),
+                       unique_rows=len(rows), removed_duplicates=len(inputs["records"])-len(rows),
+                       roles={k:dict(rows=int(v.sum()), positives=int(y[v].sum()), origins=roles[k]) for k,v in masks.items()},
+                       manifest_sha256=_sha256(a.canonical_manifest), admitted=admission is not None, model_qualified=False)
+    (a.out_dir/"PREPARATION.json").write_text(json.dumps(preparation, indent=2)+"\n")
+    if a.prepare_only:
+        print(json.dumps(preparation, indent=2)); return
+    # Fixed source weights: each origin has equal total mass within its role.
+    weights = np.empty(len(rows))
+    for origin in owner:
+        idx = np.array([r["origin"] == origin for r in rows])
+        weights[idx] = 1.0 / idx.sum()
+    fit, cal = masks["fit"], masks["calibrate"]
+    scaler = StandardScaler().fit(X[fit], sample_weight=weights[fit])
+    Z = np.clip(scaler.transform(X), -8, 8)
+    require(m["hyperparameters"] == {"early_stopping":False,"max_iter":100,"max_leaf_nodes":31}, "unregistered HGB settings")
+    require(m["deadband"] == 0.9 and m["seeds"] == [4101,4103,4107], "unregistered threshold/seeds")
+    for seed in m["seeds"]:
+        run = a.out_dir/f"seed-{seed}"; run.mkdir()
+        # Rescale source weights to unit mean so HGB's leaf regularization has
+        # its ordinary sample-mass scale; class balancing stays in the factory.
+        clf, iso = fit_canonical_hgb(Z, y, fit, cal, weights, seed, m["hyperparameters"])
+        head = run/"head.zcth"
+        provenance = dict(manifest_sha256=_sha256(a.canonical_manifest), seed=seed,
+                          sklearn=_sklearn_version(), trainer_sha256=_sha256(__file__),
+                          feature_ids=list(range(372)), formula_revision=1, root_form="libm")
+        emit_zcth(str(head),372,list(range(372)),scaler.mean_,scaler.scale_,8.0,clf,iso,m["deadband"],provenance)
+        # Export and evaluate THIS fitted estimator, never a CV ensemble.
+        prob = iso.predict(clf.predict_proba(Z)[:,1])
+        np.savez_compressed(run/"parity.npz", test_X=X, test_raw=clf.decision_function(Z), test_p=prob)
+        with (run/"parity.log").open("w") as log:
+            subprocess.run([str(parity_bin),"--head",str(head),"--parity",str(run/"parity.npz"),"--set","test"],
+                           stdout=log,stderr=subprocess.STDOUT,check=True)
+        command = [str(extractor),"--corpus","pairs","--path",m["pairs_tsv"],"--out",str(run/"features.csv"),
+                   "--audit-jsonl",str(run/"audit.jsonl"),"--audit-bake",str(base),"--audit-corruption-head",str(head)]
+        env = dict(os.environ, ZENSIM_FORMULA_REV="1", ZENSIM_ROOT_FORM="libm", RAYON_NUM_THREADS="8")
+        with (run/"surface.log").open("w") as log:
+            subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+        subprocess.run([sys.executable,str(Path(__file__).with_name("corruption_gate_eval.py")),"--audit-jsonl",str(run/"audit.jsonl"),
+                        "--inputs-json",str(ip),"--out-json",str(run/"report.json"),"--model-context","canonical-fit"],check=True)
+        summary = json.loads((run/"report.json").read_text())["splits"]["validate"]
+        require(set(summary["by_codec"]) == {"jxl", "avif"}, "native codec screen coverage")
+        gates = dict(
+            zero_native_codec_lowering=all(v["honest_score_lowered"]["count"] == 0 for v in summary["by_codec"].values()),
+            honest_lowering_le_1pct=summary["honest_score_lowered"]["rate"] <= .01,
+            detection_ge_95pct=summary["detection"]["rate"] >= .95,
+            real_bug_detection_ge_90pct=summary["by_family"]["real_bug"]["detection"]["rate"] >= .90,
+            below_q20_ge_99pct=summary["composed_below_q20"]["rate"] >= .99)
+        (run/"SCREEN.json").write_text(json.dumps(dict(scope="registered companion development screen only",
+                    gates=gates, selection_pass=all(gates.values()), model_qualified=False),indent=2)+"\n")
+        (run/"COMPLETE.json").write_text(json.dumps(dict(head_sha256=_sha256(head), model_qualified=False,
+                    source="exact exported single fit through Rust pixel/cache audit", command=command),indent=2)+"\n")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--canonical-manifest":
+        return canonical_main(sys.argv[1:])
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--negrich", default=NEGRICH)

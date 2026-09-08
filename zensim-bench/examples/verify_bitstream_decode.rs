@@ -71,6 +71,10 @@ fn main() {
 }
 
 #[cfg(feature = "verify-decode")]
+#[path = "shared/zen_decode.rs"]
+mod zen_decode;
+
+#[cfg(feature = "verify-decode")]
 mod real {
     use std::borrow::Cow;
     use std::collections::BTreeMap;
@@ -101,10 +105,16 @@ mod real {
         let mut it = std::env::args().skip(1);
         while let Some(arg) = it.next() {
             match arg.as_str() {
-                "--images-root" => a.images_root = PathBuf::from(it.next().expect("--images-root <path>")),
+                "--images-root" => {
+                    a.images_root = PathBuf::from(it.next().expect("--images-root <path>"))
+                }
                 "--tiles" => a.tiles = it.next().expect("--tiles <n>").parse().expect("int"),
                 "--max-per-codec" => {
-                    a.max_per_codec = it.next().expect("--max-per-codec <n>").parse().expect("int")
+                    a.max_per_codec = it
+                        .next()
+                        .expect("--max-per-codec <n>")
+                        .parse()
+                        .expect("int")
                 }
                 "--codec" => a.codec_filter = Some(it.next().expect("--codec <substr>")),
                 "-h" | "--help" => {
@@ -172,9 +182,21 @@ mod real {
         eprintln!("  max/codec   : {}", args.max_per_codec);
         eprintln!(
             "  codecs built: jpeg{}{}{}",
-            if cfg!(feature = "verify-avif") { " avif" } else { "" },
-            if cfg!(feature = "verify-jxl") { " jxl" } else { "" },
-            if cfg!(feature = "verify-webp") { " webp" } else { "" },
+            if cfg!(feature = "verify-avif") {
+                " avif"
+            } else {
+                ""
+            },
+            if cfg!(feature = "verify-jxl") {
+                " jxl"
+            } else {
+                ""
+            },
+            if cfg!(feature = "verify-webp") {
+                " webp"
+            } else {
+                ""
+            },
         );
 
         let mut tiles: Vec<PathBuf> = match std::fs::read_dir(&args.images_root) {
@@ -199,7 +221,10 @@ mod real {
 
         for tile in &tiles {
             let codec_dirs = match std::fs::read_dir(tile) {
-                Ok(rd) => rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()),
+                Ok(rd) => rd
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir()),
                 Err(_) => continue,
             };
             for codec_dir in codec_dirs {
@@ -207,10 +232,10 @@ mod real {
                     .file_name()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                if let Some(f) = &args.codec_filter {
-                    if !codec.contains(f.as_str()) {
-                        continue;
-                    }
+                if let Some(f) = &args.codec_filter
+                    && !codec.contains(f.as_str())
+                {
+                    continue;
                 }
                 let entries = match std::fs::read_dir(&codec_dir) {
                     Ok(rd) => rd,
@@ -300,7 +325,9 @@ mod real {
                 let bytes = match std::fs::read(src) {
                     Ok(b) => b,
                     Err(e) => {
-                        errs.lock().unwrap().push(format!("{}: read {e}", src.display()));
+                        errs.lock()
+                            .unwrap()
+                            .push(format!("{}: read {e}", src.display()));
                         return;
                     }
                 };
@@ -330,7 +357,7 @@ mod real {
                 match write_png_rgb8(&dst, &rgb, w, h) {
                     Ok(()) => {
                         let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-                        if n % 2000 == 0 {
+                        if n.is_multiple_of(2000) {
                             eprintln!("  decoded {n}/{}", inputs.len());
                         }
                     }
@@ -454,6 +481,11 @@ mod real {
             "avif" => decode_avif(bytes),
             "jxl" => decode_jxl(bytes),
             "webp" => decode_webp(bytes),
+            "bmp" => wrap(
+                super::zen_decode::decode_rgb8_bytes(bytes, "BMP decode-list input")
+                    .map(|im| (im.pixels, im.width, im.height))
+                    .map_err(|e| e.to_string()),
+            ),
             _ => Outcome::NotBuilt,
         }
     }
@@ -554,7 +586,8 @@ mod real {
         let stride = slice.stride();
         let data = slice.as_strided_bytes();
 
-        if desc.layout_compatible(PixelDescriptor::RGB8) || desc.layout_compatible(PixelDescriptor::RGB8_SRGB)
+        if desc.layout_compatible(PixelDescriptor::RGB8)
+            || desc.layout_compatible(PixelDescriptor::RGB8_SRGB)
         {
             let bpr = w * 3;
             let mut out = Vec::with_capacity(bpr * h);
@@ -571,7 +604,7 @@ mod real {
             let mut out = Vec::with_capacity(bpr_out * h);
             for row in 0..h {
                 let start = row * stride;
-                for px in data[start..start + bpr_in].chunks_exact(4) {
+                for px in data[start..start + bpr_in].as_chunks::<4>().0 {
                     out.extend_from_slice(&px[..3]);
                 }
             }
@@ -589,15 +622,8 @@ mod real {
             let mut out = vec![0u8; dst_stride * h];
             let mut conv = RowConverter::new(desc, PixelDescriptor::RGB8_SRGB)
                 .map_err(|e| format!("cannot plan {desc:?} -> RGB8_SRGB: {e}"))?;
-            conv.convert_rows(
-                data,
-                stride,
-                &mut out,
-                dst_stride,
-                w as u32,
-                h as u32,
-            )
-            .map_err(|e| format!("row conversion {desc:?} -> RGB8_SRGB: {e}"))?;
+            conv.convert_rows(data, stride, &mut out, dst_stride, w as u32, h as u32)
+                .map_err(|e| format!("row conversion {desc:?} -> RGB8_SRGB: {e}"))?;
             Ok(out)
         }
     }
@@ -654,7 +680,15 @@ mod real {
         };
         println!(
             "{:<24} {:>6} {:>6} {:>6} {:>5} {:>5} {:>5}  {:.1}% exact of {} compared",
-            "TOTAL", tot.n, tot.exact, tot.diff, tot.dim_mismatch, tot.decode_err, tot.not_built, pct, checked
+            "TOTAL",
+            tot.n,
+            tot.exact,
+            tot.diff,
+            tot.dim_mismatch,
+            tot.decode_err,
+            tot.not_built,
+            pct,
+            checked
         );
         println!("=============================================================");
         println!(

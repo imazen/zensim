@@ -4,7 +4,20 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest September 8 continuation: [canonical corruption serving screen](benchmarks/canonical_corruption_serving_2026-09-08.md)
+Latest September 8 continuation: [canonical refit preparation](benchmarks/canonical_corruption_refit_2026-09-08.md)
+adds native content admission and a trainer mode that exports and evaluates the
+same single fit. All 12 training origins have zero strict flags against 182 SDR
+holdout reference entries; four looser matches were reviewed as distinct content.
+The source/pixel-deduplicated fit / calibration / evaluation views contain
+5,504 / 2,709 / 5,679 rows and pass explicit full-key Parquet checks. An invented
+800-row numeric fixture has exact weighted-HGB export parity in Rust. **No
+canonical image-data fit yet:** 30 UPIQ HDR EXR references remain unaudited. The
+existing EXR owners use `image::open`, contrary to the current native-only rule;
+a limited reference-fingerprinting exception was asked asynchronously and is
+pending. Do not infer approval from elapsed time. If still pending, continue
+independent spatial-allocation work rather than rerunning the same SDR audit.
+
+Previous September 8 continuation: [canonical corruption serving screen](benchmarks/canonical_corruption_serving_2026-09-08.md)
 is complete on all 15,060 canonical/native rows, with exact pixel, cached and
 stored-f32 feature/score parity. New `BakeScorer::score_features_with_identity`
 carries proven pixel identity; raw zero features remain insufficient evidence.

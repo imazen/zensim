@@ -34,25 +34,15 @@
 
 use image::DynamicImage;
 
+mod dhash_bits;
+
 /// dHash-64 of a decoded image: resize to 9×8 luma (Lanczos3), one bit
 /// per horizontally adjacent pair, set if `left > right`. Robust to
 /// resampling and mild recompression; blind to crops.
 pub fn dhash_64(img: &DynamicImage) -> u64 {
     let small =
         image::imageops::resize(&img.to_luma8(), 9, 8, image::imageops::FilterType::Lanczos3);
-    let mut hash = 0u64;
-    let mut bit = 0u32;
-    for y in 0..8 {
-        for x in 0..8 {
-            let left = small.get_pixel(x, y).0[0];
-            let right = small.get_pixel(x + 1, y).0[0];
-            if left > right {
-                hash |= 1u64 << bit;
-            }
-            bit += 1;
-        }
-    }
-    hash
+    dhash_bits::from_luma9x8(small.as_raw().as_slice().try_into().expect("9x8 luma"))
 }
 
 /// Hamming distance between two 64-bit hashes.

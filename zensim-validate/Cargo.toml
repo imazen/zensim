@@ -70,6 +70,11 @@ sha2 = "0.11.0"
 # npz (zip-of-npy) reading for `bake_dial_refit fit-lasso` — DEFLATE inflate
 # only, via our own pure-Rust DEFLATE crate (no external zip/npy deps).
 zenflate = "0.4.0"
+# Native content-admission mode; the legacy audit remains available for replay.
+zenpng = { workspace = true }
+zenresize = { workspace = true }
+zenpixels-convert = { version = ">=0.2.16, <0.4.0", default-features = false }
+enough = { workspace = true }
 
 [dev-dependencies]
 zenbench = { workspace = true }

@@ -24,7 +24,7 @@ Checks (any FAIL → exit 1, loud):
                                                         source_id obeys mod10
   C10 duplicate-row spot check (first feature col + target, sampled)
 """
-import argparse, hashlib, os, re, sys
+import argparse, hashlib, math, os, re, sys
 import pyarrow.parquet as pq
 import numpy as np
 
@@ -119,7 +119,27 @@ def validate(path, kind="train", expect_rows=None, expect_sha=None,
         got = h.hexdigest()
         check(got == expect_sha, "C8", f"sha256 {got[:12]}… == manifest {expect_sha[:12]}…")
     dup_rate = dup_hits / max(1, len(dup_keys) + dup_hits)
-    check(dup_rate < allow_dup_rate, "C10",
+    duplicate_columns = contract.get("duplicate_key_columns") if contract else None
+    if duplicate_columns is not None:
+        check(isinstance(duplicate_columns, list) and bool(duplicate_columns)
+              and len(set(duplicate_columns)) == len(duplicate_columns)
+              and all(c in names for c in duplicate_columns), "C10", "declared duplicate-key columns present and unique")
+        if not isinstance(duplicate_columns, list) or not duplicate_columns or any(c not in names for c in duplicate_columns):
+            return
+        keys, repeated, missing = set(), 0, 0
+        for batch in pf.iter_batches(columns=duplicate_columns):
+            for row in batch.to_pylist():
+                key = tuple(row[c] for c in duplicate_columns)
+                if any(v is None or v == "" or (isinstance(v, float) and not math.isfinite(v)) for v in key):
+                    missing += 1
+                if key in keys:
+                    repeated += 1
+                keys.add(key)
+        check(missing == 0 and repeated == 0, "C10",
+              f"full declared-key check: {len(keys)} unique, {repeated} duplicates, {missing} missing; "
+              f"legacy (f0,target) diagnostic {dup_rate*100:.2f}% is not the declared record identity")
+    else:
+        check(dup_rate < allow_dup_rate, "C10",
           f"duplicate (f0,target) sampled rate: {dup_rate*100:.2f}% ({dup_hits} hits) — "
           f">1% indicates systematic dup rows (e.g. knob-no-op sweep cells; 2026-07-02: "
           f"caught 22.2% dups in bigcodec from modes_full no-op knobs)")
