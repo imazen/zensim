@@ -32,6 +32,62 @@ structural script checks passed; they cannot tell us whether a script uses the
 right science or duplicates another implementation. Detailed candidate inventories are local
 at `~/tmp/zensim-science-audit-2026-09-07/`.
 
+### Completion checklist — September 7 continuation
+
+The user has requested **the full remaining list**, followed by evidence that
+the cleaned path can still train competitive models. This checklist tracks the
+operative September 7 plan, not superseded status statements in the historical
+appendix. Conditional scientific removals must earn their evidence; a failed
+ablation closes its hypothesis and preserves the useful component.
+
+- [ ] Rust surface for dynamically loaded candidate bakes; shared validated
+  head/spline decoding; reusable prediction state; pixel/cached-feature parity;
+  complete corruption composition through the same API used by evaluation.
+- [ ] Migrate candidate-evaluation callers and remove alternate runtime dispatch.
+- [ ] Explicit validated evaluation stages and artifact-identity reuse; harvest
+  invokes the owner once; qualification distinguishes failure from missing data.
+- [ ] Complete transform-screen option migration and remaining spline-writer
+  consolidation with historical recipe and boundary evidence.
+- [ ] Enforce trainer capabilities before CPU/GPU work; enforce feature IDs and
+  semantic revisions at table admission; preserve honest historical replay.
+- [ ] Resolve C/CHdr activity semantics, declared-ID conversion and legacy plan
+  derivation retirement, with the serving census and feature-build matrix.
+- [ ] Consolidate repeated feature/era metadata; retire unused positional
+  training surfaces and the stale JS example after caller checks.
+- [ ] Slim current instructions; consolidate workflow docs; move completed root
+  documents and retire obsolete launch tools while retaining their evidence.
+- [ ] Close the bounded compute/implementation ablation review using existing
+  results and any necessary discriminating measurements; run the all-codec
+  floor-coverage control, including rav1e, without assuming qualification.
+- [ ] Reproduce competitive training from recorded recipes on the cleaned path;
+  evaluate the emitted bakes through the Rust API and report held-out quality,
+  identity/floors, serving cost and actual target-loop behavior separately.
+- [ ] Run required checks, resolve regressions, push and verify every increment,
+  and leave a complete execution/evidence record.
+
+**API delta registered before implementation:** a reusable `BakeScorer<'a>`
+surface in `zensim`, borrowing a parsed `zenpredict::Model` owned by the caller.
+Construction validates metadata and feature declarations; cached-feature and
+image-pair methods use the same inference dispatch. The image path uses the
+existing extraction planner and pixel validation. Predictor/gather scratch is
+reused, with no leaked bake bytes or mutable global loader. Model-author
+configuration can select score disposition and attach Rust corruption heads;
+the final composed score is the value returned and evaluated. Existing named
+profiles and their signatures remain compatible. Its exact exported methods
+will be enumerated with the API snapshot and changelog in the implementation
+increment. New public items are limited to concrete evaluator/serving callers.
+
+**Training validation design:** reproduce the latest recorded competitive
+`372 S228 H128` / best-of-all `A_plain` recipe with its three recorded seeds
+(4004/4005/4006), keeping data, order, packing and instrument identities fixed.
+The recorded reference means are approximately CID22 0.8891, KonJND 0.4997,
+composite 0.8729. Before launching, pin the exact baseline artifacts and compare
+current API scores on the same rows; require before/after prediction or metric
+parity for unchanged recipes. Competitive rank is distinct from product
+qualification: these controls have known identity and codec-floor failures.
+Test the constrained challenger and the registered floor-data control as
+separate claims; do not silently waive failed target-dial gates.
+
 ### Execution record — first batch, September 7
 
 **This batch executes parts of §§1–3. The API migration in §1a and the
