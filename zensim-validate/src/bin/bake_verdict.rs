@@ -168,7 +168,7 @@ fn ds_auc(predicted: &[f64], human: &[f64], diff_threshold: f64) -> f64 {
 // Bake scoring helpers — DEDUP-M (2026-05-26):
 // `PerSampleAlphaHeadDispatch`, `HybridHeadDispatch`, `extract_*` helpers,
 // and `score_row` were factored into `zensim_validate::bake_runtime`.
-// Six bins (this one + qsweep_eval + preview_stats_demo + ensemble_score_rows
+// Evaluation bins (this one + qsweep_eval + ensemble_score_rows
 // + score_pair_with_bake + predict_features_with_bake) used to carry
 // ~90-95 % shared local copies. The factored runtime is bit-exact (f32 ±1e-6
 // on representative parquet rows; see benchmarks/dedup_M_score_row_evidence/).

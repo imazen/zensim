@@ -2,7 +2,7 @@
 //!
 //! Until 2026-05-26 every binary that scored rows through a zenpredict
 //! `Predictor` rolled its own `score_row` + extract-from-metadata helpers
-//! (bake_verdict / qsweep_eval / preview_stats_demo / ensemble_score_rows /
+//! (bake_verdict / qsweep_eval / ensemble_score_rows /
 //! score_pair_with_bake / predict_features_with_bake — six bins, ~90-95 %
 //! shared logic). The canonical `zensim::metric::score_features_with_profile`
 //! consumes a compiled-in `ZensimProfile`, NOT user-provided bake bytes, so
@@ -415,7 +415,7 @@ impl CallerGather {
 ///
 /// Per DEDUP-M, this is the single canonical implementation of the
 /// per-row bake dispatch shared across `bake_verdict` / `qsweep_eval` /
-/// `preview_stats_demo` / `ensemble_score_rows` / `score_pair_with_bake` /
+/// `ensemble_score_rows` / `score_pair_with_bake` /
 /// `predict_features_with_bake`.
 ///
 /// Caller pre-allocates `f32_features` to the bake's `n_inputs` so a

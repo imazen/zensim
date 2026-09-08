@@ -6,6 +6,12 @@ D is available explicitly; the September 5 change replaced D’s calibration,
 not the `codec_target()` alias. The implementation in
 [`profile.rs`](../zensim/src/profile.rs) determines routing and embedded bytes.
 
+**User ruling, later 2026-09-07:** no consumers have calibrated to B, C or D;
+all may be improved/replaced. The mapping below records today's implementation,
+not a frozen score contract. New models must be fully executable and servable
+in Rust through a zensim surface API, and evaluation must use that API,
+including all heads, corruption gates, splines and final composition.
+
 ## What the user controls
 
 A user chooses a target such as **80**. The encoder chooses its own quality
@@ -99,11 +105,11 @@ achieved quality or request the codec’s strict failure policy when needed.
 The `zensim-target` helper instead reports symmetric target tolerance and a
 `converged` result. Do not silently equate those success conditions in an eval.
 
-**Current CLI discrepancy:** `zensim-target`'s library default resolves to B,
-but its command-line parser still defaults to the experimental `tuner-v4`.
-Pass `--profile codec-target` explicitly to target the common profile from that
-CLI. See its [checked usage](../zensim-target/README.md). The shared-dial
-requirement is not evidence that every consumer already follows it.
+**CLI default aligned during the September 7 cleanup:** `zensim-target`'s
+library, CLI default and `--profile default` all use `codec_target()`.
+Use `--profile tuner-v4` to reproduce the previous CLI default. See its
+[checked usage](../zensim-target/README.md). This change does not establish
+that every sibling consumer uses the same model.
 
 The product loop is: predict an initial setting → encode/reconstruct → score →
 accept or correct. Reuse source-side work where the actual scoring API supports
@@ -143,8 +149,9 @@ No new common-dial winner is declared by this guide.
 A public profile name is not a frozen model hash. Pin the bake, extractor
 revision, decoder versions, calibration and target-predictor lineage for a
 reproducible experiment. A dial calibration change may require rescoring data
-and retraining/recalibrating starting-quality predictors even when rankings
-are unchanged.
+and retraining/recalibrating experimental starting-quality predictors even
+when rankings are unchanged. This is an experiment-reproducibility concern;
+the user confirms there is no deployed consumer calibration to B/C/D to preserve.
 
 - **May 2026:** Balanced/Compression/Tuner experiments and provisional JND/JOD
   anchors; those variant names and integration examples are historical.

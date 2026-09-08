@@ -282,8 +282,8 @@ cargo run --release --manifest-path zensim-target/Cargo.toml --bin zensim-target
     input.png --target 70 --codec zenjpeg --profile codec-target --output out.jpg
 ```
 
-The explicit profile matters: the library defaults to B, while the CLI still
-defaults to historical `tuner-v4`. JPEG, WebP, AVIF and PNG are enabled by
+The CLI and library default to `codec-target` (currently B). Use
+`--profile tuner-v4` to reproduce the earlier CLI default. JPEG, WebP, AVIF and PNG are enabled by
 default; JXL encode/decode requires `--features zenjxl` before `--`.
 The historical May 18 demo matrix at
 [`benchmarks/zensim_target_demo_2026-05-18.md`](https://github.com/imazen/zensim/blob/main/benchmarks/zensim_target_demo_2026-05-18.md):

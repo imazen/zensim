@@ -14,6 +14,13 @@ present and pass. Use [`MODEL_SELECTION_SCORECARD.md`](MODEL_SELECTION_SCORECARD
 for the complete product exam. The September board's operative addressability
 block is `dial_ladder`; `dial.curves` still describes its canonical grid.
 
+**Later user ruling, 2026-09-07:** new-model evaluation must score through a
+zensim surface API, with the full model executable and servable in Rust,
+including all heads and splines. The current separate `bake_runtime` adapter
+shares arithmetic but is not yet that complete surface path. The integration
+is tracked in [cleanup plan §1a](PLAN_CRUFT_PURGE_2026-09-06.md#1a-make-the-zensim-surface-the-model-evaluation-path);
+“Rust-only statistics” above is not proof that a new model meets this requirement.
+
 ## Usage
 
 ```sh

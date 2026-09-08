@@ -6,6 +6,12 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 
 ## Where to look first
 
+New models must execute and serve entirely in Rust through a zensim surface
+API, and evaluation must use that API (including heads and splines). Python
+prototypes and independent references remain useful. See the
+[authorized cleanup plan](../../docs/PLAN_CRUFT_PURGE_2026-09-06.md) for current
+owners, retired July pipelines and their frozen source revision.
+
 | If you want to… | Use |
 |---|---|
 | Compute IW-SSIM on the safesyn corpus | [`compute_iwssim_on_safesyn.py`](compute_iwssim_on_safesyn.py) |
@@ -37,7 +43,7 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 | Script | Role |
 |---|---|
 | `v0_20_feature_transform_greedy_screen.py` | For each feature column, try every `FeatureTransform` and report the one with maximum Pearson lift over identity. Output: TSV with `feat_idx, best_transform, params_csv, lift, ...`. Run against any per-pair features CSV. |
-| `v0_20_screen_to_trainer_args.py` | Convert the screen TSV into `--feature-transform TOKEN:IDX[:PARAMS]` flag strings for the trainer. Used to be required; **now redundant** — the trainer has `--auto-transforms <SCREEN.tsv>` (commit `d32ca890`) which loads the TSV directly. |
+| `v0_20_screen_to_trainer_args.py` | Convert the screen TSV into `--feature-transform TOKEN:IDX[:PARAMS]` flags. The Rust trainer loads the TSV with `--auto-transforms`, but does not yet expose this helper's top-N `--max-features` cap. Keep it until that behavior and callers migrate; the earlier claim of complete redundancy was premature. |
 | `v0_20_parse_reeval_logs.py` | Parse `dataset_metric_baseline` per-corpus eval logs + collate full Mohammadi panel rows into a consolidated comparison markdown. |
 | `v0_20_extract_statistical_panels.py` | Same as parse_reeval_logs but reads training-time validation logs + emits the full panel structure. |
 | `v0_20_low_n_band_analysis.py` | For (corpus, band) cells with n < 100, compute the empirical SROCC ceiling and rank bakes by mean SROCC. |
@@ -81,11 +87,20 @@ ZNPR v3 JSON pipeline, and analysis. All scripts assume the
 | `make_v02_v18_candlestick.py` | The V_2 → V_18 candlestick chart used in commit / handoff narratives. |
 | ~~`generate_v16_chunks.py` / `launch_v16_sweep.sh`~~ | **Deleted 2026-07-15.** Hand-rolled chunk splitters — the thing CLAUDE.md's fleet rule forbids outright. Superseded by the zenfleet job system (`zenmetrics/scripts/jobsys/`); never produced output; marked "reference only" here for 10 weeks, which is the queued-for-removal anti-pattern rather than a reprieve. In git history if needed. |
 
-### Training (Python trainer — legacy)
+### Training and retired experiments
 
 | Script | Role |
 |---|---|
-| the MLP trainer | `zensim-validate/src/bin/zensim_mlp_train` (Rust) — the canonical and only trainer. The Python `train_v_next_mlp.py` was deleted in 34f796f4; this row described it as merely "largely retired" for weeks afterwards. |
+| the supported MLP trainer | `zensim-validate/src/bin/zensim_mlp_train` (Rust). Python prototypes may invent new recipes; admitting a model requires the full Rust serving/evaluation path described above. The older `train_v_next_mlp.py` was deleted in `34f796f4`. |
+
+On September 7 the obsolete July blend and negative/diverse training families
+were retired along with their private report path. Their source, recipes and
+instrument definitions remain at [revision `45e1ec9a`](https://github.com/imazen/zensim/tree/45e1ec9a95f0cbbb58decef46155aa46d6d1b8b6/scripts/v_next).
+This is archival retirement, not a claim of same-recipe training parity with
+Rust. Stored results and bake inputs remain intact. `bandwise_dashboard.py`
+now forwards to `gauntlet.py`; its old NPZ/Matplotlib mode is retired. The board
+reads recorded composites and leaves absent values unmeasured. Four historical
+spline writers remain pending recipe and runtime-boundary comparisons.
 
 ### Planning notes
 

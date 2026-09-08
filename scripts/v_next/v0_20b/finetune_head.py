@@ -7,7 +7,9 @@ head, trains on labeled corpora (KADID + TID + CID22-train + KonJND)
 using RankNet-style pairwise loss to align the output scale with MOS.
 
 Output: full V_20b bake-ready npz with all of (scaler, encoder, head)
-weights. Phase 4 (`bake_v3.py`) converts to ZNPR v3.
+weights. The historical JSON adapter is `bake_znpr_v3.py`; the incomplete
+`bake_v3.py` stub was retired. New candidates must run and be evaluated through
+the Rust zensim surface API before being introduced as models.
 
 ## Usage
 

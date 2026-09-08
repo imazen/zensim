@@ -18,6 +18,11 @@ Read [`docs/CODEC_TARGET_METRIC.md`](docs/CODEC_TARGET_METRIC.md) for current
 integration, profile/bake mapping, and real consumer behavior. **B remains the
 `codec_target()` / `latest_preview()` default; D is an explicit fast profile.**
 The September 5 change updated D’s own calibration, not the default alias.
+**Later user ruling, September 7:** no consumers have calibrated to B/C/D;
+all may be improved or replaced. Their present defaults are descriptive,
+not a requirement to preserve their scores. Every new model must execute and
+serve fully in Rust through a zensim surface API, and evaluation must use that
+API—including all heads, corruption gates and splines.
 
 ## What the latest evidence establishes
 
@@ -30,9 +35,9 @@ The September 5 change updated D’s own calibration, not the default alias.
 | Is revision 2 the shipped default? | No. Deterministic roots/power and bounded-feature changes have measured opt-in paths. Default behavior and the remaining predictor-transform exposure are separate decisions. | [D2/D5](docs/OPEN_DECISIONS_2026-09-06.md), [score arithmetic owner](benchmarks/score_owner_consolidation_2026-09-06.md) |
 
 The original Claude session’s last user question was whether we have something
-really good, because the accumulated choices were overwhelming. There is no
-subsequent ruling on the September 6 decision memo. Do not treat its
-recommendations as adopted changes or present another six-question wall.
+really good, because the accumulated choices were overwhelming. The later
+September 7 ruling above and cleanup authorization now govern this work;
+other September 6 memo proposals are not automatically adopted.
 
 ## One route through the work
 
@@ -40,8 +45,14 @@ recommendations as adopted changes or present another six-question wall.
 names the deletion batches, owner migrations, feature/recipe ablations and
 completion checks. Its §0 separates demonstrated parity from unresolved
 replacement claims. **Prefer Rust for canonical implementations; keep Python
-for fast invention and independent references.** Establish the intended method
-and actual implementation evidence before retiring a useful prototype.
+for fast invention and independent references.** New-model evaluation requires
+the Rust surface first. The listed cleanup changes are authorized. Check
+`../zenpapers` before fundamental research changes and prioritize feature
+ablations only when they remove compute or resolve a named scientific failure.
+The [first execution batch](docs/PLAN_CRUFT_PURGE_2026-09-06.md#execution-record--first-batch-september-7)
+retires 14 obsolete tools, consolidates the board, aligns the targeting CLI
+default and adds `just full-eval` / `just compare`. The Rust surface migration
+and evidence-dependent removals remain open.
 
 1. **Define the product claim and cheapest discriminating experiment.** Pin the
    baseline, one lever, data split, feature/decoder era, decision rule and cost
@@ -53,7 +64,9 @@ and actual implementation evidence before retiring a useful prototype.
    [`docs/FEATURE_SET_IDS.md`](docs/FEATURE_SET_IDS.md), and the relevant
    [`DATASET_HISTORY`](docs/DATASET_HISTORY.md) corrections. Use the canonical
    owners in `CLAUDE.md`; do not infer semantics from a 372/944 width.
-3. **Evaluate and qualify separately.** `bake_verdict` owns the statistics;
+3. **Evaluate through the zensim surface and qualify separately.**
+   `bake_verdict` owns the statistics; its separate scoring adapter still needs
+   the surface integration tracked in cleanup-plan §1a.
    `scripts/run_full_eval.sh` adds coherence. Neither alone runs the real
    codec RD/target exam. Grade G-ADDR on the named ladder and compatible identity
    and negative probes. Missing measurements stay missing. Follow

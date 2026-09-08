@@ -1,5 +1,14 @@
 # Model-selection scorecard — the five-gate closed-loop exam (2026-07-18)
 
+**Admission prerequisite — user ruling 2026-09-07:** a new model must execute
+and serve entirely in Rust through a zensim surface API. Evaluate through that
+API, including multi-head/corruption routing, splines and final composition.
+A Python-only prototype or a Rust evaluation-only scorer does not meet this
+requirement. Cached features require matching identity and the same zensim
+scoring surface, checked against the image API. This prerequisite is separate
+from—and cannot be replaced by—the quality gates below. B/C/D are replaceable;
+no consumer calibration to their current numeric outputs constrains replacement.
+
 **Why this exists.** Until 2026-07-18, zensim model selection was a two-panel offline exam
 (rank + dial). But zensim ships to make *codecs hit targets*, and that ability was never
 measured — and could not be: `DiffmapResult::score()` returned the legacy V0_2 score for every

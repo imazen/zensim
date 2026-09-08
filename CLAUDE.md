@@ -6,10 +6,14 @@ one user-facing score and current profile/bake mapping, read
 below may be superseded; check the later correction and the implementation
 before treating an old measurement or instruction as current.
 
-**User preference clarified 2026-09-07:** prefer Rust for canonical
-implementations; keep Python for fast invention and independent references.
-The ownership rules below do not ban new experimental methods. Canonical status
-does not prove correctness or authorize deleting an unverified replacement;
+**User ruling 2026-09-07:** new models must execute/serve entirely in Rust,
+be wired to a zensim surface API, and be evaluated through that API, including
+all heads, corruption gates and splines. Python remains useful for invention
+and independent references. No consumers have calibrated to B/C/D; all may be
+improved/replaced. Check `../zenpapers` and dated summaries before fundamental
+research changes. Feature ablation is low priority when it saves no compute.
+The user authorized the listed cruft removals/changes; retain their evidence
+and caller checks. Canonical status alone does not prove correctness;
 see [cleanup plan §0](docs/PLAN_CRUFT_PURGE_2026-09-06.md#0-establish-correctness-before-choosing-what-survives).
 
 Workspace with three crates: `zensim` (library), `zensim-regress` (regression testing binary), `zensim-validate` (validation binary).

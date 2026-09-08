@@ -1,12 +1,11 @@
 //! Parity gate for the canonical IQA statistical panel.
 //!
-//! This is the MANDATORY cross-check that proves the canonical Rust
-//! home (`zensim_validate::panel`) computes the same numbers as the
-//! Python reference BEFORE any of the ~14 scattered Python stat
-//! reimplementations are retired (see
-//! `benchmarks/dedup_VERIFIED_synthesis_2026-05-26.md` Tier-1 #2). It is
-//! the IQA-stats equivalent of the `assemble` subcommand's corruption
-//! tests: prove the canonical matches before deleting the copies.
+//! Checks the current panel's stated definitions on particular fixtures.
+//! Cross-language references reuse Rust's logistic-rescaled predictions;
+//! this does not independently verify the optimizer or establish equivalence
+//! with every historical Python instrument. PWRC/OR use shared Python helpers
+//! across reference columns. Preserve the reference as an independent check
+//! where it is independent; ownership is not proof of correctness.
 //!
 //! Two layers:
 //!
@@ -14,10 +13,8 @@
 //!    `compute_panel` on a fixed 12-point distance-shaped fixture must
 //!    reproduce values captured from the cross-checked Python reference
 //!    (`scripts/verify_panel_parity.py`) to <= 1e-9. The golden values
-//!    were themselves verified to agree with scipy `spearmanr` /
-//!    `kendalltau` / `pearsonr` to ~5e-11 (SROCC/PLCC/KROCC/PWRC), so
-//!    this test pins the canonical home against the textbook reference
-//!    without requiring scipy at test time.
+//!    pin the previously cross-checked implementation without requiring
+//!    SciPy at test time. PWRC is a Python SA-ST reference, not a SciPy stat.
 //!
 //! 2. `cross_language_parity_via_python` (`#[ignore]` — run explicitly,
 //!    requires Python + numpy + scipy + the built `panel` binary):

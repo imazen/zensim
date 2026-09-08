@@ -6,9 +6,9 @@ and scores the reconstruction; the result includes encoded bytes, achieved
 score, probe history, and whether it reached the requested tolerance.
 
 **Checked against source on 2026-09-07:** the library default uses
-`ZensimProfile::codec_target()`, currently B. The CLI still defaults to the
-historical `tuner-v4` profile. Pass **`--profile codec-target`** to use the same
-scorer as the library default. Selecting a default profile does not establish
+`ZensimProfile::codec_target()`, currently B. The CLI now uses the same alias;
+`--profile default` also follows it. Explicit **`--profile tuner-v4`** retains
+the historical scorer. Selecting a default profile does not establish
 that every image or target is reachable.
 
 The [codec-target integration guide](../docs/CODEC_TARGET_METRIC.md) owns the
@@ -45,11 +45,11 @@ is required.
 
 | CLI value | Meaning |
 |---|---|
-| `codec-target` (`codec_target`) | Current `ZensimProfile::codec_target()`; use this to match `TargetSpec::default()` |
+| `codec-target` (`codec_target`, `default`) | CLI default; current `ZensimProfile::codec_target()`, matching `TargetSpec::default()` |
 | `latest` (`latest-preview`, `latest_preview`) | Current `ZensimProfile::latest_preview()` |
 | `a` (`v0_3`, `v03`, `preview-v0.3`) | Deprecated A profile |
 | `v0_2` (`v02`, `preview-v0.2`) | Historical linear profile supplied by `zensim-experimental` |
-| `tuner`, `tuner-v2`, `tuner-v3`, `tuner-v4` | Historical experimental tuners; **CLI default is `tuner-v4`**; `default` also selects it |
+| `tuner`, `tuner-v2`, `tuner-v3`, `tuner-v4` | Historical experimental tuners; explicit selection required |
 | `balanced`, `balanced-v2`, `balanced-v3`, `compression`, `compression-v2`, `compression-v3`, `ensemble` | Historical experimental profiles for evaluation |
 
 Names are case-insensitive. The [parser](src/bin/zensim_target.rs) lists all

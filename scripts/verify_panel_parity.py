@@ -1,50 +1,20 @@
 #!/usr/bin/env python3
-"""Cross-check the canonical Rust `panel` subcommand against the Python
-IQA-stat reimplementations it is meant to retire.
+"""Cross-check selected canonical Rust panel statistics with Python references.
 
-This is the MANDATORY parity gate for the py->Rust IQA-stats
-consolidation (see `benchmarks/dedup_VERIFIED_synthesis_2026-05-26.md`
-Tier-1 #2). It proves the canonical Rust home
-(`zensim_validate::panel`) computes the same numbers as the Python
-reference BEFORE any py reimpl is deleted — the equivalent of the
-`assemble` subcommand's corruption tests.
+The 36-case gate compares current panel definitions at tolerance 1e-9.
+Both references consume Rust's --emit-rescaled predictions, so this verifies
+statistics conditional on that fit, NOT the logistic optimizer end to end.
+SciPy supplies rank/correlation checks; PWRC and OR share Python helpers across
+the two reference columns and are not two independent implementations.
 
-## What it compares
+Current PWRC is SA-ST AUC and OR thresholds logistic-rescaled residuals at
+1.96 times target sigma. The retired mohammadi_eval.py used different PWRC/OR
+instruments; a PASS here does not establish equivalence with that historical
+script or authorize arbitrary statistical substitutions. Global and per-sample
+Z-RMSE use different normalizers; the latter is not the global-panel gate.
 
-For a set of synthetic (predicted, target, sigma) vectors it runs:
-
-1. The Rust `panel --input <tsv> --json` binary (the canonical home).
-2. Two Python references:
-   a. `scipy_ref` — textbook scipy (`spearmanr`/`kendalltau`/`pearsonr`)
-      + a 4-param logistic fit via `scipy.optimize.least_squares`,
-      matching `scripts/mohammadi_eval.py`'s stat defs exactly.
-   b. `panel_def_ref` — a faithful pure-Python reimplementation of
-      panel.rs's EXACT definitions (same tie handling, same OR z-score
-      residual rule, same global-σ Z-RMSE). This is what a mirrored
-      `zen_stats.py` would contain.
-
-## The gate
-
-`SROCC`, `PLCC`, `KROCC`, `PWRC` are textbook-defined and MUST agree
-between Rust and BOTH Python references to <= 1e-9 (after the shared
-`.abs()` polarity convention). These are the verdict-gate stats.
-
-`OR` (outlier ratio) and `Z-RMSE` are NOT uniquely defined in the IQA
-literature — Mohammadi 2025 leaves the OR residual rule and the σ
-normalization to the implementer. panel.rs and `mohammadi_eval.py`
-made DIFFERENT but each-internally-consistent choices:
-  * OR: panel.rs uses a polarity-aligned z-score residual; scipy_ref
-    uses logistic-rescaled |residual| > 2σ. Different by construction.
-  * Z-RMSE: panel.rs's global `z_rmse` divides by the target's global
-    σ; mohammadi_eval.py's `z_rmse_per_sample` divides by the
-    per-stimulus σ. Different normalizers.
-So for OR and Z-RMSE we assert parity ONLY against `panel_def_ref`
-(panel.rs's own definition), and we REPORT (not gate) the divergence
-vs scipy_ref so the algorithmic difference is documented, not papered
-over.
-
-Exit 0 iff every GATED stat agrees to <= 1e-9. Prints the max
-divergence per stat for both references.
+The companion Rust tests pin small goldens in normal CI. Full cross-language
+integration tests are ignored by default and must be invoked explicitly.
 
 Usage:
   python3 scripts/verify_panel_parity.py [--bin path/to/panel] [--tol 1e-9]
@@ -65,7 +35,7 @@ from scipy.stats import kendalltau, pearsonr, spearmanr
 
 
 # ----------------------------------------------------------------------
-# scipy_ref — textbook definitions, matching mohammadi_eval.py
+# scipy_ref — SciPy correlations plus current panel PWRC/OR helpers
 # ----------------------------------------------------------------------
 
 def _logistic_4param(b, x):
@@ -432,10 +402,9 @@ def main():
     # exact definitions in Python and (using panel.rs's own rescaled
     # scores for the logistic-dependent stats) gates all six to <= tol.
     panel_def_gated = ["srocc", "plcc", "krocc", "pwrc", "or", "z_rmse"]
-    # scipy_ref is the cross-check against the textbook / mohammadi_eval
-    # definitions. SROCC/PLCC/KROCC/PWRC are gated (textbook-defined);
-    # OR is REPORTED-ONLY (panel.rs and scipy use different residual
-    # rules — documented, not a bug).
+    # SciPy cross-checks correlations. PWRC/OR reuse the same Python helpers
+    # as panel_def_ref. Preserve the existing gate set; OR is report-only
+    # in this column and gated against panel_def_ref.
     scipy_gated = ["srocc", "plcc", "krocc", "pwrc"]
 
     cases = [
@@ -478,7 +447,7 @@ def main():
           f"(seeds 1-3 x n in {{40,120,400}} x 4 shapes), tol={tol:g}")
     print()
     print("## vs panel_def_ref (faithful pure-Python mirror of panel.rs definitions)")
-    print("## (uses panel.rs's own --emit-rescaled scores for PLCC/Z-RMSE)")
+    print("## (uses Rust --emit-rescaled scores for all fit-dependent statistics)")
     print(f"{'stat':<10} {'max_div':>14} {'gate':>8}")
     fail = False
     for k in panel_def_gated:
@@ -488,7 +457,7 @@ def main():
         if not ok:
             fail = True
     print()
-    print("## vs scipy_ref (textbook scipy + scipy.stats, == mohammadi_eval.py defs)")
+    print("## vs scipy_ref (SciPy correlations; shared Python PWRC/OR helpers)")
     print(f"{'stat':<10} {'max_div':>14} {'gate':>8}")
     for k in ["srocc", "plcc", "krocc", "pwrc", "or"]:
         is_gated = k in scipy_gated
@@ -497,7 +466,7 @@ def main():
         flag = "" if ok else "  <-- FAIL"
         note = ""
         if k == "or":
-            note = "  (OR def differs: panel.rs z-score residual vs scipy logistic-residual)"
+            note = "  (same Python OR helper as panel_def_ref; report-only here)"
         print(f"{k:<10} {max_div_scipy[k]:>14.3e} {gate:>8}{flag}{note}")
         if is_gated and not ok:
             fail = True
@@ -508,17 +477,12 @@ def main():
               "and the Python reference have a real algorithmic difference "
               "(tie-handling / NaN-drop / formula) that must be reconciled.")
         return 1
-    print("RESULT: PASS — every GATED stat agrees to <= tol. The canonical "
-          "Rust `panel` is verified equivalent to the Python reference; the "
-          "py reimpls can be retired.")
+    print("RESULT: PASS — every GATED stat agrees to <= tol on these fixtures, "
+          "conditional on Rust's logistic-rescaled predictions.")
     print()
-    print("NOTE: OR (outlier ratio) and Z-RMSE are intentionally definition-"
-          "dependent. panel.rs's OR uses a polarity-aligned z-score residual; "
-          "mohammadi_eval.py's uses logistic-rescaled |residual| > 2σ. Both "
-          "are internally consistent Mohammadi-2025-compatible choices; the "
-          "panel_def_ref column proves panel.rs's OR + global Z-RMSE are "
-          "exactly reproducible. The scipy_ref OR divergence above is EXPECTED "
-          "and documents the definitional difference (not a bug).")
+    print("LIMIT: this gate does not independently validate the logistic fit, "
+          "all edge cases, or the retired historical instrument. Keep the "
+          "Python reference as a check on the actual Rust owner.")
     return 0
 
 

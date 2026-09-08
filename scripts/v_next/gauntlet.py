@@ -525,32 +525,6 @@ def _signed(rank, corpus):
     return abs(v) if corpus in SIGN_ABS_CORPORA else v
 
 
-def _composite(rank):
-    """FALLBACK ONLY (pre-2026-07-26 JSONs). The canonical composite is the Rust
-    `product_composite`, emitted as `composite` in the fulleval JSON; `load_fulleval`
-    READS that and only calls this when the field is absent, so there is one source
-    of truth (stats review Rec-7). Goal-aware ranking scalar (reuses blend_lib.composite
-    — the owner — when importable, else a transparent documented fallback). rank:
-    {corpus: {srocc,...}} with srocc already
-    polarity-corrected (abs for JND corpora), per the fulleval schema."""
-    def g(c):
-        v = _signed(rank, c)
-        return float(v) if v is not None and np.isfinite(v) else 0.0
-    try:
-        import blend_lib as B
-        res = {}
-        for c in B.VAL_CORPORA:
-            v = g(c)
-            res[c] = {"srocc": v, "srocc_abs": v}
-        score, reject = B.composite(res)
-        return round(float(score), 4), bool(reject)
-    except Exception:
-        # documented fallback (same weights as blend_lib.composite)
-        score = g("cid22") + 0.30 * g("nonphoto") + 0.20 * g("konjnd") + 0.10 * g("aic3") + 0.05 * g("aic4")
-        reject = (g("cid22") < 0.84) or (g("nonphoto") < 0.80)
-        return round(score, 4), bool(reject)
-
-
 def load_annotations_registry():
     """The committed invalidation/annotation registry (board-integrity pass
     2026-08-04): benchmarks/eval_annotations.json. Returns (entries, meta) where
@@ -1131,35 +1105,13 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         rank = o.get("rank", {})
         matched_ann = [e["id"] for e in ann_entries if "id" in e and _ann_matches(o, e)]
         fair = fairness_of(o, ann_entries, seed_groups, name_to_group)
-        # Prefer the Rust-emitted `composite` (product_composite is the single
-        # source — stats review Rec-7); the dashboard READS it rather than
-        # re-deriving a divergent one. `_composite` stays only as the fallback
-        # for pre-2026-07-26 JSONs that predate the field. The reject gate is a
-        # dashboard concern (CID22<0.84 or nonphoto<0.80), computed either way.
+        # Read the recorded instrument's composite; missing stays unmeasured.
+        # Recalculating historical rows here made their scale/rejection depend
+        # on whether a private Torch/SciPy module happened to import successfully.
         emitted = o.get("composite")
-        if emitted is not None:
-            comp = round(float(emitted), 4)
-            # SIGNED (2026-08-04, APPENDIX F): `abs()` here let an ANTI-CORRELATED
-            # bake clear the reject gate on the strength of its inversion. CID22 and
-            # nonphoto are quality-oriented, so a negative is a backwards ranker and
-            # must reject. (konjnd is the only corpus whose sign is structurally
-            # negative; it is not part of this gate.)
-            cid = _signed(rank, "cid22")
-            nph = _signed(rank, "nonphoto")
-            reject = (cid is None or cid < 0.84) or (nph is not None and nph < 0.80)
-        elif o.get("peer") or (o.get("model") or {}).get("kind") == "reference-metric":
-            # A PEER row has no product_composite and never will — `bake_verdict` (the
-            # formula's owner) does not run on a reference metric. Falling through to
-            # `_composite` gave it the UNNORMALISED legacy sum (max ~1.65) while every
-            # bake carries the normalised Rust value (max 1.0), so the four peers sat at
-            # the top of the board's DEFAULT SORT with 1.11-1.42 against the best bake's
-            # 0.872 — a scale artefact reading as "ssim2 beats every model". Publish NOT
-            # MEASURED instead: the scoreboard renders an em-dash and sorts nulls last.
-            comp = None
-            cid, nph = _signed(rank, "cid22"), _signed(rank, "nonphoto")
-            reject = (cid is None or cid < 0.84) or (nph is not None and nph < 0.80)
-        else:
-            comp, reject = _composite(rank)
+        comp = round(float(emitted), 4) if emitted is not None else None
+        cid, nph = _signed(rank, "cid22"), _signed(rank, "nonphoto")
+        reject = (cid is None or cid < 0.84) or (nph is not None and nph < 0.80)
         scatter_out = {}
         # Registered board-size rule (2026-08-04): scatter embeds for the CURATED set
         # only. Grid-interior cells keep every scalar stat; their per-pair data stays in

@@ -34,24 +34,9 @@ struct Cli {
     #[arg(short, long, default_value = "zenjpeg")]
     codec: String,
 
-    /// Zensim profile: v0_2 | v0_3 | balanced (v0.5) | compression (v0.5) |
-    /// ensemble (v0.5) | tuner (v0.5) | tuner-v2 (v0.5) | tuner-v3 (v0.5) |
-    /// tuner-v4 (v0.5).
-    /// Default is `tuner-v4` (PreviewV0_5TunerV4, EXP-CROSS-CODEC-V10
-    /// ship, 2026-05-20) — the V9 dial reallocated: lossless = 100,
-    /// JND = 80, JOD = 50, q=0 worst-codec floor = 0, pathological < 0
-    /// (unclamped linear extrapolation). The wider perceptibility band
-    /// (50 score units between JOD and JND vs V3's 30) gives the dial
-    /// more resolution where compression product decisions live; the
-    /// unclamped extrapolation lets the dial signal "broken / unreasonable"
-    /// instead of collapsing to a tie at 0 for worst-case codec output.
-    /// Use `tuner-v3` for the V9 JND=60 / JOD=30 dial; `tuner-v2` for
-    /// the prior tuner ship; `tuner` for the V_24 baseline; `v0_3` for
-    /// the legacy default. The `balanced` / `compression` / `ensemble`
-    /// ranking profiles are available for end-to-end evaluation but are
-    /// NOT calibrated for quality-dial use — they produce non-monotonic
-    /// scores in the target search loop.
-    #[arg(long, default_value = "tuner-v4")]
+    /// Scoring profile. Defaults to the library's codec-target profile.
+    /// Historical tuners remain available by explicit name, such as tuner-v4.
+    #[arg(long, default_value = "codec-target")]
     profile: String,
 
     /// Convergence tolerance — search stops when `|achieved - target| <= tolerance`.
@@ -86,7 +71,7 @@ fn parse_profile(s: &str) -> Result<ZensimProfile> {
         // "v0.3" was the never-published deprecated alias for `A`; keep the
         // CLI string working but resolve it to the canonical `A`.
         "a" | "v0_3" | "v03" | "preview-v0.3" => Ok(ZensimProfile::A),
-        "codec-target" | "codec_target" => Ok(ZensimProfile::codec_target()),
+        "codec-target" | "codec_target" | "default" => Ok(ZensimProfile::codec_target()),
         "latest" | "latest-preview" | "latest_preview" => Ok(ZensimProfile::latest_preview()),
         "balanced" | "v0_5_balanced" | "preview-v0.5-balanced" => {
             Ok(zensim_experimental::preview_v0_5_balanced())
@@ -106,7 +91,7 @@ fn parse_profile(s: &str) -> Result<ZensimProfile> {
         "tuner-v3" | "tuner_v3" | "v0_5_tuner_v3" | "preview-v0.5-tuner-v3" => {
             Ok(zensim_experimental::preview_v0_5_tuner_v3())
         }
-        "tuner-v4" | "tuner_v4" | "v0_5_tuner_v4" | "preview-v0.5-tuner-v4" | "default" => {
+        "tuner-v4" | "tuner_v4" | "v0_5_tuner_v4" | "preview-v0.5-tuner-v4" => {
             Ok(zensim_experimental::preview_v0_5_tuner_v4())
         }
         "balanced-v2" | "balanced_v2" | "v0_5_balanced_v2" | "preview-v0.5-balanced-v2" => {
@@ -201,4 +186,21 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_defaults_follow_the_library_and_keep_explicit_legacy_selection() {
+        let cli = Cli::try_parse_from(["zensim-target", "input.png"]).unwrap();
+        let library_default = TargetSpec::default().profile;
+        assert_eq!(parse_profile(&cli.profile).unwrap(), library_default);
+        assert_eq!(parse_profile("default").unwrap(), library_default);
+        assert_eq!(
+            parse_profile("tuner-v4").unwrap(),
+            zensim_experimental::preview_v0_5_tuner_v4()
+        );
+    }
 }

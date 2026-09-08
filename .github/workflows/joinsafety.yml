@@ -33,7 +33,5 @@ jobs:
       - name: grep-gate — `.merge(` and `pd.merge(`
         run: python3 scripts/canonical_corpus/joinsafety_gate.py
 
-      - name: Run join_safety self-tests
-        run: |
-          python3 -m pip install --user numpy pandas pyarrow
-          python3 scripts/canonical_corpus/test_join_safety.py
+      # The separate CI job "join_safety unit tests" owns the unit suite.
+      # Keep this job/status as the distinct source gate, without rerunning it.

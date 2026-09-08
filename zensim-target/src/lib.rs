@@ -99,9 +99,8 @@ impl Default for TargetSpec {
             max_iterations: 8,
             // Follow the library's codec-target alias (B as of 2026-09-07).
             // This selects the scorer; convergence still depends on the
-            // codec, content, target, and probe budget. The CLI separately
-            // defaults to historical tuner-v4: pass --profile codec-target
-            // there to match this default. Current mapping and score contract:
+            // codec, content, target, and probe budget. The CLI's default and
+            // --profile default follow the same alias. Current score contract:
             // docs/CODEC_TARGET_METRIC.md in the parent repository.
             profile: ZensimProfile::codec_target(),
         }

@@ -2,6 +2,15 @@
 
 **Read this before launching any wave, arm, or sweep that runs detached compute.**
 
+**User ruling 2026-09-07:** before introducing/evaluating a new model, make its
+entire inference path executable and servable in Rust through a zensim surface
+API. Evaluation uses that API, including heads, corruption gates and splines.
+Python can invent the method; a private evaluator is not model admission.
+B/C/D may be replaced (no consumers are calibrated to them). Consult
+`../zenpapers` and later dated summaries for fundamental ideas. Prioritize
+feature ablations only when they remove actual compute or settle a named
+scientific failure. See [the authorized cleanup plan](PLAN_CRUFT_PURGE_2026-09-06.md).
+
 Every rule here is priced. The costs come from
 [`benchmarks/rnd_cycle_audit_2026-08-04.md`](../benchmarks/rnd_cycle_audit_2026-08-04.md),
 which measured the 2026-08-03/04 campaign: 34.3 h of wall-clock, 11 waves,

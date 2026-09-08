@@ -14,6 +14,8 @@ builder anywhere in the repo: four scripts READ it (`blend_lib.py`,
 `train_mlp_negatives.py`, `train_mlp_diverse.py`,
 `mlp_piecewise_negatives_probe.py`), none WRITES it. It carries no
 `_MANIFEST.json`, no `build_commit`, and — the sharp one — **no `source_id`**.
+Those four historical readers were retired on 2026-09-07; their source remains
+at revision 45e1ec9a. The recorded provenance gap is unchanged.
 
 That last omission matters beyond bookkeeping. KADIS-700k ships `source_id`
 precisely because DATA_SPLITS.md requires splitting on it ("split on this, never
