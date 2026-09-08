@@ -251,24 +251,38 @@ fn validate_feature_column_names<'a>(
 }
 
 fn feature_column_run(
-    path: &std::path::Path,
+    path: &Path,
     arrow_fields: &[std::sync::Arc<arrow::datatypes::Field>],
 ) -> Result<(&'static str, usize, usize), String> {
-    validate_feature_column_names(path, arrow_fields.iter().map(|f| f.name().as_str()))?;
-    let n_arrow_cols = arrow_fields.len();
+    feature_column_run_names(
+        path,
+        &arrow_fields
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Shared contiguous feature-header admission for parquet and CSV callers.
+pub fn feature_column_run_names(
+    path: &Path,
+    names: &[&str],
+) -> Result<(&'static str, usize, usize), String> {
+    validate_feature_column_names(path, names.iter().copied())?;
+    let n_arrow_cols = names.len();
     let (prefix, f0) = ["f", "feat_"]
         .iter()
         .find_map(|p| {
-            arrow_fields
+            names
                 .iter()
-                .position(|f| f.name() == &format!("{p}0"))
+                .position(|f| *f == format!("{p}0"))
                 .map(|i| (*p, i))
         })
         .ok_or_else(|| format!("{path:?}: missing f0 / feat_0 column"))?;
     let mut n = 0usize;
     while f0 + n < n_arrow_cols {
         let expected = format!("{prefix}{n}");
-        if arrow_fields[f0 + n].name() != &expected {
+        if names[f0 + n] != expected {
             break;
         }
         n += 1;
@@ -279,13 +293,9 @@ fn feature_column_run(
     // The GAP check: any `<prefix><id>` column with `id >= n` means the run
     // stopped early on a table that HAS more feature columns — a dense-by-id
     // layout, not a narrow table.
-    let beyond: Vec<usize> = arrow_fields
+    let beyond: Vec<usize> = names
         .iter()
-        .filter_map(|f| {
-            f.name()
-                .strip_prefix(prefix)
-                .and_then(|r| r.parse::<usize>().ok())
-        })
+        .filter_map(|f| f.strip_prefix(prefix).and_then(|r| r.parse::<usize>().ok()))
         .filter(|id| *id >= n)
         .collect();
     if !beyond.is_empty() {
@@ -343,6 +353,24 @@ fn feature_column_run_by_name(
         ));
     }
     Ok(out)
+}
+
+/// Inspect only the header/footer before allocating or reading feature rows.
+/// Gapped or duplicate IDs refuse through the same owner as the full loader.
+pub fn table_feature_width(path: &Path) -> Result<usize, String> {
+    let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if path.extension().is_some_and(|e| e == "parquet") {
+        let b = ParquetRecordBatchReaderBuilder::try_new(file)
+            .map_err(|e| format!("{}: parquet header: {e}", path.display()))?;
+        Ok(feature_column_run(path, b.schema().fields())?.2)
+    } else {
+        use std::io::BufRead;
+        let mut header = String::new();
+        std::io::BufReader::new(file)
+            .read_line(&mut header)
+            .map_err(|e| format!("{}: CSV header: {e}", path.display()))?;
+        Ok(feature_column_run_names(path, &header.trim_end().split(',').collect::<Vec<_>>())?.2)
+    }
 }
 
 pub fn load_parquet(

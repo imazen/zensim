@@ -80,6 +80,31 @@ pub fn validate_training_capabilities(
         hyperparams
     };
 
+    super::hidden_activation_for(hyperparams.leaky_alpha);
+    // `run_parallel_minibatch` / `run_minibatch_with_nin` carry NO absolute term
+    // and no polarity reconciliation — they are pure RankNet + PWRC. Before
+    // 2026-09-06 a run that set both an absolute term and K>1 (or NiN) silently
+    // trained pure rank, throwing the absolute term away without a word, which
+    // is the same silent-no-op class the dispatcher already fails loud for.
+    // Refuse instead of lying. Rank-only recipes at any K are unaffected.
+    if !hyperparams.per_sample_alpha_head
+        && !hyperparams.pool_head
+        && !hyperparams.hybrid_head
+        && (has_absolute_group || hyperparams.nonneg_distance)
+        && (hyperparams.parallel_batch && hyperparams.minibatch_size.max(1) > 1
+            || hyperparams.norm_in_norm_weight > 0.0)
+    {
+        panic!(
+            "an absolute (mse/both) term is active, but --minibatch-size {} \
+             (parallel_batch={}) / --norm-in-norm-weight {} routes pairs through a \
+             mini-batch helper that implements RankNet only. The absolute term would \
+             be silently discarded and the bake would be byte-identical to a run that \
+             never asked for it. Use --minibatch-size 1 with --norm-in-norm-weight 0, \
+             or drop the absolute term.",
+            hyperparams.minibatch_size, hyperparams.parallel_batch, hyperparams.norm_in_norm_weight,
+        );
+    }
+
     // The pool and hybrid heads implement NO absolute term — they read
     // `g.loss_mode` only to log it. Before the polarity owner that was merely a
     // silent discard; with it, a `:mse`/`:both` group would flip their RankNet

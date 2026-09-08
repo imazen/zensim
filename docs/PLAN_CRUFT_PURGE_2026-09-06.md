@@ -48,11 +48,11 @@ ablation closes its hypothesis and preserves the useful component.
   invokes the owner once; qualification distinguishes failure from missing data.
 - [x] Complete transform-screen option migration and remaining spline-writer
   consolidation with historical recipe and boundary evidence.
-- [ ] Enforce trainer capabilities before CPU/GPU work; enforce feature IDs and
+- [x] Enforce trainer capabilities before CPU/GPU work; enforce feature IDs and
   semantic revisions at table admission; preserve honest historical replay.
 - [x] Resolve C/CHdr activity semantics, declared-ID conversion and legacy plan
   derivation retirement, with the serving census and feature-build matrix.
-- [ ] Consolidate repeated feature/era metadata; retire unused positional
+- [x] Consolidate repeated feature/era metadata; retire unused positional
   training surfaces and the stale JS example after caller checks.
 - [ ] Slim current instructions; consolidate workflow docs; move completed root
   documents and retire obsolete launch tools while retaining their evidence.
@@ -946,3 +946,10 @@ preserve their profile; the candidate experiment records the complete model/head
 composition by content hash. No supported `zensim` signature is removed.
 The existing demo matrix will accept explicit sources/candidates and emit
 measurement artifacts; it must fail on missing inputs rather than skip them.
+
+### Admission and positional CLI retirement — September 7
+
+The trainer/metadata checklist items are complete. See the [implementation and
+verification record](../benchmarks/trainer_admission_cleanup_2026-09-07.md).
+Unknown decoder declarations do not confer qualified provenance; historical
+replay remains explicitly unqualified.

@@ -273,46 +273,25 @@ fn block_ablated_score(
         .expect("network-output diagnostic")
 }
 
-/// Feature-family label per the registered aggregation keys (§C.3).
-fn family_of(idx: usize, n_inputs: usize) -> &'static str {
-    match n_inputs {
-        944 => match idx {
-            0..=155 => "v1fold156",
-            156..=371 => "zeros156-371",
-            372..=719 => "v2-348",
-            720..=923 => "append204",
-            _ => "tail20",
-        },
-        720..=943 => match idx {
-            0..=155 => "v1fold156",
-            156..=371 => "zeros156-371",
-            372..=719 => "v2-348",
-            _ => "append204",
-        },
-        300..=719 => match idx {
-            0..=155 => "basic",
-            156..=227 => "peaks",
-            228..=299 => "masked",
-            _ => "iw",
-        },
-        156 => "v1basic",
-        _ => "all",
+/// Labels come from the metric's feature-definition owner, never input width.
+fn family_of(id: usize) -> &'static str {
+    use zensim::feature_set_id::ComputeToken;
+    for token in [
+        ComputeToken::Basic,
+        ComputeToken::Peaks,
+        ComputeToken::Masked,
+        ComputeToken::Iw,
+        ComputeToken::V2,
+        ComputeToken::Append,
+        ComputeToken::Append2,
+        ComputeToken::Csfw,
+    ] {
+        if zensim::research::family_slots(token).contains(id) {
+            return token.as_str();
+        }
     }
+    "unregistered"
 }
-
-const FAMILY_ORDER: &[&str] = &[
-    "v1fold156",
-    "zeros156-371",
-    "v2-348",
-    "append204",
-    "tail20",
-    "basic",
-    "peaks",
-    "masked",
-    "iw",
-    "v1basic",
-    "all",
-];
 
 struct CorpusSpec {
     name: String,
@@ -463,7 +442,13 @@ fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    let heads = BakeScorer::new(&model).expect("invalid score metadata");
     let n_inputs = model.n_inputs();
+    let feature_ids: Vec<usize> = zensim::declared_feature_ids(&model)
+        .map(|ids| ids.into_iter().map(usize::from).collect())
+        .unwrap_or_else(|| (0..n_inputs).collect());
+    let families: Vec<_> = feature_ids.iter().map(|&id| family_of(id)).collect();
+
     let layers: Vec<OwnedLayer> = model.layers().map(|l| dequant_layer(&l)).collect();
     if layers.is_empty() || layers[0].in_dim != n_inputs {
         eprintln!("bake has no layers / layer0 in_dim mismatch");
@@ -488,11 +473,11 @@ fn main() -> ExitCode {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "bake".into());
         let mut n_live = 0usize;
-        for i in 0..l0.in_dim {
+        for (i, &id) in feature_ids.iter().enumerate().take(l0.in_dim) {
             let row = &l0.w[i * l0.out_dim..(i + 1) * l0.out_dim];
             let live = row.iter().any(|&w| w != 0.0);
             n_live += usize::from(live);
-            let _ = writeln!(out, "{name}\t{i}\t{}", u8::from(live));
+            let _ = writeln!(out, "{name}\t{}\t{}", id, u8::from(live));
         }
         if let Err(e) = fs::write(path, out) {
             eprintln!("write {}: {e}", path.display());
@@ -508,7 +493,6 @@ fn main() -> ExitCode {
         }
     }
 
-    let heads = BakeScorer::new(&model).expect("invalid score metadata");
     let metadata = heads.metadata();
     let has_transforms = model.has_nontrivial_feature_transforms();
 
@@ -865,8 +849,9 @@ fn main() -> ExitCode {
         for k in 0..n_inputs {
             let _ = write!(
                 s,
-                "{k}\t{}\t{:.4}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.4}\t{:.6e}\t{:.6e}\t{}\t{}\t{}",
-                family_of(k, n_inputs),
+                "{}\t{}\t{:.4}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.4}\t{:.6e}\t{:.6e}\t{}\t{}\t{}",
+                feature_ids[k],
+                families[k],
                 xt_nonzero[k] as f64 / n_rows_f,
                 mean_abs[k],
                 p95_abs[k],
@@ -925,19 +910,35 @@ fn main() -> ExitCode {
         md,
         "analytic-vs-ablation SROCC: simple={srocc_simple:.4}, path={srocc_path:.4}"
     );
-    // Structural-zero gate (944 regime).
-    if n_inputs == 944 {
-        let bad: Vec<usize> = (156..372).filter(|&k| mean_abs[k] != 0.0).collect();
-        let _ = writeln!(
-            md,
-            "structural-zero gate f156-371: {} — {} nonzero of 216",
-            if bad.is_empty() {
-                "PASS (Δ ≡ 0 exactly)"
-            } else {
-                "FAIL"
-            },
-            bad.len()
-        );
+    // Table identity, not width, determines structural zeros. Report only
+    // known producer-absent IDs, and keep unknown provenance explicit.
+    for (ci, corpus) in corpora.iter().enumerate() {
+        let producer = zensim_validate::feature_set::table_feature_set_ref(&corpus.path);
+        let producer = match producer {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::from(2);
+            }
+        };
+        if let Some(p) = producer.filter(|p| !p.slots.is_empty()) {
+            let absent: Vec<_> = feature_ids
+                .iter()
+                .enumerate()
+                .filter(|(_, id)| !p.slots.contains(**id))
+                .map(|(k, _)| k)
+                .collect();
+            let bad = absent
+                .iter()
+                .filter(|&&k| per_corpus_mean_abs[k][ci] != 0.0)
+                .count();
+            let _ = writeln!(
+                md,
+                "producer-absent IDs ({}): {} declared; {bad} have nonzero contribution in this corpus",
+                corpus.name,
+                absent.len()
+            );
+        }
     }
     let _ = writeln!(
         md,
@@ -959,10 +960,9 @@ fn main() -> ExitCode {
     let per_corpus_total: Vec<f64> = (0..n_corpora)
         .map(|ci| (0..n_inputs).map(|k| per_corpus_mean_abs[k][ci]).sum())
         .collect();
-    for fam in FAMILY_ORDER {
-        let idxs: Vec<usize> = (0..n_inputs)
-            .filter(|&k| family_of(k, n_inputs) == *fam)
-            .collect();
+    let family_order: std::collections::BTreeSet<_> = families.iter().copied().collect();
+    for fam in &family_order {
+        let idxs: Vec<usize> = (0..n_inputs).filter(|&k| families[k] == *fam).collect();
         if idxs.is_empty() {
             continue;
         }
@@ -1006,8 +1006,9 @@ fn main() -> ExitCode {
             .collect();
         let _ = writeln!(
             md,
-            "| {k} | {} | {:.4} | {:.4} | {:.2} | {} |",
-            family_of(k, n_inputs),
+            "| {} | {} | {:.4} | {:.4} | {:.2} | {} |",
+            feature_ids[k],
+            families[k],
             mean_abs[k],
             std_delta[k],
             sign_cons[k],
@@ -1108,6 +1109,14 @@ mod tests {
             vec![2.5, -1.0, 0.3],
             vec![0.0, 0.0, 0.0],
         ]
+    }
+
+    #[test]
+    fn contribution_family_uses_feature_identity_not_packed_position() {
+        assert_eq!(family_of(0), "basic");
+        assert_eq!(family_of(369), "iw");
+        assert_eq!(family_of(950), "csfw");
+        assert_eq!(family_of(9999), "unregistered");
     }
 
     #[test]

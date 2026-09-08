@@ -1813,9 +1813,17 @@ fn load_auto_transforms_from_screen(
         } else {
             params_str
                 .split(',')
-                .filter_map(|s| s.trim().parse::<f32>().ok())
+                .map(|s| {
+                    s.trim().parse::<f32>().unwrap_or_else(|e| {
+                        panic!("--auto-transforms: invalid parameter at f{idx}: {s:?}: {e}")
+                    })
+                })
                 .collect()
         };
+        assert!(
+            parsed_params.iter().all(|p| p.is_finite()),
+            "--auto-transforms: nonfinite parameter at f{idx}"
+        );
         eligible.push((idx, lift, transform, parsed_params));
     }
     eligible.sort_by(|a, b| b.1.total_cmp(&a.1)); // stable: original TSV order breaks ties
@@ -1913,22 +1921,8 @@ fn load_csv_sequential(
         .iter()
         .position(|&c| c == target_column)
         .ok_or_else(|| format!("{path:?}: missing target column {target_column:?}"))?;
-    let f0 = cols
-        .iter()
-        .position(|&c| c == "f0")
-        .ok_or_else(|| format!("{path:?}: missing f0 column"))?;
-    // Find consecutive f0..f<N-1> columns. Stop at the first non-f<idx> column or end of header.
-    let mut n_features = 0usize;
-    while f0 + n_features < cols.len() {
-        let expected = format!("f{}", n_features);
-        if cols[f0 + n_features] != expected {
-            break;
-        }
-        n_features += 1;
-    }
-    if n_features == 0 {
-        return Err(format!("{path:?}: no fN columns found"));
-    }
+    let (_, f0, n_features) =
+        zensim_validate::parquet_loader::feature_column_run_names(path, &cols)?;
     let mut human_scores = Vec::new();
     let mut feature_rows = Vec::new();
     for (lineno, line) in rdr.lines().enumerate() {
@@ -2019,21 +2013,8 @@ pub(crate) fn load_csv(
         .iter()
         .position(|&c| c == target_column)
         .ok_or_else(|| format!("{path:?}: missing target column {target_column:?}"))?;
-    let f0 = cols
-        .iter()
-        .position(|&c| c == "f0")
-        .ok_or_else(|| format!("{path:?}: missing f0 column"))?;
-    let mut n_features = 0usize;
-    while f0 + n_features < cols.len() {
-        let expected = format!("f{}", n_features);
-        if cols[f0 + n_features] != expected {
-            break;
-        }
-        n_features += 1;
-    }
-    if n_features == 0 {
-        return Err(format!("{path:?}: no fN columns found"));
-    }
+    let (_, f0, n_features) =
+        zensim_validate::parquet_loader::feature_column_run_names(path, &cols)?;
     let min_fields = f0 + n_features;
 
     // 2) Build a Vec of (start, end) byte offsets for every body line,
@@ -2546,6 +2527,10 @@ fn apply_manifest_to_args(
 /// CLI-only capabilities (data sources and the GPU adapter). Shared head/loss
 /// checks live in mlp_train::validate_training_capabilities.
 fn preflight_cli_capabilities(args: &Args, matches: &clap::ArgMatches, want_gpu: bool) {
+    assert!(
+        args.monotone_feature_mask.is_none() || args.monotone_cbc,
+        "--monotone-feature-mask requires --monotone-cbc"
+    );
     // See `keep_features_unsupported_flag` / `group_l1_unsupported_flag`
     // above for the up-to-date support table and rationale (2026-09-04,
     // `benchmarks/fastclass_distill_wave_2026-09-04.md` §7.6/§7.7) — fail
@@ -3024,9 +3009,17 @@ fn main() {
         0, // Pool has not been opened; requesting the loss already requires its head.
     );
 
+    let selected_ids = args.keep_features.as_deref().map(|spec| {
+        parse_keep_features(spec, args.max_features).unwrap_or_else(|e| {
+            eprintln!("--keep-features: {e}");
+            std::process::exit(2)
+        })
+    });
     let table_admission = zensim_validate::feature_set::admit_training_tables(
         &group_modes.iter().map(|g| g.1.clone()).collect::<Vec<_>>(),
         args.historical_replay.as_deref(),
+        selected_ids.as_deref(),
+        Some(args.max_features),
     )
     .unwrap_or_else(|e| {
         eprintln!("{e}");
@@ -3380,18 +3373,11 @@ fn main() {
     // exactly 0.0 for the whole run; the trainer core pins the matching
     // layer-1 rows to 0.0 once at init (`INPUT_KEEP_MASK`). Net effect: an
     // exact K-wide fit, at zero per-step cost, with exactly-zero baked rows.
-    let keep_mask: Option<Vec<bool>> = match args.keep_features.as_deref() {
+    let keep_mask: Option<Vec<bool>> = match selected_ids.as_deref() {
         None => None,
-        Some(spec) => {
-            let idx = match parse_keep_features(spec, args.max_features) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("FATAL: --keep-features: {e}");
-                    std::process::exit(1);
-                }
-            };
+        Some(idx) => {
             let mut mask = vec![false; args.max_features];
-            for &i in &idx {
+            for &i in idx {
                 mask[i] = true;
             }
             let n_keep = mask.iter().filter(|&&k| k).count();
@@ -4564,17 +4550,22 @@ fn main() {
             .iter()
             .filter(|g| g.train_w > 0.0)
             .filter_map(|g| {
-                std::path::Path::new(&g.source_path)
-                    .parent()
-                    .map(|d| d.to_path_buf())
+                zensim_validate::feature_set::table_feature_set_ref(std::path::Path::new(
+                    &g.source_path,
+                ))
+                .ok()
+                .flatten()
             })
-            .collect::<BTreeSet<_>>()
-            .iter()
-            .filter_map(|d| zensim_validate::feature_set::root_feature_set_ref(d))
             .map(|r| r.id.to_string())
             .collect();
+        let every_leg_resolved = loaded.iter().filter(|g| g.train_w > 0.0).all(|g| {
+            zensim_validate::feature_set::table_feature_set_ref(std::path::Path::new(
+                &g.source_path,
+            ))
+            .is_ok_and(|r| r.is_some())
+        });
         match ids.len() {
-            1 => {
+            1 if every_leg_resolved => {
                 let id = ids.into_iter().next().expect("len 1");
                 match zenpredict_bake::append_metadata_utf8(
                     &bake_bytes,
@@ -4606,7 +4597,7 @@ fn main() {
             }
             n => {
                 eprintln!(
-                    "WARNING: training groups span {n} DIFFERENT feature sets ({}) — refusing to \
+                    "WARNING: training groups have {n} known feature sets and/or unresolved legs ({}) — refusing to \
                      stamp one of them as the bake's zentrain.feature_set_id. A mixed-era training \
                      set is a regime-purity question, not a labelling one.",
                     ids.into_iter().collect::<Vec<_>>().join(" ; ")

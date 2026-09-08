@@ -2154,26 +2154,6 @@ pub fn train_mlp_strategy(
     let polarity = OutputPolarity::for_groups(groups, hyperparams);
     let rank_target_sign = polarity.rank_target_sign();
     let ladder_sign = polarity.ladder_sign();
-    // `run_parallel_minibatch` / `run_minibatch_with_nin` carry NO absolute term
-    // and no polarity reconciliation — they are pure RankNet + PWRC. Before
-    // 2026-09-06 a run that set both an absolute term and K>1 (or NiN) silently
-    // trained pure rank, throwing the absolute term away without a word, which
-    // is the same silent-no-op class the dispatcher already fails loud for.
-    // Refuse instead of lying. Rank-only recipes at any K are unaffected.
-    if polarity == OutputPolarity::Score
-        && (hyperparams.parallel_batch && hyperparams.minibatch_size.max(1) > 1
-            || hyperparams.norm_in_norm_weight > 0.0)
-    {
-        panic!(
-            "an absolute (mse/both) term is active, but --minibatch-size {} \
-             (parallel_batch={}) / --norm-in-norm-weight {} routes pairs through a \
-             mini-batch helper that implements RankNet only. The absolute term would \
-             be silently discarded and the bake would be byte-identical to a run that \
-             never asked for it. Use --minibatch-size 1 with --norm-in-norm-weight 0, \
-             or drop the absolute term.",
-            hyperparams.minibatch_size, hyperparams.parallel_batch, hyperparams.norm_in_norm_weight,
-        );
-    }
 
     let train_indices: Vec<usize> = groups
         .iter()

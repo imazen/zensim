@@ -395,58 +395,12 @@ pub fn root_feature_set_ref(root: &Path) -> Option<FeatureSetRef> {
         && let Some(v) = json_string_field(txt, "feature_set_id")
         && let Some(id) = FeatureSetId::parse(v.trim())
     {
-        // The slot set comes from the registry when the id is registered; an
-        // unregistered id still identifies itself, with an empty slot set that
-        // makes every coverage check report rather than silently pass.
-        //
-        // Look the id up BOTH ways. Registry keys are the CLASS form
-        // (`<compute>@w<layout>/<era>`, hash in the value's `slots_hash8`), so
-        // an exact-key lookup on the full id -- which is what a manifest
-        // declares -- matched NOTHING, and every manifest-declared root
-        // resolved to an EMPTY slot set. That is not a cosmetic miss: an empty
-        // producer set makes `check` report `SlotsNotPopulated` for every slot
-        // the consumer reads, so the FIRST root to carry the key the design
-        // calls most authoritative got 28 spurious "not populated" slots
-        // (2026-09-05, the postC 372 root). Fall back to the class form, and
-        // only accept it when the registered `slots_hash8` AGREES with the
-        // declared one -- a disagreement means the name and the bytes have
-        // come apart, which must not resolve silently.
-        // Registry keys are append-only and were written in the LEGACY
-        // `@w<N>` spelling, so a lookup tries every spelling of the same id:
-        // the string as declared, the canonical layout-free form, and both
-        // class forms. `Registry::set` also indexes the layout-free spelling
-        // of every legacy key, so an id declared canonically finds a key
-        // written with a width.
-        let class_forms: Vec<String> = [
-            Some(format!("{}/{}", id.compute(), id.era())),
-            id.layout_width()
-                .map(|w| format!("{}@w{}/{}", id.compute(), w, id.era())),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        let slots = reg
-            .set(&id.to_string())
-            .or_else(|| reg.set(&id.clone().layout_free().to_string()))
-            .or_else(|| {
-                class_forms.iter().find_map(|c| {
-                    reg.set(c).filter(|s| {
-                        s.as_ref()
-                            .is_some_and(|r| r.id.slots_hash() == id.slots_hash())
-                    })
-                })
-            })
-            .and_then(|s| s.as_ref().map(|r| r.slots.clone()))
-            .unwrap_or_default();
-        let layout = id.layout_width();
-        return Some(FeatureSetRef {
+        return resolve_declared_set(
             id,
-            slots,
-            layout,
-            source: format!("{}/_MANIFEST.json feature_set_id", root.display()),
-            inferred: false,
-        });
+            format!("{}/_MANIFEST.json feature_set_id", root.display()),
+        );
     }
+
     // 2. the registry's root table.
     let key = root.to_string_lossy();
     let key = key.trim_end_matches('/');
@@ -479,20 +433,142 @@ pub fn root_feature_set_ref(root: &Path) -> Option<FeatureSetRef> {
     None
 }
 
-/// Narrow scan for a top-level `"key": "value"` string — the same deliberate
-/// non-serde shape `bake_verdict::root_declared_regime` uses, for the same
-/// reason: these manifests have several historical shapes and the guard needs
-/// one string.
+fn resolve_declared_set(id: FeatureSetId, source: String) -> Option<FeatureSetRef> {
+    let reg = registry();
+    // The slot set comes from the registry when the id is registered; an
+    // unregistered id still identifies itself, with an empty slot set that
+    // makes every coverage check report rather than silently pass.
+    //
+    // Look the id up BOTH ways. Registry keys are the CLASS form
+    // (`<compute>@w<layout>/<era>`, hash in the value's `slots_hash8`), so
+    // an exact-key lookup on the full id -- which is what a manifest
+    // declares -- matched NOTHING, and every manifest-declared root
+    // resolved to an EMPTY slot set. That is not a cosmetic miss: an empty
+    // producer set makes `check` report `SlotsNotPopulated` for every slot
+    // the consumer reads, so the FIRST root to carry the key the design
+    // calls most authoritative got 28 spurious "not populated" slots
+    // (2026-09-05, the postC 372 root). Fall back to the class form, and
+    // only accept it when the registered `slots_hash8` AGREES with the
+    // declared one -- a disagreement means the name and the bytes have
+    // come apart, which must not resolve silently.
+    // Registry keys are append-only and were written in the LEGACY
+    // `@w<N>` spelling, so a lookup tries every spelling of the same id:
+    // the string as declared, the canonical layout-free form, and both
+    // class forms. `Registry::set` also indexes the layout-free spelling
+    // of every legacy key, so an id declared canonically finds a key
+    // written with a width.
+    let class_forms: Vec<String> = [
+        Some(format!("{}/{}", id.compute(), id.era())),
+        id.layout_width()
+            .map(|w| format!("{}@w{}/{}", id.compute(), w, id.era())),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let slots = reg
+        .set(&id.to_string())
+        .or_else(|| reg.set(&id.clone().layout_free().to_string()))
+        .or_else(|| {
+            class_forms.iter().find_map(|c| {
+                reg.set(c).filter(|s| {
+                    s.as_ref()
+                        .is_some_and(|r| r.id.slots_hash() == id.slots_hash())
+                })
+            })
+        })
+        .and_then(|s| s.as_ref().map(|r| r.slots.clone()))
+        .unwrap_or_default();
+    let layout = id.layout_width();
+    Some(FeatureSetRef {
+        id,
+        slots,
+        layout,
+        source,
+        inferred: false,
+    })
+}
+
+/// Resolve a specific table's declarations. Per-file sidecars may refine a
+/// root, but conflicting explicit IDs/revisions are never guessed away.
+pub fn table_feature_set_ref(path: &Path) -> Result<Option<FeatureSetRef>, String> {
+    let metadata = table_metadata(path)?;
+    match metadata.get("feature_set_id") {
+        Some(value) => {
+            let id = value
+                .as_str()
+                .and_then(FeatureSetId::parse)
+                .ok_or_else(|| format!("{}: malformed feature_set_id", path.display()))?;
+            Ok(resolve_declared_set(
+                id,
+                format!("{}: stored table declaration", path.display()),
+            ))
+        }
+        None => Ok(root_feature_set_ref(
+            path.parent().unwrap_or(Path::new(".")),
+        )),
+    }
+}
+
+fn table_metadata(path: &Path) -> Result<serde_json::Value, String> {
+    let root = path.parent().unwrap_or(Path::new("."));
+    let mut merged = serde_json::Map::new();
+    for manifest in [
+        root.join("_MANIFEST.json"),
+        std::path::PathBuf::from(format!("{}.manifest.json", path.display())),
+        std::path::PathBuf::from(format!("{}._MANIFEST.json", path.display())),
+    ] {
+        let bytes = match std::fs::read(&manifest) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("{}: {e}", manifest.display())),
+        };
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("{}: invalid manifest: {e}", manifest.display()))?;
+        if !value.is_object() {
+            return Err(format!(
+                "{}: manifest must be an object",
+                manifest.display()
+            ));
+        }
+        let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let per_file = value.get("files").and_then(|v| v.get(filename));
+        for scope in [Some(&value), per_file].into_iter().flatten() {
+            for key in [
+                "feature_set_id",
+                "formula_revision",
+                "decoder_era",
+                "decoder_revision",
+            ] {
+                let Some(v) = scope.get(key) else { continue };
+                if let Some(old) = merged.get(key) {
+                    // Formula revisions occur as both strings and integers.
+                    let norm = |v: &serde_json::Value| {
+                        v.as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| v.to_string())
+                    };
+                    if norm(old) != norm(v) {
+                        return Err(format!(
+                            "{}: conflicting {key}: {old} vs {v}",
+                            manifest.display()
+                        ));
+                    }
+                }
+                merged.insert(key.into(), v.clone());
+            }
+        }
+    }
+    Ok(merged.into())
+}
+
+/// Read only a top-level string; nested historical notes cannot impersonate
+/// a declaration. Malformed present manifests are refused by table admission.
 fn json_string_field(txt: &str, key: &str) -> Option<String> {
-    let needle = format!("\"{key}\"");
-    let i = txt.find(&needle)?;
-    let rest = &txt[i + needle.len()..];
-    let c = rest.find(':')?;
-    let after = &rest[c + 1..];
-    let q1 = after.find('"')?;
-    let after = &after[q1 + 1..];
-    let q2 = after.find('"')?;
-    Some(after[..q2].to_string())
+    serde_json::from_str::<serde_json::Value>(txt)
+        .ok()?
+        .get(key)?
+        .as_str()
+        .map(str::to_owned)
 }
 
 /// The parsed registry.
@@ -1122,6 +1198,8 @@ mod derive_regime_tests {
 pub fn admit_training_tables(
     paths: &[std::path::PathBuf],
     replay: Option<&str>,
+    selected_ids: Option<&[usize]>,
+    max_features: Option<usize>,
 ) -> Result<serde_json::Value, String> {
     if replay.is_some_and(|s| s.trim().is_empty()) {
         return Err("--historical-replay requires a nonempty reason and recorded recipe".into());
@@ -1131,24 +1209,60 @@ pub fn admit_training_tables(
     let mut eras = std::collections::BTreeSet::new();
     let mut revisions = std::collections::BTreeSet::new();
     for path in paths {
-        let root = path.parent().unwrap_or(Path::new("."));
-        if let Ok(bytes) = std::fs::read(root.join("_MANIFEST.json")) {
-            let manifest: serde_json::Value = serde_json::from_slice(&bytes)
-                .map_err(|e| format!("{}: invalid manifest: {e}", root.display()))?;
-            if let Some(id) = manifest.get("feature_set_id") {
-                let valid = id.as_str().and_then(FeatureSetId::parse).is_some();
-                if !valid {
-                    return Err(format!("{}: malformed feature_set_id", root.display()));
-                }
-            }
+        let metadata = table_metadata(path)?;
+        let resolved = table_feature_set_ref(path)?;
+        let actual_width = max_features
+            .map(|_| crate::parquet_loader::table_feature_width(path))
+            .transpose()?;
+        let requested = actual_width.map(|w| {
+            selected_ids.map_or_else(
+                || (0..w.min(max_features.unwrap())).collect::<Vec<_>>(),
+                |ids| ids.to_vec(),
+            )
+        });
+        if let (Some(w), Some(ids)) = (actual_width, requested.as_ref())
+            && let Some(id) = ids.iter().find(|&&id| id >= w)
+        {
+            return Err(format!(
+                "{}: required feature f{id} is missing from {w}-column table",
+                path.display()
+            ));
         }
-        let resolved = root_feature_set_ref(root);
         if let Some(r) = &resolved {
             eras.insert(r.id.era().to_owned());
             if r.slots.is_empty() {
                 issues.push(format!("{}: producer slots are unknown", path.display()));
             }
-            if let Some(rev) = registry().formula_revision(r.id.era()) {
+            if let Some(ids) = &requested {
+                let want = SlotSet::from_slots(ids.iter().copied());
+                if !r.slots.covers(&want) {
+                    issues.push(format!(
+                        "{}: requested IDs not populated by producer: {}",
+                        path.display(),
+                        r.slots.missing_from(&want)
+                    ));
+                }
+            }
+            let registered = registry().formula_revision(r.id.era());
+            let declared = metadata
+                .get("formula_revision")
+                .map(|v| {
+                    v.as_u64()
+                        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                        .filter(|n| matches!(n, 1 | 2))
+                        .map(|n| n as u8)
+                        .ok_or_else(|| format!("{}: invalid formula_revision {v}", path.display()))
+                })
+                .transpose()?;
+            if let (Some(a), Some(b)) = (registered, declared)
+                && a != b
+            {
+                return Err(format!(
+                    "{}: formula revision {b} conflicts with registered era revision {a}",
+                    path.display()
+                ));
+            }
+            if let Some(rev) = declared.or(registered) {
                 revisions.insert(rev);
             } else {
                 issues.push(format!("{}: formula revision is unknown", path.display()));
@@ -1163,7 +1277,24 @@ pub fn admit_training_tables(
             "path": path, "feature_set_id": resolved.as_ref().map(|r| r.id.to_string()),
             "inferred": resolved.as_ref().map(|r| r.inferred),
             "source": resolved.as_ref().map(|r| &r.source),
+            "stored_declarations": metadata, "actual_width": actual_width,
+            "requested_ids": requested,
         }));
+    }
+    if revisions.len() > 1 {
+        issues.push(format!("mixed formula revisions: {revisions:?}"));
+    }
+    let decoders: std::collections::BTreeSet<_> = tables
+        .iter()
+        .filter_map(|t| {
+            t["stored_declarations"]
+                .get("decoder_era")
+                .or_else(|| t["stored_declarations"].get("decoder_revision"))
+        })
+        .map(|v| v.to_string())
+        .collect();
+    if decoders.len() > 1 {
+        issues.push(format!("mixed decoder declarations: {decoders:?}"));
     }
     if eras.len() > 1 {
         issues.push(format!("mixed table eras: {eras:?}"));
@@ -1181,7 +1312,9 @@ pub fn admit_training_tables(
     };
     Ok(
         serde_json::json!({"tables": tables, "issues": issues, "historical_replay": replay,
-        "formula_revision": revision, "qualified_provenance": issues.is_empty() && replay.is_none()}),
+        "formula_revision": revision, "qualified_provenance": issues.is_empty() && replay.is_none() && tables.iter().all(|t|
+            ["decoder_era", "decoder_revision"].iter().any(|key|
+                t["stored_declarations"].get(key).is_some_and(|v| !v.is_null() && v.as_str() != Some(""))))}),
     )
 }
 
@@ -1189,10 +1322,66 @@ pub fn admit_training_tables(
 mod training_admission_tests {
     use super::*;
     #[test]
+    fn real_headers_and_file_declarations_are_admitted_before_rows() {
+        let dir = std::env::temp_dir().join(format!("zensim-admission-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("features.csv");
+        let header = (0..956)
+            .map(|i| format!("f{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        std::fs::write(&path, format!("human_score,{header}\n")).unwrap();
+        let manifest = dir.join("_MANIFEST.json");
+        std::fs::write(
+            &manifest,
+            serde_json::json!({
+                "feature_set_id": "basic+peaks+masked+iw@w372/v1postc#d16a1091",
+                "formula_revision": 1, "decoder_era": "fixture-pinned"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let paths = vec![path.clone()];
+        let admitted = admit_training_tables(&paths, None, Some(&[0, 371]), Some(956)).unwrap();
+        assert_eq!(admitted["qualified_provenance"], true);
+        assert_eq!(admitted["formula_revision"], 1);
+        let absent = admit_training_tables(&paths, None, Some(&[950]), Some(956)).unwrap_err();
+        assert!(absent.contains("not populated"), "{absent}");
+        // Replay records semantic mismatch, but cannot fabricate a missing column.
+        let replay =
+            admit_training_tables(&paths, Some("frozen test recipe"), Some(&[950]), Some(956))
+                .unwrap();
+        assert_eq!(replay["qualified_provenance"], false);
+        let absent =
+            admit_training_tables(&paths, Some("frozen test recipe"), Some(&[956]), Some(957))
+                .unwrap_err();
+        assert!(absent.contains("required feature f956"), "{absent}");
+        let sidecar = dir.join("features.csv.manifest.json");
+        for v in [
+            serde_json::json!({"formula_revision":2}),
+            serde_json::json!({"decoder_era":"another-decoder"}),
+            serde_json::json!({"feature_set_id":"malformed"}),
+        ] {
+            std::fs::write(&sidecar, v.to_string()).unwrap();
+            assert!(
+                admit_training_tables(&paths, Some("frozen test recipe"), None, Some(372)).is_err()
+            );
+        }
+        std::fs::remove_file(&sidecar).unwrap();
+        // Gapped CSV has the same refusal as parquet, before any body is read.
+        std::fs::write(&path, "human_score,f0,f1,f8\n").unwrap();
+        let err =
+            admit_training_tables(&paths, Some("frozen test recipe"), None, Some(372)).unwrap_err();
+        assert!(err.contains("DENSE-BY-ID"), "{err}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn unknown_and_mixed_eras_require_explicit_replay() {
         let unknown = vec![std::path::PathBuf::from("/not-registered/features.parquet")];
-        assert!(admit_training_tables(&unknown, None).is_err());
-        let replay = admit_training_tables(&unknown, Some("reproduce frozen recipe")).unwrap();
+        assert!(admit_training_tables(&unknown, None, None, None).is_err());
+        let replay =
+            admit_training_tables(&unknown, Some("reproduce frozen recipe"), None, None).unwrap();
         assert_eq!(replay["qualified_provenance"], false);
         assert!(replay["formula_revision"].is_null());
         let paths: Vec<_> = registry()
@@ -1205,8 +1394,10 @@ mod training_admission_tests {
             .map(|p| Path::new(p).join("probe.parquet"))
             .collect();
         assert_eq!(paths.len(), 2);
-        assert!(admit_training_tables(&paths, None).is_err());
-        assert!(admit_training_tables(&paths, Some("fixed historical control")).is_ok());
+        assert!(admit_training_tables(&paths, None, None, None).is_err());
+        assert!(
+            admit_training_tables(&paths, Some("fixed historical control"), None, None).is_ok()
+        );
     }
 }
 
