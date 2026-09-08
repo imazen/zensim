@@ -4,7 +4,23 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest September 8 continuation: [canonical refit preparation](benchmarks/canonical_corruption_refit_2026-09-08.md)
+Latest September 8 continuation: [coarse JXL intervention screen](benchmarks/zensim_coarse_interventions_2026-09-08.md)
+finishes native PNG IO and whole-transform 4×4 grouping in the existing codec
+instrument. Coarse / ±20% gives expected D direction in 244/256 probes at 256
+and 245/256 at 512; independent judges mostly agree. Map mass predicts response
+much better, but density versus gain per byte remains weak/negative in some
+cells. Area and amplitude both changed, so their separate effects are not
+identified. **No matched-RD win or model qualification.** All 272 historical
+transform outputs are byte/pixel/score/map-exact under native IO, and 816 final
+probes plus 1,632 judge values reproduce. Thirty-one analyzer and eleven CLI
+refusals pass; final/local CI-closure checks pass. All evidence is retained at
+`/mnt/v/output/zensim/jxl-coarse-interventions-2026-09-08/`.
+Next spatial work: preregister an actual coarse allocation policy in the same
+owner and test matched quality/bytes before separate-family 1/2/3-shot targeting.
+Do not repeat the completed intervention screens or treat oracle-probe cost as
+runtime cost. The corruption refit EXR question below is still unanswered.
+
+Previous September 8 continuation: [canonical refit preparation](benchmarks/canonical_corruption_refit_2026-09-08.md)
 adds native content admission and a trainer mode that exports and evaluates the
 same single fit. All 12 training origins have zero strict flags against 182 SDR
 holdout reference entries; four looser matches were reviewed as distinct content.

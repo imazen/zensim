@@ -527,7 +527,6 @@ def interventions_main():
     import json
     from pathlib import Path
     import numpy as np
-    from PIL import Image
     from scipy.stats import spearmanr
 
     ap = argparse.ArgumentParser()
@@ -537,7 +536,17 @@ def interventions_main():
         raise SystemExit("intervention validation requires Python assertions enabled")
     inp = json.loads((root / "INPUTS.json").read_text())
     done = json.loads((root / "COMPLETE.json").read_text())
-    assert inp["schema"] == "native-jxl-interventions-v1"
+    assert inp["schema"] in ("native-jxl-interventions-v1", "native-jxl-interventions-v2")
+    native_png = inp["schema"] == "native-jxl-interventions-v2"
+    coarse = native_png and inp["region_mode"] == "coarse4"
+    factors = [("up",1.2),("down",0.8)] if coarse else [("up",1.1),("down",0.9)]
+    if native_png:
+        assert inp["png_io"] == "zenpng-0.1.4-packed-opaque-rgb8-v1"
+        assert inp["region_mode"] in ("transform", "coarse4")
+        assert np.allclose(inp["raw_q_factors"], [factors[1][1], factors[0][1]], rtol=0, atol=1e-6)
+    else:
+        # Historical v1 artifacts only. New runs never use foreign image IO.
+        from PIL import Image
     assert inp["model_sha256"] == "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6"
     rows = [json.loads(line) for line in (root / "measurements.jsonl").read_text().splitlines()]
     assert len(rows) == done["full_encodes"] == done["independent_decodes"] == done["ordinary_scalar_pixel_comparisons"]
@@ -565,8 +574,14 @@ def interventions_main():
         width, height = row["width"], row["height"]
         rgb = (cell / f"{name}.rgb8").read_bytes()
         assert len(rgb) == width * height * 3 and sha(rgb) == work["decoded_sha256"]
-        with Image.open(cell / f"{name}.png") as im:
-            assert im.mode == "RGB" and im.size == (width, height) and im.tobytes() == rgb
+        if native_png:
+            assert sha((cell / f"{name}.png").read_bytes()) == work["png_sha256"]
+            assert work["png_readback_rgb_sha256"] == sha(rgb)
+            assert work["png_roundtrip_decodes"] == 1
+            assert math.isfinite(work["png_roundtrip_seconds"]) and work["png_roundtrip_seconds"] >= 0
+        else:
+            with Image.open(cell / f"{name}.png") as im:
+                assert im.mode == "RGB" and im.size == (width, height) and im.tobytes() == rgb
         encoded = (cell / f"{name}.jxl").read_bytes()
         assert len(encoded) == work["bytes"] and sha(encoded) == work["encoded_sha256"]
         for field, suffix, cache in [("requested_q_sha256", "requested-q.u8", requested),
@@ -589,6 +604,17 @@ def interventions_main():
     completion = {(v["origin"], v["distance"]): v for v in done["cells"]}
     assert len(completion) == 8
     assert done["internal_reconstructions"] == 0
+    if native_png:
+        assert done["source_png_decodes"] == 4 and done["png_roundtrip_decodes"] == len(rows)
+        for origin, source in sources.items():
+            record = json.loads((root/f"source-{origin}.json").read_text())
+            assert record["source"] == source and record["source_decodes"] == 1
+            rgb = (root/f"source-{origin}.rgb8").read_bytes()
+            assert sha(rgb) == record["decoded_sha256"]
+            assert len(rgb) == record["width"] * record["height"] * 3
+            assert all((r["width"],r["height"]) == (record["width"],record["height"])
+                       for r in rows if r["origin"] == origin)
+            assert math.isfinite(record["source_decode_seconds"]) and record["source_decode_seconds"] >= 0
     compatibility = json.loads((root / "COMPATIBILITY.json").read_text())
     assert compatibility["version_stdout"].startswith("djxl v0.12.")
     expected_compatibility = {(o, d, n) for o, d in groups
@@ -605,12 +631,22 @@ def interventions_main():
         o, d, n = identity
         decoded = root/"compatibility"/f"{o}-d{d:g}-{n}.png"
         assert record["decoded"] == str(decoded)
-        with Image.open(decoded) as im:
-            primary = pixels[identity]
-            assert im.mode == "RGB" and im.size == (primary.shape[1], primary.shape[0])
-            assert sha(im.tobytes()) == record["decoded_sha256"]
-            difference = int(np.max(np.abs(np.array(im).astype(int) - primary.astype(int))))
-            assert difference == record["primary_max_abs_rgb8_difference"]
+        primary = pixels[identity]
+        if native_png:
+            assert done["compatibility_png_decodes"] == 2*len(expected_compatibility)
+            assert record["native_png_decodes"] == 2
+            assert sha(decoded.read_bytes()) == record["png_sha256"]
+            raw = decoded.with_suffix(".rgb8").read_bytes()
+            assert len(raw) == primary.size and sha(raw) == record["decoded_sha256"]
+            assert (record["width"],record["height"]) == (primary.shape[1],primary.shape[0])
+            independent = np.frombuffer(raw,dtype=np.uint8).reshape(primary.shape)
+        else:
+            with Image.open(decoded) as im:
+                assert im.mode == "RGB" and im.size == (primary.shape[1], primary.shape[0])
+                assert sha(im.tobytes()) == record["decoded_sha256"]
+                independent = np.array(im)
+        difference = int(np.max(np.abs(independent.astype(int) - primary.astype(int))))
+        assert difference == record["primary_max_abs_rgb8_difference"]
     with (root / "judge_pairs.tsv").open() as f:
         pairs = list(csv.DictReader(f, delimiter="\t"))
     assert len(pairs) == len(expected_pairs) and len({p["dist_path"] for p in pairs}) == len(pairs)
@@ -655,21 +691,42 @@ def interventions_main():
             assert abs(region["map_density"] * region["area"] - region["map_mass"]) < 1e-10
             covered_image[y0:y1, x0:x1] += 1
         assert np.all(covered_image == 1)
-        count = min(16, len(regions))
-        indices = [i*(len(regions)-1)//max(1,count-1) for i in range(count)]
+        transforms = regions
+        if coarse:
+            regions = json.loads((cell/"allocation_regions.json").read_text())
+            expected = defaultdict(list)
+            by = (height+7)//8
+            for i,r in enumerate(transforms):
+                expected[(4*r["y"]//by)*4+4*r["x"]//bx].append(i)
+            assert len(regions) == len(expected)
+            for region,(grid_cell,members) in zip(regions,sorted(expected.items())):
+                assert region["grid_cell"] == grid_cell and region["transform_indices"] == members
+                assert region["area"] == sum(transforms[i]["area"] for i in members)
+                assert abs(region["map_mass"]-sum(transforms[i]["map_mass"] for i in members)) < 1e-10
+                assert abs(region["map_density"]*region["area"]-region["map_mass"]) < 1e-10
+            count = len(regions)
+            indices = list(range(count))
+        else:
+            count = min(16, len(regions))
+            indices = [i*(len(regions)-1)//max(1,count-1) for i in range(count)]
         assert completion[key]["sampled_regions"] == count
         assert set(by_name) == {"baseline", "neutral"} | {f"r{i}-{side}" for i in indices for side in ["up", "down"]}
         central, cell_samples = [], []
         baseline_id = (*key, "baseline")
         for index in indices:
             region = regions[index]
-            covered = {y*bx+x for y in range(region["y"], region["y"]+region["blocks_y"])
-                       for x in range(region["x"], region["x"]+region["blocks_x"])}
+            members = [transforms[i] for i in region["transform_indices"]] if coarse else [region]
+            covered = {y*bx+x for r in members for y in range(r["y"],r["y"]+r["blocks_y"])
+                       for x in range(r["x"],r["x"]+r["blocks_x"])}
             mask = np.array([i in covered for i in range(len(actual[baseline_id]))])
-            x0, y0 = region["x"]*8, region["y"]*8
-            x1, y1 = min(width,x0+region["blocks_x"]*8), min(height,y0+region["blocks_y"]*8)
+            pixel_mask = np.zeros((height,width),dtype=bool)
+            for r in members:
+                x0,y0 = r["x"]*8,r["y"]*8
+                x1,y1 = min(width,x0+r["blocks_x"]*8),min(height,y0+r["blocks_y"]*8)
+                pixel_mask[y0:y1,x0:x1] = True
+            assert int(pixel_mask.sum()) == region["area"]
             pair = {}
-            for side, factor in [("up",1.1),("down",0.9)]:
+            for side, factor in factors:
                 name = f"r{index}-{side}"
                 row, identity = by_name[name], (*key, name)
                 work, intervention = row["work"], row["intervention"]
@@ -680,6 +737,12 @@ def interventions_main():
                 assert np.array_equal(requested[identity][~mask], requested[baseline_id][~mask])
                 delta = requested[identity].astype(int) - requested[baseline_id].astype(int)
                 assert np.all(delta[mask] >= 0) if side == "up" else np.all(delta[mask] <= 0)
+                if native_png:
+                    old = requested[baseline_id].astype(int)
+                    wanted = np.floor(old.astype(np.float32)*np.float32(factor)+np.float32(0.5)).astype(int)
+                    wanted = np.maximum(wanted,old+1) if side == "up" else np.minimum(wanted,old-1)
+                    wanted = np.clip(wanted,1,255)
+                    assert np.array_equal(requested[identity][mask],wanted[mask])
                 changed = actual[identity] != actual[baseline_id]
                 assert intervention["changed_inside"] == int(np.sum(changed & mask))
                 assert intervention["changed_outside"] == int(np.sum(changed & ~mask))
@@ -689,7 +752,7 @@ def interventions_main():
                 assert abs(score_change-intervention["score_change"]) < 1e-5
                 assert work["bytes"]-base["work"]["bytes"] == intervention["byte_change"]
                 changed_pixels = np.any(pixels[identity] != pixels[baseline_id], axis=2)
-                inside = int(np.sum(changed_pixels[y0:y1,x0:x1]))
+                inside = int(np.sum(changed_pixels & pixel_mask))
                 path, baseline_path = str(cell/f"{name}.png"), str(cell/"baseline.png")
                 sample = {"origin":key[0],"distance":key[1],"region_index":index,"side":side,
                     **intervention,"native_score_delta":score_change,"byte_delta":intervention["byte_change"],
@@ -729,7 +792,7 @@ def interventions_main():
         summary["central_differences"] = central
         results.append(summary)
         samples.extend(cell_samples)
-    result = {"schema":"native-jxl-interventions-analysis-v1","inputs":inp,"work":done,
+    result = {"schema":"native-jxl-interventions-analysis-v2" if native_png else "native-jxl-interventions-analysis-v1","inputs":inp,"work":done,
         "compatibility":compatibility,
         "judge_pairs_per_metric":len(rows),"verified_neutral_cells":len(groups),
         "cells":results,"interventions":samples,

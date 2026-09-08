@@ -3684,3 +3684,17 @@ The trainer's canonical mode evaluates its exact exported single fit through
 Rust and refuses fitting without complete admission. Numeric-fixture export
 parity passes, but **no canonical image-data candidate has been fit**. See the
 [preparation record](../benchmarks/canonical_corruption_refit_2026-09-08.md).
+
+
+## 2026-09-08 — native PNG and coarse JXL intervention evidence
+
+**STANDS, training-family mechanism screen only.** The same four canonical
+training origins and their existing 256/512 variants are used without a fit
+or new corpus split. The JXL instrument now has native PNG IO; all 272 previous
+transform outputs reproduce byte/pixel/q/score/map-exactly. Coarse whole-transform
+unions with ±20% raw-q changes yield expected D direction in 244/256 and 245/256
+probes, but gain-per-byte prediction remains uneven. Area and amplitude change
+together; no matched-RD or qualification claim. Source/PNG hashes, whole-transform
+coverage, complete independent judges, final-code reproduction and negative
+controls are retained in the [screen record](../benchmarks/zensim_coarse_interventions_2026-09-08.md).
+The separate canonical corruption refit remains unfitted pending EXR admission.
