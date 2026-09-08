@@ -14,6 +14,7 @@ objectives. B/C/D can be replaced; good rank alone is not product readiness.
 | Feature definitions / read-set planning | `zensim::feature_defs`, `feature_set_id`, `Plan::for_bake` | Actual consumed IDs versus canonical extraction; era, SIMD, geometry and feature-build checks |
 | New candidate inference | `zensim::BakeScorer` | Complete heads/splines/composition; cached-row and pixel/HDR parity |
 | Named-profile inference | `zensim::Zensim` | Profile/bake identity and supported pixel contract |
+| Spatial attribution / rectangle queries | `zensim/src/attribution.rs`, retained extraction in `feature_v2` | Signed score-unit density, covered integrands, scalar/feature parity, binned and stale-session contracts; bind candidate sensitivities to complete `BakeScorer` composition |
 | MLP training / capability admission | `zensim_mlp_train`, `mlp_train::capabilities` | Explicit recipe, table declarations, source-disjoint selection, reproducible random streams |
 | Transform selection | Trainer `--auto-transforms` | Declared score/method, top-N and parameter bounds; preserve independent screen references |
 | Serialize / inspect ZNPR v3 | `zenpredict-bake` | Versioned metadata and final artifact hashes |
@@ -32,6 +33,12 @@ Python may invent a method or provide an independent reference. Introducing a
 model requires the complete Rust serving surface first; evaluation must execute
 that surface. Do not implement a second owner to bypass unsupported metadata.
 Inspect `../zenpapers` and later summaries before fundamental changes.
+
+Native controllers stay in their codec repositories. The
+[September 8 reuse audit](../benchmarks/diffmap_reuse_audit_2026-09-08.md)
+indexes the already implemented JXL attribution loop, JPEG research workspace,
+WebP segment loop and AVIF CQ attribution experiment, with later corrections
+and negative results. Check that record before proposing another implementation.
 
 ## A complete experiment
 

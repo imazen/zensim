@@ -95,6 +95,15 @@ binary, source/split and probe identities; mismatches must fail.
 
 ## Branch and implementation audit
 
+Later September 8 correction: the [fleet and attribution reuse audit](../benchmarks/diffmap_reuse_audit_2026-09-08.md)
+extends this initial inventory. JXL already has fused/binned/stale attribution
+and H3 steering. JPEG's `zenjpeg--zensim-diffmap-rd` is a `jj` workspace at
+`46a6ff30`, absent from a Git-only worktree listing and not merged into main.
+AVIF's later `examples/zensim_cq_rd.rs` already implements folded-944/H3,
+split-role maps and a hint-engagement probe; its August 7 report contains
+August 29 negative results and must be read through its final sections.
+The missing candidate surface must extend these owners, not recreate them.
+
 Remote refs were refreshed September 8 without changing sibling checkouts.
 The exact inventory and local dirty-state records are retained in the private
 target-audit directory. Main branches were newer than several local HEADs.
