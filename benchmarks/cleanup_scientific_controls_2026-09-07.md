@@ -54,3 +54,16 @@ measurements remain missing qualification evidence.
 The operative cleanup plan's noninferiority/product gates still apply. These
 experiments may close a hypothesis with a negative result; they cannot turn a
 failed or unmeasured gate into a qualified model.
+
+### Concrete target-loop inputs (registered before loop execution)
+
+Use CID22 gold original PNGs `1025469.png`, `1044329.png`, `1189261.png`
+(the first three 512-square references by pixel count/name) and
+`adriankierman-report-page.png` (text/graphics coverage). No resizing. These
+filenames are absent from both CID22's 201-reference training table and the
+bigcodec training table. This is a four-reference diagnostic, not a powered
+content-wide comparison. Compare current B, D and H_anchorlad seed 4004 at
+JPEG/WebP/AVIF, targets -10/30/70/90/99, tolerance 1, budgets 3 and 8. The
+current target adapters fix their other encoder settings; pin the complete
+binary/dependency identities. Use SSIMULACRA2, Butteraugli pnorm3 and fixed B
+as independent judges. No recipe/target adaptation follows these results.
