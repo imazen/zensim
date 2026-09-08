@@ -112,3 +112,10 @@ not a complete composed-model map surface. Do not describe old per-bake
 gradient mounting as support for every multi-head/ensemble/corruption model.
 That serving gap must be closed and parity-tested before those candidates can
 qualify in native map loops. Keep this distinct from the scalar baseline.
+
+First execution and remaining native integration details:
+[September 8 measurement record](../benchmarks/target_steering_bounds_2026-09-08.md).
+The existing alternate JXL `zensim_backend.rs` bridge also clamps
+`100 - score` to 0..100; the dedicated `zensim_loop.rs` uses another loss
+conversion. Audit the actual selected route before claiming negative-target
+support. The generic scalar controller measured here never clamps scores.

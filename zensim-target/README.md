@@ -199,7 +199,7 @@ reproduction. Sources must be opaque RGB8/RGBA8 sRGB PNGs; the example uses the
 Imazen PNG decoder. JPEG and PNG adapters now also use Imazen decoders. This
 changes the JPEG measurement instrument relative to its old foreign decoder.
 
-Missing inputs, unsupported builds and runtime errors fail; an unreachable
+Missing inputs, unsupported builds and runtime errors fail; an unmet
 target is retained as a measured `converged=false` result. Scoring samples
 exclude encoding/judges, and recorded VmHWM is cumulative process peak memory.
 Quiet, repeated runs are needed for performance claims. Raw measurements do not

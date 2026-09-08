@@ -35,11 +35,16 @@ family delta.
   `07f1e35874a5f3b253d8ac26ac4c9045afd2d4a12a413a0392ae7df968d20a3e`.
   This exact by-ID artifact is the identity; do not substitute another H file.
   `ZENSIM_FORMULA_REV=1`; `RAYON_NUM_THREADS=8`.
-- Frozen release instrument SHA256
+- Initial frozen release instrument SHA256
   `d7384c255e691e484c5f93afe6efb0f2d2280a24aa1f57fd7e1e9bcb9c0cd720`.
   Source and dependency heads, lockfile and binary are preserved with the run.
-  Later changes are Clippy control-flow/type-alias cleanup and analyzer/docs;
-  the frozen binary remains the reproduction authority.
+  Final code at `ddb0d9d170fa14394f5e9555c48c597ec89931f3` was rebuilt after
+  Clippy cleanup: SHA256
+  `296e4b189520e91f2f7f612b713c1a3a4cbb63a77ef24cdcc55f1c116c60778e`.
+  Re-fitting and re-evaluating that binary reproduces all 9 calibration
+  curves, 72 bound cells and 2,730 steering cells **exactly**, excluding
+  timing and process RSS. Every encoded/reconstructed hash, score, judge,
+  seed and pass count matches. `REPRODUCTION_FINAL.json` records the check.
 
 ## What was actually measured
 
@@ -104,7 +109,8 @@ No universal perceptual tolerance has been established; ±1 is an explicit
 instrument stopping band, and ±0.5/±1/±2 hit rates are descriptive.
 
 Calibration ran in 6 seconds; validation including bound sweeps, verification
-and independent judges ran in 67 seconds. Process peak RSS was about 40 MiB
+and independent judges ran in 67 seconds (69 on final-code reproduction).
+Process peak RSS was about 40 MiB
 under the capped runner. These are single-run operating observations at small
 geometry, not quiet/repeated production performance claims. Per-cell timings
 and separate oracle/verification costs are in the raw rows.
@@ -155,7 +161,10 @@ No metric/training implementation changed or model default was promoted.
 Full artifacts: `/mnt/v/output/zensim/target-steering-2026-09-08/`.
 `SOURCE_PROVENANCE.json`, `BUILD.json`, `canonical/`, `train.json`,
 `validate.json`, both dHash TSVs, `bin/`, `calibration/` and `validation/`
-retain identities and results. `COMPLETE` is written only after every requested
+retain initial identities and results. `BUILD_FINAL.json`, `SOURCE_FINAL.json`,
+`bin-final/`, `calibration-final/`, `validation-final/` and
+`REPRODUCTION_FINAL.json` bind the final-code reproduction; the linked
+structured summary is from that run. `COMPLETE` is written only after every requested
 cell succeeds. Use the frozen binary and exact arguments from INPUTS/BUILD;
 the README documents the same two-stage fit/evaluate commands. The final
 manifest binds all artifacts by SHA256.

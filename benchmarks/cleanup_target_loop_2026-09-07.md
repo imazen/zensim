@@ -1,5 +1,12 @@
 # Actual target-loop validation — September 7, 2026
 
+**September 8 interpretation correction:** these measurements mix feasible
+and unwitnessed requests. Their aggregate error screen does not establish a
+model's targeting failure. The [replacement protocol and experiment](target_steering_bounds_2026-09-08.md)
+measure bounds first and evaluate 1/2/3-shot train-calibrated policies only on
+witnessed targets. Raw September 7 observations below remain unchanged;
+the legacy median <=2 bar is not a validated perceptual product tolerance.
+
 **360/360 registered cells completed**: four original 512×512 PNGs, JPEG/WebP/
 AVIF, B/D/H-control seed 4004, targets −10/30/70/90/99, tolerance 1, budgets
 3 and 8. Registration `ab14a6787361`; instrument `898ac8589a43`.

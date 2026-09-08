@@ -1,6 +1,6 @@
 # Develop, train and evaluate zensim
 
-Current owner map and workflow, September 7, 2026. Start from
+Current owner map and workflow, September 8, 2026. Start from
 [SESSION-RESUME](../SESSION-RESUME.md). The product is one target score with
 useful quality across codecs/content and affordable encoding loops. Read
 [CODEC_TARGET_METRIC](CODEC_TARGET_METRIC.md) and
