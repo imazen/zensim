@@ -1664,13 +1664,7 @@ pub enum V1FreeExtras {
 /// that append cell, so its slots are structural zeros on BOTH sides and
 /// including them would make a parity gate weaker, not stronger.
 ///
-/// Promoted from a test-only helper (`free_slot_indices`, formerly
-/// `#[cfg(feature = "training")]` inside `mod tests`) so
-/// [`ComputeSet::from_block_profile`] can reuse the SAME derivation a wide
-/// bake's free-extras eligibility is checked against, rather than a second
-/// hand-maintained copy of this arithmetic (`fold_engine::wide_bake_v2_read`
-/// calls this via `crate::feature_v2::free_slot_indices`). The gate tests in
-/// `mod tests` (`free_extras_*`) call this exact function — no shadow copy.
+/// Shared by the registered feature definitions and free-accumulator gates.
 pub(crate) fn free_slot_indices(n_scales: usize) -> Vec<usize> {
     // v1 (31/ch/scale) ++ v2 (29) ++ append (17) ++ append2 (5/scale).
     let append0 = n_scales * 3 * (31 + FEATURES_PER_CHANNEL_V2_TOTAL);
@@ -1704,7 +1698,7 @@ pub(crate) fn free_slot_indices(n_scales: usize) -> Vec<usize> {
 /// error slots at the Y channel only.
 ///
 /// Same contract as [`free_slot_indices`] — ONE derivation, reused by the
-/// gate tests and by [`crate::fold_engine::wide_bake_v2_read`], never
+/// gate tests and by [`crate::feature_plan::Plan::for_bake`], never
 /// re-typed as a literal list.
 pub(crate) fn class_c_slot_indices(n_scales: usize) -> Vec<usize> {
     let v1_total = n_scales * 3 * 31;
@@ -1896,10 +1890,7 @@ struct ScratchV2Strip {
 ///    *exactly nothing* to the 944 MLPs (they read those slots with zero
 ///    weight) and 0.399 CID22 to `B`. So the right shipping form is neither
 ///    "drop" nor "keep" but **"let the request say"**, computed from the
-///    model's own block profile rather than hand-set per call site. That
-///    constructor (`from_block_profile`) is the next step and is deliberately
-///    NOT added here — it needs a `zenpredict::Model`, i.e. a decision about
-///    which crate owns the derivation.
+///    model's declared read IDs through `Plan::for_bake`.
 /// 2. **HDR toggles.** The HDR append is a future regime whose blocks extend
 ///    this struct **append-only**, exactly as the feature numbering does. The
 ///    HDR front end already flows into the walk (`FrontEnd::Hdr` selects the
@@ -1908,9 +1899,8 @@ struct ScratchV2Strip {
 ///
 /// **Public surface: none yet, deliberately.** `V2NewFeatureToggles` stays the
 /// public request type and is unchanged; this is `pub(crate)` and derived from
-/// it. Promoting it (and `from_block_profile`) is an API change and is listed
-/// for approval in `benchmarks/era2_perf_break_2026-08-31.md` §26 rather than
-/// taken unilaterally.
+/// it. Serving uses the internal feature planner; callers keep their existing
+/// public extraction APIs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ComputeSet {
     /// The formula revision this request computes — see
@@ -2077,128 +2067,6 @@ impl ComputeSet {
             && matches!(self.v1_pools, V1PoolsMode::Full | V1PoolsMode::Peaks)
     }
 
-    /// Derive the minimal compute set a bake structurally needs, from its own
-    /// declared layer-0 read pattern — item E's shipping form
-    /// (`benchmarks/era2_perf_break_2026-08-31.md` §26,
-    /// `benchmarks/era2_fast_profile_subset_2026-08-31.md` §4-5): read the
-    /// model's own block profile — the same one `zensim-validate`'s
-    /// `bake_block_profile` reports — and switch off any family it reads
-    /// with zero weight, rather than hand-setting a toggle per call site.
-    ///
-    /// `pub(crate)`, per the recorded decision
-    /// (era2_perf_break_2026-08-31.md §26.1 / era2_fast_profile_subset
-    /// §4: "No new public type, no new public entry point"): the cheapest
-    /// shipping form needs no new public surface at all, so this stays
-    /// internal — reached from entry points that already hold a model
-    /// handle (today: [`crate::Zensim::new`]'s per-profile engine defaults
-    /// for [`crate::profile::ZensimProfile::D`]).
-    ///
-    /// A bake whose declared CALLER width fits within the v1 372-feature
-    /// layout (`[0,156) basic · [156,228) peaks · [228,300) masked ·
-    /// [300,372) IW`) cannot read any v2-era block by construction — there
-    /// is no such column for it to read — so `v2_blocks` and every field
-    /// under it come back `false` exactly, with zero risk of
-    /// under-reporting. Within that layout, `v1_pools` is derived the same
-    /// way [`crate::fold_engine::score_pool_mode`] derives it for a single
-    /// bake, via the shared [`crate::fold_engine::bake_pool_need_from_model`]
-    /// and [`crate::fold_engine::pools_mode_for_need`] together — one
-    /// policy, two call sites, never duplicated.
-    ///
-    /// A bake WIDER than the v1 layout (a folded-720/944/append model) is
-    /// checked against exactly ONE more thing before falling back:
-    /// [`crate::fold_engine::wide_bake_v2_read`] — does it read anything
-    /// beyond `v1_total` that ISN'T one of the 40
-    /// [`V1FreeExtras::RawMoments`] slots (`GLOBAL_*`/`LUMA_MEAN_REF`) a
-    /// v1-only walk can finalize for free? A 944-wide `--keep-features`
-    /// bake whose live columns sit entirely inside basic+peaks+the free 40
-    /// (the free-set training arms, `benchmarks/free_features_2026-09-01.md`)
-    /// gets the CHEAP set here — `v2_blocks` false, `free_extras` set only
-    /// if it actually reads one of the 40. Anything that reads genuine
-    /// v2-348/append/append2/csfw content gets the safe "everything is
-    /// needed" fallback — the same shape
-    /// [`crate::fold_engine::bake_pool_need_from_model`] uses for a bake it
-    /// cannot analyse ([`V1PoolNeed::ALL`]) — so a caller that hands this
-    /// function a wide model with real v2-era reads degrades to computing
-    /// everything rather than silently under-computing. Before this check
-    /// existed, EVERY wide bake — including the free-set arms this fallback
-    /// was named for — took this path, which was correct but paid the full
-    /// 944 walk for a bake reading 40 or fewer of its 572 non-v1 columns.
-    ///
-    /// Not yet a runtime call site (see the "smallest fix" trade recorded in
-    /// `era2_fast_profile_subset_2026-08-31.md` §5: [`Self::from_toggles`]'s
-    /// `V1PoolsMode`-only plumbing already reaches `ZensimProfile::D` through
-    /// the tested, CACHED [`crate::fold_engine::score_pool_mode`] path, and
-    /// swapping that for a per-call uncached parse through this function
-    /// would regress the exact hot path this exists to speed up) — exercised
-    /// today by the cross-check tests that gate it against
-    /// `bake_block_profile`'s independently-reported numbers, hence `test`
-    /// rather than a blanket allow.
-    pub(crate) fn from_block_profile(model: &crate::mlp::Model) -> Self {
-        // The v1-layout total: `num_scales * 3 channels *
-        // (extended-per-channel + IW-per-channel)` = 4*3*(25+6) = 372. Named
-        // via the same constants `fold_engine::v1_feature_width` composes,
-        // rather than a bare `372` magic number.
-        let v1_total = crate::NUM_SCALES
-            * 3
-            * (crate::metric::FEATURES_PER_CHANNEL_EXTENDED
-                + crate::metric::FEATURES_PER_CHANNEL_IW);
-        let everything = Self {
-            formula_revision: bake_formula_revision(model),
-            v1_basic: true,
-            v1_pools: V1PoolsMode::Full,
-            v2_blocks: true,
-            gradient: true,
-            blockiness: true,
-            transducer_bank: true,
-            transducers_luma_only: false,
-            append: true,
-            append2: true,
-            append2_dst_activity: true,
-            csfw: true,
-            free_extras: V1FreeExtras::Off,
-        };
-        // v1_pools is independent of the wide/narrow question below — a
-        // wide bake's [156,372) reads are checked the SAME way a narrow
-        // bake's are, via the same shared, tested derivation.
-        let need = crate::fold_engine::bake_pool_need_from_model(model);
-        let v1_pools = crate::fold_engine::pools_mode_for_need(need);
-        if model.caller_input_width() <= v1_total {
-            return Self {
-                formula_revision: bake_formula_revision(model),
-                v1_basic: true,
-                v1_pools,
-                v2_blocks: false,
-                gradient: false,
-                blockiness: false,
-                transducer_bank: false,
-                transducers_luma_only: false,
-                append: false,
-                append2: false,
-                append2_dst_activity: false,
-                csfw: false,
-                free_extras: V1FreeExtras::Off,
-            };
-        }
-        match crate::fold_engine::wide_bake_v2_read(model, v1_total) {
-            None => everything,
-            Some(free_extras) => Self {
-                formula_revision: bake_formula_revision(model),
-                v1_basic: true,
-                v1_pools,
-                v2_blocks: false,
-                gradient: false,
-                blockiness: false,
-                transducer_bank: false,
-                transducers_luma_only: false,
-                append: false,
-                append2: false,
-                append2_dst_activity: false,
-                csfw: false,
-                free_extras,
-            },
-        }
-    }
-
     /// The COMPUTE half of this request's **feature-set id**
     /// (`docs/FEATURE_SET_IDS.md` §2.1) — which registered slot families this
     /// walk actually populates.
@@ -2255,7 +2123,7 @@ impl ComputeSet {
     /// Block bounds are composed from the same named constants the emit sites
     /// use, never re-typed as literals; the two scattered tranches come from
     /// [`free_slot_indices`] / [`class_c_slot_indices`], the SAME derivations
-    /// `fold_engine::wide_bake_v2_read` checks a bake against.
+    /// `Plan::for_bake` checks a bake against.
     pub(crate) fn populated_slots(
         &self,
         n_scales: usize,
@@ -13829,20 +13697,20 @@ pub(crate) mod tests {
 
     /// **The safety gate `era2_fast_profile_subset_2026-08-31.md` §5 item 2
     /// asks for**: the derivation must never drop a family the model
-    /// actually reads. Cross-checks [`ComputeSet::from_block_profile`]
+    /// actually reads. Cross-checks [`crate::feature_plan::Plan::for_bake`]
     /// against the independently-derived, already-tested
     /// [`crate::fold_engine::score_pool_mode`] on shipped `B` — same bake,
     /// two derivations, must agree bit-for-bit on `v1_pools`, and `B` must
     /// resolve to `Full` (it reads the whole pool block, so nothing is safe
     /// to skip).
     #[test]
-    fn from_block_profile_matches_score_pool_mode_on_shipped_b() {
+    fn bake_plan_matches_score_pool_mode_on_shipped_b() {
         use crate::profile::ZensimProfile;
         let params = ZensimProfile::B.params();
         let bytes: Vec<&'static [u8]> = params.scoring_bake_bytes().collect();
         assert_eq!(bytes.len(), 1, "B forwards exactly one bake");
         let model = crate::mlp::Model::from_bytes(bytes[0]).expect("shipped B bake parses");
-        let cs = ComputeSet::from_block_profile(&model);
+        let cs = crate::feature_plan::Plan::for_bake(&model).unwrap().compute;
         assert_eq!(
             cs.v1_pools,
             V1PoolsMode::Full,
@@ -13854,7 +13722,7 @@ pub(crate) mod tests {
         let want = crate::fold_engine::score_pool_mode(params, &config, true);
         assert_eq!(
             cs.v1_pools, want,
-            "from_block_profile disagrees with the tested score_pool_mode path"
+            "bake plan disagrees with the tested score_pool_mode path"
         );
     }
 
@@ -13866,7 +13734,7 @@ pub(crate) mod tests {
     /// coverage for 944 bakes lives in the block-profile tooling, not here).
     #[cfg(feature = "candidate-profiles")]
     #[test]
-    fn from_block_profile_falls_back_to_everything_on_a_wide_bake() {
+    fn bake_plan_covers_c_without_unused_pools_or_activity_variant() {
         use crate::profile::ZensimProfile;
         let params = ZensimProfile::C.params();
         let bytes: Vec<&'static [u8]> = params.scoring_bake_bytes().collect();
@@ -13876,13 +13744,14 @@ pub(crate) mod tests {
             model.caller_input_width() > 372,
             "fixture must actually be wider than the v1 layout to exercise the fallback"
         );
-        let cs = ComputeSet::from_block_profile(&model);
+        let cs = crate::feature_plan::Plan::for_bake(&model).unwrap().compute;
         assert!(
             cs.v2_blocks,
             "a wide, unanalysed bake must fall back to computing everything"
         );
-        assert_eq!(cs.v1_pools, V1PoolsMode::Full);
-        assert!(cs.append && cs.append2 && cs.gradient && cs.blockiness && cs.csfw);
+        assert_eq!(cs.v1_pools, V1PoolsMode::Peaks);
+        assert!(cs.append && cs.append2 && cs.gradient && cs.blockiness);
+        assert!(!cs.csfw && !cs.append2_dst_activity);
     }
 
     // ---------------------------------------------------------------- //
@@ -14038,7 +13907,7 @@ pub(crate) mod tests {
     /// v2-era block.
     #[cfg(feature = "candidate-profiles")]
     #[test]
-    fn from_block_profile_derives_the_156_set_for_profile_d() {
+    fn bake_plan_derives_the_156_set_for_profile_d() {
         use crate::profile::ZensimProfile;
         let params = ZensimProfile::D.params();
         let bytes: Vec<&'static [u8]> = params.scoring_bake_bytes().collect();
@@ -14055,7 +13924,7 @@ pub(crate) mod tests {
             28,
             "ADD156 declares the 28 basic ids it reads"
         );
-        let cs = ComputeSet::from_block_profile(&model);
+        let cs = crate::feature_plan::Plan::for_bake(&model).unwrap().compute;
         assert_eq!(
             cs.v1_pools,
             V1PoolsMode::Peaks,
@@ -14132,7 +14001,7 @@ pub(crate) mod tests {
     /// false, `free_extras: RawMoments` — not the "everything" fallback a
     /// bare `caller_input_width() > 372` check would give it.
     #[test]
-    fn from_block_profile_gives_a4b_class_free_set_bakes_the_cheap_set() {
+    fn bake_plan_gives_a4b_class_free_set_bakes_the_cheap_set() {
         let free = free_slot_indices(crate::NUM_SCALES);
         assert!(free.len() >= 2, "need at least two free slots to pick from");
         let nonzero = [5usize, 200, free[0], free[10.min(free.len() - 1)]];
@@ -14140,7 +14009,7 @@ pub(crate) mod tests {
         let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
         assert_eq!(model.caller_input_width(), 944);
 
-        let cs = ComputeSet::from_block_profile(&model);
+        let cs = crate::feature_plan::Plan::for_bake(&model).unwrap().compute;
         assert!(
             !cs.v2_blocks
                 && !cs.gradient
@@ -14168,10 +14037,10 @@ pub(crate) mod tests {
     /// come back `Off`: requesting `RawMoments` for a bake that never
     /// reads it would cost cycles for nothing.
     #[test]
-    fn from_block_profile_leaves_free_extras_off_when_unread() {
+    fn bake_plan_leaves_free_extras_off_when_unread() {
         let bytes = wide_free_set_bake_bytes(&[5, 200]);
         let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
-        let cs = ComputeSet::from_block_profile(&model);
+        let cs = crate::feature_plan::Plan::for_bake(&model).unwrap().compute;
         assert!(!cs.v2_blocks);
         assert_eq!(cs.free_extras, V1FreeExtras::Off);
     }
@@ -14183,7 +14052,7 @@ pub(crate) mod tests {
     /// `era2_fast_profile_subset_2026-08-31.md` §5 asks for: the cheap-set
     /// carve-out must never fire on a bake it can't fully account for.
     #[test]
-    fn from_block_profile_falls_back_on_a_non_free_append_read() {
+    fn bake_plan_computes_a_non_free_append_read() {
         let free = free_slot_indices(crate::NUM_SCALES);
         let non_free_append = 720 + idx_append::XMASK_TRANSDUCER; // = 720
         assert!(
@@ -14192,15 +14061,14 @@ pub(crate) mod tests {
         );
         let bytes = wide_free_set_bake_bytes(&[5, 200, non_free_append]);
         let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
-        let cs = ComputeSet::from_block_profile(&model);
+        let cs = crate::feature_plan::Plan::for_bake(&model).unwrap().compute;
         assert!(
             cs.v2_blocks
                 && cs.append
                 && cs.append2
                 && cs.gradient
                 && cs.blockiness
-                && cs.transducer_bank
-                && cs.csfw,
+                && cs.transducer_bank,
             "a non-free append read must trigger the full fallback, got {cs:?}"
         );
     }
@@ -14208,10 +14076,10 @@ pub(crate) mod tests {
     /// Same, for a genuine v2-348 read (f372..720 — gradient/blockiness/
     /// transducer territory, no free slots live there at all).
     #[test]
-    fn from_block_profile_falls_back_on_a_v2_348_read() {
+    fn bake_plan_computes_a_v2_348_read() {
         let bytes = wide_free_set_bake_bytes(&[5, 200, 400]);
         let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
-        let cs = ComputeSet::from_block_profile(&model);
+        let cs = crate::feature_plan::Plan::for_bake(&model).unwrap().compute;
         assert!(cs.v2_blocks, "a v2-348 read must trigger the full fallback");
     }
 
@@ -14224,13 +14092,13 @@ pub(crate) mod tests {
     /// `V2NewFeatureToggles` built from each `ComputeSet` by hand, since
     /// `ComputeSet` itself has no public "run me" entry point yet.
     #[test]
-    fn from_block_profile_cheap_set_is_score_neutral_for_a4b_class_bakes() {
+    fn bake_plan_cheap_set_is_score_neutral_for_a4b_class_bakes() {
         use crate::source::RgbSlice;
         let free = free_slot_indices(crate::NUM_SCALES);
         let nonzero = [5usize, 200, free[0], free[10.min(free.len() - 1)]];
         let bytes = wide_free_set_bake_bytes(&nonzero);
         let model = crate::mlp::Model::from_bytes(&bytes).expect("synthetic bake parses");
-        let cs_cheap = ComputeSet::from_block_profile(&model);
+        let cs_cheap = crate::feature_plan::Plan::for_bake(&model).unwrap().compute;
         assert!(
             !cs_cheap.v2_blocks,
             "fixture must actually resolve to the cheap set"

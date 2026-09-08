@@ -33,7 +33,9 @@ include = [
     "weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin",
     "weights/bhdr_linear_shaped_cvvdpmix_byid_2026-09-06.bin",
     "weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin",
+    "weights/c_sdr_purity944_byid_2026-09-07.bin",
     "weights/c_sdr_purity944_2026-08-29.bin",
+    "weights/c_hdr_l1t1944_byid_2026-09-07.bin",
     "weights/c_hdr_l1t1944_2026-08-29.bin",
     # RETIRED pre-densify bytes: `include_bytes!`ed by the `cfg(test)` flip
     # gate, and by the `ProfileParams::builder` doctest. `cargo test` on a

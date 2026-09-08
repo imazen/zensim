@@ -115,13 +115,11 @@ pub enum ZensimProfile {
     /// [`ZensimProfile::B`] / [`ZensimProfile::A`].
     BHdr,
     /// **`C` — generation-C SDR profile (external name `zensim-c`), the
-    /// SOTA-944 campaign's wave-11 ship candidate.** A 944-input MLP
-    /// (folded-720+append+append2 feature regime) from the k=8-confirmed
-    /// corrected-mix recipe — the first shipped bake trained after the
-    /// KADID orientation fix and the first shipped **dead-column-pruned**
-    /// bake (caller width 944, internal layer-0 width 667 via
-    /// `FeatureTransform::Drop`; the runtime sizes feature vectors by
-    /// `Model::caller_input_width()`, never `n_inputs()`).
+    /// SOTA-944 campaign's wave-11 candidate. The September 7 dense bake
+    /// declares 667 feature IDs from the folded/append/append2 families.
+    /// It preserves the trained function; extraction uses the canonical
+    /// training activity variant. Earlier pixel scores used a different
+    /// BANDVIS variant; see `benchmarks/feature_plan_cleanup_2026-09-07.md`.
     ///
     /// Headline panel (bake_verdict `--regime 944`, committed verdict):
     /// CID22 0.8867, KonJND |0.4988|, LIVE 0.9604, CSIQ 0.9331, nonphoto
@@ -139,21 +137,13 @@ pub enum ZensimProfile {
     /// the CID22-val anchor domain (4.50% above-knot raw mass; near-top
     /// saturation — anchor-densification lever registered, untested).
     ///
-    /// **944-regime scoring contract.** `C` consumes the folded-944
-    /// feature layout, which the standard 372-feature
-    /// [`Zensim::compute`](crate::Zensim::compute) pipeline does not
-    /// produce — `compute` on a non-identical pair returns
-    /// [`ModelForwardFailed`](crate::ZensimError::ModelForwardFailed)
-    /// (byte-identical pairs still short-circuit to 100). Score `C` by
-    /// extracting folded-944 features and forwarding them, exactly as
-    /// the eval/loop tooling does:
-    /// `Zensim::compute_folded720_append2_features` (or the fused
-    /// `compute_folded944_score_and_attribution` session entry), both
-    /// behind the `feature-regime-v2` feature, then
-    /// [`crate::score_features_with_profile`]`(ZensimProfile::C, …)`.
-    /// **SDR content only** — `C` is structurally SDR (its HDR-gated
-    /// append2 slots are pruned); route HDR content to
-    /// [`Self::BHdr`] explicitly.
+    /// **Scoring contract.** [`Zensim::compute`](crate::Zensim::compute)
+    /// derives extraction from the bake's declared IDs. Cached identity-layout
+    /// rows can be scored with [`crate::score_features_with_profile`]. Both
+    /// paths execute the same head and calibration. The candidate profile
+    /// enables `feature-regime-v2` automatically.
+    /// **SDR content only** — callers select [`Self::CHdr`] or [`Self::BHdr`]
+    /// for HDR. Calling an HDR extractor does not validate an SDR model there.
     ///
     /// Full provenance, training data shas, exact reproduction chain
     /// and verification gates: `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`
@@ -164,29 +154,21 @@ pub enum ZensimProfile {
     /// FROZEN 2026-08-29.** Internal `HDR944_L1T1_s4005_hfpack`
     /// ("aurora-anchor"), the HDR-lane freeze battery winner (route-panel
     /// judged; records: `benchmarks/hdr944_retrain_wave_2026-08-28.md`
-    /// FREEZE EXECUTED). Same folded-944 scoring contract as [`Self::C`]
-    /// (944 caller width, HDR feature extraction via
-    /// `compute_folded720_append2_features_hdr` route-side); **HDR
+    /// FREEZE EXECUTED). The September 7 dense bake declares 697 IDs.
+    /// HDR feature extraction uses the same ID-derived plan; **HDR
     /// content only** — SDR content routes to [`Self::C`]. The
     /// BHdr-parallel candidate slot: [`Self::BHdr`] remains the shipped
     /// HDR default; `CHdr` is the candidate-of-record.
     #[cfg(feature = "candidate-profiles")]
     CHdr,
     /// **`D` — the FAST SDR profile (external name `zensim-d`).** A
-    /// basic-only 372-declared-width linear (single identity-activation
-    /// layer) bake — internal `ADD156` (`ens-safesyn-only-raw-lasso`, 28
-    /// nonzero coefficients over `f0..156`, id100+negrich dial,
-    /// 4,222 B, sha256 `921a8f67…`) — reads `f0..156` only (0 of the 216
-    /// `f156..372` peak/masked/IW pool slots), so a build with
-    /// `feature-regime-v2` can skip computing that block entirely: the
-    /// `156` compute set measured **2.54×/4.43×/3.52× faster than the full
-    /// 944-class walk at 1/8/16 threads, −21 % peak RSS**
-    /// (`benchmarks/era2_fast_profile_subset_2026-08-31.md` §1). `D` is
-    /// this profile's shipping form — the compute-set derivation
-    /// (`ComputeSet::from_block_profile`, internal) reads the bake's own
-    /// block profile and switches off the unread pool block automatically,
-    /// same mechanism [`Self::C`]'s 944 MLPs already use to skip it for
-    /// free.
+    /// linear bake with 28 declared feature IDs from the basic family.
+    /// The serving planner skips unread families and retains the Peaks
+    /// scratch policy, whose working set is smaller than raw Off mode.
+    /// Historical raw-extraction speed measurements in
+    /// `benchmarks/era2_fast_profile_subset_2026-08-31.md` are not timings of
+    /// today's complete scoring call. Current controls are recorded in
+    /// `benchmarks/feature_plan_cleanup_2026-09-07.md`.
     ///
     /// **Quality: within 0.019 CID22 of [`Self::B`]** (0.8634 vs 0.8821),
     /// and **beats `B` on within-image ranking on 6 of 8 canonical
@@ -445,10 +427,9 @@ impl ZensimProfile {
     /// with ~5-10pt cross-model per-pair scatter — a visible seam
     /// (measured 2026-07-04, benchmarks/provenance_best_results doc).
     /// `A`, `BHdr` and `C` are unrouted (A has one bake; BHdr is the
-    /// explicit HDR handle for callers who want no routing; `C` is
-    /// structurally SDR-only — on the PU path its 944-wide bake cannot
-    /// consume the 372-wide PU features, so scoring fails loud instead
-    /// of silently borrowing another generation's HDR weights).
+    /// explicit HDR handle for callers who want no routing). `C` is an SDR
+    /// model and does not route automatically; callers must select the
+    /// appropriate HDR profile explicitly.
     pub(crate) fn params_pu_linear(&self) -> &'static ProfileParams {
         match self {
             Self::B => &PROFILE_B_HDR,
@@ -1224,72 +1205,19 @@ static PROFILE_B_HDR: ProfileParams = ProfileParams {
     mlp_bytes_compression: None,
 };
 
-/// `ZensimProfile::C` bake bytes — internal `W10L9PH_s4004_packed`
-/// ("north-anchor", `c_sdr_purity944_2026-08-29.bin`, 149,343 B, sha256
-/// `61ebc4562c2c4f78663d2c4d7608e7560d77f519c9e18d84fb0555d5fbca5940`).
-/// FROZEN 2026-08-29 (user-directed Profile-C freeze, superseding the
-/// 2026-08-05 `W10L9_s4003_packed` bytes): the balance-campaign SDR
-/// candidate-of-record — sole full two-zone eligibility pass, 8/8
-/// floors, PERFECT identity (100.00 exact, 0/4817 dial-grid violations),
-/// best avif scalar-loop steering measured (k3 med |err| 0.180, 24/27).
-/// Records: `benchmarks/sdr_pure_retrain_wave_2026-08-28.md` (FREEZE
-/// EXECUTED) + `benchmarks/balance_campaign_2026-08-28.md`. Prior C
-/// provenance (superseded):
-/// The SOTA-944 wave-11 battery-selected cell: 944 → 128 → 1 MLP
-/// (f16 + zerobias-0.005, LeakyReLU), trained seed 4003 on the 10-group
-/// corrected mix (corrected `ext_kadid`, KonJND-BPG leg, teacher tables,
-/// `tkadis` dropped), dial-packaged (`bake_dial_refit add-spline` on
-/// `anchor944_dial.parquet`) then packed with dead-column pruning
-/// (944 caller lines → 667 internal; 277 all-class-1 drops, identity
-/// gate BIT-identical on 2,035 anchor rows). Carries its full
-/// `zentrain.repro` (input shas + seed + argv) embedded in the bake
-/// metadata. Selection: `freeze_check --select` over the k=8 family
-/// (7/8 floors, sel_comp 0.9579, M3a 0.8626 GOLD tie-break).
-/// Records: campaign appendix K (`benchmarks/sota944_campaign_2026-08-03.md`)
-/// and `docs/PROFILE_C_REPRODUCTION_2026-08-05.md`. The pinning test
-/// `profile_c_tests::weight_sha256_pinned` fails loud on any silent
-/// byte swap of this file.
-/// ⛔ **NOT DENSIFIED — a registered, PENDING USER DECISION, not an oversight.**
-///
-/// Increment 2A of the cruft purge converted `A`, `B`, `BHdr` and `D` to the
-/// dense feature-id contract with a bit-identical served score. `C` and `CHdr`
-/// were deliberately left on the wide 944 declaration with their 247-277
-/// [`zenpredict::FeatureTransform::Drop`] entries, because for THIS pair the
-/// conversion is not score-neutral:
-///
-/// `Plan::for_bake` derives COMPUTE two different ways. Its identity-layout
-/// branch falls back to `everything`, which hard-sets `append2_dst_activity:
-/// true`; its id-space branch derives `false`. **The canonical extractor that
-/// built these bakes' training tables defaults `false`** (`v2_ab_extract.rs`
-/// reads `ZENSIM_APPEND2_DSTACT`, and `extract_944_canonical.sh` never sets
-/// it), and `CLAUDE.md`'s own BANDVIS adjudication says the same. So the
-/// SHIPPED runtime already computes a BANDVIS formula these weights never saw
-/// — MEASURED at **0.866** zensim points on `C` and **0.311** on `CHdr` for
-/// one CID22 pair.
-///
-/// That is a pre-existing train/serve skew that densify EXPOSED rather than
-/// caused, and both ways out change a shipped number: fixing `everything`
-/// moves `C`/`CHdr` to their train-consistent values, and teaching the dense
-/// derivation to reproduce `true` perpetuates the skew in a new place.
-/// Choosing is the user's, so **nothing here — the bytes, the served toggle,
-/// the declaration — is touched until that decision lands.**
-/// Measurement: `benchmarks/dense_bake_contract_2026-09-06.md` §5. The
-/// executable form of this note is
-/// `dense_bake_flip_gate::flipped_bakes_are_dense_and_the_c_pair_is_deliberately_not`,
-/// which FAILS if either bake is densified while the decision is open.
+/// C SDR candidate bake, with explicit feature IDs (September 7, 2026).
+/// Weights/spline are retained from the August 29 artifact; its original bytes
+/// and recipe manifest remain in `weights`. Serving now uses the canonical
+/// training activity variant (`append2_dst_activity = false`). This deliberately
+/// corrects the old train/serve skew; no consumer is calibrated to these values.
+/// See `benchmarks/feature_plan_cleanup_2026-09-07.md` for scores and provenance.
 #[cfg(feature = "candidate-profiles")]
 pub(crate) fn mlp_bake_c_purity944() -> &'static [u8] {
-    include_bytes!("../weights/c_sdr_purity944_2026-08-29.bin")
+    include_bytes!("../weights/c_sdr_purity944_byid_2026-09-07.bin")
 }
 
-/// Generation-C SDR profile params. The bake is a 944-input (pruned to
-/// 667 internal) MLP over the folded-720+append+append2 feature regime —
-/// NOT the 372-feature v1 pipeline — so the `extended_features` /
-/// `compute_iw_features` flags below only shape the legacy `compute()`
-/// path's extraction (whose 372-wide vector the 944 bake refuses,
-/// failing loud). Full-fidelity scoring goes through the folded-944
-/// extraction + [`crate::score_features_with_profile`]; see the
-/// [`ZensimProfile::C`] docs for the contract.
+/// C SDR profile params: 667 declared IDs from the folded/append/append2
+/// feature families. The scoring planner derives extraction from these IDs.
 #[cfg(feature = "candidate-profiles")]
 static PROFILE_C: ProfileParams = ProfileParams {
     weights: &WEIGHTS_PREVIEW_V0_2,
@@ -1316,43 +1244,15 @@ static PROFILE_C: ProfileParams = ProfileParams {
     mlp_bytes_compression: None,
 };
 
-/// `ZensimProfile::CHdr` bake bytes — internal `HDR944_L1T1_s4005_hfpack`
-/// ("aurora-anchor", `c_hdr_l1t1944_2026-08-29.bin`, 180,195 B, sha256
-/// `0a437d9927dd63dce08ba72d031ce0a6d0c13ff4bd3034458d56cb1995d2463d`).
-/// FROZEN 2026-08-29 (user-directed HDR Profile-C freeze). 944 caller /
-/// 697 internal (dead-column pruned). Pinned by
-/// `profile_c_tests::chdr_weight_sha256_pinned`.
-/// ⛔ **NOT DENSIFIED — a registered, PENDING USER DECISION, not an oversight.**
-///
-/// Increment 2A of the cruft purge converted `A`, `B`, `BHdr` and `D` to the
-/// dense feature-id contract with a bit-identical served score. `C` and `CHdr`
-/// were deliberately left on the wide 944 declaration with their 247-277
-/// [`zenpredict::FeatureTransform::Drop`] entries, because for THIS pair the
-/// conversion is not score-neutral:
-///
-/// `Plan::for_bake` derives COMPUTE two different ways. Its identity-layout
-/// branch falls back to `everything`, which hard-sets `append2_dst_activity:
-/// true`; its id-space branch derives `false`. **The canonical extractor that
-/// built these bakes' training tables defaults `false`** (`v2_ab_extract.rs`
-/// reads `ZENSIM_APPEND2_DSTACT`, and `extract_944_canonical.sh` never sets
-/// it), and `CLAUDE.md`'s own BANDVIS adjudication says the same. So the
-/// SHIPPED runtime already computes a BANDVIS formula these weights never saw
-/// — MEASURED at **0.866** zensim points on `C` and **0.311** on `CHdr` for
-/// one CID22 pair.
-///
-/// That is a pre-existing train/serve skew that densify EXPOSED rather than
-/// caused, and both ways out change a shipped number: fixing `everything`
-/// moves `C`/`CHdr` to their train-consistent values, and teaching the dense
-/// derivation to reproduce `true` perpetuates the skew in a new place.
-/// Choosing is the user's, so **nothing here — the bytes, the served toggle,
-/// the declaration — is touched until that decision lands.**
-/// Measurement: `benchmarks/dense_bake_contract_2026-09-06.md` §5. The
-/// executable form of this note is
-/// `dense_bake_flip_gate::flipped_bakes_are_dense_and_the_c_pair_is_deliberately_not`,
-/// which FAILS if either bake is densified while the decision is open.
+/// CHdr candidate bake, with explicit feature IDs (September 7, 2026).
+/// Weights/spline are retained from the August 29 artifact; its original bytes
+/// and recipe manifest remain in `weights`. Serving now uses the canonical
+/// training activity variant (`append2_dst_activity = false`). This deliberately
+/// corrects the old train/serve skew; no consumer is calibrated to these values.
+/// See `benchmarks/feature_plan_cleanup_2026-09-07.md` for scores and provenance.
 #[cfg(feature = "candidate-profiles")]
 pub(crate) fn mlp_bake_chdr_l1t1944() -> &'static [u8] {
-    include_bytes!("../weights/c_hdr_l1t1944_2026-08-29.bin")
+    include_bytes!("../weights/c_hdr_l1t1944_byid_2026-09-07.bin")
 }
 
 /// Generation-C HDR profile params — the PROFILE_C shape (folded-944
@@ -2225,39 +2125,29 @@ mod profile_c_tests {
         (src, dst)
     }
 
-    /// The shipped `C` weight file is pinned by sha256 — a silent byte
-    /// swap of `c_sdr_purity944_2026-08-29.bin` fails this test loudly.
-    /// Expected digest = the committed `W10L9PH_s4004_packed` bytes
-    /// ("north-anchor"), frozen 2026-08-29 by `e9a705c0` and described
-    /// by `zensim/weights/manifests/c_sdr_purity944_2026-08-29.toml`.
-    /// (Before that rotation this pinned `W10L9_s4003_packed` /
-    /// `c_sdr_mlp944_corrmix_2026-08-05.bin`; that bake's manifest
-    /// stays in the same directory for the superseded artifact.)
+    /// Pin the September 7 declared-ID conversion. Its manifest records
+    /// the preserved August 29 source and exact cached-prediction gate.
     #[test]
     fn weight_sha256_pinned() {
         use sha2::{Digest, Sha256};
         let bytes = mlp_bake_c_purity944();
-        assert_eq!(bytes.len(), 149_343, "C weight byte length changed");
+        assert_eq!(bytes.len(), 151785, "C weight byte length changed");
         let mut hasher = Sha256::new();
         hasher.update(bytes);
         let digest = hasher.finalize();
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(
-            hex, "61ebc4562c2c4f78663d2c4d7608e7560d77f519c9e18d84fb0555d5fbca5940",
+            hex, "996dfbb16ee0abf1a4d7faeaeab7e390fdc20277bbcaa46c4f3b89b2604041f7",
             "C weight bytes do not match the pinned north-anchor W10L9PH_s4004_packed sha256"
         );
     }
 
-    /// `C` is the first PRUNED shipped bake: the caller-facing width is
-    /// 944 (the folded-944 feature layout) while the internal layer-0
-    /// width is 667 (`FeatureTransform::Drop` on the dead raw lines).
-    /// The runtime MUST size feature vectors by `caller_input_width()`,
-    /// never `n_inputs()` (metric.rs fix `ae852b1b`).
+    /// C declares 667 consumed feature IDs; its layer-0 width is also 667.
     #[test]
-    fn bake_loads_caller_width_944_internal_667() {
+    fn bake_declares_667_ids() {
         let model = crate::mlp::Model::from_bytes(mlp_bake_c_purity944())
             .expect("shipped C bake must parse");
-        assert_eq!(model.caller_input_width(), 944, "caller-facing width");
+        assert_eq!(model.caller_input_width(), 667, "caller-facing width");
         assert_eq!(model.n_inputs(), 667, "internal (pruned) layer-0 width");
         assert_eq!(model.n_outputs(), 1);
         assert_eq!(model.n_layers(), 2);
@@ -2268,23 +2158,23 @@ mod profile_c_tests {
     fn chdr_weight_sha256_pinned() {
         use sha2::{Digest, Sha256};
         let bytes = mlp_bake_chdr_l1t1944();
-        assert_eq!(bytes.len(), 180_195, "CHdr weight byte length changed");
+        assert_eq!(bytes.len(), 182826, "CHdr weight byte length changed");
         let mut hasher = Sha256::new();
         hasher.update(bytes);
         let digest = hasher.finalize();
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(
-            hex, "0a437d9927dd63dce08ba72d031ce0a6d0c13ff4bd3034458d56cb1995d2463d",
+            hex, "3ea640d3299632eae189bedb6ec47911e2c0dbf5ef8bce81a36815a83d20411a",
             "CHdr weight bytes do not match the pinned aurora-anchor sha256"
         );
     }
 
-    /// CHdr widths: 944 caller / 697 internal (pruned).
+    /// CHdr declares 697 consumed feature IDs.
     #[test]
-    fn chdr_bake_loads_caller_width_944_internal_697() {
+    fn chdr_bake_declares_697_ids() {
         let model = crate::mlp::Model::from_bytes(mlp_bake_chdr_l1t1944())
             .expect("shipped CHdr bake must parse");
-        assert_eq!(model.caller_input_width(), 944, "caller-facing width");
+        assert_eq!(model.caller_input_width(), 697, "caller-facing width");
         assert_eq!(model.n_inputs(), 697, "internal (pruned) layer-0 width");
         assert_eq!(model.n_outputs(), 1);
         assert_eq!(model.n_layers(), 2);
@@ -2331,13 +2221,13 @@ mod profile_c_tests {
             .compute(&RgbSlice::new(&src, 64, 64), &RgbSlice::new(&dst, 64, 64))
             .expect("a 944-declared bake must be servable by compute()");
         let bake = (ZensimProfile::C.params().mlp_bytes.expect("C has a bake"))();
-        let want = crate::mlp::Model::from_bytes(bake)
-            .expect("C's bake parses")
-            .caller_input_width();
+        let model = crate::mlp::Model::from_bytes(bake).expect("C's bake parses");
+        let ids = crate::declared_feature_ids(&model).expect("C declares IDs");
+        let want = usize::from(*ids.iter().max().unwrap()) + 1;
         assert_eq!(
             r.features().len(),
             want,
-            "the emitted vector must be the bake's DECLARED width, not a prefix"
+            "the identity row must reach every declared ID"
         );
         assert!(
             r.score().is_finite() && r.score() <= 100.0,
@@ -2598,14 +2488,10 @@ mod profile_c_tests {
 ///   `score`, `raw_distance` and `mean_offset` on the whole
 ///   `tests/common/parity_cells.rs` geometry matrix.
 ///
-/// `C` and `CHdr` are deliberately absent. They are not train/serve
-/// consistent: `Plan::for_bake`'s identity-layout branch derives
-/// `append2_dst_activity: true` (the `everything` fallback) while the
-/// canonical extractor that made their training tables defaults it **false**,
-/// so densifying them adopts the honest `false` and MOVES a shipped score by
-/// 0.866 (`C`) / 0.311 (`CHdr`) zensim points. That is a measured, registered
-/// USER DECISION — `benchmarks/dense_bake_contract_2026-09-06.md` §5 — and
-/// not a lane's to make, so their bakes and their served toggle are untouched.
+/// C and CHdr have the same dense-versus-wide prediction contract after the
+/// September 7 activity correction. Their earlier pixel scores were skewed
+/// from training and are recorded separately; this gate does not preserve that
+/// defect. The original artifacts remain available for the comparison.
 #[cfg(all(test, feature = "custom-profiles", feature = "feature-regime-v2"))]
 mod dense_bake_flip_gate {
     use crate::{RgbSlice, Zensim, ZensimProfile};
@@ -2713,24 +2599,17 @@ mod dense_bake_flip_gate {
         }
     }
 
-    /// The negative control shared by every case: the flip must have HAPPENED.
-    /// A dense bake is strictly narrower than the wide one it replaces, so
-    /// equal lengths mean the `include_bytes!` path was reverted and every
-    /// identity assertion below it is vacuous.
+    /// A real declaration change is required; disk size need not shrink
+    /// because an explicit ID list can exceed the compressed Drop metadata.
     fn assert_flipped(shipped: &ProfileParams, wide: &'static [u8], label: &str) {
-        let f = shipped.mlp_bytes.expect("shipped profile has an MLP bake");
-        let dense = f();
-        assert_ne!(
-            dense.len(),
-            wide.len(),
-            "{label}: shipped bake is byte-length-identical to the RETIRED wide bake — the \
-             dense flip did not happen and the identity assertions are vacuous"
-        );
+        let dense = shipped.mlp_bytes.expect("bake")();
+        assert_ne!(dense, wide, "{label}: source artifact is still selected");
+        let dm = crate::mlp::Model::from_bytes(dense).unwrap();
+        let wm = crate::mlp::Model::from_bytes(wide).unwrap();
+        assert!(crate::declared_feature_ids(&dm).is_some());
         assert!(
-            dense.len() < wide.len(),
-            "{label}: dense bake ({} B) is not smaller than the wide one ({} B)",
-            dense.len(),
-            wide.len()
+            dm.caller_input_width() < wm.caller_input_width(),
+            "{label}: declaration did not narrow"
         );
     }
 
@@ -2797,21 +2676,48 @@ mod dense_bake_flip_gate {
         );
     }
 
-    /// Gate B.3, held at the SHIPPED artifacts rather than at densify's own
-    /// output: every flipped bake declares ids, carries no `Drop`, and has
-    /// `caller_input_width() == n_inputs()`. `C` / `CHdr` are asserted to
-    /// still be the WIDE 944 shape, so this test also records — as an
-    /// executable fact rather than a comment — that the append2 decision is
-    /// still pending.
+    #[test]
+    #[cfg(feature = "candidate-profiles")]
+    fn c_pair_dense_bakes_match_corrected_wide_twins() {
+        fn wide_c() -> &'static [u8] {
+            include_bytes!("../weights/c_sdr_purity944_2026-08-29.bin")
+        }
+        fn wide_chdr() -> &'static [u8] {
+            include_bytes!("../weights/c_hdr_l1t1944_2026-08-29.bin")
+        }
+        for (p, wide, label) in [
+            (ZensimProfile::C, wide_c as fn() -> &'static [u8], "C"),
+            (
+                ZensimProfile::CHdr,
+                wide_chdr as fn() -> &'static [u8],
+                "CHdr",
+            ),
+        ] {
+            assert_flipped(p.params(), wide(), label);
+            let twin = Box::leak(Box::new(with_bake(p.params(), wide)));
+            assert_same_on_cells(
+                p,
+                ZensimProfile::Custom {
+                    name: label,
+                    params: twin,
+                },
+                label,
+            );
+        }
+    }
+
+    /// Every shipped scoring bake declares exactly its consumed input IDs.
     #[test]
     #[cfg(all(feature = "candidate-profiles", feature = "deprecated-profiles"))]
-    fn flipped_bakes_are_dense_and_the_c_pair_is_deliberately_not() {
+    fn all_shipped_bakes_declare_exactly_the_ids_they_read() {
         #[allow(deprecated)]
-        let dense: [(&str, &ProfileParams); 4] = [
+        let dense: [(&str, &ProfileParams); 6] = [
             ("A", &super::PROFILE_A),
             ("B", &super::PROFILE_B),
             ("BHdr", &super::PROFILE_B_HDR),
             ("D", &super::PROFILE_D),
+            ("C", &super::PROFILE_C),
+            ("CHdr", &super::PROFILE_C_HDR),
         ];
         for (label, p) in dense {
             let bytes = p.mlp_bytes.expect("bake")();
@@ -2833,23 +2739,6 @@ mod dense_bake_flip_gate {
                  it reads",
                 m.caller_input_width(),
                 m.n_inputs()
-            );
-        }
-        for (label, p) in [("C", &super::PROFILE_C), ("CHdr", &super::PROFILE_C_HDR)] {
-            let bytes = p.mlp_bytes.expect("bake")();
-            let m = crate::mlp::Model::from_bytes(bytes)
-                .unwrap_or_else(|e| panic!("{label}: parse: {e:?}"));
-            assert_eq!(
-                m.caller_input_width(),
-                944,
-                "{label}: expected the UNCONVERTED 944 shape — the append2_dst_activity \
-                 decision (benchmarks/dense_bake_contract_2026-09-06.md §5) is still pending, \
-                 so converting this pair would move a shipped score"
-            );
-            assert!(
-                crate::declared_feature_ids(&m).is_none(),
-                "{label}: declares feature ids — it was densified while the append2 decision \
-                 was still open"
             );
         }
     }

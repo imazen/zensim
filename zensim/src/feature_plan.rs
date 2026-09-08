@@ -4,21 +4,10 @@
 //! Design: `docs/FEATURE_SYSTEM_DESIGN_2026-09-05.md` §5. Phases + gates:
 //! `docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`.
 //!
-//! ## What was missing, precisely
-//!
-//! [`crate::feature_v2::ComputeSet::from_block_profile`] already derived the
-//! right COMPUTE set for any bake — including the cheap free-extras set for a
-//! wide bake that only reads the raw-moment tranche. It was never on a runtime
-//! path (`#[cfg_attr(not(test), allow(dead_code))]`), and promoting it alone
-//! would not have helped, because the runtime had no notion of a LAYOUT: the
-//! fold-backed score truncates to `fold_engine::v1_feature_width(config)` —
-//! at most 372 — and `metric::prep_bake_input_f32` then refuses any bake
-//! declaring more than `features.len() + 4`.
-//!
-//! So the missing piece was never the compute derivation. It was the pair
-//! `(compute, layout)`. A [`Plan`] is exactly that pair, plus the slot set the
-//! walk will actually populate, so "can this bake be served?" is a checked
-//! question — [`Plan::covers`] — rather than three independent hard-codings.
+//! Declared feature IDs and the formula revision determine one compute/layout
+//! plan for dense and legacy identity bakes. The previous block-profile
+//! fallback is retired; it enabled a BANDVIS variant absent from training.
+//! The September 7 canonical-pixel and serving-census gates cover the change.
 //!
 //! ## Universal servability
 //!
@@ -278,48 +267,16 @@ impl Plan {
 
     /// Plan for a loaded bake — **the servability entry point**.
     ///
-    /// COMPUTE comes from [`ComputeSet::from_block_profile`], the existing
-    /// tested derivation, so this adds a layout rather than a second opinion.
-    /// LAYOUT is `Model::caller_input_width()` — never `n_inputs()`, which is
-    /// the pruned internal width and is a third, different number.
+    /// Declared feature IDs determine compute for both dense and legacy
+    /// identity layouts. The canonical BANDVIS activity variant is off,
+    /// matching training extraction (September 7 correction).
     pub(crate) fn for_bake(model: &crate::mlp::Model) -> Result<Plan, PlanError> {
         let revision = crate::feature_layout::formula_revision(model)
             .map_err(|_| PlanError::UnreadableBake)?;
-        let ns = crate::NUM_SCALES;
         let layout_width = model.caller_input_width();
         let layout = crate::feature_layout::declared_layout(model);
-        // The bake reads POSITIONS and the plan speaks IDS; for every identity
-        // layout they are the same numbers and for a dense one they are not.
-        // The translation lives in [`bake_read_slots`], which is THE owner of
-        // "which ids does this bake read" — it used to happen here, which made
-        // the owner return positions under an ids-shaped name and left
-        // `fold_engine::bake_pool_need_from_model` folding raw positions
-        // against the v1 family bounds (measured wrong on shipped B the moment
-        // it went dense). One translation, one place.
         let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
-        // COMPUTE. `ComputeSet::from_block_profile` is the existing, tested
-        // derivation and stays THE answer for an identity layout — which is
-        // every bake that ships, so no served bake changes.
-        //
-        // It cannot serve a DENSE one, and the reason is structural rather
-        // than a bug in it: it reads the bake's live layer-0 columns as v1
-        // SLOT INDICES (`caller_input_width() <= v1_total` ⇒ the v1 branch,
-        // then `bake_pool_need_from_model` on the same positions). Under a
-        // dense layout position 228 is a raw-moment id, not a masked one, so
-        // that reading is wrong by construction. MEASURED: a `dense265` bake
-        // over `basic+peaks+moments` derived `v1_pools: Full, free_extras:
-        // Off`, whose `emit` does not cover the moment ids, so
-        // `Plan::for_bake` REFUSED its own bake and the profile silently fell
-        // back to a 228-wide walk.
-        //
-        // So a non-identity layout is derived in ID space instead. Phase 5
-        // unifies the two once `from_block_profile_agrees_with_the_id_space_
-        // derivation` has held across the whole bake census.
-        let mut plan = if layout.is_identity() {
-            Plan::normalized(ComputeSet::from_block_profile(model), layout)
-        } else {
-            Plan::derive_with_layout(&want, layout)?
-        };
+        let mut plan = Plan::derive_with_layout(&want, layout)?;
         plan.compute.formula_revision = revision;
         // **The SERVING-plan footprint policy, applied to both branches.**
         // `fold_engine::pools_mode_for_need` owns the rule that `Off` is never
@@ -328,8 +285,8 @@ impl Plan {
         // unconditional L8/max tier), but `Off` hands the band no scratch,
         // which disables the band-local self-blur and falls back to phase A's
         // four STRIP-wide H planes — a LARGER hot set for no arithmetic
-        // saving. `from_block_profile` routes through that owner; the id-space
-        // branch derives `v1_pools` from the touched families and does not.
+        // saving. `score_pool_mode` routes through that owner; the plan
+        // derives `v1_pools` from the touched families and does not.
         //
         // Before the dense flip nothing reached the second branch, so the
         // divergence was invisible. MEASURED the moment shipped `D` declared
@@ -351,7 +308,6 @@ impl Plan {
                 layout_width,
             });
         }
-        let _ = ns;
         Ok(plan)
     }
 
@@ -955,76 +911,102 @@ pub(crate) mod servability_census {
         );
     }
 
-    /// **Phase 5 evidence** — `ComputeSet::from_block_profile` and the
-    /// ID-SPACE derivation (`Plan::derive_with_layout`) agree on every bake
-    /// this build ships.
-    ///
-    /// `for_bake` still routes identity layouts through `from_block_profile`,
-    /// because that is the tested derivation and keeping it keeps the 445-bake
-    /// census on the SAME code rather than an equivalent one. This gate is
-    /// what would let phase 5 collapse the two: while it holds, the id-space
-    /// derivation is a drop-in, and `fold_engine::wide_bake_v2_read` (which
-    /// exists only to serve `from_block_profile`'s wide branch) loses its last
-    /// caller.
-    ///
-    /// Reported per bake on failure, so a disagreement names WHICH bake and
-    /// on which axis rather than just failing.
+    /// Compare planned pixel extraction to the canonical full producer on the
+    /// model's actual read IDs. This catches changed feature semantics, unlike
+    /// a coverage-only test. The free accumulators have the existing 2e-5
+    /// summation-order bound; every other consumed feature is bit-exact.
     #[test]
-    fn from_block_profile_agrees_with_the_id_space_derivation() {
-        let mut checked = 0usize;
-        let mut disagreements = Vec::new();
-        for (name, p) in shipped_profiles() {
-            for bytes in p.params().scoring_bake_bytes() {
-                let Ok(m) = crate::mlp::Model::from_bytes(bytes) else {
-                    continue;
-                };
-                let layout = crate::feature_layout::declared_layout(&m);
-                // `bake_read_slots` already answers in ID space.
-                let Some(want) = bake_read_slots(&m) else {
-                    continue;
-                };
-                let legacy = Plan::normalized(ComputeSet::from_block_profile(&m), layout.clone());
-                let derived = Plan::derive_with_layout(&want, layout);
-                checked += 1;
-                match derived {
-                    Ok(d) => {
-                        // The derived plan may be a STRICT SUBSET of the
-                        // legacy one (it computes only what the bake reads);
-                        // what it may never be is short of the read set, and
-                        // its emit must be contained in the legacy emit.
-                        if !d.emit.covers(&want) {
-                            disagreements.push(format!(
-                                "{name}: id-space derivation does not cover the read set \
-                                 (missing {})",
-                                d.emit.missing_from(&want)
-                            ));
-                        }
-                        if !legacy.emit.covers(&d.emit) {
-                            disagreements.push(format!(
-                                "{name}: id-space emit is NOT a subset of from_block_profile's \
-                                 (extra {})",
-                                d.emit.missing_from(&legacy.emit)
-                            ));
-                        }
-                    }
-                    Err(e) => disagreements.push(format!(
-                        "{name}: id-space derivation REFUSED a bake from_block_profile \
-                         serves: {e}"
-                    )),
+    fn planned_pixels_match_canonical_features_at_consumed_ids() {
+        use crate::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
+        use crate::{BakeScorer, RgbSlice};
+        let mut bakes: Vec<(String, Vec<u8>)> = shipped_profiles()
+            .into_iter()
+            .flat_map(|(name, p)| {
+                p.params()
+                    .scoring_bake_bytes()
+                    .map(move |b| (name.to_string(), b.to_vec()))
+            })
+            .collect();
+        // Optional filesystem tier reuses the existing serve_custom_bake
+        // census roster. No missing file or malformed bake is silently skipped.
+        if let Ok(path) = std::env::var("ZENSIM_PLAN_CENSUS_TSV") {
+            let text = std::fs::read_to_string(path).unwrap();
+            let mut added = 0;
+            for line in text.lines() {
+                let cols: Vec<_> = line.split('\t').collect();
+                if cols.len() == 5 && cols[3] == "SERVED" {
+                    bakes.push((cols[0].into(), std::fs::read(cols[0]).unwrap()));
+                    added += 1;
                 }
             }
+            assert!(
+                added >= 400,
+                "filesystem census unexpectedly shrank: {added}"
+            );
         }
-        assert!(
-            checked >= expected_min_bake_count(),
-            "the gate must see bakes, saw {checked}, expected >= {}",
-            expected_min_bake_count()
-        );
-        assert!(
-            disagreements.is_empty(),
-            "the two derivations disagree on {} of {checked} bakes:\n  {}",
-            disagreements.len(),
-            disagreements.join("\n  ")
-        );
+        let free =
+            crate::feature_defs::family_slots(ComputeToken::Moments, crate::NUM_SCALES).union(
+                &crate::feature_defs::family_slots(ComputeToken::ClassC, crate::NUM_SCALES),
+            );
+        let mut checked = 0;
+        for (w, h) in [(64usize, 64usize), (97, 65)] {
+            let (r, d) = crate::serving::pair(w, h);
+            let (rs, ds) = (RgbSlice::new(&r, w, h), RgbSlice::new(&d, w, h));
+            let full = crate::feature_v2::compute_folded720_streaming_impl(
+                &rs,
+                &ds,
+                None,
+                true,
+                V2NewFeatureToggles {
+                    v1_pools: V1PoolsMode::Full,
+                    append_block: true,
+                    append2_block: true,
+                    csfw_block: true,
+                    ..Default::default()
+                },
+                &mut V2Scratch::new(),
+            )
+            .unwrap();
+            assert_eq!(full.features().len(), 956);
+            for (name, bytes) in &bakes {
+                let model = crate::mlp::Model::from_bytes(bytes).unwrap();
+                let want = bake_read_slots(&model).unwrap();
+                let plan = Plan::for_bake(&model).unwrap();
+                assert!(
+                    !plan.compute.append2_dst_activity,
+                    "{name}: training variant is off"
+                );
+                let mut scorer = BakeScorer::new(&model).unwrap();
+                let served = scorer.compute(&rs, &ds, None).unwrap();
+                for id in want.iter_slots() {
+                    let a = served.features()[id];
+                    let b = full.features()[id];
+                    if free.contains(id) {
+                        assert!(
+                            (a - b).abs() <= 2e-5,
+                            "{name} {w}x{h} free f{id}: {a:e} != {b:e}"
+                        );
+                    } else {
+                        assert_eq!(
+                            a.to_bits(),
+                            b.to_bits(),
+                            "{name} {w}x{h} f{id}: {a:e} != {b:e}"
+                        );
+                    }
+                }
+                let cached = scorer
+                    .score_features(served.features(), w as u32, h as u32, None)
+                    .unwrap();
+                assert_eq!(
+                    cached.to_bits(),
+                    served.score().to_bits(),
+                    "{name}: pixel/cached score drift"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked >= 2 * expected_min_bake_count());
+        eprintln!("PLAN CANONICAL PIXEL CHECK: {checked} bake/pair cases passed");
     }
 
     /// Every registered PRODUCER set is plannable, and the plan populates

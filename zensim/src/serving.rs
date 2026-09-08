@@ -18,7 +18,7 @@
 //!
 //! Everything here needs only [`ZensimProfile`], [`Zensim::compute`] and
 //! `mlp::Model`. The gates that need a `Plan` (revision agreement, the
-//! id-space-vs-`from_block_profile` cross-check) stay in `feature_plan` and
+//! id-space-vs-`Plan::for_bake` cross-check) stay in `feature_plan` and
 //! import the roster from here, so there is still exactly one roster.
 
 use crate::ZensimProfile;
@@ -116,14 +116,9 @@ pub(crate) fn expected_min_bake_count() -> usize {
 /// How many of [`expected_min_bake_count`]'s bakes are DENSE
 /// (`zentrain.feature_ids`-declared) under the active feature set.
 ///
-/// `B` and `BHdr` are dense unconditionally; `A` and `D` are dense when their
-/// gating feature is on; `C` / `CHdr` are DELIBERATELY never dense — see
-/// `profile::mlp_bake_c_purity944`'s doc comment, a registered, pending user
-/// decision, not an oversight.
+/// Every scoring bake in the current roster declares its consumed IDs.
 pub(crate) fn expected_min_dense_count() -> usize {
-    2 // B, BHdr
-        + usize::from(cfg!(feature = "deprecated-profiles")) // A
-        + usize::from(cfg!(feature = "candidate-profiles")) // D only — not C/CHdr
+    expected_min_bake_count()
 }
 
 #[cfg(test)]
@@ -335,9 +330,10 @@ mod tests {
             ("PreviewV0_2", 46.958_140_610_559, 98.185_741_680_479),
             // C saturates the single-LSB cell at exactly 100 — noted, not
             // hidden: that cell cannot discriminate for C, and its
-            // quantize+shift cell (41.4) is what carries the profile here.
-            ("C", 41.426_587_377_802, 100.0),
-            ("CHdr", 66.205_122_955_756, 96.997_278_515_181),
+            // quantize+shift cell carries the profile here. The September 7
+            // activity correction moves C/CHdr to canonical training features.
+            ("C", 38.633_627_095_004, 100.0),
+            ("CHdr", 66.079_811_960_673, 97.132_037_328_304),
             ("D", 16.490_362_421_318, 97.179_188_906_774),
         ];
         let (w, h) = (64usize, 64usize);
@@ -361,6 +357,7 @@ mod tests {
                     .compute(&RgbSlice::new(r, w, h), &RgbSlice::new(d, w, h))
                     .unwrap_or_else(|e| panic!("{name}/{label}: shipped profile refused: {e}"))
                     .score();
+                eprintln!("SERVING PIN {name}/{label}: {got:.17}");
                 checked += 1;
                 if (got - want).abs() > TOL {
                     fails.push(format!(

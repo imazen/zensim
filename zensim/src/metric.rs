@@ -1321,7 +1321,7 @@ impl Zensim {
     pub fn new(profile: ZensimProfile) -> Self {
         // `ZensimProfile::D`'s whole reason to exist is speed: its bake
         // structurally reads none of the `f156..372` pool block
-        // (`ComputeSet::from_block_profile` / `fold_engine::score_pool_mode`
+        // (`Plan::for_bake` / `fold_engine::score_pool_mode`
         // both derive `V1PoolsMode::Peaks` for it), so — unlike every other
         // profile, which defaults to the buffered walk and leaves these
         // `#[doc(hidden)]` knobs to an explicit opt-in — `D` opts itself in.

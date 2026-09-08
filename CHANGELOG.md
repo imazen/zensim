@@ -32,6 +32,14 @@ Malformed present metadata, unknown revisions and incompatible ensembles now
 refuse. Dense extraction honors the bake's revision. Min-max models apply the
 output pin before the spline, matching training; no shipped bake has this head.
 
+### Fixed — training-consistent C/CHdr extraction (2026-09-07)
+
+C and CHdr now declare their consumed feature IDs and use the canonical training
+BANDVIS activity setting (off). The old wide-bake fallback selected a different
+formula; these candidate profiles intentionally change pixel scores. Their
+original weights, splines and historical artifacts remain. All legacy and dense
+bakes now use one ID-based extraction planner. No public signature is removed.
+
 ### QUEUED BREAKING CHANGES — the cruft purge (`zensim` 0.3.0, 2026-09-06)
 
 <!-- Batched for one 0.3.0 release. NOTHING here has landed; each item lands

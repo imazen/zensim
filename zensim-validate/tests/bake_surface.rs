@@ -325,6 +325,50 @@ fn hdr_pixel_surface_matches_the_canonical_pu_features() {
             .unwrap(),
         100.
     );
+    // Wide and dense C bakes consume the same canonical PU features.
+    let canonical = Zensim::new(ZensimProfile::B)
+        .compute_folded720_features_hdr(
+            &r,
+            &d,
+            HdrEncoding::Linear,
+            V2NewFeatureToggles {
+                v1_pools: V1PoolsMode::Full,
+                append_block: true,
+                append2_block: true,
+                csfw_block: true,
+                ..Default::default()
+            },
+            &mut V2Scratch::new(),
+        )
+        .unwrap();
+    for (wide, dense) in [
+        (
+            include_bytes!("../../zensim/weights/c_sdr_purity944_2026-08-29.bin").as_slice(),
+            include_bytes!("../../zensim/weights/c_sdr_purity944_byid_2026-09-07.bin").as_slice(),
+        ),
+        (
+            include_bytes!("../../zensim/weights/c_hdr_l1t1944_2026-08-29.bin").as_slice(),
+            include_bytes!("../../zensim/weights/c_hdr_l1t1944_byid_2026-09-07.bin").as_slice(),
+        ),
+    ] {
+        let models = [
+            Model::from_bytes(wide).unwrap(),
+            Model::from_bytes(dense).unwrap(),
+        ];
+        let mut values = Vec::new();
+        for m in &models {
+            let mut scorer = BakeScorer::new(m).unwrap();
+            let pixel = scorer
+                .compute_hdr(&r, &d, HdrEncoding::Linear, None)
+                .unwrap();
+            let cached = scorer
+                .score_features(canonical.features(), 64, 64, None)
+                .unwrap();
+            assert_eq!(pixel.to_bits(), cached.to_bits());
+            values.push(pixel);
+        }
+        assert_eq!(values[0].to_bits(), values[1].to_bits());
+    }
     let srgb = vec![[123u8; 3]; 64 * 64];
     let wrong = RgbSlice::new(&srgb, 64, 64);
     assert!(

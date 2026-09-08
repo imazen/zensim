@@ -1,0 +1,33 @@
+# Declared-ID form; original weights/recipe remain in the August 29 manifest.
+# Pixel behavior intentionally corrects the legacy activity mismatch. This is
+# separate from densify's prediction-preserving gather transformation.
+[bake]
+name = "zensim-c"
+file = "../c_sdr_purity944_byid_2026-09-07.bin"
+sha256 = "996dfbb16ee0abf1a4d7faeaeab7e390fdc20277bbcaa46c4f3b89b2604041f7"
+file_bytes = 151785
+n_inputs = 667
+caller_input_width = 667
+declared_ids = 667
+drop_transforms = 0
+date = "2026-09-07"
+derived_from = "../c_sdr_purity944_2026-08-29.bin"
+derived_from_sha256 = "61ebc4562c2c4f78663d2c4d7608e7560d77f519c9e18d84fb0555d5fbca5940"
+derived_from_bytes = 149343
+
+[derivation]
+tool = "bake_dial_refit densify"
+command = "bake_dial_refit densify --in zensim/weights/c_sdr_purity944_2026-08-29.bin --out zensim/weights/c_sdr_purity944_byid_2026-09-07.bin --gate-rows 4096"
+source_recipe = "zensim/weights/manifests/c_sdr_purity944_2026-08-29.toml"
+
+[gates]
+identity_gate = "4096/4096 cached feature-row predictions BIT-IDENTICAL"
+shape_gate = "caller_input_width == n_inputs == 667; 0 Drop transforms"
+score_identity = "Dense and original wide bakes agree through the corrected planner on the shared geometry matrix. Earlier activity-on pixel scores intentionally change."
+
+[known_gaps]
+era = "Densify declares feature IDs; it does not invent missing original extractor/decoder provenance."
+
+[record]
+doc = "benchmarks/feature_plan_cleanup_2026-09-07.md"
+plan = "docs/PLAN_CRUFT_PURGE_2026-09-06.md"

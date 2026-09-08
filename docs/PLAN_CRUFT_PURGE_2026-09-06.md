@@ -50,7 +50,7 @@ ablation closes its hypothesis and preserves the useful component.
   consolidation with historical recipe and boundary evidence.
 - [ ] Enforce trainer capabilities before CPU/GPU work; enforce feature IDs and
   semantic revisions at table admission; preserve honest historical replay.
-- [ ] Resolve C/CHdr activity semantics, declared-ID conversion and legacy plan
+- [x] Resolve C/CHdr activity semantics, declared-ID conversion and legacy plan
   derivation retirement, with the serving census and feature-build matrix.
 - [ ] Consolidate repeated feature/era metadata; retire unused positional
   training surfaces and the stale JS example after caller checks.
@@ -917,3 +917,13 @@ surface. Historical fit and runtime-boundary differences, the exact f32
 V47 primitive fixture and intentional corrections are recorded in
 [the spline-owner audit](../benchmarks/spline_owner_cleanup_2026-09-07.md).
 The distinct equal-count training fitter remains a named recipe.
+
+### Feature-plan completion — September 7 continuation
+
+C/CHdr now use explicit IDs and training-consistent activity semantics. Both
+legacy plan derivations are retired. The 984-case canonical-pixel census, its
+semantic negative control, HDR parity and eight feature-build arms pass.
+The broad historical-bake score correction is recorded explicitly in the
+[feature-plan audit](../benchmarks/feature_plan_cleanup_2026-09-07.md). Fresh
+wall-time evidence was rejected for contention; the useful cheap-wide features
+and buffered compatibility paths remain.

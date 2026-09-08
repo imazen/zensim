@@ -4,7 +4,7 @@
 //! in one process so shared-box noise cancels
 //! (`benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md`).
 //!
-//! Four arms per size, one interleaved group:
+//! Extraction controls per size, one interleaved group:
 //!
 //! | arm | path | features |
 //! |---|---|---|
@@ -14,10 +14,10 @@
 //! | `fold944_full`| STREAMING fold, `V1PoolsMode::Full` (`folded720append2pools`) | 944, all live |
 //! | `fast_ssim2`  | the OPPONENT: `fast_ssim2::compute_ssimulacra2`, same pixels | — |
 //!
-//! `buf_v1_372 − buf_v1_228` and `fold944_full − fold944_off` are the
-//! marginal cost of the SAME 216 v1 pool features in each family — that is
-//! the honest same-feature-set comparison, because no fold mode computes
-//! v1-372 alone (`fold_v1` is hardcoded on and v2-348 always rides along).
+//! Pool deltas price the extra accumulators. The v1-only arms also measure
+//! cheap-wide raw-moment and bounded-error producers against the full walk.
+//! `fold156_basic` retains raw Off as a historical diagnostic; current serving
+//! promotes Off to Peaks for its smaller working set.
 //!
 //! The `fast_ssim2` arm (added 2026-08-31 by the ssim2-replacement-bar lane,
 //! `benchmarks/ssim2_replacement_bar_2026-08-31.md`) is the speed row of the
@@ -102,9 +102,7 @@ fn fold_zensim() -> &'static Zensim {
     ))
 }
 
-// NOTE: 944 with all pools live (`toggles_full`) is the ONLY product mode.
-// `toggles_off` (structural-zero pools) is kept as the measurement CONTROL
-// arm that prices the pool block, not as a shippable configuration.
+// Explicit producer controls; serving derives the needed work by ID.
 fn toggles_off() -> zensim::feature_v2::V2NewFeatureToggles {
     zensim::feature_v2::V2NewFeatureToggles {
         append_block: true,
@@ -120,20 +118,8 @@ fn toggles_full() -> zensim::feature_v2::V2NewFeatureToggles {
     }
 }
 
-/// The MODEL-CLASS arms (feature-cost lane, 2026-08-31). Each is the CHEAPEST
-/// fold request that can serve one class of scoring model, so the deltas
-/// between them are what a model class costs, not what a feature block costs:
-///
-/// | arm | serves | v1 slots live |
-/// |---|---|---|
-/// | `fold156_basic` | a basic-only model (ADD156 and its class) | `f0..156` |
-/// | `fold228_peaks` | basic + peaks | `f0..228` |
-/// | `fold372_full`  | any 372-input model — **what a fold-backed `score()` runs today** | `f0..372` |
-/// | `fold944_full`  | a 944-input model (the W-LIN 7b blend, the 944 MLPs) | all |
-///
-/// All three 372-class arms set `v1_only`, which is the block-skipping the
-/// predecessor measured at 53 % of the 944 walk; `fold944_full` is the same
-/// request `score()` would run for a 944 bake.
+/// Raw extraction controls. Serving additionally derives its plan, gathers
+/// declared IDs and applies the complete scoring composition.
 fn toggles_v1_only(
     pools: zensim::feature_v2::V1PoolsMode,
 ) -> zensim::feature_v2::V2NewFeatureToggles {
@@ -141,6 +127,21 @@ fn toggles_v1_only(
         v1_only: true,
         v1_pools: pools,
         ..Default::default()
+    }
+}
+
+fn free_toggles(arm: &str) -> zensim::feature_v2::V2NewFeatureToggles {
+    use zensim::feature_v2::{V1FreeExtras, V1PoolsMode};
+    zensim::feature_v2::V2NewFeatureToggles {
+        // Retain the 944 identity layout while v1_only suppresses its work.
+        append_block: true,
+        append2_block: true,
+        free_extras: match arm {
+            "fold228_moments" => V1FreeExtras::RawMoments,
+            "fold228_classc" => V1FreeExtras::RawMomentsPlusBoundedErr,
+            _ => unreachable!("free control arm"),
+        },
+        ..toggles_v1_only(V1PoolsMode::Peaks)
     }
 }
 
@@ -215,6 +216,17 @@ fn rss_mode(arm: &str) {
                     .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
                     .expect("fold v1_only");
                 sink += v2.features()[0];
+            }
+            "fold228_moments" | "fold228_classc" => {
+                let r = z
+                    .compute_folded720_features_streaming(
+                        &RgbSlice::new(&src, w, h),
+                        &RgbSlice::new(&dst, w, h),
+                        free_toggles(arm),
+                        &mut scratch,
+                    )
+                    .expect("free control");
+                sink += r.features()[941];
             }
             "fold944_off" | "fold944_full" => {
                 let t = if arm == "fold944_full" {
@@ -299,6 +311,23 @@ fn main() {
                                 .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
                                 .unwrap();
                             zenbench::black_box(v2.features()[0]);
+                        })
+                    });
+                }
+                for name in ["fold228_moments", "fold228_classc"] {
+                    let t = free_toggles(name);
+                    group.bench(name, move |b| {
+                        let mut scratch = zensim::feature_v2::V2Scratch::new();
+                        b.iter(move || {
+                            let v = z
+                                .compute_folded720_features_streaming(
+                                    &RgbSlice::new(src_s, n, n),
+                                    &RgbSlice::new(dst_s, n, n),
+                                    t,
+                                    &mut scratch,
+                                )
+                                .unwrap();
+                            zenbench::black_box(v.features()[941]);
                         })
                     });
                 }

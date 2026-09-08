@@ -70,7 +70,7 @@ fn census_one(path: &str, rs: &RgbSlice<'_>, ds: &RgbSlice<'_>) -> (bool, String
         Ok(res) => (
             true,
             format!(
-                "{path}\t{declared}\t{}\tSERVED\t{:.6}",
+                "{path}\t{declared}\t{}\tSERVED\t{:.17e}",
                 res.features().len(),
                 res.score()
             ),

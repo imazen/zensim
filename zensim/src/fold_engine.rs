@@ -301,7 +301,7 @@ fn caller_col_spans(model: &crate::mlp::Model, in_dim: usize) -> Option<Vec<(usi
 /// Layer-0 structural read-set of an ALREADY-PARSED bake, or
 /// [`V1PoolNeed::ALL`] when its arities do not tile layer 0 (which no valid
 /// bake's do). The parse-free half of [`bake_pool_need`] — split out so
-/// [`crate::feature_v2::ComputeSet::from_block_profile`] can derive the same
+/// [`crate::feature_plan::Plan::for_bake`] can derive the same
 /// structural read-set from a model handle it already holds, rather than
 /// re-parsing bytes it was never given. Handles pruned and expanded bakes
 /// through [`caller_col_spans`].
@@ -365,88 +365,6 @@ pub(crate) fn caller_line_reads(model: &crate::mlp::Model) -> Option<Vec<bool>> 
             })
             .collect(),
     )
-}
-
-/// For a bake WIDER than the v1 372-layout: does it read anything beyond
-/// `v1_total` that a cheap v1-only(+free-extras) walk cannot serve?
-///
-/// Checks every caller line from `v1_total` up to the bake's declared width
-/// against the two free sets a v1-only walk can finalize without the
-/// expensive v2-348/append/append2/csfw compute passes:
-/// [`crate::feature_v2::free_slot_indices`] (the 40 `RawMoments` positions —
-/// three `GLOBAL_*` append slots per live (scale, channel) plus append2's
-/// per-scale `LUMA_MEAN_REF`) and
-/// [`crate::feature_v2::class_c_slot_indices`] (the 24 class-C
-/// bounded-error positions — the v2-348 `MSE` cell per (scale, channel)
-/// plus the Y-channel luminance-bin trio per scale). `None` when the bake
-/// can't be tiled (unanalyzable — same safe-fallback contract as
-/// [`bake_pool_need_from_model`]'s `V1PoolNeed::ALL`) OR when it reads ANY
-/// live column beyond `v1_total` that is in NEITHER set — either way the
-/// caller must fall back to computing everything. `Some(mode)` when every
-/// live column beyond `v1_total` sits inside the free sets (or there are
-/// none): cheap-set-eligible, with `mode` the CHEAPEST
-/// [`crate::feature_v2::V1FreeExtras`] that still covers what it reads.
-///
-/// This is what closes the gap `benchmarks/free_features_2026-09-01.md`-
-/// class bakes (944-wide, `--keep-features` trained, live columns entirely
-/// inside basic+peaks+the free 40) fell into: before this function existed,
-/// [`crate::feature_v2::ComputeSet::from_block_profile`] saw `caller_input_
-/// width() > 372` and unconditionally fell back to "compute everything" —
-/// correct, but silently paying the full 944 walk for a bake that never
-/// reads 904 of its 944 declared inputs.
-pub(crate) fn wide_bake_v2_read(
-    model: &crate::mlp::Model,
-    v1_total: usize,
-) -> Option<crate::feature_v2::V1FreeExtras> {
-    let layer = model.layer(0);
-    let (in_dim, out_dim) = (layer.in_dim, layer.out_dim);
-    let spans = caller_col_spans(model, in_dim)?;
-    if spans.len() <= v1_total {
-        // Nothing beyond v1_total to read at all — trivially cheap-eligible,
-        // free_extras unread.
-        return Some(crate::feature_v2::V1FreeExtras::Off);
-    }
-    let col_live = |i: usize| -> bool {
-        match &layer.weights {
-            crate::mlp::WeightStorage::F32(w) => {
-                w[i * out_dim..(i + 1) * out_dim].iter().any(|&v| v != 0.0)
-            }
-            crate::mlp::WeightStorage::F16(w) => w[i * out_dim..(i + 1) * out_dim]
-                .iter()
-                .any(|&h| crate::mlp::f16_bits_to_f32(h) != 0.0),
-            crate::mlp::WeightStorage::I8 { weights, scales } => weights
-                [i * out_dim..(i + 1) * out_dim]
-                .iter()
-                .zip(scales.iter())
-                .any(|(&q, &s)| q != 0 && s != 0.0),
-        }
-    };
-    let free: std::collections::HashSet<usize> =
-        crate::feature_v2::free_slot_indices(crate::NUM_SCALES)
-            .into_iter()
-            .collect();
-    let class_c: std::collections::HashSet<usize> =
-        crate::feature_v2::class_c_slot_indices(crate::NUM_SCALES)
-            .into_iter()
-            .collect();
-    // Cheapest-covering mode, monotone: once a class-C read is seen the
-    // request cannot drop back to the raw-moments-only set (its strict
-    // subset).
-    let mut mode = crate::feature_v2::V1FreeExtras::Off;
-    for (pos, &(a, b)) in spans.iter().enumerate().skip(v1_total) {
-        if (a..b).any(&col_live) {
-            if class_c.contains(&pos) {
-                mode = crate::feature_v2::V1FreeExtras::RawMomentsPlusBoundedErr;
-            } else if free.contains(&pos) {
-                if mode == crate::feature_v2::V1FreeExtras::Off {
-                    mode = crate::feature_v2::V1FreeExtras::RawMoments;
-                }
-            } else {
-                return None;
-            }
-        }
-    }
-    Some(mode)
 }
 
 /// Layer-0 structural read-set of one bake's BYTES, or [`V1PoolNeed::ALL`]
@@ -657,7 +575,7 @@ pub(crate) fn score_plan(
 ///
 /// Shared by [`score_pool_mode`] (which unions `need` across a profile's up
 /// to three bakes first) and
-/// [`crate::feature_v2::ComputeSet::from_block_profile`] (which derives
+/// [`crate::feature_plan::Plan::for_bake`] (which derives
 /// `need` from one already-parsed model) so the "`Off` is never the right
 /// answer" policy lives in exactly one place.
 pub(crate) fn pools_mode_for_need(need: V1PoolNeed) -> crate::feature_v2::V1PoolsMode {
@@ -1022,7 +940,7 @@ mod skip_policy_tests {
     /// `pools_mode_for_need` documents (with a measured footprint argument)
     /// that `Off` is never the right answer for a SERVED v1 walk: it costs the
     /// same arithmetic as `Peaks` and grows the hot set by disabling the
-    /// band-local self-blur. `from_block_profile` routes through that owner;
+    /// band-local self-blur. `Plan::for_bake` routes through that owner;
     /// `Plan::derive_with_layout` derives from touched families and will
     /// happily return `Off`. Nothing reached that branch until shipped `D`
     /// declared its 28 basic ids — at which point D's emitted vector went from
