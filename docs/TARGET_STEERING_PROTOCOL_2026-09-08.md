@@ -185,7 +185,10 @@ and H3 steering. JPEG's `zenjpeg--zensim-diffmap-rd` is a `jj` workspace at
 AVIF's later `examples/zensim_cq_rd.rs` already implements folded-944/H3,
 split-role maps and a hint-engagement probe; its August 7 report contains
 August 29 negative results and must be read through its final sections.
-The missing candidate surface must extend these owners, not recreate them.
+The candidate surface is now implemented and JXL consumes it in commit
+`9f038d4dd7f4`. Its 840-ladder D/H3 screen proves native map engagement but
+not a broad independent-judge RD benefit. The [native record](https://github.com/imazen/jxl-encoder/blob/main/benchmarks/zensim_candidate_binding_2026-09-08.md)
+retains the negative findings. Reuse the other codec owners in the same way.
 
 Remote refs were refreshed September 8 without changing sibling checkouts.
 The exact inventory and local dirty-state records are retained in the private
