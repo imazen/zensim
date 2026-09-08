@@ -133,6 +133,7 @@ fn usage() -> ! {
          usage: freeze_check --fulleval <bake.fulleval.json> [--bar name=value]...\n\
                 freeze_check --fulleval <f> --profile balanced-2026-08-04 [--tsv]\n\
                              [--annotations <registry.json|none>]\n\
+                freeze_check --qualify --fulleval <json> (JSON report; missing evidence does not pass)\n\
                 freeze_check --select <a.fulleval.json> <b...> [--tsv]\n\
                              [--seed-group] [--min-k N] [--floor-basis all|mean|legacy]\n\
          \x20                    [--gaddr-block auto|canonical|ladder]\n\
@@ -2890,8 +2891,146 @@ fn run_select(
     i32::from(winner.is_none())
 }
 
+/// Product qualification is stricter than ranking research candidates. Every
+/// gate is read from its measuring owner, with content-bound evidence.
+fn qualification_report(v: &serde_json::Value) -> serde_json::Value {
+    use serde_json::json;
+    let mut checks = Vec::new();
+    let mut add = |gate: &str, state: &str, detail: String| {
+        checks.push(json!({"gate": gate, "state": state, "detail": detail}))
+    };
+    let surface = v["scoring"]["surface"].as_str() == Some("zensim::BakeScorer");
+    add(
+        "Rust surface",
+        if surface { "pass" } else { "not_measured" },
+        "Complete composed scorer used by evaluation".into(),
+    );
+    let fs = &v["feature_set"];
+    let known = fs["bake"].as_str().is_some() && fs["table"].as_str().is_some();
+    let compatible = known && fs["mismatches"].as_array().is_some_and(|m| m.is_empty());
+    let replay = !v["repro"]["table_admission"]["historical_replay"].is_null();
+    add(
+        "Table provenance",
+        if replay {
+            "fail"
+        } else if compatible {
+            "pass"
+        } else {
+            "not_measured"
+        },
+        if replay {
+            "Explicit historical replay cannot qualify a new model"
+        } else {
+            "Require declared compatible feature and decoder eras; see feature_set"
+        }
+        .into(),
+    );
+    let source = &v["dial_ladder_source"];
+    let source_valid = source["path"]
+        .as_str()
+        .zip(source["sha256"].as_str())
+        .is_some_and(|(path, sha)| {
+            zensim_validate::train_manifest::sha256_file(&PathBuf::from(path))
+                .is_ok_and(|actual| actual == sha)
+        });
+    let addr = gaddr_block(v, GaddrBlock::Ladder);
+    let composition_matches = addr.is_some_and(|a| a["scoring"] == v["scoring"]);
+    add(
+        "Ladder evidence",
+        if source_valid && composition_matches {
+            "pass"
+        } else {
+            "not_measured"
+        },
+        "Require the preserved ladder artifact and the same complete scorer".into(),
+    );
+    for (gate, key) in [
+        ("G-ADDR contract", "contract"),
+        ("G-ADDR regression", "regression"),
+    ] {
+        let state = match addr.and_then(|a| a[key].as_str()) {
+            Some("PASS") => "pass",
+            Some("FAIL") => "fail",
+            _ => "not_measured",
+        };
+        add(
+            gate,
+            state,
+            "Operative ladder instrument; missing tiers cannot pass".into(),
+        );
+    }
+    let floors = gaddr_codec_states_of(v, GaddrBlock::Ladder);
+    for codec in ["avif-rav1e", "avif-svt", "jpeg", "jxl", "webp"] {
+        let state = match floors
+            .iter()
+            .find(|(c, _)| c == codec)
+            .and_then(|(_, state)| *state)
+        {
+            Some(true) => "pass",
+            Some(false) => "fail",
+            None => "not_measured",
+        };
+        add(
+            &format!("Codec floor: {codec}"),
+            state,
+            "All five required codec families must be measured".into(),
+        );
+    }
+    let candidate = v["bake_sha256"].as_str();
+    for gate in ["G-RANK", "G-DIAL", "G-STEER", "G-RD", "G-TARGET"] {
+        let evidence = &v["product_evidence"][gate];
+        let mut state = "not_measured";
+        let mut detail = "Missing content-bound product evidence".to_string();
+        if candidate.is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+            && evidence["bake_sha256"].as_str() == candidate
+            && evidence["surface"].as_str() == Some("zensim::BakeScorer")
+            && evidence["n"].as_u64().is_some_and(|n| n > 0)
+            && evidence["instrument"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+            && let (Some(path), Some(sha)) = (
+                evidence["artifact"]["path"].as_str(),
+                evidence["artifact"]["sha256"].as_str(),
+            )
+        {
+            let path = PathBuf::from(path);
+            let matches = zensim_validate::train_manifest::sha256_file(&path)
+                .is_ok_and(|actual| actual == sha);
+            if matches {
+                if let Ok(bytes) = std::fs::read(&path)
+                    && let Ok(measurement) = serde_json::from_slice::<serde_json::Value>(&bytes)
+                    && measurement["bake_sha256"].as_str() == candidate
+                    && measurement["scoring"] == v["scoring"]
+                    && measurement["gates"][gate]["state"] == evidence["state"]
+                {
+                    state = match evidence["state"].as_str() {
+                        Some("pass") => "pass",
+                        Some("fail") => "fail",
+                        _ => "not_measured",
+                    };
+                    detail = format!(
+                        "{}; artifact {} sha256 {}",
+                        evidence["instrument"].as_str().unwrap_or("?"),
+                        path.display(),
+                        sha
+                    );
+                }
+            } else {
+                detail = "Evidence artifact is missing or its content hash changed".into();
+            }
+        }
+        add(gate, state, detail);
+    }
+    let failed = checks.iter().any(|c| c["state"] == "fail");
+    let missing = checks.iter().any(|c| c["state"] == "not_measured");
+    json!({"schema": 1, "name": bake_name(v), "bake_sha256": candidate,
+        "status": if failed { "failed" } else if missing { "incomplete" } else { "qualified" },
+        "checks": checks, "research_selection_is_qualification": false})
+}
+
 fn main() {
     let mut fulleval: Option<PathBuf> = None;
+    let mut qualify = false;
     let mut bar_csiq: Option<f64> = None;
     let mut bar_live: Option<f64> = None;
     let mut profile: Option<String> = None;
@@ -2918,6 +3057,7 @@ fn main() {
         in_select = false;
         match a.as_str() {
             "--fulleval" => fulleval = args.next().map(PathBuf::from),
+            "--qualify" => qualify = true,
             "--select" => in_select = true,
             // A BARE flag: the grouping rule is DERIVED from each
             // fulleval's embedded repro argv (one owner — see the module
@@ -3005,6 +3145,12 @@ fn main() {
             _ => usage(),
         }
     }
+    if qualify && (!select.is_empty() || profile.is_some() || tsv) {
+        eprintln!(
+            "freeze_check: --qualify is a standalone product gate, separate from --select/--profile/--tsv"
+        );
+        std::process::exit(2);
+    }
     match profile.as_deref() {
         None | Some("balanced-2026-08-04") => {}
         Some(other) => {
@@ -3061,6 +3207,19 @@ fn main() {
             std::process::exit(2);
         }
     };
+
+    if qualify {
+        let report = qualification_report(&v);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).expect("qualification JSON")
+        );
+        std::process::exit(if report["status"] == "qualified" {
+            0
+        } else {
+            1
+        });
+    }
 
     // ── Balanced profile path (AMENDMENT 8) ─────────────────────────────
     if profile.is_some() {
@@ -5261,5 +5420,44 @@ mod tests {
             balanced_composite(&inv).unwrap() < balanced_composite(&good).unwrap(),
             "inverted tail must score BELOW the healthy one in the composite"
         );
+    }
+}
+
+#[cfg(test)]
+mod qualification_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn missing_is_incomplete_failures_persist_and_evidence_is_content_bound() {
+        assert_eq!(qualification_report(&json!({}))["status"], "incomplete");
+        let sha = "a".repeat(64);
+        let mut v = json!({"name":"candidate", "bake_sha256":sha,
+            "scoring":{"surface":"zensim::BakeScorer"},
+            "feature_set":{"bake":"declared", "table":"declared", "mismatches":[]},
+            "dial_ladder":{"contract":"PASS", "regression":"PASS", "measured":{"codec_floor":
+                (["avif-rav1e","avif-svt","jpeg","jxl","webp"].iter().map(|c| json!({"codec":c,"state":"pass"})).collect::<Vec<_>>())}}
+        });
+        let path =
+            std::env::temp_dir().join(format!("zensim-qualification-{}.json", std::process::id()));
+        let mut artifact = json!({"bake_sha256":sha,"scoring":v["scoring"],"gates":{}});
+        for gate in ["G-RANK", "G-DIAL", "G-STEER", "G-RD", "G-TARGET"] {
+            artifact["gates"][gate] = json!({"state":"pass"});
+        }
+        std::fs::write(&path, artifact.to_string()).unwrap();
+        let hash = zensim_validate::train_manifest::sha256_file(&path).unwrap();
+        v["dial_ladder_source"] = json!({"path":path,"sha256":hash});
+        v["dial_ladder"]["scoring"] = v["scoring"].clone();
+        for gate in ["G-RANK", "G-DIAL", "G-STEER", "G-RD", "G-TARGET"] {
+            v["product_evidence"][gate] = json!({"state":"pass","bake_sha256":sha,"n":30,
+                "surface":"zensim::BakeScorer","instrument":"test measuring owner",
+                "artifact":{"path":path,"sha256":hash}});
+        }
+        assert_eq!(qualification_report(&v)["status"], "qualified");
+        std::fs::write(&path, "{}").unwrap();
+        assert_eq!(qualification_report(&v)["status"], "incomplete");
+        v["dial_ladder"]["contract"] = json!("FAIL");
+        assert_eq!(qualification_report(&v)["status"], "failed");
+        std::fs::remove_file(path).unwrap();
     }
 }

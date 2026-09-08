@@ -23,17 +23,10 @@ present and pass. Use [`MODEL_SELECTION_SCORECARD.md`](MODEL_SELECTION_SCORECARD
 for the complete product exam. The September board's operative addressability
 block is `dial_ladder`; `dial.curves` still describes its canonical grid.
 
-**Later user ruling, 2026-09-07:** new-model evaluation must score through a
-zensim surface API, with the full model executable and servable in Rust,
-including all heads and splines. The current separate `bake_runtime` adapter
-shares arithmetic but is not yet that complete surface path. The integration
-is tracked in [cleanup plan §1a](PLAN_CRUFT_PURGE_2026-09-06.md#1a-make-the-zensim-surface-the-model-evaluation-path);
-“Rust-only statistics” above is not proof that a new model meets this requirement.
-
 ## Usage
 
 ```sh
-scripts/run_full_eval.sh <bake.bin> <name> [regime=720] [features-root]
+scripts/run_full_eval.sh [--stage all|verdict|coherence|qualify] <bake.bin> <name> [regime=720] [features-root]
 ```
 
 - `<bake.bin>` — a ZNPR v3 bake; the scorer gathers its declared feature IDs.
@@ -56,14 +49,30 @@ scripts/run_full_eval.sh \
   foldmlp_bigcodec_kadis_720 720
 ```
 
-Env overrides: `ZENSIM_M3_FIXTURES` (default
-`/mnt/v/output/zensim/diffmap-coherence-2026-07-18`), `ZENSIM_M3_DIST_Q`
-(default `q50`), `ZENSIM_FULLEVAL_OUT` (default the reports dir above),
-`ZENSIM_M3_REUSE=1` — carry `m3_*` from the bake's previous fulleval JSON
-instead of re-measuring. **Use this for schema re-emits**: the rank/dial/
-corruption portion is a cheap rescore over stored feature parquets (numbers
-cannot change unless the bake/parquets/estimators changed), but the M3 sweep
-is 27 diffmap runs per bake — re-measuring an unchanged value.
+Stages are independently reusable. `verdict` runs the offline score/statistics
+owner; `coherence` requires a current verdict and runs the 27-cell map exam;
+`all` runs both. `qualify` reads the assembled evidence through
+`freeze_check --qualify`, stores its report, and returns nonzero for failed or
+incomplete qualification. G-RD/G-TARGET still need the real codec instruments.
+
+Reuse is automatic only when the owning tools' complete input identities
+match: model/member/head hashes, evaluator binary, resolved feature tables and
+manifest, probes/truth and settings; coherence additionally pins every fixture
+and the sweep executable. `bake_verdict --print-inputs` and
+`m3a_sweep.sh --print-inputs` expose those identities without computing scores.
+The independent `*.verdict-stage.json` and `*.coherence-stage.json` artifacts
+survive interruptions. JSON writes are atomic and output stems are locked.
+`harvest_bakes.sh` calls this owner once and copies its verdict for legacy
+consumers. It never treats file existence as proof of a completed evaluation.
+
+Environment overrides: `ZENSIM_M3_FIXTURES`, `ZENSIM_M3_CONTENT` (three names),
+`ZENSIM_FULLEVAL_OUT`, `ZENSIM_BAKE_VERDICT` and `ZENSIM_DIFFMAP_BIN`.
+`CARGO_TARGET_DIR` is honored. `ZENSIM_M3_ONLY=1` remains an alias for the
+coherence stage; `ZENSIM_M3_REUSE=1` cannot bypass identity validation.
+`ZENSIM_M3_DIST_Q` was obsolete: the registered grid uses q20/q50/q75.
+A missing historical fixture now refuses instead of mixing a newly encoded
+file into an old fixture era. Generate a complete new era with the existing
+`m3_fixture_gen` owner in a separate directory.
 
 ## What it chains (no duplicate stat implementations)
 
@@ -75,14 +84,21 @@ is 27 diffmap runs per bake — re-measuring an unchanged value.
 | per_pair (pred vs mos/jnd/ssim2/butter/cvvdp) | `bake_verdict` + `parquet_loader::load_perpair_sample` | `--fulleval` |
 | m3_coherence (G-STEER) | `zensim/examples/diffmap_block_coherence.rs --bake` | shell loop, jq-injected |
 
-The script builds both binaries release (`bake_verdict`; the example with
-`custom-profiles,feature-regime-v2` so a >372 bake's v2 block folds into the M3
-map — inert for a ≤372 bake), then jq sets the top-level M3 fields from the
-sweep means. Everything else is emitted by `bake_verdict --fulleval` directly
-in the target schema — since 2026-08-04 that flag emits the SCHEMA-COMPLETE
-file (all five `m3_*`/`m3a_*` slots pre-nulled; `--full-json` remains the
-m3_coherence-only legacy form), so the jq step only injects INTO existing keys
-and `run_full_eval.sh` adds no statistic of its own.
+Each stage builds only its required Rust instrument. The verdict emits the
+schema-complete JSON; the sweep supplies M3/M3a means. A coherence stage requires
+all 27 cells for both measurements. Partial results retain their logs and the
+completed verdict, return failure, and cannot become a valid cache entry.
+
+Qualification evidence uses `product_evidence["G-RANK"|"G-DIAL"|"G-STEER"|
+"G-RD"|"G-TARGET"]`: state, candidate `bake_sha256`, `surface` equal to
+`zensim::BakeScorer`, instrument identity, positive sample count `n`, and
+`artifact: {path, sha256}`. The measuring owner's JSON must name the same bake
+and contain that gate/state under `gates`. The qualifier verifies the artifact
+bytes before reading the state. An absent or stale record is incomplete; a
+known gate failure remains failed even when other evidence is missing. This
+extends the existing scorecard and decision owner; it is not another model
+registry. The gauntlet displays the stored qualification report without
+synthesizing one from rank or badges.
 
 ## JSON schema
 
@@ -93,7 +109,7 @@ and `run_full_eval.sh` adds no statistic of its own.
   "name": "<name>",
   "regime": "720" | "372",
   "n_inputs": 720,                  // the bake's own input width
-  "m3_coherence": 0.6456,           // mean M3 over the 3 fixture pairs (null if none)
+  "m3_coherence": 0.6456,           // mean M3 over the 27 fixture pairs (null if none)
 
   "rank": {                         // per held-out corpus (the rank panel)
     "cid22": { "n", "srocc", "plcc", "krocc", "or", "pwrc", "z_rmse" },
@@ -146,7 +162,7 @@ from the KADIS-720 metric parquet) → `ssim2` / `butter` / `cvvdp` from
   (a non-existent path skips the `kadis` block).
 - **M3 (G-STEER).** `diffmap_block_coherence --bake` reports M1/M1b/M3/M2; the
   wrapper reads the **M3** line (deployable model-sensitivity map ↔ per-block ΔS)
-  and averages it over the 3 fixture image pairs. M3 is per-pair noisy (measured
+  and averages it over the 27 fixture image pairs. M3 is per-pair noisy (measured
   city 0.28 / dog 0.75 / girl 0.91 for the fold-MLP), so the mean is the summary;
   the per-pair `<name>.m3.<ref>.log` files are kept for inspection. This holds
   for a nonlinear MLP too — M3 is a rank correlation of per-block ΔS, not an
@@ -199,3 +215,10 @@ identities never persisted); fingerprint matching cannot cross regimes (the
 folded block replaces v1-372), so those tables are **720-legacy only — do NOT
 rebuild them for 924**. The eval instruments `corruption_grid_924col` and
 `dial_grid_924col` live in `/mnt/v/output/zensim/v2-eval-924-2026-07-27/`.
+
+A repeated stage preserves attached ladder/product evidence only when the aggregate
+verdict identity still matches. It clears the previous qualification decision; run
+`--stage qualify` again to recheck artifact hashes and complete scorer composition.
+Product measurement JSON must carry the same `scoring` block as the verdict.
+Changing any verdict input drops these attachments; graft freshly measured evidence
+through `promote_fulleval.py` before qualifying again.

@@ -1,0 +1,88 @@
+{
+  "seeds": [
+    {
+      "seed": 4004,
+      "cid22": 0.8903616385842106,
+      "konjnd_guard": 0.4946508147753531,
+      "composite": 0.8727940159416271,
+      "exact_verdict": {
+        "rank": true,
+        "dial": true,
+        "corruption": true,
+        "per_pair": true,
+        "composite": true,
+        "gates": true
+      },
+      "exact_gaddr": {
+        "checks": true,
+        "measured": true,
+        "contract": true,
+        "regression": true
+      },
+      "contract": "FAIL",
+      "regression": "FAIL",
+      "codec_floors_passed": 0
+    },
+    {
+      "seed": 4005,
+      "cid22": 0.8863610694871065,
+      "konjnd_guard": 0.5063879568395345,
+      "composite": 0.8725347353877418,
+      "exact_verdict": {
+        "rank": true,
+        "dial": true,
+        "corruption": true,
+        "per_pair": true,
+        "composite": true,
+        "gates": true
+      },
+      "exact_gaddr": {
+        "checks": true,
+        "measured": true,
+        "contract": true,
+        "regression": true
+      },
+      "contract": "FAIL",
+      "regression": "FAIL",
+      "codec_floors_passed": 0
+    },
+    {
+      "seed": 4006,
+      "cid22": 0.8905608226955334,
+      "konjnd_guard": 0.4981656116761643,
+      "composite": 0.8732883210249119,
+      "exact_verdict": {
+        "rank": true,
+        "dial": true,
+        "corruption": true,
+        "per_pair": true,
+        "composite": true,
+        "gates": true
+      },
+      "exact_gaddr": {
+        "checks": true,
+        "measured": true,
+        "contract": true,
+        "regression": true
+      },
+      "contract": "FAIL",
+      "regression": "FAIL",
+      "codec_floors_passed": 0
+    }
+  ],
+  "aggregate": {
+    "cid22": {
+      "mean": 0.8890945102556168,
+      "sample_sd": 0.0023693231952957943
+    },
+    "konjnd_guard": {
+      "mean": 0.4997347944303506,
+      "sample_sd": 0.006023858966287398
+    },
+    "composite": {
+      "mean": 0.872872357451427,
+      "sample_sd": 0.00038285228516433983
+    }
+  },
+  "qualification": "failed; historical replay with identity and codec-floor failures; KonJND is not held out"
+}

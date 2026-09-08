@@ -1007,6 +1007,7 @@ struct Args {
     /// `resolve_features_root`. The derivation lives in the feature-set owner;
     /// this flag is only the shell's way in, so there is still ONE rule.
     print_features_root: bool,
+    print_inputs: bool,
 }
 
 fn print_usage() {
@@ -1142,6 +1143,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut regime_944 = false;
     let mut regime_flag_passed = false;
     let mut print_features_root = false;
+    let mut print_inputs = false;
     let mut cross_regime = false;
     let mut allow_unpopulated_slots = false;
     let mut require_feature_set_match = false;
@@ -1373,6 +1375,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 let v = args.next().ok_or("--identity-probe requires <parquet>")?;
                 identity_probe = Some(PathBuf::from(v));
             }
+            "--print-inputs" => {
+                print_inputs = true;
+            }
             "--print-features-root" => {
                 print_features_root = true;
             }
@@ -1587,6 +1592,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         regime_flag_passed,
         features_root_explicit: features_root_set,
         print_features_root,
+        print_inputs,
         per_pair_output,
         per_pair_refs,
         dial_grid,
@@ -1793,7 +1799,6 @@ struct Ensemble {
     /// Per-member `has_nontrivial_feature_transforms()` — members are allowed
     /// to differ here; the dispatch is per-member, never the primary's.
     has_transforms: Vec<bool>,
-    n_inputs: usize,
     corruption_head: Option<CompanionHead>,
     corruption_threshold: f64,
     /// `None` = the historical equal-weight mean, accumulated exactly as before
@@ -1803,6 +1808,21 @@ struct Ensemble {
 }
 
 impl Ensemble {
+    fn accepts_row_width(&self, width: usize) -> bool {
+        let members = self.models.iter().enumerate().all(|(i, model)| {
+            self.weights.as_ref().is_some_and(|w| w[i] == 0.0)
+                || CallerGather::for_model(model)
+                    .accepts_prefix_row_width(width, model.caller_input_width())
+        });
+        members
+            && match &self.corruption_head {
+                None => true,
+                Some(CompanionHead::Znpr(model)) => CallerGather::for_model(model)
+                    .accepts_prefix_row_width(width, model.caller_input_width()),
+                Some(CompanionHead::Tree(head)) => width >= head.caller_input_width(),
+            }
+    }
+
     /// Member 0 — the provenance anchor + the bake whose architecture the
     /// report's metadata blocks describe.
     fn primary(&self) -> &Model {
@@ -3623,17 +3643,12 @@ fn render_corpus(
     // Only the narrow direction fabricates data. Failing here aborts the whole
     // verdict rather than dropping one corpus, because a verdict that silently
     // lost a corpus is the same class of quiet wrongness.
-    if g.n_features < ens.n_inputs {
+    if !ens.accepts_row_width(g.n_features) {
         return Err(format!(
-            "corpus {} at {} holds {} features but the bake declares {} caller inputs — \
-             scoring it would ZERO-FILL the missing {}. This is a wrong-root read, not a \
-             narrow corpus: pass the features root this bake was trained on (bake_verdict \
-             prints the root era it read), or --regime the width that matches.",
+            "corpus {} at {} has {} identity columns, which do not cover every active member and companion's required feature IDs",
             corpus.display,
             path.display(),
-            g.n_features,
-            ens.n_inputs,
-            ens.n_inputs - g.n_features
+            g.n_features
         ));
     }
     let humans = std::mem::take(&mut g.human_scores);
@@ -4036,6 +4051,115 @@ fn feature_set_block(model: &Model, root: &Path) -> serde_json::Value {
     })
 }
 
+/// Complete artifact identity for this evaluator's own resolved inputs.
+/// Used both by --print-inputs (no scoring) and the result, so orchestration
+/// never duplicates corpus-slot or default-path policy.
+fn evaluation_input_identity(
+    args: &Args,
+    corpora: &[(String, PathBuf, String, u64)],
+    members: &[PathBuf],
+) -> Result<serde_json::Value, String> {
+    use std::collections::BTreeMap;
+    use zensim_validate::train_manifest::sha256_file;
+    let mut files: BTreeMap<PathBuf, Option<String>> = corpora
+        .iter()
+        .map(|(_, p, sha, _)| (p.clone(), Some(sha.clone())))
+        .collect();
+    let mut paths = vec![
+        args.features_root.join("_MANIFEST.json"),
+        args.dial_grid.clone(),
+        args.corruption_grid.clone(),
+        args.perpair_metrics.clone(),
+    ];
+    paths.extend_from_slice(members);
+    paths.extend(
+        [
+            &args.ramp_grid,
+            &args.compare,
+            &args.corruption_head,
+            &args.negtail_probe,
+            &args.identity_probe,
+            &args.gaddr_grid_truth,
+        ]
+        .into_iter()
+        .filter_map(|p| p.clone()),
+    );
+    paths.extend(
+        [
+            &args.dial_peer_scores,
+            &args.negtail_peer_scores,
+            &args.identity_peer_scores,
+        ]
+        .into_iter()
+        .filter_map(|p| p.as_ref().map(|(_, path)| path.clone())),
+    );
+    paths.extend(args.reference_truth.as_ref().map(|(p, _)| p.clone()));
+    for member in members {
+        paths.push(PathBuf::from(format!("{}.spec.json", member.display())));
+    }
+    for path in paths {
+        if let std::collections::btree_map::Entry::Vacant(entry) = files.entry(path) {
+            let sha = if entry.key().exists() {
+                Some(sha256_file(entry.key()).map_err(|e| e.to_string())?)
+            } else {
+                None
+            };
+            entry.insert(sha);
+        }
+    }
+    let mut options = Vec::new();
+    let mut argv = std::env::args().skip(1);
+    while let Some(arg) = argv.next() {
+        match arg.as_str() {
+            "--print-inputs" => {}
+            "--output"
+            | "--full-json"
+            | "--fulleval"
+            | "--json"
+            | "--html"
+            | "--name"
+            | "--gaddr-json"
+            | "--per-pair-output"
+            | "--encoder-inversion-census" => {
+                argv.next();
+            }
+            _ => options.push(arg),
+        }
+    }
+    let environment: BTreeMap<_, _> = std::env::vars()
+        .filter(|(k, _)| {
+            k.starts_with("ZENSIM_")
+                && !k.starts_with("ZENSIM_M3")
+                && !k.starts_with("ZENSIM_FULLEVAL")
+                && k != "ZENSIM_EVAL_STAGE"
+        })
+        .collect();
+    Ok(serde_json::json!({
+        "schema": 1, "surface": "zensim::BakeScorer",
+        "evaluator_sha256": sha256_file(&std::env::current_exe().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?,
+        "files": files.into_iter().map(|(path, sha256)| serde_json::json!({"path": path, "sha256": sha256})).collect::<Vec<_>>(),
+        "options": options, "environment": environment,
+    }))
+}
+
+fn atomic_json_write(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)?;
+    let result = (|| {
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
 fn features_root_block(
     root: &Path,
     corpus_prov: &[(String, PathBuf, String, u64)],
@@ -4308,20 +4432,6 @@ fn main() -> ExitCode {
     // `n_features == n_inputs` rule they had.
     let gather_for_grids = CallerGather::for_model(&models[0]);
 
-    if let Some((p, m)) = members
-        .iter()
-        .zip(models.iter())
-        .find(|(_, m)| m.caller_input_width() != n_inputs)
-    {
-        eprintln!(
-            "bake_verdict: ensemble member {} has n_inputs={} but member 0 has {} — \
-             refusing to average across feature regimes",
-            p.display(),
-            m.n_inputs(),
-            n_inputs
-        );
-        return ExitCode::from(2);
-    }
     // C2 wrong-regime guard (appendix W): the `--regime 944` root is a FOLDED
     // extraction whose f156-371 block is structural zeros. A bake that
     // structurally uses that block would score to plausible-looking garbage
@@ -4562,25 +4672,30 @@ fn main() -> ExitCode {
                         b.id,
                         p.display()
                     );
-                    // **PER-BAKE REVISION.** A bake declares the formula
-                    // revision it was trained against
-                    // (`zentrain.formula_revision`; absent = the shipped
-                    // one), and this build computes one revision per walk. A
-                    // bake asking for a revision this build is not computing
-                    // would be scored on arithmetic it never saw — measured
-                    // as 22 of 33 inputs per shipped 944 bake for the F5 fix
-                    // — so it is REFUSED rather than reported.
                     let bake_rev = zensim::feature_v2::bake_formula_revision_public(m);
-                    let build_rev = zensim::feature_v2::active_formula_revision();
-                    if bake_rev != build_rev {
+                    let table_rev = match feature_set::root_formula_revision(&args.features_root) {
+                        Ok(rev) => rev,
+                        Err(e) => {
+                            eprintln!("bake_verdict: {e}");
+                            return ExitCode::from(2);
+                        }
+                    };
+                    let expected = match bake_rev {
+                        zensim::feature_v2::FormulaRevision::Rev1 => 1,
+                        zensim::feature_v2::FormulaRevision::Rev2 => 2,
+                    };
+                    if table_rev.is_some_and(|rev| rev != expected)
+                        && (!args.cross_regime || args.require_feature_set_match)
+                    {
                         eprintln!(
-                            "bake_verdict: REFUSING — {} declares formula revision {bake_rev:?} \
-                             and this build computes {build_rev:?}. The arithmetic differs on \
-                             the slots that revision moves, so every number would be about a \
-                             formula the bake was not trained on. Re-run with \
-                             ZENSIM_FORMULA_REV set to match, or score a bake of this build's \
-                             revision.",
+                            "bake_verdict: REFUSING — {} requires formula {expected}, cached table declares {table_rev:?}; changing ZENSIM_FORMULA_REV cannot change stored values. Use a matching table; --cross-regime is explicit historical replay only.",
                             p.display()
+                        );
+                        return ExitCode::from(2);
+                    }
+                    if table_rev.is_none() && args.require_feature_set_match {
+                        eprintln!(
+                            "bake_verdict: REFUSING — cached table formula revision is unknown"
                         );
                         return ExitCode::from(2);
                     }
@@ -4680,7 +4795,6 @@ fn main() -> ExitCode {
             .iter()
             .map(|m| m.has_nontrivial_feature_transforms())
             .collect(),
-        n_inputs,
         corruption_head,
         corruption_threshold,
         models,
@@ -4832,6 +4946,31 @@ fn main() -> ExitCode {
         corpus_prov.push((label, args.dial_grid.clone(), sha, bytes));
     }
 
+    let scoring = serde_json::json!({
+        "surface":"zensim::BakeScorer", "version":"2026-09-07",
+        "output":"complete calibrated score, including the corruption gate",
+        "members":members.iter().map(|p|serde_json::json!({"path":p,"sha256":zensim_validate::train_manifest::sha256_file(p).ok()})).collect::<Vec<_>>(),
+        "ensemble_weights":ens.weights,
+        "corruption":args.corruption_head.as_ref().map(|p|serde_json::json!({
+            "path":p,"sha256":zensim_validate::train_manifest::sha256_file(p).ok(),
+            "deadband_score":ens.corruption_threshold,
+        })),
+    });
+    let input_identity = match evaluation_input_identity(&args, &corpus_prov, &members) {
+        Ok(identity) => identity,
+        Err(e) => {
+            eprintln!("bake_verdict: input identity: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    if args.print_inputs {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&input_identity).expect("input identity JSON")
+        );
+        return ExitCode::SUCCESS;
+    }
+
     pt.mark("corpus pre-pass (existence + sha256 of every input)");
 
     let mut buf = String::new();
@@ -4917,7 +5056,7 @@ fn main() -> ExitCode {
             None
         };
         let s = format_per_pair(&last.humans, &last.rescaled_scores, refs);
-        if let Err(e) = std::fs::write(path, s) {
+        if let Err(e) = atomic_json_write(path, &s) {
             eprintln!("bake_verdict: write per-pair output: {e}");
             return ExitCode::from(1);
         }
@@ -5252,7 +5391,7 @@ Run the dedicated q-sweep harness for those._\n",
                 );
                 None
             }
-            (None, None) if gather_for_grids.accepts_row_width(g.n_features, n_inputs) => {
+            (None, None) if ens.accepts_row_width(g.n_features) => {
                 let scores = ens.score_rows(&g.feature_rows);
                 Some((g.label, scores, sha, g.truth_ssim2))
             }
@@ -5356,6 +5495,10 @@ Run the dedicated q-sweep harness for those._\n",
                 // peer, not `--bake`, and a file that does not say so is a
                 // mislabelled measurement waiting to be quoted.
                 if let Some(obj) = j.as_object_mut() {
+                    if args.dial_peer_scores.is_none() {
+                        obj.insert("scoring".into(), scoring.clone());
+                    }
+                    obj.insert("input_identity".into(), input_identity.clone());
                     // `to_json` already carries `"floor_rule"` (the tag); add
                     // the numeric params actually used, so a `resolvable`/
                     // `spaced` bar is fully reproducible from the JSON alone
@@ -5410,7 +5553,7 @@ Run the dedicated q-sweep harness for those._\n",
     // ── Severity-ramp monotonicity (distortion dial) — opt-in ──────────
     if let Some(ramp_path) = &args.ramp_grid {
         match parquet_loader::load_ramp_grid(ramp_path) {
-            Ok(grid) if gather_for_grids.accepts_row_width(grid.n_features, n_inputs) => {
+            Ok(grid) if ens.accepts_row_width(grid.n_features) => {
                 let dial = ens.score_rows(&grid.feature_rows);
                 let images: Vec<String> =
                     grid.image.iter().map(|p| basename(Path::new(p))).collect();
@@ -5495,7 +5638,7 @@ Run the dedicated q-sweep harness for those._\n",
                 // scores; `None` when the dial could not read this grid, which
                 // is exactly when the composition is undefined.
                 let mut dial_scores: Option<Vec<f64>> = None;
-                if gather_for_grids.accepts_row_width(grid.n_features, n_inputs) {
+                if ens.accepts_row_width(grid.n_features) {
                     let dial = ens.score_rows_ungated(&grid.feature_rows);
                     let stats = eval_report::corruption_gate(&grid.label, &dial);
                     dial_scores = Some(dial);
@@ -6115,9 +6258,7 @@ Run the dedicated q-sweep harness for those._\n",
             // load time, not a second derivation that could drift from it.
             let perpair_gather = &gather_for_grids;
             match perpair_load {
-                Ok(sample)
-                    if perpair_gather.accepts_prefix_row_width(sample.n_features, n_inputs) =>
-                {
+                Ok(sample) if ens.accepts_row_width(sample.n_features) => {
                     let idx = stride(sample.feature_rows.len(), args.perpair_cap);
                     let rows: Vec<Vec<f64>> = idx
                         .iter()
@@ -6233,16 +6374,6 @@ Run the dedicated q-sweep harness for those._\n",
             },
             Err(_) => repro_value,
         };
-        let scoring = json!({
-            "surface":"zensim::BakeScorer", "version":"2026-09-07",
-            "output":"complete calibrated score, including the corruption gate",
-            "members":members.iter().map(|p|json!({"path":p,"sha256":zensim_validate::train_manifest::sha256_file(p).ok()})).collect::<Vec<_>>(),
-            "ensemble_weights":ens.weights,
-            "corruption":args.corruption_head.as_ref().map(|p|json!({
-                "path":p,"sha256":zensim_validate::train_manifest::sha256_file(p).ok(),
-                "deadband_score":ens.corruption_threshold,
-            })),
-        });
         let full = json!({
             "scoring":scoring,
             "bake": args.bake.display().to_string(),
@@ -6254,6 +6385,7 @@ Run the dedicated q-sweep harness for those._\n",
             // sha + declared regime, and the per-corpus files actually read.
             // `regime` above is a campaign flag string and is NOT this fact.
             "features_root": features_root_block(&args.features_root, &corpus_prov),
+            "input_identity": input_identity,
             // FEATURE-SET IDS (docs/FEATURE_SET_IDS.md). `regime`/`n_inputs`
             // above are LEGACY ALIASES — a width, not an identity ("944" alone
             // has named seven feature sets). This block is the identity: the

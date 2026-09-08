@@ -1209,3 +1209,25 @@ mod training_admission_tests {
         assert!(admit_training_tables(&paths, Some("fixed historical control")).is_ok());
     }
 }
+
+/// Revision of cached values, read from their manifest or the registered era.
+/// The process's extraction setting cannot change an already-written table.
+pub fn root_formula_revision(root: &Path) -> Result<Option<u8>, String> {
+    if let Ok(bytes) = std::fs::read(root.join("_MANIFEST.json")) {
+        let v: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", root.display()))?;
+        if let Some(value) = v.get("formula_revision") {
+            let n = value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|s| s.parse().ok()));
+            return match n {
+                Some(1 | 2) => Ok(n.map(|n| n as u8)),
+                _ => Err(format!(
+                    "{}: invalid formula_revision {value}",
+                    root.display()
+                )),
+            };
+        }
+    }
+    Ok(root_feature_set_ref(root).and_then(|r| registry().formula_revision(r.id.era())))
+}

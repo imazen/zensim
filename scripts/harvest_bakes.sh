@@ -40,8 +40,8 @@
 #   # detached (the normal case):
 #   setsid nohup scripts/harvest_bakes.sh --glob ... >/dev/null 2>&1 &
 #
-# Idempotent: a bake whose fulleval JSON already exists is skipped, so it is
-# safe to re-run, and safe to run alongside a puller that is still copying.
+# Idempotent: the evaluation owner verifies model/input/instrument identities
+# before reusing each completed stage. A filename is never a cache key.
 #
 # EXIT CODES
 #   0  every targeted bake harvested cleanly
@@ -101,28 +101,8 @@ trap 'finish' EXIT
 # --- harvest one bake -----------------------------------------------------
 # Returns 0 on success (or already-done), 1 on failure. NEVER swallows an
 # error: that is failure (B) above.
-# The bake_verdict binary, resolved the same way sota944_verdict.sh does, so
-# the two never disagree about which build is being driven.
-BV=${ZL_BV:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}/release/bake_verdict}
-
-# The features root for ONE bake: the caller's override, else derived FROM THE
-# BAKE by its owner. Derived ONCE here and forwarded to BOTH the verdict and
-# the fulleval, so a harvest can never produce a verdict and a fulleval read on
-# different rulers. Empty output ⇒ undeterminable; the callee refuses loudly.
-root_for_bake() {
-    local bake=$1
-    if [ -n "$FEATURES_ROOT" ]; then printf '%s' "$FEATURES_ROOT"; return 0; fi
-    [ -x "$BV" ] || return 0   # not built: let run_full_eval.sh build + resolve
-    "$BV" --bake "$bake" --regime "$REGIME" --print-features-root 2>>"$LOG" || true
-}
-
 harvest_one() {
     local bake=$1 stem=$2 rc=0
-    local root
-    root=$(root_for_bake "$bake")
-    if [ -f "$FE/$stem.fulleval.json" ] || { [ "$SKIP_FULLEVAL" = 1 ] && [ -f "$VD/$stem.full.json" ]; }; then
-        return 0
-    fi
     # A bake still being written by the trainer, or mid-rsync, is not ready.
     # This MUST fall through to the accounting block below rather than
     # early-returning: an early `return 1` here skipped the NFAIL increment and
@@ -133,18 +113,23 @@ harvest_one() {
         rc=1; say "NOT READY $stem — bake is empty or absent"
     fi
 
-    if [ "$rc" = 0 ] && [ ! -f "$VD/$stem.full.json" ]; then
-        say "verdict $stem"
-        if ! "$REPO_ROOT/scripts/sota944_verdict.sh" "$bake" "$stem" \
-                ${root:+--features-root "$root"} >>"$LOG" 2>&1; then
-            rc=1; say "VERDICT FAILED $stem"
-        fi
-    fi
-    if [ "$rc" = 0 ] && [ "$SKIP_FULLEVAL" = 0 ] && [ ! -f "$FE/$stem.fulleval.json" ]; then
-        say "fulleval $stem (regime $REGIME)"
-        if ! nice -n 19 ionice -c 3 "$REPO_ROOT/scripts/run_full_eval.sh" \
-                "$bake" "$stem" "$REGIME" "$root" >>"$LOG" 2>&1; then
-            rc=1; say "FULLEVAL FAILED $stem"
+    if [ "$rc" = 0 ]; then
+        local stage=all
+        [ "$SKIP_FULLEVAL" = 1 ] && stage=verdict
+        say "evaluate $stem (stage=$stage regime=$REGIME; owner validates reuse)"
+        if ! "$REPO_ROOT/scripts/run_full_eval.sh" --stage "$stage" \
+            "$bake" "$stem" "$REGIME" "$FEATURES_ROOT" >>"$LOG" 2>&1; then
+            rc=1; say "EVALUATION FAILED $stem"
+        else
+            # Compatibility artifact, copied from the same completed verdict.
+            # No second scoring pass and no second regime/root selection.
+            local copy_tmp
+            copy_tmp=$(mktemp "$VD/.$stem.XXXXXX")
+            if cp "$FE/$stem.verdict-stage.json" "$copy_tmp" && mv "$copy_tmp" "$VD/$stem.full.json"; then
+                if [ -f "$FE/$stem.verdict.md" ]; then cp "$FE/$stem.verdict.md" "$VD/$stem.verdict.md" || rc=1; fi
+            else
+                rm -f "$copy_tmp"; rc=1; say "VERDICT COPY FAILED $stem"
+            fi
         fi
     fi
 

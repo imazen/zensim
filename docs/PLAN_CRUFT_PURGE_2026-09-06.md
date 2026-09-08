@@ -44,7 +44,7 @@ ablation closes its hypothesis and preserves the useful component.
   head/spline decoding; reusable prediction state; pixel/cached-feature parity;
   complete corruption composition through the same API used by evaluation.
 - [x] Migrate candidate-evaluation callers and remove alternate runtime dispatch.
-- [ ] Explicit validated evaluation stages and artifact-identity reuse; harvest
+- [x] Explicit validated evaluation stages and artifact-identity reuse; harvest
   invokes the owner once; qualification distinguishes failure from missing data.
 - [ ] Complete transform-screen option migration and remaining spline-writer
   consolidation with historical recipe and boundary evidence.
@@ -135,6 +135,25 @@ root, exactly reproduces **every value** in `rank`, `dial`, `corruption`,
 Its composite remains `0.8727940159416271`. This establishes unchanged
 inference/statistics for the competitive control, not training reproduction
 or product qualification; those remain in the checklist above.
+
+### Evaluation and training preservation — September 7 continuation
+
+The evaluation-stage checklist item is complete: independently reusable verdict
+and coherence stages, content identities, atomic outputs, harvest through one
+owner, and explicit product qualification in `freeze_check --qualify`.
+The real control ran all 27 coherence cells, then reused both completed stages;
+interruption/stale-input tests pass. Attached evidence is retained only for the
+same verdict identity and its hashes/composition are rechecked for qualification.
+Both gauntlet pages retain the negative score axes and display qualification
+separately from research selection.
+
+The three registered training seeds completed on the cleaned path. Every
+measured verdict/ladder field exactly reproduces its September 6 reference.
+CID22 mean is 0.8890945 (sample SD 0.0023693). All three retain the known
+identity and five-codec-floor failures. Historical KonJND is an overlapping
+memorization guard, not a holdout. See the [full reproduction record](../benchmarks/cleanup_training_reproduction_2026-09-07.md).
+This completes training preservation only; the remaining scientific controls
+and product-loop measurements stay explicitly open in the checklist.
 
 ### Execution record — first batch, September 7
 
@@ -874,3 +893,17 @@ registered `Proposed`); any crates.io publish; bigcodec/KADIS conversion (fleet
 jobs, registered not run); `zenanalyze-api` (frozen).
 
 </details>
+
+### Qualification interface registration — September 7 continuation
+
+Extend the existing `freeze_check` decision owner with `--qualify --fulleval
+<json>`. It reports `qualified`, `failed`, or `incomplete` plus each finding;
+research selection remains distinct. Require the Rust scoring identity,
+resolved compatible provenance, both G-ADDR tiers and all five codec families,
+and the five product gates in `MODEL_SELECTION_SCORECARD.md`. The latter use
+content-bound evidence records (`product_evidence`): gate state, candidate
+SHA-256, Rust surface, instrument, positive sample count, and the path/SHA-256
+of the measuring owner's JSON artifact. Missing or stale evidence is incomplete,
+never pass. Known failures remain failures even when other evidence is missing.
+The board may display this report, but must not synthesize qualification from
+composite or from the absence of a failing badge.

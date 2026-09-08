@@ -1,111 +1,42 @@
 #!/usr/bin/env bash
-#
-# 924-era NOTE (2026-07-28): imazen26/nonphoto eval slices for 924-regime models come from the
-# canonical bigcodec 924 TEST views, NOT the NN-matched ext_*_720 tables — see docs/FULL_EVAL.md
-# "924-era eval slices" (user directive; fingerprint matching cannot cross regimes).
-# run_full_eval.sh — ONE comprehensive Rust "full-eval" per bake → unified JSON.
-#
-#   scripts/run_full_eval.sh <bake.bin> <name> [regime=720] [features-root]
-#
-# The FEATURES ROOT COMES FROM THE BAKE (2026-09-05). This script used to
-# hard-code one root per regime, so a bake trained at a non-default root had
-# two outcomes and no third: a wrong-regime read (which bake_verdict correctly
-# REFUSES) or no board cell at all. The casualty of record is A3b — the
-# replication wave's one genuinely-k=1 recipe, trained on
-# ext944-era2r4-2026-09-01, which scores 0.88-0.89 CID22 at its native root and
-# had no board row (replication_wave_2026-09-05.md §4c.3).
-#
-# Resolution, in the ONE owner (zensim_validate::feature_set::
-# resolve_features_root, reached via `bake_verdict --print-features-root`):
-#   1. an explicit 4th argument / $ZENSIM_FEATURES_ROOT — always wins;
-#   2. the bake's declared zentrain.feature_set_id -> registry roots table;
-#   3. the bake's embedded zentrain.repro training-input paths -> that same
-#      roots table (the path A3b takes: it predates feature-set ids);
-#   4. the regime default, but only as a DETERMINATION — the bake has a repro
-#      and its training inputs name no registered features root, i.e. it
-#      trained on a corpus that is not an eval root (every 372/720 bake).
-# A bake with NO repro and NO override is an ERROR (exit 3), never a silent
-# default. Pass the root explicitly to score such a bake.
-#
-# Chains the canonical Rust owners (NO Python for any statistic):
-#   1. bake_verdict --fulleval  → the schema-complete fulleval JSON: rank
-#      (per-corpus Mohammadi) + dial (mono/tied/reach/dynamic_range) +
-#      corruption gate + a sampled multi-metric per_pair block (pred vs
-#      mos/jnd for the rank corpora; pred vs ssim2/butter/cvvdp from the
-#      KADIS metric parquet), with all five M3 slots emitted as nulls.
-#   2. diffmap_block_coherence --bake  → G-STEER coherence: M3 (legacy signal
-#      fold) AND M3a (the DEPLOYABLE attribution-density map, task #67 —
-#      exact integrands + SAT), averaged over the fixture sweep.
-#   3. jq injects the averages INTO the pre-nulled `m3_*`/`m3a_*` keys —
-#      this script's remaining role is the M3/M3a measurement, not assembly.
-#
-# Output: /mnt/v/output/zensim/reports/fulleval/<name>.fulleval.json
-#         (+ <name>.verdict.md — the human bake_verdict report, for reference)
-#
-# ENV MODES
-#   ZENSIM_M3_REUSE=1  carry m3_*/m3a_* from the previous JSON instead of
-#                      re-measuring (schema re-emits — the rank/dial part is a
-#                      cheap rescore, the M3 sweep is not).
-#   ZENSIM_M3_ONLY=1   the INVERSE: keep the existing JSON's rank/dial/
-#                      corruption blocks untouched (bake_verdict is NOT run)
-#                      and re-measure ONLY M3/M3a, injecting into the existing
-#                      keys. Use when the coherence INSTRUMENT changed but the
-#                      bake and corpora did not — e.g. the 2026-08-04 append2
-#                      coverage fix (299ccc8c), which moved every 944-width
-#                      M3a and nothing else. Requires the JSON to exist.
-#   ZENSIM_M3_GRID     full (default, and the only accepted value — the
-#                      registered 9-cell cheap grid was MEASURED and REJECTED,
-#                      campaign appendix E.5; m3a_sweep.sh refuses it).
-#
-# Schema + rationale: docs/FULL_EVAL.md.
+# One evaluation pipeline: independently reusable verdict and coherence stages.
+# Rust owns scores/statistics; bake_verdict and m3a_sweep own input identities.
+# Usage: run_full_eval.sh [--stage all|verdict|coherence|qualify] bake name [regime] [root]
+# Existing ZENSIM_M3_ONLY maps to coherence; M3_REUSE requests only VALID reuse.
+# Historical results lacking identities are never a cache hit. Re-run their
+# stage to establish provenance. Every stage is saved atomically, so an
+# interrupted coherence sweep retains the completed verdict.
+# See docs/FULL_EVAL.md for the schema, fixtures and qualification distinction.
 set -euo pipefail
-
-if [[ $# -lt 2 ]]; then
-    echo "usage: run_full_eval.sh <bake.bin> <name> [regime=720|372|924|944] [features-root]" >&2
-    exit 2
-fi
-BAKE=$1
-NAME=$2
-REGIME=${3:-720}
-# 4th positional, else $ZENSIM_FEATURES_ROOT, else derived from the bake below.
+STAGE=${ZENSIM_EVAL_STAGE:-all}
+[[ "${ZENSIM_M3_ONLY:-0}" == 1 ]] && STAGE=coherence
+if [[ "${1:-}" == --stage ]]; then STAGE=${2:?}; shift 2; fi
+case "$STAGE" in all|verdict|coherence|qualify) ;; *) echo "unknown stage: $STAGE" >&2; exit 2 ;; esac
+if [[ $# -lt 2 ]]; then echo "usage: run_full_eval.sh [--stage all|verdict|coherence|qualify] bake name [regime] [root]" >&2; exit 2; fi
+BAKE=$1; NAME=$2; REGIME=${3:-720}
 FEATURES_ROOT_OVERRIDE=${4:-${ZENSIM_FEATURES_ROOT:-}}
-
-# Repo-relative — NEVER a hardcoded worktree path (CLAUDE.md). Works from the
-# main checkout or any jj workspace: binaries build into that tree's target/.
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-FIX=${ZENSIM_M3_FIXTURES:-/mnt/v/output/zensim/diffmap-coherence-2026-07-18}
-DIST_Q=${ZENSIM_M3_DIST_Q:-q50}       # fixture distortion level for M3 pairs
 OUTDIR=${ZENSIM_FULLEVAL_OUT:-/mnt/v/output/zensim/reports/fulleval}
+TGT=${CARGO_TARGET_DIR:-$REPO_ROOT/target}
+BV=${ZENSIM_BAKE_VERDICT:-${ZL_BV:-$TGT/release/bake_verdict}}
+DM=${ZENSIM_DIFFMAP_BIN:-$TGT/release/examples/diffmap_block_coherence}
+HEAVY=("${ZENSIM_RUN_HEAVY:-$HOME/work/zen/scripts/run-heavy}" --mem 16G --jobs 8)
+command -v jq >/dev/null
+[[ -s "$BAKE" ]] || { echo "bake missing: $BAKE" >&2; exit 3; }
+[[ "$NAME" != */* && -n "$NAME" ]] || { echo "name must be a filename stem" >&2; exit 2; }
 mkdir -p "$OUTDIR"
-
-# nice/ionice so a build never starves a co-tenant (CLAUDE.md machine-safety).
-HEAVY=(nice -n 19)
-command -v ionice >/dev/null 2>&1 && HEAVY=(nice -n 19 ionice -c 3)
-
-command -v jq >/dev/null 2>&1 || { echo "run_full_eval: jq is required" >&2; exit 3; }
-[[ -f "$BAKE" ]] || { echo "run_full_eval: bake not found: $BAKE" >&2; exit 3; }
-
-echo "== build (release): bake_verdict + diffmap_block_coherence ==" >&2
-"${HEAVY[@]}" cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" \
-    -p zensim-validate --bin bake_verdict >&2
-# feature-regime-v2 so a >372 (720) bake's v2 block folds into the M3 map; the
-# path is inert for a <=372 bake, so this one binary serves both regimes.
-"${HEAVY[@]}" cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" \
-    -p zensim --features custom-profiles,feature-regime-v2 \
-    --example diffmap_block_coherence >&2
-
-# Honor CARGO_TARGET_DIR (campaign workspaces build out-of-tree).
-TGT="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
-BV="$TGT/release/bake_verdict"
-DM="$TGT/release/examples/diffmap_block_coherence"
-JSON="$OUTDIR/$NAME.fulleval.json"
-MD="$OUTDIR/$NAME.verdict.md"
-
-echo "== bake_verdict --regime $REGIME --full-json ==" >&2
-# regime "924" = the folded+append campaign invocation: bake_verdict's
-# feature-regime flag stays 720 (slot_720 filename map), but the three data
-# roots swap to the canonical 924 extractions + the kadis-924 perpair source
-# (docs/FULL_EVAL.md "924-era eval slices"; E-LIN linear924_phase1).
+JSON="$OUTDIR/$NAME.fulleval.json"; MD="$OUTDIR/$NAME.verdict.md"
+VERDICT="$OUTDIR/$NAME.verdict-stage.json"; COHERENCE="$OUTDIR/$NAME.coherence-stage.json"
+WORK=$(mktemp -d "$OUTDIR/.${NAME}.eval.XXXXXX")
+trap 'rm -rf "$WORK"' EXIT
+# A stage owns this output stem while it runs. Another process may use a
+# different stem. Keep the lock file: unlinking it would create two locks.
+exec 9>"$OUTDIR/.$NAME.eval.lock"
+flock 9
+if [[ -z "${ZENSIM_BAKE_VERDICT:-${ZL_BV:-}}" && "$STAGE" != coherence && "$STAGE" != qualify ]]; then
+    "${HEAVY[@]}" cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" -p zensim-validate --bin bake_verdict >&2
+fi
+[[ -x "$BV" ]] || { echo "build bake_verdict or run the verdict stage first" >&2; exit 3; }
 BV_EXTRA=()
 BV_REGIME=$REGIME
 if [[ "$REGIME" == "924" ]]; then
@@ -137,10 +68,9 @@ fi
 # second opinion about which root a bake belongs to. It is a read-only mode:
 # it loads the bake, resolves, prints, exits — no corpus is touched.
 #
-# ZENSIM_M3_ONLY=1 skips bake_verdict entirely, so the root is irrelevant then
-# and the resolution is skipped with it (a bake with no repro must not fail an
-# M3-only re-measure that never reads a corpus).
-if [[ "${ZENSIM_M3_ONLY:-0}" != "1" ]]; then
+# Coherence-only resolves the same inputs to validate its prerequisite verdict;
+# it does not rescore the corpus.
+{
     if [[ -n "$FEATURES_ROOT_OVERRIDE" ]]; then
         RESOLVED_ROOT=$FEATURES_ROOT_OVERRIDE
         echo "== features-root: $RESOLVED_ROOT (explicit caller override) ==" >&2
@@ -164,142 +94,78 @@ if [[ "${ZENSIM_M3_ONLY:-0}" != "1" ]]; then
         BV_REBUILT+=("$a")
     done
     BV_EXTRA=("${BV_REBUILT[@]}" --features-root "$RESOLVED_ROOT")
-fi
+}
 
-if [[ "${ZENSIM_M3_ONLY:-0}" == "1" ]]; then
-    # Instrument-changed re-measure: leave every rank/dial/corruption number
-    # exactly as the owning tool produced it, and refresh only M3/M3a.
-    [[ -f "$JSON" ]] || { echo "run_full_eval: ZENSIM_M3_ONLY=1 needs an existing $JSON" >&2; exit 3; }
-    [[ "${ZENSIM_M3_REUSE:-0}" == "1" ]] && { echo "run_full_eval: ZENSIM_M3_ONLY and ZENSIM_M3_REUSE are mutually exclusive" >&2; exit 2; }
-    echo "== ZENSIM_M3_ONLY=1 — skipping bake_verdict; re-measuring M3/M3a only ==" >&2
-else
-# Stash the previous JSON so ZENSIM_M3_REUSE=1 can carry its M3 fields after
-# bake_verdict overwrites the file (bake_verdict always emits m3=null).
-[[ "${ZENSIM_M3_REUSE:-0}" == "1" && -f "$JSON" ]] && cp "$JSON" "$JSON.pre"
-"${HEAVY[@]}" "$BV" --bake "$BAKE" --name "$NAME" --regime "$BV_REGIME" \
-    "${BV_EXTRA[@]}" \
-    --fulleval "$JSON" --output "$MD" >&2
-fi
-
-# ── M3 diffmap-coherence: content × size × quality sweep ──────────────────
-# ZENSIM_M3_REUSE=1: carry m3_coherence/m3_n/m3_dropped_mass_pct +
-# m3a_coherence/m3a_n from the PREVIOUS fulleval JSON instead of re-measuring. Use for schema re-emits —
-# the rank/dial/corruption portion is a cheap rescore over stored feature
-# parquets, but the M3 sweep is 27 diffmap runs (~minutes/bake) measuring a
-# value that cannot change unless the bake or fixtures changed. (2026-07-27:
-# a 17-bake schema re-emit redid ~45 min of unchanged M3 before this existed.)
-if [[ "${ZENSIM_M3_REUSE:-0}" == "1" && -f "$JSON.pre" ]]; then
-    jq --slurpfile o "$JSON.pre" \
-        '.m3_coherence=$o[0].m3_coherence | .m3_n=$o[0].m3_n | .m3_dropped_mass_pct=$o[0].m3_dropped_mass_pct | .m3a_coherence=$o[0].m3a_coherence | .m3a_n=$o[0].m3a_n' \
-        "$JSON" >"$JSON.tmp" && mv "$JSON.tmp" "$JSON"
-    rm -f "$JSON.pre"
-    echo "== M3 carried from previous JSON (ZENSIM_M3_REUSE=1) ==" >&2
-    echo "wrote $JSON" >&2
-    echo "$JSON"
-    exit 0
-fi
-# WIDENED 2026-07-26 (stats review §Rec-8) from 3 fixtures × q50 to a
-# content × size × quality grid — the size axis matters because M3 spatializes
-# a per-block map and block count scales with resolution. Sizes are Mitchell
-# DOWNSCALES of the 576px refs (never upscaling, per CLAUDE.md). Also captures
-# the dropped-f156-371 |s_k| mass so a LOW M3 is read against pooled-feature
-# reliance ("incoherent map" != "model uses non-spatializable pooled features").
-M3_CONTENT=(city dog girl)
-M3_SIZES=(576 384 256) # 576=orig; 384/256 = Mitchell downscales (no upscaling)
-M3_QS=(20 50 75)
-# FIXTURE GENERATION — IMAZEN OWNERS ONLY (2026-09-02).
-#
-# This block used to shell ImageMagick for BOTH axes: `-filter Mitchell
-# -resize NxN` for size and `-quality Q` (ImageMagick's bundled libjpeg) for
-# quality. That is a USER-RULE violation ("IMAZEN-ONLY IMAGING/CODEC SOFTWARE",
-# ~/work/zen/CLAUDE.md, 2026-09-02) in the worst possible place: M3a is a
-# first-class MODEL-SELECTION input (WAVE_PLAYBOOK step 6, freeze_check
-# --select tie-break), so a foreign JPEG encoder sat inside the loop that picks
-# which zensim model ships. The owner is now
-# `zensim-bench/examples/m3_fixture_gen.rs` — zenpng decode/encode + zenresize
-# Mitchell + zenjpeg encode.
-#
-# ⚠ ERA HAZARD, MEASURED 2026-09-02 — do NOT regenerate $FIX in place.
-# zenjpeg's q is not ImageMagick-libjpeg's q. On city_384 the same nominal
-# quality gives 0.907x (q20), 0.795x (q50), 0.827x (q75) of the ImageMagick
-# bytes, and the Mitchell downscales differ too (241828 vs 241630 B at 384).
-# So a fixture made by the new owner is a DIFFERENT rate point, and an M3a
-# measured on it is NOT comparable to any M3a in the record. The 48 fixtures
-# under the default $FIX are ImageMagick-era and every published M3/M3a value
-# was measured against them, so they are LEFT ALONE: the loop below only ever
-# fills in a MISSING file. Point ZENSIM_M3_FIXTURES at a NEW era-stamped
-# directory to regenerate from scratch (same discipline as the 372 feature
-# roots: 2026-05-15-full-features vs 2026-08-30-full-features-372), and expect
-# the whole M3a axis to re-base when you do.
-M3GEN="${ZENSIM_M3_FIXTURE_GEN:-$REPO_ROOT/zensim-bench/target/release/examples/m3_fixture_gen}"
-for ref in "${M3_CONTENT[@]}"; do
-    for sz in "${M3_SIZES[@]}"; do
-        if [[ "$sz" == "576" ]]; then rp="$FIX/${ref}.png"; else
-            rp="$FIX/${ref}_${sz}.png"
-        fi
-        for q in "${M3_QS[@]}"; do
-            dp="$FIX/${ref}_${sz}_q${q}.jpg"
-            [[ -f "$rp" && -f "$dp" ]] && continue
-            # NO GRACEFUL SKIP (CLAUDE.md: "a test that silently passes without
-            # testing anything is worse than one that loudly fails"). The old
-            # code dropped the size axis to (576) with a warning when magick was
-            # absent, which silently CHANGED WHAT M3a MEANS mid-run. A missing
-            # generator is now fatal.
-            if [[ ! -x "$M3GEN" ]]; then
-                echo "FATAL: M3 fixture missing ($rp / $dp) and the generator is not built." >&2
-                echo "  build: cd $REPO_ROOT/zensim-bench && cargo build --release \\" >&2
-                echo "           --example m3_fixture_gen --features m3-fixtures" >&2
-                echo "  or set ZENSIM_M3_FIXTURE_GEN to its path." >&2
-                echo "  Refusing to silently shrink the M3 grid — the size axis is load-bearing" >&2
-                echo "  for M3a, which is a model-selection input." >&2
-                exit 3
-            fi
-            [[ -f "$rp" ]] || "$M3GEN" resize --in "$FIX/${ref}.png" --out "$rp" --max "$sz" || exit 3
-            [[ -f "$dp" ]] || "$M3GEN" jpeg --in "$rp" --out "$dp" --quality "$q" || exit 3
-        done
-    done
-done
-
-# Delegate the grid loop to its OWNER (scripts/m3a_sweep.sh, extracted
-# 2026-08-04 per the no-duplication rule: one implementation, two callers —
-# this script and any impact-accounting / selection run that needs M3a
-# without the rank+dial panels). It emits key=value lines; we READ them.
-echo "== M3 coherence: delegating to scripts/m3a_sweep.sh --grid ${ZENSIM_M3_GRID:-full} ==" >&2
-"$REPO_ROOT/scripts/m3a_sweep.sh" --bake "$BAKE" --bin "$DM" \
-    --grid "${ZENSIM_M3_GRID:-full}" --label "$NAME" --logdir "$OUTDIR" \
-    --tsv "$OUTDIR/$NAME.m3a_cells.tsv" >"$OUTDIR/$NAME.m3a.kv" || true
-kv() { awk -F= -v k="$1" '$1==k{print $2; exit}' "$OUTDIR/$NAME.m3a.kv"; }
-M3_AVG=$(kv M3_MEAN);  M3_N=$(kv M3_N)
-M3A_AVG=$(kv M3A_MEAN); M3A_N=$(kv M3A_N)
-MASS_AVG=$(kv MASS_MEAN); MASS_N=$(kv MASS_N)
-M3_N=${M3_N:-0}; M3A_N=${M3A_N:-0}; MASS_N=${MASS_N:-0}
-
-if [[ "$M3_N" -gt 0 ]]; then
-    echo "== M3 mean over $M3_N pair(s) = $M3_AVG ==" >&2
-    jq --argjson m3 "$M3_AVG" --argjson n "$M3_N" '.m3_coherence = $m3 | .m3_n = $n' \
-        "$JSON" >"$JSON.tmp" && mv "$JSON.tmp" "$JSON"
-    if [[ "$M3A_N" -gt 0 ]]; then
-        echo "== M3a (attribution density) mean over $M3A_N pair(s) = $M3A_AVG ==" >&2
-        jq --argjson m3a "$M3A_AVG" --argjson n "$M3A_N" \
-            '.m3a_coherence = $m3a | .m3a_n = $n' "$JSON" >"$JSON.tmp" \
-            && mv "$JSON.tmp" "$JSON"
+BV_ARGS=(--bake "$BAKE" --name "$NAME" --regime "$BV_REGIME" "${BV_EXTRA[@]}")
+"${HEAVY[@]}" "$BV" "${BV_ARGS[@]}" --print-inputs > "$WORK/verdict-inputs.json"
+valid_verdict() {
+    [[ -s "$1" ]] && jq -e --slurpfile i "$WORK/verdict-inputs.json" \
+        '.input_identity == $i[0] and .scoring.surface == "zensim::BakeScorer" and (.rank | type == "object")' "$1" >/dev/null
+}
+if ! valid_verdict "$VERDICT"; then
+    if valid_verdict "$JSON"; then
+        cp "$JSON" "$WORK/verdict.json"; mv "$WORK/verdict.json" "$VERDICT"
+    elif [[ "$STAGE" == coherence || "$STAGE" == qualify ]]; then
+        echo "$STAGE needs a verdict with matching model, table and evaluator identities; run --stage verdict first" >&2; exit 3
     else
-        # M3a is a first-class SELECTION input (campaign appendix E.4:
-        # freeze_check --select treats a missing M3a as UNMEASURED and
-        # therefore NOT SELECTABLE). A silent absence would quietly make a
-        # bake unselectable at the end of a wave, so say it out loud here.
-        echo "== WARNING: M3a NOT MEASURED for $NAME — this bake will be" >&2
-        echo "   UNMEASURED (and NOT SELECTABLE) under freeze_check --select ==" >&2
-    fi
-    if [[ "$MASS_N" -gt 0 ]]; then
-        echo "== M3 dropped-f156-371 mass mean = ${MASS_AVG}% (read a low M3 against this) ==" >&2
-        jq --argjson dm "$MASS_AVG" '.m3_dropped_mass_pct = $dm' "$JSON" >"$JSON.tmp" \
-            && mv "$JSON.tmp" "$JSON"
+        "${HEAVY[@]}" "$BV" "${BV_ARGS[@]}" --fulleval "$WORK/verdict.json" --output "$WORK/verdict.md" >&2
+        valid_verdict "$WORK/verdict.json" || { echo "verdict inputs changed during evaluation" >&2; exit 3; }
+        mv "$WORK/verdict.json" "$VERDICT"; mv "$WORK/verdict.md" "$MD"
     fi
 else
-    echo "== M3: no successful pairs — leaving m3_coherence null ==" >&2
-    echo "== WARNING: M3a NOT MEASURED for $NAME — NOT SELECTABLE under --select ==" >&2
+    echo "== reused verified verdict stage ==" >&2
 fi
-
-echo "wrote $JSON" >&2
+if [[ "$STAGE" == qualify ]]; then
+    valid_verdict "$JSON" || { echo "qualification needs a current aggregate; run --stage all first" >&2; exit 3; }
+    "${HEAVY[@]}" cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" -p zensim-validate --bin freeze_check >&2
+    status=0
+    "$TGT/release/freeze_check" --qualify --fulleval "$JSON" > "$WORK/qualification.json" || status=$?
+    (( status <= 1 )) || exit "$status"
+    jq --slurpfile q "$WORK/qualification.json" '.qualification=$q[0]' "$JSON" > "$WORK/aggregate.json"
+    mv "$WORK/aggregate.json" "$JSON"
+    cat "$WORK/qualification.json"
+    exit "$status"
+fi
+# Preserve attached evidence only when this aggregate has the current verdict
+# identity. Qualification rechecks its content-bound artifacts. Clear the old
+# qualification decision and M3, which are independently admitted below.
+BASE="$VERDICT"
+if valid_verdict "$JSON"; then BASE="$JSON"; fi
+jq '.m3_coherence=null | .m3_n=null | .m3_dropped_mass_pct=null | .m3a_coherence=null | .m3a_n=null |
+    .evaluation_stages={verdict:"complete",coherence:"not_requested"} | del(.qualification)' "$BASE" > "$WORK/aggregate.json"
+mv "$WORK/aggregate.json" "$JSON"
+if [[ "$STAGE" == verdict ]]; then echo "$JSON"; exit 0; fi
+if [[ -z "${ZENSIM_DIFFMAP_BIN:-}" ]]; then
+    "${HEAVY[@]}" cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" -p zensim \
+        --features custom-profiles,feature-regime-v2 --example diffmap_block_coherence >&2
+fi
+M3_ARGS=(--bake "$BAKE" --bin "$DM" --grid "${ZENSIM_M3_GRID:-full}" --label "$NAME" --logdir "$OUTDIR")
+# A missing historical fixture is a refusal. Generating one with a newer
+# codec would silently mix fixture eras; use m3_fixture_gen in a NEW directory.
+"$REPO_ROOT/scripts/m3a_sweep.sh" "${M3_ARGS[@]}" --print-inputs > "$WORK/coherence-inputs.json"
+valid_coherence() {
+    [[ -s "$COHERENCE" ]] && jq -e --slurpfile i "$WORK/coherence-inputs.json" \
+        '.identity == $i[0] and .m3_n == 27 and .m3a_n == 27' "$COHERENCE" >/dev/null
+}
+if ! valid_coherence; then
+    if ! "${HEAVY[@]}" "$REPO_ROOT/scripts/m3a_sweep.sh" "${M3_ARGS[@]}" \
+        --tsv "$OUTDIR/$NAME.m3a_cells.tsv" > "$WORK/coherence.kv"; then
+        echo "coherence stage failed; completed verdict retained" >&2; exit 3
+    fi
+    "$REPO_ROOT/scripts/m3a_sweep.sh" "${M3_ARGS[@]}" --print-inputs > "$WORK/coherence-after.json"
+    cmp -s "$WORK/coherence-inputs.json" "$WORK/coherence-after.json" || { echo "coherence inputs changed during evaluation" >&2; exit 3; }
+    kv() { awk -F= -v k="$1" '$1==k{print $2; exit}' "$WORK/coherence.kv"; }
+    [[ "$(kv M3_N)" == 27 && "$(kv M3A_N)" == 27 ]] || { echo "coherence incomplete; all 27 cells are required" >&2; exit 3; }
+    jq -n --slurpfile i "$WORK/coherence-inputs.json" \
+        --argjson m3 "$(kv M3_MEAN)" --argjson m3a "$(kv M3A_MEAN)" --arg mass "$(kv MASS_MEAN)" \
+        '{identity:$i[0],m3_coherence:$m3,m3_n:27,m3a_coherence:$m3a,m3a_n:27,m3_dropped_mass_pct:($mass | if . == "" then null else tonumber end)}' \
+        > "$WORK/coherence.json"
+    mv "$WORK/coherence.json" "$COHERENCE"
+    cp "$WORK/coherence.kv" "$OUTDIR/$NAME.m3a.kv"
+else
+    echo "== reused verified coherence stage ==" >&2
+fi
+jq --slurpfile c "$COHERENCE" '. * ($c[0] | del(.identity)) |
+    .evaluation_stages.coherence="complete" | .coherence_identity=$c[0].identity' "$JSON" > "$WORK/aggregate.json"
+mv "$WORK/aggregate.json" "$JSON"
 echo "$JSON"

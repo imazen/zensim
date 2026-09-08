@@ -41,7 +41,7 @@ FIX=${ZENSIM_M3_FIXTURES:-/mnt/v/output/zensim/diffmap-coherence-2026-07-18}
 TGT="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
 
 BAKE=""; BIN="$TGT/release/examples/diffmap_block_coherence"
-GRID=full; TSV=""; LABEL=""; LOGDIR=""
+GRID=full; TSV=""; LABEL=""; LOGDIR=""; PRINT_INPUTS=0
 
 die() { echo "m3a_sweep: $*" >&2; exit 2; }
 
@@ -50,6 +50,7 @@ while [ $# -gt 0 ]; do
         --bake)   BAKE=${2:?};   shift 2 ;;
         --bin)    BIN=${2:?};    shift 2 ;;
         --grid)   GRID=${2:?};   shift 2 ;;
+        --print-inputs) PRINT_INPUTS=1; shift ;;
         --tsv)    TSV=${2:?};    shift 2 ;;
         --label)  LABEL=${2:?};  shift 2 ;;
         --logdir) LOGDIR=${2:?}; shift 2 ;;
@@ -105,6 +106,28 @@ REJECTED
         exit 2 ;;
     *) die "unknown --grid: $GRID (want full)" ;;
 esac
+
+# Identity is emitted by the grid owner, using the exact cell list below.
+# No caller maintains a second fixture/grid definition.
+if [ "$PRINT_INPUTS" = 1 ]; then
+    input_files=("$BAKE" "$BIN" "${BASH_SOURCE[0]}")
+    for cell in "${CELLS[@]}"; do
+        read -r ref sz q <<<"$cell"
+        if [ "$sz" = 576 ]; then input_files+=("$FIX/${ref}.png"); else input_files+=("$FIX/${ref}_${sz}.png"); fi
+        input_files+=("$FIX/${ref}_${sz}_q${q}.jpg")
+    done
+    python3 - "$GRID" "${input_files[@]}" <<'PYIDENTITY'
+import hashlib, json, os, pathlib, sys
+files = []
+for name in sorted(set(sys.argv[2:])):
+    p = pathlib.Path(name).resolve()
+    with p.open('rb') as f: sha = hashlib.file_digest(f, 'sha256').hexdigest()
+    files.append({'path': str(p), 'sha256': sha})
+print(json.dumps({'schema': 1, 'grid': sys.argv[1], 'expected_cells': 27, 'files': files,
+    'environment': {k: v for k, v in sorted(os.environ.items()) if k.startswith('ZENSIM_') and not k.startswith(('ZENSIM_FULLEVAL', 'ZENSIM_EVAL', 'ZENSIM_M3_ONLY', 'ZENSIM_M3_REUSE'))}}, sort_keys=True))
+PYIDENTITY
+    exit $?
+fi
 
 [ -n "$TSV" ] && printf 'label\tgrid\tcontent\tsize\tq\tm3\tm3a\tdropped_mass_pct\n' > "$TSV"
 

@@ -645,6 +645,24 @@ def _ulps_apart(a: float, b: float) -> int:
 GADDR_DIAL_ULP_SLACK = 4
 
 
+def _gaddr_composition_gate(board, reading):
+    """A primary bake hash alone cannot identify an ensemble or companion gate."""
+    def key(scoring):
+        if not isinstance(scoring, dict):
+            return None
+        return (scoring.get("surface"),
+                tuple(m.get("sha256") for m in scoring.get("members", [])),
+                tuple(scoring.get("ensemble_weights") or []),
+                (scoring.get("corruption") or {}).get("sha256"),
+                (scoring.get("corruption") or {}).get("deadband_score"))
+    before, after = board.get("scoring"), reading.get("scoring")
+    if before and after:
+        if key(before) != key(after):
+            raise SystemExit("graft-gaddr: complete scorer differs (members, blend or corruption gate)")
+    elif any(s and (len(s.get("members", [])) > 1 or s.get("corruption")) for s in (before, after)):
+        raise SystemExit("graft-gaddr: historical reading does not identify the complete composed scorer")
+
+
 def graft_gaddr(board: Path, gaddr: Path, dry_run: bool = False) -> bool:
     """Copy the G-ADDR dial-addressability verdict (`dial.addressability`, plus
     the `dial.min` / `dial.max` pooled ends it grades) from a same-bake
@@ -667,6 +685,7 @@ def graft_gaddr(board: Path, gaddr: Path, dry_run: bool = False) -> bool:
     bdoc = _load_board(board)
     g_bytes = gaddr.read_bytes()
     g = json.loads(g_bytes)
+    _gaddr_composition_gate(bdoc, g)
     if not isinstance(g.get("checks"), list):
         raise SystemExit(f"graft-gaddr: {gaddr} carries no G-ADDR `checks` list")
     scorer = g.get("scorer") or {}
@@ -701,7 +720,7 @@ def graft_gaddr(board: Path, gaddr: Path, dry_run: bool = False) -> bool:
     blk = {k: g[k] for k in ("headline", "regression", "contract", "shippable", "checks",
                              "grid_label", "grid_sha256", "active_reference",
                              "incumbent_reference", "reference", "measured",
-                             "n_pass", "n_fail", "n_not_measured") if k in g}
+                             "n_pass", "n_fail", "n_not_measured", "scoring", "input_identity") if k in g}
     if _jc(bd.get("addressability")) == _jc(blk):
         print(f"graft-gaddr: {board.name} already carries this addressability block — unchanged")
         return False
@@ -771,6 +790,7 @@ def graft_gaddr_ladder(board: Path, gaddr: Path, dry_run: bool = False) -> bool:
     bdoc = _load_board(board)
     g_bytes = gaddr.read_bytes()
     g = json.loads(g_bytes)
+    _gaddr_composition_gate(bdoc, g)
     if not isinstance(g.get("checks"), list):
         raise SystemExit(f"graft-gaddr-ladder: {gaddr} carries no G-ADDR `checks` list")
     ladder = registered_ladder_grid_shas()
@@ -803,7 +823,7 @@ def graft_gaddr_ladder(board: Path, gaddr: Path, dry_run: bool = False) -> bool:
                              "grid_label", "grid_sha256", "active_reference",
                              "incumbent_reference", "reference", "measured", "floor_rule",
                              "value_pins", "tail_pin_set", "tail_pins",
-                             "n_pass", "n_fail", "n_not_measured") if k in g}
+                             "n_pass", "n_fail", "n_not_measured", "scoring", "input_identity") if k in g}
     blk["instrument"] = {"family": "ladder-2026-09-05", "registered_label": ladder[gsha],
                          "grid_sha256": gsha, "scorer_kind": kind}
     if _jc(bdoc.get("dial_ladder")) == _jc(blk):

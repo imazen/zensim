@@ -1187,6 +1187,8 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         # renders coverage beside the seed and every earlier row reads NOT MEASURED.
         # Absent is NOT MEASURED, never a zero.
         fair["coverage"] = (o.get("repro") or {}).get("sample_coverage")
+        if isinstance(o.get("qualification"), dict):
+            fair["qualification"] = o["qualification"]
         # G-ADDR: the six axes every cell already stores (dial p5/p95/reach/DR/mono/tied)
         # against the registry's bars, PLUS the emitted `dial.addressability` block when
         # a verdict carries one (the gate landed 2026-09-04; no board cell has it yet).
@@ -3579,6 +3581,11 @@ function renderModels(){
       el('b',{text:b.name}));
     const hbd=ensBadge(b);if(hbd)hd.append(hbd);
     card.append(hd);
+    const q=b.qualification;
+    card.append(el('div',{style:'font-size:10px;margin-bottom:7px',
+      text:'Product qualification: '+(q?q.status:'not evaluated'),
+      title:q?(q.checks||[]).map(c=>c.gate+': '+c.state+' — '+c.detail).join('\n'):
+        'A research rank or the absence of a failing badge does not establish product qualification.'}));
     // An ensemble has no single ZNPR: everything below (arch, size, transforms,
     // repro, spline) is the ANCHOR member. Say so before the numbers, not after.
     if(isEns(b)){
@@ -3587,9 +3594,10 @@ function renderModels(){
         +'border-radius:5px;background:color-mix(in srgb, var(--warn) 16%, var(--surface-1));'
         +'border:1px solid var(--border)'});
       note.append(el('b',{text:'Equal-weight ensemble of '+ensK(b)+' bakes.'}),
-        document.createTextNode(' Not a shippable artifact — the fields below describe the '
-          +'ANCHOR member '+(m.anchor||'?')+' only, and M3/M3a are NOT COMPUTABLE for an ensemble '
-          +'(the coherence instrument loads one ZNPR). Distillation to a single bake is pending.'));
+        document.createTextNode(' The fields below describe the ANCHOR member '+(m.anchor||'?')
+          +' only. Rust supports complete ensemble serving through BakeScorer; this row still needs '
+          +'product qualification. The current coherence instrument measures one ZNPR, so it cannot '
+          +'supply an ensemble M3/M3a measurement.'));
       if(mem.length){
         const det=el('details',{style:'margin-top:4px'});
         det.append(el('summary',{style:'font-size:9.5px;cursor:pointer;opacity:.75',
