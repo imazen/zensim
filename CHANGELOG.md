@@ -38,6 +38,21 @@
   Numbers produced this way measure the extraction change against fixed
   coefficients and are never a served score (#61).
 
+### Measured
+
+- Revision 3 costs **+27% to +87%** of extraction time depending on how much
+  non-SSIM work the walk does (2048², one pinned core, paired A/B, anchor
+  within 0.3%; `benchmarks/stable_ssim_kernel_2026-09-08.md`). At revision 1
+  `fold944_full` (265.1 ms) beats `fast_ssim2` (294.1 ms); at revision 3 it is
+  336.5 ms and **does not**, which breaks the scorecard's "≤ fast-ssim2"
+  clause. Peak RSS is a non-issue: +0.7 to +3.0 MB, every arm far under the
+  128 bytes/pixel clause.
+- Replaying the 23 registered spatial coherence cells with revision-1 bakes on
+  revision-3 pixels (cross-revision diagnostic) moves M3a ≥ 0.70 from 7/23 to
+  20/23 and M2 ≥ 0.99 from 16/23 to 19/23, concentrated on the small-block
+  cells. Four cells regress on M2. This measures the extraction change against
+  fixed coefficients — it is not model quality and not a qualification.
+
 - Add `ScoredAttribution::refinement_gain` and separate refinement coverage:
   finite max-signal rectangle effects include ties and reflected/coarse source
   footprints without changing additive density semantics. Extend the existing

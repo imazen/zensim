@@ -205,6 +205,80 @@ from the child so a filter that matched nothing fails instead of passing
 vacuously. That guard fired for real: the fold-parity wrapper first reported
 `matched 0 tests`, because those gates are `training`-feature-gated.
 
+### Cost, MEASURED — and it is a problem
+
+Paired A/B through the repo's existing interleaved instrument
+(`zensim/benches/extract_paths_bench.rs`), driven by
+`scripts/bench/rev3_cost_ab.sh`. ONE binary built once (a rebuild alone has
+moved a 2304 squared timing ~10% here), alternating revision-1 / revision-3
+blocks so drift is shared, two blocks per revision, `RAYON_NUM_THREADS=1`,
+`taskset -c 8`, plain release without target-cpu=native. `ZENSIM_FORMULA_REV=1`
+and `=3` are the same byte length. `fast_ssim2` is revision-independent and
+serves as the cross-block anchor. Medians of the two blocks per revision.
+
+Quality of the measurement first, because it decides whether the rest is
+readable: the revision-1 A-A replicate spread is **0.06%** at 1024 squared and
+**1.26%** at 2048 squared on the anchor, and the anchor moves **-3.4% / -0.3%**
+between revisions. 2048 squared is the trustworthy geometry (arm cv 0.8-11%
+versus 9-14% at 1024 squared).
+
+| arm @2048 squared | rev 1 | rev 3 | delta |
+|---|---:|---:|---:|
+| `fast_ssim2` (anchor) | 294.05 ms | 293.28 ms | -0.3% |
+| `buf_v1_372` | 183.62 ms | 226.07 ms | +23.1% |
+| `fold944_full` | 265.06 ms | 336.48 ms | +26.9% |
+| `fold944_off` | 224.61 ms | 297.42 ms | +32.4% |
+| `fold372_full` | 130.45 ms | 196.77 ms | +50.8% |
+| `buf_v1_228` | 115.47 ms | 176.44 ms | +52.8% |
+| `fold228_classc` | 88.97 ms | 154.34 ms | +73.5% |
+| `fold228_peaks` | 86.66 ms | 152.44 ms | +75.9% |
+| `fold228_moments` | 86.81 ms | 152.85 ms | +76.1% |
+| `fold156_basic` | 82.31 ms | 154.24 ms | +87.4% |
+
+The ordering is the mechanism: the f64 pass is a fixed addition, so the LEANER
+the walk the larger the relative cost. `fold156_basic` does the least other
+work and pays +87%; `fold944_full` does the most and pays +27%.
+
+**The clause this breaks.** At revision 1, `fold944_full` (265.1 ms) is FASTER
+than `fast_ssim2` (294.1 ms). At revision 3 it is **336.5 ms — slower**. The
+scorecard's scalar-performance row requires "<= fast-ssim2 p95 on the same
+inputs". As integrated, this correction flips zensim from beating the
+independent judge to losing to it at 2048 squared. That is reported, not
+softened: the dead-moment removal below is required work, not headroom.
+
+What these numbers are NOT: they are extraction arms, not complete inference,
+and they cannot be read against the absolute 50/200 ms bar. That bar is written
+for a QUALIFIED CANDIDATE, and no revision-3 candidate exists because nothing
+has been refit. The revision delta is what this measurement can attribute.
+
+**Memory** (`/usr/bin/time -v` max RSS, one arm per process via the bench's
+`ZEN_XP_RSS` mode, `scripts/bench/rev3_rss.sh`) is a non-issue:
+
+| arm | size | rev 1 | rev 3 | delta | rev 3 bytes/pixel |
+|---|---|---:|---:|---:|---:|
+| `buf_v1_372` | 1024 | 48,904 KB | 49,648 KB | +744 KB | 48.5 |
+| `fold372_full` | 1024 | 34,704 KB | 35,464 KB | +760 KB | 34.6 |
+| `fold944_full` | 1024 | 53,960 KB | 54,968 KB | +1,008 KB | 53.7 |
+| `buf_v1_372` | 2048 | 180,780 KB | 181,996 KB | +1,216 KB | 44.4 |
+| `fold372_full` | 2048 | 77,688 KB | 80,048 KB | +2,360 KB | 19.5 |
+| `fold944_full` | 2048 | 116,692 KB | 118,248 KB | +1,556 KB | 28.9 |
+
+0.7-3.0 MB incremental, 0.7-3.0%, every arm far under the 128 bytes/pixel
+clause. That matches the design: one strip-sized f32 signal plane plus the
+kernel's O(width x radius) f64 row ring, ~1.8 MB at 2048 wide.
+
+**A discarded run, and what it measured.** The first A/B was thrown out for
+contention: a stray diagnostic process survived a `pkill -x` (the kernel
+truncates process names at 15 characters, so the pattern matched nothing) and
+a follow-up `kill` hit the wrong pid. Comparing the discarded revision-1 block
+against the clean one is itself a result: medians agree to ~3% at 1024 squared
+and ~0.5% at 2048 squared, because zenbench's exclusive lock made the second
+process SLEEP rather than compete — contention doubled wall-clock (1286 s ->
+648 s) without moving the timings. The discard was therefore conservative
+rather than necessary, and is kept as
+`rev3-cost-ab2-CONTENDED-DISCARDED`. "Contended or incomplete timing cannot
+pass" is not a standard one gets to evaluate after seeing the numbers.
+
 ### Cost headroom, and why the obvious version of it is NOT free
 
 Under revision 3 on the v1 strip path, `sigma_sq` and `sigma12` are computed
@@ -230,6 +304,55 @@ would fail, correctly. Recovering the H-side saving means a two-plane blur with
 `fused_blur_h_ssim`'s tail semantics, not a call-site substitution; the V-side
 saving (skipping the two accumulators when the sigma planes have no consumer)
 is independent of that and does not touch `mu`.
+
+### Registered spatial cells, replayed at both revisions
+
+`scripts/bench/rev3_spatial_replay.sh` re-runs all 23 registered coherence
+cells from `nonmax-diagnosis-2026-09-08/COMMANDS.json` through the in-tree
+`diffmap_block_coherence` example, at revision 1 and revision 3, same bakes,
+same rectangles, same block sizes. 46 runs, 0 non-zero exits.
+
+**Read the caveat before the numbers.** Those bakes were fit against revision-1
+features. Scoring them at revision 3 is a cross-era measurement by
+construction, so the driver arms the `cross-revision-diagnostic` bypass;
+`BakeScorer` refuses it otherwise. All 23 revision-3 runs carry the
+"CROSS-REVISION DIAGNOSTIC" stderr line and none of the revision-1 runs do, so
+every result is self-identifying. **What this measures is what the extraction
+change does to a FIXED model. It is not model quality and not a
+qualification.** A revision-3 candidate does not exist.
+
+| bar | revision 1 | revision 3 |
+|---|---:|---:|
+| M2 >= 0.99 | 16 / 23 | **19 / 23** |
+| M3a >= 0.70 | 7 / 23 | **20 / 23** |
+
+M3a (attribution density) is where the correction shows, and it shows exactly
+where the diagnosis predicted — the SMALL-block cells, which is where a
+per-pixel signal that moves outside its own support does the most damage:
+
+| cell | M3a rev 1 | M3a rev 3 |
+|---|---:|---:|
+| `row220-b8` | 0.1761 | 0.5821 |
+| `row223-b8` | 0.2826 | 0.5701 |
+| `row73-b8` | 0.3098 | 0.7540 |
+| `row94-b8` | 0.3396 | 0.8438 |
+| `row199-b8` | 0.4073 | 0.8122 |
+| `row220-b16` | 0.3054 | 0.7500 |
+| `row94-b16` | 0.3728 | 0.7509 |
+| `row73-b16` | 0.4210 | 0.8186 |
+
+M2 (linear coherence) is roughly flat and MIXED, not uniformly better: three
+cells cross the bar, and four move down — `row199-b32` 0.9845 -> 0.9370,
+`row202-b8` 0.9924 -> 0.9742, `row160-b32` 0.9998 -> 0.9988, `row34-b32`
+0.9368 -> 0.9333 (that one fails at both revisions). Reporting the regressions
+matters more than the headline: a fixed revision-1 model priced against
+revision-3 features has no reason to improve monotonically, and it did not.
+
+This is consistent with the issue's own finding that a saved-data oracle
+replacing only the SSIM predictions resolved its failing cells, and it is the
+first evidence that the numerical correction — not an oracle — moves the
+spatial screen. It is not evidence that the spatial bars are MET by a
+revision-3 candidate; only a re-extraction and a refit can say that.
 
 ### NOT done, and load-bearing
 
