@@ -599,9 +599,10 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
             "../../zensim/weights/b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin"
         ),
         include_bytes!("../../zensim/weights/c_sdr_purity944_byid_2026-09-07.bin"),
+        include_bytes!("../../zensim-experimental/weights/f_nonneg32_4004_byid_2026-09-08.bin"),
         include_bytes!("../../zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin"),
     ];
-    // Reuse across candidates and geometries, including C -> basic-only D.
+    // Reuse across candidates and geometries, including C -> peaks F -> basic D.
     let mut session = zensim::Fused944Session::new();
     for (w, h) in [(96, 80), (71, 65), (31, 47), (1, 1)] {
         let (src, dst) = spatial_pair(w, h);
@@ -634,12 +635,24 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
                     expected.raw_distance().to_bits()
                 );
                 assert!(!result.has_corruption_gate());
-                if i >= 2 {
+                if i == 2 || i == 4 {
                     assert!(
                         result.unsupported_feature_ids().is_empty(),
                         "bake {i}: {:?}",
                         result.unsupported_feature_ids()
                     );
+                }
+                assert!(
+                    result
+                        .unsupported_feature_ids()
+                        .iter()
+                        .all(|id| { !(156..228).contains(id) || (id - 156) % 6 < 3 })
+                );
+                if i == 3 {
+                    let expected: Vec<usize> = (156..228)
+                        .filter(|id| (id - 156) % 6 < 3 && result.sensitivities()[*id] != 0.0)
+                        .collect();
+                    assert_eq!(result.unsupported_feature_ids(), expected);
                 }
                 assert!(result.attribution().density().iter().all(|x| x.is_finite()));
             }

@@ -62,6 +62,48 @@ fn attribution_identities_hold_on_every_tier() {
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
         let label = &perm.label;
 
+        // Candidate L8 coverage through the public surface. Dispatch changes
+        // are process-wide, so these probes belong in this isolated executable,
+        // never the parallel library unit-test process.
+        #[cfg(feature = "feature-regime-v2")]
+        {
+            let (w, h) = (128, 128);
+            let (src, dst) = test_pair(w, h);
+            let rs = RgbSlice::new(&src, w, h);
+            let ds = RgbSlice::new(&dst, w, h);
+            let mut session = zensim::Fused944Session::new();
+            for cell in 0..12 {
+                for slot in 3..6 {
+                    let id = 156 + cell * 6 + slot;
+                    let weight = if id % 2 == 0 { -1.0 } else { 0.75 };
+                    let recipe = serde_json::json!({
+                        "schema_hash": 1, "scaler_mean": [0.0], "scaler_scale": [1.0],
+                        "metadata": [{"key":"zentrain.feature_ids","type":"utf8","text":id.to_string()}],
+                        "layers": [{"in_dim":1,"out_dim":1,"activation":"identity",
+                                    "dtype":"f32","weights":[weight],"biases":[0.0]}]
+                    });
+                    let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+                    let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+                    let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+                    let pre = scorer.precompute_reference(&rs).unwrap();
+                    let scalar = scorer.compute(&rs, &ds, None).unwrap();
+                    let scored = scorer
+                        .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
+                        .unwrap();
+                    assert_eq!(scalar.score().to_bits(), scored.result().score().to_bits());
+                    assert_eq!(scalar.features(), scored.result().features());
+                    assert!(scored.unsupported_feature_ids().is_empty());
+                    let expected = -scored.sensitivities()[id] * scalar.features()[id] / 8.0;
+                    let actual = scored.attribution().query_rect(0, 0, w, h);
+                    if (actual - expected).abs() > 2e-5 * expected.abs().max(1e-12) {
+                        failures.push(format!(
+                            "{label} candidate L8 f{id}: {actual} != {expected}"
+                        ));
+                    }
+                }
+            }
+        }
+
         // Fresh vs precomputed-reference scoring: bit-identical features.
         {
             let (w, h) = (64, 64);

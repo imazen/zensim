@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Include the 36 L8 peak terms in candidate `BakeScorer` attribution, using
+  retained canonical signals and finite f64 normalization. Preserve scalar
+  scores and legacy map APIs; keep hard max and masked/IW coverage gaps explicit.
+
 - Apply the same arithmetic-preserving padded-row storage to v4x horizontal
   activity box blur, reducing full-pool extraction cost. Retain exact image/map
   replay and complete-surface timing controls in the September 8 activity record.

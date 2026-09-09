@@ -4,6 +4,19 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
+Latest continuation [implements candidate L8 attribution](benchmarks/l8_attribution_2026-09-08.md).
+All 36 terms pass canonical reconstruction across ten SIMD configurations.
+All 792 pixel/cache/spatial audits preserve exact features/scores; D maps stay
+exact and F/blend maps gain L8. Max coverage remains incomplete (36 IDs on
+241 nonidentity rows, 35 on eleven, per F/blend arm). Tests/Clippy/API/lint
+pass; initial fixture, dispatch-isolation and replay-count corrections are
+retained. A max-removal reference matches brute force on 7,365 rectangles:
+row/column prefix/suffix maxima give exact signal-rectangle effects in O(1)
+with O(width+height) storage. Next implement this non-additive rectangle
+estimate in the existing Rust owner, validate source/coarse/reflected/padded
+geometry and actual pixel interventions, then qualify native JXL spatial RD.
+Do not treat L8 coverage as complete maps or product qualification.
+
 Latest continuation [fits and Rust-serves a cheaper complete model](benchmarks/cheap_model_blend_2026-09-08.md):
 equal F_nonneg32 seeds 4004/4005/4006 at 0.11333333333333333 each, plus D at 0.66.
 All 1,647 FIT and 824 CAL training consensus pairs resolve; identities/upper bound

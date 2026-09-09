@@ -109,7 +109,10 @@ The complete configured model supplies the sensitivities, including heads,
 splines, ensemble and corruption gating. Inspect `unsupported_feature_ids()`
 and `has_corruption_gate()` before interpreting the map. Attribution is a
 local approximation; finite block edits and actual encoded outputs establish
-whether it helps. The [September 8 binding record](../benchmarks/candidate_attribution_serving_2026-09-08.md)
+whether it helps. Candidate maps include the 36 L8 terms in the peak block;
+hard max and masked/IW terms remain explicitly unsupported. L8 uses moment-removal
+linearization, whose curvature limits finite-edit accuracy.
+The [September 8 binding record](../benchmarks/candidate_attribution_serving_2026-09-08.md)
 includes exact score/feature gates and full coherence grids, with their tails.
 Those checks do not establish codec improvements or model qualification.
 

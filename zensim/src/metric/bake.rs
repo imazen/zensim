@@ -763,6 +763,10 @@ impl<'a> BakeScorer<'a> {
     /// flag: local finite sensitivities and supported integrands do not prove
     /// accuracy for a finite pixel edit. Identity returns score 100 and a zero
     /// map. Negative scores retain their original scale.
+    /// The candidate map includes the L8 terms in f156-227, with the same
+    /// removal-based moment linearization as L2/L4. Hard maxima and masked/IW
+    /// pools remain explicitly unsupported; large removals retain root-curvature
+    /// and blur-neighborhood approximation errors.
     ///
     /// # Errors
     /// Refuses `bin == 0`, invalid inputs/cache dimensions, HDR, a formula
@@ -833,6 +837,7 @@ impl<'a> BakeScorer<'a> {
             precomputed,
             distorted,
             &spatial,
+            spatial.get(156..spatial.len().min(228)).unwrap_or(&[]),
             session,
             bin,
         )?;

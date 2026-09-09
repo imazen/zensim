@@ -5,7 +5,8 @@
 //! retained, binned map owner. Its result reports unsupported spatial terms
 //! and discontinuous corruption gating. The basic-block construction below
 //! underlies both that route and the earlier caller-supplied-gradient APIs;
-//! the full route also covers v2, append and append2 integrands.
+//! the full route also covers v2, append and append2 integrands. The candidate
+//! route additionally covers the 36 L8 terms in f156-227.
 //!
 //! Builds a per-pixel **attribution density** `D(x, y)` for a scalar model's
 //! gradient `s_k = ∂score/∂f_k` over the BASIC feature block (f0-155: 13 slots
@@ -61,6 +62,10 @@
 //!   weighting against mean slots, so the `1/p` form is used. Per-slot block
 //!   RANKING is identical either way (same `M` for all blocks); only the
 //!   cross-slot mix differs.
+//!   Candidate L8 slots (offsets 3/4/5 in each six-slot peak cell) use the
+//!   same formula with p=8 and the same SSIM/artifact/detail signals. Their
+//!   historical `p95` field names do not denote quantiles. Canonical f32
+//!   eighth powers are multiplied by f64 coefficients before map rounding.
 //! - **hf ratio slots** (10-12): exact first-order integrands of the clamped
 //!   ratio, gated on the clamp state (`varSrc > 1e-10` matching `finalize`,
 //!   loss XOR gain active). With `e_i = (s_i−μ1_i)² − (d_i−μ2_i)²`:
@@ -82,11 +87,15 @@
 //!
 //! # Honest approximations / blind spots
 //!
-//! 1. **f156-371 (peak/masked/iw) and f944+ have no integrands here.**
+//! 1. **Hard maxima, masked/IW pools and f944+ have no integrands here.**
 //!    The candidate result reports locally active unsupported IDs, including
 //!    extraction variants whose matching retained integrands are unavailable.
 //!    Reference-only features and SDR highlight structural zeros contribute
-//!    exactly zero. The full map covers supported f372-943 terms.
+//!    exactly zero. The candidate covers L8 (three of each six f156-227 slots)
+//!    and supported f372-943 terms. Legacy caller-gradient APIs still ignore
+//!    all f156-371. An additive density cannot exactly represent finite max
+//!    removal: removing either of two tied maxima has no effect, but removing
+//!    both does. Coverage of L8 does not resolve that max-term limitation.
 //! 2. **Blur bleed** (C2b MEASURED): refining block `B` also changes signals
 //!    within the blur radius outside `B`. The pure-window-supported signals
 //!    (ssim `d`; v2 contrast/texture) ARE spread over their blur window via
@@ -144,8 +153,10 @@ mod layout_ends {
     /// End of the basic block (`f0-155`) = start of the v1 pooled block.
     /// Used by the candidate coverage report and the per-width coverage gate.
     pub(crate) const BLOCK_END_BASIC: usize = 156;
+    /// End of the v1 peak block (max and L8, f156-227).
+    pub(crate) const BLOCK_END_V1_PEAKS: usize = 228;
     /// End of the v1 peak/masked/IW pooled block (`f156-371`) = start of v2.
-    /// Structurally NOT spatialized (module blind spot 1).
+    /// Max/masked/IW remain unsupported (module blind spot 1).
     pub(crate) const BLOCK_END_V1_POOLS: usize = 372;
     /// End of the v2 block (`f372-719`) = start of the append block.
     pub(crate) const BLOCK_END_V2: usize = 720;
@@ -1475,25 +1486,183 @@ mod tests {
     fn candidate_coverage_distinguishes_variants_reference_only_and_missing_integrands() {
         use crate::feature_plan::Plan;
         use crate::feature_set_id::SlotSet;
-        let wanted = SlotSet::from_slots([0, 156, 377, 924, 926, 927, 944]);
+        let wanted = SlotSet::from_slots([0, 156, 159, 227, 228, 377, 924, 926, 927, 944]);
         let mut plan = Plan::derive(&wanted, 960).unwrap();
         let mut sensitivities = vec![0.; 960];
-        for id in [0, 156, 377, 924, 926, 927, 944] {
+        for id in [0, 156, 159, 227, 228, 377, 924, 926, 927, 944] {
             sensitivities[id] = -1.;
         }
         let (spatial, missing) = candidate_map_sensitivities(&plan, &sensitivities);
-        assert_eq!(missing, [156, 944]);
+        assert_eq!(missing, [156, 228, 944]);
+        assert_eq!(spatial[159], -1.);
+        assert_eq!(spatial[227], -1.);
         assert_eq!(spatial[377], -1.);
         assert_eq!(spatial[924], -1.);
         assert_eq!(spatial[926], 0.); // Reference-only luma.
         assert_eq!(spatial[927], 0.); // SDR highlight structural zero.
         plan.compute.append2_dst_activity = true;
         let (_, missing) = candidate_map_sensitivities(&plan, &sensitivities);
-        assert_eq!(missing, [156, 924, 944]);
+        assert_eq!(missing, [156, 228, 924, 944]);
         plan.compute.v2_blocks = false;
         let (spatial, missing) = candidate_map_sensitivities(&plan, &sensitivities);
-        assert_eq!(missing, [156, 377, 924, 944]);
-        assert_eq!(spatial.len(), 156); // No stale retention is consulted.
+        assert_eq!(missing, [156, 228, 377, 924, 944]);
+        assert_eq!(spatial.len(), 228); // No stale v2 retention is consulted.
+        assert_eq!(spatial[159], -1.);
+        assert_eq!(spatial[227], -1.);
+    }
+
+    #[test]
+    fn l8_reconstructs_each_canonical_feature() {
+        let (w, h) = (128, 128);
+        let (src, dst) = test_pair(w, h);
+        let z = test_zensim().with_parallel(false);
+        let rs = RgbSlice::new(&src, w, h);
+        let ds = RgbSlice::new(&dst, w, h);
+        let pre = z.precompute_reference(&rs).unwrap();
+        let canonical = z.compute_with_ref(&pre, &ds).unwrap();
+        for cell in 0..12 {
+            for slot in 3..6 {
+                let k = cell * 6 + slot;
+                let mut s_l8 = [0.0; 72];
+                s_l8[k] = if k % 2 == 0 { -1.0 } else { 0.75 };
+                let mut canvas = vec![0.0; w * h];
+                let (result, _, _) = z
+                    .fused_basic_into(
+                        &pre,
+                        &ds,
+                        &[],
+                        &s_l8,
+                        None,
+                        &mut AttrSinkF32::Canvas(&mut canvas),
+                    )
+                    .unwrap();
+                assert_eq!(result.features(), canonical.features());
+                assert_eq!(result.score().to_bits(), canonical.score().to_bits());
+                let expected = -s_l8[k] * canonical.features()[156 + k] / 8.0;
+                let actual: f64 = canvas.iter().map(|v| f64::from(*v)).sum();
+                if (actual - expected).abs() > 2e-5 * expected.abs().max(1e-12) {
+                    panic!("f{}: {actual} != {expected}", 156 + k);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn l8_finite_moment_removal_and_near_zero_coefficients() {
+        // Independent closed-form moment interventions, NOT pixel edits:
+        // the latter also move neighboring means and need codec experiments.
+        for amplitude in [0.0_f32, 3e-6, 0.1, 1.0] {
+            let values: Vec<f32> = (0..64).map(|i| amplitude * (i + 1) as f32 / 64.0).collect();
+            let powers: Vec<f64> = values
+                .iter()
+                .map(|v| {
+                    let v2 = v * v;
+                    let v4 = v2 * v2;
+                    f64::from(v4 * v4)
+                })
+                .collect();
+            let total: f64 = powers.iter().sum();
+            let root = (total / 64.0).powf(0.125);
+            let stats = crate::metric::ScaleStats {
+                ssim_p95: [root; 3],
+                ..Default::default()
+            };
+            let mut s = [0.0; 72];
+            s[3] = -256.0;
+            let co = l8_coefficients(&s, 0, 0, &stats, 64.0);
+            let mut id = [0.0; 64];
+            let mut win = [0.0; 64];
+            fused_combine_l8_f32(
+                &values, &[0.0; 64], &[0.0; 64], &[0.0; 64], &[0.0; 64], co, &mut id, &mut win,
+            );
+            assert!(win.iter().all(|v| v.is_finite()));
+            assert_eq!(id, [0.0; 64]);
+            if amplitude == 0.0 {
+                assert_eq!(win, [0.0; 64]);
+                continue;
+            }
+            if amplitude == 3e-6 {
+                // A f32 coefficient would overflow and poison the map even
+                // though its final density is representable and nonzero.
+                assert!(co[0] > f64::from(f32::MAX));
+                assert!(win.iter().any(|v| *v > 0.0));
+            }
+            for end in [1, 16, 32, 63, 64] {
+                let fraction = powers[..end].iter().sum::<f64>() / total;
+                let predicted: f64 = win[..end].iter().map(|v| f64::from(*v)).sum();
+                let expected = 256.0 * root * fraction / 8.0;
+                assert!((predicted - expected).abs() <= 2e-5 * expected.abs().max(1e-12));
+                let exact = 256.0 * root * (1.0 - (1.0 - fraction).powf(0.125));
+                // Concavity bounds: first order underpredicts finite removal;
+                // at full removal the true effect is eight times larger.
+                let tol = 2e-5 * (256.0 * root).max(1e-12);
+                assert!(predicted <= exact + tol);
+                assert!(exact <= 8.0 * predicted + tol);
+                let epsilon = 1e-5;
+                let derivative =
+                    256.0 * root * (1.0 - (1.0 - epsilon * fraction).powf(0.125)) / epsilon;
+                assert!((derivative - predicted).abs() <= 2e-5 * (256.0 * root).max(1e-12));
+            }
+        }
+    }
+
+    #[test]
+    fn l8_bins_preserve_aligned_queries_on_padded_and_tiny_images() {
+        let s_l8: Vec<f64> = (0..72)
+            .map(|k| if k % 6 >= 3 { -1.0 } else { 0.0 })
+            .collect();
+        for (w, h) in [(1, 1), (17, 23), (97, 83), (128, 160)] {
+            let (src, dst) = test_pair(w, h);
+            let z = test_zensim();
+            let rs = RgbSlice::new(&src, w, h);
+            let ds = RgbSlice::new(&dst, w, h);
+            let pre = z.precompute_reference(&rs).unwrap();
+            let (_, cw, ch) = pre.scale(0);
+            let mut canvas = vec![0.0; cw * ch];
+            let (canonical, _, _) = z
+                .fused_basic_into(
+                    &pre,
+                    &ds,
+                    &[],
+                    &s_l8,
+                    None,
+                    &mut AttrSinkF32::Canvas(&mut canvas),
+                )
+                .unwrap();
+            let mut trimmed = Vec::new();
+            for y in 0..h {
+                trimmed.extend_from_slice(&canvas[y * cw..y * cw + w]);
+            }
+            let full = AttributionResult::from_density(trimmed, w, h);
+            let tolerance = 2e-5 * full.query_rect(0, 0, w, h).abs().max(1e-12);
+            for bin in [1, 8, 16] {
+                let mut accum = BinAccum::new(w, h, bin);
+                let (result, _, _) = z
+                    .fused_basic_into(
+                        &pre,
+                        &ds,
+                        &[],
+                        &s_l8,
+                        None,
+                        &mut AttrSinkF32::Bins(&mut accum),
+                    )
+                    .unwrap();
+                assert_eq!(result.features(), canonical.features());
+                assert_eq!(result.score().to_bits(), canonical.score().to_bits());
+                let map = accum.into_result();
+                assert!(map.density().iter().all(|v| v.is_finite()));
+                for y in (0..h).step_by(bin) {
+                    for x in (0..w).step_by(bin) {
+                        let (x1, y1) = ((x + bin).min(w), (y + bin).min(h));
+                        let delta = map.query_rect(x, y, x1, y1) - full.query_rect(x, y, x1, y1);
+                        assert!(
+                            delta.abs() <= tolerance,
+                            "{w}x{h} bin{bin} ({x},{y}): {delta}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// Extended-features test profile (all channels/scales active, default
@@ -3017,6 +3186,65 @@ pub(crate) fn fused_combine_plane_f32(
     }
 }
 
+/// Coefficients for the three L8 slots in each six-slot peak cell. Despite
+/// their historical `p95` names, these stats are eighth-root means, not
+/// quantiles. Retain f64 coefficients: a representable f32 eighth moment can
+/// require a coefficient above f32::MAX, while its map contribution is tiny.
+fn l8_coefficients(
+    s: &[f64],
+    scale: usize,
+    channel: usize,
+    stats: &crate::metric::ScaleStats,
+    n: f64,
+) -> [f64; 3] {
+    let roots = [
+        stats.ssim_p95[channel],
+        stats.art_p95[channel],
+        stats.det_p95[channel],
+    ];
+    core::array::from_fn(|slot| {
+        let sensitivity = s
+            .get((scale * 3 + channel) * 6 + 3 + slot)
+            .copied()
+            .unwrap_or(0.0);
+        if sensitivity == 0.0 || roots[slot] <= 0.0 {
+            0.0
+        } else {
+            -sensitivity / (8.0 * n * roots[slot].powi(7))
+        }
+    })
+}
+
+/// Candidate-only extension of the retained combine. Evaluate the signal and
+/// eighth powers in the SAME f32 order as the canonical fused accumulator;
+/// multiply in f64 before writing finite f32 mass. Keeping this separate
+/// preserves every legacy basic/stale combine operation and rounding point.
+#[autoversion]
+fn fused_combine_l8_f32(
+    sd: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    co: [f64; 3],
+    id_plane: &mut [f32],
+    win_plane: &mut [f32],
+) {
+    for i in 0..id_plane.len() {
+        let ed = (1.0 + (dst[i] - mu2[i]).abs()) / (1.0 + (src[i] - mu1[i]).abs()) - 1.0;
+        let art = ed.max(0.0);
+        let det = (-ed).max(0.0);
+        let sd2 = sd[i] * sd[i];
+        let a2 = art * art;
+        let d2 = det * det;
+        let sd4 = sd2 * sd2;
+        let a4 = a2 * a2;
+        let d4 = d2 * d2;
+        win_plane[i] += (co[0] * f64::from(sd4 * sd4)) as f32;
+        id_plane[i] += (co[1] * f64::from(a4 * a4) + co[2] * f64::from(d4 * d4)) as f32;
+    }
+}
+
 /// `Σ (src−mu1)²` and `Σ |src−mu1|` over a plane — the two reference-side
 /// pooled sums the hf coefficients need that `ScaleStats` does not carry.
 #[autoversion]
@@ -3359,7 +3587,9 @@ pub(crate) fn candidate_map_sensitivities(
             *value = 0.0;
             continue;
         }
-        let missing = (BLOCK_END_BASIC..BLOCK_END_V1_POOLS).contains(&id)
+        let v1_pool_missing = (BLOCK_END_BASIC..BLOCK_END_V1_POOLS).contains(&id)
+            && !(id < BLOCK_END_V1_PEAKS && (id - BLOCK_END_BASIC) % 6 >= 3);
+        let missing = v1_pool_missing
             || id >= BLOCK_END_APPEND2
             || (toggles.v1_only && id >= BLOCK_END_V1_POOLS)
             || (toggles.append2_dst_activity && append2_slot.is_some());
@@ -3371,7 +3601,12 @@ pub(crate) fn candidate_map_sensitivities(
     // Avoid pass B when no supported v2 integrand is active, including a
     // basic-only plan after reuse of a session that previously held v2 data.
     if spatial.iter().skip(BLOCK_END_V1_POOLS).all(|s| *s == 0.0) {
-        spatial.truncate(BLOCK_END_BASIC);
+        let end = if spatial.iter().skip(BLOCK_END_BASIC).any(|s| *s != 0.0) {
+            BLOCK_END_V1_PEAKS
+        } else {
+            BLOCK_END_BASIC
+        };
+        spatial.truncate(end);
     }
     (spatial, unsupported)
 }
@@ -3449,6 +3684,7 @@ impl crate::metric::Zensim {
             precomputed,
             distorted,
             s,
+            &[],
             None,
             &mut AttrSinkF32::Bins(&mut accum),
         )?;
@@ -3505,6 +3741,7 @@ impl crate::metric::Zensim {
             precomputed,
             distorted,
             s,
+            &[],
             prime,
             &mut AttrSinkF32::Canvas(&mut canvas),
         )?;
@@ -3530,6 +3767,7 @@ impl crate::metric::Zensim {
         precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         s: &[f64],
+        s_l8: &[f64],
         mut prime: Option<&mut AttributionSession>,
         sink: &mut AttrSinkF32<'_>,
     ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
@@ -3584,6 +3822,8 @@ impl crate::metric::Zensim {
                     s, base_k, stats, c, n_f, hf[c].0, hf[c].1,
                 ))
             });
+            let l8_co: [[f64; 3]; 3] =
+                core::array::from_fn(|c| l8_coefficients(s_l8, scale, c, stats, n_f));
             // task #70: prime the stale session — THIS compare's coefficient
             // packs become the NEXT stale call's fold input; the hf sums are
             // reference-side constants cached once here.
@@ -3606,6 +3846,18 @@ impl crate::metric::Zensim {
                         idc,
                         winc,
                     );
+                    if l8_co[c].iter().any(|v| *v != 0.0) {
+                        fused_combine_l8_f32(
+                            &ret.sd[c][off..off + len],
+                            &src_planes[c][off..off + len],
+                            &dst_planes[c][off..off + len],
+                            &ret.mu1[c][off..off + len],
+                            &ret.mu2[c][off..off + len],
+                            l8_co[c],
+                            idc,
+                            winc,
+                        );
+                    }
                 }
             };
             #[cfg(feature = "threads")]
@@ -3839,6 +4091,7 @@ impl crate::metric::Zensim {
                         precomputed,
                         distorted,
                         s,
+                        &[],
                         Some(session),
                         &mut AttrSinkF32::Bins(&mut accum),
                     )?;
@@ -4197,7 +4450,7 @@ impl crate::metric::Zensim {
             &mut session.retention,
         )?;
         let (result, attribution) =
-            self.attribution_from_retention_binned(precomputed, distorted, s, session, bin)?;
+            self.attribution_from_retention_binned(precomputed, distorted, s, &[], session, bin)?;
         Ok((result, v2res, attribution))
     }
 
@@ -4209,6 +4462,7 @@ impl crate::metric::Zensim {
         precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         s: &[f64],
+        s_l8: &[f64],
         session: &mut Fused944Session,
         bin: usize,
     ) -> Result<(crate::ZensimResult, AttributionResult), ZensimError> {
@@ -4219,6 +4473,7 @@ impl crate::metric::Zensim {
             precomputed,
             distorted,
             s,
+            s_l8,
             None,
             &mut AttrSinkF32::Bins(&mut accum),
         )?;

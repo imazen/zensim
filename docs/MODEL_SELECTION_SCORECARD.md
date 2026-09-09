@@ -39,6 +39,14 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+Later September 8 candidate spatial work: all 36 L8 integrands pass canonical
+reconstruction and the 792-pair/map replay, with exact features and scores.
+The cheaper F/D candidate still has 36 hard-max IDs in its unsupported union;
+all 252 nonidentity maps remain incomplete. A compact non-additive rectangle
+max reference passes exhaustive synthetic checks but is not yet Rust-served
+or pixel/codec-qualified. No release gate changes or inherits a pass.
+[L8 evidence and exact max-query next step](../benchmarks/l8_attribution_2026-09-08.md).
+
 Later September 8 cheaper composition: 66% D plus 34% equally across the three
 F_nonneg32 seeds resolves all 2,471 FIT/CAL training consensus pairs and passes
 the preliminary cost screen (23.77/84.38 ms, essentially D). All 72 peak terms
