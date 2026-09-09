@@ -764,9 +764,10 @@ impl<'a> BakeScorer<'a> {
     /// accuracy for a finite pixel edit. Identity returns score 100 and a zero
     /// map. Negative scores retain their original scale.
     /// The candidate map includes the L8 terms in f156-227, with the same
-    /// removal-based moment linearization as L2/L4. Hard maxima and masked/IW
-    /// pools remain explicitly unsupported; large removals retain root-curvature
-    /// and blur-neighborhood approximation errors.
+    /// removal-based moment linearization as L2/L4. Hard maxima are available
+    /// through [`ScoredAttribution::refinement_gain`](crate::ScoredAttribution::refinement_gain),
+    /// separately from density. Masked/IW pools remain unsupported; large
+    /// removals retain root-curvature and blur-neighborhood approximation errors.
     ///
     /// # Errors
     /// Refuses `bin == 0`, invalid inputs/cache dimensions, HDR, a formula
@@ -809,6 +810,8 @@ impl<'a> BakeScorer<'a> {
                     bin,
                 ),
                 unsupported_feature_ids: Vec::new(),
+                max_removals: Vec::new(),
+                unsupported_refinement_feature_ids: Vec::new(),
                 has_corruption_gate,
             });
         }
@@ -833,15 +836,26 @@ impl<'a> BakeScorer<'a> {
         )?;
         let (spatial, unsupported_feature_ids) =
             crate::attribution::candidate_map_sensitivities(&plan, &sensitivities);
+        let mut max_removals = Vec::new();
         let (_, attribution) = Zensim::new(ZensimProfile::B).attribution_from_retention_binned(
             precomputed,
             distorted,
             &spatial,
-            spatial.get(156..spatial.len().min(228)).unwrap_or(&[]),
+            sensitivities
+                .get(156..sensitivities.len().min(228))
+                .unwrap_or(&[]),
+            Some(&mut max_removals),
             session,
             bin,
         )?;
+        let unsupported_refinement_feature_ids = crate::attribution::bind_max_removals(
+            &mut max_removals,
+            &features,
+            &unsupported_feature_ids,
+        );
         Ok(crate::ScoredAttribution {
+            max_removals,
+            unsupported_refinement_feature_ids,
             result: ZensimResult::new(score, raw_distance, features, ZensimProfile::B, mean_offset),
             attribution,
             sensitivities,

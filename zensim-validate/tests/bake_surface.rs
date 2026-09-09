@@ -635,6 +635,13 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
                     expected.raw_distance().to_bits()
                 );
                 assert!(!result.has_corruption_gate());
+                if i >= 2 {
+                    assert!(
+                        result.unsupported_refinement_feature_ids().is_empty(),
+                        "bake {i}: {:?}",
+                        result.unsupported_refinement_feature_ids()
+                    );
+                }
                 if i == 2 || i == 4 {
                     assert!(
                         result.unsupported_feature_ids().is_empty(),
@@ -661,6 +668,9 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
                     let a = full
                         .attribution()
                         .query_rect(x, y, (x + 8).min(w), (y + 8).min(h));
+                    let qfull = full.refinement_gain(x, y, (x + 8).min(w), (y + 8).min(h));
+                    let qbin = binned.refinement_gain(x, y, (x + 8).min(w), (y + 8).min(h));
+                    assert!((qfull - qbin).abs() <= 1e-5 * a.abs().max(1e-6));
                     let b = binned
                         .attribution()
                         .query_rect(x, y, (x + 8).min(w), (y + 8).min(h));
@@ -678,10 +688,20 @@ fn candidate_attribution_matches_served_features_scores_and_reuses_sessions() {
                 binned.attribution().density()
             );
             assert_eq!(repeat.sensitivities(), binned.sensitivities());
+            assert_eq!(
+                repeat.refinement_gain(0, 0, w, h),
+                binned.refinement_gain(0, 0, w, h)
+            );
+            assert_eq!(
+                repeat.unsupported_refinement_feature_ids(),
+                binned.unsupported_refinement_feature_ids()
+            );
             let identity = scorer
                 .compute_with_ref_and_attribution(&rs, &pre, &rs, None, &mut session, 8)
                 .unwrap();
             assert_eq!(identity.result().score(), 100.);
+            assert_eq!(identity.refinement_gain(0, 0, w, h), 0.0);
+            assert!(identity.unsupported_refinement_feature_ids().is_empty());
             assert_eq!(identity.result().raw_distance(), 0.);
             assert!(identity.result().features().iter().all(|x| *x == 0.));
             assert!(identity.attribution().density().iter().all(|x| *x == 0.));
@@ -703,6 +723,7 @@ fn candidate_attribution_reports_unsupported_terms_and_complete_gating() {
         .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
         .unwrap();
     assert_eq!(scored.unsupported_feature_ids(), &[156]);
+    assert!(scored.unsupported_refinement_feature_ids().is_empty());
     assert!(scored.result().score() < 0.);
     assert_eq!(
         scored.result().score(),

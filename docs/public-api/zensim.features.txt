@@ -13,20 +13,20 @@
 #   pub types (struct/enum/trait/alias)        18
 #   pub consts/statics                         10
 #   free functions                              8
-#   inherent methods                           55
+#   inherent methods                           57
 #   struct fields                              50
 #   enum variants                              14
 #   trait roster entries (type × trait)        51
 #   auto-trait-complete types                  18
 #
 # per-module pub lines:
-#   (root)                          129
+#   (root)                          131
 #   cvvdp_features                    2
 #   feature_v2                        4
 #   profile                          20
 #   xyb_lms_features                  2
 
-## items (157 lines)
+## items (159 lines)
 
 pub mod cvvdp_features
 pub const cvvdp_features::CVVDP_FEATURE_COUNT: usize
@@ -139,9 +139,11 @@ pub RoundingBias::positive_fraction: [f64; 3]
 #[non_exhaustive] pub struct ScoredAttribution
 pub fn ScoredAttribution::attribution(&self) -> &AttributionResult
 pub fn ScoredAttribution::has_corruption_gate(&self) -> bool
+pub fn ScoredAttribution::refinement_gain(&self, usize, usize, usize, usize) -> f64
 pub fn ScoredAttribution::result(&self) -> &ZensimResult
 pub fn ScoredAttribution::sensitivities(&self) -> &[f64]
 pub fn ScoredAttribution::unsupported_feature_ids(&self) -> &[usize]
+pub fn ScoredAttribution::unsupported_refinement_feature_ids(&self) -> &[usize]
 pub struct UnsupportedFormat(pub &'static str)
 pub struct ZenpixelsSource<'a>
 pub fn ZenpixelsSource<'a>::try_from_buffer(&'a zenpixels::buffer::PixelBuffer) -> core::result::Result<Self, UnsupportedFormat>

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Add `ScoredAttribution::refinement_gain` and separate refinement coverage:
+  finite max-signal rectangle effects include ties and reflected/coarse source
+  footprints without changing additive density semantics. Extend the existing
+  coherence instrument to complete ensembles and per-block JSON evidence.
+
 - Include the 36 L8 peak terms in candidate `BakeScorer` attribution, using
   retained canonical signals and finite f64 normalization. Preserve scalar
   scores and legacy map APIs; keep hard max and masked/IW coverage gaps explicit.

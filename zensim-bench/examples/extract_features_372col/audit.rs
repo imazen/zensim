@@ -292,6 +292,55 @@ impl Config {
                     .iter()
                     .flat_map(|v| v.to_le_bytes())
                     .collect::<Vec<_>>()));
+                record["spatial_refinement_unsupported_feature_ids"] =
+                    json!(spatial.unsupported_refinement_feature_ids());
+                let (w, h) = (src.width as usize, src.height as usize);
+                let full_density = spatial.attribution().query_rect(0, 0, w, h);
+                let full_gain = spatial.refinement_gain(0, 0, w, h);
+                let expected_max: f64 = (156..228)
+                    .filter(|id| {
+                        (id - 156) % 6 < 3
+                            && !spatial.unsupported_refinement_feature_ids().contains(id)
+                    })
+                    .map(|id| {
+                        -spatial.sensitivities().get(id).copied().unwrap_or(0.0)
+                            * spatial.result().features().get(id).copied().unwrap_or(0.0)
+                    })
+                    .sum();
+                if !full_gain.is_finite()
+                    || (full_gain - full_density - expected_max).abs()
+                        > 1e-9 * (full_density.abs() + expected_max.abs()).max(1e-12)
+                {
+                    return Err("candidate full-rectangle max reconstruction mismatch".into());
+                }
+                record["spatial_refinement_full_gain"] = json!(full_gain);
+                record["spatial_refinement_full_density"] = json!(full_density);
+                record["spatial_refinement_full_max_expected"] = json!(expected_max);
+                let mut grids = Vec::new();
+                let mut queries = 1;
+                for block in [8, 16, 32, 64, 128] {
+                    let mut bytes = Vec::new();
+                    let mut corrected = 0;
+                    for y in (0..h).step_by(block) {
+                        for x in (0..w).step_by(block) {
+                            let (x1, y1) = ((x + block).min(w), (y + block).min(h));
+                            let gain = spatial.refinement_gain(x, y, x1, y1);
+                            if !gain.is_finite() {
+                                return Err("nonfinite candidate rectangle estimate".into());
+                            }
+                            corrected +=
+                                usize::from(gain != spatial.attribution().query_rect(x, y, x1, y1));
+                            bytes.extend_from_slice(&gain.to_le_bytes());
+                            queries += 1;
+                        }
+                    }
+                    grids.push(
+                        json!({"block":block,"cols":w.div_ceil(block),"rows":h.div_ceil(block),
+                        "gain_sha256":sha(&bytes),"nonzero_max_corrections":corrected}),
+                    );
+                }
+                record["spatial_refinement_grids"] = json!(grids);
+                record["spatial_refinement_queries"] = json!(queries);
             }
             let mut max_abs: f64 = 0.0;
             if let Some(head) = &self.head {

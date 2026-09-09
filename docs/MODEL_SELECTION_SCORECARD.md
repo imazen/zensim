@@ -39,6 +39,16 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+Later September 8 finite max queries: complete local refinement coverage and
+exact old score/feature/density replay pass on 792 candidate audits. The
+25,248 actual pixel interventions improve mean spatial rank to
+0.718/0.801/0.910/0.950 at block sizes 8/16/32/64, but only 81/96 M3f cells
+and 80/96 M2 cells pass their bars. Saved-data component substitutions locate
+all 15 remaining spatial failures in the non-max approximation: oracle max
+fixes none; oracle non-max fixes all. This is training diagnosis, with no
+native RD, HDR spatial, memory/latency or model qualification.
+[Exact max query, failed cells and next correction](../benchmarks/max_attribution_2026-09-08.md).
+
 Later September 8 candidate spatial work: all 36 L8 integrands pass canonical
 reconstruction and the 792-pair/map replay, with exact features and scores.
 The cheaper F/D candidate still has 36 hard-max IDs in its unsupported union;

@@ -7,6 +7,9 @@
 //! underlies both that route and the earlier caller-supplied-gradient APIs;
 //! the full route also covers v2, append and append2 integrands. The candidate
 //! route additionally covers the 36 L8 terms in f156-227.
+//! [`ScoredAttribution::refinement_gain`] adds hard maxima through a separate
+//! non-additive rectangle estimate. Its coverage report is distinct from
+//! density coverage; see that method's frozen-signal ownership contract.
 //!
 //! Builds a per-pixel **attribution density** `D(x, y)` for a scalar model's
 //! gradient `s_k = ∂score/∂f_k` over the BASIC feature block (f0-155: 13 slots
@@ -1481,6 +1484,148 @@ mod tests {
     use crate::{RgbSlice, Zensim, ZensimProfile};
     use std::sync::OnceLock;
 
+    #[test]
+    fn max_rectangles_match_explicit_reflected_source_footprints() {
+        let mut queries = 0;
+        for (w, h) in [(1, 1), (3, 5), (17, 23), (65, 71), (97, 83)] {
+            // Coordinate-coded pixels let the actual reflection owner supply
+            // an independent expansion, rather than copying its index formula.
+            let src: Vec<[u8; 3]> = (0..h)
+                .flat_map(|y| (0..w).map(move |x| [x as u8, y as u8, 0]))
+                .collect();
+            let rs = RgbSlice::new(&src, w, h);
+            let extended = reflect_pad_to_min(&rs);
+            let pre = test_zensim().precompute_reference(&rs).unwrap();
+            let cuts = |n: usize| {
+                let mut v = if n <= 5 {
+                    (0..=n).collect()
+                } else {
+                    vec![0, 1, 7, 8, 16, n / 2, n - 1, n]
+                };
+                v.retain(|x| *x <= n);
+                v.sort_unstable();
+                v.dedup();
+                v
+            };
+            let xc = cuts(w);
+            let yc = cuts(h);
+            for scale in 0..4 {
+                let (_, sw, sh) = pre.scale(scale);
+                let factor = 1 << scale;
+                let xs: Vec<Vec<usize>> = (0..sw)
+                    .map(|x| {
+                        (x * factor..(x + 1) * factor)
+                            .map(|i| {
+                                usize::from(extended.row_bytes(0)[3 * i.min(extended.width() - 1)])
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let ys: Vec<Vec<usize>> = (0..sh)
+                    .map(|y| {
+                        (y * factor..(y + 1) * factor)
+                            .map(|i| {
+                                usize::from(extended.row_bytes(i.min(extended.height() - 1))[1])
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let xb = max_axis_footprints(w, sw, scale);
+                let yb = max_axis_footprints(h, sh, scale);
+                for (expanded, bounds) in xs.iter().zip(&xb).chain(ys.iter().zip(&yb)) {
+                    assert_eq!(
+                        (
+                            *expanded.iter().min().unwrap(),
+                            *expanded.iter().max().unwrap()
+                        ),
+                        *bounds
+                    );
+                }
+                let signals: Vec<f32> = (0..sw * sh)
+                    .map(|i| ((i * 13 + i / sw * 7) % 11) as f32)
+                    .collect();
+                let global = signals.iter().copied().fold(0.0_f32, f32::max);
+                let mut map = MaxRemoval::new(156, -1.0, w, h);
+                for y in 0..sh {
+                    for x in 0..sw {
+                        map.add(signals[y * sw + x], xb[x], yb[y]);
+                    }
+                }
+                map.finish();
+                assert_eq!(map.global(), f64::from(global));
+                assert_eq!(
+                    map.feature_drop(0, 0, usize::MAX, usize::MAX),
+                    f64::from(global)
+                );
+                assert_eq!(map.feature_drop(usize::MAX, 0, w, h), 0.0);
+                assert_eq!(map.feature_drop(0, usize::MAX, w, h), 0.0);
+                for &x0 in &xc {
+                    for &x1 in &xc {
+                        if x1 < x0 {
+                            continue;
+                        }
+                        let remove_x: Vec<bool> = xs
+                            .iter()
+                            .map(|v| v.iter().all(|x| x0 <= *x && *x < x1))
+                            .collect();
+                        for &y0 in &yc {
+                            for &y1 in &yc {
+                                if y1 < y0 {
+                                    continue;
+                                }
+                                let remove_y: Vec<bool> = ys
+                                    .iter()
+                                    .map(|v| v.iter().all(|y| y0 <= *y && *y < y1))
+                                    .collect();
+                                let mut outside = 0.0_f32;
+                                for y in 0..sh {
+                                    for x in 0..sw {
+                                        if !remove_x[x] || !remove_y[y] {
+                                            outside = outside.max(signals[y * sw + x]);
+                                        }
+                                    }
+                                }
+                                assert_eq!(
+                                    map.feature_drop(x0, y0, x1, y1),
+                                    f64::from(global) - f64::from(outside),
+                                    "{w}x{h} scale{scale} ({x0},{y0})..({x1},{y1})"
+                                );
+                                queries += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(queries > 10000);
+        eprintln!("max source-footprint rectangle queries: {queries}");
+    }
+
+    #[test]
+    fn max_ties_are_non_additive_and_mismatches_keep_coverage_missing() {
+        let mut map = MaxRemoval::new(156, -1.0, 3, 1);
+        for (x, v) in [4.0, 2.0, 4.0].into_iter().enumerate() {
+            map.add(v, (x, x), (0, 0));
+        }
+        map.finish();
+        assert_eq!(map.feature_drop(0, 0, 1, 1), 0.0);
+        assert_eq!(map.feature_drop(1, 0, 3, 1), 0.0);
+        assert_eq!(map.feature_drop(0, 0, 3, 1), 4.0);
+        #[cfg(feature = "feature-regime-v2")]
+        {
+            let mut features = vec![0.0; 228];
+            features[156] = 4.0;
+            let mut maps = vec![map];
+            assert_eq!(bind_max_removals(&mut maps, &features, &[156, 228]), [228]);
+            features[156] = f64::from_bits(4.0_f64.to_bits() + 1);
+            assert_eq!(
+                bind_max_removals(&mut maps, &features, &[156, 228]),
+                [156, 228]
+            );
+            assert!(maps.is_empty());
+        }
+    }
+
     #[cfg(feature = "feature-regime-v2")]
     #[test]
     fn candidate_coverage_distinguishes_variants_reference_only_and_missing_integrands() {
@@ -1523,22 +1668,23 @@ mod tests {
         for cell in 0..12 {
             for slot in 3..6 {
                 let k = cell * 6 + slot;
-                let mut s_l8 = [0.0; 72];
-                s_l8[k] = if k % 2 == 0 { -1.0 } else { 0.75 };
+                let mut s_peaks = [0.0; 72];
+                s_peaks[k] = if k % 2 == 0 { -1.0 } else { 0.75 };
                 let mut canvas = vec![0.0; w * h];
                 let (result, _, _) = z
                     .fused_basic_into(
                         &pre,
                         &ds,
                         &[],
-                        &s_l8,
+                        &s_peaks,
+                        None,
                         None,
                         &mut AttrSinkF32::Canvas(&mut canvas),
                     )
                     .unwrap();
                 assert_eq!(result.features(), canonical.features());
                 assert_eq!(result.score().to_bits(), canonical.score().to_bits());
-                let expected = -s_l8[k] * canonical.features()[156 + k] / 8.0;
+                let expected = -s_peaks[k] * canonical.features()[156 + k] / 8.0;
                 let actual: f64 = canvas.iter().map(|v| f64::from(*v)).sum();
                 if (actual - expected).abs() > 2e-5 * expected.abs().max(1e-12) {
                     panic!("f{}: {actual} != {expected}", 156 + k);
@@ -1608,7 +1754,7 @@ mod tests {
 
     #[test]
     fn l8_bins_preserve_aligned_queries_on_padded_and_tiny_images() {
-        let s_l8: Vec<f64> = (0..72)
+        let s_peaks: Vec<f64> = (0..72)
             .map(|k| if k % 6 >= 3 { -1.0 } else { 0.0 })
             .collect();
         for (w, h) in [(1, 1), (17, 23), (97, 83), (128, 160)] {
@@ -1624,7 +1770,8 @@ mod tests {
                     &pre,
                     &ds,
                     &[],
-                    &s_l8,
+                    &s_peaks,
+                    None,
                     None,
                     &mut AttrSinkF32::Canvas(&mut canvas),
                 )
@@ -1642,7 +1789,8 @@ mod tests {
                         &pre,
                         &ds,
                         &[],
-                        &s_l8,
+                        &s_peaks,
+                        None,
                         None,
                         &mut AttrSinkF32::Bins(&mut accum),
                     )
@@ -3215,6 +3363,167 @@ fn l8_coefficients(
     })
 }
 
+/// Logical source-coordinate bounds owned by each sample along a pyramid
+/// axis. This is a frozen-signal ownership model, not the blur dependency
+/// graph. Reflection precedes zero padding; padding belongs to the nearest
+/// extended-image edge. Halving drops odd trailing samples, as the producer
+/// does. Explicit bounds also handle noncontiguous reflected footprints.
+fn max_axis_footprints(logical: usize, scale_len: usize, scale: usize) -> Vec<(usize, usize)> {
+    let extended = logical.max(MIN_PYRAMID_DIM);
+    let factor = 1usize << scale;
+    (0..scale_len)
+        .map(|i| {
+            let mut lo = logical;
+            let mut hi = 0;
+            for j in i * factor..(i + 1) * factor {
+                let source = crate::metric::reflect_index(j.min(extended - 1), logical);
+                lo = lo.min(source);
+                hi = hi.max(source);
+            }
+            (lo, hi)
+        })
+        .collect()
+}
+
+/// Non-additive max removal, retained in logical source coordinates. A signal
+/// survives a rectangle if ANY owned source coordinate is outside it. The
+/// four one-dimensional projections answer that union exactly, including
+/// ties; no full signal plane is retained.
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+pub(crate) struct MaxRemoval {
+    feature_id: usize,
+    sensitivity: f64,
+    left: Vec<f32>,
+    right: Vec<f32>,
+    top: Vec<f32>,
+    bottom: Vec<f32>,
+}
+
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+impl MaxRemoval {
+    fn new(feature_id: usize, sensitivity: f64, width: usize, height: usize) -> Self {
+        Self {
+            feature_id,
+            sensitivity,
+            left: vec![0.0; width + 1],
+            right: vec![0.0; width + 1],
+            top: vec![0.0; height + 1],
+            bottom: vec![0.0; height + 1],
+        }
+    }
+
+    fn add(&mut self, value: f32, x: (usize, usize), y: (usize, usize)) {
+        self.left[x.0 + 1] = self.left[x.0 + 1].max(value);
+        self.right[x.1] = self.right[x.1].max(value);
+        self.top[y.0 + 1] = self.top[y.0 + 1].max(value);
+        self.bottom[y.1] = self.bottom[y.1].max(value);
+    }
+
+    fn finish(&mut self) {
+        for prefix in [&mut self.left, &mut self.top] {
+            for i in 1..prefix.len() {
+                prefix[i] = prefix[i].max(prefix[i - 1]);
+            }
+        }
+        for suffix in [&mut self.right, &mut self.bottom] {
+            for i in (0..suffix.len() - 1).rev() {
+                suffix[i] = suffix[i].max(suffix[i + 1]);
+            }
+        }
+    }
+
+    fn global(&self) -> f64 {
+        f64::from(self.left[self.left.len() - 1])
+    }
+
+    fn feature_drop(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
+        let x1 = x1.min(self.left.len() - 1);
+        let y1 = y1.min(self.top.len() - 1);
+        if x0 >= x1 || y0 >= y1 {
+            return 0.0;
+        }
+        let outside = self.left[x0]
+            .max(self.right[x1])
+            .max(self.top[y0])
+            .max(self.bottom[y1]);
+        self.global() - f64::from(outside)
+    }
+}
+
+fn retain_max_removals(
+    output: &mut Vec<MaxRemoval>,
+    s_peaks: &[f64],
+    scale: usize,
+    logical_width: usize,
+    logical_height: usize,
+    sw: usize,
+    sh: usize,
+    src: [&[f32]; 3],
+    dst: [&[f32]; 3],
+    ret: &crate::streaming::AttrScaleRetention,
+) {
+    if !(0..3).any(|c| {
+        (0..3).any(|slot| {
+            s_peaks
+                .get((scale * 3 + c) * 6 + slot)
+                .is_some_and(|s| *s != 0.0)
+        })
+    }) {
+        return;
+    }
+    let xs = max_axis_footprints(logical_width, sw, scale);
+    let ys = max_axis_footprints(logical_height, sh, scale);
+    for c in 0..3 {
+        let base = (scale * 3 + c) * 6;
+        let mut maps: [Option<MaxRemoval>; 3] = core::array::from_fn(|slot| {
+            let s = s_peaks.get(base + slot).copied().unwrap_or(0.0);
+            (s != 0.0).then(|| MaxRemoval::new(156 + base + slot, s, logical_width, logical_height))
+        });
+        if maps.iter().all(Option::is_none) {
+            continue;
+        }
+        for (y, &yf) in ys.iter().enumerate() {
+            for (x, &xf) in xs.iter().enumerate() {
+                let i = y * sw + x;
+                // Same f32 expression as the canonical fused accumulator.
+                let ed = (1.0 + (dst[c][i] - ret.mu2[c][i]).abs())
+                    / (1.0 + (src[c][i] - ret.mu1[c][i]).abs())
+                    - 1.0;
+                let signals = [ret.sd[c][i], ed.max(0.0), (-ed).max(0.0)];
+                for (map, value) in maps.iter_mut().zip(signals) {
+                    if let Some(map) = map {
+                        map.add(value, xf, yf);
+                    }
+                }
+            }
+        }
+        for mut map in maps.into_iter().flatten() {
+            map.finish();
+            output.push(map);
+        }
+    }
+}
+
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) fn bind_max_removals(
+    maps: &mut Vec<MaxRemoval>,
+    features: &[f64],
+    density_missing: &[usize],
+) -> Vec<usize> {
+    // An extraction variant or numerical mismatch cannot silently gain
+    // coverage. The old density remains usable with its old coverage report.
+    maps.retain(|m| {
+        features
+            .get(m.feature_id)
+            .is_some_and(|f| f.to_bits() == m.global().to_bits())
+    });
+    density_missing
+        .iter()
+        .copied()
+        .filter(|id| !maps.iter().any(|m| m.feature_id == *id))
+        .collect()
+}
+
 /// Candidate-only extension of the retained combine. Evaluate the signal and
 /// eighth powers in the SAME f32 order as the canonical fused accumulator;
 /// multiply in f64 before writing finite f32 mass. Keeping this separate
@@ -3514,8 +3823,9 @@ impl Fused944Session {
 ///
 /// The candidate's declared feature plan and complete score produce the
 /// sensitivities used by the map. Attribution remains a local approximation
-/// of finite pixel changes; inspect [`Self::unsupported_feature_ids`] and
-/// [`Self::has_corruption_gate`] when evaluating or consuming it.
+/// of finite pixel changes. [`Self::attribution`] supplies an additive density;
+/// [`Self::refinement_gain`] additionally includes finite max-signal removal.
+/// Inspect the corresponding coverage report and [`Self::has_corruption_gate`].
 #[cfg(feature = "feature-regime-v2")]
 #[non_exhaustive]
 pub struct ScoredAttribution {
@@ -3524,6 +3834,8 @@ pub struct ScoredAttribution {
     pub(crate) sensitivities: Vec<f64>,
     pub(crate) unsupported_feature_ids: Vec<usize>,
     pub(crate) has_corruption_gate: bool,
+    pub(crate) max_removals: Vec<MaxRemoval>,
+    pub(crate) unsupported_refinement_feature_ids: Vec<usize>,
 }
 
 #[cfg(feature = "feature-regime-v2")]
@@ -3543,13 +3855,54 @@ impl ScoredAttribution {
         &self.sensitivities
     }
 
-    /// Locally nonzero sensitivities whose integrands this map cannot serve.
+    /// Locally nonzero sensitivities whose integrands the additive density cannot serve.
     ///
     /// Reference-only and SDR structural-zero terms are deliberately excluded.
     /// A missing ID is not proof that a finite intervention has no effect:
     /// a clamp or gate may have zero local sensitivity and still be crossed.
     pub fn unsupported_feature_ids(&self) -> &[usize] {
         &self.unsupported_feature_ids
+    }
+
+    /// Estimated score gain for refining a half-open source-pixel rectangle.
+    ///
+    /// Adds finite max-signal removal to the additive density integral. This
+    /// result is **not additive**: two blocks may each leave a tied maximum
+    /// unchanged while their union removes it. Do not sum separate queries
+    /// to obtain the union's estimate. Coordinates are clamped to the image;
+    /// empty or inverted rectangles return zero.
+    ///
+    /// A max sample is removed only when its entire downsampled source
+    /// footprint is contained. Reflected duplicates are included; SIMD padding
+    /// belongs to the nearest extended-image edge. Partial coarse footprints
+    /// survive. This freezes the extracted signals: actual pixel edits also
+    /// change blurred neighborhoods and can create new maxima. Root curvature,
+    /// model nonlinearity and corruption/clamp crossing remain approximations.
+    /// Binning affects only the additive term, as in [`AttributionResult::query_rect`].
+    ///
+    /// Inspect [`Self::unsupported_refinement_feature_ids`] and
+    /// [`Self::has_corruption_gate`]. Complete local coverage does not establish
+    /// accurate finite pixel or codec steering.
+    pub fn refinement_gain(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
+        if x0 >= x1.min(self.attribution.width()) || y0 >= y1.min(self.attribution.height()) {
+            return 0.0;
+        }
+        let mut gain = self.attribution.query_rect(x0, y0, x1, y1);
+        for map in &self.max_removals {
+            gain -= map.sensitivity * map.feature_drop(x0, y0, x1, y1);
+        }
+        gain
+    }
+
+    /// Locally active feature IDs not represented by [`Self::refinement_gain`].
+    ///
+    /// Unlike density-only [`Self::unsupported_feature_ids`], this excludes
+    /// max terms whose retained signal maximum exactly matches the complete
+    /// served feature. A zero local derivative is not proof that a finite
+    /// edit is inert. Reflected/coarse ownership and blur approximations still
+    /// apply even when this list is empty.
+    pub fn unsupported_refinement_feature_ids(&self) -> &[usize] {
+        &self.unsupported_refinement_feature_ids
     }
 
     /// Whether the complete score includes a discontinuous corruption gate.
@@ -3686,6 +4039,7 @@ impl crate::metric::Zensim {
             s,
             &[],
             None,
+            None,
             &mut AttrSinkF32::Bins(&mut accum),
         )?;
         Ok((result, accum.into_result()))
@@ -3742,6 +4096,7 @@ impl crate::metric::Zensim {
             distorted,
             s,
             &[],
+            None,
             prime,
             &mut AttrSinkF32::Canvas(&mut canvas),
         )?;
@@ -3767,7 +4122,8 @@ impl crate::metric::Zensim {
         precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         s: &[f64],
-        s_l8: &[f64],
+        s_peaks: &[f64],
+        mut max_removals: Option<&mut Vec<MaxRemoval>>,
         mut prime: Option<&mut AttributionSession>,
         sink: &mut AttrSinkF32<'_>,
     ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
@@ -3812,6 +4168,11 @@ impl crate::metric::Zensim {
             let t_c = std::time::Instant::now();
             let n = sw * sh;
             let n_f = n as f64;
+            if let Some(output) = max_removals.as_deref_mut() {
+                retain_max_removals(
+                    output, s_peaks, scale, width, height, sw, sh, src_planes, dst_planes, ret,
+                );
+            }
             id_plane[..n].fill(0.0);
             win_plane[..n].fill(0.0);
             let hf: [(f64, f64); 3] =
@@ -3823,7 +4184,7 @@ impl crate::metric::Zensim {
                 ))
             });
             let l8_co: [[f64; 3]; 3] =
-                core::array::from_fn(|c| l8_coefficients(s_l8, scale, c, stats, n_f));
+                core::array::from_fn(|c| l8_coefficients(s_peaks, scale, c, stats, n_f));
             // task #70: prime the stale session — THIS compare's coefficient
             // packs become the NEXT stale call's fold input; the hf sums are
             // reference-side constants cached once here.
@@ -4092,6 +4453,7 @@ impl crate::metric::Zensim {
                         distorted,
                         s,
                         &[],
+                        None,
                         Some(session),
                         &mut AttrSinkF32::Bins(&mut accum),
                     )?;
@@ -4449,8 +4811,15 @@ impl crate::metric::Zensim {
             &mut session.scratch,
             &mut session.retention,
         )?;
-        let (result, attribution) =
-            self.attribution_from_retention_binned(precomputed, distorted, s, &[], session, bin)?;
+        let (result, attribution) = self.attribution_from_retention_binned(
+            precomputed,
+            distorted,
+            s,
+            &[],
+            None,
+            session,
+            bin,
+        )?;
         Ok((result, v2res, attribution))
     }
 
@@ -4462,7 +4831,8 @@ impl crate::metric::Zensim {
         precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         s: &[f64],
-        s_l8: &[f64],
+        s_peaks: &[f64],
+        max_removals: Option<&mut Vec<MaxRemoval>>,
         session: &mut Fused944Session,
         bin: usize,
     ) -> Result<(crate::ZensimResult, AttributionResult), ZensimError> {
@@ -4473,7 +4843,8 @@ impl crate::metric::Zensim {
             precomputed,
             distorted,
             s,
-            s_l8,
+            s_peaks,
+            max_removals,
             None,
             &mut AttrSinkF32::Bins(&mut accum),
         )?;

@@ -62,7 +62,7 @@ fn attribution_identities_hold_on_every_tier() {
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
         let label = &perm.label;
 
-        // Candidate L8 coverage through the public surface. Dispatch changes
+        // Candidate max/L8 coverage through the public surface. Dispatch changes
         // are process-wide, so these probes belong in this isolated executable,
         // never the parallel library unit-test process.
         #[cfg(feature = "feature-regime-v2")]
@@ -73,7 +73,7 @@ fn attribution_identities_hold_on_every_tier() {
             let ds = RgbSlice::new(&dst, w, h);
             let mut session = zensim::Fused944Session::new();
             for cell in 0..12 {
-                for slot in 3..6 {
+                for slot in 0..6 {
                     let id = 156 + cell * 6 + slot;
                     let weight = if id % 2 == 0 { -1.0 } else { 0.75 };
                     let recipe = serde_json::json!({
@@ -92,12 +92,23 @@ fn attribution_identities_hold_on_every_tier() {
                         .unwrap();
                     assert_eq!(scalar.score().to_bits(), scored.result().score().to_bits());
                     assert_eq!(scalar.features(), scored.result().features());
-                    assert!(scored.unsupported_feature_ids().is_empty());
-                    let expected = -scored.sensitivities()[id] * scalar.features()[id] / 8.0;
-                    let actual = scored.attribution().query_rect(0, 0, w, h);
+                    assert!(scored.unsupported_refinement_feature_ids().is_empty());
+                    let (actual, divisor) = if slot < 3 {
+                        assert_eq!(scored.unsupported_feature_ids(), &[id]);
+                        assert!(scored.attribution().density().iter().all(|v| *v == 0.0));
+                        (scored.refinement_gain(0, 0, w, h), 1.0)
+                    } else {
+                        assert!(scored.unsupported_feature_ids().is_empty());
+                        assert_eq!(
+                            scored.refinement_gain(0, 0, w, h),
+                            scored.attribution().query_rect(0, 0, w, h)
+                        );
+                        (scored.attribution().query_rect(0, 0, w, h), 8.0)
+                    };
+                    let expected = -scored.sensitivities()[id] * scalar.features()[id] / divisor;
                     if (actual - expected).abs() > 2e-5 * expected.abs().max(1e-12) {
                         failures.push(format!(
-                            "{label} candidate L8 f{id}: {actual} != {expected}"
+                            "{label} candidate peak f{id}: {actual} != {expected}"
                         ));
                     }
                 }

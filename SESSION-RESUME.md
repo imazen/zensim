@@ -4,6 +4,21 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
+Latest continuation [adds finite max rectangle estimates](benchmarks/max_attribution_2026-09-08.md).
+`ScoredAttribution::refinement_gain` handles max ties and source footprints;
+its separate coverage report is empty on all 792 fixed blend/F/D audits.
+Old density/features/scores stay exact. All 72 peak terms pass the Rust
+surface on ten SIMD configurations; 14,268 footprint queries pass brute force.
+Actual 25,248 pixel replacements improve mean spatial rank at every block
+size, but 15/96 cells still miss M3f >=0.70 and 16/96 miss M2 >=0.99.
+The saved-data oracle diagnosis is decisive: observed max deltas fix 0/15
+spatial failures; observed non-max deltas fix 15/15. Next isolate basic SSIM,
+residual/HF and L8 approximation errors through the existing coherence owner,
+then correct the responsible terms. Do not retune max ownership or repeat
+unchanged encodes. Native steering, corruption and full qualification remain
+incomplete; no default model changes. Reports and source-bound binaries are
+in the September 8 `max-attribution` validation delivery.
+
 Latest continuation [implements candidate L8 attribution](benchmarks/l8_attribution_2026-09-08.md).
 All 36 terms pass canonical reconstruction across ten SIMD configurations.
 All 792 pixel/cache/spatial audits preserve exact features/scores; D maps stay

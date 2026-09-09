@@ -41,11 +41,26 @@
 //! cargo run --release -p zensim --features custom-profiles \
 //!   --example diffmap_block_coherence -- <ref> <dist> --bake winner.bin [--block 32]
 //! ```
+//!
+//! `--ensemble <comma-separated paths> --ensemble-weights <comma-separated weights>`
+//! serves the complete calibrated blend through the same Rust surface. `--json`
+//! writes a new per-block report with input/model hashes and work counts.
+//! M3f measures the non-additive `ScoredAttribution::refinement_gain`; M3a
+//! remains the density-only control. Neither establishes an encoder RD gain.
 
 use zensim::{DiffmapWeighting, RgbSlice, Zensim, ZensimProfile};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(feature = "custom-profiles")]
+    if args.first().map(String::as_str) == Some("--refinement-analysis") {
+        assert!(
+            args.len() == 4 && args[2] == "--json",
+            "expected --refinement-analysis INPUT --json NEW_OUTPUT"
+        );
+        analyze_refinement(&args[1], &args[3]);
+        return;
+    }
     // E-JBU perf mode (protocol: ms/MP of the redistribution pass): `--perf WxH`
     // synthesizes a pair and times the diffmap render with the guided option
     // OFF vs ON, interleaved, medians of 4 per arm.
@@ -56,18 +71,45 @@ fn main() {
     }
     if args.len() < 2 {
         eprintln!(
-            "usage: diffmap_block_coherence <ref> <dist> [--block N] [--weighting trained|balanced] [--bake <path>] | --perf WxH"
+            "usage: diffmap_block_coherence <ref> <dist> [--block N] [--weighting trained|balanced] [--bake <path> | --ensemble <paths> --ensemble-weights <weights>] [--json <new-path>] | --perf WxH"
         );
         std::process::exit(2);
     }
     let mut block = 32usize;
     let mut weighting = DiffmapWeighting::default(); // Trained (V0_2 weights)
     let mut bake_path: Option<String> = None;
+    let mut ensemble: Option<String> = None;
+    let mut ensemble_weights: Option<Vec<f64>> = None;
+    let mut report_json: Option<String> = None;
     let mut i = 2;
-    while i + 1 < args.len() {
+    while i < args.len() {
+        assert!(
+            i + 1 < args.len() && !args[i + 1].starts_with("--"),
+            "missing option value"
+        );
         match args[i].as_str() {
             "--block" => block = args[i + 1].parse().unwrap(),
-            "--bake" => bake_path = Some(args[i + 1].clone()),
+            "--bake" => {
+                assert!(bake_path.is_none(), "duplicate --bake");
+                bake_path = Some(args[i + 1].clone());
+            }
+            "--ensemble" => {
+                assert!(ensemble.is_none(), "duplicate --ensemble");
+                ensemble = Some(args[i + 1].clone());
+            }
+            "--ensemble-weights" => {
+                assert!(ensemble_weights.is_none(), "duplicate weights");
+                ensemble_weights = Some(
+                    args[i + 1]
+                        .split(',')
+                        .map(|s| s.parse().expect("numeric weight"))
+                        .collect(),
+                );
+            }
+            "--json" => {
+                assert!(report_json.is_none(), "duplicate --json");
+                report_json = Some(args[i + 1].clone());
+            }
             "--weighting" => {
                 weighting = match args[i + 1].as_str() {
                     "balanced" => DiffmapWeighting::Balanced,
@@ -78,9 +120,44 @@ fn main() {
                     }
                 }
             }
-            _ => {}
+            other => panic!("unknown option {other}"),
         }
         i += 2;
+    }
+    assert!(block > 0, "block must be positive");
+    assert!(
+        !(bake_path.is_some() && ensemble.is_some()),
+        "--bake conflicts with --ensemble"
+    );
+    assert_eq!(
+        ensemble.is_some(),
+        ensemble_weights.is_some(),
+        "ensemble paths and weights must be supplied together"
+    );
+    assert!(
+        report_json.is_none() || bake_path.is_some() || ensemble.is_some(),
+        "--json requires a candidate"
+    );
+    if let Some(path) = &report_json {
+        assert!(
+            !std::path::Path::new(path).exists(),
+            "JSON output already exists"
+        );
+    }
+    let candidate_paths: Option<Vec<String>> = bake_path
+        .map(|p| vec![p])
+        .or_else(|| ensemble.map(|s| s.split(',').map(String::from).collect()));
+    if let Some(paths) = &candidate_paths {
+        assert!(paths.iter().all(|s| !s.is_empty()), "empty candidate path");
+        if let Some(weights) = &ensemble_weights {
+            assert_eq!(paths.len(), weights.len(), "weight count mismatch");
+            assert!(
+                weights.iter().all(|w| w.is_finite() && *w >= 0.0)
+                    && weights.iter().sum::<f64>().is_finite()
+                    && weights.iter().sum::<f64>() > 0.0,
+                "invalid ensemble weights"
+            );
+        }
     }
     let r = image::open(&args[0]).expect("open ref").to_rgb8();
     let d = image::open(&args[1]).expect("open dist").to_rgb8();
@@ -93,10 +170,20 @@ fn main() {
     let rpx: Vec<[u8; 3]> = r.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
     let dpx: Vec<[u8; 3]> = d.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
-    if let Some(bp) = bake_path {
+    if let Some(bp) = candidate_paths {
         #[cfg(feature = "custom-profiles")]
         {
-            run_bake_mode(&bp, &rpx, &dpx, w, h, block, weighting);
+            run_bake_mode(
+                &bp,
+                ensemble_weights.as_deref(),
+                report_json.as_deref(),
+                &rpx,
+                &dpx,
+                w,
+                h,
+                block,
+                weighting,
+            );
             return;
         }
         #[cfg(not(feature = "custom-profiles"))]
@@ -191,6 +278,84 @@ fn main() {
     );
 }
 
+#[cfg(feature = "custom-profiles")]
+fn sha(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Diagnose stored interventions with the SAME statistics owner, without
+/// decoding images or repeating any feature/model computation. Oracle arms
+/// identify approximation errors; they are not available to runtime steering.
+#[cfg(feature = "custom-profiles")]
+fn analyze_refinement(input: &str, output: &str) {
+    assert!(
+        !std::path::Path::new(output).exists(),
+        "JSON output already exists"
+    );
+    let bytes = std::fs::read(input).expect("read recorded interventions");
+    let value: serde_json::Value = serde_json::from_slice(&bytes).expect("intervention JSON");
+    assert_eq!(
+        value["schema"], "zensim-finite-rectangle-coherence-v1",
+        "wrong intervention schema"
+    );
+    assert_eq!(
+        value["refinement_available"], true,
+        "refinement unavailable"
+    );
+    let blocks = value["blocks"].as_array().expect("block records");
+    assert!(blocks.len() >= 2, "at least two blocks required");
+    assert_eq!(
+        value["pixel_interventions"].as_u64(),
+        Some(blocks.len() as u64),
+        "block count mismatch"
+    );
+    let number = |v: &serde_json::Value| {
+        let n = v.as_f64().expect("finite numeric field");
+        assert!(n.is_finite(), "finite numeric field");
+        n
+    };
+    let column = |key: &str| blocks.iter().map(|b| number(&b[key])).collect::<Vec<_>>();
+    let actual = column("score_delta");
+    let linear = column("linearized_gain");
+    let density = column("density_gain");
+    let refinement = column("refinement_gain");
+    let observed_max = column("max_observed_linear_gain");
+    let predicted_max = column("max_predicted_gain");
+    for (name, vector) in [("m2", &linear), ("m3a", &density), ("m3f", &refinement)] {
+        assert!(
+            (spearman(vector, &actual) - number(&value[name])).abs() <= 1e-12,
+            "inconsistent saved statistic {name}"
+        );
+    }
+    let oracle_max: Vec<f64> = density
+        .iter()
+        .zip(&observed_max)
+        .map(|(a, b)| a + b)
+        .collect();
+    let oracle_nonmax: Vec<f64> = linear
+        .iter()
+        .zip(&observed_max)
+        .zip(&predicted_max)
+        .map(|((total, old), new)| total - old + new)
+        .collect();
+    let report = serde_json::json!({"schema":"zensim-refinement-oracle-diagnostic-v1",
+        "input_sha256":sha(&bytes),"blocks":blocks.len(),"m2":value["m2"],"m3a":value["m3a"],"m3f":value["m3f"],
+        "oracle_max_srocc":spearman(&oracle_max,&actual),"oracle_nonmax_srocc":spearman(&oracle_nonmax,&actual),
+        "new_pixel_comparisons":0,"deployable":false});
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)
+        .expect("new JSON report");
+    writeln!(file, "{}", serde_json::to_string_pretty(&report).unwrap())
+        .expect("write JSON report");
+}
+
 /// Per-block sums of the diffmap and of pixel SSE (the codec default selector).
 fn block_sums(
     diff: &[f32],
@@ -230,7 +395,9 @@ fn block_sums(
 /// is preserved; flat-spline pairs are degenerate and should be mid-dial).
 #[cfg(feature = "custom-profiles")]
 fn run_bake_mode(
-    bake_path: &str,
+    bake_paths: &[String],
+    weights: Option<&[f64]>,
+    report_json: Option<&str>,
     rpx: &[[u8; 3]],
     dpx: &[[u8; 3]],
     w: usize,
@@ -242,10 +409,19 @@ fn run_bake_mode(
         std::env::var("ZENSIM_APPEND2_DSTACT").as_deref() != Ok("1"),
         "extraction semantics must be declared in the bake; ZENSIM_APPEND2_DSTACT no longer overrides them"
     );
-    let bytes = std::fs::read(bake_path).expect("read bake");
-    let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
-    let mut pixel_scorer = zensim::BakeScorer::new(&model).expect("servable candidate");
-    let mut sensitivity_scorer = zensim::BakeScorer::new(&model).expect("servable candidate");
+    let bake_path = bake_paths.join(",");
+    let model_bytes: Vec<Vec<u8>> = bake_paths
+        .iter()
+        .map(|p| std::fs::read(p).expect("read bake"))
+        .collect();
+    let models: Vec<zenpredict::Model> = model_bytes
+        .iter()
+        .map(|b| zenpredict::Model::from_bytes(b).expect("parse bake"))
+        .collect();
+    let mut pixel_scorer =
+        zensim::BakeScorer::ensemble(&models, weights).expect("servable candidate");
+    let mut sensitivity_scorer =
+        zensim::BakeScorer::ensemble(&models, weights).expect("servable candidate");
     let rs = RgbSlice::new(rpx, w, h);
     let mut compare = |dist: &[[u8; 3]]| {
         pixel_scorer
@@ -289,8 +465,16 @@ fn run_bake_mode(
     let folded924 = n_in > 720;
     println!(
         "  BakeScorer: layer0_in_dim={}, caller_width={}, identity_extent={n_in}",
-        model.n_inputs(),
-        model.caller_input_width()
+        models
+            .iter()
+            .map(zenpredict::Model::n_inputs)
+            .max()
+            .unwrap(),
+        models
+            .iter()
+            .map(zenpredict::Model::caller_input_width)
+            .max()
+            .unwrap()
     );
     #[cfg(feature = "feature-regime-v2")]
     let s = base_spatial.sensitivities().to_vec();
@@ -658,6 +842,9 @@ fn run_bake_mode(
     let mut lin_v2 = vec![0f64; nblocks];
     let mut lin_append = vec![0f64; nblocks];
     let mut scratch = dpx.to_vec();
+    let mut refinement_block = vec![0.0; nblocks];
+    let mut max_lin = vec![0.0; nblocks];
+    let mut block_records = Vec::new();
     for by_i in 0..by {
         for bx_i in 0..bx {
             let b = by_i * bx + bx_i;
@@ -674,6 +861,21 @@ fn run_bake_mode(
             let rfeats = refined.features();
             delta_s[b] = refined.score() - base_score;
             lin_pred[b] = (0..n_in).map(|k| s[k] * (rfeats[k] - base_feats[k])).sum();
+            max_lin[b] = (156..n_in.min(228))
+                .filter(|k| (k - 156) % 6 < 3)
+                .map(|k| s[k] * (rfeats[k] - base_feats[k]))
+                .sum();
+            #[cfg(feature = "feature-regime-v2")]
+            {
+                refinement_block[b] = base_spatial.refinement_gain(x0, y0, x1, y1);
+            }
+            #[cfg(not(feature = "feature-regime-v2"))]
+            {
+                refinement_block[b] = attr_block[b];
+            }
+            block_records.push(serde_json::json!({"bounds":[x0,y0,x1,y1],"score_delta":delta_s[b],
+                "linearized_gain":lin_pred[b],"density_gain":attr_block[b],"refinement_gain":refinement_block[b],
+                "max_observed_linear_gain":max_lin[b],"max_predicted_gain":refinement_block[b]-attr_block[b]}));
             if attr_diag {
                 for k in 0..n_in.min(156) {
                     let d = s[k] * (rfeats[k] - base_feats[k]);
@@ -704,6 +906,7 @@ fn run_bake_mode(
     let m1b = spearman(&dmap_all_block, &delta_s);
     let m3 = spearman(&dmap_model_block, &delta_s);
     let m3a = spearman(&attr_block, &delta_s);
+    let m3f = spearman(&refinement_block, &delta_s);
     let m3a_basic = spearman(&attr_block_basic, &delta_s);
     let m2 = spearman(&lin_pred, &delta_s);
     let sse = spearman(&sse_block, &delta_s);
@@ -916,6 +1119,37 @@ fn run_bake_mode(
             String::new()
         }
     );
+    println!(
+        "  M3f SROCC(finite_rectangle,        ΔS_bake) = {m3f:+.4}   PLCC {:+.4}",
+        pearson(&refinement_block, &delta_s)
+    );
+    if let Some(path) = report_json {
+        let pixel_bytes = |px: &[[u8; 3]]| px.iter().flatten().copied().collect::<Vec<u8>>();
+        let mut result = serde_json::json!({"schema":"zensim-finite-rectangle-coherence-v1",
+            "models":bake_paths.iter().zip(&model_bytes).map(|(p,b)| serde_json::json!({"path":p,"sha256":sha(b)})).collect::<Vec<_>>(),
+            "weights":weights,"width":w,"height":h,"block_size":block,"base_score":base_score,
+            "reference_pixels_sha256":sha(&pixel_bytes(rpx)),"distorted_pixels_sha256":sha(&pixel_bytes(dpx)),
+            "pixel_interventions":nblocks,"candidate_pixel_comparisons":nblocks+1,"candidate_maps":1,"rectangle_queries":nblocks,
+            "refinement_available":cfg!(feature = "feature-regime-v2"),
+            "m2":m2,"m3a":m3a,"m3f":m3f,"sse":sse,"blocks":block_records});
+        #[cfg(feature = "feature-regime-v2")]
+        {
+            result["density_unsupported_ids"] =
+                serde_json::json!(base_spatial.unsupported_feature_ids());
+            result["refinement_unsupported_ids"] =
+                serde_json::json!(base_spatial.unsupported_refinement_feature_ids());
+            result["has_corruption_gate"] = serde_json::json!(base_spatial.has_corruption_gate());
+        }
+        // create_new protects immutable experiment output from accidental reruns.
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .expect("new JSON report");
+        writeln!(file, "{}", serde_json::to_string_pretty(&result).unwrap())
+            .expect("write JSON report");
+    }
     #[cfg(feature = "feature-regime-v2")]
     let full_note = format!(" | candidate score+sensitivities+map {candidate_ms:.1} ms");
     #[cfg(not(feature = "feature-regime-v2"))]

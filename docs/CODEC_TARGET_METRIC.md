@@ -102,16 +102,23 @@ let scored = scorer.compute_with_ref_and_attribution(
     &source, &reference, &reconstruction, Some("jxl"), &mut session, 8,
 )?;
 let achieved_score = scored.result().score();
-let first_block_gain = scored.attribution().query_rect(0, 0, 8, 8);
+let first_block_gain = scored.refinement_gain(0, 0, 8, 8);
 ```
 
 The complete configured model supplies the sensitivities, including heads,
-splines, ensemble and corruption gating. Inspect `unsupported_feature_ids()`
-and `has_corruption_gate()` before interpreting the map. Attribution is a
-local approximation; finite block edits and actual encoded outputs establish
-whether it helps. Candidate maps include the 36 L8 terms in the peak block;
-hard max and masked/IW terms remain explicitly unsupported. L8 uses moment-removal
-linearization, whose curvature limits finite-edit accuracy.
+splines, ensemble and corruption gating. `refinement_gain` adds finite max
+removal to the additive density. Inspect `unsupported_refinement_feature_ids()`
+and `has_corruption_gate()` before using it. The query is non-additive: two
+rectangles can each leave a tied maximum unchanged while their union removes
+it. Coarse/reflected footprints are explicit; actual pixel edits also change
+blurred neighborhoods and can cross nonlinearities.
+
+`attribution().query_rect()` remains the additive density-only route; its
+`unsupported_feature_ids()` report still includes max terms. Both routes
+include L8 moment-removal linearization and its curvature limitations.
+Masked/IW coverage remains unsupported. Complete local coverage does not prove
+useful encoder steering; the [finite-query record](../benchmarks/max_attribution_2026-09-08.md)
+retains the current pixel-screen failures and their non-max diagnosis.
 The [September 8 binding record](../benchmarks/candidate_attribution_serving_2026-09-08.md)
 includes exact score/feature gates and full coherence grids, with their tails.
 Those checks do not establish codec improvements or model qualification.
