@@ -26,6 +26,24 @@
 > outside the zen workspace, 33/33 lanes wrote a `.workongoing` marker, 27/27 workspace-cleanup
 > claims verified.** Reasoning is unauditable — all 10,404 `thinking` blocks persist empty.
 
+> **★★ SSIM FEATURE EXTRACTION WAS NUMERICALLY UNSTABLE, AND NONLOCAL, 2026-09-08/09:**
+> [`nonmax_diagnosis_2026-09-08.md`](nonmax_diagnosis_2026-09-08.md) (diagnosis) →
+> [`stable_ssim_kernel_2026-09-08.md`](stable_ssim_kernel_2026-09-08.md) (kernel + the September 9
+> INTEGRATION section) → [`../docs/PLAN_FEATURE_REV3_2026-09-09.md`](../docs/PLAN_FEATURE_REV3_2026-09-09.md)
+> (the revision lane and its refresh/refit handoff). The shipped signal recovers variance and
+> covariance by SUBTRACTION from f32 raw moments, which on flat content cancels away most of the
+> significant bits, and its box blur is an f32 sliding recurrence, which is path-dependent — so a
+> pixel whose own window contains no changed sample still moves. MEASURED on the integrated banded
+> walk: a local replacement with reference pixels moves **8,293** signals outside the changed
+> samples' support under revision 1 (peak |Δ| 4.886e-4) and **0** under
+> `FormulaRevision::Rev3`, which accumulates f64 moments and forms the error variance directly as
+> `(a−b)²` instead of `var1 + var2 − 2·cov`. Retained planes match the canonical whole-plane kernel
+> to 5.821e-11 over 220,320 signals. Rev3 also gets an explicit route contract (`blur_passes != 1`
+> returns a `ZensimError`, not a panic) and a bake/process revision refusal that distinguishes
+> revisions 2 and 3 **despite both selecting the Clamp luminance form**. **Nothing is trained on
+> corrected features**: `SHIPPED_REVISION` stays `Rev1`, every stored table is a revision-1
+> artifact, and an old bake relabelled `3` is refused rather than served. Issue #61.
+
 > **BOARD HYGIENE — fair gauntlet re-issued at 508 fullevals, 2026-09-06:**
 > [`fair_gauntlet_2026-09-06.md`](fair_gauntlet_2026-09-06.md). `summer_gauntlet_fair.html` had
 > gone stale (last built 2026-09-05 19:58, 97 of 433) while the all-rows board moved to 508; the

@@ -5691,6 +5691,12 @@ fn fold_v1_one_band(
             sums.masked_mse += mse_m;
             sums.iw_mse += mse_i;
             let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) = if stable {
+                // `stable_sd` is sized under `stable && full` above and read
+                // here under `stable` — equivalent only because this arm IS
+                // the `full` one. Pinned rather than assumed: moving this
+                // pooling out of `if full` would otherwise read a zeroed
+                // buffer and quietly emit zero masked/IW SSIM.
+                debug_assert!(full && stable_sd.len() >= inner.end);
                 crate::simd_ops::ssim_signal_inline_both(
                     &stable_sd[inner.clone()],
                     act_inner,
@@ -14614,6 +14620,25 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, ZensimError::DimensionMismatch));
+    }
+
+    /// **The HDR extraction routes reach revision 3, and still hold there.**
+    ///
+    /// Declared-HDR extraction goes through `foldapp_streaming_walk`, i.e. the
+    /// same fold band replay as SDR, so it inherits the corrected SSIM signal
+    /// automatically. "Automatically" is the part worth checking: this re-runs
+    /// the existing `hdr_*` gates — route refusal, auto-vs-explicit routing,
+    /// identity zeros, and bounded output over all four encodings — in a
+    /// revision-3 process, so an HDR route that silently broke under the new
+    /// arithmetic fails here rather than in a fleet extraction.
+    ///
+    /// It does NOT establish HDR quality at revision 3; no HDR bake is fit
+    /// against corrected features.
+    #[test]
+    fn rev3_hdr_route_gates_hold() {
+        // Named so it does NOT match its own filter — a wrapper that counted
+        // itself would mask one of the four gates going missing.
+        crate::ssim_form::rerun_tests_at_revision("3", "feature_v2::tests::hdr_", 4);
     }
 
     /// **Folded-vs-streaming parity holds at revision 3 too.**

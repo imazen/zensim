@@ -122,3 +122,126 @@ versus streaming consumed-feature parity; weighted-pool controls; reject bake/
 process mismatch even when both select Clamp. Run the existing candidate
 surface on the corrected path before new fitting. Changed-era data must be
 re-extracted. Existing product scorecard remains the release contract.
+
+## September 9 integration — LANDED (issue #61)
+
+The registration above described what integration would require. This section
+records what integration actually did, and what it did not.
+
+### Landed
+
+`FormulaRevision::Rev3` selects `stable_ssim_plane` for the v1 SSIM signal.
+`fused_vblur_features_ssim` forms the plane once per band and every consumer
+reads it: the basic/peak tiers inside the fused kernel, the retained `sd`
+plane (diffmap, attribution, folded replay), and the weighted pools through
+three new reducers — `simd_ops::ssim_signal_inline_both` / `_mask` / `_iw`.
+Those three copy their weights, `.max(0)` floor, d/d2/d4 tiers and f64
+accumulation order verbatim from the legacy trio, so the only difference
+between a legacy pool and its Rev3 counterpart is where `d_raw` comes from.
+The shipped Rev1/Rev2 reducers are byte-for-byte unchanged.
+
+Under Rev3 the streaming path also STOPS V-blurring `sigma1_sq` / `sigma12`
+for the masked/IW block. That is not only a saving: running it would hand the
+weighted pools a different `d_raw` than the basic pools already consumed,
+which is the single-signal property this era exists to establish.
+
+### Route contract
+
+Rev3's support is exactly one reflect-101 box of `blur_radius`, so
+`blur_passes != 1` — which selects `process_strip_channel`'s separate
+blur+reduce fallback, whose halo is `passes * radius` — is NOT served.
+`ssim_form::check_route` returns `ZensimError::ModelForwardFailed` naming both
+the route and the revision, from every fallible entry that builds a
+`ZensimConfig` (profile-based entries in `metric`, `attribution`, `diffmap`,
+`corruption_head`, plus the two `pub fn`s that take a caller-built config).
+The refusal is a `Result` on the caller's thread; the strip walk keeps only a
+`debug_assert!` recording that the gate ran.
+
+Observed while auditing that gate, NOT acted on: the `blur_passes != 1`
+fallback calls `box_blur_1pass_into` — one pass — while `process_scale_bands`
+sizes its halo at `passes * radius`. Whatever `blur_passes = 2` or `3` means
+today, it is not "two or three box passes" in the streaming path. That is a
+pre-existing question for whoever owns that route.
+
+### Measured locality, on the integrated route
+
+Not the standalone kernel: the real banded strip walk, retaining
+`AttrScaleRetention::sd` at four scales and three channels. Fixture is a
+deterministic document/screenshot pair (flat paper, hard glyph edges, one
+smooth patch, near-lossless distortion) at 192x288, so scale 0 spans three
+128-row strips and scale 1 spans two. A rectangle of the distorted image is
+replaced with REFERENCE pixels; every signal whose own reflect-101 window
+contains no changed sample must be unchanged.
+
+| revision | out-of-support signals moved | peak abs delta |
+|---|---:|---:|
+| 1 (shipped) | 8,293 | 4.886e-4 |
+| 3 | **0** (serial and rayon) | 0 |
+
+The revision-1 row is a committed test of its own
+(`locality_fixture_reproduces_out_of_support_movement_on_the_shipped_revision`)
+so the revision-3 row cannot pass on an inert fixture.
+
+Retained planes against the whole-plane canonical kernel: 220,320 signals,
+worst |delta| **5.821e-11**, inside the registered
+`2e-10 + 2e-6*|reference|` acceptance. Non-zero because the strips genuinely
+re-seed the vertical recurrence; within bound because that re-seeding is
+stable.
+
+### Revision agreement
+
+`check_pixel_revision` compares the REVISION, not only the luminance form it
+selects. Revisions 2 and 3 both select `Clamp`, so the form comparison alone
+would have served revision 2 coefficients against revision 3 pixels. A Rev3
+process refuses bakes declaring 1 or 2 and serves one declaring 3; the shipped
+process refuses a bake declaring 3, so an old bake relabelled `3` cannot stand
+in for a refit. Fold-vs-streaming parity was re-established by re-running the
+two existing `folded720_v1_*` gates in a Rev3 process, not by copying them.
+
+Revision-specific tests own their process (`active_revision` is a `OnceLock`):
+`ssim_form::run_at_revision` / `rerun_tests_at_revision` re-execute the test
+binary with `ZENSIM_FORMULA_REV` set, and require a sentinel (or a test count)
+from the child so a filter that matched nothing fails instead of passing
+vacuously. That guard fired for real: the fold-parity wrapper first reported
+`matched 0 tests`, because those gates are `training`-feature-gated.
+
+### Cost headroom, and why the obvious version of it is NOT free
+
+Under revision 3 on the v1 strip path, `sigma_sq` and `sigma12` are computed
+and thrown away: `ssim_dissim` is bypassed, `store_sigma` is false there, and
+the masked/IW block's two sigma V-blurs are already skipped. That is 2 of the 4
+planes in `fused_blur_h_ssim` plus 2 of the 4 running V-blur accumulators,
+produced for no consumer. The folded path writes them through `store_sigma`
+into the same dead end.
+
+**The one-line version does not work.** `blur::fused_blur_h_mu` already exists
+and computes exactly the two planes that are still needed — but it is NOT
+bit-equivalent to `fused_blur_h_ssim`'s mu output. VERIFIED by reading
+`blur.rs`'s own `h_entries_are_bit_exact_at_a_degenerate_last_column_tile`:
+`fused_blur_h_mu`'s SCALAR TAIL carries a known, era-locked 1-2 ulp divergence
+from its own vector body (`sum += add - rem` there vs `(sum + add) - rem` in
+the group loops), deliberately left unfixed because correcting it would move
+v1's shipped bytes; `fused_blur_h_ssim`'s tail is already consistent.
+
+So swapping the H blur would move `mu1`/`mu2` at ragged heights, and through
+them the activity map, the masked/IW weights and the edge features — i.e. slots
+OUTSIDE `v1ssimstable`'s registered 132. `rev3_moves_exactly_the_registered_slots`
+would fail, correctly. Recovering the H-side saving means a two-plane blur with
+`fused_blur_h_ssim`'s tail semantics, not a call-site substitution; the V-side
+saving (skipping the two accumulators when the sigma planes have no consumer)
+is independent of that and does not touch `mu`.
+
+### NOT done, and load-bearing
+
+- **No model is trained on corrected features.** Every stored table and every
+  shipped bake is a revision 1 artifact. The default stays revision 1.
+- The `ZENSIM_FORMULA_REV` research pin does NOT make a built-in profile's
+  own bake revision-checked — that contract lives in `BakeScorer`. A built-in
+  profile declares no revision, so it IS revision 1, and pinning revision 3
+  prices those coefficients against another era's features. Refusing would
+  break extraction (the same call emits the features), so the profile path
+  warns once per process on stderr. Use the pin to EXTRACT; use `BakeScorer`
+  to score.
+- Registered spatial cells have not been replayed on the corrected path, so
+  nothing here says the 15 failing coherence cells now pass.
+- No codec RD, HDR or product qualification.

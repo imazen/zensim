@@ -62,6 +62,33 @@ metric-eval bake ref="" ramp="" out="/mnt/v/output/zensim/reports":
 lint-scripts:
     python3 scripts/lint_scripts.py
 
+# Paired arithmetic-revision cost A/B (issue #61). Builds the interleaved
+# extraction instrument ONCE and runs it in alternating revision-1/revision-3
+# blocks on one pinned core, with `fast_ssim2` as the cross-block drift anchor.
+# Do NOT wrap in run-heavy — its cgroup makes zenbench's gating refuse the run.
+#   just rev3-cost ~/tmp/rev3-cost 2 1024,2048 8
+[positional-arguments]
+rev3-cost out blocks="2" sizes="1024,2048" cpu="8":
+    cargo bench --no-run --locked --bench extract_paths_bench -p zensim \
+        --features custom-profiles,feature-regime-v2,threads,training
+    ./scripts/bench/rev3_cost_ab.sh "$1" "$2" "$3" "$4"
+    python3 scripts/bench/rev3_cost_report.py "$1"
+
+# Peak-RSS half of the revision cost question: `/usr/bin/time -v` max RSS per
+# arm per revision, one arm per process so the reading is attributable.
+#   just rev3-rss ~/tmp/rev3-rss
+[positional-arguments]
+rev3-rss out sizes="1024 2048" arms="buf_v1_372 fold372_full fold944_full" cpu="8":
+    ./scripts/bench/rev3_rss.sh "$1" "$2" "$3" "$4"
+
+# Replay the registered spatial coherence cells at revision 1 and revision 3.
+# ARMS THE CROSS-REVISION DIAGNOSTIC BYPASS: the bakes were fit at revision 1,
+# so this measures what the extraction change does to a FIXED model. Not a
+# qualification, not model quality. See the script header.
+[positional-arguments]
+rev3-spatial out:
+    ./scripts/bench/rev3_spatial_replay.sh "$1"
+
 # Report only, never fails — for a quick survey.
 lint-scripts-list:
     python3 scripts/lint_scripts.py --list

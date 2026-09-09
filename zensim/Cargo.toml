@@ -85,6 +85,20 @@ corruption-head = []
 ## `cfg(test)` can reach it. NEVER enable in a product build — it is a ruler,
 ## not semantics.
 oracle = []
+## DIAGNOSTIC ONLY: let a bake be scored against pixels from a DIFFERENT
+## arithmetic revision, so an existing candidate can be replayed on a corrected
+## extraction BEFORE it has been refit (issue #61's "run the existing candidate
+## surface on the corrected path before new fitting").
+##
+## Compile-gated rather than env-gated on purpose: a product build does not
+## CONTAIN the bypass, so no environment can turn it on. Enabling the feature is
+## still not enough — `ZENSIM_CROSS_REVISION_DIAGNOSTIC=1` must also be set, and
+## every affected call prints a stderr warning naming both revisions. A number
+## produced this way is a cross-era diagnostic, never a served score: the
+## coefficients were fit against one extractor and the pixels came from another.
+## NEVER enable in a product build. Same standing as `oracle` — a ruler, not
+## semantics.
+cross-revision-diagnostic = []
 ## Enable multi-threaded computation via rayon. Disable for wasm or single-threaded use.
 threads = ["dep:rayon"]
 ## Exposes training/research API: ZensimConfig, try_score_from_features,

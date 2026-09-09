@@ -1,15 +1,27 @@
 # Start here — one target score, one development path
 
-## September 9: SSIM correction handed off at user request
+## September 9: SSIM correction — handed off, then taken up
 
-The user requested a detailed issue for someone else to tackle this bug:
-https://github.com/imazen/zensim/issues/61. Pause concurrent implementation of
-this SSIM lane. An unfinished Rev3 integration draft remains in the working
-copy against `f7b9f39a`; preserve it. A separate WIP patch, build/parity logs
-and issue copy are delivered in `zensim-validation-2026-09-09/ssim-handoff`
-under shared work. The issue identifies the known gaps and exact test scope.
-No corrected model is trained or qualified, and the draft is not pushed to main.
-Continue independent product work without assuming this correction is finished.
+The correction was written up as https://github.com/imazen/zensim/issues/61 for
+someone else to tackle, and then tackled. The handoff draft that was sitting
+uncommitted against `f7b9f39a` is preserved as its own labelled commit and the
+integration was finished on top of it, so the earlier instruction to pause this
+lane NO LONGER APPLIES — read the issue plus the commits above `f7b9f39a`
+rather than the handoff bundle.
+
+WHAT IS TRUE NOW: `FormulaRevision::Rev3` selects
+`ssim_form::stable_ssim_plane` for the v1 SSIM signal on every route that
+serves it; basic, peak, masked and IW pools all consume that ONE retained
+value; unsupported routes (`blur_passes != 1`) return an explicit
+`ZensimError`; and bake/process revision disagreement is refused even between
+two revisions that select the same luminance form.
+
+WHAT IS STILL NOT TRUE, and matters more: **no model is trained on corrected
+features.** Revision 3 changes what the extractor emits, so every stored table
+and every shipped bake is a revision 1 artifact. The default stays revision 1.
+An old bake relabelled `3` is refused by the loader, deliberately — do not work
+around that; re-extract and refit. Nothing here establishes codec RD gains or
+product qualification.
 
 
 Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rules;

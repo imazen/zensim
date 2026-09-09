@@ -522,6 +522,69 @@ pub(crate) fn check_route(config: &crate::metric::ZensimConfig) -> Result<(), cr
     Ok(())
 }
 
+/// Warn, once per process, that a pinned research revision is producing a
+/// score from a built-in profile's revision-1 coefficients.
+///
+/// Silent when nothing is pinned, which is every shipping path — the check is
+/// one `OnceLock` read and one comparison against a constant.
+///
+/// This is NOT a refusal. The same entry that scores also emits the features a
+/// research extraction exists to collect, so refusing would break extraction to
+/// protect a number the caller may not be reading. Making it visible is the
+/// most that can be done here; the enforceable contract is `BakeScorer`'s,
+/// where a bake declares its own revision.
+#[inline]
+pub(crate) fn warn_pinned_revision_scoring_once() {
+    if active_revision() == SHIPPED_REVISION {
+        return;
+    }
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        eprintln!(
+            "zensim: ZENSIM_FORMULA_REV pins {:?} pixels, but a built-in \
+             profile's bake is revision-1 coefficients. Its FEATURES are the \
+             pinned revision; its SCORE prices them with weights fit against \
+             another extractor and is not a served score. Use BakeScorer with \
+             a bake that declares its revision to get an enforced match.",
+            active_revision()
+        );
+    });
+}
+
+/// Is the cross-revision DIAGNOSTIC bypass armed?
+///
+/// Two independent switches, both required: the `cross-revision-diagnostic`
+/// cargo feature must be compiled in (so a product build does not contain the
+/// bypass at all) and `ZENSIM_CROSS_REVISION_DIAGNOSTIC=1` must be set. See
+/// that feature's declaration in `Cargo.toml` for what the resulting numbers
+/// are and are not.
+#[cfg(feature = "cross-revision-diagnostic")]
+pub(crate) fn cross_revision_diagnostic() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("ZENSIM_CROSS_REVISION_DIAGNOSTIC").as_deref() == Ok("1"))
+}
+
+/// Say so, once per process, on stderr. A cross-era number that reaches a
+/// report without this line beside it in the log is not attributable.
+#[cfg(feature = "cross-revision-diagnostic")]
+pub(crate) fn warn_cross_revision_once(bake: FormulaRevision) {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        eprintln!(
+            "zensim: CROSS-REVISION DIAGNOSTIC — serving a bake declared {bake:?} \
+             with {:?} pixels ({:?} luminance form). The coefficients were fit \
+             against a different extractor; these numbers are a measurement of \
+             the extraction change, NOT a served score, and must not be \
+             reported as model quality.",
+            active_revision(),
+            active_luma_form()
+        );
+    });
+}
+
 /// The luminance form the active revision selects.
 ///
 /// Call this ONCE per kernel invocation, above the pixel loop — it reads a
@@ -764,7 +827,12 @@ mod tests {
         use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
         let mut baseline = None;
         let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
-            let actual = stable_kernel_cases();
+            // The kernel AND the Rev3 pools it feeds: both are dispatched
+            // code, both are new, and a tier that disagreed in the reducer
+            // would move a pooled feature without moving a single per-pixel
+            // signal. Snapshotting them together costs nothing and closes
+            // that gap in the one test that may change global dispatch.
+            let actual = (stable_kernel_cases(), stable_pool_cases());
             if let Some(expected) = &baseline {
                 assert_eq!(&actual, expected, "SIMD permutation {}", perm.label);
             } else {
@@ -776,6 +844,39 @@ mod tests {
             "{} SIMD permutations: exact stable moment outputs",
             report.permutations_run
         );
+    }
+
+    /// The three Rev3 retained-signal reducers over the same geometries the
+    /// kernel cases use, snapshotted bitwise. `f64` sums are reduced per SIMD
+    /// lane, so a tier with a different lane count reduces in a different
+    /// order — these are recorded as bits, and any disagreement between tiers
+    /// is therefore visible rather than absorbed by a tolerance.
+    fn stable_pool_cases() -> Vec<[u64; 9]> {
+        let mut out = Vec::new();
+        for n in [1usize, 15, 16, 17, 31, 33, 64, 129, 512] {
+            let signal: Vec<f32> = (0..n)
+                .map(|i| ((i * 31 % 97) as f32 / 97.0) * 0.6)
+                .collect();
+            let activity: Vec<f32> = (0..n)
+                .map(|i| ((i * 13 % 61) as f32 / 61.0) * 0.9)
+                .collect();
+            let ((m, m4, m2), (w, w4, w2)) =
+                crate::simd_ops::ssim_signal_inline_both(&signal, &activity, 4.0, 4.0);
+            let (om, om4, om2) = crate::simd_ops::ssim_signal_inline_mask(&signal, &activity, 4.0);
+            let (oi, _, _) = crate::simd_ops::ssim_signal_iw_inline(&signal, &activity, 4.0);
+            out.push([
+                m.to_bits(),
+                m4.to_bits(),
+                m2.to_bits(),
+                w.to_bits(),
+                w4.to_bits(),
+                w2.to_bits(),
+                om.to_bits(),
+                om4.to_bits() ^ om2.to_bits(),
+                oi.to_bits(),
+            ]);
+        }
+        out
     }
 
     fn stable_kernel_cases() -> Vec<Vec<u32>> {

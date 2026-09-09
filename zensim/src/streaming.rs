@@ -6991,9 +6991,9 @@ mod tests {
             for x in 0..w {
                 let i = y * w + x;
                 let t = ((x * 13 + y * 29) % 7) as i32 - 3;
-                for c in 0..3 {
-                    let heavy = if (x / 16 + y / 16) % 9 == 0 { 6 } else { 1 };
-                    dst[i][c] = (dst[i][c] as i32 + t * heavy).clamp(0, 255) as u8;
+                let heavy = if (x / 16 + y / 16) % 9 == 0 { 6 } else { 1 };
+                for ch in &mut dst[i] {
+                    *ch = (*ch as i32 + t * heavy).clamp(0, 255) as u8;
                 }
             }
         }
@@ -7002,7 +7002,8 @@ mod tests {
 
     /// Retained per-(scale, channel) SSIM planes for one distorted image,
     /// through the REAL banded strip walk — not the standalone kernel.
-    type RetainedPlanes = Vec<(usize, usize, usize, usize, Vec<f32>, Vec<f32>)>;
+    /// `(scale, channel, width, height, reference, distorted, retained_sd)`.
+    type RetainedPlanes = Vec<(usize, usize, usize, usize, Vec<f32>, Vec<f32>, Vec<f32>)>;
 
     fn retained_ssim_planes(
         pre: &PrecomputedReference,
@@ -7018,7 +7019,7 @@ mod tests {
             &RgbSlice::new(pixels, w, h),
             config,
             weights,
-            |scale, _stats, _r, d, ret, sw, sh| {
+            |scale, _stats, r, d, ret, sw, sh| {
                 let n = sw * sh;
                 for c in 0..3 {
                     planes.push((
@@ -7026,6 +7027,7 @@ mod tests {
                         c,
                         sw,
                         sh,
+                        r[c][..n].to_vec(),
                         d[c][..n].to_vec(),
                         ret.sd[c][..n].to_vec(),
                     ));
@@ -7048,8 +7050,8 @@ mod tests {
         let rad = radius as isize;
         let (mut count, mut max_abs) = (0usize, 0.0f64);
         for (b, c) in base.iter().zip(changed) {
-            let (scale, ch, sw, sh, bd, bs) = b;
-            let (_, _, _, _, cd, cs) = c;
+            let (scale, ch, sw, sh, _br, bd, bs) = b;
+            let (_, _, _, _, _cr, cd, cs) = c;
             assert_eq!((scale, ch), (&c.0, &c.1));
             for y in 0..*sh {
                 for x in 0..*sw {
@@ -7178,6 +7180,252 @@ mod tests {
         println!("REV3-LOCALITY-RAN out-of-support: 0 signals (serial and parallel)");
     }
 
+    /// **Cached and uncached agree at revision 3.**
+    ///
+    /// `precomputed_ref_matches_streaming` is the crate's existing contract
+    /// between the cached-reference walk and the plain one. Revision 3 adds a
+    /// per-band f64 kernel and a retained plane to BOTH, so the contract is
+    /// re-established at that revision rather than assumed to survive — same
+    /// method as the fold-parity and HDR wrappers, re-running the real gate in
+    /// a revision-3 process instead of copying it.
+    #[test]
+    fn cached_and_uncached_agree_at_revision_three() {
+        crate::ssim_form::rerun_tests_at_revision(
+            "3",
+            "streaming::tests::precomputed_ref_matches_streaming",
+            1,
+        );
+    }
+
+    /// **Identity on the supported range, through the integrated route** —
+    /// and the honest strength of it.
+    ///
+    /// `Zensim::compute` short-circuits a byte-identical pair before any
+    /// arithmetic runs, so an all-identical fixture would prove nothing about
+    /// the kernel. This fixture differs inside one rectangle, so the walk
+    /// really executes; the claim is then made about every window at every
+    /// pyramid level whose reference and distorted samples are all EQUAL.
+    /// Equality is read off the retained planes themselves, per level, so no
+    /// footprint arithmetic has to be trusted.
+    ///
+    /// MEASURED, and NOT what was first asserted here: such a window is not
+    /// bit-zero. 1,400 of 216,222 of them carry a residue, worst **8.18e-15**.
+    /// The kernel's own `stable_moments_*` controls DO show exact identity —
+    /// on *fully* identical inputs, where the sliding recurrence never
+    /// diverges. Here the window has passed THROUGH the changed rectangle, and
+    /// `sum = (sum + entering) - leaving` in f64 is not exactly reversible
+    /// once several differing terms have gone through it, so `(a-b)²` returns
+    /// to ~1e-15 rather than to 0.
+    ///
+    /// That is inside the kernel's registered acceptance
+    /// (`2e-10 + 2e-6*|reference|`) by four orders of magnitude, and it is
+    /// also why the LOCALITY control above still measures bit-exact zeros: a
+    /// 1e-15 absolute perturbation of a signal whose value is ~1e-3 or larger
+    /// vanishes when the f64 accumulator is rounded once to f32. It survives
+    /// here only because the true value is exactly 0, where nothing rounds it
+    /// away. So the bound is asserted, and the residue is reported.
+    #[test]
+    fn rev3_identity_windows_are_exactly_zero() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "streaming::tests::rev3_identity_windows_are_exactly_zero",
+            "REV3-IDENTITY-RAN",
+        ) {
+            return;
+        }
+        let (w, h) = LOCALITY_DIMS;
+        let (src, _) = locality_fixture(w, h);
+        let mut dst = src.clone();
+        let (x0, y0, x1, y1) = LOCALITY_RECT;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                dst[y * w + x] = [0, 0, 0];
+            }
+        }
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let params = z.profile().params();
+        let config = crate::metric::config_from_params(params, false);
+        let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
+        let planes = retained_ssim_planes(&pre, &dst, w, h, &config, params.weights);
+
+        // The kernel's registered numerical acceptance, applied here with
+        // `reference == 0` — so the whole allowance is the absolute term.
+        const IDENTITY_BOUND: f32 = 2e-10;
+        let rad = config.blur_radius as isize;
+        let (mut checked, mut nonzero, mut worst) = (0usize, 0usize, 0.0f32);
+        for (_scale, _ch, sw, sh, r, d, sd) in &planes {
+            for y in 0..*sh {
+                for x in 0..*sw {
+                    let mut differs = false;
+                    for dy in -rad..=rad {
+                        for dx in -rad..=rad {
+                            let xx =
+                                crate::metric::reflect_index((x as isize + dx).unsigned_abs(), *sw);
+                            let yy =
+                                crate::metric::reflect_index((y as isize + dy).unsigned_abs(), *sh);
+                            differs |= r[yy * sw + xx] != d[yy * sw + xx];
+                        }
+                    }
+                    if !differs {
+                        checked += 1;
+                        let v = sd[y * sw + x];
+                        if v != 0.0 {
+                            nonzero += 1;
+                            worst = worst.max(v.abs());
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 0, "no identity windows were examined");
+        assert!(
+            worst <= IDENTITY_BOUND,
+            "{nonzero} of {checked} windows whose samples are all EQUAL produced a \
+             signal above the registered acceptance: worst {worst:e} > {IDENTITY_BOUND:e}. \
+             A residue of ~1e-15 is the f64 recurrence returning inexactly after \
+             passing through a difference; anything near the bound is a defect."
+        );
+        println!(
+            "REV3-IDENTITY-RAN {checked} identity windows, {nonzero} non-zero, \
+             worst {worst:e} (bound {IDENTITY_BOUND:e})"
+        );
+    }
+
+    /// **G3.1 for revision 3's `v1ssimstable` era** — the registry's claim
+    /// about WHICH slots this era moves, checked against a real
+    /// cross-revision re-extraction rather than against a second list.
+    ///
+    /// The two halves run in different processes (`active_revision` is a
+    /// `OnceLock`), so the revision-3 half prints its 372-wide vector as
+    /// `to_bits()` hex and the shipped-revision half diffs against its own.
+    /// A slot that moves and is NOT registered fails; so does a registered
+    /// slot that does not move, which is the half that catches a revision
+    /// wired to fewer consumers than it claims.
+    ///
+    /// This is the control that makes "basic, peaks, masked and IW all
+    /// consume the same corrected signal" checkable end-to-end: if any of the
+    /// four blocks were still reading legacy moments, its slots would be
+    /// missing from the measured set.
+    #[test]
+    fn rev3_moves_exactly_the_registered_slots() {
+        const SENTINEL: &str = "REV3-VECTOR ";
+        let path = "streaming::tests::rev3_moves_exactly_the_registered_slots";
+        let (w, h) = (192usize, 160usize);
+        let (src, dst) = locality_fixture(w, h);
+        // Struct-update, not field reassignment: `field_reassign_with_default`
+        // is warn-by-default and CI runs clippy with `-D warnings`.
+        let config = ZensimConfig {
+            extended_features: true,
+            compute_iw_features: true,
+            allow_multithreading: false,
+            ..Default::default()
+        };
+        let vector = || {
+            compute_zensim_streaming(
+                &RgbSlice::new(&src, w, h),
+                &RgbSlice::new(&dst, w, h),
+                &config,
+                crate::metric::WEIGHTS,
+            )
+            .features()
+            .to_vec()
+        };
+
+        if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok("3") {
+            let bits: Vec<String> = vector()
+                .iter()
+                .map(|v| format!("{:016x}", v.to_bits()))
+                .collect();
+            println!("{SENTINEL}{}", bits.join(","));
+            return;
+        }
+        assert_eq!(
+            crate::ssim_form::active_revision(),
+            crate::ssim_form::SHIPPED_REVISION,
+            "the baseline half must run at the shipped revision"
+        );
+        let base = vector();
+        assert_eq!(base.len(), 372, "this gate reads the 372-wide v1 layout");
+
+        let exe = std::env::current_exe().expect("test binary path");
+        let out = std::process::Command::new(exe)
+            .args([path, "--exact", "--nocapture", "--test-threads=1"])
+            .env("ZENSIM_FORMULA_REV", "3")
+            .output()
+            .expect("re-exec the test binary");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "the revision-3 half failed\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let line = stdout
+            .lines()
+            .find_map(|l| l.split(SENTINEL).nth(1))
+            .expect("the revision-3 half printed no vector — the control did not run");
+        let rev3: Vec<f64> = line
+            .trim()
+            .split(',')
+            .map(|t| f64::from_bits(u64::from_str_radix(t, 16).expect("hex bits")))
+            .collect();
+        assert_eq!(rev3.len(), base.len());
+
+        let moved: Vec<u16> = (0..base.len())
+            .filter(|&i| base[i].to_bits() != rev3[i].to_bits())
+            .map(|i| i as u16)
+            .collect();
+        assert!(
+            !moved.is_empty(),
+            "revision 3 produced an IDENTICAL 372 vector — it is not reaching the extractor"
+        );
+
+        // TWO different sets, and conflating them is the mistake this comment
+        // exists to stop anyone repeating. The measurement is a REVISION diff
+        // (1 vs 3), and revision 3 INHERITS revision 2 — its eras are
+        // `v1ssimcap`, `freecomp`, `v1hfgain`, `v1detroot`, `scorepow` AND
+        // `v1ssimstable`. So the upper bound is the revision's union, not the
+        // one era this lane added. Checking against the era alone reports
+        // `contrast_inc` (F17/`v1hfgain`) and every L4/L8-pooled edge slot
+        // (F18/`v1detroot`) as leaks, which is what it did the first time it
+        // ran; see `era_moved_slots`'s own doc for why the two forms differ.
+        let revision_bound =
+            crate::feature_defs::FormulaRevision::Rev3.moved_slots(372, crate::NUM_SCALES);
+        let outside: Vec<u16> = moved
+            .iter()
+            .copied()
+            .filter(|i| !revision_bound.contains(i))
+            .collect();
+        assert!(
+            outside.is_empty(),
+            "revision 3 moved slots NO era of it declares — it leaked outside its \
+             registered blast radius: {outside:?}"
+        );
+
+        // The lower bound is this lane's own era: every slot `v1ssimstable`
+        // claims must ACTUALLY move. This is the direction that catches a
+        // consumer still reading legacy moments — basic, peaks, masked or IW
+        // quietly left on the old signal would show up here as a claimed slot
+        // that did not move.
+        let ssim_era = crate::feature_defs::era_moved_slots("v1ssimstable", 372, crate::NUM_SCALES);
+        let unmoved: Vec<u16> = ssim_era
+            .iter()
+            .copied()
+            .filter(|i| !moved.contains(i))
+            .collect();
+        assert!(
+            unmoved.is_empty(),
+            "these slots are registered as moved by v1ssimstable but did NOT move — \
+             a consumer is still reading legacy moments: {unmoved:?}"
+        );
+        println!(
+            "rev3 moved {} of 372 slots; all {} v1ssimstable slots moved; \
+             none outside the revision's {} declared slots",
+            moved.len(),
+            ssim_era.len(),
+            revision_bound.len()
+        );
+    }
+
     /// **The unsupported route returns an ERROR.** Revision 3's moments are
     /// one reflect-101 box, so a `blur_passes != 1` profile is refused —
     /// through the public entry, as a `Result`, on the thread the caller is
@@ -7290,8 +7538,10 @@ mod tests {
                         &mut want,
                         &mut scratch,
                     );
-                    for i in 0..n {
-                        let (got, exp) = (ret.sd[c][i] as f64, want[i] as f64);
+                    for (i, (&got_f32, &exp_f32)) in
+                        ret.sd[c][..n].iter().zip(&want[..n]).enumerate()
+                    {
+                        let (got, exp) = (got_f32 as f64, exp_f32 as f64);
                         assert!(got.is_finite(), "non-finite retained signal at {i}");
                         let tol = 2e-10 + 2e-6 * exp.abs();
                         assert!(

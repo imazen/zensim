@@ -699,7 +699,24 @@ const REV_SSIM_STABLE: Revision = Revision {
     era: "v1ssimstable",
     commit: "-",
     status: RevisionStatus::Proposed,
-    note: "Rev3: f64 running box moments, direct pairwise error variance, one f32 signal shared by all v1 SSIM pools and attribution. Requires fresh extraction and refit; shipped default stays Rev1.",
+    note: "Rev3 (issue #61): the v1 SSIM signal is formed ONCE per pixel by \
+           `ssim_form::stable_ssim_plane` and retained, so basic, peak, \
+           masked, IW and the attribution planes all read the same value. \
+           f64 products and f64 sliding-window moments; the error variance \
+           is accumulated DIRECTLY as `(a-b)^2` instead of recovered as \
+           `var1 + var2 - 2*cov`, which is where the shipped f32 raw \
+           moments lose their significant bits on flat content; the \
+           recurrence skips an add/remove pair that cancels, so a window \
+           whose samples did not change acquires no drift. One reflect-101 \
+           box, one rounding to f32 at the end. \
+           MEASURED on the integrated banded walk \
+           (`streaming::tests::locality_fixture_*`): a local replacement \
+           with reference pixels moves 8,293 signals OUTSIDE the changed \
+           samples' support under revision 1, peak |delta| 4.886e-4, and \
+           ZERO under this era. This era therefore moves values \
+           everywhere, unlike `v1ssimcap`. STILL PROPOSED: \
+           `ssim_form::SHIPPED_REVISION` is `Rev1`, no table has been \
+           re-extracted and no bake has been refit against it.",
 };
 
 const REV_F4_ENTRY: Revision = Revision {
@@ -2164,6 +2181,44 @@ mod tests {
                 "f{id} (an audit-named worst column) is missing"
             );
         }
+    }
+
+    /// **The registry half of G3.1 for revision 3's `v1ssimstable` era.**
+    ///
+    /// Revision 3 changes the PRECISION of the same per-pixel `d` that F4's
+    /// bounded form changes, so it reaches exactly the same slots — asserted
+    /// against `v1ssimcap`'s measured set rather than against a second
+    /// hand-written list.
+    ///
+    /// The two eras are NOT interchangeable despite sharing a slot set:
+    /// `v1ssimcap` is bit-identical to revision 1 wherever `D^2 <= 1`, i.e.
+    /// on all ordinary content, while `v1ssimstable` moves every one of these
+    /// columns on every image. Same blast radius, very different blast.
+    ///
+    /// The MEASURED half — that the extractor really does move this set and
+    /// nothing else — is
+    /// `streaming::tests::rev3_moves_exactly_the_registered_slots`, which
+    /// re-extracts at revision 3 in a child process and diffs.
+    #[test]
+    fn ssim_stable_moves_exactly_the_f4_slots() {
+        use super::FormulaRevision;
+        use crate::NUM_SCALES;
+        let stable = super::era_moved_slots("v1ssimstable", 372, NUM_SCALES);
+        let f4 = super::era_moved_slots("v1ssimcap", 372, NUM_SCALES);
+        assert_eq!(
+            stable, f4,
+            "v1ssimstable and v1ssimcap read the same per-pixel signal, so they \
+             must declare the same slots"
+        );
+        assert_eq!(stable.len(), 132);
+        // And it is one of revision 3's eras, so a recalculation planned from
+        // the revision (not the era) still sees these columns.
+        assert!(
+            FormulaRevision::Rev3
+                .moved_slots(372, NUM_SCALES)
+                .contains(&241)
+        );
+        assert!(FormulaRevision::Rev3.era_tokens().contains(&"v1ssimstable"));
     }
 
     /// Revision 1 is the baseline, so it moves nothing by definition.

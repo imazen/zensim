@@ -755,6 +755,11 @@ pub fn compute_zensim_with_ref_and_config(
     height: usize,
     config: ZensimConfig,
 ) -> Result<ZensimResult, ZensimError> {
+    // These two entries take a caller-built config rather than a profile, so
+    // they never pass through `config_from_params` — the route refusal has to
+    // be repeated here or a `blur_passes != 1` config would reach the strip
+    // walk under an arithmetic revision that does not serve it.
+    crate::ssim_form::check_route(&config)?;
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
@@ -3804,6 +3809,13 @@ pub(crate) fn apply_mlp_scoring_with_codec(
     let Some(loader) = params.mlp_bytes else {
         return Ok(());
     };
+    // A built-in profile's bake declares no revision, so it IS revision 1.
+    // `ZENSIM_FORMULA_REV` pins the PIXELS, not the coefficients — pinning a
+    // research revision and reading a profile score therefore prices revision-1
+    // weights against another era's features. `BakeScorer` refuses that
+    // outright; this path cannot, because the same call also produces the
+    // features a research extraction is there to collect. So it says so, once.
+    crate::ssim_form::warn_pinned_revision_scoring_once();
     // **Score-disposition guard (D9).** A bake carrying
     // `zentrain.output_calibration_spline` emits an already-calibrated
     // 0-100 score. Scoring it with `skip_score_mapping == false` applies
@@ -4952,7 +4964,11 @@ pub fn compute_zensim_with_config(
     height: usize,
     config: ZensimConfig,
 ) -> Result<ZensimResult, ZensimError> {
-    // Validation
+    // Validation. The route refusal comes first: this entry takes a
+    // caller-built config, so it never passes through `config_from_params`
+    // and would otherwise carry a `blur_passes != 1` config into the strip
+    // walk under an arithmetic revision that does not serve it.
+    crate::ssim_form::check_route(&config)?;
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }

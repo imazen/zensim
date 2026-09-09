@@ -641,6 +641,16 @@ impl<'a> BakeScorer<'a> {
             || crate::ssim_form::active_luma_form()
                 != crate::ssim_form::SsimLumaForm::for_revision(revision)
         {
+            // The ONLY way past this, and it does not exist in a product
+            // build: the `cross-revision-diagnostic` feature must be compiled
+            // in AND the environment must ask for it. It exists so an
+            // already-fit candidate can be replayed on a corrected extraction
+            // before any refit — a measurement, never a score.
+            #[cfg(feature = "cross-revision-diagnostic")]
+            if crate::ssim_form::cross_revision_diagnostic() {
+                crate::ssim_form::warn_cross_revision_once(revision);
+                return Ok(());
+            }
             return Err(ZensimError::ModelLoadFailed {
                 reason: "pixel kernels use another formula revision; set ZENSIM_FORMULA_REV to the bake's declared revision before starting the process",
             });
@@ -968,7 +978,7 @@ mod revision_contract_tests {
             let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
             let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
             let err = scorer.compute(&rs, &ds, None).expect_err(
-                "a revision-{declared} bake must not be served by a revision-3 process",
+                "a mismatched-revision bake must not be served by a revision-3 process",
             );
             assert!(
                 matches!(err, ZensimError::ModelLoadFailed { .. }),
@@ -984,7 +994,11 @@ mod revision_contract_tests {
         let score = scorer
             .compute(&rs, &ds, None)
             .expect("a revision-3 bake is served by a revision-3 process");
-        assert!(score.score().is_finite(), "served bake produced {score:?}");
+        assert!(
+            score.score().is_finite(),
+            "served bake produced a non-finite score: {}",
+            score.score()
+        );
         println!("REV3-BAKE-MISMATCH-RAN");
     }
 
@@ -1055,6 +1069,78 @@ mod revision_contract_tests {
             matches!(err, ZensimError::ModelLoadFailed { .. }),
             "{err:?}"
         );
+    }
+
+    /// **Compiling the diagnostic bypass in is not arming it.** With the
+    /// `cross-revision-diagnostic` feature ON but the environment switch
+    /// unset, revision disagreement is still refused. Two independent
+    /// switches is the whole design: `--all-features` builds — including
+    /// CI's — must behave exactly like a product build here.
+    #[cfg(feature = "cross-revision-diagnostic")]
+    #[test]
+    fn the_diagnostic_bypass_is_inert_without_its_environment_switch() {
+        assert!(
+            std::env::var("ZENSIM_CROSS_REVISION_DIAGNOSTIC").is_err(),
+            "this test asserts the DEFAULT; do not run it with the switch set"
+        );
+        let (w, h) = (96usize, 96usize);
+        let (src, dst) = pair(w, h);
+        let other = if crate::ssim_form::active_revision() == FormulaRevision::Rev3 {
+            "1"
+        } else {
+            "3"
+        };
+        let bytes = bake_declaring(Some(other), 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
+        assert!(
+            scorer
+                .compute(&RgbSlice::new(&src, w, h), &RgbSlice::new(&dst, w, h), None)
+                .is_err(),
+            "the bypass armed itself from the feature flag alone"
+        );
+    }
+
+    /// And when BOTH switches are on it does bypass, loudly. This is the
+    /// capability issue #61 needs to replay an already-fit candidate on a
+    /// corrected extraction before any refit; the stderr line is what keeps
+    /// such a number attributable in a log.
+    #[cfg(feature = "cross-revision-diagnostic")]
+    #[test]
+    fn the_diagnostic_bypass_serves_a_mismatched_bake_and_says_so() {
+        const SENTINEL: &str = "REV3-CROSS-DIAG-RAN";
+        let path = "metric::bake::revision_contract_tests::the_diagnostic_bypass_serves_a_mismatched_bake_and_says_so";
+        if std::env::var("ZENSIM_CROSS_REVISION_DIAGNOSTIC").as_deref() != Ok("1") {
+            let exe = std::env::current_exe().expect("test binary path");
+            let out = std::process::Command::new(exe)
+                .args([path, "--exact", "--nocapture", "--test-threads=1"])
+                .env("ZENSIM_FORMULA_REV", "3")
+                .env("ZENSIM_CROSS_REVISION_DIAGNOSTIC", "1")
+                .output()
+                .expect("re-exec the test binary");
+            let (so, se) = (
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr),
+            );
+            assert!(out.status.success(), "child failed\n{so}\n{se}");
+            assert!(so.contains(SENTINEL), "the control did not run\n{so}");
+            assert!(
+                se.contains("CROSS-REVISION DIAGNOSTIC"),
+                "the bypass served a mismatched bake SILENTLY\n{se}"
+            );
+            return;
+        }
+        assert_eq!(crate::ssim_form::active_revision(), FormulaRevision::Rev3);
+        let (w, h) = (96usize, 96usize);
+        let (src, dst) = pair(w, h);
+        let bytes = bake_declaring(Some("1"), 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
+        let r = scorer
+            .compute(&RgbSlice::new(&src, w, h), &RgbSlice::new(&dst, w, h), None)
+            .expect("the armed bypass serves a revision-1 bake on revision-3 pixels");
+        assert!(r.score().is_finite());
+        println!("{SENTINEL}");
     }
 
     /// An undeclared bake is the registered pre-stamp era, and a bake naming

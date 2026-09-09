@@ -1391,6 +1391,53 @@ mod training_admission_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// **The admitted-revision list is ONE list, and it now includes 3.**
+    ///
+    /// Before this, the registry parse, the per-table metadata check and the
+    /// root-manifest read each spelled `matches!(n, 1 | 2)` separately — which
+    /// is exactly how a new revision comes to be accepted in one place and
+    /// silently rejected in another. This pins that all three read the same
+    /// list, and that an unregistered value is still refused rather than
+    /// defaulted (a mislabelled table must fail loudly, not become revision 1).
+    #[test]
+    fn the_admitted_revision_list_covers_every_registered_revision() {
+        assert_eq!(ADMITTED_FORMULA_REVISIONS, &[1, 2, 3]);
+        for n in ADMITTED_FORMULA_REVISIONS {
+            assert!(
+                is_admitted_formula_revision(*n),
+                "revision {n} is registered but not admitted"
+            );
+        }
+        for n in [0u64, 4, 99] {
+            assert!(
+                !is_admitted_formula_revision(n),
+                "revision {n} must not be admitted"
+            );
+        }
+
+        // The root-manifest reader is one of the three sites; check it end to
+        // end rather than trusting that it calls the helper.
+        let dir = std::env::temp_dir().join(format!("zensim-admit-rev-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (value, want_ok) in [("3", true), ("2", true), ("4", false)] {
+            std::fs::write(
+                dir.join("_MANIFEST.json"),
+                format!("{{\"formula_revision\": {value}}}"),
+            )
+            .unwrap();
+            let got = root_formula_revision(&dir);
+            assert_eq!(
+                got.is_ok(),
+                want_ok,
+                "formula_revision {value} admission: {got:?}"
+            );
+            if want_ok {
+                assert_eq!(got.unwrap(), Some(value.parse::<u8>().unwrap()));
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn unknown_and_mixed_eras_require_explicit_replay() {
         let unknown = vec![std::path::PathBuf::from("/not-registered/features.parquet")];

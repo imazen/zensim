@@ -15,7 +15,7 @@
 #   free functions                             35
 #   inherent methods                          127
 #   struct fields                              92
-#   enum variants                              25
+#   enum variants                              26
 #   trait roster entries (type × trait)        98
 #   auto-trait-complete types                  17
 #
@@ -27,14 +27,14 @@
 #   det_math                         13
 #   f64                               3
 #   feature_set_id                    5
-#   feature_v2                       21
+#   feature_v2                       22
 #   fold_engine                       8
 #   profile                           1
 #   research                         76
 #   score_math                       26
 #   source                            4
 
-## items (312 lines)
+## items (313 lines)
 
 pub const fn det_math::PowForm::for_revision(feature_v2::FormulaRevision) -> Self
 pub const ZENTRAIN_FEATURE_IDS_KEY: &str
@@ -301,6 +301,7 @@ pub det_math::PowForm::LibmPowf
 pub det_math::PowForm::PureRust
 pub feature_v2::FormulaRevision::Rev1
 pub feature_v2::FormulaRevision::Rev2
+pub feature_v2::FormulaRevision::Rev3
 pub feature_v2::V2NewFeatureToggles::formula_revision: feature_v2::FormulaRevision
 pub feature_v2::V2NewFeatureToggles::free_extras: feature_v2::V1FreeExtras
 pub feature_v2::V2NewFeatureToggles::v1_only: bool

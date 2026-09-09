@@ -2,10 +2,41 @@
 
 ## [Unreleased]
 
-- Add `FormulaRevision::Rev3` for stable SSIM moments shared by basic, peak,
-  masked/IW pooling and retained attribution. Require matching bake/process
-  revision for pixel serving. Existing bakes/default remain revision 1;
-  revision 3 needs fresh features and trained model bytes.
+### Added
+
+- `FormulaRevision::Rev3` — the v1 SSIM signal is formed once per pixel by
+  `ssim_form::stable_ssim_plane` (f64 moments, direct pairwise error variance,
+  no covariance subtraction) and retained, so basic, peak, masked and IW pools
+  and the attribution planes all consume the SAME value (#61). MEASURED on the
+  integrated banded walk: a local replacement with reference pixels moves
+  8,293 signals outside the changed samples' support under revision 1
+  (max |delta| 4.886e-4) and **0** under revision 3. Existing bakes and the
+  shipped default stay revision 1; revision 3 needs freshly extracted features
+  and a refit, and an old bake relabelled `3` is refused rather than served.
+
+### Changed
+
+- Bake/process revision disagreement is refused by comparing the REVISION, not
+  only the luminance form it selects — revisions 2 and 3 both select `Clamp`,
+  so the form comparison alone would serve revision 2 coefficients against
+  revision 3 pixels (#61).
+- Routes an arithmetic revision does not serve now return an explicit
+  `ZensimError` from every fallible entry that builds a `ZensimConfig`
+  (`ssim_form::check_route`), instead of reaching the strip walk. Revision 3
+  serves `blur_passes == 1` only; its moments are one reflect-101 box.
+- The built-in-profile scoring path warns once per process when
+  `ZENSIM_FORMULA_REV` pins a non-shipped revision: a built-in bake declares no
+  revision, so it IS revision 1, and its score then prices revision-1
+  coefficients against another era's features. Not a refusal — the same call
+  emits the features a research extraction exists to collect — and silent
+  unless a revision is pinned, so no shipping path is affected (#61).
+- New non-default feature `cross-revision-diagnostic`. It lets a bake be scored
+  against pixels from a different arithmetic revision, so an already-fit
+  candidate can be replayed on a corrected extraction before any refit. It
+  needs BOTH the cargo feature and `ZENSIM_CROSS_REVISION_DIAGNOSTIC=1`, and
+  warns on stderr when it fires; a product build does not contain the bypass.
+  Numbers produced this way measure the extraction change against fixed
+  coefficients and are never a served score (#61).
 
 - Add `ScoredAttribution::refinement_gain` and separate refinement coverage:
   finite max-signal rectangle effects include ties and reflected/coarse source
