@@ -1,5 +1,31 @@
 # Canonical corruption refit — September 8 registration
 
+## Input-precision repair — later September 8, before implementation
+
+The cost-4 serving audit fails because a tree trained on stored f32 inputs can
+take a different branch on full-precision pixel f64 inputs. The initial D228
+head also has one probability discrepancy despite identical composed scores.
+Make precision executable model data, not an undocumented caller cast.
+
+Extend the existing ZCTH reader/exporter with format version 2: identical
+sections, but every declared feature rounds to IEEE f32 and widens to f64
+BEFORE scaler subtraction/division/clipping. Include version 2 in the schema
+descriptor. Version 1 retains its exact native-input arithmetic and existing
+public FORMAT_VERSION constant; old readers refuse version 2. No new public
+item or feature extraction is required. Concrete callers are the canonical
+trainer, corrhead_parity and BakeScorer's pixel/cache corruption paths.
+
+The canonical manifest opts in with input_precision="f32". Preserve legacy
+default export, fitted trees/scaler/calibration, thresholds and source roles.
+Allow one deterministic seed (4101) for this registered precision repair;
+repeating identical HGB fits does not add evidence. Refit/re-export cost 4
+with no other scientific changes and run only its 12 training origins through
+the complete Rust pixel/cache audit. This diagnoses and repairs serving; it
+does not reopen validation for the failed cost sweep. Test distinguishing
+rounding-boundary cases, legacy behavior, raw/probability/fire consistency,
+version/hash refusal and the real previously failing pixel row. Retain old
+artifacts unchanged. Subsequent accuracy work must address honest coverage.
+
 ## D-regime companion — later user direction, before results
 
 The user requests a head using D's existing feature regime. This supersedes

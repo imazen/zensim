@@ -186,7 +186,8 @@ def _fnv1a64(b):
     return h
 
 
-def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_knots):
+def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_knots,
+                     version=ZCTH_VERSION):
     """The canonical shape descriptor, byte-for-byte what
     `corruption_head::schema_descriptor` builds. Covers SHAPE and the read set,
     never the fitted numbers: the hash answers "is this structurally the head I
@@ -194,7 +195,7 @@ def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_kn
     a different file, not a corrupted one."""
     import struct as _s
     d = bytearray(ZCTH_MAGIC)
-    d += _s.pack("<H", ZCTH_VERSION)
+    d += _s.pack("<H", version)
     d += _s.pack("<IIII", caller_width, n_declared, n_trees, n_nodes)
     d += _s.pack("<f", clip)
     for i in ids:
@@ -204,8 +205,8 @@ def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_kn
 
 
 def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
-              deadband_t, provenance):
-    """Emit a gradient-boosted-tree corruption head as a ZCTH v1 file.
+              deadband_t, provenance, *, input_precision="native"):
+    """Emit ZCTH v1 (native inputs) or v2 (f32 before standardisation).
 
     The mirror of `emit_znpr`, and the reason `can_bake` is no longer
     `name == "logistic"`. Every field is copied out of the fitted estimator;
@@ -226,6 +227,10 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
     """
     import struct as _s
     import numpy as _np
+
+    if input_precision not in ("native", "f32"):
+        raise SystemExit(f"unsupported ZCTH input precision: {input_precision}")
+    version = 2 if input_precision == "f32" else ZCTH_VERSION
 
     if getattr(clf, "n_trees_per_iteration_", 1) != 1:
         raise SystemExit(f"ZCTH is binary-only; this estimator emits "
@@ -284,10 +289,10 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
 
     flags = ZCTH_FLAG_SCALER | (ZCTH_FLAG_ISOTONIC if len(iso_x) else 0)
     schema = zcth_schema_hash(caller_width, len(ids), len(preds), n_nodes,
-                              float(clip), ids, len(iso_x))
+                              float(clip), ids, len(iso_x), version=version)
     h = bytearray(ZCTH_HEADER_LEN)
     h[0:4] = ZCTH_MAGIC
-    h[4:6] = _s.pack("<H", ZCTH_VERSION)
+    h[4:6] = _s.pack("<H", version)
     h[6:8] = _s.pack("<H", flags)
     h[8:16] = _s.pack("<Q", schema)
     h[16:20] = _s.pack("<I", caller_width)
@@ -303,7 +308,7 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "wb") as f:
         f.write(bytes(h) + bytes(body))
-    print(f"BAKED (ZCTH v1) -> {out_path} ({os.path.getsize(out_path)} B; "
+    print(f"BAKED (ZCTH v{version}) -> {out_path} ({os.path.getsize(out_path)} B; "
           f"caller width {caller_width}, reads {len(ids)}; {len(preds)} trees / "
           f"{n_nodes} nodes; schema {schema:#018x}; deadband P>{deadband_t}, "
           f"i.e. score < {100.0 * (1.0 - deadband_t):g})")
@@ -586,7 +591,12 @@ def canonical_main(argv):
     fit_weights = weights.copy()
     fit_weights[fit & (y == 0)] *= negative_fit_weight
     require(m["hyperparameters"] == {"early_stopping":False,"max_iter":100,"max_leaf_nodes":31}, "unregistered HGB settings")
-    require(m["deadband"] == 0.9 and m["seeds"] == [4101,4103,4107], "unregistered threshold/seeds")
+    input_precision = m.get("input_precision", "native")
+    require(input_precision in ("native", "f32"), "unregistered input precision")
+    allowed_seeds = [[4101,4103,4107]]
+    if input_precision == "f32":
+        allowed_seeds.append([4101])
+    require(m["deadband"] == 0.9 and m["seeds"] in allowed_seeds, "unregistered threshold/seeds")
     scoring_inputs, scoring_pairs = ip, Path(m["pairs_tsv"])
     parity_rows = np.ones(len(rows), dtype=bool)
     if a.training_screen_only:
@@ -613,8 +623,9 @@ def canonical_main(argv):
         provenance = dict(manifest_sha256=_sha256(a.canonical_manifest), seed=seed,
                           sklearn=_sklearn_version(), trainer_sha256=_sha256(__file__),
                           feature_ids=head_ids, formula_revision=1, root_form="libm",
-                          negative_fit_weight=negative_fit_weight)
-        emit_zcth(str(head),372,head_ids,scaler.mean_,scaler.scale_,8.0,clf,iso,m["deadband"],provenance)
+                          negative_fit_weight=negative_fit_weight, input_precision=input_precision)
+        emit_zcth(str(head),372,head_ids,scaler.mean_,scaler.scale_,8.0,clf,iso,m["deadband"],provenance,
+                  input_precision=input_precision)
         # Export and evaluate THIS fitted estimator, never a CV ensemble.
         prob = iso.predict(clf.predict_proba(Z[parity_rows])[:,1])
         # The parity owner's matrix is in declared-ID order; Rust scatters

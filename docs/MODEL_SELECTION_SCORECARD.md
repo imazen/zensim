@@ -1,4 +1,43 @@
-# Model-selection scorecard — the five-gate closed-loop exam (2026-07-18)
+# Production release scorecard
+
+## September 8 production contract — registered before new candidate validation
+
+This section is the current release contract. The older measurement history
+below remains evidence, not an alternate set of acceptance criteria. These
+new numerical tolerances are engineering requirements established under the
+user's September 8 directive; they are not claimed to be perceptually validated
+JNDs or previously agreed consumer tolerances. No candidate is qualified yet.
+Freeze the contract and experiment manifests before evaluating new candidates.
+
+| Requirement | Release bar / measurement |
+|---|---|
+| Human ranking | Preserve G-RANK below: at least incumbent CID22-band performance and no holdout collapse. Also meet or exceed SSIMULACRA2 on the registered SDR human-ranking aggregate and each supported content-class aggregate. Report each corpus/content panel separately; terminal panels are read only for a frozen finalist. HDR uses the registered HDR reference panel. |
+| Dial and addressability | Preserve G-DIAL, G-ADDR REGRESSION and CONTRACT, all required codec floors, exact pixel identity at 100, no distorted image above identity, and valid negative tails. No clipping the dial to make targeting pass. |
+| Corruption | Preserve the registered D228 bars: zero honest native codec outputs lowered; overall honest lowering <=1%; unique corruption detection >=95%; real-bug detection >=90%; strict below-native-q20 ordering >=99%. Require 100% detection of tested non-inert RGB swaps. Report per-origin/content/codec failures and counts, not only pooled rates. |
+| One-shot targeting | On witnessed attainable requests: median absolute score error <=2, p95 <=8; fraction undershooting by more than 8 <=5%. |
+| Two-shot targeting | On the same requests: median absolute score error <=1, p95 <=3; fraction undershooting by more than 3 <=5%. |
+| Three-shot targeting | On the same requests: median absolute score error <=0.5, p95 <=1, maximum <=3; fraction undershooting by more than 1 <=1%. |
+| Target coverage and cost | Evaluate every preregistered image/configuration/request, including failed encodes. Report 100% disposition coverage and the witnessed-attainable fraction separately. Unattainable/uncertain requests are not steering failures or silently removed. Bounds remain hidden from runtime. Actual work must respect each shot budget; native internal reconstructions and map work remain separately counted. |
+| Spatial value | Preserve G-STEER M2 >=0.99 and M3 >=0.70. Each JXL/AVIF/JPEG/WebP integration must pass active/neutral and intervention controls. Against a strong scalar controller, require >=0% geometric-mean byte savings at equal quality on every independent judge, plus >=1% savings on at least one judge; no content-class aggregate regression. Use measured overlapping quality intervals, report per-image regressions and source-bootstrap uncertainty. |
+| Scalar performance | On AMD Ryzen 9 9950X3D, release build without target-cpu=native, one pinned worker: complete SDR reference+comparison p95 <=50 ms at 1024x1024 and <=200 ms at 2048x2048, <=1.25x frozen D and <=fast-ssim2 p95 on the same inputs. Report cached-reference and uncached paths separately; the absolute bar applies to uncached. |
+| Spatial and memory cost | Cached-reference complete score+map p95 <=3x the candidate's uncached scalar p95 at matching geometry. Peak incremental RSS, including caches/scratch/maps, <=128 bytes/pixel +64 MiB per worker; report codec RSS separately. Use >=30 accepted paired rounds, dispersion and competing-process records. Contended or incomplete timing cannot pass. |
+| Input and serving correctness | All components execute through the Rust surface with packed-artifact identity. Exact declared-input tree raw/fire parity; pixel/cache composed-score parity under the declared precision contract. Preserve supported SDR/HDR transfer, primaries, luminance, alpha, stride and geometry behavior with their existing reference checks. Explicit unsupported codec/input combinations must not silently convert or masquerade as supported. |
+
+Target bars apply per codec/configuration and per declared SDR/HDR lane; also
+report content-class distributions. Calibration uses canonical training
+families only. The target request grid and witnessed-feasibility rule are
+frozen in each experiment under TARGET_STEERING_PROTOCOL_2026-09-08.md, before
+results; use the same requests for all shot budgets and scalar/spatial arms.
+HDR quality and steering use their registered HDR judges, never SDR SSIM2 on
+uninterpreted HDR samples. Supported-input coverage and HDR timing must be
+reported explicitly; an SDR pass cannot qualify the complete product.
+
+Current disposition: corruption FAIL (honest protection/ordering), spatial RD
+FAIL for measured policies, full targeting/performance/input qualification
+INCOMPLETE, final artifact NOT FROZEN. Existing reports remain linked below and
+in SESSION-RESUME.md. The qualification owner must consume evidence for every
+row above before declaring this contract satisfied; its historical five-gate
+JSON alone is insufficient.
 
 **September 8 correction — user ruling:** steering evaluation must first
 establish each image's attained codec range, then compare 1/2/3-shot policies
@@ -40,7 +79,7 @@ the same gates (HDR swaps the corpora/judges — see §HDR).
 | **G-DIAL** | monotone calibrated dial? | dial panel (quarantined_v2 grid) | G1 p5≤25 ∧ p95≥85; G3 mono ≥0.93 | incl. |
 | **G-STEER** | can its diffmap steer? | `diffmap_block_coherence --bake` (M2 ceiling + M3 deployable map; fold per family) | M2 ≥0.99; M3 ≥0.70 | ~3 min |
 | **G-RD** | saves real bytes at equal *judged* quality? | probe matrix + independent judge panel (`rd_probe_2026-07-18.sh` + analyze) | ≥0% on ALL judges (no gaming regression), photos | ~30 min |
-| **G-TARGET** | codec hits attainable targets fast? | per-image bounds + frozen train-calibrated 1/2/3-shot probes | current protocol: witnessed-target error/tails/coverage and explicit cost; product tolerance not yet established | incl. + separately reported bound oracle |
+| **G-TARGET** | codec hits attainable targets fast? | per-image bounds + frozen train-calibrated 1/2/3-shot probes | September 8 production contract above: per-shot error/undershoot bars, complete coverage and explicit cost | incl. + separately reported bound oracle |
 
 Operational notes (learned the hard way — see `benchmarks/rd_probe_results_2026-07-18.md`):
 

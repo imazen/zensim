@@ -3774,3 +3774,14 @@ origins. Cost 4 hits a pixel/stored-f32 fire disagreement; costs 16 and 64 fail
 calibration protection/ordering bars across three seeds. No cost arm advances
 to validation. No threshold is retuned or admission rule relaxed.
 [Recipe, chronology, hashes and complete results](../benchmarks/canonical_corruption_d228_2026-09-08.md).
+
+## 2026-09-08 — explicit corruption input precision, after the D228 cost sweep
+
+The existing cost-4 recipe is reproduced once with a new ZCTH v2 contract:
+round declared inputs to f32 before scaler arithmetic. Original source tables,
+admission, roles, head IDs and fitted numeric sections are unchanged. All
+9,036 training pixel comparisons and 8,213 unique array parity rows pass exact
+raw/probability/fire/composed-score comparisons. Legacy v1 remains unchanged.
+Calibration still lowers three honest near-lossless JXL outputs and fails the
+fixed screen. No validation/terminal evaluation or new data admission occurs.
+[Precision evidence and remaining accuracy work](../benchmarks/corruption_input_precision_2026-09-08.md).

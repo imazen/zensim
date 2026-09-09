@@ -200,6 +200,7 @@ impl Config {
                 .map_err(|e| e.to_string())?;
             let mut max_abs: f64 = 0.0;
             if let Some(head) = &self.head {
+                let mut pixel_features = vec![0.0; head.caller_input_width()];
                 for &id in head.declared_feature_ids() {
                     let id = usize::from(id);
                     let actual = *computed
@@ -207,6 +208,7 @@ impl Config {
                         .get(id)
                         .ok_or("missing served feature")?;
                     let expected = features[id];
+                    pixel_features[id] = actual;
                     let diff = (actual - expected).abs();
                     max_abs = max_abs.max(diff);
                     if !actual.is_finite() || diff > 1e-6 + 1e-5 * expected.abs() {
@@ -219,13 +221,30 @@ impl Config {
                     json!(head.probability_f64(features).map_err(|e| e.to_string())?);
                 record["head_threshold"] = json!(head.deadband());
                 let stored_p = head.probability_f64(&stored).map_err(|e| e.to_string())?;
+                let pixel_p = head
+                    .probability_f64(&pixel_features)
+                    .map_err(|e| e.to_string())?;
                 let raw_p = record["head_probability"]
                     .as_f64()
                     .ok_or("nonfinite head probability")?;
                 if (stored_p > head.deadband()) != (raw_p > head.deadband()) {
                     return Err("stored-f32 versus pixel head fire mismatch".into());
                 }
+                if (pixel_p > head.deadband()) != (raw_p > head.deadband()) {
+                    return Err("canonical versus served pixel head fire mismatch".into());
+                }
                 record["stored_f32_head_probability"] = json!(stored_p);
+                record["served_pixel_head_probability"] = json!(pixel_p);
+                record["canonical_head_raw"] = json!(
+                    head.decision_function(features)
+                        .map_err(|e| e.to_string())?
+                );
+                record["stored_f32_head_raw"] =
+                    json!(head.decision_function(&stored).map_err(|e| e.to_string())?);
+                record["served_pixel_head_raw"] = json!(
+                    head.decision_function(&pixel_features)
+                        .map_err(|e| e.to_string())?
+                );
             }
             if ![score, cached, cached_f32, base_score]
                 .iter()
@@ -245,7 +264,7 @@ impl Config {
             record["max_consumed_feature_abs_delta"] = json!(max_abs);
             record["candidate_pixel_comparisons"] = json!(1);
             record["cached_comparisons"] = json!(4);
-            record["auxiliary_head_evaluations"] = json!(2 * usize::from(self.head.is_some()));
+            record["auxiliary_head_evaluations"] = json!(6 * usize::from(self.head.is_some()));
         }
         Ok(record)
     }

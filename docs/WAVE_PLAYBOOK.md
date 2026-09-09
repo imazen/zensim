@@ -63,8 +63,10 @@ and negative results. Check that record before proposing another implementation.
    immutable and use a fresh output directory. Current capped LAN/local work
    supersedes July Hetzner-first commands. Source dimensions and packing must
    match when comparing performance.
-4. Screen with at least three paired, recorded seeds. Confirm finalists with
-   five and the registered full recipe. Separate initialization and sampled-data
+4. For stochastic recipes, screen with at least three paired, recorded seeds.
+   Confirm finalists with five and the registered full recipe. A deterministic
+   HGB fit with no sampling/early stopping uses one recorded seed; repeated
+   identical fits do not add evidence. Separate initialization and sampled-data
    randomness; a seed spread is not proof of source/subset coverage. Tune only
    on the permitted selection data, retain failures, then evaluate final packed
    bytes through the surface. The frozen `bestofall_wave.sh` is a historical

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Add explicitly versioned f32 input semantics for ZCTH corruption heads;
+  legacy v1 arithmetic remains unchanged. Canonical training can export v2
+  heads with pixel/cache precision parity. Extend the audit with actual served
+  pixel raw/probability comparisons. The repaired candidate still fails honest
+  output protection and does not replace a default model.
+
 - Canonical corruption training now declares the head's feature IDs separately
   from its source schema, supporting D's existing basic+peak regime. Add a
   training-only cost screen, separate fit/calibration reports, keyed channel

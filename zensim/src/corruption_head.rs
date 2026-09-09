@@ -26,12 +26,17 @@
 //! table of `(offset, len)`, and a declared-feature-id list so a head obeys
 //! the same dense contract as [`crate::declared_feature_ids`].
 //!
-//! ## Wire format, `ZCTH` v1 (little-endian throughout)
+//! ## Wire format, `ZCTH` v1/v2 (little-endian throughout)
+//!
+//! Version 2 rounds each declared input to IEEE f32, then widens to f64
+//! before standardisation. This binds pixel inference to f32 training tables.
+//! Version 1 preserves native input precision. Sections are otherwise identical;
+//! the version participates in the schema hash and old readers refuse v2.
 //!
 //! ```text
 //! Header, 120 bytes
 //!    0..4    magic                b"ZCTH"
-//!    4..6    format_version  u16  = 1
+//!    4..6    format_version  u16  = 1 (native inputs) or 2 (f32 inputs)
 //!    6..8    flags           u16  bit0 has_isotonic, bit1 has_scaler
 //!    8..16   schema_hash     u64  FNV-1a over the canonical shape descriptor
 //!   16..20   caller_input_width u32
@@ -80,8 +85,10 @@
 
 /// The magic every `ZCTH` file starts with.
 pub const MAGIC: [u8; 4] = *b"ZCTH";
-/// The only format version this build reads or writes.
+/// The legacy native-input format version, retained for existing writers.
+/// The reader also supports version 2 with f32-rounded inputs.
 pub const FORMAT_VERSION: u16 = 1;
+const F32_INPUT_VERSION: u16 = 2;
 /// Header length in bytes; the section table ends here.
 const HEADER_LEN: usize = 120;
 /// One node's serialized width.
@@ -276,8 +283,8 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 /// changed threshold is a different model that must get a different file, not
 /// a corrupted one. Both sides build this from the same field order.
 fn schema_descriptor(
+    version: u16,
     caller_input_width: u32,
-    n_declared: u32,
     n_trees: u32,
     n_nodes: u32,
     clip: f32,
@@ -286,9 +293,9 @@ fn schema_descriptor(
 ) -> Vec<u8> {
     let mut d = Vec::with_capacity(26 + declared_ids.len() * 2);
     d.extend_from_slice(&MAGIC);
-    d.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+    d.extend_from_slice(&version.to_le_bytes());
     d.extend_from_slice(&caller_input_width.to_le_bytes());
-    d.extend_from_slice(&n_declared.to_le_bytes());
+    d.extend_from_slice(&(declared_ids.len() as u32).to_le_bytes());
     d.extend_from_slice(&n_trees.to_le_bytes());
     d.extend_from_slice(&n_nodes.to_le_bytes());
     d.extend_from_slice(&clip.to_le_bytes());
@@ -327,6 +334,7 @@ pub fn gate_score(perceptual: f64, head_score: f64, deadband_score: f64) -> f64 
 /// A loaded corruption head.
 #[derive(Clone, Debug)]
 pub struct CorruptionHead {
+    round_inputs_to_f32: bool,
     caller_input_width: usize,
     declared_ids: Vec<u16>,
     mean: Vec<f64>,
@@ -386,7 +394,7 @@ fn read_f64_vec(
 }
 
 impl CorruptionHead {
-    /// Parse a `ZCTH` v1 file.
+    /// Parse a `ZCTH` v1 or v2 file.
     ///
     /// Validates the magic, the version, the schema hash, every section's
     /// range and stride, every declared id against the caller width, and every
@@ -404,10 +412,10 @@ impl CorruptionHead {
             return Err(CorruptionHeadError::BadMagic { got: magic });
         }
         let version = rd_u16(bytes, 4);
-        if version != FORMAT_VERSION {
+        if version != FORMAT_VERSION && version != F32_INPUT_VERSION {
             return Err(CorruptionHeadError::UnsupportedVersion {
                 got: version,
-                supported: FORMAT_VERSION,
+                supported: F32_INPUT_VERSION,
             });
         }
         let flags = rd_u16(bytes, 6);
@@ -513,8 +521,8 @@ impl CorruptionHead {
             .to_string();
 
         let computed = fnv1a64(&schema_descriptor(
+            version,
             caller_input_width as u32,
-            n_declared as u32,
             n_trees as u32,
             n_nodes as u32,
             clip,
@@ -529,6 +537,7 @@ impl CorruptionHead {
         }
 
         let head = Self {
+            round_inputs_to_f32: version == F32_INPUT_VERSION,
             caller_input_width,
             declared_ids,
             mean,
@@ -668,6 +677,8 @@ impl CorruptionHead {
     }
 
     /// `P(corrupt)` for one caller-width feature row of `f64`.
+    /// Version 2 rounds declared inputs to f32 before standardisation;
+    /// version 1 retains the supplied precision.
     pub fn probability_f64(&self, features: &[f64]) -> Result<f64, CorruptionHeadError> {
         if features.len() != self.caller_input_width {
             return Err(CorruptionHeadError::FeatureLenMismatch {
@@ -741,7 +752,13 @@ impl CorruptionHead {
         let n = self.declared_ids.len();
         let mut z = Vec::with_capacity(n);
         for j in 0..n {
-            let v = (get(j) - self.mean[j]) / self.scale[j];
+            let input = get(j);
+            let input = if self.round_inputs_to_f32 {
+                f64::from(input as f32)
+            } else {
+                input
+            };
+            let v = (input - self.mean[j]) / self.scale[j];
             z.push(v.clamp(-self.clip, self.clip));
         }
         let mut raw = self.baseline;
@@ -976,6 +993,10 @@ mod tests {
         }
 
         pub(super) fn build(&self) -> Vec<u8> {
+            self.build_version(FORMAT_VERSION)
+        }
+
+        fn build_version(&self, version: u16) -> Vec<u8> {
             let mut body: Vec<u8> = Vec::new();
             let push = |body: &mut Vec<u8>, data: &[u8]| -> Section {
                 let off = HEADER_LEN + body.len();
@@ -1019,8 +1040,8 @@ mod tests {
                 flags |= FLAG_HAS_ISOTONIC;
             }
             let hash = fnv1a64(&schema_descriptor(
+                version,
                 self.caller_input_width,
-                self.declared_ids.len() as u32,
                 (self.tree_offsets.len() - 1) as u32,
                 self.nodes.len() as u32,
                 self.clip,
@@ -1029,7 +1050,7 @@ mod tests {
             ));
             let mut h = vec![0u8; HEADER_LEN];
             h[0..4].copy_from_slice(&MAGIC);
-            h[4..6].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
+            h[4..6].copy_from_slice(&version.to_le_bytes());
             h[6..8].copy_from_slice(&flags.to_le_bytes());
             h[8..16].copy_from_slice(&hash.to_le_bytes());
             h[16..20].copy_from_slice(&self.caller_input_width.to_le_bytes());
@@ -1052,6 +1073,61 @@ mod tests {
             h.extend_from_slice(&body);
             h
         }
+    }
+
+    #[test]
+    fn f32_contract_rounds_before_scaler_and_preserves_legacy_behavior() {
+        let mut b = Builder::single_stump(3, 0.25, -5.0, 5.0);
+        b.mean[0] = 1.0;
+        b.scale[0] = 2.0_f64.powi(-24);
+        let legacy = CorruptionHead::from_bytes(&b.build()).unwrap();
+        let head = CorruptionHead::from_bytes(&b.build_version(F32_INPUT_VERSION)).unwrap();
+        let mut row = [0.0_f64; 8];
+        row[3] = 1.0 + 2.0_f64.powi(-25);
+        // This perturbation vanishes in f32 BEFORE subtraction. Rounding the
+        // standardized 0.5 instead would retain the wrong branch and fire.
+        assert_eq!(legacy.decision_function(&row).unwrap(), 5.0);
+        assert_eq!(head.decision_function(&row).unwrap(), -5.0);
+        assert!(legacy.probability_f64(&row).unwrap() > legacy.deadband());
+        assert!(head.probability_f64(&row).unwrap() < head.deadband());
+        for value in [
+            1.0,
+            row[3],
+            1.0 + 2.0_f64.powi(-24),
+            1.0 + 2.0_f64.powi(-23),
+            -1.0,
+            f64::NAN,
+            f64::INFINITY,
+        ] {
+            row[3] = value;
+            let stored = row.map(|x| x as f32);
+            let widened = stored.map(f64::from);
+            assert_eq!(
+                head.decision_function(&row).unwrap(),
+                legacy.decision_function(&widened).unwrap()
+            );
+            assert_eq!(
+                head.probability_f64(&row).unwrap(),
+                head.probability(&stored).unwrap()
+            );
+            assert_eq!(head.score_f64(&row).unwrap(), head.score(&stored).unwrap());
+        }
+    }
+
+    #[test]
+    fn input_precision_version_is_hash_bound_and_unknown_versions_refuse() {
+        let b = Builder::single_stump(3, 0.5, -2.0, 7.0);
+        let mut bytes = b.build();
+        bytes[4..6].copy_from_slice(&F32_INPUT_VERSION.to_le_bytes());
+        assert!(matches!(
+            CorruptionHead::from_bytes(&bytes),
+            Err(CorruptionHeadError::SchemaHashMismatch { .. })
+        ));
+        bytes[4..6].copy_from_slice(&3_u16.to_le_bytes());
+        assert!(matches!(
+            CorruptionHead::from_bytes(&bytes),
+            Err(CorruptionHeadError::UnsupportedVersion { got: 3, .. })
+        ));
     }
 
     #[test]

@@ -4,6 +4,19 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
+Latest September 8 continuation establishes the missing numerical release
+contract at the top of [MODEL_SELECTION_SCORECARD](docs/MODEL_SELECTION_SCORECARD.md).
+It repairs the head's precision boundary with explicit ZCTH v2 f32 inputs;
+v1 behavior and all fitted numeric sections remain unchanged. The cost-4
+training-only replay now has exact raw/probability/composed-score equality
+on all 9,036 pixel comparisons and exact sklearn/Rust parity on 8,213 unique
+rows. Accuracy still fails: three honest calibration JXL outputs are lowered.
+No validation was evaluated and no model qualifies. See
+[precision record](benchmarks/corruption_input_precision_2026-09-08.md).
+Next corruption work is broader admitted honest coverage, especially legitimate
+near-lossless JXL across independent source families; repeating cost fits or
+retuning validation thresholds cannot close that gap.
+
 Latest user direction: **keep the corruption head in D's existing feature
 regime**. A new f0..227 HGB head is fully Rust-servable without expanding image
 extraction. All three seeds detect every tested non-inert RGB swap and 99.57%
@@ -19,7 +32,8 @@ Remaining work, in order:
 
 1. Improve the D-regime corruption head's honest-output protection with broader
    admitted honest codec/chroma/tone examples and source coverage. Resolve the
-   tree's training/stored-f32 versus pixel-feature precision boundary. Preserve
+   tree's training/stored-f32 versus pixel-feature precision boundary (now
+   resolved for newly exported v2 heads; preserve v1 artifacts). Preserve
    fixed safety bars and full Rust evaluation. The completed cost sweep chose
    no arm; do not tune its failed arms on validation or expand D's extraction.
 2. Repair base-model identity, near-lossless and codec-floor preferences using
