@@ -451,6 +451,41 @@ hide the latency. The recurrence was never latency-bound.
 Not selected. Kept in tree because it is the only construction that makes
 locality precision-independent, which is what any f32 variant would need.
 
+### Which moments need the f64? (per-moment ablation)
+
+The four moments have very different magnitudes — `a`, `b` and `a^2+b^2` are
+order 0.5 while `(a-b)^2` is order 1e-6 on near-lossless content — so their f32
+drift differs by orders of magnitude and they need not share a width. Bit `k`
+set means moment `k` accumulated in f32, sliding recurrence, direct form:
+
+| mask | moved | peak abs delta | max err vs f64 windows |
+|---|---:|---:|---:|
+| `0001` source mean `a` | **0** | 0 | 3.357e-4 |
+| `0010` distorted mean `b` | 23,186 | 7.614e-6 | 3.487e-4 |
+| `0100` `a^2+b^2` | 29,114 | 9.358e-6 | 4.511e-4 |
+| `1000` error `(a-b)^2` | 7,533 | **5.867e-8** | **4.343e-7** |
+| `1011` (only `a^2+b^2` in f64) | 26,166 | 1.118e-5 | 4.059e-4 |
+| `1001` source mean + error | 7,482 | 5.867e-8 | 3.355e-4 |
+
+Two things to read carefully:
+
+- **The `0001` zero is CONDITIONAL, not free.** The reference plane is identical
+  in both phases of this measurement, so drift in the source-side accumulator
+  is common-mode and cancels in the comparison. That property does hold for the
+  steering use case — one reference, many distorted candidates — but it buys
+  locality only, and costs accuracy (3.357e-4).
+- **The error moment is nearly free numerically but not exactly local.** In f32
+  it moves 7,533 signals at a peak of 5.867e-8 — 9,000x below what ships today
+  (5.298e-4) — while keeping f64-grade accuracy (4.343e-7).
+
+So half the moments could be f32 IF "local" is defined as bounded below the f32
+output's own noise rather than exactly zero bits. That is a change to the
+acceptance bar and a product decision, not an implementation one; it is
+recorded here, not taken. The distorted mean and `a^2+b^2` need f64 either way.
+
+**Net: there is no cheap sliding kernel.** Per-moment precision does not unlock
+one.
+
 ### Where the cost actually is
 
 Three things have now been measured and none of them is the cost:

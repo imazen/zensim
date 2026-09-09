@@ -217,7 +217,11 @@ pub(crate) fn ablation_plane(
     height: usize,
     radius: usize,
     form: SsimLumaForm,
-    f32_accum: bool,
+    // Bit k set => moment k accumulates in f32. The four moments have very
+    // different magnitudes — `a`, `b` and `a^2+b^2` are order 0.5 while
+    // `(a-b)^2` is order 1e-6 on near-lossless content — so their f32 drift
+    // differs by orders of magnitude and they need not share a width.
+    f32_mask: u8,
     direct_error: bool,
     // Re-seed the recurrence exactly every `reset` positions (0 = never).
     // The "periodic stability reset": it does NOT make the sum a function of
@@ -225,7 +229,15 @@ pub(crate) fn ablation_plane(
     // instead of the whole row/column.
     reset: usize,
 ) -> Vec<f32> {
-    let r = |x: f64| if f32_accum { x as f32 as f64 } else { x };
+    let rk = |k: usize, x: f64| {
+        if f32_mask & (1 << k) != 0 {
+            x as f32 as f64
+        } else {
+            x
+        }
+    };
+    // Non-moment arithmetic (the final expression) follows moment 0.
+    let r = |x: f64| rk(0, x);
     let diameter = radius * 2 + 1;
     let rad = radius as isize;
     let mirror = |i: isize, len: usize| {
@@ -239,19 +251,19 @@ pub(crate) fn ablation_plane(
         let a = src[y * width + x] as f64;
         let b = dst[y * width + x] as f64;
         let fourth = if direct_error {
-            let e = r(a - b);
-            r(e * e)
+            let e = rk(3, a - b);
+            rk(3, e * e)
         } else {
-            r(a * b)
+            rk(3, a * b)
         };
-        [a, b, r(r(a * a) + r(b * b)), fourth]
+        [a, b, rk(2, rk(2, a * a) + rk(2, b * b)), fourth]
     };
     let horizontal = |y: usize, output: &mut [[f64; 4]]| {
         let mut sums = [0.0f64; 4];
         for dx in -rad..=rad {
             let m = at(mirror(dx, width), y);
             for k in 0..4 {
-                sums[k] = r(sums[k] + m[k]);
+                sums[k] = rk(k, sums[k] + m[k]);
             }
         }
         for (x, cell) in output.iter_mut().enumerate() {
@@ -270,7 +282,7 @@ pub(crate) fn ablation_plane(
             let rem = at(mirror(x as isize - rad, width), y);
             if add != rem {
                 for k in 0..4 {
-                    sums[k] = r(r(sums[k] + add[k]) - rem[k]);
+                    sums[k] = rk(k, rk(k, sums[k] + add[k]) - rem[k]);
                 }
             }
         }
@@ -283,7 +295,7 @@ pub(crate) fn ablation_plane(
         horizontal(y, ring);
         for (sum, add) in vertical.iter_mut().zip(ring) {
             for k in 0..4 {
-                sum[k] = r(sum[k] + add[k]);
+                sum[k] = rk(k, sum[k] + add[k]);
             }
         }
     }
@@ -327,7 +339,7 @@ pub(crate) fn ablation_plane(
                 *sum = [0.0; 4];
                 for row in 0..diameter {
                     for k in 0..4 {
-                        sum[k] = r(sum[k] + rows[row * width + x][k]);
+                        sum[k] = rk(k, sum[k] + rows[row * width + x][k]);
                     }
                 }
             }
@@ -335,13 +347,13 @@ pub(crate) fn ablation_plane(
         let ring = &mut rows[head * width..(head + 1) * width];
         for (sum, rem) in vertical.iter_mut().zip(ring.iter()) {
             for k in 0..4 {
-                sum[k] = r(sum[k] - rem[k]);
+                sum[k] = rk(k, sum[k] - rem[k]);
             }
         }
         horizontal(mirror(y as isize + rad + 1, height), ring);
         for (sum, add) in vertical.iter_mut().zip(ring.iter()) {
             for k in 0..4 {
-                sum[k] = r(sum[k] + add[k]);
+                sum[k] = rk(k, sum[k] + add[k]);
             }
         }
         head = (head + 1) % diameter;

@@ -7357,25 +7357,34 @@ mod tests {
             "arm", "moved", "peak |d|", "max err vs f64ref"
         );
         let mut shipped_moved = usize::MAX;
-        for (f32_accum, direct, tiled, reset) in [
-            (false, true, false, 0),
-            (true, true, false, 0),
-            (false, false, false, 0),
-            (true, false, false, 0),
+        for (f32_mask, direct, tiled, reset) in [
+            (0u8, true, false, 0usize),
+            (0b1111, true, false, 0),
+            (0, false, false, 0),
+            (0b1111, false, false, 0),
+            // WHICH moments need the f64? The four have very different
+            // magnitudes: a, b and a^2+b^2 are order 0.5 while (a-b)^2 is
+            // order 1e-6 on near-lossless content, so their f32 drift differs
+            // by orders of magnitude. One f32 moment at a time, then the
+            // complement of the cheapest useful split.
+            (0b0001, true, false, 0),
+            (0b0010, true, false, 0),
+            (0b0100, true, false, 0),
+            (0b1000, true, false, 0),
+            (0b1011, true, false, 0),
+            (0b1001, true, false, 0),
             // Periodic stability resets on the CHEAP sliding recurrence: one
             // pass, f32, drift bounded to a tile instead of the whole row.
-            (true, true, false, 64),
-            (true, true, false, 32),
-            (true, true, false, 16),
-            (true, true, false, 8),
-            (true, true, false, 4),
+            (0b1111, true, false, 64),
+            (0b1111, true, false, 16),
+            (0b1111, true, false, 4),
             // The tiled (van Herk) decomposition: with tiles of exactly the
             // window diameter, every window sum reads only its own samples, so
             // locality should stop being a numerical property — f32 should be
             // exactly local too.
-            (false, true, true, 0),
-            (true, true, true, 0),
-            (true, false, true, 0),
+            (0, true, true, 0),
+            (0b1111, true, true, 0),
+            (0b1111, false, true, 0),
         ] {
             let (mut moved, mut peak, mut worst_err) = (0usize, 0.0f64, 0.0f64);
             for (i, (b, c)) in base.iter().zip(&after).enumerate() {
@@ -7384,11 +7393,18 @@ mod tests {
                 let arm = |d: &[f32]| {
                     if tiled {
                         crate::ssim_form::ablation_plane_tiled(
-                            r, d, *sw, *sh, radius, form, f32_accum, direct,
+                            r,
+                            d,
+                            *sw,
+                            *sh,
+                            radius,
+                            form,
+                            f32_mask != 0,
+                            direct,
                         )
                     } else {
                         crate::ssim_form::ablation_plane(
-                            r, d, *sw, *sh, radius, form, f32_accum, direct, reset,
+                            r, d, *sw, *sh, radius, form, f32_mask, direct, reset,
                         )
                     }
                 };
@@ -7398,7 +7414,7 @@ mod tests {
                 // WHOLE-PLANE `stable_ssim_plane`, not against `ret.sd`:
                 // the strip walk re-seeds the recurrence per strip and
                 // legitimately differs by ~6e-11 (measured separately).
-                if !f32_accum && direct && !tiled && reset == 0 {
+                if f32_mask == 0 && direct && !tiled && reset == 0 {
                     let mut want = vec![0.0f32; sw * sh];
                     let mut scratch = crate::ssim_form::StableSsimScratch::default();
                     crate::ssim_form::stable_ssim_plane(
@@ -7431,7 +7447,11 @@ mod tests {
             }
             let label = format!(
                 "{} {}, {}",
-                if f32_accum { "f32" } else { "f64" },
+                match f32_mask {
+                    0 => "f64   ".to_string(),
+                    0b1111 => "f32   ".to_string(),
+                    m => format!("f32:{m:04b}"),
+                },
                 if tiled {
                     "TILED".to_string()
                 } else if reset == 0 {
@@ -7446,7 +7466,7 @@ mod tests {
                 }
             );
             println!("{label:<30}{moved:>10}{peak:>14.3e}{worst_err:>16.3e}");
-            if !f32_accum && direct && !tiled && reset == 0 {
+            if f32_mask == 0 && direct && !tiled && reset == 0 {
                 shipped_moved = moved;
             }
         }
