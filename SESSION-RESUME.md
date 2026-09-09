@@ -4,6 +4,20 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
+Latest continuation [isolates SSIM numerical drift](benchmarks/nonmax_diagnosis_2026-09-08.md).
+The 23-cell family diagnostic saves 6,812 pixel interventions and per-feature
+changes with all old fields exact. Replacing only SSIM's predicted contribution
+resolves all 15 spatial failures; edge resolves two, other families none.
+A direct f64 reference on the exact f32 XYB pyramid then proves production
+SSIM signals change outside the edited pixels' mathematical window support.
+In one screenshot the SSIM linear gain is -0.093813 in production versus
++0.000120 in the reference. Next repair canonical SSIM moment precision and
+locality with an explicit feature-era contract, measure its cost, re-extract
+and validate the affected candidate. Do not fit maps to floating-point drift,
+retune maxima, or relabel old bakes/features. The current spatial screen stays
+FAILED; no product arithmetic or default model changed. Evidence is in the
+September 8 `nonmax-diagnosis` delivery; all other product gates remain open.
+
 Latest continuation [adds finite max rectangle estimates](benchmarks/max_attribution_2026-09-08.md).
 `ScoredAttribution::refinement_gain` handles max ties and source footprints;
 its separate coverage report is empty on all 792 fixed blend/F/D audits.

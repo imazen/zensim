@@ -45,6 +45,10 @@
 //! `--ensemble <comma-separated paths> --ensemble-weights <comma-separated weights>`
 //! serves the complete calibrated blend through the same Rust surface. `--json`
 //! writes a new per-block report with input/model hashes and work counts.
+//! With `ZENSIM_ATTR_DIAG=1`, candidates with zero sensitivity above f227
+//! also retain per-feature linear deltas and six-family density decomposition.
+//! The saved-data analysis reports one-family oracle substitutions; these are
+//! diagnostic only. Four extra basic-family map calls are counted separately.
 //! M3f measures the non-additive `ScoredAttribution::refinement_gain`; M3a
 //! remains the density-only control. Neither establishes an encoder RD gain.
 
@@ -342,10 +346,57 @@ fn analyze_refinement(input: &str, output: &str) {
         .zip(&predicted_max)
         .map(|((total, old), new)| total - old + new)
         .collect();
-    let report = serde_json::json!({"schema":"zensim-refinement-oracle-diagnostic-v1",
+    let mut report = serde_json::json!({"schema":"zensim-refinement-oracle-diagnostic-v1",
         "input_sha256":sha(&bytes),"blocks":blocks.len(),"m2":value["m2"],"m3a":value["m3a"],"m3f":value["m3f"],
         "oracle_max_srocc":spearman(&oracle_max,&actual),"oracle_nonmax_srocc":spearman(&oracle_nonmax,&actual),
         "new_pixel_comparisons":0,"deployable":false});
+    if !value["family_names"].is_null() {
+        assert_eq!(
+            value["family_names"],
+            serde_json::json!(["ssim", "edge", "mse", "hf", "l8", "max"])
+        );
+        let mut observed = vec![Vec::new(); 6];
+        let mut predicted = vec![Vec::new(); 6];
+        let mut residual_max = [0.0f64; 2];
+        for (i, b) in blocks.iter().enumerate() {
+            let obs = b["family_observed_linear_gain"]
+                .as_array()
+                .expect("observed families");
+            let pred = b["family_predicted_gain"]
+                .as_array()
+                .expect("predicted families");
+            assert_eq!(obs.len(), 6);
+            assert_eq!(pred.len(), 6);
+            for f in 0..6 {
+                observed[f].push(number(&obs[f]));
+                predicted[f].push(number(&pred[f]));
+            }
+            for (j, (sum, total)) in [
+                (obs.iter().map(number).sum::<f64>(), linear[i]),
+                (pred.iter().map(number).sum::<f64>(), refinement[i]),
+            ]
+            .iter()
+            .enumerate()
+            {
+                let residual = (sum - total).abs();
+                residual_max[j] = residual_max[j].max(residual);
+                assert!(
+                    residual <= 1e-6 + 1e-5 * sum.abs().max(total.abs()),
+                    "family reconstruction mismatch"
+                );
+            }
+        }
+        let families: Vec<_> = (0..6).map(|f| {
+            let oracle: Vec<f64> = (0..blocks.len()).map(|i| refinement[i] - predicted[f][i] + observed[f][i]).collect();
+            serde_json::json!({"family":value["family_names"][f],
+                "oracle_srocc":spearman(&oracle, &actual),
+                "predicted_vs_observed_srocc":spearman(&predicted[f], &observed[f]),
+                "observed_vs_score_srocc":spearman(&observed[f], &actual),
+                "squared_error":predicted[f].iter().zip(&observed[f]).map(|(a,b)| (a-b).powi(2)).sum::<f64>()})
+        }).collect();
+        report["families"] = serde_json::json!(families);
+        report["family_reconstruction_max_abs"] = serde_json::json!(residual_max);
+    }
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -354,6 +405,17 @@ fn analyze_refinement(input: &str, output: &str) {
         .expect("new JSON report");
     writeln!(file, "{}", serde_json::to_string_pretty(&report).unwrap())
         .expect("write JSON report");
+}
+
+/// Basic-156 scale/channel layout: SSIM, edge ratio, MSE, then HF ratios.
+#[cfg(feature = "custom-profiles")]
+fn basic_family(k: usize) -> usize {
+    match k % 13 {
+        0..=2 => 0,
+        3..=8 => 1,
+        9 => 2,
+        _ => 3,
+    }
 }
 
 /// Per-block sums of the diffmap and of pixel SSE (the codec default selector).
@@ -800,6 +862,26 @@ fn run_bake_mode(
         .expect("attribution density");
     let ms_attr = t_attr.elapsed().as_secs_f64() * 1e3;
     let attr_block_basic = attr.block_sums(block);
+    let attr_diag = std::env::var("ZENSIM_ATTR_DIAG").as_deref() == Ok("1");
+    // Diagnostic-only decomposition through the existing density surface.
+    // Save feature deltas below so later subdivisions need no pixel rescoring.
+    let family_density: Vec<Vec<f64>> = if attr_diag && s.iter().skip(228).all(|&v| v == 0.0) {
+        (0..4)
+            .map(|family| {
+                let masked: Vec<f64> = s_basic
+                    .iter()
+                    .enumerate()
+                    .map(|(k, &v)| if basic_family(k) == family { v } else { 0.0 })
+                    .collect();
+                z_map
+                    .compute_attribution_density(&rs, &dist_slice, &masked)
+                    .expect("family attribution")
+                    .block_sums(block)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     #[cfg(feature = "feature-regime-v2")]
     let attr_block = base_spatial.attribution().block_sums(block);
     #[cfg(not(feature = "feature-regime-v2"))]
@@ -833,7 +915,6 @@ fn run_bake_mode(
     let mut lin_pred = vec![0f64; nblocks];
     // ZENSIM_ATTR_DIAG=1: class-restricted TRUE linearizations, to decompose
     // an M3a gap into (mass outside basic) vs (density approximation error).
-    let attr_diag = std::env::var("ZENSIM_ATTR_DIAG").as_deref() == Ok("1");
     let mut lin_basic = vec![0f64; nblocks];
     let mut lin_mse = vec![0f64; nblocks];
     let mut lin_ssim = vec![0f64; nblocks];
@@ -876,6 +957,34 @@ fn run_bake_mode(
             block_records.push(serde_json::json!({"bounds":[x0,y0,x1,y1],"score_delta":delta_s[b],
                 "linearized_gain":lin_pred[b],"density_gain":attr_block[b],"refinement_gain":refinement_block[b],
                 "max_observed_linear_gain":max_lin[b],"max_predicted_gain":refinement_block[b]-attr_block[b]}));
+            if !family_density.is_empty() {
+                let feature_linear_deltas: Vec<f64> = (0..n_in)
+                    .map(|k| s[k] * (rfeats[k] - base_feats[k]))
+                    .collect();
+                let mut observed = [0.0f64; 6];
+                for (k, &d) in feature_linear_deltas.iter().take(228).enumerate() {
+                    let family = if k < 156 {
+                        basic_family(k)
+                    } else if (k - 156) % 6 >= 3 {
+                        4
+                    } else {
+                        5
+                    };
+                    observed[family] += d;
+                }
+                let predicted = [
+                    family_density[0][b],
+                    family_density[1][b],
+                    family_density[2][b],
+                    family_density[3][b],
+                    attr_block[b] - attr_block_basic[b],
+                    refinement_block[b] - attr_block[b],
+                ];
+                let record = block_records.last_mut().unwrap();
+                record["family_observed_linear_gain"] = serde_json::json!(observed);
+                record["family_predicted_gain"] = serde_json::json!(predicted);
+                record["feature_linear_deltas"] = serde_json::json!(feature_linear_deltas);
+            }
             if attr_diag {
                 for k in 0..n_in.min(156) {
                     let d = s[k] * (rfeats[k] - base_feats[k]);
@@ -1139,6 +1248,12 @@ fn run_bake_mode(
             result["refinement_unsupported_ids"] =
                 serde_json::json!(base_spatial.unsupported_refinement_feature_ids());
             result["has_corruption_gate"] = serde_json::json!(base_spatial.has_corruption_gate());
+        }
+        if !family_density.is_empty() {
+            result["family_names"] = serde_json::json!(["ssim", "edge", "mse", "hf", "l8", "max"]);
+            result["diagnostic_family_maps"] = serde_json::json!(4);
+            result["base_features"] = serde_json::json!(&base_feats[..n_in]);
+            result["base_sensitivities"] = serde_json::json!(&s[..n_in]);
         }
         // create_new protects immutable experiment output from accidental reruns.
         use std::io::Write;

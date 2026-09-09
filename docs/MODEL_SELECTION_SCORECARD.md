@@ -39,6 +39,15 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+Later September 8 SSIM diagnosis: 6,812 additional pixel interventions on
+15 failed training cells and eight controls isolate SSIM: its oracle
+substitution resolves all 15 failures. The direct f64 window reference then
+confirms nonlocal production rounding drift on the same f32 XYB pyramids.
+This is an extraction-precision defect to repair with explicit feature-era
+provenance before more spatial fitting. No arithmetic changes or new model
+qualification occur; the current spatial screen remains FAIL.
+[Family decomposition and numerical evidence](../benchmarks/nonmax_diagnosis_2026-09-08.md).
+
 Later September 8 finite max queries: complete local refinement coverage and
 exact old score/feature/density replay pass on 792 candidate audits. The
 25,248 actual pixel interventions improve mean spatial rank to

@@ -6672,10 +6672,17 @@ mod tests {
     /// content do, which is why the full-parquet scan found it and row-group-0
     /// did not.
     ///
+    /// Precision mode: set `ZENSIM_SSIM_PRECISION_PROBE` to a registered
+    /// coherence-case JSON; see `benchmarks/nonmax_diagnosis_2026-09-08.md`.
+    ///
     /// `ZENSIM_DUMP_IMG=<png> [ZENSIM_DUMP_IMG2=<png> …] cargo test -p zensim --release dump_ssim_moment_explosion -- --ignored --nocapture`
     #[test]
     #[ignore = "needs specific images; set ZENSIM_DUMP_IMG (comma-separated) and run --ignored"]
     fn dump_ssim_moment_explosion() {
+        if let Ok(path) = std::env::var("ZENSIM_SSIM_PRECISION_PROBE") {
+            dump_ssim_precision_from_coherence(&path);
+            return;
+        }
         let list = std::env::var("ZENSIM_DUMP_IMG")
             .expect("set ZENSIM_DUMP_IMG to comma-separated image paths");
         let config = ZensimConfig {
@@ -6819,6 +6826,220 @@ mod tests {
                 .collect();
             println!("| {short} | {:.4e} | {} | |", best.0, best.1);
         }
+    }
+
+    /// The existing SSIM diagnostic's precision mode. This is an independent
+    /// direct-window f64 reference, never a serving or training implementation.
+    /// It holds the actual f32 XYB pyramid fixed to isolate moment arithmetic.
+    fn dump_ssim_precision_from_coherence(path: &str) {
+        assert_eq!(
+            crate::ssim_form::active_luma_form(),
+            crate::ssim_form::SsimLumaForm::Ssim2Legacy,
+            "precision reference requires legacy SSIM arithmetic"
+        );
+        let spec: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let output = spec["output"].as_str().unwrap();
+        assert!(!std::path::Path::new(output).exists(), "immutable output");
+        let mut reports = Vec::new();
+        for case in spec["cases"].as_array().unwrap() {
+            let read = |key: &str| {
+                let im = image::open(case[key].as_str().unwrap()).unwrap().to_rgb8();
+                let dims = (im.width() as usize, im.height() as usize);
+                (im.pixels().map(|p| p.0).collect::<Vec<_>>(), dims)
+            };
+            let (src, (w, h)) = read("reference");
+            let (dst, dims) = read("distorted");
+            assert_eq!(dims, (w, h));
+            let bounds: Vec<usize> = case["bounds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_u64().unwrap() as usize)
+                .collect();
+            let saved: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(case["coherence"].as_str().unwrap()).unwrap(),
+            )
+            .unwrap();
+            let saved_block = saved["blocks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|b| b["bounds"] == case["bounds"])
+                .unwrap();
+            let z = crate::Zensim::new(crate::ZensimProfile::codec_target());
+            let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
+            let params = z.profile().params();
+            let config = crate::metric::config_from_params(params, false);
+            assert_eq!(config.blur_passes, 1);
+            let radius = config.blur_radius as isize;
+            let mut refined = dst.clone();
+            for y in bounds[1]..bounds[3] {
+                for x in bounds[0]..bounds[2] {
+                    refined[y * w + x] = src[y * w + x];
+                }
+            }
+            let mut phases = Vec::new();
+            for pixels in [&dst, &refined] {
+                let mut planes = Vec::new();
+                compute_zensim_streaming_with_ref_and_attr_planes(
+                    &pre,
+                    &RgbSlice::new(pixels, w, h),
+                    &config,
+                    params.weights,
+                    |scale, stats, r, d, ret, sw, sh| {
+                        for c in 0..3 {
+                            let n = sw * sh;
+                            let mut stable = Vec::with_capacity(n);
+                            let mut raw_agreement = 0.0f64;
+                            let mut samples = Vec::new();
+                            for y in 0..sh {
+                                for x in 0..sw {
+                                    samples.clear();
+                                    for dy in -radius..=radius {
+                                        for dx in -radius..=radius {
+                                            let xx = crate::metric::reflect_index(
+                                                (x as isize + dx).unsigned_abs(),
+                                                sw,
+                                            );
+                                            let yy = crate::metric::reflect_index(
+                                                (y as isize + dy).unsigned_abs(),
+                                                sh,
+                                            );
+                                            samples.push((
+                                                r[c][yy * sw + xx] as f64,
+                                                d[c][yy * sw + xx] as f64,
+                                            ));
+                                        }
+                                    }
+                                    let count = samples.len() as f64;
+                                    let m1 = samples.iter().map(|p| p.0).sum::<f64>() / count;
+                                    let m2 = samples.iter().map(|p| p.1).sum::<f64>() / count;
+                                    let md = samples.iter().map(|p| p.0 - p.1).sum::<f64>() / count;
+                                    let v1 =
+                                        samples.iter().map(|p| (p.0 - m1).powi(2)).sum::<f64>()
+                                            / count;
+                                    let v2 =
+                                        samples.iter().map(|p| (p.1 - m2).powi(2)).sum::<f64>()
+                                            / count;
+                                    let ve = samples
+                                        .iter()
+                                        .map(|p| (p.0 - p.1 - md).powi(2))
+                                        .sum::<f64>()
+                                        / count;
+                                    let c2 = crate::ssim_form::C2 as f64;
+                                    let sd = md * md + (1.0 - md * md) * ve / (v1 + v2 + c2);
+                                    let ssq =
+                                        samples.iter().map(|p| p.0 * p.0 + p.1 * p.1).sum::<f64>()
+                                            / count;
+                                    let s12 =
+                                        samples.iter().map(|p| p.0 * p.1).sum::<f64>() / count;
+                                    let raw = 1.0
+                                        - (1.0 - (m1 - m2).powi(2)) * (2.0 * (s12 - m1 * m2) + c2)
+                                            / (ssq - m1 * m1 - m2 * m2 + c2);
+                                    raw_agreement = raw_agreement.max((sd - raw).abs());
+                                    stable.push(sd.max(0.0));
+                                }
+                            }
+                            assert!(raw_agreement < 1e-9, "independent f64 algebra mismatch");
+                            let pooled =
+                                [stats.ssim[c * 2], stats.ssim[c * 2 + 1], stats.ssim_2nd[c]];
+                            planes.push((
+                                scale,
+                                c,
+                                sw,
+                                sh,
+                                d[c][..n].to_vec(),
+                                ret.sd[c][..n].to_vec(),
+                                stable,
+                                pooled,
+                                raw_agreement,
+                            ));
+                        }
+                    },
+                );
+                phases.push(planes);
+            }
+            let mut rows = Vec::new();
+            let mut canonical_gain = 0.0;
+            let mut stable_gain = 0.0;
+            for (base, changed) in phases[0].iter().zip(&phases[1]) {
+                let (scale, c, sw, sh, bd, bs, bf, bpool, agreement) = base;
+                let (_, _, _, _, cd, cs, cf, cpool, _) = changed;
+                let mut outside_changed = 0usize;
+                let mut outside_max = 0.0f64;
+                let mut outside_stable_max = 0.0f64;
+                for y in 0..*sh {
+                    for x in 0..*sw {
+                        let mut supported = false;
+                        for dy in -radius..=radius {
+                            for dx in -radius..=radius {
+                                let xx = crate::metric::reflect_index(
+                                    (x as isize + dx).unsigned_abs(),
+                                    *sw,
+                                );
+                                let yy = crate::metric::reflect_index(
+                                    (y as isize + dy).unsigned_abs(),
+                                    *sh,
+                                );
+                                supported |= bd[yy * sw + xx] != cd[yy * sw + xx];
+                            }
+                        }
+                        if !supported {
+                            let i = y * sw + x;
+                            outside_changed += usize::from(bs[i] != cs[i]);
+                            outside_max = outside_max.max((bs[i] as f64 - cs[i] as f64).abs());
+                            outside_stable_max = outside_stable_max.max((bf[i] - cf[i]).abs());
+                        }
+                    }
+                }
+                let pool = |v: &[f64]| {
+                    let n = v.len() as f64;
+                    [
+                        v.iter().sum::<f64>() / n,
+                        (v.iter().map(|x| x.powi(4)).sum::<f64>() / n).sqrt().sqrt(),
+                        (v.iter().map(|x| x * x).sum::<f64>() / n).sqrt(),
+                    ]
+                };
+                let stable_before = pool(bf);
+                let stable_after = pool(cf);
+                for j in 0..3 {
+                    let k = scale * 39 + c * 13 + j;
+                    // JSON numeric parsing may round the serialized f64 by
+                    // one ULP. This is a reconstruction check, not a feature
+                    // era admission or a bit-parity claim.
+                    assert!(
+                        (bpool[j] - saved["base_features"][k].as_f64().unwrap()).abs() < 1e-12,
+                        "canonical base SSIM mismatch f{k}"
+                    );
+                    let sensitivity = saved["base_sensitivities"][k].as_f64().unwrap();
+                    let observed = sensitivity * (cpool[j] - bpool[j]);
+                    assert!(
+                        (observed - saved_block["feature_linear_deltas"][k].as_f64().unwrap())
+                            .abs()
+                            < 1e-12,
+                        "canonical intervention SSIM mismatch"
+                    );
+                    canonical_gain += observed;
+                    stable_gain += sensitivity * (stable_after[j] - stable_before[j]);
+                }
+                assert_eq!(outside_stable_max, 0.0, "direct reference locality");
+                rows.push(serde_json::json!({"scale":scale,"channel":c,"width":sw,"height":sh,
+                    "canonical_base":bpool,"canonical_refined":cpool,"stable_base":stable_before,"stable_refined":stable_after,
+                    "outside_support_changed_signals":outside_changed,"outside_support_max_abs":outside_max,
+                    "outside_support_f64_max_abs":outside_stable_max,"independent_f64_agreement_max_abs":agreement,
+                    "base_signal_max_abs_error":bs.iter().zip(bf).map(|(&a,&b)| (a as f64-b).abs()).fold(0.0f64,f64::max)}));
+            }
+            reports.push(serde_json::json!({"case":case,"canonical_ssim_linear_gain":canonical_gain,"stable_ssim_linear_gain":stable_gain,"planes":rows}));
+        }
+        let report = serde_json::json!({"schema":"zensim-ssim-precision-diagnostic-v1","deployable":false,"cases":reports});
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(output)
+            .unwrap();
+        use std::io::Write;
+        writeln!(file, "{}", serde_json::to_string_pretty(&report).unwrap()).unwrap();
     }
 
     // ── E-JBU: guided mass-conserving redistribution (kernel-level) ─────────
