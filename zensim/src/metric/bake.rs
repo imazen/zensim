@@ -890,7 +890,13 @@ fn check_deadband(t: f64) -> Result<(), ZensimError> {
 #[cfg(test)]
 mod revision_contract_tests {
     use crate::feature_defs::FormulaRevision;
-    use crate::ssim_form::{SsimLumaForm, run_at_revision};
+    use crate::ssim_form::SsimLumaForm;
+    // Everything that scores PIXELS through a bake needs `feature-regime-v2`:
+    // `bake_declaring` fixes a v2 extraction requirement, so `BakeScorer::new`
+    // refuses it without the feature and the pixel-path tests are gated.
+    #[cfg(feature = "feature-regime-v2")]
+    use crate::ssim_form::run_at_revision;
+    #[cfg(feature = "feature-regime-v2")]
     use crate::{RgbSlice, ZensimError};
 
     /// A minimal one-input identity bake reading feature `id`, optionally
@@ -915,6 +921,7 @@ mod revision_contract_tests {
         zenpredict_bake::bake_from_json_str(&recipe.to_string()).expect("bake the recipe")
     }
 
+    #[cfg(feature = "feature-regime-v2")]
     fn pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
         let mut src = vec![[200u8, 190, 180]; w * h];
         let mut dst = vec![[200u8, 190, 180]; w * h];
@@ -1079,7 +1086,7 @@ mod revision_contract_tests {
     /// unset, revision disagreement is still refused. Two independent
     /// switches is the whole design: `--all-features` builds — including
     /// CI's — must behave exactly like a product build here.
-    #[cfg(feature = "cross-revision-diagnostic")]
+    #[cfg(all(feature = "cross-revision-diagnostic", feature = "feature-regime-v2"))]
     #[test]
     fn the_diagnostic_bypass_is_inert_without_its_environment_switch() {
         assert!(
@@ -1108,7 +1115,7 @@ mod revision_contract_tests {
     /// capability issue #61 needs to replay an already-fit candidate on a
     /// corrected extraction before any refit; the stderr line is what keeps
     /// such a number attributable in a log.
-    #[cfg(feature = "cross-revision-diagnostic")]
+    #[cfg(all(feature = "cross-revision-diagnostic", feature = "feature-regime-v2"))]
     #[test]
     fn the_diagnostic_bypass_serves_a_mismatched_bake_and_says_so() {
         const SENTINEL: &str = "REV3-CROSS-DIAG-RAN";
