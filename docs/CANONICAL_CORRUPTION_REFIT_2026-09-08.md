@@ -1,5 +1,30 @@
 # Canonical corruption refit — September 8 registration
 
+## Honest native-map coverage — after precision repair, before new fitting
+
+The v2 cost-4 model still lowers three honest near-lossless JXL calibration
+outputs. The retained native target runs contain honest outputs absent from
+the scalar-only fit supplement: both neutral and active JXL/AVIF map arms.
+Their bytes/pixels are not uniformly duplicates of scalar output. Reuse these
+actual bitstreams before generating another codec wave.
+
+Extend the existing build_corruption_corpus.py owner with a strict supplemental
+manifest mode. Select only the eight existing fit origins, both non-scalar arms,
+all 21 JXL distances and 17 AVIF CQ settings: 608 raw attempts. Pin source,
+family, bounds, encoder provenance, bitstream bytes and current v2-capable Rust
+extractor. Independently decode/extract/audit each pair; merge into the existing
+serving input packet with fresh global keys. Deduplicate by source/pixel identity
+through the canonical trainer as before. No new source admission, pixel resize,
+validation encoding or change to the four calibration origins.
+
+Keep D228 features, cost 4, HGB/scaler/calibration settings, f32 contract,
+deadband and seed 4101 unchanged. Train once and run the 12 training origins
+only through the complete Rust surface. Advance only if all existing five bars
+pass on the unchanged calibration origins; otherwise retain the failure and
+move to broader source/geometry coverage, not a threshold or cost sweep. This
+experiment adds honest codec variation; it is not independent-source validation
+or proof of useful spatial steering. No terminal holdout is used.
+
 ## Input-precision repair — later September 8, before implementation
 
 The cost-4 serving audit fails because a tree trained on stored f32 inputs can

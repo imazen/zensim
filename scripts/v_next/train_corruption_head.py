@@ -526,8 +526,10 @@ def canonical_main(argv):
         require(v["reference"] == meta["reference"] and v["distorted"] == meta["distorted"], "audit path join")
         require(not meta["label"] or not v["pixels_identical"], "positive identity label")
         key = (origin, v["width"], v["height"], v["reference_pixels_sha256"], v["distorted_pixels_sha256"])
+        vector = tables[meta["source_table"]].loc[meta["source_row_id"], cols].to_numpy(dtype=np.float32).astype(np.float64)
         if key in unique:
             require(rows[unique[key]]["label"] == meta["label"], "duplicate label conflict")
+            require(np.array_equal(vectors[unique[key]], vector), "duplicate pixels have different features")
             rows[unique[key]]["catalog_families"] = sorted(set(rows[unique[key]]["catalog_families"] + [meta["family"]]))
             continue
         unique[key] = len(rows)
@@ -536,7 +538,7 @@ def canonical_main(argv):
                    reference_pixels_sha256=v["reference_pixels_sha256"],
                    distorted_pixels_sha256=v["distorted_pixels_sha256"], catalog_families=[meta["family"]])
         rows.append(row)
-        vectors.append(tables[meta["source_table"]].loc[meta["source_row_id"], cols].to_numpy(dtype=np.float32).astype(np.float64))
+        vectors.append(vector)
     require(set(owner) == {r["origin"] for r in rows}, "declared origin coverage")
     X = np.stack(vectors); y = np.array([r["label"] for r in rows], dtype=np.int64)
     require(np.isfinite(X).all() and set(y) == {0, 1}, "finite binary training data")

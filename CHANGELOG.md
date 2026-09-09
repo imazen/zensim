@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Add a strict canonical importer for retained honest native JXL/AVIF map-arm
+  outputs. Bind sources/roles/bytes and independently decode through the existing
+  Rust surface. Refuse differing feature vectors for duplicate pixel pairs.
+  The expanded head still fails calibration; record a separate native JXL
+  decoder-contract discrepancy that must be resolved before qualification.
+
 - Add explicitly versioned f32 input semantics for ZCTH corruption heads;
   legacy v1 arithmetic remains unchanged. Canonical training can export v2
   heads with pixel/cache precision parity. Extend the audit with actual served

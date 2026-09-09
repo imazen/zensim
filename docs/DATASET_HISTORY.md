@@ -3785,3 +3785,18 @@ raw/probability/fire/composed-score comparisons. Legacy v1 remains unchanged.
 Calibration still lowers three honest near-lossless JXL outputs and fails the
 fixed screen. No validation/terminal evaluation or new data admission occurs.
 [Precision evidence and remaining accuracy work](../benchmarks/corruption_input_precision_2026-09-08.md).
+
+## 2026-09-08 — honest native-map supplement and decoder-contract finding
+
+Reuse 608 honest JXL/AVIF non-scalar bound outputs on the eight admitted fit
+origins. Current native decoding/extraction adds 402 unique honest pixel pairs;
+calibration and validation inputs remain unchanged. One fixed v2 cost-4 fit
+passes 8,615-row array and 9,644-attempt pixel audits but lowers two honest
+calibration outputs, still FAIL; no validation/terminal scoring.
+
+All 336 JXL current decoded hashes differ from their old native-bound hashes,
+with D score drift up to 2.425 points. All 272 AVIF decoded hashes agree. Keep
+the two JXL decoder contracts distinct; the current training packet uses only
+the canonical decoder. Source inspection suggests U8 dithering versus f32
+plain rounding, but the decoder packages also differ and a controlled causal
+check remains necessary. [Full record](../benchmarks/corruption_honest_map_2026-09-08.md).

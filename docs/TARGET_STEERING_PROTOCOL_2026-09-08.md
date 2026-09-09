@@ -1,5 +1,17 @@
 # Reachable targets and codec steering — September 8, 2026
 
+**Later September 8 decoder-contract finding:** all 336 reused honest JXL
+map-arm bitstreams decode to different pixels in the canonical native extractor
+than in the earlier native target loop. Same frozen D, absolute score drift
+median 0.185 / p95 1.807 / max 2.425. All 272 AVIF counterparts are pixel-exact
+(score differences <=3.8e-6 from f32 reporting). Source paths differ in decoder
+and output quantization: upstream jxl f32+plain rounding versus the canonical
+zenjxl-decoder U8 path with default blue-noise dithering. Establish the exact
+cause with a controlled same-decoder comparison, then use the same declared
+delivered-pixel contract for bounds, runtime comparisons and independent
+qualification. Do not silently change old scores or call their old hit counts
+evidence under a new decoder contract. [Measured rows and provenance](../benchmarks/corruption_honest_map_2026-09-08.md).
+
 User ruling: establish each image's codec range before judging steering; fit
 codec-specific seeds/heuristics on imazen/imazen-26 **training** content; compare
 1, 2 and 3 shots. JXL is the first diffmap integration, with JPEG and WebP also

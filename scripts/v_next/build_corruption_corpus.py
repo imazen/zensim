@@ -347,12 +347,147 @@ def process_ref(ref_path, ref_id, cclass, tmpdir):
                      **{k: pa.array(v) for k, v in meta.items()}})
 
 
+def honest_supplement(a):
+    """Import retained native map-arm bitstreams into the canonical fit packet."""
+    from collections import Counter
+    require(a.nfeat == 372 and a.limit == 0 and a.artifacts_dir,
+            "supplement requires complete 372-column extraction and artifacts directory")
+    root, output = Path(a.artifacts_dir).resolve(), Path(a.out).resolve()
+    require(not root.exists() and not output.exists(), "supplement outputs must be fresh")
+    spec = json.loads(Path(a.supplement_manifest).read_text())
+    require(spec["schema"] == "canonical-honest-map-supplement-v1", "supplement schema")
+    pinned_files = {str(Path(a.supplement_manifest).resolve()): file_sha(a.supplement_manifest)}
+    def pinned(entry):
+        path = str(Path(entry["path"]).resolve())
+        require(file_sha(path) == entry["sha256"], "changed supplement input: " + path)
+        pinned_files[path] = entry["sha256"]
+        return Path(path)
+    fit = json.loads(pinned(spec["base_fit_manifest"]).read_text())
+    require(fit["input_precision"] == "f32" and fit["head_feature_ids"] == list(range(228))
+            and fit["negative_fit_weight"] == 4 and fit["seeds"] == [4101], "supplement recipe mismatch")
+    sources_path, family_path = pinned(spec["sources"]), pinned(spec["family_manifest"])
+    source_manifest, split_sha = canonical_sources(sources_path, family_path)
+    sources = {s["origin"]: s for s in source_manifest["sources"]}
+    origins = fit["origins"]["fit"]
+    require(len(origins) == 8 and set(origins) <= sources.keys(), "supplement fit origins")
+    role_origins = [o for group in fit["origins"].values() for o in group]
+    require(set(fit["origins"]) == {"fit", "calibrate", "evaluate"}
+            and len(role_origins) == len(set(role_origins)), "supplement origin roles overlap")
+    admission = json.loads(pinned(fit["admission"]).read_text())
+    require(admission["complete"] and not admission["unresolved"], "incomplete content admission")
+    require(all(admission["files_sha256"].get(sources[o]["path"]) == sources[o]["sha256"]
+                for o in origins), "supplement source not bound to admission")
+    base_inputs = json.loads(pinned(fit["serving_inputs"]).read_text())
+    base_audit = pinned(fit["serving_audit"])
+    extractor, base = pinned(fit["extractor"]), pinned(fit["base_bake"])
+    require(base_inputs["schema"] == "canonical-corruption-serving-inputs-v1", "base input schema")
+    for path, digest in base_inputs["files_sha256"].items():
+        require(file_sha(path) == digest, "changed base input: " + path)
+    records = base_inputs["records"].copy()
+    require(len({r["index"] for r in records}) == len(records), "duplicate base keys")
+    next_key = max(r["index"] for r in records) + 1
+    added = []
+    require(len(spec["legs"]) == 2 and {l["codec"] for l in spec["legs"]} == {"jxl", "avif"},
+            "supplement requires exactly JXL and AVIF legs")
+    for leg in spec["legs"]:
+        codec = leg["codec"]
+        bounds = pinned(leg["bounds"])
+        calibration = json.loads(pinned(leg["calibration"]).read_text())
+        pinned(leg["encoder_record"])
+        require(calibration["training"] == source_manifest, "native bound source/role mismatch")
+        count = Counter()
+        knobs = set()
+        for line in bounds.open():
+            b = json.loads(line)["bound"]
+            origin, arm = b["origin"], b["arm"]
+            require(origin in sources and arm in ("scalar", "neutral", "active"), "unknown native bound")
+            pos = count[origin, arm]; count[origin, arm] += 1
+            require((origin, arm, b["knob"]) not in knobs, "duplicate native bound knob")
+            knobs.add((origin, arm, b["knob"]))
+            if origin not in origins or arm == "scalar":
+                continue
+            source = sources[origin]
+            bitstream = bounds.parent / f"{origin}-{arm}-{pos}.{codec}"
+            require(bitstream.stat().st_size == b["bytes"], "native bound byte count")
+            pinned({"path": str(bitstream), "sha256": b["encoded_sha256"]})
+            pinned({"path": source["path"], "sha256": source["sha256"]})
+            key = next_key + len(added)
+            added.append(dict(index=key, role="train", source_table=str(output), source_row_id=key,
+                reference=source["path"], distorted=str(bitstream), label=0, family="honest_codec",
+                origin=origin, source_family=source["family"], content_class=source["content_class"],
+                kind="honest_codec", codec=codec, knob=b["knob"], native_arm=arm, inert=False,
+                expected_distorted_file_sha256=b["encoded_sha256"], prior_decoded_sha256=b["decoded_sha256"]))
+        expected = 21 if codec == "jxl" else 17
+        require(count == Counter({(o, arm): expected for o in sources for arm in ("scalar", "neutral", "active")}),
+                "incomplete native bound grid")
+    require(len(added) == 608, "supplement row coverage")
+    root.mkdir(parents=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    pairs = root / "supplement-pairs.tsv"
+    def write_pairs(path, rows):
+        with path.open("x", newline="") as f:
+            w = csv.writer(f, delimiter="\t", lineterminator="\n")
+            w.writerow(["ref_path", "dist_path", "human_score"])
+            w.writerows((r["reference"], r["distorted"], r["index"]) for r in rows)
+    write_pairs(pairs, added)
+    csv_path, audit_path = root / "features.csv", root / "supplement-audit.jsonl"
+    command = [str(extractor), "--corpus", "pairs", "--path", str(pairs), "--out", str(csv_path),
+               "--audit-jsonl", str(audit_path), "--audit-bake", str(base)]
+    env = dict(os.environ, ZENSIM_FORMULA_REV="1", ZENSIM_ROOT_FORM="libm", RAYON_NUM_THREADS="8")
+    with (root / "extract.log").open("w") as log:
+        subprocess.run(command, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+    with csv_path.open() as f:
+        feature_rows = list(csv.DictReader(f))
+    audits = [json.loads(line) for line in audit_path.open()]
+    keys = {r["index"] for r in added}
+    require(len(feature_rows) == len(audits) == len(keys), "supplement extraction coverage")
+    require({int(float(r["human_score"])) for r in feature_rows} == keys
+            and {r["human_score"] for r in audits} == keys, "supplement extraction keys")
+    by_key = {int(float(r["human_score"])): r for r in feature_rows}
+    audit_by_key = {r["human_score"]: r for r in audits}
+    matrix = np.array([[float(by_key[r["index"]][f"f{i}"]) for i in range(372)] for r in added], dtype=np.float32)
+    require(np.isfinite(matrix).all(), "nonfinite supplement features")
+    for row in added:
+        audit = audit_by_key[row["index"]]
+        require(audit["reference"] == row["reference"] and audit["distorted"] == row["distorted"]
+                and audit["distorted_file_sha256"] == row["expected_distorted_file_sha256"], "supplement pixel join")
+        row["expected_distorted_pixels_sha256"] = audit["distorted_pixels_sha256"]
+        row["inert"] = audit["pixels_identical"]
+    table = pa.table({**{f"f{i}": pa.array(matrix[:,i]) for i in range(372)},
+                      "row_id": [r["index"] for r in added], "is_corruption": [0] * len(added),
+                      "origin": [r["origin"] for r in added]})
+    pq.write_table(table, output)
+    records.extend(added)
+    merged_pairs, merged_audit = root / "all-pairs.tsv", root / "all-audit.jsonl"
+    write_pairs(merged_pairs, records)
+    with merged_audit.open("x") as f:
+        for path in (base_audit, audit_path):
+            with path.open() as source:
+                shutil.copyfileobj(source, f)
+    for path, digest in pinned_files.items():
+        require(file_sha(path) == digest, "supplement input changed during extraction: " + path)
+    files = dict(base_inputs["files_sha256"], **pinned_files)
+    for path in (output, merged_pairs, csv_path, audit_path):
+        files[str(path)] = file_sha(path)
+    inputs_path = root / "INPUTS.json"
+    inputs_path.write_text(json.dumps(dict(schema=base_inputs["schema"], records=records, files_sha256=files), indent=2)+"\n")
+    for key, path in [("serving_inputs", inputs_path), ("serving_audit", merged_audit)]:
+        fit[key] = {"path": str(path), "sha256": file_sha(path)}
+    fit["pairs_tsv"] = str(merged_pairs)
+    (root / "FIT_MANIFEST.json").write_text(json.dumps(fit, indent=2)+"\n")
+    (root / "COMPLETE.json").write_text(json.dumps(dict(schema=spec["schema"], added_rows=len(added),
+        origins=origins, canonical_split_owner_sha256=split_sha, command=command, full_encodes=0,
+        validation_added_rows=0, model_qualified=False, output_sha256=file_sha(output)), indent=2)+"\n")
+    print(f"Imported {len(added)} honest native attempts from {len(origins)} fit origins; no new encodes")
+
+
 def main():
     global GEN, EXTRACT, MAX_DIM
     ap = argparse.ArgumentParser()
     sources = ap.add_mutually_exclusive_group(required=True)
     sources.add_argument("--sources", help="historical TSV mode, unchanged pixels/anchors")
     sources.add_argument("--sources-json", help="canonical frozen JSON manifest, native IO/anchors")
+    sources.add_argument("--supplement-manifest", help="registered honest native-map bitstream supplement")
     ap.add_argument("--artifacts-dir")
     ap.add_argument("--family-manifest")
     ap.add_argument("--producer-json")
@@ -369,6 +504,9 @@ def main():
     NFEAT = a.nfeat
     FEATCOLS = [f"f{i}" for i in range(NFEAT)]
     GEN, EXTRACT, MAX_DIM = a.gen, a.extract, a.max_dim
+    if a.supplement_manifest:
+        honest_supplement(a)
+        return
     if a.sources_json:
         canonical_corpus(a)
         return
