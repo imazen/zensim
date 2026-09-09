@@ -39,6 +39,12 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+Later September 8 activity-row storage: complete blend means improve further
+to 35.33/133.88 ms, with unchanged features/scores/maps and passing registered
+retention controls. Relative-to-D remains 1.49/1.53 on these means; strict
+quiet/p95/HDR/memory qualification remains INCOMPLETE. No quality or spatial
+gate changes. [Activity repair and controls](../benchmarks/padded_activity_rows_2026-09-08.md).
+
 Later September 8 arithmetic-preserving row storage: blend means become
 42.20/141.44 ms at 1024²/2048², D 25.34/89.77 ms, with exact feature/score/map
 replay. Absolute observed latency improves substantially; the relative-to-D

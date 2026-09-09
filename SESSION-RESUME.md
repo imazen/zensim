@@ -4,7 +4,19 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest continuation [reduces horizontal SSIM row cost](benchmarks/padded_ssim_rows_2026-09-08.md)
+Latest continuation [reduces full-pool activity blur cost](benchmarks/padded_activity_rows_2026-09-08.md).
+Separate existing producer profiles locate about 63% of full-pool incremental
+sampled cycles in horizontal activity box blur. A second padded-row kernel
+preserves all 1,320 pixel and 792 spatial audits exactly and passes 482 tests
+(six ignored), Clippy, formatting and script lint. Complete blend observed
+means improve 42.10→35.33 ms at 1024² and 141.81→133.88 ms at 2048²; both
+registered gains and the 576/1152 non-trigger controls pass. The blend still
+costs 1.49/1.53 times D; no quiet/p95/HDR/memory qualification. Next assess
+existing cheaper training recipes and data coverage before another kernel
+repair or D-regime candidate. Missing pooled attribution, corruption honest
+protection and useful native spatial targeting remain required.
+
+The preceding continuation [reduces horizontal SSIM row cost](benchmarks/padded_ssim_rows_2026-09-08.md)
 without changing any feature or score bit. Native profiling locates 69% of the
 mixed benchmark's sampled cycles in that kernel. Padded sixteen-row storage
 reduces observed blend means 88.40→42.20 ms at 1024² and 194.94→141.44 ms at

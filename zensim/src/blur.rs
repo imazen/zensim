@@ -851,6 +851,73 @@ fn box_blur_h_inner_v4x(
     height: usize,
     radius: usize,
 ) {
+    box_blur_h_v4x_body(token, input, output, width, height, radius);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn box_blur_h_v4x_body(
+    token: archmage::X64V4xToken,
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    if width == 0 || !width.is_multiple_of(256) || height < 16 {
+        box_blur_h_v4x_strided(token, input, output, width, height, radius, width);
+        return;
+    }
+    thread_local! {
+        static PADDED: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
+    }
+    let rows = height / 16 * 16;
+    PADDED.with(|a| {
+        let mut arena = a.borrow_mut();
+        let stride = width + 16;
+        let per = 16 * stride;
+        arena.resize(2 * per, 0.0);
+        let (src, dst) = arena.split_at_mut(per);
+        for first in (0..rows).step_by(16) {
+            for row in 0..16 {
+                let from = (first + row) * width;
+                let to = row * stride;
+                src[to..to + width].copy_from_slice(&input[from..from + width]);
+            }
+            box_blur_h_v4x_strided(token, src, dst, width, 16, radius, stride);
+            for row in 0..16 {
+                let from = row * stride;
+                let to = (first + row) * width;
+                output[to..to + width].copy_from_slice(&dst[from..from + width]);
+            }
+        }
+    });
+    if rows < height {
+        let off = rows * width;
+        box_blur_h_v4x_strided(
+            token,
+            &input[off..],
+            &mut output[off..],
+            width,
+            height - rows,
+            radius,
+            width,
+        );
+    }
+}
+
+// Physical row pitch changes storage only; preserve the original recurrence.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn box_blur_h_v4x_strided(
+    token: archmage::X64V4xToken,
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    stride: usize,
+) {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
@@ -871,7 +938,7 @@ fn box_blur_h_inner_v4x(
             };
             let mut arr = [0.0f32; 16];
             for ro in 0..16 {
-                arr[ro] = input[(row_base + ro) * width + idx];
+                arr[ro] = input[(row_base + ro) * stride + idx];
             }
             sum = sum + f32x16::from_array(token, arr);
         }
@@ -879,7 +946,7 @@ fn box_blur_h_inner_v4x(
         for x in 0..width {
             let result = (sum * inv_v).to_array();
             for ro in 0..16 {
-                output[(row_base + ro) * width + x] = result[ro];
+                output[(row_base + ro) * stride + x] = result[ro];
             }
 
             let add_raw = x + r + 1;
@@ -894,7 +961,7 @@ fn box_blur_h_inner_v4x(
 
             let mut add_arr = [0.0f32; 16];
             for ro in 0..16 {
-                add_arr[ro] = input[(row_base + ro) * width + add_idx];
+                add_arr[ro] = input[(row_base + ro) * stride + add_idx];
             }
             // rem-ring (2026-08-30): for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -909,7 +976,7 @@ fn box_blur_h_inner_v4x(
             } else {
                 let mut a = [0.0f32; 16];
                 for ro in 0..16 {
-                    a[ro] = input[(row_base + ro) * width + rem_idx];
+                    a[ro] = input[(row_base + ro) * stride + rem_idx];
                 }
                 a
             };
@@ -944,14 +1011,14 @@ fn box_blur_h_inner_v4x(
             };
             let mut arr = [0.0f32; 8];
             for ro in 0..8 {
-                arr[ro] = input[(row_base + ro) * width + idx];
+                arr[ro] = input[(row_base + ro) * stride + idx];
             }
             sum = sum + f32x8::from_array(v3, arr);
         }
         for x in 0..width {
             let result = (sum * inv_v8).to_array();
             for ro in 0..8 {
-                output[(row_base + ro) * width + x] = result[ro];
+                output[(row_base + ro) * stride + x] = result[ro];
             }
             let add_raw = x + r + 1;
             let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
@@ -964,7 +1031,7 @@ fn box_blur_h_inner_v4x(
             let rem_idx = rem_idx.min(width - 1);
             let mut add_arr = [0.0f32; 8];
             for ro in 0..8 {
-                add_arr[ro] = input[(row_base + ro) * width + add_idx];
+                add_arr[ro] = input[(row_base + ro) * stride + add_idx];
             }
             // rem-ring (2026-08-30): for every `x >= diam`, `rem_idx(x)` and
             // `add_idx(x - diam)` BOTH resolve to column `x - r`, unmirrored
@@ -979,7 +1046,7 @@ fn box_blur_h_inner_v4x(
             } else {
                 let mut a = [0.0f32; 8];
                 for ro in 0..8 {
-                    a[ro] = input[(row_base + ro) * width + rem_idx];
+                    a[ro] = input[(row_base + ro) * stride + rem_idx];
                 }
                 a
             };
@@ -997,7 +1064,7 @@ fn box_blur_h_inner_v4x(
     // Scalar remainder
     let inv = 1.0 / diam as f32;
     for row in (remaining_start + remaining_8groups * 8)..height {
-        let row_off = row * width;
+        let row_off = row * stride;
         let inp = &input[row_off..row_off + width];
         let out = &mut output[row_off..row_off + width];
         let mut sum = 0.0f32;
@@ -5303,6 +5370,44 @@ pub fn box_spread_merge_f32(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn padded_box_rows_preserve_contiguous_bits() {
+        use archmage::SimdToken;
+        let Some(token) = archmage::X64V4xToken::summon() else {
+            return;
+        };
+        for width in [255, 256, 512, 1024, 1026] {
+            for height in [15, 16, 17, 24, 31, 32, 48] {
+                let len = width * height;
+                let src: Vec<_> = (0..len)
+                    .map(|i| ((i * 127 + i / width * 31) % 4093) as f32 / 1024.0 - 2.0)
+                    .collect();
+                for radius in [0, 1, 4, 16, 17] {
+                    let mut expected = vec![0.0; len];
+                    let mut actual = vec![0.0; len];
+                    super::box_blur_h_v4x_strided(
+                        token,
+                        &src,
+                        &mut expected,
+                        width,
+                        height,
+                        radius,
+                        width,
+                    );
+                    super::box_blur_h_v4x_body(token, &src, &mut actual, width, height, radius);
+                    assert!(
+                        expected
+                            .iter()
+                            .zip(&actual)
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "{width}x{height} radius={radius}"
+                    );
+                }
+            }
+        }
+    }
+
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn padded_ssim_rows_preserve_contiguous_bits() {

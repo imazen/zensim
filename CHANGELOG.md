@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Apply the same arithmetic-preserving padded-row storage to v4x horizontal
+  activity box blur, reducing full-pool extraction cost. Retain exact image/map
+  replay and complete-surface timing controls in the September 8 activity record.
+
 - Stage v4x horizontal SSIM rows with padded physical pitch at cache-sensitive
   widths, preserving logical dimensions, tile boundaries and every feature/
   score bit. Reduce observed complete-scoring cost with bounded per-thread
