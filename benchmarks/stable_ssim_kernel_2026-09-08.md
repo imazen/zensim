@@ -713,12 +713,13 @@ the `err` flag is consumed once, outside the loops, and each loop body is a
 straight-line copy specialised on it. That is what "unswitched" means here,
 and it is why the revision-1 arms did not move.
 
-#### Eight threads: no regression the instrument can resolve, one block
+#### Eight threads: no regression the instrument can resolve
 
 Same driver with `THREADS=8` (`RAYON_NUM_THREADS=8`, `taskset -c 8-15`, one
-CCD), `ZEN_XP_WALL_S=240`, ONE block per revision — so there is no A-A
-replicate spread to read the deltas against, only the anchor. Raw report:
-`benchmarks/rev3_fused_cost_mt_2026-09-09.json`.
+CCD), `ZEN_XP_WALL_S=240`. Run twice: ONE block per revision
+(`benchmarks/rev3_fused_cost_mt_2026-09-09.json`, table below), then a
+TWO-block replication (`benchmarks/rev3_fused_cost_mt2_2026-09-09.json`)
+whose point is the A-A spread, reported after the table.
 
 | arm @2048 squared, 8 threads | rev 1 | rev 3 FUSED | delta |
 |---|---:|---:|---:|
@@ -735,15 +736,35 @@ replicate spread to read the deltas against, only the anchor. Raw report:
 
 At 1024 squared (5-26 ms arms) the spread is wider in both directions:
 `buf_v1_372` -7.2%, `fold944_full` +6.8%, `fold228_peaks` +14.2%, anchor
--0.3%. Two things keep this from being read as a threaded regression:
-`buf_v1_228` is +6.9% here and was -4.1% single-threaded on the same binary
-with the same arithmetic, and the only revision-3-specific work on the v1
-strip path that is NOT arithmetic-neutral is the retention copy of the
-canonical plane (`bufs.stable_sd.extend_from_slice`, one inner-strip memcpy
-per channel per scale), which is memory traffic and would show under eight
-threads before it shows under one. A two-block replication is the next
-measurement; until it exists the eight-thread numbers are "inside ±7% on
-sub-60 ms arms, +2.6% on the full 944 walk, single block".
+-0.3%.
+
+**The two-block replication** (medians of two blocks per revision, 2048
+squared): `fold944_full` 114.02 -> 115.13 ms (+1.0%), `fold372_full` 56.09
+-> 59.62 ms (+6.3%), `buf_v1_372` 38.42 -> 36.60 ms (-4.7%), `buf_v1_228`
+24.11 -> 24.34 ms (+0.9%), `fold156_basic` 25.52 -> 25.57 ms (+0.2%), anchor
+307.62 -> 304.86 ms (-0.9%). The single-block arms that looked like movement
+did not replicate: `buf_v1_228` went from +6.9% to +0.9%, `fold944_full`
+from +2.6% to +1.0%, `fold372_full` from +4.0% to +6.3%.
+
+What the replication actually measures is the instrument. The revision-1 A-A
+spread between its two blocks at eight threads is **6.8-17.2%** per arm at
+2048 squared (`fast_ssim2` 304.2 vs 325.5 ms, `fold944_full` 111.1 vs
+118.7 ms, `fold156_basic` 24.4 vs 28.6 ms) — block 2 of revision 1 ran slower
+on EVERY arm including the revision-independent anchor, and no competing
+process was identified afterwards. Single-threaded the same A-A spread is
+0.06-1.3%. So at eight threads this box resolves ±7-10% at best, every fused
+delta above is inside that, and `fold372_full` +6.3% sits inside its own
+revision-1 pair's 6.9% spread. The eight-thread verdict is "no regression the
+instrument can resolve", and the instrument is the thing to fix before a
+threaded claim finer than that is made: the run-to-run drift is a box
+property (one CCD, eight rayon workers, whatever else the kernel scheduled
+there), not a revision property.
+
+The only revision-3-specific work on the v1 strip path that is NOT
+arithmetic-neutral is the retention copy of the canonical plane
+(`bufs.stable_sd.extend_from_slice`, one inner-strip memcpy per channel per
+scale); that is memory traffic and would show under eight threads before it
+shows under one. It is in the round-two list below regardless.
 
 `fast_ssim2` at eight threads is 292 ms — the same as at one — and 81 ms at
 1024 squared against 68 ms single-threaded: it does not scale with the pool

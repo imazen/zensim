@@ -855,6 +855,7 @@ fn box_blur_h_inner_v4x(
 }
 
 #[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))] // only the v4x arcane bodies call this; they are not emitted without `avx512`
 #[inline(always)]
 fn box_blur_h_v4x_body(
     token: archmage::X64V4xToken,
@@ -908,6 +909,7 @@ fn box_blur_h_v4x_body(
 
 // Physical row pitch changes storage only; preserve the original recurrence.
 #[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))] // only the v4x arcane bodies call this; they are not emitted without `avx512`
 #[inline(always)]
 fn box_blur_h_v4x_strided(
     token: archmage::X64V4xToken,

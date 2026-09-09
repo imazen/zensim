@@ -69,7 +69,10 @@
   instead of V-blurring the two sigma planes and re-deriving the covariance
   per strip), no arm slower beyond noise; `fold944_full` at
   revision 3 is again under `fast_ssim2` (288.6 ms). The revision-1 arms are
-  unchanged on the fused build (`benchmarks/rev3_fused_cost_st_2026-09-09.json`,
+  unchanged on the fused build. At eight threads (one CCD) the paired deltas
+  are inside the instrument's own 7-17% A-A spread (`fold944_full` +1.0%,
+  two-block medians) — no threaded regression the box can resolve
+  (`benchmarks/rev3_fused_cost_{st,mt,mt2}_2026-09-09.json`,
   `benchmarks/stable_ssim_kernel_2026-09-08.md` "Fusion") (#61).
 - SUPERSEDED — the exact f64 second-pass form of revision 3 cost **+27% to
   +87%** of extraction time depending on how much

@@ -1288,6 +1288,7 @@ impl<T: F32x16Backend + Copy> SsimSplats16<T> {
     /// `var1 + var2 - 2*cov`. Same algebra as the f64 reference `finalize`,
     /// in f32 with the crate's `mul_add` spellings. Bounded error, registered
     /// in `benchmarks/stable_ssim_kernel_2026-09-08.md`.
+    #[cfg_attr(not(feature = "avx512"), allow(dead_code))] // 16-lane: only the v4x arcane bodies reach it
     #[inline(always)]
     pub(crate) fn direct(
         &self,
@@ -1489,6 +1490,7 @@ pub(crate) fn ssim_direct_raw_scalar(
 }
 
 /// 16-lane direct-error form; see [`SsimSplats16::direct`].
+#[cfg_attr(not(feature = "avx512"), allow(dead_code))] // only the v4x arcane bodies call this; they are not emitted without `avx512`
 #[inline(always)]
 pub(crate) fn ssim_direct16<T: F32x16Backend + Copy>(
     token: T,

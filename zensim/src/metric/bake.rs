@@ -960,6 +960,7 @@ mod revision_contract_tests {
     /// luminance-form comparison could not see the difference; the revision
     /// comparison can.
     #[test]
+    #[cfg(feature = "feature-regime-v2")] // `bake_declaring` fixes a v2 extraction requirement
     fn rev3_process_refuses_a_rev2_bake_despite_the_shared_clamp_form() {
         if !run_at_revision(
             "3",
@@ -1012,6 +1013,7 @@ mod revision_contract_tests {
     /// an unsupported refinement term at this revision.
     #[cfg(feature = "feature-regime-v2")]
     #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn rev3_bake_serves_scalar_and_spatial_attribution() {
         if !run_at_revision(
             "3",
@@ -1053,6 +1055,7 @@ mod revision_contract_tests {
     /// as if it had been refit, and a genuine revision-3 bake cannot be
     /// served against revision-1 pixels.
     #[test]
+    #[cfg(feature = "feature-regime-v2")] // `bake_declaring` fixes a v2 extraction requirement
     fn the_shipped_process_refuses_a_rev3_bake() {
         if crate::ssim_form::active_revision() != crate::ssim_form::SHIPPED_REVISION {
             return;

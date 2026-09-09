@@ -509,14 +509,14 @@ fn lum_bins_finish_scalar(
 /// The vector tiers are gated end-to-end instead (the geometry list in
 /// `class_c_extras_match_the_944_walk` covers every tier's main loop AND
 /// its 8-lane / scalar remainder).
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))] // callers live in feature_v2's tests
 pub(crate) fn test_only_bounded_err_scalar(be_m: &mut f32, pd: f32) -> f32 {
     bounded_err_accumulate_scalar(be_m, pd)
 }
 
 /// Test-only handle on [`lum_bins_accumulate_scalar`]. See
 /// [`test_only_bounded_err_scalar`].
-#[cfg(test)]
+#[cfg(all(test, feature = "feature-regime-v2"))] // callers live in feature_v2's tests
 pub(crate) fn test_only_lum_bins_scalar(
     wd_num: &mut f32,
     wd_den: &mut f32,

@@ -7044,6 +7044,7 @@ mod tests {
     /// window is unchanged — the registered "out-of-support movement" of
     /// `benchmarks/nonmax_diagnosis_2026-09-08.md`, computed here on the
     /// integrated retention route rather than on isolated planes.
+    #[cfg(feature = "feature-regime-v2")] // read only by the v2-walk locality controls
     fn out_of_support_movement(
         base: &RetainedPlanes,
         changed: &RetainedPlanes,
@@ -7085,6 +7086,7 @@ mod tests {
     /// with a small rectangle of the distorted image replaced by REFERENCE
     /// pixels. Windows containing no changed sample must produce an unchanged
     /// signal, because their inputs are identical.
+    #[cfg(feature = "feature-regime-v2")]
     fn locality_probe(
         w: usize,
         h: usize,
@@ -7135,7 +7137,9 @@ mod tests {
     /// | peak out-of-support movement | 4.886e-4 | 4.277e-6 | 2e-5 |
     /// | max abs error vs the exact f64 kernel | 3.378e-3 | printed by the test | 1e-3 |
     /// | worst residue on an all-equal window | — | 3.689e-6 | 1e-5 |
+    #[cfg(feature = "feature-regime-v2")]
     const REV3_LOCALITY_PEAK_BOUND: f64 = 2e-5;
+    #[cfg(feature = "feature-regime-v2")]
     const REV3_ACCURACY_BOUND: f64 = 1e-3;
 
     /// **The negative control that makes the Rev3 result mean something.**
@@ -7146,6 +7150,7 @@ mod tests {
     /// would be passing on nothing — so this failing is as informative as the
     /// other one failing.
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn locality_fixture_reproduces_out_of_support_movement_on_the_shipped_revision() {
         if crate::ssim_form::active_revision() != crate::feature_defs::FormulaRevision::Rev1 {
             // Deliberately not an assertion about the environment: this test
@@ -7168,6 +7173,7 @@ mod tests {
     /// strip walk and its retained planes — not merely through the standalone
     /// kernel that `ssim_form`'s own tests cover.
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn rev3_retained_signal_is_local_under_a_reference_replacement() {
         if !crate::ssim_form::run_at_revision(
             "3",
@@ -7645,6 +7651,7 @@ mod tests {
     /// longer held `Σab`. Fold-vs-streaming parity could not catch it (both
     /// routes were equally wrong) and the 372 gate does not reach `f372+`.
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn rev3_moves_exactly_the_registered_slots_on_the_944_layout() {
         const SENTINEL: &str = "REV3-VECTOR944 ";
         let path = "streaming::tests::rev3_moves_exactly_the_registered_slots_on_the_944_layout";
@@ -7756,6 +7763,7 @@ mod tests {
     /// this pins a refusal that is specific to the revision rather than a
     /// profile that stopped working.
     #[test]
+    #[cfg(feature = "custom-profiles")]
     fn rev3_refuses_multi_pass_blur_profiles_through_the_public_entry() {
         if !crate::ssim_form::run_at_revision(
             "3",
@@ -7813,6 +7821,7 @@ mod tests {
     /// channel. Bound is `REV3_ACCURACY_BOUND`; the measured worst is printed
     /// so the record carries the value, not only the verdict.
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn rev3_retained_planes_are_the_canonical_stable_signal() {
         if !crate::ssim_form::run_at_revision(
             "3",

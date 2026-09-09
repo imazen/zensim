@@ -1,0 +1,134 @@
+{
+ "record": "benchmarks/stable_ssim_kernel_2026-09-08.md#fusion",
+ "what": "paired A/B, FUSED revision 3 vs revision 1, one binary, RAYON_NUM_THREADS=8 pinned to cpus 8-15, ZEN_XP_WALL_S=240, TWO blocks per revision (replication of rev3_fused_cost_mt_2026-09-09.json); revision-1 block 2 ran 4-17% slower than block 1 on every arm including the anchor, no competing process identified",
+ "run_meta": {
+  "host": "Linux 7.0.0-31-generic x86_64 dev",
+  "cpu_pinned": "8-15",
+  "threads": "8",
+  "sizes": "1024,2048",
+  "rounds_min": "30",
+  "blocks_per_revision": "2",
+  "commit": "4c6a2a8fa98fff66d281fb62613e4fc57f63eea8",
+  "started_utc": "2026-09-09T23:10:34Z",
+  "finished_utc": "2026-09-09T23:44:40Z"
+ },
+ "binary_sha256": "07a8b1b9274fea354a2f232d415f578b6ea6abd2e115671c2f15c8860a39407e",
+ "report": {
+  "groups": {
+   "extract_paths_1024": {
+    "anchor_drift_pct": -1.16,
+    "arms": {
+     "buf_v1_228": {
+      "rev1_median_ms": 5.765,
+      "rev3_median_ms": 5.87,
+      "delta_pct": 1.82
+     },
+     "buf_v1_372": {
+      "rev1_median_ms": 8.905,
+      "rev3_median_ms": 8.4,
+      "delta_pct": -5.67
+     },
+     "fast_ssim2": {
+      "rev1_median_ms": 84.56,
+      "rev3_median_ms": 83.58,
+      "delta_pct": -1.16
+     },
+     "fold156_basic": {
+      "rev1_median_ms": 5.225,
+      "rev3_median_ms": 5.195,
+      "delta_pct": -0.57
+     },
+     "fold228_classc": {
+      "rev1_median_ms": 6.285,
+      "rev3_median_ms": 6.365,
+      "delta_pct": 1.27
+     },
+     "fold228_moments": {
+      "rev1_median_ms": 6.155,
+      "rev3_median_ms": 6.68,
+      "delta_pct": 8.53
+     },
+     "fold228_peaks": {
+      "rev1_median_ms": 5.855,
+      "rev3_median_ms": 5.93,
+      "delta_pct": 1.28
+     },
+     "fold372_full": {
+      "rev1_median_ms": 9.63,
+      "rev3_median_ms": 9.785,
+      "delta_pct": 1.61
+     },
+     "fold944_full": {
+      "rev1_median_ms": 25.74,
+      "rev3_median_ms": 24.345,
+      "delta_pct": -5.42
+     },
+     "fold944_off": {
+      "rev1_median_ms": 21.705,
+      "rev3_median_ms": 20.84,
+      "delta_pct": -3.99
+     }
+    }
+   },
+   "extract_paths_2048": {
+    "anchor_drift_pct": -0.9,
+    "arms": {
+     "buf_v1_228": {
+      "rev1_median_ms": 24.115,
+      "rev3_median_ms": 24.345,
+      "delta_pct": 0.95
+     },
+     "buf_v1_372": {
+      "rev1_median_ms": 38.42,
+      "rev3_median_ms": 36.6,
+      "delta_pct": -4.74
+     },
+     "fast_ssim2": {
+      "rev1_median_ms": 307.62,
+      "rev3_median_ms": 304.86,
+      "delta_pct": -0.9
+     },
+     "fold156_basic": {
+      "rev1_median_ms": 25.52,
+      "rev3_median_ms": 25.565,
+      "delta_pct": 0.18
+     },
+     "fold228_classc": {
+      "rev1_median_ms": 31.91,
+      "rev3_median_ms": 31.475,
+      "delta_pct": -1.36
+     },
+     "fold228_moments": {
+      "rev1_median_ms": 31.405,
+      "rev3_median_ms": 31.56,
+      "delta_pct": 0.49
+     },
+     "fold228_peaks": {
+      "rev1_median_ms": 30.655,
+      "rev3_median_ms": 30.96,
+      "delta_pct": 0.99
+     },
+     "fold372_full": {
+      "rev1_median_ms": 56.085,
+      "rev3_median_ms": 59.625,
+      "delta_pct": 6.31
+     },
+     "fold944_full": {
+      "rev1_median_ms": 114.02,
+      "rev3_median_ms": 115.13,
+      "delta_pct": 0.97
+     },
+     "fold944_off": {
+      "rev1_median_ms": 95.195,
+      "rev3_median_ms": 96.425,
+      "delta_pct": 1.29
+     }
+    }
+   }
+  },
+  "blocks_per_revision": {
+   "1": 2,
+   "3": 2
+  }
+ }
+}
