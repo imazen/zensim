@@ -24,6 +24,7 @@ objectives. B/C/D can be replaced; good rank alone is not product readiness.
 | Serialize / inspect ZNPR v3 | `zenpredict-bake` | Versioned metadata and final artifact hashes |
 | Quantize / calibrate / densify | `bake_dial_refit` | Quantize before calibration; spline-coordinate and boundary gates; final served bytes |
 | Full evaluation and reuse | `scripts/run_full_eval.sh` | Content-bound input/scorer identity, atomic stages, no stale reuse |
+| Training-only base preference screen | `rd_probe_analyze_2026-07-18.py --model-preferences`, optional `--family NAME --advancement noninferior` | Explicit family/rule registration, D plus all three seeds, unchanged source/model/pixel/judge identity guards; legacy nine-model strict mode remains unchanged. Passing scalar preferences does not qualify spatial guidance. |
 | Rank/dial/G-ADDR statistics | `bake_verdict`, `zenstats` | Final Rust-surface scores, complete panels and named floor ruler |
 | Coherence | `scripts/m3a_sweep.sh` through full-eval | All registered cells; partial sweeps remain incomplete |
 | Research selection / product qualification | `freeze_check --select` / `--qualify` | Distinct claims; missing or failed product evidence never passes |

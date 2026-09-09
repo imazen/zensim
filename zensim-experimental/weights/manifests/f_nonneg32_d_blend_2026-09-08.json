@@ -1,0 +1,56 @@
+{
+  "schema": "zensim-calibrated-score-blend-v1",
+  "surface": "BakeScorer::ensemble",
+  "fit_origins": [
+    "1054",
+    "2010",
+    "6068",
+    "6610",
+    "7066",
+    "8206",
+    "8384",
+    "9380"
+  ],
+  "calibration_origins": [
+    "1214",
+    "6064",
+    "8462",
+    "9066"
+  ],
+  "fit_consensus_pairs": 1647,
+  "selection": "equal three-seed F weights, smallest D weight in hundredths below one that resolves all FIT consensus pairs",
+  "model_qualified": false,
+  "path_base": "repository_root",
+  "members": [
+    {
+      "name": "F_nonneg32_4004",
+      "path": "zensim-experimental/weights/f_nonneg32_4004_byid_2026-09-08.bin",
+      "sha256": "14da8fe03b1413e5a792aca1afd8714ffb6fb4a04c391a4dc384bfcfa3841341",
+      "weight": 0.11333333333333333
+    },
+    {
+      "name": "F_nonneg32_4005",
+      "path": "zensim-experimental/weights/f_nonneg32_4005_byid_2026-09-08.bin",
+      "sha256": "16e6231f038c91d92c77bb43778629804f9f6d866f222c2319435d975a99279a",
+      "weight": 0.11333333333333333
+    },
+    {
+      "name": "F_nonneg32_4006",
+      "path": "zensim-experimental/weights/f_nonneg32_4006_byid_2026-09-08.bin",
+      "sha256": "f81f3fae304de248c14bde844155b3363a79865aae454693f6c3070e6127d5f5",
+      "weight": 0.11333333333333333
+    },
+    {
+      "name": "D",
+      "path": "zensim/weights/d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin",
+      "sha256": "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6",
+      "weight": 0.66
+    }
+  ],
+  "calibration_consensus_pairs": 824,
+  "spatial_status": "INCOMPLETE: active v1 peak terms f156..227",
+  "corruption_head": null,
+  "recipe": "scripts/bestofall_wave.sh: F_nonneg32; historical mixed-era/overlap limitations in benchmarks/cheap_model_blend_2026-09-08.md",
+  "evidence": "benchmarks/cheap_model_blend_2026-09-08.md",
+  "fit_manifest_sha256": "a4b71091ee709dbcca6b1a30f6632eaf485ec9d620626b8ce8aea21f44b3babd"
+}

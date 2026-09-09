@@ -39,6 +39,13 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+Later September 8 cheaper composition: 66% D plus 34% equally across the three
+F_nonneg32 seeds resolves all 2,471 FIT/CAL training consensus pairs and passes
+the preliminary cost screen (23.77/84.38 ms, essentially D). All 72 peak terms
+remain missing from 252 nonidentity maps. Human/HDR/corruption/spatial/targeting
+and full performance qualification remain failed or incomplete; no release
+candidate qualifies. [Composition, corrected sample count and next work](../benchmarks/cheap_model_blend_2026-09-08.md).
+
 Later September 8 activity-row storage: complete blend means improve further
 to 35.33/133.88 ms, with unchanged features/scores/maps and passing registered
 retention controls. Relative-to-D remains 1.49/1.53 on these means; strict

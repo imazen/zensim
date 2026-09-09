@@ -939,7 +939,10 @@ def model_preferences_main():
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--model-preferences", required=True, type=Path)
-    root = ap.parse_args().model_preferences
+    ap.add_argument("--family", help="Registered three-seed family to screen against D")
+    ap.add_argument("--advancement", choices=("strict", "noninferior"), default="strict")
+    args = ap.parse_args()
+    root = args.model_preferences
     def require(ok, message):
         if not ok:
             raise SystemExit(message)
@@ -955,8 +958,19 @@ def model_preferences_main():
     m = read(root / "INPUTS.json")
     require(m["schema"] == "zensim-model-preference-screen-v1", "preference schema mismatch")
     require(m["thresholds"] == {"ssim2":0.1,"butteraugli":0.005,"model_tie":1e-6}, "unregistered preference thresholds")
-    names = {"A", "B", "D"} | {f"{family}_{seed}" for family in ("A_plain", "H_anchorlad") for seed in (4004,4005,4006)}
-    require(len(m["models"]) == 9 and {v["name"] for v in m["models"]} == names, "model coverage mismatch")
+    if args.family:
+        import re
+        require(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", args.family) is not None, "invalid family name")
+        require(m.get("screen_family") == args.family and m.get("advancement_rule") == args.advancement,
+                "family registration mismatch")
+        families_to_screen = (args.family,)
+        names = {"D"} | {f"{args.family}_{seed}" for seed in (4004,4005,4006)}
+    else:
+        require(args.advancement == "strict" and "screen_family" not in m,
+                "legacy screen requires its original strict rule")
+        families_to_screen = ("A_plain", "H_anchorlad")
+        names = {"A", "B", "D"} | {f"{family}_{seed}" for family in families_to_screen for seed in (4004,4005,4006)}
+    require(len(m["models"]) == len(names) and {v["name"] for v in m["models"]} == names, "model coverage mismatch")
     sources = {v["origin"]:v for v in m["sources"]["sources"]}
     require(len(sources) == len(m["sources"]["sources"]) == 12, "source coverage mismatch")
     require(len({s["family"] for s in sources.values()}) == 12, "duplicate source family")
@@ -1044,8 +1058,10 @@ def model_preferences_main():
             by_origin={o:tally(name,[p for p in consensus if p["origin"]==o]) for o in sorted(sources)},
             adjacent_distance_inversions=sum(audits[name][a["index"]]["pixel_composed_score"] < audits[name][b["index"]]["pixel_composed_score"]-1e-6 for g in groups.values() for a,b in zip(g,g[1:])))
     for name,s in summaries.items():
-        s["advancement_pass"] = s["identity_100"]==12 and s["distorted_above_100"]==0 and s["all"]["unresolved"] < summaries["D"]["all"]["unresolved"] and all(v["unresolved"] <= summaries["D"]["by_content"][c]["unresolved"] for c,v in s["by_content"].items())
-    families = {f:all(summaries[f"{f}_{seed}"]["advancement_pass"] for seed in (4004,4005,4006)) for f in ("A_plain","H_anchorlad")}
+        candidate, baseline = s["all"]["unresolved"], summaries["D"]["all"]["unresolved"]
+        preference_pass = candidate <= baseline if args.advancement == "noninferior" else candidate < baseline
+        s["advancement_pass"] = s["identity_100"]==12 and s["distorted_above_100"]==0 and preference_pass and all(v["unresolved"] <= summaries["D"]["by_content"][c]["unresolved"] for c,v in s["by_content"].items())
+    families = {f:all(summaries[f"{f}_{seed}"]["advancement_pass"] for seed in (4004,4005,4006)) for f in families_to_screen}
     result = dict(schema="zensim-model-preference-result-v1",manifest_sha256=sha(root/"INPUTS.json"),
                   pairs=264,models=summaries,three_seed_families=families,consensus_pairs=consensus,
                   model_qualified=False,validation_scored=False,full_encodes=0)
@@ -1056,6 +1072,11 @@ def model_preferences_main():
         text.append(f"| {name} | {s['identity_100']} | {s['distorted_above_100']} | {s['all']['wrong']} / {s['all']['ties']} | {s['adjacent']['unresolved']} | {s['near_lossless']['unresolved']} | {s['advancement_pass']} |")
     text += ["", f"Resolved judge-consensus pairs: {len(consensus)} of 2520. Ties count as unresolved.",
              "The frozen rule requires strict improvement over D and no content-class regression. A failed advancement test does not prove a model is globally worse."]
+    if args.family:
+        result["screen_family"] = args.family
+        result["advancement_rule"] = args.advancement
+        if args.advancement == "noninferior":
+            text[-1] = "The separately registered family rule requires no more unresolved pairs than D and no content-class regression. This scalar screen does not qualify a model."
     output.write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
     (root/"preferences.md").write_text("\n".join(text)+"\n")
     print("\n".join(text))

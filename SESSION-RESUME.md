@@ -4,7 +4,19 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest continuation [reduces full-pool activity blur cost](benchmarks/padded_activity_rows_2026-09-08.md).
+Latest continuation [fits and Rust-serves a cheaper complete model](benchmarks/cheap_model_blend_2026-09-08.md):
+equal F_nonneg32 seeds 4004/4005/4006 at 0.11333333333333333 each, plus D at 0.66.
+All 1,647 FIT and 824 CAL training consensus pairs resolve; identities/upper bound
+and 792 pixel/cache/spatial audits pass. Cost screen passes at 23.77 ms (1024²) and
+84.38 ms (2048²), essentially D cost. The first 4 MP run has only 29 clean paired
+samples and stays rejected; its preregistered 60-round repeat has 55 and passes.
+No p95/HDR/cache/map/RSS or model qualification. All 252 nonidentity maps still
+omit 72 peak terms. Next implement/check L8 and max contributions in the
+existing Rust attribution owner, with ties/finite-removal semantics explicit,
+then qualify native spatial RD. Keep historical recipe limitations, corruption
+honest-protection failures and the full release contract intact.
+
+The preceding continuation [reduces full-pool activity blur cost](benchmarks/padded_activity_rows_2026-09-08.md).
 Separate existing producer profiles locate about 63% of full-pool incremental
 sampled cycles in horizontal activity box blur. A second padded-row kernel
 preserves all 1,320 pixel and 792 spatial audits exactly and passes 482 tests
