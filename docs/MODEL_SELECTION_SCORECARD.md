@@ -39,6 +39,13 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+September 8 A/D cost: complete blend means are 88.05/194.45 ms at 1024²/2048²,
+versus D 76.41/136.04 ms. The 40-round observed extrema miss the 1 MP absolute
+and SSIM2 bars and the 4 MP relative-to-D bar. Low dispersion does not repair
+strict quiet admission: background activity leaves performance qualification
+INCOMPLETE. The blend does not advance as-is; profile common extraction and
+the full-pool increment next. [Measured cost and repaired benchmark gate](../benchmarks/model_blend_speed_2026-09-08.md).
+
 September 8 A/D composition: the fitted 59% A / 41% D blend passes the
 registered fit/calibration ordering and Rust pixel/cache screen. Its complete
 spatial scores match, but all 252 nonidentity maps omit active v1 pooled-feature

@@ -25,6 +25,11 @@
 //! ```
 //! `ZEN_S2_SIZES` (default `576,1152,2304`), `ZEN_S2_ROUNDS`, `ZEN_S2_WALL_S`
 //! keep a matrix run from holding zenbench's exclusive lock for hours.
+//! `ZEN_S2_ENSEMBLE` (comma-separated ordered bake paths) together with
+//! `ZEN_S2_ENSEMBLE_WEIGHTS` adds the complete calibrated `bake_ensemble`
+//! surface and separate `bake_member_N` controls. Both options are required;
+//! malformed or unservable candidates fail before benchmarking.
+//! `ZEN_S2_SINGLE_CALL=1` disables iteration batching for latency bounds.
 //!
 //! ## The amended-W4 arms (`benchmarks/hybrid_candidate_2026-09-01.md`, APPENDIX B)
 //!
@@ -69,6 +74,50 @@
 use imgref::Img;
 use zenpredict::{Model, Predictor};
 use zensim::{RgbSlice, Zensim, ZensimProfile};
+
+struct Ensemble {
+    models: Vec<Model>,
+    weights: Vec<f64>,
+}
+
+impl Ensemble {
+    fn load() -> Option<Self> {
+        let paths = std::env::var("ZEN_S2_ENSEMBLE").ok();
+        let weights = std::env::var("ZEN_S2_ENSEMBLE_WEIGHTS").ok();
+        let (paths, weights) = match (paths, weights) {
+            (None, None) => return None,
+            (Some(paths), Some(weights)) => (paths, weights),
+            _ => panic!("ZEN_S2_ENSEMBLE and ZEN_S2_ENSEMBLE_WEIGHTS must be supplied together"),
+        };
+        let paths: Vec<_> = paths.split(',').map(str::trim).collect();
+        assert!(paths.len() >= 2, "ensemble needs at least two members");
+        let mut identities = std::collections::HashSet::new();
+        let models = paths
+            .iter()
+            .map(|path| {
+                assert!(!path.is_empty(), "empty ensemble member");
+                let canonical = std::fs::canonicalize(path).expect("ensemble member path");
+                assert!(identities.insert(canonical), "duplicate ensemble member");
+                let bytes = std::fs::read(path).expect("read ensemble member");
+                Model::from_bytes(&bytes).expect("load ensemble member")
+            })
+            .collect();
+        let weights = weights
+            .split(',')
+            .map(|s| s.trim().parse().expect("parse explicit ensemble weight"))
+            .collect();
+        let candidate = Self { models, weights };
+        // The canonical surface owns convexity, feature and model validation.
+        candidate.scorer();
+        eprintln!("# ensemble paths={paths:?} weights={:?}", candidate.weights);
+        Some(candidate)
+    }
+
+    fn scorer(&self) -> zensim::BakeScorer<'_> {
+        zensim::BakeScorer::ensemble(&self.models, Some(&self.weights))
+            .expect("servable complete ensemble")
+    }
+}
 
 /// One env-supplied bake, parsed once and reused across every round.
 /// The companion CORRUPTION head, in either wire format it can arrive in.
@@ -234,6 +283,11 @@ fn cap_tier_v3(_cap: bool) -> Result<(), String> {
 }
 
 fn main() {
+    let result_path = std::env::var_os("ZENBENCH_RESULT_PATH").map(std::path::PathBuf::from);
+    if let Some(path) = &result_path {
+        assert!(!path.exists(), "refusing to overwrite benchmark evidence");
+    }
+    let ensemble: Option<&'static Ensemble> = Ensemble::load().map(|e| &*Box::leak(Box::new(e)));
     if env_usize("ZEN_S2_CAP_V3", 0) == 1 {
         match cap_tier_v3(true) {
             Ok(()) => {
@@ -335,12 +389,64 @@ fn main() {
             let (src, dst) = test_pair(n, n);
             let src_s: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
             let dst_s: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
+            if let Some(e) = ensemble {
+                let s = RgbSlice::new(src_s, n, n);
+                let d = RgbSlice::new(dst_s, n, n);
+                let member_scores: Vec<_> = e
+                    .models
+                    .iter()
+                    .map(|m| {
+                        zensim::BakeScorer::new(m)
+                            .unwrap()
+                            .compute(&s, &d, None)
+                            .unwrap()
+                            .score()
+                    })
+                    .collect();
+                let expected: f64 = member_scores
+                    .iter()
+                    .zip(&e.weights)
+                    .map(|(s, w)| s * w)
+                    .sum();
+                let actual = e.scorer().compute(&s, &d, None).unwrap().score();
+                assert!(
+                    actual.is_finite() && (actual - expected).abs() <= 1e-10,
+                    "ensemble score differs from calibrated member composition"
+                );
+                eprintln!(
+                    "# geometry={n} member_scores={member_scores:?} ensemble_score={actual:?}"
+                );
+            }
             suite.compare(format!("ssim2_bar_{n}"), |group| {
                 group
                     .config()
                     .max_rounds(max_r)
                     .min_rounds(min_r)
                     .max_wall_time(std::time::Duration::from_secs(wall_s));
+                if env_usize("ZEN_S2_SINGLE_CALL", 0) == 1 {
+                    group.config().min_iterations = 1;
+                    group.config().max_iterations = 1;
+                }
+                if let Some(e) = ensemble {
+                    group.bench("bake_ensemble", move |b| {
+                        let mut scorer = e.scorer();
+                        b.iter(move || {
+                            let s = RgbSlice::new(src_s, n, n);
+                            let d = RgbSlice::new(dst_s, n, n);
+                            zenbench::black_box(scorer.compute(&s, &d, None).unwrap().score())
+                        })
+                    });
+                    for (i, model) in e.models.iter().enumerate() {
+                        group.bench(format!("bake_member_{i}"), move |b| {
+                            let mut scorer = zensim::BakeScorer::new(model).unwrap();
+                            b.iter(move || {
+                                let s = RgbSlice::new(src_s, n, n);
+                                let d = RgbSlice::new(dst_s, n, n);
+                                zenbench::black_box(scorer.compute(&s, &d, None).unwrap().score())
+                            })
+                        });
+                    }
+                }
                 group.bench("fast_ssim2", move |b| {
                     b.iter(move || {
                         let s = Img::new(src_s, n, n);
@@ -656,5 +762,7 @@ fn main() {
             });
         }
     });
-    let _ = result;
+    if let Some(path) = result_path {
+        result.save(path).expect("save benchmark evidence");
+    }
 }

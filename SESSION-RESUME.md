@@ -4,7 +4,19 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest continuation fits and Rust-serves the registered A/D blend: exact
+Latest continuation [measures actual A/D inference cost](benchmarks/model_blend_speed_2026-09-08.md)
+and fixes zenbench waiting on its own Linux lock-heartbeat thread. Root bench
+now pins pushed zenbench `1bf8a6509fce`. Corrected 40-round, single-worker means:
+blend 88.05/194.45 ms at 1024²/2048²; D 76.41/136.04 ms; SSIM2 67.73/289.15 ms.
+Blend and A alone cost essentially the same. Observed extrema miss the 1 MP
+absolute/SSIM2 and 4 MP relative-to-D bars. Strict quiet admission still fails
+(one advisory/background activity), so these are diagnostic results, not a
+performance qualification. Next profile shared extraction and the full-pool
+increment before choosing a compute repair or cheaper competitive regime.
+Do not invest in all missing A spatial integrands before resolving cost.
+No model/inference arithmetic changed; full product goal remains incomplete.
+
+The preceding continuation fits and Rust-serves the registered A/D blend: exact
 weights `[0.5900000000000001, 0.41]`. It resolves all 1,647 fit and 824 separate
 training-calibration consensus pairs, preserves twelve exact identities, and
 matches independent arithmetic exactly. The actual attribution check then

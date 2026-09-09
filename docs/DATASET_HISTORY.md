@@ -24,6 +24,15 @@ source" rule). Where the survey and a shipped doc disagree, that conflict is cal
 
 ## 0. The five recurring "actual why" families — READ THIS FIRST
 
+September 8 later measurement: [A/D scalar cost and benchmark repair](../benchmarks/model_blend_speed_2026-09-08.md).
+The first run's four rounds/240 waits came from detecting its own Linux
+lock-heartbeat task as a competing benchmark. An observed failing regression
+and canonical repair enable 40 rounds per geometry. Complete blend costs
+essentially the same as A alone; common extraction/full-pool work determines
+the next optimization. Background activity prevents strict release admission;
+observed latency inequalities are diagnostic. No model or dataset changed,
+and no validation or terminal images were consumed.
+
 The dominant class of dead-end in this project was **never a bad mechanism — it was an
 invalid selection or verdict instrument.** Almost every entry below is an instance of one
 of these five. The guard each produced is the scar tissue; §6 collects them.

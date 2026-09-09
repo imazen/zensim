@@ -1,5 +1,10 @@
 # A/D blend: scalar screen passes, spatial coverage is incomplete
 
+Later continuation: [actual complete inference cost](model_blend_speed_2026-09-08.md)
+shows negligible extra forward cost over A, but observed latency misses the
+1 MP absolute/SSIM2 and 4 MP relative-to-D bars. Strict quiet qualification is
+still incomplete. Profile extraction before implementing all pooled maps.
+
 The [registered fit](model_preferences_2026-09-08.md#next-registered-model-experiment)
 selects D weight 0.41: the first hundredth-grid weight that correctly orders all
 1,647 independent-judge consensus pairs on the eight fit origins. The exact
