@@ -39,6 +39,12 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+Later September 8 arithmetic-preserving row storage: blend means become
+42.20/141.44 ms at 1024²/2048², D 25.34/89.77 ms, with exact feature/score/map
+replay. Absolute observed latency improves substantially; the relative-to-D
+bar still fails in the same build. Quiet/p95/HDR/per-worker memory admission
+remains INCOMPLETE. [Kernel repair, parity and control limits](../benchmarks/padded_ssim_rows_2026-09-08.md).
+
 September 8 A/D cost: complete blend means are 88.05/194.45 ms at 1024²/2048²,
 versus D 76.41/136.04 ms. The 40-round observed extrema miss the 1 MP absolute
 and SSIM2 bars and the 4 MP relative-to-D bar. Low dispersion does not repair

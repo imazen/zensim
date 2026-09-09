@@ -24,6 +24,14 @@ source" rule). Where the survey and a shipped doc disagree, that conflict is cal
 
 ## 0. The five recurring "actual why" families — READ THIS FIRST
 
+September 8 later kernel experiment: [padded SSIM rows](../benchmarks/padded_ssim_rows_2026-09-08.md)
+retain every saved feature/score/map byte while reducing measured complete
+scalar cost. Row pitch changes physical storage, not horizontal tile boundaries
+or sum order, and differs from the historical plane-base staggering failure.
+The cache/code-generation mechanisms are not separately identified. Non-trigger
+controls bound a small regression; formal performance and model qualification
+remain incomplete. No dataset, feature era or model changed.
+
 September 8 later measurement: [A/D scalar cost and benchmark repair](../benchmarks/model_blend_speed_2026-09-08.md).
 The first run's four rounds/240 waits came from detecting its own Linux
 lock-heartbeat task as a competing benchmark. An observed failing regression

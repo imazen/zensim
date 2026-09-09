@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Stage v4x horizontal SSIM rows with padded physical pitch at cache-sensitive
+  widths, preserving logical dimensions, tile boundaries and every feature/
+  score bit. Reduce observed complete-scoring cost with bounded per-thread
+  scratch; retain explicit performance-qualification limitations and image/
+  spatial parity evidence in the September 8 padded-row record.
+
 - Add a strict canonical importer for retained honest native JXL/AVIF map-arm
   outputs. Bind sources/roles/bytes and independently decode through the existing
   Rust surface. Refuse differing feature vectors for duplicate pixel pairs.

@@ -3702,6 +3702,98 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
     height: usize,
     radius: usize,
 ) {
+    // A cache-line pad spreads the 16 row streams across cache sets. Logical
+    // width and horizontal running sums remain unchanged (unlike column
+    // tiling). Stage one vector group, not a whole image, and reuse storage.
+    if width == 0 || !width.is_multiple_of(256) || height < 16 {
+        fused_blur_h_ssim_v4x_strided::<MU1>(
+            token,
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            width,
+            height,
+            radius,
+            width,
+        );
+        return;
+    }
+    thread_local! {
+        static PADDED: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
+    }
+    let rows = height / 16 * 16;
+    PADDED.with(|a| {
+        let mut arena = a.borrow_mut();
+        let stride = width + 16;
+        let per = 16 * stride;
+        arena.resize(6 * per, 0.0);
+        let (s, rest) = arena.split_at_mut(per);
+        let (d, rest) = rest.split_at_mut(per);
+        let (m1, rest) = rest.split_at_mut(per);
+        let (m2, rest) = rest.split_at_mut(per);
+        let (sq, prod) = rest.split_at_mut(per);
+        for first in (0..rows).step_by(16) {
+            for row in 0..16 {
+                let from = (first + row) * width;
+                let to = row * stride;
+                s[to..to + width].copy_from_slice(&src[from..from + width]);
+                d[to..to + width].copy_from_slice(&dst[from..from + width]);
+            }
+            fused_blur_h_ssim_v4x_strided::<MU1>(
+                token, s, d, m1, m2, sq, prod, width, 16, radius, stride,
+            );
+            for row in 0..16 {
+                let from = row * stride;
+                let to = (first + row) * width;
+                if MU1 {
+                    out_mu1[to..to + width].copy_from_slice(&m1[from..from + width]);
+                }
+                out_mu2[to..to + width].copy_from_slice(&m2[from..from + width]);
+                out_sigma_sq[to..to + width].copy_from_slice(&sq[from..from + width]);
+                out_sigma12[to..to + width].copy_from_slice(&prod[from..from + width]);
+            }
+        }
+    });
+    if rows < height {
+        let off = rows * width;
+        // The three-output path permits an empty, untouched mu1 slice.
+        let tail_mu1 = if MU1 { &mut out_mu1[off..] } else { &mut [] };
+        fused_blur_h_ssim_v4x_strided::<MU1>(
+            token,
+            &src[off..],
+            &dst[off..],
+            tail_mu1,
+            &mut out_mu2[off..],
+            &mut out_sigma_sq[off..],
+            &mut out_sigma12[off..],
+            width,
+            height - rows,
+            radius,
+            width,
+        );
+    }
+}
+
+// Original arithmetic, with physical row pitch independent of logical width.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
+    token: archmage::X64V4xToken,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    stride: usize,
+) {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
@@ -3736,12 +3828,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 // reads, so it is in bounds precisely when the old form was.
                 // Same loads, same values, same order — BIT-EXACT; this moves
                 // WHERE the bound is proven, not what is read.
-                let off = row_base * width + idx;
-                let cs = &src[off..off + 15 * width + 1];
-                let cd = &dst[off..off + 15 * width + 1];
+                let off = row_base * stride + idx;
+                let cs = &src[off..off + 15 * stride + 1];
+                let cd = &dst[off..off + 15 * stride + 1];
                 for ro in 0..16 {
-                    s_arr[ro] = cs[ro * width];
-                    d_arr[ro] = cd[ro * width];
+                    s_arr[ro] = cs[ro * stride];
+                    d_arr[ro] = cd[ro * stride];
                 }
             }
             let sv = f32x16::from_array(token, s_arr);
@@ -3762,12 +3854,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             if MU1 {
                 let mu1_result = (sum_s * inv_v).to_array();
                 for ro in 0..16 {
-                    let base = (row_base + ro) * width + x;
+                    let base = (row_base + ro) * stride + x;
                     out_mu1[base] = mu1_result[ro];
                 }
             }
             for ro in 0..16 {
-                let base = (row_base + ro) * width + x;
+                let base = (row_base + ro) * stride + x;
                 out_mu2[base] = mu2_result[ro];
                 out_sigma_sq[base] = sq_result[ro];
                 out_sigma12[base] = prod_result[ro];
@@ -3793,12 +3885,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 // reads, so it is in bounds precisely when the old form was.
                 // Same loads, same values, same order — BIT-EXACT; this moves
                 // WHERE the bound is proven, not what is read.
-                let off = row_base * width + add_idx;
-                let cs = &src[off..off + 15 * width + 1];
-                let cd = &dst[off..off + 15 * width + 1];
+                let off = row_base * stride + add_idx;
+                let cs = &src[off..off + 15 * stride + 1];
+                let cd = &dst[off..off + 15 * stride + 1];
                 for ro in 0..16 {
-                    s_add[ro] = cs[ro * width];
-                    d_add[ro] = cd[ro * width];
+                    s_add[ro] = cs[ro * stride];
+                    d_add[ro] = cd[ro * stride];
                 }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
@@ -3820,12 +3912,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                     // reads, so it is in bounds precisely when the old form was.
                     // Same loads, same values, same order — BIT-EXACT; this moves
                     // WHERE the bound is proven, not what is read.
-                    let off = row_base * width + rem_idx;
-                    let cs = &src[off..off + 15 * width + 1];
-                    let cd = &dst[off..off + 15 * width + 1];
+                    let off = row_base * stride + rem_idx;
+                    let cs = &src[off..off + 15 * stride + 1];
+                    let cd = &dst[off..off + 15 * stride + 1];
                     for ro in 0..16 {
-                        sa[ro] = cs[ro * width];
-                        da[ro] = cd[ro * width];
+                        sa[ro] = cs[ro * stride];
+                        da[ro] = cd[ro * stride];
                     }
                 }
                 (sa, da)
@@ -3887,12 +3979,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 // reads, so it is in bounds precisely when the old form was.
                 // Same loads, same values, same order — BIT-EXACT; this moves
                 // WHERE the bound is proven, not what is read.
-                let off = row_base * width + idx;
-                let cs = &src[off..off + 7 * width + 1];
-                let cd = &dst[off..off + 7 * width + 1];
+                let off = row_base * stride + idx;
+                let cs = &src[off..off + 7 * stride + 1];
+                let cd = &dst[off..off + 7 * stride + 1];
                 for ro in 0..8 {
-                    s_arr[ro] = cs[ro * width];
-                    d_arr[ro] = cd[ro * width];
+                    s_arr[ro] = cs[ro * stride];
+                    d_arr[ro] = cd[ro * stride];
                 }
             }
             let sv = f32x8::from_array(v3, s_arr);
@@ -3912,12 +4004,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             if MU1 {
                 let mu1_result = (sum_s * inv_v8).to_array();
                 for ro in 0..8 {
-                    let base = (row_base + ro) * width + x;
+                    let base = (row_base + ro) * stride + x;
                     out_mu1[base] = mu1_result[ro];
                 }
             }
             for ro in 0..8 {
-                let base = (row_base + ro) * width + x;
+                let base = (row_base + ro) * stride + x;
                 out_mu2[base] = mu2_result[ro];
                 out_sigma_sq[base] = sq_result[ro];
                 out_sigma12[base] = prod_result[ro];
@@ -3943,12 +4035,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 // reads, so it is in bounds precisely when the old form was.
                 // Same loads, same values, same order — BIT-EXACT; this moves
                 // WHERE the bound is proven, not what is read.
-                let off = row_base * width + add_idx;
-                let cs = &src[off..off + 7 * width + 1];
-                let cd = &dst[off..off + 7 * width + 1];
+                let off = row_base * stride + add_idx;
+                let cs = &src[off..off + 7 * stride + 1];
+                let cd = &dst[off..off + 7 * stride + 1];
                 for ro in 0..8 {
-                    s_add[ro] = cs[ro * width];
-                    d_add[ro] = cd[ro * width];
+                    s_add[ro] = cs[ro * stride];
+                    d_add[ro] = cd[ro * stride];
                 }
             }
             // rem-ring: for every `x >= diam`, `rem_idx(x)` and
@@ -3970,12 +4062,12 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                     // reads, so it is in bounds precisely when the old form was.
                     // Same loads, same values, same order — BIT-EXACT; this moves
                     // WHERE the bound is proven, not what is read.
-                    let off = row_base * width + rem_idx;
-                    let cs = &src[off..off + 7 * width + 1];
-                    let cd = &dst[off..off + 7 * width + 1];
+                    let off = row_base * stride + rem_idx;
+                    let cs = &src[off..off + 7 * stride + 1];
+                    let cd = &dst[off..off + 7 * stride + 1];
                     for ro in 0..8 {
-                        sa[ro] = cs[ro * width];
-                        da[ro] = cd[ro * width];
+                        sa[ro] = cs[ro * stride];
+                        da[ro] = cd[ro * stride];
                     }
                 }
                 (sa, da)
@@ -4007,7 +4099,7 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
     // Scalar remainder rows
     let inv = 1.0 / diam as f32;
     for row in (remaining_start + remaining_8groups * 8)..height {
-        let row_off = row * width;
+        let row_off = row * stride;
         let s_row = &src[row_off..row_off + width];
         let d_row = &dst[row_off..row_off + width];
         let mut sum_s = 0.0f32;
@@ -5211,6 +5303,53 @@ pub fn box_spread_merge_f32(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn padded_ssim_rows_preserve_contiguous_bits() {
+        use archmage::SimdToken;
+        let Some(token) = archmage::X64V4xToken::summon() else {
+            return;
+        };
+        for width in [255, 256, 512, 1024, 1026] {
+            for height in [15, 16, 17, 24, 31, 32, 48] {
+                let len = width * height;
+                let src: Vec<_> = (0..len)
+                    .map(|i| ((i * 127 + i / width * 31) % 4093) as f32 / 1024.0 - 2.0)
+                    .collect();
+                let dst: Vec<_> = (0..len)
+                    .map(|i| ((i * 337 + i / width * 17) % 4091) as f32 / 1024.0 - 2.0)
+                    .collect();
+                for radius in [0, 1, 4, 16, 17] {
+                    let [mut a, mut b, mut c, mut d] = core::array::from_fn(|_| vec![0.0; len]);
+                    let [mut e, mut f, mut g, mut h] = core::array::from_fn(|_| vec![0.0; len]);
+                    super::fused_blur_h_ssim_v4x_strided::<true>(
+                        token, &src, &dst, &mut a, &mut b, &mut c, &mut d, width, height, radius,
+                        width,
+                    );
+                    super::fused_blur_h_ssim_v4x_body::<true>(
+                        token, &src, &dst, &mut e, &mut f, &mut g, &mut h, width, height, radius,
+                    );
+                    for (old, new) in [&a, &b, &c, &d].into_iter().zip([&e, &f, &g, &h]) {
+                        assert!(
+                            old.iter().zip(new).all(|(x, y)| x.to_bits() == y.to_bits()),
+                            "{width}x{height} radius={radius}"
+                        );
+                    }
+                    e.fill(-123.0);
+                    super::fused_blur_h_ssim_v4x_body::<false>(
+                        token, &src, &dst, &mut e, &mut f, &mut g, &mut h, width, height, radius,
+                    );
+                    assert!(e.iter().all(|x| *x == -123.0));
+                    for (old, new) in [&b, &c, &d].into_iter().zip([&f, &g, &h]) {
+                        assert!(
+                            old.iter().zip(new).all(|(x, y)| x.to_bits() == y.to_bits()),
+                            "three-output {width}x{height} radius={radius}"
+                        );
+                    }
+                }
+            }
+        }
+    }
     use super::*;
 
     /// `box_spread_sum_preserving` must conserve total mass EXACTLY (to f64

@@ -30,6 +30,9 @@
 //! surface and separate `bake_member_N` controls. Both options are required;
 //! malformed or unservable candidates fail before benchmarking.
 //! `ZEN_S2_SINGLE_CALL=1` disables iteration batching for latency bounds.
+//! `ZEN_S2_CALLS=N` sets a positive base batch size for throughput controls; it
+//! cannot be combined with `ZEN_S2_SINGLE_CALL=1`. Batched means are not
+//! individual-call latency percentiles.
 //!
 //! ## The amended-W4 arms (`benchmarks/hybrid_candidate_2026-09-01.md`, APPENDIX B)
 //!
@@ -283,6 +286,15 @@ fn cap_tier_v3(_cap: bool) -> Result<(), String> {
 }
 
 fn main() {
+    let calls = std::env::var("ZEN_S2_CALLS").ok().map(|s| {
+        let n: usize = s.parse().expect("ZEN_S2_CALLS must be a positive integer");
+        assert!(n > 0, "ZEN_S2_CALLS must be positive");
+        assert!(
+            env_usize("ZEN_S2_SINGLE_CALL", 0) != 1,
+            "ambiguous batch size"
+        );
+        n
+    });
     let result_path = std::env::var_os("ZENBENCH_RESULT_PATH").map(std::path::PathBuf::from);
     if let Some(path) = &result_path {
         assert!(!path.exists(), "refusing to overwrite benchmark evidence");
@@ -426,6 +438,10 @@ fn main() {
                 if env_usize("ZEN_S2_SINGLE_CALL", 0) == 1 {
                     group.config().min_iterations = 1;
                     group.config().max_iterations = 1;
+                }
+                if let Some(calls) = calls {
+                    group.config().min_iterations = calls;
+                    group.config().max_iterations = calls;
                 }
                 if let Some(e) = ensemble {
                     group.bench("bake_ensemble", move |b| {

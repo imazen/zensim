@@ -4,7 +4,25 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest continuation [measures actual A/D inference cost](benchmarks/model_blend_speed_2026-09-08.md)
+Latest continuation [reduces horizontal SSIM row cost](benchmarks/padded_ssim_rows_2026-09-08.md)
+without changing any feature or score bit. Native profiling locates 69% of the
+mixed benchmark's sampled cycles in that kernel. Padded sixteen-row storage
+reduces observed blend means 88.40→42.20 ms at 1024² and 194.94→141.44 ms at
+2048²; D becomes 25.34/89.77 ms. All 1,320 pixel audits and 792 spatial audits
+are byte-identical, including the blend's existing unsupported map terms.
+Golden/fold/SIMD/allocation/serving tests pass. Non-trigger widths stay within
+the registered 5% normalized regression tolerance; maximum observed increase
+is 4.50%. Formal quiet/p95/HDR/memory qualification remains incomplete, and the
+blend still exceeds 1.25 times current D. Next profile remaining full-pool
+cost before choosing further compute repair or a cheaper competitive model;
+missing pooled attribution, corruption protection and codec RD remain required.
+Post-change native profile: fused horizontal SSIM 31%, fused vertical SSIM 15%,
+single-plane horizontal blur 12% of the mixed workload. Inspect those owners
+next, separating common work from A's pool increment. The initial noisy 576²
+control was replaced by a passing preregistered batched control; no threshold
+was relaxed and no latency percentile was inferred from batching.
+
+The preceding continuation [measures actual A/D inference cost](benchmarks/model_blend_speed_2026-09-08.md)
 and fixes zenbench waiting on its own Linux lock-heartbeat thread. Root bench
 now pins pushed zenbench `1bf8a6509fce`. Corrected 40-round, single-worker means:
 blend 88.05/194.45 ms at 1024²/2048²; D 76.41/136.04 ms; SSIM2 67.73/289.15 ms.
