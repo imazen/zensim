@@ -352,10 +352,30 @@ fn formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse()
     let one = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"1"}]));
     let two = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"2"}]));
     assert!(BakeScorer::ensemble(&[one, two], None).is_err());
-    for bad in ["", "3", "rev0", "second"] {
+    for bad in ["", "4", "rev0", "second"] {
         let model = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":bad}]));
-        assert!(BakeScorer::new(&model).is_err());
+        assert!(BakeScorer::new(&model).is_err(), "{bad:?} must be unknown");
     }
+    // Revision 3 is a KNOWN revision (issue #61): a bake declaring it loads,
+    // and scoring its own feature rows is legitimate in any process. This
+    // process runs the shipped revision, so its PIXEL scoring is refused
+    // instead of pricing revision-3 coefficients against revision-1 pixels.
+    let three = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"3"}]));
+    let mut surface = BakeScorer::new(&three).unwrap();
+    assert_eq!(
+        surface.score_features(&[0., 0.], 64, 64, None).unwrap(),
+        -5.
+    );
+    let src: Vec<[u8; 3]> = (0..64 * 64)
+        .map(|i| [(i % 251) as u8, (i % 13) as u8, 7])
+        .collect();
+    let dst: Vec<[u8; 3]> = src.iter().map(|p| [p[0] / 2, p[1], p[2]]).collect();
+    let (r, d) = (RgbSlice::new(&src, 64, 64), RgbSlice::new(&dst, 64, 64));
+    let err = surface.compute(&r, &d, None).unwrap_err();
+    assert!(
+        matches!(err, zensim::ZensimError::ModelLoadFailed { reason } if reason.contains("formula revision")),
+        "{err}"
+    );
 }
 
 #[test]

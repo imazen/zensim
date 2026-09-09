@@ -742,7 +742,9 @@ pub(crate) fn stable_ssim_plane_tiled(
         }
         // prefix over the next tile, forwards
         for i in 0..d {
-            let (dst_i, prev_i) = (i * row_stride, i.wrapping_sub(1) * row_stride);
+            // `prev_i` is only read when `i > 0`; saturate so the debug-build
+            // overflow check does not fire on the `i == 0` row (CI runs debug).
+            let (dst_i, prev_i) = (i * row_stride, i.saturating_sub(1) * row_stride);
             for j in 0..row_stride {
                 pre[dst_i + j] = next[dst_i + j] + if i > 0 { pre[prev_i + j] } else { 0.0 };
             }
