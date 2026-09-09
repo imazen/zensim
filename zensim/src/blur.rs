@@ -3096,6 +3096,7 @@ fn fused_blur_h_ssim_column_tiled(
     rows: usize,
     radius: usize,
     tile: usize,
+    err: bool,
 ) {
     thread_local! {
         static ARENA: core::cell::RefCell<Vec<f32>> = const { core::cell::RefCell::new(Vec::new()) };
@@ -3138,6 +3139,7 @@ fn fused_blur_h_ssim_column_tiled(
                 tw,
                 rows,
                 radius,
+                err,
             );
             for y in 0..rows {
                 let o = y * width + x0;
@@ -3167,6 +3169,10 @@ pub fn fused_blur_h_ssim(
     height: usize,
     radius: usize,
 ) {
+    // Revision 3 accumulates the direct error moment `Σ(a-b)²` in the
+    // `sigma12` plane in place of `Σab` — the fusion that replaced the exact
+    // f64 second pass. Read ONCE per call; every tier below unswitches on it.
+    let err = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let tile = h_blur_tile_width();
     if tile > 0 && width > tile {
         fused_blur_h_ssim_column_tiled(
@@ -3180,6 +3186,7 @@ pub fn fused_blur_h_ssim(
             height,
             radius,
             tile,
+            err,
         );
         return;
     }
@@ -3193,6 +3200,7 @@ pub fn fused_blur_h_ssim(
         width,
         height,
         radius,
+        err,
     )
 }
 
@@ -3209,6 +3217,7 @@ fn fused_blur_h_ssim_untiled(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     incant!(
         fused_blur_h_ssim_inner(
@@ -3220,7 +3229,8 @@ fn fused_blur_h_ssim_untiled(
             out_sigma12,
             width,
             height,
-            radius
+            radius,
+            err
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     );
@@ -3247,6 +3257,10 @@ pub fn fused_blur_h_ssim3(
     height: usize,
     radius: usize,
 ) {
+    // Revision 3 accumulates the direct error moment `Σ(a-b)²` in the
+    // `sigma12` plane in place of `Σab` — the fusion that replaced the exact
+    // f64 second pass. Read ONCE per call; every tier below unswitches on it.
+    let err = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     // The tile must be on THIS entry too, not just `fused_blur_h_ssim`: the
     // cached-reference-moments path reaches the H planes through here, and
     // tiling only the 4-output entry made it disagree with the pair path
@@ -3267,6 +3281,7 @@ pub fn fused_blur_h_ssim3(
             height,
             radius,
             tile,
+            err,
         );
         return;
     }
@@ -3280,6 +3295,7 @@ pub fn fused_blur_h_ssim3(
         width,
         height,
         radius,
+        err,
     )
 }
 
@@ -3296,6 +3312,7 @@ fn fused_blur_h_ssim3_untiled(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     #[cfg(target_arch = "x86_64")]
     {
@@ -3312,6 +3329,7 @@ fn fused_blur_h_ssim3_untiled(
                 width,
                 height,
                 radius,
+                err,
             );
             return;
         }
@@ -3326,6 +3344,7 @@ fn fused_blur_h_ssim3_untiled(
         width,
         height,
         radius,
+        err,
     );
 }
 
@@ -3343,6 +3362,7 @@ fn fused_blur_h_ssim_inner_v4(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -3391,7 +3411,12 @@ fn fused_blur_h_ssim_inner_v4(
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         // Slide window
@@ -3483,7 +3508,13 @@ fn fused_blur_h_ssim_inner_v4(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 
@@ -3533,7 +3564,12 @@ fn fused_blur_h_ssim_inner_v4(
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -3624,7 +3660,13 @@ fn fused_blur_h_ssim_inner_v4(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 
@@ -3650,7 +3692,12 @@ fn fused_blur_h_ssim_inner_v4(
             sum_s += s;
             sum_d += d;
             sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
-            sum_prod = s.mul_add(d, sum_prod);
+            sum_prod = if err {
+                let e = s - d;
+                e.mul_add(e, sum_prod)
+            } else {
+                s.mul_add(d, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -3678,7 +3725,13 @@ fn fused_blur_h_ssim_inner_v4(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 }
@@ -3696,6 +3749,7 @@ fn fused_blur_h_ssim_inner_v4x(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     fused_blur_h_ssim_v4x_body::<true>(
         token,
@@ -3708,6 +3762,7 @@ fn fused_blur_h_ssim_inner_v4x(
         width,
         height,
         radius,
+        err,
     );
 }
 
@@ -3731,6 +3786,7 @@ fn fused_blur_h_ssim3_inner_v4x(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     fused_blur_h_ssim_v4x_body::<false>(
         token,
@@ -3743,6 +3799,7 @@ fn fused_blur_h_ssim3_inner_v4x(
         width,
         height,
         radius,
+        err,
     );
 }
 
@@ -3768,6 +3825,7 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     // A cache-line pad spreads the 16 row streams across cache sets. Logical
     // width and horizontal running sums remain unchanged (unlike column
@@ -3785,6 +3843,7 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             height,
             radius,
             width,
+            err,
         );
         return;
     }
@@ -3810,7 +3869,7 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
                 d[to..to + width].copy_from_slice(&dst[from..from + width]);
             }
             fused_blur_h_ssim_v4x_strided::<MU1>(
-                token, s, d, m1, m2, sq, prod, width, 16, radius, stride,
+                token, s, d, m1, m2, sq, prod, width, 16, radius, stride, err,
             );
             for row in 0..16 {
                 let from = row * stride;
@@ -3840,6 +3899,7 @@ fn fused_blur_h_ssim_v4x_body<const MU1: bool>(
             height - rows,
             radius,
             width,
+            err,
         );
     }
 }
@@ -3860,6 +3920,7 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
     height: usize,
     radius: usize,
     stride: usize,
+    err: bool,
 ) {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -3910,7 +3971,12 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
             }
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         // Slide window
@@ -4009,7 +4075,13 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 
@@ -4061,7 +4133,12 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
             }
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -4159,7 +4236,13 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 
@@ -4187,7 +4270,12 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
             }
             sum_d += d;
             sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
-            sum_prod = s.mul_add(d, sum_prod);
+            sum_prod = if err {
+                let e = s - d;
+                e.mul_add(e, sum_prod)
+            } else {
+                s.mul_add(d, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -4219,7 +4307,13 @@ fn fused_blur_h_ssim_v4x_strided<const MU1: bool>(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 }
@@ -4239,6 +4333,7 @@ fn fused_blur_h_ssim_inner_v3(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
@@ -4285,7 +4380,12 @@ fn fused_blur_h_ssim_inner_v3(
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -4376,7 +4476,13 @@ fn fused_blur_h_ssim_inner_v3(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 
@@ -4402,7 +4508,12 @@ fn fused_blur_h_ssim_inner_v3(
             sum_s += s;
             sum_d += d;
             sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
-            sum_prod = s.mul_add(d, sum_prod);
+            sum_prod = if err {
+                let e = s - d;
+                e.mul_add(e, sum_prod)
+            } else {
+                s.mul_add(d, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -4430,7 +4541,13 @@ fn fused_blur_h_ssim_inner_v3(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     }
 }
@@ -4448,6 +4565,7 @@ fn fused_blur_h_ssim_inner(
     width: usize,
     height: usize,
     radius: usize,
+    err: bool,
 ) {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -4498,7 +4616,12 @@ fn fused_blur_h_ssim_inner(
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
-            sum_prod = sv.mul_add(dv, sum_prod);
+            sum_prod = if err {
+                let e = sv - dv;
+                e.mul_add(e, sum_prod)
+            } else {
+                sv.mul_add(dv, sum_prod)
+            };
         }
 
         for x in 0..width {
@@ -4565,7 +4688,13 @@ fn fused_blur_h_ssim_inner(
                 sa,
                 da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
             );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
+            sum_prod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+            };
         }
     };
 
@@ -5429,10 +5558,11 @@ mod tests {
                     let [mut e, mut f, mut g, mut h] = core::array::from_fn(|_| vec![0.0; len]);
                     super::fused_blur_h_ssim_v4x_strided::<true>(
                         token, &src, &dst, &mut a, &mut b, &mut c, &mut d, width, height, radius,
-                        width,
+                        width, false,
                     );
                     super::fused_blur_h_ssim_v4x_body::<true>(
                         token, &src, &dst, &mut e, &mut f, &mut g, &mut h, width, height, radius,
+                        false,
                     );
                     for (old, new) in [&a, &b, &c, &d].into_iter().zip([&e, &f, &g, &h]) {
                         assert!(
@@ -5443,6 +5573,7 @@ mod tests {
                     e.fill(-123.0);
                     super::fused_blur_h_ssim_v4x_body::<false>(
                         token, &src, &dst, &mut e, &mut f, &mut g, &mut h, width, height, radius,
+                        false,
                     );
                     assert!(e.iter().all(|x| *x == -123.0));
                     for (old, new) in [&b, &c, &d].into_iter().zip([&f, &g, &h]) {
@@ -6417,12 +6548,12 @@ mod tests {
                 let (mut s1, mut s2) = (vec![0.0f32; n], vec![0.0f32; n]);
                 let (mut sq, mut pr) = (vec![0.0f32; n], vec![0.0f32; n]);
                 super::fused_blur_h_ssim_untiled(
-                    &src, &dst, &mut s1, &mut s2, &mut sq, &mut pr, w, h, radius,
+                    &src, &dst, &mut s1, &mut s2, &mut sq, &mut pr, w, h, radius, false,
                 );
                 let (mut t1, mut t2) = (vec![0.0f32; n], vec![0.0f32; n]);
                 let (mut tq, mut tp) = (vec![0.0f32; n], vec![0.0f32; n]);
                 super::fused_blur_h_ssim3_untiled(
-                    &src, &dst, &mut t1, &mut t2, &mut tq, &mut tp, w, h, radius,
+                    &src, &dst, &mut t1, &mut t2, &mut tq, &mut tp, w, h, radius, false,
                 );
 
                 let (mut wm1, mut wm2) = (vec![0.0f32; n], vec![0.0f32; n]);

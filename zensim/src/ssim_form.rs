@@ -64,9 +64,16 @@ use archmage::autoversion;
 use magetypes::simd::backends::{F32x8Backend, F32x16Backend};
 use magetypes::simd::generic::{f32x8 as GenericF32x8, f32x16};
 
-/// Scratch for the stable moment kernel. Row-ring storage is proportional
-/// to width and blur radius, independent of image height. This private kernel
-/// is selected by Rev3; previous revisions retain their original arithmetic.
+/// Scratch for the exact f64 second-pass kernel. Row-ring storage is
+/// proportional to width and blur radius, independent of image height.
+///
+/// NOT on the served path any more: revision 3 is served by the FUSED
+/// direct-error moments inside the existing H/V pass (`blur::fused_blur_h_ssim`
+/// accumulates `Σ(a-b)²` in place of `Σab`, and `fused::fused_vblur_ssim_inner`
+/// forms the dissimilarity from it). This kernel is the exactness REFERENCE the
+/// bounded-error tests measure against — see
+/// `benchmarks/stable_ssim_kernel_2026-09-08.md`.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Default)]
 pub(crate) struct StableSsimScratch {
     rows: Vec<[f64; 4]>,
@@ -78,6 +85,7 @@ pub(crate) struct StableSsimScratch {
 /// All moments use f64, including source products and sliding-window updates;
 /// outputs round once to f32. No covariance subtraction enters the numerator.
 /// The spatial kernel is one reflect-101 box with the specified radius.
+#[cfg_attr(not(test), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 #[autoversion]
 pub(crate) fn stable_ssim_plane(
@@ -1271,6 +1279,33 @@ impl<T: F32x16Backend + Copy> SsimSplats16<T> {
         // `x * 1.0` is exact, so the legacy arm keeps its original rounding.
         self.one - (num_m * num_s) / (den_m * denom_s)
     }
+
+    /// The DIRECT-ERROR form, for revision 3: the fourth moment is
+    /// `Σ(a-b)²` (the H/V passes accumulate it in place of `Σab`), so the
+    /// error variance is formed directly instead of recovered as
+    /// `var1 + var2 - 2*cov`. Same algebra as the f64 reference `finalize`,
+    /// in f32 with the crate's `mul_add` spellings. Bounded error, registered
+    /// in `benchmarks/stable_ssim_kernel_2026-09-08.md`.
+    #[inline(always)]
+    pub(crate) fn direct(
+        &self,
+        m1: f32x16<T>,
+        m2: f32x16<T>,
+        ssq: f32x16<T>,
+        err: f32x16<T>,
+    ) -> f32x16<T> {
+        let mu_diff = m1 - m2;
+        let mean_error2 = mu_diff * mu_diff;
+        let variance_sum = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)).max(self.zero);
+        let error_variance = (err - mean_error2).max(self.zero);
+        let luma_loss = match self.form {
+            SsimLumaForm::Ssim2Legacy => mean_error2,
+            SsimLumaForm::Clamp => mean_error2.min(self.one),
+            SsimLumaForm::Lorentz => mean_error2 / (mean_error2 + self.one),
+            SsimLumaForm::SsimLumaC1 => mean_error2 / m1.mul_add(m1, m2.mul_add(m2, self.c1)),
+        };
+        (self.one - luma_loss).mul_add(error_variance / (variance_sum + self.c2), luma_loss)
+    }
 }
 
 /// 8-lane sibling of [`SsimSplats16`].
@@ -1327,6 +1362,28 @@ impl<T: F32x8Backend + Copy> SsimSplats8<T> {
             }
         };
         self.one - (num_m * num_s) / (den_m * denom_s)
+    }
+
+    /// 8-lane sibling of [`SsimSplats16::direct`].
+    #[inline(always)]
+    pub(crate) fn direct(
+        &self,
+        m1: GenericF32x8<T>,
+        m2: GenericF32x8<T>,
+        ssq: GenericF32x8<T>,
+        err: GenericF32x8<T>,
+    ) -> GenericF32x8<T> {
+        let mu_diff = m1 - m2;
+        let mean_error2 = mu_diff * mu_diff;
+        let variance_sum = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)).max(self.zero);
+        let error_variance = (err - mean_error2).max(self.zero);
+        let luma_loss = match self.form {
+            SsimLumaForm::Ssim2Legacy => mean_error2,
+            SsimLumaForm::Clamp => mean_error2.min(self.one),
+            SsimLumaForm::Lorentz => mean_error2 / (mean_error2 + self.one),
+            SsimLumaForm::SsimLumaC1 => mean_error2 / m1.mul_add(m1, m2.mul_add(m2, self.c1)),
+        };
+        (self.one - luma_loss).mul_add(error_variance / (variance_sum + self.c2), luma_loss)
     }
 }
 
@@ -1404,6 +1461,55 @@ pub(crate) fn ssim_dissim8<T: F32x8Backend + Copy>(
     s12: GenericF32x8<T>,
 ) -> GenericF32x8<T> {
     SsimSplats8::new(token, form).dissim(m1, m2, ssq, s12)
+}
+
+/// Scalar direct-error form — the tail sibling of [`SsimSplats16::direct`],
+/// same spellings so vector and tail agree to their usual `mul_add` residual.
+#[inline(always)]
+pub(crate) fn ssim_direct_raw_scalar(
+    form: SsimLumaForm,
+    m1: f32,
+    m2: f32,
+    ssq: f32,
+    err: f32,
+) -> f32 {
+    let mu_diff = m1 - m2;
+    let mean_error2 = mu_diff * mu_diff;
+    let variance_sum = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)).max(0.0f32);
+    let error_variance = (err - mean_error2).max(0.0f32);
+    let luma_loss = match form {
+        SsimLumaForm::Ssim2Legacy => mean_error2,
+        SsimLumaForm::Clamp => mean_error2.min(1.0f32),
+        SsimLumaForm::Lorentz => mean_error2 / (mean_error2 + 1.0f32),
+        SsimLumaForm::SsimLumaC1 => mean_error2 / m1.mul_add(m1, m2.mul_add(m2, C_SSIM_LUMA)),
+    };
+    (1.0f32 - luma_loss).mul_add(error_variance / (variance_sum + C2), luma_loss)
+}
+
+/// 16-lane direct-error form; see [`SsimSplats16::direct`].
+#[inline(always)]
+pub(crate) fn ssim_direct16<T: F32x16Backend + Copy>(
+    token: T,
+    form: SsimLumaForm,
+    m1: f32x16<T>,
+    m2: f32x16<T>,
+    ssq: f32x16<T>,
+    err: f32x16<T>,
+) -> f32x16<T> {
+    SsimSplats16::new(token, form).direct(m1, m2, ssq, err)
+}
+
+/// 8-lane direct-error form; see [`SsimSplats8::direct`].
+#[inline(always)]
+pub(crate) fn ssim_direct8<T: F32x8Backend + Copy>(
+    token: T,
+    form: SsimLumaForm,
+    m1: GenericF32x8<T>,
+    m2: GenericF32x8<T>,
+    ssq: GenericF32x8<T>,
+    err: GenericF32x8<T>,
+) -> GenericF32x8<T> {
+    SsimSplats8::new(token, form).direct(m1, m2, ssq, err)
 }
 
 #[cfg(test)]

@@ -34,6 +34,9 @@ BLOCKS="${2:-2}"
 SIZES="${3:-1024,2048}"
 CPU="${4:-8}"
 ROUNDS="${ZEN_XP_ROUNDS:-30}"
+# Threads per arm. 1 = the single pinned worker (streaming path). For the
+# threaded path set THREADS=8 and give taskset a matching CPU range via CPU=8-15.
+THREADS="${THREADS:-1}"
 
 mkdir -p "$OUT"
 BIN=$(ls -t target/release/deps/extract_paths_bench-* 2>/dev/null | grep -v '\.d$' | head -1)
@@ -47,6 +50,7 @@ sha256sum "$BIN" | tee "$OUT/binary.sha256"
 {
   echo "host: $(uname -srm) $(hostname)"
   echo "cpu_pinned: $CPU"
+  echo "threads: $THREADS"
   echo "sizes: $SIZES"
   echo "rounds_min: $ROUNDS"
   echo "blocks_per_revision: $BLOCKS"
@@ -59,7 +63,7 @@ for b in $(seq 1 "$BLOCKS"); do
     log="$OUT/block${b}_rev${rev}.txt"
     echo "=== block $b revision $rev -> $log ==="
     ZEN_XP_SIZES="$SIZES" ZEN_XP_ROUNDS="$ROUNDS" \
-    RAYON_NUM_THREADS=1 ZENSIM_FORMULA_REV="$rev" \
+    RAYON_NUM_THREADS="$THREADS" ZENSIM_FORMULA_REV="$rev" \
       taskset -c "$CPU" nice -n19 ionice -c3 "$BIN" >"$log" 2>&1
     echo "  done: $(grep -c . "$log") lines"
   done

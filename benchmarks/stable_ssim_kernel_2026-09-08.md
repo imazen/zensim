@@ -176,17 +176,29 @@ contains no changed sample must be unchanged.
 | revision | out-of-support signals moved | peak abs delta |
 |---|---:|---:|
 | 1 (shipped) | 8,293 | 4.886e-4 |
-| 3 | **0** (serial and rayon) | 0 |
+| 3, exact f64 second pass (SUPERSEDED, see "Fusion") | 0 (serial and rayon) | 0 |
+| 3, fused (SERVED) | 11,163 (serial and rayon) | **4.277e-6** (bound 2e-5) |
 
 The revision-1 row is a committed test of its own
 (`locality_fixture_reproduces_out_of_support_movement_on_the_shipped_revision`)
-so the revision-3 row cannot pass on an inert fixture.
+so the revision-3 rows cannot pass on an inert fixture.
 
-Retained planes against the whole-plane canonical kernel: 220,320 signals,
-worst |delta| **5.821e-11**, inside the registered
-`2e-10 + 2e-6*|reference|` acceptance. Non-zero because the strips genuinely
-re-seed the vertical recurrence; within bound because that re-seeding is
-stable.
+Read the fused row honestly: it moves MORE out-of-support signals than the
+shipped revision, because the fused form runs on the same f32 sliding sums and
+those stay path-dependent. What the direct error moment removes is the
+cancellation that made each of those movements large — the peak drops ~114×,
+from 4.886e-4 to 4.277e-6. That is the bounded-error acceptance the user
+directed ("bounded error is fine, speed above minor flaws"); the exact-zero row
+is what it cost +27–87% of extraction to get, and no data was ever extracted at
+it.
+
+Retained planes against the whole-plane exact f64 kernel: 220,320 signals,
+worst |delta| **3.150e-4** for the fused form (bound 1e-3), versus 5.821e-11
+for the superseded exact second pass (bound `2e-10 + 2e-6*|reference|`).
+All-equal windows: 216,222 identity windows, 15,135 non-zero, worst residue
+**3.689e-6** (bound 1e-5); the exact form left 8.18e-15. These three numbers
+are printed by the three `rev3_*` controls in `streaming.rs` under
+`ZENSIM_FORMULA_REV=3` and are the registered acceptance.
 
 ### Revision agreement
 
@@ -206,6 +218,11 @@ vacuously. That guard fired for real: the fold-parity wrapper first reported
 `matched 0 tests`, because those gates are `training`-feature-gated.
 
 ### Cost, MEASURED — and it is a problem
+
+> **SUPERSEDED.** Everything from here to "Registered spatial cells" measures
+> the EXACT f64 second-pass form of revision 3, which is no longer served. It
+> is kept because each negative result below is what ruled the alternatives
+> out; the served form and its cost are in "Fusion" below.
 
 Paired A/B through the repo's existing interleaved instrument
 (`zensim/benches/extract_paths_bench.rs`), driven by
@@ -598,12 +615,204 @@ would fail, correctly. Recovering the H-side saving means a two-plane blur with
 saving (skipping the two accumulators when the sigma planes have no consumer)
 is independent of that and does not touch `mu`.
 
+### Fusion: the second traversal is gone, and so is the cost
+
+The lever "Where the cost actually is" pointed at. `blur::fused_blur_h_ssim`
+already accumulated `Σa`, `Σb`, `Σ(a²+b²)` and `Σab` per column window; under
+revision 3 the `Σab` plane has NO consumer (the dissimilarity is bypassed on
+every route that serves the stable signal), so that plane now carries
+`Σ(a−b)²` instead — the same two FMAs, on `a−b` — behind an `err: bool` that
+`fused_blur_h_ssim` / `fused_blur_h_ssim3` read ONCE per call from
+`ssim_form::active_revision()` and thread through all ten tier bodies (18
+accumulation sites: the initial window fill and the slide, in v4x, v4, v3 and
+the generic tail). `fused::fused_vblur_features_ssim` then forms
+
+```text
+loss     = f(mu1 − mu2)                      (the revision-2 Clamp luma form)
+ve       = E[(a−b)²] − (mu1 − mu2)²          direct error variance, ≥ 0
+d        = loss + (1 − loss) · ve / (var1 + var2 + C2)
+```
+
+from the same four f32 planes it always V-blurred (`ssim_form::ssim_direct16`
+/ `ssim_direct8`, ten call sites), and the seven v2 dense-kernel sites
+(`feature_v2::ssim_d_local` / `ssim_d_local_v`) do the same, so the v2 SSIM
+family moves with the v1 family (era `v2ssimstable`, registered alongside
+`v1ssimstable`; `Rev3.moved_slots` is the upper bound the 944-layout gate
+enforces). The exact kernel `ssim_form::stable_ssim_plane` and its thread-local
+scratch are off the served path; it survives as the reference the bounds are
+measured against.
+
+**What is given up, exactly.** The f32 sliding sums are still path-dependent,
+so locality is bounded, not structural: 11,163 out-of-support signals move by
+at most 4.277e-6 (the shipped revision: 8,293 by 4.886e-4, ~114× larger). The
+direct moment kills the cancellation, which was the large term; the recurrence
+drift it leaves is 1e-6-class. Against the exact kernel the fused plane is
+within 3.150e-4 (bound 1e-3), and an all-equal window leaves ≤ 3.689e-6
+(bound 1e-5). Those three numbers ARE the registered acceptance
+(`streaming.rs`: `REV3_LOCALITY_PEAK_BOUND`, `REV3_ACCURACY_BOUND`,
+`IDENTITY_BOUND`), printed by the three `rev3_*` controls under
+`ZENSIM_FORMULA_REV=3`.
+
+#### Single-thread cost: parity
+
+Same instrument as before (`scripts/bench/rev3_cost_ab.sh`, one binary,
+alternating revision blocks, two blocks per revision, `RAYON_NUM_THREADS=1`,
+`taskset -c 8`, `ZEN_XP_WALL_S=300`, no target-cpu=native), on a quiet box
+with exactly one bench process — a first attempt sat behind an orphaned bench
+binary holding zenbench's exclusive lock and was discarded before it timed
+anything. Raw report: `benchmarks/rev3_fused_cost_st_2026-09-09.json`.
+
+| arm @2048 squared | rev 1 | rev 3 FUSED | delta | rev 3 EXACT (superseded) |
+|---|---:|---:|---:|---:|
+| `fast_ssim2` (anchor) | 291.62 ms | 288.64 ms | -1.0% | 293.28 ms |
+| `buf_v1_372` | 178.58 ms | 153.95 ms | **-13.8%** | 226.07 ms (+23.1%) |
+| `buf_v1_228` | 111.73 ms | 107.10 ms | -4.1% | — |
+| `fold372_full` | 128.63 ms | 123.73 ms | -3.8% | — |
+| `fold228_classc` | 86.16 ms | 83.97 ms | -2.5% | — |
+| `fold228_moments` | 85.72 ms | 83.94 ms | -2.1% | — |
+| `fold228_peaks` | 85.16 ms | 83.81 ms | -1.6% | — |
+| `fold944_full` | 263.30 ms | 259.86 ms | **-1.3%** | 336.48 ms (+27%) |
+| `fold156_basic` | 80.84 ms | 80.86 ms | 0.0% | 154.24 ms (+87%) |
+| `fold944_off` | 223.25 ms | 223.85 ms | +0.3% | — |
+
+The anchor moved -1.0% between revisions, so every fused delta inside ±1.5%
+is parity. `fold944_full` at revision 3 (259.9 ms) is again under
+`fast_ssim2` (288.6 ms) — the scorecard's "≤ fast-ssim2" clause holds. The one
+real saving, `buf_v1_372` -13.8%, is the masked/IW block of the strip walk
+(`streaming.rs`, `if need_ssim && stable`): under revision 3 the weighted
+pools read the retained `stable_sd` plane inline, instead of V-blurring
+`sigma1_sq` and `sigma12` per strip and re-deriving the covariance — two
+`box_blur_v_from_copy` sweeps and a plane of arithmetic that the shipped
+revision still pays. `fold372_full` -3.8% is the folded walk's share of the
+same thing. That block was written for the exact form and is unchanged by the
+fusion; the fusion's own contribution is the disappearance of the +27-87%.
+
+At 1024 squared the picture is the same (anchor -1.4%; `buf_v1_372` -11.8%,
+`fold944_full` -0.7%, `fold228_classc` +3.5% is the noisiest arm at that
+geometry, cv 9-14% as recorded above).
+
+**The legacy path paid nothing for the branch.** Revision-1 arms on the fused
+build versus the pre-fusion build (the `err` bool is the only change that can
+reach them): `fold944_full` 265.06 → 263.30 ms, `fold156_basic` 82.31 →
+80.84 ms, anchor 294.05 → 291.62 ms — all inside the cross-build movement of
+the anchor. The unswitch is on a value read once per call; LLVM hoists it out
+of every tier body (see the `cargo asm` note below).
+
+#### `cargo asm`: the branch is resolved outside the loops
+
+`cargo asm -p zensim --lib --release --features custom-profiles,feature-regime-v2,threads,training fused_blur_h_ssim_inner_v4x`
+(cargo-show-asm 0.2.62; the `_v4x_body::<MU1>` and `_v4x_strided` helpers are
+inlined into it, so this one symbol is the whole AVX-512 H pass; 4,443 lines).
+Splitting it into labelled blocks and keeping the FMA-bearing ones: every
+accumulation loop is present TWICE — one body whose FMAs are fed by `vsubps`
+(the `(a−b)²` form: e.g. `.LBB672_188`, 4 FMA / 3 `vsubps`, back-edge) next
+to one with two FMAs and no `vsubps` at all (the `Σab` form: `.LBB672_186`,
+2 FMA / 0 `vsubps`, back-edge), for the fill loop and the slide loop of each
+row-group variant. There is no 8-bit `test`/`cmp` anywhere in the function:
+the `err` flag is consumed once, outside the loops, and each loop body is a
+straight-line copy specialised on it. That is what "unswitched" means here,
+and it is why the revision-1 arms did not move.
+
+#### Eight threads: no regression the instrument can resolve, one block
+
+Same driver with `THREADS=8` (`RAYON_NUM_THREADS=8`, `taskset -c 8-15`, one
+CCD), `ZEN_XP_WALL_S=240`, ONE block per revision — so there is no A-A
+replicate spread to read the deltas against, only the anchor. Raw report:
+`benchmarks/rev3_fused_cost_mt_2026-09-09.json`.
+
+| arm @2048 squared, 8 threads | rev 1 | rev 3 FUSED | delta |
+|---|---:|---:|---:|
+| `fast_ssim2` (anchor) | 292.13 ms | 293.25 ms | +0.4% |
+| `buf_v1_372` | 38.03 ms | 36.28 ms | -4.6% |
+| `fold228_moments` | 31.30 ms | 31.11 ms | -0.6% |
+| `fold228_classc` | 31.44 ms | 31.62 ms | +0.6% |
+| `fold156_basic` | 23.59 ms | 23.78 ms | +0.8% |
+| `fold944_off` | 93.68 ms | 94.72 ms | +1.1% |
+| `fold228_peaks` | 28.72 ms | 29.12 ms | +1.4% |
+| `fold944_full` | 109.10 ms | 111.92 ms | +2.6% |
+| `fold372_full` | 55.69 ms | 57.90 ms | +4.0% |
+| `buf_v1_228` | 21.88 ms | 23.39 ms | +6.9% |
+
+At 1024 squared (5-26 ms arms) the spread is wider in both directions:
+`buf_v1_372` -7.2%, `fold944_full` +6.8%, `fold228_peaks` +14.2%, anchor
+-0.3%. Two things keep this from being read as a threaded regression:
+`buf_v1_228` is +6.9% here and was -4.1% single-threaded on the same binary
+with the same arithmetic, and the only revision-3-specific work on the v1
+strip path that is NOT arithmetic-neutral is the retention copy of the
+canonical plane (`bufs.stable_sd.extend_from_slice`, one inner-strip memcpy
+per channel per scale), which is memory traffic and would show under eight
+threads before it shows under one. A two-block replication is the next
+measurement; until it exists the eight-thread numbers are "inside ±7% on
+sub-60 ms arms, +2.6% on the full 944 walk, single block".
+
+`fast_ssim2` at eight threads is 292 ms — the same as at one — and 81 ms at
+1024 squared against 68 ms single-threaded: it does not scale with the pool
+here, so as a threaded anchor it only says the box was steady, not that the
+arms were.
+
+#### Peak memory: unchanged
+
+`/usr/bin/time -v` max RSS of the same binary, one arm per process, pinned to
+cpu 8 (`scripts/bench/rev3_rss.sh`; table committed as
+`benchmarks/rev3_fused_rss_2026-09-09.tsv`):
+
+| arm | size | rev 1 | rev 3 FUSED | delta | bytes/pixel (rev 3) |
+|---|---:|---:|---:|---:|---:|
+| `fold944_full` | 2048² | 116,400 KB | 117,244 KB | +844 KB | 28.6 |
+| `fold372_full` | 2048² | 77,512 KB | 78,112 KB | +600 KB | 19.1 |
+| `buf_v1_372` | 2048² | 180,964 KB | 180,864 KB | -100 KB | 44.2 |
+| `fold944_full` | 1024² | 53,904 KB | 54,296 KB | +392 KB | 53.0 |
+
+The retained canonical plane is one inner strip per channel per scale, and
+that is what the +0.4-0.8 MB is; every arm stays far under the scorecard's
+128 bytes/pixel clause. The exact second pass's thread-local f64 scratch is
+gone with it.
+
+#### Where the time goes now (perf, fused revision 3)
+
+`perf record -F 2999 -g` on `fold944_full` at 2048 squared, one pinned core,
+ten iterations, `--no-children` self time, functions ≥ 2%
+(`benchmarks/rev3_fused_perf_top_2026-09-09.txt`):
+
+| self | function |
+|---:|---|
+| 26.3% | `blur::box_blur_v_copy_inner_v4x` |
+| 13.1% | `fused::fused_vblur_ssim_inner_v4x` |
+| 9.6% | `libc memmove` (AVX-512 erms) |
+| 9.0% | `blur::fused_blur_h_ssim_inner_v4x` |
+| 8.7% | `feature_v2::dense_block_kernel_era2_entry_v4x` |
+| 8.5% | `blur::box_blur_h_inner_v4x` |
+| 2.6% | `color::srgb_to_positive_xyb_planar_inner_v4x` |
+| 2.6% / 2.5% | `feature_v2::append_block_kernel_entry_{nocross,cross}_v4x` |
+| 2.4% | `simd_ops::edge_diff_channel_inline_both_inner_v4` |
+| 2.4% / 2.3% | `feature_v2::gradient_block_kernel_entry_{bandvis,plain}_v4x` |
+| 2.1% | `simd_ops::ssim_signal_inline_both_inner_v4` |
+| 2.0% | `simd_ops::abs_diff_into_inner_v4` |
+
+`ssim_form::stable_ssim_plane` — 22% of the exact form's profile — is absent;
+the SSIM arithmetic that replaced it is inside `fused_vblur_ssim` and
+`fused_blur_h_ssim`, whose shares are what they were at revision 1. What is
+left on the table is not revision-3 work at all, and it is the round-two
+list: **`box_blur_v_copy` at 26%** is the activity-map blur plus the fold's
+v2-phase whole-window V sweeps (`feature_v2` around the `want_v2` block:
+four `box_blur_v_from_copy` calls on planes the H pass just wrote);
+**`memmove` at 9.6%** is retention and attribution copies (`bufs.stable_sd`
+per strip, the `attr` plane copies); **`box_blur_h` at 8.5%** is the activity
+chain's `box_blur_h_into_abs_diff` re-blurring `src` that the fused H pass
+already blurred into its `mu1` plane — bit-equality of the two H blurs is the
+thing to test before that one is a substitution. None of these move the
+registered SSIM slots; all of them are v1/v2 plumbing shared with revision 1.
+
 ### Registered spatial cells, replayed at both revisions
 
 `scripts/bench/rev3_spatial_replay.sh` re-runs all 23 registered coherence
 cells from `nonmax-diagnosis-2026-09-08/COMMANDS.json` through the in-tree
 `diffmap_block_coherence` example, at revision 1 and revision 3, same bakes,
-same rectangles, same block sizes. 46 runs, 0 non-zero exits.
+same rectangles, same block sizes. 46 runs, 0 non-zero exits — run once for
+the exact second-pass form and again for the FUSED form
+(`benchmarks/rev3_spatial_cells_2026-09-09.json`,
+`benchmarks/rev3_fused_spatial_cells_2026-09-09.json`); both columns are
+below, and the bounded form lands on the same counts.
 
 **Read the caveat before the numbers.** Those bakes were fit against revision-1
 features. Scoring them at revision 3 is a cross-era measurement by
@@ -614,32 +823,39 @@ every result is self-identifying. **What this measures is what the extraction
 change does to a FIXED model. It is not model quality and not a
 qualification.** A revision-3 candidate does not exist.
 
-| bar | revision 1 | revision 3 |
-|---|---:|---:|
-| M2 >= 0.99 | 16 / 23 | **19 / 23** |
-| M3a >= 0.70 | 7 / 23 | **20 / 23** |
+| bar | revision 1 | revision 3, exact (superseded) | revision 3, FUSED |
+|---|---:|---:|---:|
+| M2 >= 0.99 | 16 / 23 | 19 / 23 | **19 / 23** |
+| M3a >= 0.70 | 7 / 23 | 20 / 23 | **20 / 23** |
 
 M3a (attribution density) is where the correction shows, and it shows exactly
 where the diagnosis predicted — the SMALL-block cells, which is where a
 per-pixel signal that moves outside its own support does the most damage:
 
-| cell | M3a rev 1 | M3a rev 3 |
-|---|---:|---:|
-| `row220-b8` | 0.1761 | 0.5821 |
-| `row223-b8` | 0.2826 | 0.5701 |
-| `row73-b8` | 0.3098 | 0.7540 |
-| `row94-b8` | 0.3396 | 0.8438 |
-| `row199-b8` | 0.4073 | 0.8122 |
-| `row220-b16` | 0.3054 | 0.7500 |
-| `row94-b16` | 0.3728 | 0.7509 |
-| `row73-b16` | 0.4210 | 0.8186 |
+| cell | M3a rev 1 | M3a rev 3 exact | M3a rev 3 FUSED |
+|---|---:|---:|---:|
+| `row220-b8` | 0.1761 | 0.5821 | 0.5781 |
+| `row223-b8` | 0.2826 | 0.5701 | 0.5700 |
+| `row73-b8` | 0.3098 | 0.7540 | 0.7527 |
+| `row94-b8` | 0.3396 | 0.8438 | 0.8440 |
+| `row199-b8` | 0.4073 | 0.8122 | 0.8175 |
+| `row220-b16` | 0.3054 | 0.7500 | 0.7505 |
+| `row94-b16` | 0.3728 | 0.7509 | 0.7510 |
+| `row73-b16` | 0.4210 | 0.8186 | 0.8176 |
+
+The fused column tracks the exact one to a few thousandths on every cell —
+the bounded error is invisible at the scale the spatial screen reads.
 
 M2 (linear coherence) is roughly flat and MIXED, not uniformly better: three
-cells cross the bar, and four move down — `row199-b32` 0.9845 -> 0.9370,
-`row202-b8` 0.9924 -> 0.9742, `row160-b32` 0.9998 -> 0.9988, `row34-b32`
-0.9368 -> 0.9333 (that one fails at both revisions). Reporting the regressions
-matters more than the headline: a fixed revision-1 model priced against
-revision-3 features has no reason to improve monotonically, and it did not.
+cells cross the bar, and some move down. Exact form: `row199-b32` 0.9845 ->
+0.9370, `row202-b8` 0.9924 -> 0.9742, `row160-b32` 0.9998 -> 0.9988,
+`row34-b32` 0.9368 -> 0.9333 (that one fails at both revisions). Fused form:
+`row199-b32` 0.9845 -> 0.9415, `row199-b64` 1.0000 -> 0.9930, `row202-b8`
+0.9924 -> 0.9858, and four more by ≤ 0.001 (`row136-b8`, `row139-b32`,
+`row160-b32`, `row202-b32`); on M3a only `row160-b32` (0.9611 -> 0.9467) and
+`row13-b32` (-0.0008) move down. Reporting the regressions matters more than
+the headline: a fixed revision-1 model priced against revision-3 features has
+no reason to improve monotonically, and it did not.
 
 This is consistent with the issue's own finding that a saved-data oracle
 replacing only the SSIM predictions resolved its failing cells, and it is the
@@ -658,6 +874,7 @@ revision-3 candidate; only a re-extraction and a refit can say that.
   break extraction (the same call emits the features), so the profile path
   warns once per process on stderr. Use the pin to EXTRACT; use `BakeScorer`
   to score.
-- Registered spatial cells have not been replayed on the corrected path, so
-  nothing here says the 15 failing coherence cells now pass.
+- The spatial-cell replay ("Registered spatial cells, replayed at both
+  revisions") measures a FIXED revision-1 model on corrected pixels; it says
+  nothing about a refit model, and there is no refit model.
 - No codec RD, HDR or product qualification.

@@ -424,6 +424,7 @@ impl FormulaRevision {
                 "v1detroot",
                 "scorepow",
                 "v1ssimstable",
+                "v2ssimstable",
             ],
         }
     }
@@ -665,6 +666,30 @@ const REV_F4_AND_DETROOT: &[Revision] = &[
 /// touched.
 const REV_V2_DETROOT: &[Revision] = &[REV_DETROOT];
 
+/// The v2 block's SSIM-derived signals under revision 3. They read the same
+/// `sigma12` plane the v1 signal does, and under revision 3 that plane holds
+/// the direct error moment — so `feature_v2::ssim_d_local` forms the v2
+/// dissimilarity from it directly rather than as `cov = s12 - mu1*mu2`. A
+/// separate era from `v1ssimstable` because it names a different kernel and a
+/// different slot family; both are in revision 3's list.
+const REV_V2_SSIM_STABLE: Revision = Revision {
+    era: "v2ssimstable",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "Rev3 (issue #61): the v2 dense kernel's SSIM dissimilarity \
+           (`ssim_d_local` / `ssim_d_local_v`) reads the fourth moment plane \
+           as the DIRECT error `E[(a-b)^2]` and forms \
+           `(d(b-a) + a*err_var)/(b*d)` instead of recovering the covariance \
+           by subtraction. Same bounded-error contract as `v1ssimstable`. \
+           Registered after the first fused build was caught (by reading, \
+           not by a gate) still computing `cov = s12 - mu1*mu2` on the \
+           redefined plane; `rev3_moves_exactly_the_registered_slots_on_the_944_layout` \
+           now covers the v2 block. Proposed: nothing is trained against it.",
+};
+const REV_V2_SSIM: &[Revision] = &[REV_V2_SSIM_STABLE];
+/// `ssim_dev4` carries F18's pooled-root era AND the v2 SSIM era.
+const REV_V2_SSIM_AND_DETROOT: &[Revision] = &[REV_DETROOT, REV_V2_SSIM_STABLE];
+
 /// The one text of the `v1detroot` era, so the three lists above cannot drift.
 const REV_DETROOT: Revision = Revision {
     era: "v1detroot",
@@ -699,24 +724,25 @@ const REV_SSIM_STABLE: Revision = Revision {
     era: "v1ssimstable",
     commit: "-",
     status: RevisionStatus::Proposed,
-    note: "Rev3 (issue #61): the v1 SSIM signal is formed ONCE per pixel by \
-           `ssim_form::stable_ssim_plane` and retained, so basic, peak, \
-           masked, IW and the attribution planes all read the same value. \
-           f64 products and f64 sliding-window moments; the error variance \
-           is accumulated DIRECTLY as `(a-b)^2` instead of recovered as \
-           `var1 + var2 - 2*cov`, which is where the shipped f32 raw \
-           moments lose their significant bits on flat content; the \
-           recurrence skips an add/remove pair that cancels, so a window \
-           whose samples did not change acquires no drift. One reflect-101 \
-           box, one rounding to f32 at the end. \
-           MEASURED on the integrated banded walk \
-           (`streaming::tests::locality_fixture_*`): a local replacement \
-           with reference pixels moves 8,293 signals OUTSIDE the changed \
-           samples' support under revision 1, peak |delta| 4.886e-4, and \
-           ZERO under this era. This era therefore moves values \
-           everywhere, unlike `v1ssimcap`. STILL PROPOSED: \
-           `ssim_form::SHIPPED_REVISION` is `Rev1`, no table has been \
-           re-extracted and no bake has been refit against it.",
+    note: "Rev3 (issue #61), FUSED form: the v1 SSIM dissimilarity is formed \
+           from a DIRECT error moment. `blur::fused_blur_h_ssim` accumulates \
+           `sum (a-b)^2` in the fourth plane in place of `sum a*b` (same two \
+           FMAs), and `fused::fused_vblur_ssim_inner` forms \
+           `loss + (1-loss)*E_err/(var1+var2+C2)` from the same four f32 \
+           planes it always V-blurred — no second traversal. Basic, peak, \
+           masked, IW and the attribution planes all read that one retained \
+           value. BOUNDED, not exact, by user directive 2026-09-09 (\"bounded \
+           error is fine, speed above minor flaws\"): registered on the \
+           locality fixture, peak out-of-support movement <= 2e-5 (measured \
+           4.277e-6; shipped rev 1 measures 4.886e-4), max abs error vs the \
+           exact f64 reference kernel <= 1e-3, all-equal-window residue \
+           <= 1e-5 (measured 3.689e-6). The exact f64 second-pass kernel \
+           `ssim_form::stable_ssim_plane` measured 0 movement but cost \
+           +27..87% of extraction (22% of the walk in perf) and is retained \
+           only as the reference the bounds are measured against. This era \
+           moves every SSIM-derived slot on every image, unlike `v1ssimcap`. \
+           STILL PROPOSED: `ssim_form::SHIPPED_REVISION` is `Rev1`, no table \
+           has been re-extracted and no bake refit against it.",
 };
 
 const REV_F4_ENTRY: Revision = Revision {
@@ -1058,6 +1084,33 @@ const fn v2sig(
     }
 }
 
+/// [`v2sig`] with an explicit `revisions` list, for the v2 signals an era
+/// names by KERNEL rather than by statistic (the SSIM-derived six).
+#[allow(clippy::too_many_arguments)]
+const fn v2sig_rev(
+    block_local: u16,
+    name: &'static str,
+    statistic: Statistic,
+    form: Form,
+    direction: Direction,
+    kernel: KernelId,
+    tranche: Tranche,
+    defect: Option<Defect>,
+    revisions: &'static [Revision],
+) -> SignalDef {
+    let base = v2sig(
+        block_local,
+        name,
+        statistic,
+        form,
+        direction,
+        kernel,
+        tranche,
+        defect,
+    );
+    SignalDef { revisions, ..base }
+}
+
 const fn app(
     block_local: u16,
     name: &'static str,
@@ -1188,7 +1241,7 @@ pub(crate) static V2: [SignalDef; 29] = {
     use Statistic::{L2, L4, Mean, WeightedMean};
     [
         // Bounded-basic block (idx 0..8).
-        v2sig(
+        v2sig_rev(
             0,
             "ssim_mean",
             Mean,
@@ -1197,8 +1250,9 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM,
         ),
-        v2sig(
+        v2sig_rev(
             1,
             "ssim_dev2",
             L2,
@@ -1207,8 +1261,9 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM,
         ),
-        v2sig(
+        v2sig_rev(
             2,
             "ssim_dev4",
             L4,
@@ -1217,6 +1272,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM_AND_DETROOT,
         ),
         v2sig(
             3,
@@ -1281,7 +1337,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             None,
         ),
         // Soft-saliency peak block (idx 9..11).
-        v2sig(
+        v2sig_rev(
             9,
             "ssim_soft_peak",
             WeightedMean,
@@ -1290,6 +1346,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM,
         ),
         v2sig(
             10,
@@ -1312,7 +1369,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             None,
         ),
         // Masked block (idx 12..15).
-        v2sig(
+        v2sig_rev(
             12,
             "masked_ssim",
             WeightedMean,
@@ -1321,6 +1378,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM,
         ),
         v2sig(
             13,
@@ -1353,7 +1411,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             None,
         ),
         // IW block (idx 16..19).
-        v2sig(
+        v2sig_rev(
             16,
             "iw_ssim",
             WeightedMean,
@@ -1362,6 +1420,7 @@ pub(crate) static V2: [SignalDef; 29] = {
             V2Dense,
             Tranche::None,
             None,
+            REV_V2_SSIM,
         ),
         v2sig(
             17,

@@ -1,5 +1,15 @@
 # Start here — one target score, one development path
 
+> **Framing (user, 2026-09-09, verbatim):** *"zensim is about being a speedy
+> and consistent dial and steering metric with useful spatial steering across
+> both sdr and hdr."* And, on the SSIM precision correction: *"bounded error is
+> fine, speed above minor flaws please! we must make this fast or the project
+> has no purpose."* Read every accuracy/precision decision below through that:
+> exactness is not the product, speed + consistency + useful steering are.
+> A bounded, registered error that buys speed is the right trade; an exact
+> kernel that costs +27-87% is not.
+
+
 ## September 9: SSIM correction — handed off, then taken up
 
 The correction was written up as https://github.com/imazen/zensim/issues/61 for
@@ -9,12 +19,16 @@ integration was finished on top of it, so the earlier instruction to pause this
 lane NO LONGER APPLIES — read the issue plus the commits above `f7b9f39a`
 rather than the handoff bundle.
 
-WHAT IS TRUE NOW: `FormulaRevision::Rev3` selects
-`ssim_form::stable_ssim_plane` for the v1 SSIM signal on every route that
-serves it; basic, peak, masked and IW pools all consume that ONE retained
+WHAT IS TRUE NOW: `FormulaRevision::Rev3` forms the v1 SSIM signal from a
+DIRECT error moment inside the existing fused H/V pass (`blur::fused_blur_h_ssim`
+carries `Σ(a−b)²` in its dead `Σab` plane; `fused::fused_vblur_features_ssim`
+and the v2 dense kernels form the direct dissimilarity from it) — no second
+traversal, bounded error (locality ≤ 2e-5, measured 4.277e-6 vs 4.886e-4
+shipped). Basic, peak, masked and IW pools all consume that ONE retained
 value; unsupported routes (`blur_passes != 1`) return an explicit
 `ZensimError`; and bake/process revision disagreement is refused even between
-two revisions that select the same luminance form.
+two revisions that select the same luminance form. The exact f64 kernel
+`ssim_form::stable_ssim_plane` is reference-only.
 
 WHAT IS STILL NOT TRUE, and matters more: **no model is trained on corrected
 features.** Revision 3 changes what the extractor emits, so every stored table

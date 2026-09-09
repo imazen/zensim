@@ -4,15 +4,18 @@
 
 ### Added
 
-- `FormulaRevision::Rev3` — the v1 SSIM signal is formed once per pixel by
-  `ssim_form::stable_ssim_plane` (f64 moments, direct pairwise error variance,
-  no covariance subtraction) and retained, so basic, peak, masked and IW pools
+- `FormulaRevision::Rev3` — the v1 SSIM signal is formed once per pixel from
+  a DIRECT error moment `Σ(a−b)²` (no covariance subtraction) inside the
+  existing fused H/V pass, and retained, so basic, peak, masked and IW pools
   and the attribution planes all consume the SAME value (#61). MEASURED on the
   integrated banded walk: a local replacement with reference pixels moves
-  8,293 signals outside the changed samples' support under revision 1
-  (max |delta| 4.886e-4) and **0** under revision 3. Existing bakes and the
-  shipped default stay revision 1; revision 3 needs freshly extracted features
-  and a refit, and an old bake relabelled `3` is refused rather than served.
+  8,293 out-of-support signals by up to 4.886e-4 under revision 1 and
+  11,163 by up to **4.277e-6** under revision 3 — bounded (registered
+  ≤ 2e-5), not structural, because the f32 sliding sums stay path-dependent;
+  the direct moment removes the cancellation that made the drift ~114× larger.
+  Existing bakes and the shipped default stay revision 1; revision 3 needs
+  freshly extracted features and a refit, and an old bake relabelled `3` is
+  refused rather than served.
 
 ### Changed
 
@@ -38,9 +41,38 @@
   Numbers produced this way measure the extraction change against fixed
   coefficients and are never a served score (#61).
 
+### Changed (revision 3, fused)
+
+- Revision 3 is now FUSED into the existing H/V pass and no longer runs a
+  second traversal. `blur::fused_blur_h_ssim` accumulates the direct error
+  moment `Σ(a−b)²` in its fourth plane in place of `Σa·b` (same two FMAs;
+  read once per call from the active revision, loop-unswitched in every
+  tier), and `fused::fused_vblur_features_ssim` forms
+  `loss + (1−loss)·E_err/(var1+var2+C2)` from the same four f32 planes it
+  always V-blurred. The exact f64 second-pass kernel and its thread-local
+  scratch are gone from the served path; `ssim_form::stable_ssim_plane` is
+  retained as the reference the bounds are measured against (#61).
+- The revision-3 acceptance is BOUNDED, not exact, by user directive
+  ("bounded error is fine, speed above minor flaws"). Registered on the
+  locality fixture: peak out-of-support movement ≤ 2e-5 (measured 4.277e-6;
+  the shipped revision 1 measures 4.886e-4), max abs error vs the exact f64
+  kernel ≤ 1e-3, all-equal-window residue ≤ 1e-5 (measured 3.689e-6). The
+  blast radius is unchanged: exactly the 132 registered SSIM slots move, and
+  every revision 1/2 golden and parity gate is bit-identical (#61).
+
 ### Measured
 
-- Revision 3 costs **+27% to +87%** of extraction time depending on how much
+- FUSED revision 3 is at single-thread cost PARITY with the shipped revision:
+  at 2048², one pinned core, paired A/B, `fold944_full` 263.3 → 259.9 ms
+  (−1.3%, anchor −1.0%), `fold156_basic` 80.8 → 80.9 ms, `buf_v1_372`
+  178.6 → 154.0 ms (−13.8%: the masked/IW pools read the retained signal
+  instead of V-blurring the two sigma planes and re-deriving the covariance
+  per strip), no arm slower beyond noise; `fold944_full` at
+  revision 3 is again under `fast_ssim2` (288.6 ms). The revision-1 arms are
+  unchanged on the fused build (`benchmarks/rev3_fused_cost_st_2026-09-09.json`,
+  `benchmarks/stable_ssim_kernel_2026-09-08.md` "Fusion") (#61).
+- SUPERSEDED — the exact f64 second-pass form of revision 3 cost **+27% to
+  +87%** of extraction time depending on how much
   non-SSIM work the walk does (2048², one pinned core, paired A/B, anchor
   within 0.3%; `benchmarks/stable_ssim_kernel_2026-09-08.md`). At revision 1
   `fold944_full` (265.1 ms) beats `fast_ssim2` (294.1 ms); at revision 3 it is
@@ -53,10 +85,13 @@
   REVERTED. The dead moments cost their time in the H pass that writes two full
   strip planes, not in the V accumulators. Recorded so it is not re-attempted.
 - Replaying the 23 registered spatial coherence cells with revision-1 bakes on
-  revision-3 pixels (cross-revision diagnostic) moves M3a ≥ 0.70 from 7/23 to
-  20/23 and M2 ≥ 0.99 from 16/23 to 19/23, concentrated on the small-block
-  cells. Four cells regress on M2. This measures the extraction change against
-  fixed coefficients — it is not model quality and not a qualification.
+  FUSED revision-3 pixels (cross-revision diagnostic) moves M3a ≥ 0.70 from
+  7/23 to 20/23 and M2 ≥ 0.99 from 16/23 to 19/23, concentrated on the
+  small-block cells — the same counts the superseded exact form produced, cell
+  values within a few thousandths. Three cells regress on M2 by more than
+  0.005 (`row199-b32` 0.9845 → 0.9415 is the largest). This measures the
+  extraction change against fixed coefficients — it is not model quality and
+  not a qualification (`benchmarks/rev3_fused_spatial_cells_2026-09-09.json`).
 
 - Add `ScoredAttribution::refinement_gain` and separate refinement coverage:
   finite max-signal rectangle effects include ties and reflected/coarse source

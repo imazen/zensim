@@ -11,8 +11,23 @@ Source of the mechanism and the integration record:
 
 ## 0. What "revision 3" is
 
-Revision 2 plus ONE change: the per-pixel v1 SSIM dissimilarity is formed by
-`ssim_form::stable_ssim_plane` instead of by combining f32 raw moments.
+> **Framing (user, 2026-09-09):** zensim is *"a speedy and consistent dial and
+> steering metric with useful spatial steering across both sdr and hdr"*, and
+> *"bounded error is fine, speed above minor flaws"*. Revision 3 as first
+> integrated (an exact f64 second pass) restored locality but cost +27-87% of
+> extraction and flipped zensim from beating fast-ssim2 to losing to it. It was
+> replaced, before any data was extracted at it, by the FUSED form below:
+> bounded error, no second traversal. The exact kernel survives only as the
+> reference the bounds are measured against.
+
+
+Revision 2 plus ONE change: the per-pixel v1 SSIM dissimilarity is formed from
+a DIRECT error moment. The existing H pass already accumulated three of the four
+moments the stable form needs (`Σa`, `Σb`, `Σ(a²+b²)`); its fourth plane, `Σab`,
+has no consumer under revision 3, so it now carries `Σ(a−b)²` instead (the same
+two FMAs on `a−b`). The V pass forms
+`loss + (1−loss)·E_err/(var1+var2+C2)` from the same four f32 planes it always
+V-blurred. Nothing is traversed twice.
 
 Revision 3 INHERITS revision 2 (`SsimLumaForm::Clamp`, `paired_global_contrast`,
 `NestedSqrt`, `PureRust`, `REV2_HFGAIN`). It is not an alternative to revision 2;
@@ -45,7 +60,7 @@ the result cannot recover anything:
    locality: a pixel whose own window contains no changed sample still moves,
    because the running sum that reached it passed through the changed region.
 
-### What the kernel does instead
+### What the reference kernel does (`ssim_form::stable_ssim_plane`, not served)
 
 f64 products and f64 window accumulation; a FOURTH moment `(a−b)²` so the error
 variance is accumulated directly rather than recovered as `var1 + var2 − 2·cov`;
@@ -62,9 +77,11 @@ verified against an independent direct-window f64 reference.
 
 | owner | what revision 3 changes there |
 |---|---|
-| `ssim_form::stable_ssim_plane` | the kernel. Unchanged by this lane; it landed at `f7b9f39a`. |
+| `ssim_form::stable_ssim_plane` | the exact f64 REFERENCE kernel. Not on the served path; the bounded-error tests measure against it. |
+| `ssim_form::SsimSplats16/8::direct`, `ssim_direct*` | NEW. The direct-error form in f32 SIMD/scalar, mirroring the reference `finalize`. |
+| `blur::fused_blur_h_ssim` (+`ssim3`, all tiers) | under revision 3 the fourth plane is `Σ(a−b)²`, read once per call from `active_revision`, loop-unswitched in every tier. `sigma12` keeps its name; its meaning is revision-dependent and documented. |
 | `ssim_form::check_route` | NEW. Explicit refusal of routes the revision does not serve. |
-| `fused::fused_vblur_features_ssim` | forms the plane once per band and feeds `d_raw` to the basic/peak tiers and the `sd_out` retention. Legacy `ssim_dissim*` is bypassed, not modified. |
+| `fused::fused_vblur_features_ssim` | under revision 3 forms `d_raw` with `ssim_direct*` from the four V-blurred planes; the f64 second pass and its thread-local scratch are gone. Legacy `ssim_dissim*` is bypassed, not modified. |
 | `simd_ops::ssim_signal_inline_both` / `_mask` / `_iw` | NEW. Weighted pools over the RETAINED signal. Weights, `.max(0)`, tiers and accumulation order copied verbatim from the legacy trio; the legacy trio is byte-for-byte unchanged. |
 | `streaming::process_strip_channel` | retains the band's inner signal before the activity work reuses `temp_blur`, and pools from it. Under revision 3 the two sigma V-blurs are NOT run — running them would hand the weighted pools a different `d_raw` than the basic pools already consumed. |
 | `feature_v2::fold_v1_one_band` | same retention/pooling for the folded band replay. |
@@ -111,10 +128,19 @@ be unchanged.
 | revision | out-of-support signals moved | peak abs delta |
 |---|---:|---:|
 | 1 (shipped) | 8,293 | 4.886e-4 |
-| 3 | **0** (serial and rayon) | 0 |
+| 3, exact f64 second pass (superseded) | 0 (serial and rayon) | 0 |
+| 3, fused (served) | 11,163 (serial and rayon) | **4.277e-6** (bound 2e-5) |
 
-Retained planes vs the whole-plane canonical kernel: 220,320 signals, worst
-|delta| **5.821e-11**, inside the registered `2e-10 + 2e-6·|reference|` bound.
+The fused form is BOUNDED, not exact: its f32 sliding sums stay
+path-dependent, so out-of-support signals still move, but the direct error
+moment removes the cancellation and the peak drops ~114×. Retained planes vs
+the whole-plane exact f64 kernel: 220,320 signals, worst |delta| **3.150e-4**
+(bound 1e-3). All-equal windows: worst residue **3.689e-6** (bound 1e-5).
+
+Cost, single thread, 2048², paired A/B on one binary: `fold944_full` 263.3 ms
+(rev 1) → 259.9 ms (fused rev 3), anchor −1.0% — parity; the superseded exact
+form measured 336.5 ms (+27%). `fold944_full` at revision 3 is under
+`fast_ssim2` (288.6 ms) again. Full table: benchmark record, "Fusion".
 
 The revision-1 row is a committed test of its own, so the revision-3 row cannot
 pass on an inert fixture.

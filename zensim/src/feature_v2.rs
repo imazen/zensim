@@ -704,15 +704,29 @@ pub(crate) fn gather_strip_halo(
 /// divide on every target ISA this crate SIMD-dispatches to. Kept for the
 /// scalar tail loop; see `ssim_d_local_v` for the SIMD sibling, which
 /// additionally routes the single division through `.recip()` (step 2).
+///
+/// `direct` (revision 3, issue #61): the fourth plane is the DIRECT error
+/// moment `E[(a-b)²]` rather than `E[ab]` — the H pass accumulates it in the
+/// `sigma12` plane's place — so the covariance subtraction, which cancels
+/// catastrophically on flat content, is replaced through the identity
+/// `2cov = var_sum - err_var`. Then `1 - (a/b)(c/d)` becomes
+/// `(d(b-a) + a·err_var) / (b·d)`: still one division, and the same
+/// bounded-error contract as the v1 signal (`ssim_form::SsimSplats16::direct`).
 #[inline]
-fn ssim_d_local(mu1: f64, mu2: f64, s12: f64, ssq: f64) -> f64 {
+fn ssim_d_local(mu1: f64, mu2: f64, s12: f64, ssq: f64, direct: bool) -> f64 {
     let a = 2.0 * mu1 * mu2 + C1_V2;
     let b = mu1 * mu1 + mu2 * mu2 + C1_V2;
-    let cov = s12 - mu1 * mu2;
-    let c = 2.0 * cov + C2_V2;
     let d = ssq - mu1 * mu1 - mu2 * mu2 + C2_V2;
-    let local = (a * c) / (b * d);
-    (1.0 - local).max(0.0)
+    if direct {
+        let mu_diff = mu1 - mu2;
+        let err_var = (s12 - mu_diff * mu_diff).max(0.0);
+        ((d * (b - a) + a * err_var) / (b * d)).max(0.0)
+    } else {
+        let cov = s12 - mu1 * mu2;
+        let c = 2.0 * cov + C2_V2;
+        let local = (a * c) / (b * d);
+        (1.0 - local).max(0.0)
+    }
 }
 
 /// GMSD/FSIM/DISTS canonical bounded-similarity form: `(2ab+c)/(a²+b²+c)`.
@@ -854,17 +868,25 @@ fn ssim_d_local_v<T: F32x8Backend + Copy>(
     ssq: V8<T>,
     c1: V8<T>,
     c2: V8<T>,
+    // Revision 3: `s12` carries the direct error moment; see `ssim_d_local`.
+    direct: bool,
 ) -> V8<T> {
     let two = V8::<T>::splat(token, 2.0);
     let one = V8::<T>::splat(token, 1.0);
     let zero = V8::<T>::zero(token);
     let a = two * mu1 * mu2 + c1;
     let b = mu1 * mu1 + mu2 * mu2 + c1;
-    let cov = s12 - mu1 * mu2;
-    let c = two * cov + c2;
     let d = ssq - mu1 * mu1 - mu2 * mu2 + c2;
-    let local = (a * c) / (b * d);
-    (one - local).max(zero)
+    if direct {
+        let mu_diff = mu1 - mu2;
+        let err_var = (s12 - mu_diff * mu_diff).max(zero);
+        ((d * (b - a) + a * err_var) / (b * d)).max(zero)
+    } else {
+        let cov = s12 - mu1 * mu2;
+        let c = two * cov + c2;
+        let local = (a * c) / (b * d);
+        (one - local).max(zero)
+    }
 }
 
 /// Vectorized [`bounded_sim`] — `(2ab+c)/(a²+b²+c)`. Bounded `(0, 1]`.
@@ -2951,6 +2973,10 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
+    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
+    // the v2 SSIM signal must read it as such. Hoisted once per call;
+    // loop-invariant, so every call site below unswitches on it.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
     let c1 = V8::<T>::splat(token, C1_V2 as f32);
@@ -3018,7 +3044,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
             let m2 = ld!(mu2);
             let act = ld!(activity);
 
-            let d = ssim_d_local_v(token, m1, m2, ld!(s12), ld!(ssq), c1, c2);
+            let d = ssim_d_local_v(token, m1, m2, ld!(s12), ld!(ssq), c1, c2, direct);
             r_d += d;
             let d2 = d * d;
             r_d2 += d2;
@@ -3172,7 +3198,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
             let m2 = mu2[i] as f64;
             let act = activity[i] as f64;
 
-            let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64);
+            let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64, direct);
             acc.sum_d += d;
             acc.sum_d2 += d * d;
             acc.sum_d3 += d * d * d;
@@ -6438,6 +6464,10 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
     height: usize,
     weights: &[f64; FEATURES_PER_CHANNEL_V2_TOTAL],
 ) -> Vec<f32> {
+    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
+    // the v2 SSIM signal must read it as such. Hoisted once per call;
+    // loop-invariant, so every call site below unswitches on it.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let n = width * height;
     assert_eq!(src.len(), n, "src plane length must be width*height");
     assert_eq!(dst.len(), n, "dst plane length must be width*height");
@@ -6552,7 +6582,13 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
                 // --- Dense (always-on) family — bit-for-bit the same
                 //     formulas as `dense_block_kernel_generic`'s scalar
                 //     tail. ---
-                let d = ssim_d_local(m1, m2, s12_strip[i_local] as f64, ssq_strip[i_local] as f64);
+                let d = ssim_d_local(
+                    m1,
+                    m2,
+                    s12_strip[i_local] as f64,
+                    ssq_strip[i_local] as f64,
+                    direct,
+                );
                 acc += weights[idx::SSIM_MEAN] * d;
 
                 let diff_src = (s - m1).abs();
@@ -10032,6 +10068,10 @@ fn attr_pass_b_rows(
     id_plane: &mut [f64],
     win_plane: &mut [f64],
 ) {
+    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
+    // the v2 SSIM signal must read it as such. Hoisted once per call;
+    // loop-invariant, so every call site below unswitches on it.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let out_off = y0 * width;
     let cross_on = cross.is_some();
     for y in y0..y1 {
@@ -10054,7 +10094,7 @@ fn attr_pass_b_rows(
             let mut a_res = 0.0f64;
 
             // Dense family (same formulas as `dense_block_kernel`'s tail).
-            let d = ssim_d_local(m1, m2, s12v, sq);
+            let d = ssim_d_local(m1, m2, s12v, sq, direct);
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
             let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
@@ -10639,6 +10679,10 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
     id_plane: &mut [f32],
     win_plane: &mut [f32],
 ) {
+    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
+    // the v2 SSIM signal must read it as such. Hoisted once per call;
+    // loop-invariant, so every call site below unswitches on it.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
     let sp = |v: f32| V8::<T>::splat(token, v);
@@ -10690,7 +10734,7 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
             let mut a_win = zero;
             let mut a_res = zero;
             // Dense family.
-            let d = ssim_d_local_v(token, m1, m2, ld!(s12), sq, c1, c2);
+            let d = ssim_d_local_v(token, m1, m2, ld!(s12), sq, c1, c2, direct);
             let diff_src = (s - m1).abs();
             let diff_dst = (dd - m2).abs();
             let edge_dissim = one - bounded_sim_v(token, diff_src, diff_dst, c_edge);
@@ -19366,7 +19410,14 @@ pub(crate) mod oracle {
                 let m2 = mu2[i] as f64;
                 let act = activity[i] as f64;
 
-                let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64);
+                let d = ssim_d_local(
+                    m1,
+                    m2,
+                    s12[i] as f64,
+                    ssq[i] as f64,
+                    crate::ssim_form::active_revision()
+                        == crate::feature_defs::FormulaRevision::Rev3,
+                );
                 push(&mut s, &mut sum_abs, 0, d);
                 push(&mut s, &mut sum_abs, 1, d * d);
                 push(&mut s, &mut sum_abs, 2, d * d * d);
@@ -19856,6 +19907,10 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
     height: usize,
     transducer_bank: bool,
 ) -> DenseAccum {
+    // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
+    // the v2 SSIM signal must read it as such. Hoisted once per call;
+    // loop-invariant, so every call site below unswitches on it.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     let _ = FUSED; // the split is chosen by tier; see the entries above
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
@@ -19894,7 +19949,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
             macro_rules! terms {
                 ($s:expr, $dd:expr, $m1:expr, $m2:expr, $q:expr, $p:expr, $act:expr) => {{
                     let (s, dd, m1, m2, q, p, act) = ($s, $dd, $m1, $m2, $q, $p, $act);
-                    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2);
+                    let d = ssim_d_local_v(token, m1, m2, p, q, c1, c2, direct);
                     let d2 = d * d;
                     let diff_src = (s - m1).abs();
                     let diff_dst = (dd - m2).abs();

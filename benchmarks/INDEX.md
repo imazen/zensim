@@ -35,10 +35,14 @@
 > significant bits, and its box blur is an f32 sliding recurrence, which is path-dependent — so a
 > pixel whose own window contains no changed sample still moves. MEASURED on the integrated banded
 > walk: a local replacement with reference pixels moves **8,293** signals outside the changed
-> samples' support under revision 1 (peak |Δ| 4.886e-4) and **0** under
-> `FormulaRevision::Rev3`, which accumulates f64 moments and forms the error variance directly as
-> `(a−b)²` instead of `var1 + var2 − 2·cov`. Retained planes match the canonical whole-plane kernel
-> to 5.821e-11 over 220,320 signals. Rev3 also gets an explicit route contract (`blur_passes != 1`
+> samples' support under revision 1 (peak |Δ| 4.886e-4) and 11,163 by at most **4.277e-6** under
+> `FormulaRevision::Rev3`, which forms the error variance directly as `(a−b)²` instead of
+> `var1 + var2 − 2·cov` INSIDE the existing fused H/V pass (the Σab plane is dead under Rev3 and
+> carries Σ(a−b)² instead; no second traversal). The acceptance is bounded by user directive —
+> locality ≤ 2e-5, ≤ 1e-3 vs the exact f64 reference kernel (measured 3.150e-4 over 220,320
+> signals), identity residue ≤ 1e-5 (measured 3.689e-6). An exact f64 second-pass form measured
+> 0 / 5.821e-11 but cost +27–87% of extraction and was superseded before any data was extracted
+> at it. Rev3 also gets an explicit route contract (`blur_passes != 1`
 > returns a `ZensimError`, not a panic) and a bake/process revision refusal that distinguishes
 > revisions 2 and 3 **despite both selecting the Clamp luminance form**. **Nothing is trained on
 > corrected features**: `SHIPPED_REVISION` stays `Rev1`, every stored table is a revision-1

@@ -1661,15 +1661,16 @@ fn process_strip_channel(
         return;
     }
 
-    // Rev3 replaces the v1 SSIM signal with `ssim_form::stable_ssim_plane`,
-    // whose spatial support is exactly ONE reflect-101 box of `blur_radius`.
-    // The separate blur+reduce fallback below is only reachable with
-    // `blur_passes != 1`, which no shipped profile selects and whose halo
-    // (`passes * radius`) does not describe a single box — so Rev3 does not
-    // serve it. The refusal is an explicit `ZensimError` raised at the
-    // fallible entry points (`crate::ssim_form::check_route`), NOT a panic
-    // here and NOT a silent fall-through to the legacy arithmetic; this
-    // assertion only documents that the gate ran.
+    // Rev3 is FUSED into the one-pass route: `fused_blur_h_ssim` accumulates
+    // the direct error moment in place of `Σab` and `fused_vblur_features_ssim`
+    // forms the dissimilarity from it. The separate blur+reduce fallback below
+    // (`blur_passes != 1`, which no shipped profile selects) still builds its
+    // fourth plane with `mul_into` — i.e. `Σab` — and pools with the legacy
+    // covariance reducers, so Rev3 does not serve it. The refusal is an
+    // explicit `ZensimError` raised at the fallible entry points
+    // (`crate::ssim_form::check_route`), NOT a panic here and NOT a silent
+    // fall-through to the legacy arithmetic; this assertion only documents
+    // that the gate ran.
     let stable = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
     debug_assert!(
         !stable || config.blur_passes == 1,
@@ -1745,11 +1746,13 @@ fn process_strip_channel(
                 crate::fused::FreeExtrasWork::default(),
             );
 
-            // Retain the corrected inner-band signal BEFORE the activity work
-            // below reuses `temp_blur` as blur scratch. `store_sd` was forced
-            // on for exactly this reason, so the masked/IW pools read the same
+            // Retain the inner-band signal BEFORE the activity work below
+            // reuses `temp_blur` as blur scratch. `store_sd` was forced on for
+            // exactly this reason, so the masked/IW pools read the same
             // per-pixel values the basic/peak pools already consumed rather
-            // than re-deriving a second, differently-rounded signal.
+            // than re-deriving a second, differently-rounded signal. (Under
+            // the fused Rev3 the sigma V-blurs the legacy pools needed are
+            // also skipped: their fourth plane now holds the error moment.)
             if stable && (config.extended_features || config.compute_iw_features) {
                 let inner = inner_start * width..(inner_start + inner_h) * width;
                 bufs.stable_sd.clear();
@@ -7121,6 +7124,20 @@ mod tests {
     const LOCALITY_RECT: (usize, usize, usize, usize) = (96, 150, 112, 166);
     const LOCALITY_DIMS: (usize, usize) = (192, 288);
 
+    /// REGISTERED bounded-error acceptance for the FUSED revision 3 (user
+    /// directive 2026-09-09: "bounded error is fine, speed above minor
+    /// flaws"). Each bound is ~3-5x above the value measured on this fixture
+    /// when it was registered, and every one is far under the shipped
+    /// revision 1 figure.
+    ///
+    /// | quantity | rev 1 (shipped) | fused rev 3 measured | bound |
+    /// |---|---:|---:|---:|
+    /// | peak out-of-support movement | 4.886e-4 | 4.277e-6 | 2e-5 |
+    /// | max abs error vs the exact f64 kernel | 3.378e-3 | printed by the test | 1e-3 |
+    /// | worst residue on an all-equal window | — | 3.689e-6 | 1e-5 |
+    const REV3_LOCALITY_PEAK_BOUND: f64 = 2e-5;
+    const REV3_ACCURACY_BOUND: f64 = 1e-3;
+
     /// **The negative control that makes the Rev3 result mean something.**
     ///
     /// The shipped revision's raw-moment cancellation moves the retained
@@ -7169,15 +7186,18 @@ mod tests {
         for parallel in [false, true] {
             let (count, max_abs) =
                 locality_probe(LOCALITY_DIMS.0, LOCALITY_DIMS.1, LOCALITY_RECT, parallel);
-            assert_eq!(
-                (count, max_abs),
-                (0, 0.0),
+            assert!(
+                max_abs <= REV3_LOCALITY_PEAK_BOUND,
                 "revision 3 (parallel={parallel}) moved {count} retained signals \
-                 outside the changed samples' support (max |delta| {max_abs:.3e}); \
-                 locality is the property this revision exists to restore"
+                 outside the changed samples' support with peak |delta| {max_abs:.3e}, \
+                 above the registered bound {REV3_LOCALITY_PEAK_BOUND:e}"
+            );
+            println!(
+                "rev3 fused (parallel={parallel}): out-of-support {count} signals, \
+                 peak {max_abs:.3e} (bound {REV3_LOCALITY_PEAK_BOUND:e})"
             );
         }
-        println!("REV3-LOCALITY-RAN out-of-support: 0 signals (serial and parallel)");
+        println!("REV3-LOCALITY-RAN within the registered bound (serial and parallel)");
     }
 
     /// **Cached and uncached agree at revision 3.**
@@ -7248,9 +7268,12 @@ mod tests {
         let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
         let planes = retained_ssim_planes(&pre, &dst, w, h, &config, params.weights);
 
-        // The kernel's registered numerical acceptance, applied here with
-        // `reference == 0` — so the whole allowance is the absolute term.
-        const IDENTITY_BOUND: f32 = 2e-10;
+        // Registered residue bound for the FUSED f32 revision 3 (measured
+        // 3.689e-6 on this fixture; the exact f64 kernel's figure was
+        // 8.18e-15). f32 sliding sums that have passed through a difference
+        // do not return to within f32 eps of zero; that is the accepted
+        // trade, see REV3_LOCALITY_PEAK_BOUND.
+        const IDENTITY_BOUND: f32 = 1e-5;
         let rad = config.blur_radius as isize;
         let (mut checked, mut nonzero, mut worst) = (0usize, 0usize, 0.0f32);
         for (_scale, _ch, sw, sh, r, d, sd) in &planes {
@@ -7281,9 +7304,7 @@ mod tests {
         assert!(
             worst <= IDENTITY_BOUND,
             "{nonzero} of {checked} windows whose samples are all EQUAL produced a \
-             signal above the registered acceptance: worst {worst:e} > {IDENTITY_BOUND:e}. \
-             A residue of ~1e-15 is the f64 recurrence returning inexactly after \
-             passing through a difference; anything near the bound is a defect."
+             signal above the registered residue bound: worst {worst:e} > {IDENTITY_BOUND:e}."
         );
         println!(
             "REV3-IDENTITY-RAN {checked} identity windows, {nonzero} non-zero, \
@@ -7611,6 +7632,120 @@ mod tests {
         );
     }
 
+    /// **G3.1 for revision 3 on the 944 layout** — the wide walk's v2 block
+    /// (`f372..`) reads the same `sigma12` plane the v1 signal does, so a
+    /// revision that redefines that plane reaches v2 too. The 372-wide gate
+    /// above cannot see that; this one can. Same shape: the revision-3 half
+    /// prints its vector, the shipped half diffs and checks both bounds —
+    /// nothing moved outside `Rev3.moved_slots(944)`, and every slot the
+    /// `v1ssimstable` and `v2ssimstable` eras claim did move.
+    ///
+    /// This gate exists because the first fused build got it wrong: the v2
+    /// dense kernel kept computing `cov = s12 - mu1*mu2` on a plane that no
+    /// longer held `Σab`. Fold-vs-streaming parity could not catch it (both
+    /// routes were equally wrong) and the 372 gate does not reach `f372+`.
+    #[test]
+    fn rev3_moves_exactly_the_registered_slots_on_the_944_layout() {
+        const SENTINEL: &str = "REV3-VECTOR944 ";
+        let path = "streaming::tests::rev3_moves_exactly_the_registered_slots_on_the_944_layout";
+        let (w, h) = (192usize, 160usize);
+        let (src, dst) = locality_fixture(w, h);
+        let vector = || {
+            let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+            let toggles = crate::feature_v2::V2NewFeatureToggles {
+                append_block: true,
+                append2_block: true,
+                v1_pools: crate::feature_v2::V1PoolsMode::Full,
+                ..Default::default()
+            };
+            let mut scratch = crate::feature_v2::V2Scratch::new();
+            z.compute_folded720_append_features_streaming(
+                &RgbSlice::new(&src, w, h),
+                &RgbSlice::new(&dst, w, h),
+                toggles,
+                &mut scratch,
+            )
+            .expect("944 walk")
+            .features()
+            .to_vec()
+        };
+        if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok("3") {
+            let bits: Vec<String> = vector()
+                .iter()
+                .map(|v| format!("{:016x}", v.to_bits()))
+                .collect();
+            println!("{SENTINEL}{}", bits.join(","));
+            return;
+        }
+        assert_eq!(
+            crate::ssim_form::active_revision(),
+            crate::ssim_form::SHIPPED_REVISION
+        );
+        let base = vector();
+        assert_eq!(base.len(), 944, "this gate reads the 944-wide layout");
+        let exe = std::env::current_exe().expect("test binary path");
+        let out = std::process::Command::new(exe)
+            .args([path, "--exact", "--nocapture", "--test-threads=1"])
+            .env("ZENSIM_FORMULA_REV", "3")
+            .output()
+            .expect("re-exec the test binary");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "the revision-3 half failed\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let line = stdout
+            .lines()
+            .find_map(|l| l.split(SENTINEL).nth(1))
+            .expect("the revision-3 half printed no vector — the control did not run");
+        let rev3: Vec<f64> = line
+            .trim()
+            .split(',')
+            .map(|t| f64::from_bits(u64::from_str_radix(t, 16).expect("hex bits")))
+            .collect();
+        assert_eq!(rev3.len(), base.len());
+        let moved: Vec<u16> = (0..base.len())
+            .filter(|&i| base[i].to_bits() != rev3[i].to_bits())
+            .map(|i| i as u16)
+            .collect();
+        let bound = crate::feature_defs::FormulaRevision::Rev3.moved_slots(944, crate::NUM_SCALES);
+        let outside: Vec<u16> = moved
+            .iter()
+            .copied()
+            .filter(|i| !bound.contains(i))
+            .collect();
+        assert!(
+            outside.is_empty(),
+            "revision 3 moved 944-layout slots NO era of it declares: {outside:?}"
+        );
+        let mut claimed =
+            crate::feature_defs::era_moved_slots("v1ssimstable", 944, crate::NUM_SCALES);
+        claimed.extend(crate::feature_defs::era_moved_slots(
+            "v2ssimstable",
+            944,
+            crate::NUM_SCALES,
+        ));
+        let unmoved: Vec<u16> = claimed
+            .iter()
+            .copied()
+            .filter(|i| !moved.contains(i))
+            .collect();
+        assert!(
+            unmoved.is_empty(),
+            "slots registered as moved by the SSIM eras did NOT move on the 944 layout \
+             — a consumer is still reading legacy moments: {unmoved:?}"
+        );
+        let v2_moved = moved.iter().filter(|&&i| i >= 372).count();
+        println!(
+            "rev3 moved {} of 944 slots ({v2_moved} in the v2 block); all {} SSIM-era slots moved; \
+             none outside the revision's {} declared slots",
+            moved.len(),
+            claimed.len(),
+            bound.len()
+        );
+    }
+
     /// **The unsupported route returns an ERROR.** Revision 3's moments are
     /// one reflect-101 box, so a `blur_passes != 1` profile is refused —
     /// through the public entry, as a `Result`, on the thread the caller is
@@ -7668,16 +7803,15 @@ mod tests {
         println!("REV3-ROUTE-RAN refusal: {text}");
     }
 
-    /// The integrated retention route must carry the SAME values the
-    /// canonical primitive produces on the same planes. This is what binds
-    /// "basic, peaks, masked and IW use the same corrected signal" to a
-    /// checkable statement: everything downstream reads `ret.sd`, so if
-    /// `ret.sd` is the canonical plane, they all are.
+    /// The integrated retention route is within the REGISTERED bounded error
+    /// of the exact f64 second-pass kernel it replaced.
     ///
-    /// The bound is the kernel's registered numerical acceptance
-    /// (`2e-10 + 2e-6*|reference|`) rather than bit-equality, because the
-    /// strip walk re-seeds the vertical recurrence at each strip while the
-    /// whole-plane reference accumulates from row 0.
+    /// Everything downstream reads `ret.sd`, so this binds "basic, peaks,
+    /// masked and IW use one signal" to a number: the retained plane is the
+    /// fused f32 direct-error form, and this measures its distance from
+    /// `stable_ssim_plane`, the exactness reference, across every scale and
+    /// channel. Bound is `REV3_ACCURACY_BOUND`; the measured worst is printed
+    /// so the record carries the value, not only the verdict.
     #[test]
     fn rev3_retained_planes_are_the_canonical_stable_signal() {
         if !crate::ssim_form::run_at_revision(
@@ -7728,11 +7862,6 @@ mod tests {
                     {
                         let (got, exp) = (got_f32 as f64, exp_f32 as f64);
                         assert!(got.is_finite(), "non-finite retained signal at {i}");
-                        let tol = 2e-10 + 2e-6 * exp.abs();
-                        assert!(
-                            (got - exp).abs() <= tol,
-                            "retained signal {got} != canonical {exp} at plane {sw}x{sh} ch{c} idx {i}"
-                        );
                         worst = worst.max((got - exp).abs());
                         checked += 1;
                     }
@@ -7740,7 +7869,15 @@ mod tests {
             },
         );
         assert!(checked > 0, "no planes were checked");
-        println!("REV3-CANONICAL-RAN checked {checked} signals, worst |delta| {worst:.3e}");
+        assert!(
+            worst <= REV3_ACCURACY_BOUND,
+            "fused rev3 retained signal is {worst:.3e} from the exact f64 kernel, \
+             above the registered bound {REV3_ACCURACY_BOUND:e}"
+        );
+        println!(
+            "REV3-CANONICAL-RAN checked {checked} signals, worst |delta| {worst:.3e} \
+             vs the exact kernel (bound {REV3_ACCURACY_BOUND:e})"
+        );
     }
 
     fn dump_ssim_precision_from_coherence(path: &str) {

@@ -11,7 +11,10 @@
     clippy::too_many_arguments
 )]
 
-use crate::ssim_form::{ssim_dissim_raw_scalar, ssim_dissim8, ssim_dissim16};
+use crate::ssim_form::{
+    ssim_direct_raw_scalar, ssim_direct8, ssim_direct16, ssim_dissim_raw_scalar, ssim_dissim8,
+    ssim_dissim16,
+};
 #[cfg(target_arch = "x86_64")]
 use archmage::arcane;
 use archmage::incant;
@@ -668,58 +671,40 @@ pub(crate) fn fused_vblur_features_ssim(
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
 ) -> StripChannelAccum {
-    let mut run = |stable_sd: &[f32]| {
-        incant!(
-            fused_vblur_ssim_inner(
-                h_mu1,
-                h_mu2,
-                h_sigma_sq,
-                h_sigma12,
-                src,
-                dst,
-                width,
-                height,
-                inner_start,
-                inner_h,
-                radius,
-                mu1_out,
-                mu2_out,
-                store_mu,
-                sd_out,
-                store_sd,
-                ssq_out,
-                s12_out,
-                store_sigma,
-                free,
-                stable_sd
-            ),
-            [v4x, v4, v3, neon, wasm128, scalar]
-        )
-    };
-    if crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3 {
-        // Bounded by one canonical band per worker; reused across channels,
-        // scales and calls. The retained signal is also the pooling input.
-        thread_local! {
-            static STABLE: std::cell::RefCell<(crate::ssim_form::StableSsimScratch, Vec<f32>)> =
-                std::cell::RefCell::new((Default::default(), Vec::new()));
-        }
-        STABLE.with_borrow_mut(|(scratch, signal)| {
-            signal.resize(width * height, 0.0);
-            crate::ssim_form::stable_ssim_plane(
-                src,
-                dst,
-                width,
-                height,
-                radius,
-                crate::ssim_form::active_luma_form(),
-                signal,
-                scratch,
-            );
-            run(signal)
-        })
-    } else {
-        run(&[])
-    }
+    // Revision 3 is FUSED: the H pass already carries `Σ(a-b)²` in the
+    // `h_sigma12` plane (see `blur::fused_blur_h_ssim`), so the V pass forms
+    // the direct-error dissimilarity from the same four V-blurred planes it
+    // always had — no second traversal. The exact f64 second-pass kernel this
+    // replaced measured at 22% of the whole walk (perf, fold944_full@2048^2)
+    // and is kept in `ssim_form` as the reference the bounded-error tests
+    // measure against.
+    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    incant!(
+        fused_vblur_ssim_inner(
+            h_mu1,
+            h_mu2,
+            h_sigma_sq,
+            h_sigma12,
+            src,
+            dst,
+            width,
+            height,
+            inner_start,
+            inner_h,
+            radius,
+            mu1_out,
+            mu2_out,
+            store_mu,
+            sd_out,
+            store_sd,
+            ssq_out,
+            s12_out,
+            store_sigma,
+            free,
+            direct
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
 }
 
 /// Fused V-blur + feature extraction for edge-only channels (no SSIM).
@@ -829,7 +814,9 @@ fn fused_vblur_ssim_inner_v4(
     // bounded-error family. See [`FreeExtrasWork`] and
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
-    stable_sd: &[f32],
+    // Revision 3: form the dissimilarity with the direct-error moment that the
+    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
+    direct: bool,
 ) -> StripChannelAccum {
     let form = crate::ssim_form::active_luma_form();
     let diam = 2 * radius + 1;
@@ -903,10 +890,10 @@ fn fused_vblur_ssim_inner_v4(
                 let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
 
                 // === SSIM ===
-                let sd = if stable_sd.is_empty() {
-                    (ssim_dissim16(token, form, mu1, mu2, ssq, s12)).max(zero)
+                let sd = if direct {
+                    ssim_direct16(token, form, mu1, mu2, ssq, s12).max(zero)
                 } else {
-                    f32x16::from_array(token, stable_sd[base..][..16].try_into().unwrap())
+                    (ssim_dissim16(token, form, mu1, mu2, ssq, s12)).max(zero)
                 };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
@@ -1098,10 +1085,10 @@ fn fused_vblur_ssim_inner_v4(
                 let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let sd = if stable_sd.is_empty() {
-                    (ssim_dissim8(v3, form, mu1, mu2, ssq, s12)).max(zero8)
+                let sd = if direct {
+                    ssim_direct8(v3, form, mu1, mu2, ssq, s12).max(zero8)
                 } else {
-                    f32x8::from_array(v3, stable_sd[base..][..8].try_into().unwrap())
+                    (ssim_dissim8(v3, form, mu1, mu2, ssq, s12)).max(zero8)
                 };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
@@ -1269,10 +1256,10 @@ fn fused_vblur_ssim_inner_v4(
                 let dv = dst[y * width + x];
 
                 // SSIM (f32 to match SIMD paths)
-                let sd = if stable_sd.is_empty() {
-                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
+                let sd = if direct {
+                    ssim_direct_raw_scalar(form, mu1, mu2, ssq, s12).max(0.0f32)
                 } else {
-                    stable_sd[y * width + x]
+                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
                 };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
@@ -1405,7 +1392,9 @@ fn fused_vblur_ssim_inner_v4x(
     // bounded-error family. See [`FreeExtrasWork`] and
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
-    stable_sd: &[f32],
+    // Revision 3: form the dissimilarity with the direct-error moment that the
+    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
+    direct: bool,
 ) -> StripChannelAccum {
     let form = crate::ssim_form::active_luma_form();
     let diam = 2 * radius + 1;
@@ -1479,10 +1468,10 @@ fn fused_vblur_ssim_inner_v4x(
                 let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
 
                 // === SSIM ===
-                let sd = if stable_sd.is_empty() {
-                    (ssim_dissim16(token, form, mu1, mu2, ssq, s12)).max(zero)
+                let sd = if direct {
+                    ssim_direct16(token, form, mu1, mu2, ssq, s12).max(zero)
                 } else {
-                    f32x16::from_array(token, stable_sd[base..][..16].try_into().unwrap())
+                    (ssim_dissim16(token, form, mu1, mu2, ssq, s12)).max(zero)
                 };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
@@ -1674,10 +1663,10 @@ fn fused_vblur_ssim_inner_v4x(
                 let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let sd = if stable_sd.is_empty() {
-                    (ssim_dissim8(v3, form, mu1, mu2, ssq, s12)).max(zero8)
+                let sd = if direct {
+                    ssim_direct8(v3, form, mu1, mu2, ssq, s12).max(zero8)
                 } else {
-                    f32x8::from_array(v3, stable_sd[base..][..8].try_into().unwrap())
+                    (ssim_dissim8(v3, form, mu1, mu2, ssq, s12)).max(zero8)
                 };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
@@ -1845,10 +1834,10 @@ fn fused_vblur_ssim_inner_v4x(
                 let dv = dst[y * width + x];
 
                 // SSIM (f32 to match SIMD paths)
-                let sd = if stable_sd.is_empty() {
-                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
+                let sd = if direct {
+                    ssim_direct_raw_scalar(form, mu1, mu2, ssq, s12).max(0.0f32)
                 } else {
-                    stable_sd[y * width + x]
+                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
                 };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
@@ -1986,7 +1975,9 @@ fn fused_vblur_ssim_inner_v3(
     // bounded-error family. See [`FreeExtrasWork`] and
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
-    stable_sd: &[f32],
+    // Revision 3: form the dissimilarity with the direct-error moment that the
+    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
+    direct: bool,
 ) -> StripChannelAccum {
     let form = crate::ssim_form::active_luma_form();
     let diam = 2 * radius + 1;
@@ -2051,10 +2042,10 @@ fn fused_vblur_ssim_inner_v3(
                 let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let sd = if stable_sd.is_empty() {
-                    (ssim_dissim8(token, form, mu1, mu2, ssq, s12)).max(zero)
+                let sd = if direct {
+                    ssim_direct8(token, form, mu1, mu2, ssq, s12).max(zero)
                 } else {
-                    f32x8::from_array(token, stable_sd[base..][..8].try_into().unwrap())
+                    (ssim_dissim8(token, form, mu1, mu2, ssq, s12)).max(zero)
                 };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
@@ -2222,10 +2213,10 @@ fn fused_vblur_ssim_inner_v3(
                 let dv = dst[y * width + x];
 
                 // SSIM
-                let sd = if stable_sd.is_empty() {
-                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
+                let sd = if direct {
+                    ssim_direct_raw_scalar(form, mu1, mu2, ssq, s12).max(0.0f32)
                 } else {
-                    stable_sd[y * width + x]
+                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
                 };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
@@ -2362,7 +2353,9 @@ fn fused_vblur_ssim_inner(
     // bounded-error family. See [`FreeExtrasWork`] and
     // `StripChannelAccum::sum_s` / `sum_msat`.
     free: FreeExtrasWork,
-    stable_sd: &[f32],
+    // Revision 3: form the dissimilarity with the direct-error moment that the
+    // H pass put in `h_sigma12` (see `blur::fused_blur_h_ssim`).
+    direct: bool,
 ) -> StripChannelAccum {
     let form = crate::ssim_form::active_luma_form();
     #[allow(non_camel_case_types)]
@@ -2445,10 +2438,10 @@ fn fused_vblur_ssim_inner(
                 let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
 
                 // SSIM
-                let sd = if stable_sd.is_empty() {
-                    (ssim_dissim8(token, form, mu1, mu2, ssq, s12)).max(zero)
+                let sd = if direct {
+                    ssim_direct8(token, form, mu1, mu2, ssq, s12).max(zero)
                 } else {
-                    f32x8::from_array(token, stable_sd[base..][..8].try_into().unwrap())
+                    (ssim_dissim8(token, form, mu1, mu2, ssq, s12)).max(zero)
                 };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
@@ -2623,10 +2616,10 @@ fn fused_vblur_ssim_inner(
                 let dv = dst[y * width + x];
 
                 // SSIM
-                let sd = if stable_sd.is_empty() {
-                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
+                let sd = if direct {
+                    ssim_direct_raw_scalar(form, mu1, mu2, ssq, s12).max(0.0f32)
                 } else {
-                    stable_sd[y * width + x]
+                    (ssim_dissim_raw_scalar(form, mu1, mu2, ssq, s12)).max(0.0f32)
                 };
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
