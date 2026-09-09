@@ -39,6 +39,14 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+Later September 8 stable SSIM mechanism: the private Rust error-moment
+kernel passes the direct f64 reference and ten SIMD configurations. Kernel
+means are 9.43/38.03 ms for three 1024²/2048² planes, with 384/768 KiB scratch.
+No feature era or served model selects it yet. Full extraction, spatial
+binding, refreshed training data and inference/RD qualification remain required;
+no release criterion inherits a pass from this kernel result.
+[Kernel, accuracy and integration contract](../benchmarks/stable_ssim_kernel_2026-09-08.md).
+
 Later September 8 SSIM diagnosis: 6,812 additional pixel interventions on
 15 failed training cells and eight controls isolate SSIM: its oracle
 substitution resolves all 15 failures. The direct f64 window reference then

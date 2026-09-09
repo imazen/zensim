@@ -6679,6 +6679,10 @@ mod tests {
     #[test]
     #[ignore = "needs specific images; set ZENSIM_DUMP_IMG (comma-separated) and run --ignored"]
     fn dump_ssim_moment_explosion() {
+        if let Ok(path) = std::env::var("ZENSIM_SSIM_KERNEL_PERF") {
+            dump_stable_ssim_kernel_perf(&path);
+            return;
+        }
         if let Ok(path) = std::env::var("ZENSIM_SSIM_PRECISION_PROBE") {
             dump_ssim_precision_from_coherence(&path);
             return;
@@ -6828,6 +6832,67 @@ mod tests {
         }
     }
 
+    /// Micro-cost census inside the existing SSIM diagnostic. This does not
+    /// measure complete model inference and cannot qualify a performance gate.
+    fn dump_stable_ssim_kernel_perf(path: &str) {
+        let spec: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let output = spec["output"].as_str().unwrap();
+        assert!(!std::path::Path::new(output).exists());
+        let rounds = spec["rounds"].as_u64().unwrap() as usize;
+        let mut rows = Vec::new();
+        for dim in spec["dimensions"].as_array().unwrap() {
+            let w = dim[0].as_u64().unwrap() as usize;
+            let h = dim[1].as_u64().unwrap() as usize;
+            let src: [Vec<f32>; 3] = core::array::from_fn(|c| {
+                (0..w * h)
+                    .map(|i| 0.2 + ((i * 17 + i / w * 11 + c * 41) % 137) as f32 / 100.0)
+                    .collect()
+            });
+            let dst: [Vec<f32>; 3] = core::array::from_fn(|c| {
+                src[c]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| if i % 13 == 0 { v * 0.7 } else { v + 0.0001 })
+                    .collect()
+            });
+            let mut out: [Vec<f32>; 3] = core::array::from_fn(|_| vec![0.0; w * h]);
+            let mut scratch = crate::ssim_form::StableSsimScratch::default();
+            let mut times = Vec::new();
+            for round in 0..rounds + 2 {
+                let start = std::time::Instant::now();
+                for c in 0..3 {
+                    crate::ssim_form::stable_ssim_plane(
+                        &src[c],
+                        &dst[c],
+                        w,
+                        h,
+                        5,
+                        crate::ssim_form::SsimLumaForm::Ssim2Legacy,
+                        &mut out[c],
+                        &mut scratch,
+                    );
+                }
+                let elapsed = start.elapsed().as_secs_f64() * 1e3;
+                std::hint::black_box(&out);
+                if round >= 2 {
+                    times.push(elapsed);
+                }
+            }
+            rows.push(
+                serde_json::json!({"width":w,"height":h,"channels":3,"radius":5,
+                "milliseconds":times,"scratch_formula_bytes":(2*5+2)*w*4*8}),
+            );
+        }
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(output)
+            .unwrap();
+        writeln!(file,"{}",serde_json::to_string_pretty(&serde_json::json!({"schema":"zensim-stable-ssim-kernel-cost-v1","complete_inference":false,"rows":rows})).unwrap()).unwrap();
+    }
+
     /// The existing SSIM diagnostic's precision mode. This is an independent
     /// direct-window f64 reference, never a serving or training implementation.
     /// It holds the actual f32 XYB pyramid fixed to isolate moment arithmetic.
@@ -6890,56 +6955,31 @@ mod tests {
                     |scale, stats, r, d, ret, sw, sh| {
                         for c in 0..3 {
                             let n = sw * sh;
-                            let mut stable = Vec::with_capacity(n);
-                            let mut raw_agreement = 0.0f64;
-                            let mut samples = Vec::new();
-                            for y in 0..sh {
-                                for x in 0..sw {
-                                    samples.clear();
-                                    for dy in -radius..=radius {
-                                        for dx in -radius..=radius {
-                                            let xx = crate::metric::reflect_index(
-                                                (x as isize + dx).unsigned_abs(),
-                                                sw,
-                                            );
-                                            let yy = crate::metric::reflect_index(
-                                                (y as isize + dy).unsigned_abs(),
-                                                sh,
-                                            );
-                                            samples.push((
-                                                r[c][yy * sw + xx] as f64,
-                                                d[c][yy * sw + xx] as f64,
-                                            ));
-                                        }
-                                    }
-                                    let count = samples.len() as f64;
-                                    let m1 = samples.iter().map(|p| p.0).sum::<f64>() / count;
-                                    let m2 = samples.iter().map(|p| p.1).sum::<f64>() / count;
-                                    let md = samples.iter().map(|p| p.0 - p.1).sum::<f64>() / count;
-                                    let v1 =
-                                        samples.iter().map(|p| (p.0 - m1).powi(2)).sum::<f64>()
-                                            / count;
-                                    let v2 =
-                                        samples.iter().map(|p| (p.1 - m2).powi(2)).sum::<f64>()
-                                            / count;
-                                    let ve = samples
-                                        .iter()
-                                        .map(|p| (p.0 - p.1 - md).powi(2))
-                                        .sum::<f64>()
-                                        / count;
-                                    let c2 = crate::ssim_form::C2 as f64;
-                                    let sd = md * md + (1.0 - md * md) * ve / (v1 + v2 + c2);
-                                    let ssq =
-                                        samples.iter().map(|p| p.0 * p.0 + p.1 * p.1).sum::<f64>()
-                                            / count;
-                                    let s12 =
-                                        samples.iter().map(|p| p.0 * p.1).sum::<f64>() / count;
-                                    let raw = 1.0
-                                        - (1.0 - (m1 - m2).powi(2)) * (2.0 * (s12 - m1 * m2) + c2)
-                                            / (ssq - m1 * m1 - m2 * m2 + c2);
-                                    raw_agreement = raw_agreement.max((sd - raw).abs());
-                                    stable.push(sd.max(0.0));
-                                }
+                            let (stable, raw_agreement) = crate::ssim_form::precision_reference(
+                                r[c],
+                                d[c],
+                                sw,
+                                sh,
+                                config.blur_radius,
+                                crate::ssim_form::SsimLumaForm::Ssim2Legacy,
+                            );
+                            let mut kernel = vec![0.0f32; n];
+                            let mut kernel_scratch = crate::ssim_form::StableSsimScratch::default();
+                            crate::ssim_form::stable_ssim_plane(
+                                r[c],
+                                d[c],
+                                sw,
+                                sh,
+                                config.blur_radius,
+                                crate::ssim_form::SsimLumaForm::Ssim2Legacy,
+                                &mut kernel,
+                                &mut kernel_scratch,
+                            );
+                            for (&a, &b) in kernel.iter().zip(&stable) {
+                                assert!(
+                                    a.is_finite() && (a as f64 - b).abs() <= 2e-10 + 2e-6 * b.abs(),
+                                    "stable kernel accuracy"
+                                );
                             }
                             assert!(raw_agreement < 1e-9, "independent f64 algebra mismatch");
                             let pooled =
@@ -6954,6 +6994,7 @@ mod tests {
                                 stable,
                                 pooled,
                                 raw_agreement,
+                                kernel,
                             ));
                         }
                     },
@@ -6964,11 +7005,12 @@ mod tests {
             let mut canonical_gain = 0.0;
             let mut stable_gain = 0.0;
             for (base, changed) in phases[0].iter().zip(&phases[1]) {
-                let (scale, c, sw, sh, bd, bs, bf, bpool, agreement) = base;
-                let (_, _, _, _, cd, cs, cf, cpool, _) = changed;
+                let (scale, c, sw, sh, bd, bs, bf, bpool, agreement, bk) = base;
+                let (_, _, _, _, cd, cs, cf, cpool, _, ck) = changed;
                 let mut outside_changed = 0usize;
                 let mut outside_max = 0.0f64;
                 let mut outside_stable_max = 0.0f64;
+                let mut outside_kernel_max = 0.0f64;
                 for y in 0..*sh {
                     for x in 0..*sw {
                         let mut supported = false;
@@ -6990,6 +7032,12 @@ mod tests {
                             outside_changed += usize::from(bs[i] != cs[i]);
                             outside_max = outside_max.max((bs[i] as f64 - cs[i] as f64).abs());
                             outside_stable_max = outside_stable_max.max((bf[i] - cf[i]).abs());
+                            let delta = (bk[i] as f64 - ck[i] as f64).abs();
+                            outside_kernel_max = outside_kernel_max.max(delta);
+                            assert!(
+                                delta <= 2e-10 + 2e-6 * bf[i].abs(),
+                                "stable kernel locality"
+                            );
                         }
                     }
                 }
@@ -7003,6 +7051,18 @@ mod tests {
                 };
                 let stable_before = pool(bf);
                 let stable_after = pool(cf);
+                let kernel_before = pool(&bk.iter().map(|&x| x as f64).collect::<Vec<_>>());
+                let kernel_after = pool(&ck.iter().map(|&x| x as f64).collect::<Vec<_>>());
+                for (a, b) in kernel_before
+                    .iter()
+                    .chain(&kernel_after)
+                    .zip(stable_before.iter().chain(&stable_after))
+                {
+                    assert!(
+                        (a - b).abs() <= 2e-10 + 2e-6 * b.abs(),
+                        "stable kernel pool accuracy"
+                    );
+                }
                 for j in 0..3 {
                     let k = scale * 39 + c * 13 + j;
                     // JSON numeric parsing may round the serialized f64 by
@@ -7028,7 +7088,10 @@ mod tests {
                     "canonical_base":bpool,"canonical_refined":cpool,"stable_base":stable_before,"stable_refined":stable_after,
                     "outside_support_changed_signals":outside_changed,"outside_support_max_abs":outside_max,
                     "outside_support_f64_max_abs":outside_stable_max,"independent_f64_agreement_max_abs":agreement,
-                    "base_signal_max_abs_error":bs.iter().zip(bf).map(|(&a,&b)| (a as f64-b).abs()).fold(0.0f64,f64::max)}));
+                    "base_signal_max_abs_error":bs.iter().zip(bf).map(|(&a,&b)| (a as f64-b).abs()).fold(0.0f64,f64::max),
+                    "kernel_base":kernel_before,"kernel_refined":kernel_after,
+                    "kernel_base_signal_max_abs_error":bk.iter().zip(bf).map(|(&a,&b)| (a as f64-b).abs()).fold(0.0f64,f64::max),
+                    "kernel_outside_support_max_abs":outside_kernel_max}));
             }
             reports.push(serde_json::json!({"case":case,"canonical_ssim_linear_gain":canonical_gain,"stable_ssim_linear_gain":stable_gain,"planes":rows}));
         }

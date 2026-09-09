@@ -60,8 +60,191 @@
 //! is NOT touched from here; the observation is reported, not acted on.)
 
 use crate::feature_defs::FormulaRevision;
+use archmage::autoversion;
 use magetypes::simd::backends::{F32x8Backend, F32x16Backend};
 use magetypes::simd::generic::{f32x8 as GenericF32x8, f32x16};
+
+/// Scratch for the stable moment kernel. Row-ring storage is proportional
+/// to width and blur radius, independent of image height. This private kernel
+/// is not selected by an existing feature era: integration must explicitly
+/// version changed arithmetic and validate complete serving first.
+#[cfg_attr(not(test), allow(dead_code))] // Pending measured, versioned integration.
+#[derive(Default)]
+pub(crate) struct StableSsimScratch {
+    rows: Vec<[f64; 4]>,
+    vertical: Vec<[f64; 4]>,
+}
+
+/// Form SSIM from pairwise error moments, retaining precision near identity.
+/// Inputs and output are contiguous planar arrays with stride `width`.
+/// All moments use f64, including source products and sliding-window updates;
+/// outputs round once to f32. No covariance subtraction enters the numerator.
+/// The spatial kernel is one reflect-101 box with the specified radius.
+#[cfg_attr(not(test), allow(dead_code))] // Pending measured, versioned integration.
+#[allow(clippy::too_many_arguments)]
+#[autoversion]
+pub(crate) fn stable_ssim_plane(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    form: SsimLumaForm,
+    out: &mut [f32],
+    scratch: &mut StableSsimScratch,
+) {
+    assert!(width > 0 && height > 0);
+    let n = width.checked_mul(height).expect("plane extent");
+    assert!(src.len() >= n && dst.len() >= n && out.len() >= n);
+    let diameter = radius
+        .checked_mul(2)
+        .and_then(|x| x.checked_add(1))
+        .expect("blur diameter");
+    scratch.rows.resize(
+        width.checked_mul(diameter).expect("row ring extent"),
+        [0.0; 4],
+    );
+    scratch.vertical.resize(width, [0.0; 4]);
+    scratch.vertical.fill([0.0; 4]);
+    let mirror = |i: isize, len: usize| {
+        if i >= 0 && (i as usize) < len {
+            i as usize
+        } else {
+            crate::metric::reflect_index(i.unsigned_abs(), len)
+        }
+    };
+    let rad = isize::try_from(radius).expect("signed radius");
+    let horizontal = |y: usize, output: &mut [[f64; 4]]| {
+        let at = |x: usize| {
+            let a = src[y * width + x] as f64;
+            let b = dst[y * width + x] as f64;
+            let e = a - b;
+            [a, b, a * a + b * b, e * e]
+        };
+        let mut sums = [0.0; 4];
+        for dx in -rad..=rad {
+            let m = at(mirror(dx, width));
+            for k in 0..4 {
+                sums[k] += m[k];
+            }
+        }
+        for (x, cell) in output.iter_mut().enumerate() {
+            *cell = sums;
+            let add = at(mirror(x as isize + rad + 1, width));
+            let rem = at(mirror(x as isize - rad, width));
+            // Exact no-op windows should not acquire recurrence drift.
+            if add != rem {
+                for k in 0..4 {
+                    sums[k] = (sums[k] + add[k]) - rem[k];
+                }
+            }
+        }
+    };
+    for row in 0..diameter {
+        let y = mirror(row as isize - rad, height);
+        let ring = &mut scratch.rows[row * width..(row + 1) * width];
+        horizontal(y, ring);
+        for (sum, add) in scratch.vertical.iter_mut().zip(ring) {
+            for k in 0..4 {
+                sum[k] += add[k];
+            }
+        }
+    }
+    let inv_n = 1.0 / (diameter as f64 * diameter as f64);
+    let mut head = 0;
+    for y in 0..height {
+        for (value, m) in out[y * width..(y + 1) * width]
+            .iter_mut()
+            .zip(&scratch.vertical)
+        {
+            let a = m[0] * inv_n;
+            let b = m[1] * inv_n;
+            let mean_error2 = (a - b) * (a - b);
+            let error_variance = (m[3] * inv_n - mean_error2).max(0.0);
+            let variance_sum = (m[2] * inv_n - a * a - b * b).max(0.0);
+            let luma_loss = match form {
+                SsimLumaForm::Ssim2Legacy => mean_error2,
+                SsimLumaForm::Clamp => mean_error2.min(1.0),
+                SsimLumaForm::Lorentz => mean_error2 / (1.0 + mean_error2),
+                SsimLumaForm::SsimLumaC1 => mean_error2 / (a * a + b * b + C_SSIM_LUMA as f64),
+            };
+            *value = (luma_loss + (1.0 - luma_loss) * error_variance / (variance_sum + C2 as f64))
+                .max(0.0) as f32;
+        }
+        if y + 1 == height {
+            break;
+        }
+        let ring = &mut scratch.rows[head * width..(head + 1) * width];
+        for (sum, rem) in scratch.vertical.iter_mut().zip(ring.iter()) {
+            for k in 0..4 {
+                sum[k] -= rem[k];
+            }
+        }
+        horizontal(mirror(y as isize + rad + 1, height), ring);
+        for (sum, add) in scratch.vertical.iter_mut().zip(ring.iter()) {
+            for k in 0..4 {
+                sum[k] += add[k];
+            }
+        }
+        head = (head + 1) % diameter;
+    }
+}
+
+/// Independent direct-window f64 reference, shared by the numerical
+/// instrument and kernel tests. Centered moments deliberately avoid the
+/// candidate's running-sum algorithm; raw algebra is a separate control.
+#[cfg(test)]
+pub(crate) fn precision_reference(
+    src: &[f32],
+    dst: &[f32],
+    w: usize,
+    h: usize,
+    radius: usize,
+    form: SsimLumaForm,
+) -> (Vec<f64>, f64) {
+    let mut result = Vec::with_capacity(w * h);
+    let mut agreement = 0.0f64;
+    let mut samples = Vec::new();
+    let radius = radius as isize;
+    for y in 0..h {
+        for x in 0..w {
+            samples.clear();
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let xx = crate::metric::reflect_index((x as isize + dx).unsigned_abs(), w);
+                    let yy = crate::metric::reflect_index((y as isize + dy).unsigned_abs(), h);
+                    samples.push((src[yy * w + xx] as f64, dst[yy * w + xx] as f64));
+                }
+            }
+            let count = samples.len() as f64;
+            let m1 = samples.iter().map(|p| p.0).sum::<f64>() / count;
+            let m2 = samples.iter().map(|p| p.1).sum::<f64>() / count;
+            let md = samples.iter().map(|p| p.0 - p.1).sum::<f64>() / count;
+            let v1 = samples.iter().map(|p| (p.0 - m1).powi(2)).sum::<f64>() / count;
+            let v2 = samples.iter().map(|p| (p.1 - m2).powi(2)).sum::<f64>() / count;
+            let ve = samples
+                .iter()
+                .map(|p| (p.0 - p.1 - md).powi(2))
+                .sum::<f64>()
+                / count;
+            let c2 = C2 as f64;
+            let loss = match form {
+                SsimLumaForm::Ssim2Legacy => md * md,
+                SsimLumaForm::Clamp => (md * md).min(1.0),
+                SsimLumaForm::Lorentz => md * md / (1.0 + md * md),
+                SsimLumaForm::SsimLumaC1 => md * md / (m1 * m1 + m2 * m2 + C_SSIM_LUMA as f64),
+            };
+            let sd = loss + (1.0 - loss) * ve / (v1 + v2 + c2);
+            let ssq = samples.iter().map(|p| p.0 * p.0 + p.1 * p.1).sum::<f64>() / count;
+            let s12 = samples.iter().map(|p| p.0 * p.1).sum::<f64>() / count;
+            let raw =
+                1.0 - (1.0 - loss) * (2.0 * (s12 - m1 * m2) + c2) / (ssq - m1 * m1 - m2 * m2 + c2);
+            agreement = agreement.max((sd - raw).abs());
+            result.push(sd.max(0.0));
+        }
+    }
+    (result, agreement)
+}
 
 /// SSIM structure/contrast stabiliser — ssimulacra2's value, and the ONE
 /// declaration of it.
@@ -464,6 +647,111 @@ pub(crate) fn ssim_dissim8<T: F32x8Backend + Copy>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stable_moments_match_direct_windows_and_analytic_controls() {
+        let _ = stable_kernel_cases();
+    }
+
+    #[test]
+    #[ignore = "changes process-wide SIMD dispatch; run this test alone"]
+    fn stable_moments_are_exact_across_simd_tiers() {
+        use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
+        let mut baseline = None;
+        let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
+            let actual = stable_kernel_cases();
+            if let Some(expected) = &baseline {
+                assert_eq!(&actual, expected, "SIMD permutation {}", perm.label);
+            } else {
+                baseline = Some(actual);
+            }
+        });
+        assert!(report.permutations_run >= 1);
+        println!(
+            "{} SIMD permutations: exact stable moment outputs",
+            report.permutations_run
+        );
+    }
+
+    fn stable_kernel_cases() -> Vec<Vec<u32>> {
+        use super::*;
+        let mut snapshots = Vec::new();
+        let mut scratch = StableSsimScratch::default();
+        for (w, h) in [(1, 1), (3, 7), (17, 9), (64, 33), (129, 71)] {
+            for radius in [0, 1, 5] {
+                let source: Vec<f32> = (0..w * h)
+                    .map(|i| 0.2 + ((i * 17 + i / w * 11) % 137) as f32 / 100.0)
+                    .collect();
+                let distorted: Vec<f32> = source
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| {
+                        if i % 5 == 0 {
+                            v + 0.0001
+                        } else if i % 13 == 0 {
+                            v * 0.7
+                        } else {
+                            v
+                        }
+                    })
+                    .collect();
+                for form in [
+                    SsimLumaForm::Ssim2Legacy,
+                    SsimLumaForm::Clamp,
+                    SsimLumaForm::Lorentz,
+                    SsimLumaForm::SsimLumaC1,
+                ] {
+                    let mut out = vec![f32::NAN; w * h + 1];
+                    stable_ssim_plane(
+                        &source,
+                        &distorted,
+                        w,
+                        h,
+                        radius,
+                        form,
+                        &mut out,
+                        &mut scratch,
+                    );
+                    let (reference, _) =
+                        precision_reference(&source, &distorted, w, h, radius, form);
+                    for (&a, &b) in out.iter().zip(&reference) {
+                        assert!(
+                            a.is_finite() && (a as f64 - b).abs() <= 2e-10 + 2e-6 * b.abs(),
+                            "{w}x{h}, r{radius}, {form:?}: {a} vs {b}"
+                        );
+                    }
+                    assert!(out[w * h].is_nan(), "output overrun");
+                    snapshots.push(out[..w * h].iter().map(|v| v.to_bits()).collect());
+                    stable_ssim_plane(&source, &source, w, h, radius, form, &mut out, &mut scratch);
+                    assert!(
+                        out[..w * h].iter().all(|&v| v == 0.0),
+                        "identity must be exact"
+                    );
+                }
+                let source = vec![0.75f32; w * h];
+                let distorted = vec![0.7501f32; w * h];
+                let mut out = vec![0.0; w * h];
+                stable_ssim_plane(
+                    &source,
+                    &distorted,
+                    w,
+                    h,
+                    radius,
+                    SsimLumaForm::Ssim2Legacy,
+                    &mut out,
+                    &mut scratch,
+                );
+                let expected = (source[0] as f64 - distorted[0] as f64).powi(2);
+                assert!(
+                    out.iter()
+                        .all(|&v| (v as f64 - expected).abs() <= 2e-10 + 2e-6 * expected)
+                );
+                assert_eq!(scratch.rows.len(), w * (2 * radius + 1));
+                assert_eq!(scratch.vertical.len(), w);
+            }
+        }
+        snapshots
+    }
+
     use super::*;
 
     /// A sweep that reaches both the healthy regime and F4's pathology.

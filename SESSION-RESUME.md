@@ -4,6 +4,20 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
+Latest continuation [implements the stable SSIM kernel](benchmarks/stable_ssim_kernel_2026-09-08.md).
+The Rust error-moment kernel passes direct f64 checks on 96 real-image planes,
+with exact zero out-of-support movement in the four registered cases.
+Synthetic/identity/reflection checks pass, and ten SIMD configurations produce
+exact output arrays. Removing unnecessary mirror modulo and using existing
+SIMD dispatch cuts three-plane means from 28.73/112.23 ms to 9.43/38.03 ms
+at 1024²/2048². Scratch is 384/768 KiB; these are kernel-only timings.
+**No feature era selects it yet.** Next integrate this existing kernel with
+an explicit arithmetic revision and model/data refusal contract, replace
+old SSIM moment work where possible, check full/cached/streaming and spatial
+binding, then refresh affected features and fit/validate. Do not reimplement
+or repeat the kernel mechanism campaign. The model remains unqualified;
+all other product requirements remain active.
+
 Latest continuation [isolates SSIM numerical drift](benchmarks/nonmax_diagnosis_2026-09-08.md).
 The 23-cell family diagnostic saves 6,812 pixel interventions and per-feature
 changes with all old fields exact. Replacing only SSIM's predicted contribution
