@@ -66,9 +66,7 @@ use magetypes::simd::generic::{f32x8 as GenericF32x8, f32x16};
 
 /// Scratch for the stable moment kernel. Row-ring storage is proportional
 /// to width and blur radius, independent of image height. This private kernel
-/// is not selected by an existing feature era: integration must explicitly
-/// version changed arithmetic and validate complete serving first.
-#[cfg_attr(not(test), allow(dead_code))] // Pending measured, versioned integration.
+/// is selected by Rev3; previous revisions retain their original arithmetic.
 #[derive(Default)]
 pub(crate) struct StableSsimScratch {
     rows: Vec<[f64; 4]>,
@@ -80,7 +78,6 @@ pub(crate) struct StableSsimScratch {
 /// All moments use f64, including source products and sliding-window updates;
 /// outputs round once to f32. No covariance subtraction enters the numerator.
 /// The spatial kernel is one reflect-101 box with the specified radius.
-#[cfg_attr(not(test), allow(dead_code))] // Pending measured, versioned integration.
 #[allow(clippy::too_many_arguments)]
 #[autoversion]
 pub(crate) fn stable_ssim_plane(
@@ -322,7 +319,7 @@ impl SsimLumaForm {
     pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::Ssim2Legacy,
-            FormulaRevision::Rev2 => Self::REV2_LUMA,
+            FormulaRevision::Rev2 | FormulaRevision::Rev3 => Self::REV2_LUMA,
         }
     }
 
@@ -412,6 +409,7 @@ pub(crate) fn active_revision() -> FormulaRevision {
     *REV.get_or_init(|| match std::env::var("ZENSIM_FORMULA_REV").as_deref() {
         Ok("1") => FormulaRevision::Rev1,
         Ok("2") => FormulaRevision::Rev2,
+        Ok("3") => FormulaRevision::Rev3,
         _ => SHIPPED_REVISION,
     })
 }

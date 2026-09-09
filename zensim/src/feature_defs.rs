@@ -404,6 +404,9 @@ pub enum FormulaRevision {
     /// fixes landing together, so exactly one era boundary exists rather than
     /// one per defect — one recalculation, not three.
     Rev2,
+    /// Revision 2 plus stable f64 pairwise-error moments for v1 SSIM
+    /// basic, peak, masked and IW signals. Requires freshly extracted data.
+    Rev3,
 }
 
 impl FormulaRevision {
@@ -414,6 +417,14 @@ impl FormulaRevision {
         match self {
             Self::Rev1 => &[],
             Self::Rev2 => &["v1ssimcap", "freecomp", "v1hfgain", "v1detroot", "scorepow"],
+            Self::Rev3 => &[
+                "v1ssimcap",
+                "freecomp",
+                "v1hfgain",
+                "v1detroot",
+                "scorepow",
+                "v1ssimstable",
+            ],
         }
     }
 
@@ -443,7 +454,7 @@ impl FormulaRevision {
     /// remaining free-vs-append gap into a MEASUREMENT of the append route's
     /// own error (plan R4) rather than an unattributed disagreement.
     pub(crate) const fn paired_global_contrast(self) -> bool {
-        matches!(self, Self::Rev2)
+        matches!(self, Self::Rev2 | Self::Rev3)
     }
 
     /// Every slot id this revision moves, derived from the signal table's own
@@ -594,6 +605,7 @@ const REV_F4_PROPOSED: &[Revision] = &[
         note: "option C: v1 stopped pooling mirror-padded phantom columns.",
     },
     REV_F4_ENTRY,
+    REV_SSIM_STABLE,
 ];
 
 /// **F18** — the pooled 4th/8th roots make the extractor LIBC-DEPENDENT.
@@ -645,6 +657,7 @@ const REV_F4_AND_DETROOT: &[Revision] = &[
         note: "option C: v1 stopped pooling mirror-padded phantom columns.",
     },
     REV_F4_ENTRY,
+    REV_SSIM_STABLE,
     REV_DETROOT,
 ];
 
@@ -682,6 +695,13 @@ const REV_DETROOT: Revision = Revision {
 /// in F4 alone) and [`REV_F4_AND_DETROOT`] (a slot in F4 *and* F18) name this
 /// constant, so the two lists cannot state the same era differently — the
 /// exact drift a second copy of the text would invite.
+const REV_SSIM_STABLE: Revision = Revision {
+    era: "v1ssimstable",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "Rev3: f64 running box moments, direct pairwise error variance, one f32 signal shared by all v1 SSIM pools and attribution. Requires fresh extraction and refit; shipped default stays Rev1.",
+};
+
 const REV_F4_ENTRY: Revision = Revision {
     era: "v1ssimcap",
     commit: "-",

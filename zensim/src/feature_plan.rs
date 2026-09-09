@@ -902,7 +902,7 @@ pub(crate) mod servability_census {
         assert!(a.revisions_agree(&b), "same revision must agree");
         a.compute.formula_revision = match a.compute.formula_revision {
             FormulaRevision::Rev1 => FormulaRevision::Rev2,
-            FormulaRevision::Rev2 => FormulaRevision::Rev1,
+            FormulaRevision::Rev2 | FormulaRevision::Rev3 => FormulaRevision::Rev1,
         };
         assert!(
             !a.revisions_agree(&b),

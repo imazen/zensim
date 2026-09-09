@@ -1,5 +1,17 @@
 # Start here — one target score, one development path
 
+## September 9: SSIM correction handed off at user request
+
+The user requested a detailed issue for someone else to tackle this bug:
+https://github.com/imazen/zensim/issues/61. Pause concurrent implementation of
+this SSIM lane. An unfinished Rev3 integration draft remains in the working
+copy against `f7b9f39a`; preserve it. A separate WIP patch, build/parity logs
+and issue copy are delivered in `zensim-validation-2026-09-09/ssim-handoff`
+under shared work. The issue identifies the known gaps and exact test scope.
+No corrected model is trained or qualified, and the draft is not pushed to main.
+Continue independent product work without assuming this correction is finished.
+
+
 Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rules;
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).

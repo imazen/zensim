@@ -5367,6 +5367,7 @@ enum BandPoolWork {
 #[derive(Debug, Clone, Default)]
 struct FoldPoolScratch {
     /// V-blurred `mu1` / `mu2` (the fused kernel's `store_mu` side-output).
+    stable_sd: Vec<f32>,
     mu1_v: Vec<f32>,
     mu2_v: Vec<f32>,
     /// `|src − H_blur(src)|` (v1's `bufs.mask` role).
@@ -5566,10 +5567,16 @@ fn fold_v1_one_band(
             return b1;
         }
         let full = work == BandPoolWork::Full;
+        let stable =
+            crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+        if stable && full {
+            ps.stable_sd.resize(band_cap_n, 0.0);
+        }
         ps.ensure(band_cap_n);
         // ONE destructure, so the band-local H planes can be READ while the
         // pool planes stay mutable — disjoint fields of the same `&mut`.
         let FoldPoolScratch {
+            stable_sd,
             mu1_v,
             mu2_v,
             act_raw,
@@ -5656,8 +5663,12 @@ fn fold_v1_one_band(
             &mut mu1_v[..band_n],
             &mut mu2_v[..band_n],
             true,
-            &mut empty_sd,
-            false,
+            if stable && full {
+                &mut stable_sd[..band_n]
+            } else {
+                &mut empty_sd
+            },
+            stable && full,
             &mut ssq_v[..band_n],
             &mut s12_v[..band_n],
             full,
@@ -5679,7 +5690,14 @@ fn fold_v1_one_band(
             );
             sums.masked_mse += mse_m;
             sums.iw_mse += mse_i;
-            let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) =
+            let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) = if stable {
+                crate::simd_ops::ssim_signal_inline_both(
+                    &stable_sd[inner.clone()],
+                    act_inner,
+                    V1_MASK_K,
+                    V1_IW_K,
+                )
+            } else {
                 crate::simd_ops::ssim_channel_inline_both(
                     inner_mu1,
                     inner_mu2,
@@ -5688,7 +5706,8 @@ fn fold_v1_one_band(
                     act_inner,
                     V1_MASK_K,
                     V1_IW_K,
-                );
+                )
+            };
             sums.masked_ssim_d += sd_m;
             sums.masked_ssim_d4 += sd4_m;
             sums.masked_ssim_d2 += sd2_m;

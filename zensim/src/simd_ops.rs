@@ -2919,7 +2919,31 @@ pub(crate) fn ssim_channel_inline_both(
     k_iw: f32,
 ) -> ((f64, f64, f64), (f64, f64, f64)) {
     incant!(
-        ssim_channel_inline_both_inner(mu1, mu2, sum_sq, s12, activity, k_mask, k_iw),
+        ssim_channel_inline_both_inner(mu1, mu2, sum_sq, s12, activity, k_mask, k_iw, None),
+        [v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Pool a retained canonical SSIM signal using the existing weighted reducer.
+/// All slices are matching, contiguous inner-band pixels.
+pub(crate) fn ssim_signal_inline_both(
+    signal: &[f32],
+    activity: &[f32],
+    k_mask: f32,
+    k_iw: f32,
+) -> ((f64, f64, f64), (f64, f64, f64)) {
+    assert_eq!(signal.len(), activity.len());
+    incant!(
+        ssim_channel_inline_both_inner(
+            signal,
+            signal,
+            signal,
+            signal,
+            activity,
+            k_mask,
+            k_iw,
+            Some(signal)
+        ),
         [v4, v3, neon, wasm128, scalar]
     )
 }
@@ -3073,6 +3097,7 @@ fn ssim_channel_inline_both_inner(
     activity: &[f32],
     k_mask: f32,
     k_iw: f32,
+    signal: Option<&[f32]>,
 ) -> ((f64, f64, f64), (f64, f64, f64)) {
     let form = crate::ssim_form::active_luma_form();
     let one = f32x16::splat(token, 1.0);
@@ -3093,12 +3118,13 @@ fn ssim_channel_inline_both_inner(
     let mut sum_d4b = 0.0f64;
     let mut sum_d2b = 0.0f64;
 
-    for ((((m1c, m2c), ssqc), s12c), ac) in mu1_chunks
+    for (block, ((((m1c, m2c), ssqc), s12c), ac)) in mu1_chunks
         .iter()
         .zip(mu2_chunks)
         .zip(ssq_chunks)
         .zip(s12_chunks)
         .zip(act_chunks)
+        .enumerate()
     {
         let m1 = f32x16::from_array(token, *m1c);
         let m2 = f32x16::from_array(token, *m2c);
@@ -3109,7 +3135,11 @@ fn ssim_channel_inline_both_inner(
         let mva = one / kmv.mul_add(av, one); // mask weight inline
         let mvb = kiv.mul_add(av, one); // IW weight inline
 
-        let d_raw = ssim_dissim16(token, form, m1, m2, ssq, s12v);
+        let d_raw = if let Some(sd) = signal {
+            f32x16::from_array(token, sd[block * 16..][..16].try_into().unwrap())
+        } else {
+            ssim_dissim16(token, form, m1, m2, ssq, s12v)
+        };
 
         let da = (d_raw * mva).max(zero);
         let d2a = da * da;
@@ -3129,7 +3159,10 @@ fn ssim_channel_inline_both_inner(
     let off = mu1_chunks.len() * 16;
     for (i, &m1v) in mu1_tail.iter().enumerate() {
         let j = off + i;
-        let d_raw = ssim_dissim_raw_scalar(form, m1v, mu2[j], sum_sq[j], s12[j]);
+        let d_raw = signal.map_or_else(
+            || ssim_dissim_raw_scalar(form, m1v, mu2[j], sum_sq[j], s12[j]),
+            |sd| sd[j],
+        );
         let mask = 1.0f32 / (1.0f32 + k_mask * activity[j]);
         let iw = 1.0f32 + k_iw * activity[j];
         let da = (d_raw * mask).max(0.0f32);

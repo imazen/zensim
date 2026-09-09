@@ -14,6 +14,8 @@ pub(crate) struct ScaleBuffers {
     pub sigma1_sq: Vec<f32>,
     pub sigma12: Vec<f32>,
     pub temp_blur: Vec<f32>,
+    /// Rev3 signal retained across activity scratch reuse; lazy band allocation.
+    pub stable_sd: Vec<f32>,
     /// Local contrast masking weights (when masking enabled).
     pub mask: Vec<f32>,
 }
@@ -34,6 +36,7 @@ impl ScaleBuffers {
             sigma1_sq: Vec::new(),
             sigma12: Vec::new(),
             temp_blur: Vec::new(),
+            stable_sd: Vec::new(),
             mask: Vec::new(),
         }
     }

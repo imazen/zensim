@@ -1661,6 +1661,12 @@ fn process_strip_channel(
         return;
     }
 
+    let stable = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    assert!(
+        !stable || config.blur_passes == 1,
+        "Rev3 SSIM requires the canonical one-pass box window"
+    );
+
     // Fused path: 1-pass blur (the common case for scale 0).
     // d8/max and mu1/mu2 are now computed inline by the fused kernels.
     if config.blur_passes == 1 {
@@ -1668,8 +1674,11 @@ fn process_strip_channel(
 
         let dm_needs_edge = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_edge_mse());
         let dm_needs_hf = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_hf());
-        let store_sd =
-            (diffmap.is_some() || attr_ret.is_some() || attr_fold.is_some()) && need_ssim;
+        let store_sd = (diffmap.is_some()
+            || attr_ret.is_some()
+            || attr_fold.is_some()
+            || (stable && (config.extended_features || config.compute_iw_features)))
+            && need_ssim;
         // Force mu1/mu2 storage when diffmap needs edge/MSE or HF features
         // OR when IW features are required (mu1 is the reference plane for
         // the IW weight's activity-map computation).
@@ -1726,6 +1735,12 @@ fn process_strip_channel(
                 // raw moments have nowhere to land on this path.
                 crate::fused::FreeExtrasWork::default(),
             );
+
+            if stable && (config.extended_features || config.compute_iw_features) {
+                let inner = inner_start * width..(inner_start + inner_h) * width;
+                bufs.stable_sd.resize(inner_h * width, 0.0);
+                bufs.stable_sd.copy_from_slice(&bufs.temp_blur[inner]);
+            }
 
             // Accumulate weighted features into diffmap before extended features
             // overwrites temp_blur. Inner rows are at inner_start..inner_start+inner_h
@@ -1962,7 +1977,24 @@ fn process_strip_channel(
             // (`sq_sum_into` + 2D blur for ssq, `mul_into` + 2D blur
             // for s12) with 2 SIMD passes (1D V-blur each), saving
             // ~30% of the masked-block setup cost.
-            if need_ssim {
+            if need_ssim && stable {
+                let ((m, m4, m2), (iw, iw4, iw2)) = crate::simd_ops::ssim_signal_inline_both(
+                    &bufs.stable_sd,
+                    activity_inner,
+                    k,
+                    k_iw,
+                );
+                if do_ext {
+                    accum.masked_ssim_d[c] += m;
+                    accum.masked_ssim_d4[c] += m4;
+                    accum.masked_ssim_d2[c] += m2;
+                }
+                if do_iw {
+                    accum.iw_ssim_d[c] += iw;
+                    accum.iw_ssim_d4[c] += iw4;
+                    accum.iw_ssim_d2[c] += iw2;
+                }
+            } else if need_ssim {
                 box_blur_v_from_copy(
                     &bufs.sigma1_sq[..strip_n],
                     &mut bufs.temp_blur[..strip_n],

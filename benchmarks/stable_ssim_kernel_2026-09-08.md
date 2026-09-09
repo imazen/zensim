@@ -100,3 +100,25 @@ remain separate; no favorable runs are selected or pooled across binaries.
 433 library tests pass (seven ignored), as do CI-exact Clippy, scoped
 formatting and the 605-script lint. The numerical and SIMD ignored tests
 were explicitly run; other ignored tests are not claimed as passed.
+
+## September 9 integration registration
+
+Reuse decision: inspected the current sibling fast-ssim2 sources and its later
+August 31 notes. `blur/gaussian.rs` implements an f32 recursive Gaussian;
+`simd_ops.rs` forms SSIM from f32 covariance subtraction. Neither provides the
+stable reflect-101 box moments required here. Keep one correction owner in
+`zensim::ssim_form`; do not change the independent SSIMULACRA2 judge.
+
+Authorized API delta, registered before editing: add `FormulaRevision::Rev3`
+for the existing training extraction and `BakeScorer` callers. Rev3 inherits
+Rev2 and replaces the v1 SSIM signal with stable moments. Metadata value 3
+and `ZENSIM_FORMULA_REV=3` must agree for pixel serving, including maps.
+All basic, peak, masked and IW SSIM pools must consume the same corrected
+signal. Existing default/model bytes stay Rev1; old bakes cannot be relabeled
+as evidence of a refit. Reuse existing pooling/reduction and fixed band geometry.
+
+Acceptance: independent numerical controls; fused versus retained and folded
+versus streaming consumed-feature parity; weighted-pool controls; reject bake/
+process mismatch even when both select Clamp. Run the existing candidate
+surface on the corrected path before new fitting. Changed-era data must be
+re-extracted. Existing product scorecard remains the release contract.

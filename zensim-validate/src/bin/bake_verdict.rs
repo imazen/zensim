@@ -4767,6 +4767,7 @@ fn main() -> ExitCode {
                     let expected = match bake_rev {
                         zensim::feature_v2::FormulaRevision::Rev1 => 1,
                         zensim::feature_v2::FormulaRevision::Rev2 => 2,
+                        zensim::feature_v2::FormulaRevision::Rev3 => 3,
                     };
                     if table_rev.is_some_and(|rev| rev != expected)
                         && (!args.cross_regime || args.require_feature_set_match)

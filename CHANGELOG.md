@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Add `FormulaRevision::Rev3` for stable SSIM moments shared by basic, peak,
+  masked/IW pooling and retained attribution. Require matching bake/process
+  revision for pixel serving. Existing bakes/default remain revision 1;
+  revision 3 needs fresh features and trained model bytes.
+
 - Add `ScoredAttribution::refinement_gain` and separate refinement coverage:
   finite max-signal rectangle effects include ties and reflected/coarse source
   footprints without changing additive density semantics. Extend the existing

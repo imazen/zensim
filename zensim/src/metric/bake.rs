@@ -637,8 +637,9 @@ impl<'a> BakeScorer<'a> {
                 reason: "ensemble has no active member",
             })?;
         let revision = crate::feature_layout::formula_revision(model)?;
-        if crate::ssim_form::active_luma_form()
-            != crate::ssim_form::SsimLumaForm::for_revision(revision)
+        if crate::ssim_form::active_revision() != revision
+            || crate::ssim_form::active_luma_form()
+                != crate::ssim_form::SsimLumaForm::for_revision(revision)
         {
             return Err(ZensimError::ModelLoadFailed {
                 reason: "pixel kernels use another formula revision; set ZENSIM_FORMULA_REV to the bake's declared revision before starting the process",
