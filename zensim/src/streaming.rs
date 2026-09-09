@@ -6965,6 +6965,387 @@ mod tests {
     /// The existing SSIM diagnostic's precision mode. This is an independent
     /// direct-window f64 reference, never a serving or training implementation.
     /// It holds the actual f32 XYB pyramid fixed to isolate moment arithmetic.
+    /// Run one `#[test]` body under an explicit `ZENSIM_FORMULA_REV`.
+    ///
+    /// `ssim_form::active_revision` is a `OnceLock`, so a revision cannot be
+    /// changed inside a running process and a revision-specific control has
+    /// to own its own process. Returns `true` when this process is ALREADY at
+    /// `rev` (run the body); otherwise it re-executes THIS test binary with
+    /// the variable set, running exactly this one test, and fails if the
+    /// child fails.
+    ///
+    /// This is not a skip: the assertions always execute, once, in the
+    /// process that can see them. The parent proves the child really ran the
+    /// body by requiring `sentinel` on its stdout — without that, a filter
+    /// that matched nothing would exit 0 and the control would pass
+    /// vacuously.
+    pub(crate) fn run_at_revision(rev: &str, test_path: &str, sentinel: &str) -> bool {
+        if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok(rev) {
+            return true;
+        }
+        let exe = std::env::current_exe().expect("test binary path");
+        let out = std::process::Command::new(exe)
+            .args([test_path, "--exact", "--nocapture", "--test-threads=1"])
+            .env("ZENSIM_FORMULA_REV", rev)
+            .output()
+            .expect("re-exec the test binary");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{test_path} failed at ZENSIM_FORMULA_REV={rev}\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            stdout.contains(sentinel),
+            "{test_path} exited 0 at ZENSIM_FORMULA_REV={rev} but never reached its body \
+             (sentinel {sentinel:?} absent) — the control did not run\n{stdout}"
+        );
+        false
+    }
+
+    /// A deterministic document/screenshot-flavoured pair: flat paper, hard
+    /// glyph-like edges, a smooth photographic patch, and a near-lossless
+    /// distortion. Flat, high-contrast content is where the raw-moment
+    /// cancellation this control exists for is worst (issue #61).
+    fn locality_fixture(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+        let mut src = vec![[247u8, 246, 244]; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                // Glyph-ish bars: hard edges on flat paper.
+                if (x / 7 + y / 11) % 5 == 0 && (x % 7) < 4 && (y % 11) < 8 {
+                    src[i] = [26, 24, 30];
+                }
+                // A smooth patch, so the fixture is not purely bi-level.
+                if x >= w / 2 {
+                    let v = (110 + ((x * 3 + y * 5) % 90)) as u8;
+                    src[i] = [v, v.wrapping_sub(6), v.wrapping_add(4)];
+                }
+            }
+        }
+        // Near-lossless distortion: +/-1 LSB ripple plus a few heavier cells.
+        let mut dst = src.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                let t = ((x * 13 + y * 29) % 7) as i32 - 3;
+                for c in 0..3 {
+                    let heavy = if (x / 16 + y / 16) % 9 == 0 { 6 } else { 1 };
+                    dst[i][c] = (dst[i][c] as i32 + t * heavy).clamp(0, 255) as u8;
+                }
+            }
+        }
+        (src, dst)
+    }
+
+    /// Retained per-(scale, channel) SSIM planes for one distorted image,
+    /// through the REAL banded strip walk — not the standalone kernel.
+    type RetainedPlanes = Vec<(usize, usize, usize, usize, Vec<f32>, Vec<f32>)>;
+
+    fn retained_ssim_planes(
+        pre: &PrecomputedReference,
+        pixels: &[[u8; 3]],
+        w: usize,
+        h: usize,
+        config: &ZensimConfig,
+        weights: &[f64],
+    ) -> RetainedPlanes {
+        let mut planes = Vec::new();
+        compute_zensim_streaming_with_ref_and_attr_planes(
+            pre,
+            &RgbSlice::new(pixels, w, h),
+            config,
+            weights,
+            |scale, _stats, _r, d, ret, sw, sh| {
+                let n = sw * sh;
+                for c in 0..3 {
+                    planes.push((
+                        scale,
+                        c,
+                        sw,
+                        sh,
+                        d[c][..n].to_vec(),
+                        ret.sd[c][..n].to_vec(),
+                    ));
+                }
+            },
+        );
+        planes
+    }
+
+    /// Count retained signals that MOVED although every sample in their own
+    /// window is unchanged — the registered "out-of-support movement" of
+    /// `benchmarks/nonmax_diagnosis_2026-09-08.md`, computed here on the
+    /// integrated retention route rather than on isolated planes.
+    fn out_of_support_movement(
+        base: &RetainedPlanes,
+        changed: &RetainedPlanes,
+        radius: usize,
+    ) -> (usize, f64) {
+        assert_eq!(base.len(), changed.len());
+        let rad = radius as isize;
+        let (mut count, mut max_abs) = (0usize, 0.0f64);
+        for (b, c) in base.iter().zip(changed) {
+            let (scale, ch, sw, sh, bd, bs) = b;
+            let (_, _, _, _, cd, cs) = c;
+            assert_eq!((scale, ch), (&c.0, &c.1));
+            for y in 0..*sh {
+                for x in 0..*sw {
+                    let mut supported = false;
+                    for dy in -rad..=rad {
+                        for dx in -rad..=rad {
+                            let xx =
+                                crate::metric::reflect_index((x as isize + dx).unsigned_abs(), *sw);
+                            let yy =
+                                crate::metric::reflect_index((y as isize + dy).unsigned_abs(), *sh);
+                            supported |= bd[yy * sw + xx] != cd[yy * sw + xx];
+                        }
+                    }
+                    if !supported {
+                        let i = y * sw + x;
+                        if bs[i] != cs[i] {
+                            count += 1;
+                            max_abs = max_abs.max((bs[i] as f64 - cs[i] as f64).abs());
+                        }
+                    }
+                }
+            }
+        }
+        (count, max_abs)
+    }
+
+    /// Both phases of the locality probe: score the pair, then score it again
+    /// with a small rectangle of the distorted image replaced by REFERENCE
+    /// pixels. Windows containing no changed sample must produce an unchanged
+    /// signal, because their inputs are identical.
+    fn locality_probe(
+        w: usize,
+        h: usize,
+        rect: (usize, usize, usize, usize),
+        parallel: bool,
+    ) -> (usize, f64) {
+        assert!(
+            h > crate::feature_v2::STRIP_ROWS,
+            "the probe must cross a strip boundary or it never exercises the banded walk"
+        );
+        let (src, dst) = locality_fixture(w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(parallel);
+        let params = z.profile().params();
+        let config = crate::metric::config_from_params(params, false);
+        assert_eq!(config.blur_passes, 1, "probe assumes the fused route");
+        let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
+
+        let mut refined = dst.clone();
+        for y in rect.1..rect.3 {
+            for x in rect.0..rect.2 {
+                refined[y * w + x] = src[y * w + x];
+            }
+        }
+        assert!(
+            refined != dst,
+            "the refinement rectangle changed nothing — the fixture is inert"
+        );
+
+        let base = retained_ssim_planes(&pre, &dst, w, h, &config, params.weights);
+        let after = retained_ssim_planes(&pre, &refined, w, h, &config, params.weights);
+        out_of_support_movement(&base, &after, config.blur_radius)
+    }
+
+    /// Rectangle to overwrite with reference pixels, and the fixture size.
+    /// The height spans three 128-row strips at scale 0 and two at scale 1, so
+    /// the probe measures the BANDED walk's locality, not a single band's.
+    const LOCALITY_RECT: (usize, usize, usize, usize) = (96, 150, 112, 166);
+    const LOCALITY_DIMS: (usize, usize) = (192, 288);
+
+    /// **The negative control that makes the Rev3 result mean something.**
+    ///
+    /// The shipped revision's raw-moment cancellation moves the retained
+    /// signal at pixels whose OWN window did not change. If this ever stops
+    /// being true the fixture has gone inert, and the Rev3 control below
+    /// would be passing on nothing — so this failing is as informative as the
+    /// other one failing.
+    #[test]
+    fn locality_fixture_reproduces_out_of_support_movement_on_the_shipped_revision() {
+        if crate::ssim_form::active_revision() != crate::feature_defs::FormulaRevision::Rev1 {
+            // Deliberately not an assertion about the environment: this test
+            // states a property OF Rev1 and only Rev1 can state it.
+            return;
+        }
+        let (count, max_abs) =
+            locality_probe(LOCALITY_DIMS.0, LOCALITY_DIMS.1, LOCALITY_RECT, false);
+        assert!(
+            count > 0,
+            "the shipped path showed NO out-of-support movement on this fixture — \
+             it no longer reproduces issue #61 and cannot validate the correction"
+        );
+        println!("rev1 out-of-support: {count} signals, max |delta| {max_abs:.3e}");
+    }
+
+    /// **Acceptance control (issue #61).** Under revision 3 a local
+    /// replacement with reference pixels must leave every signal outside the
+    /// changed samples' support BIT-IDENTICAL, through the integrated banded
+    /// strip walk and its retained planes — not merely through the standalone
+    /// kernel that `ssim_form`'s own tests cover.
+    #[test]
+    fn rev3_retained_signal_is_local_under_a_reference_replacement() {
+        if !run_at_revision(
+            "3",
+            "streaming::tests::rev3_retained_signal_is_local_under_a_reference_replacement",
+            "REV3-LOCALITY-RAN",
+        ) {
+            return;
+        }
+        assert_eq!(
+            crate::ssim_form::active_revision(),
+            crate::feature_defs::FormulaRevision::Rev3
+        );
+        // Both walks: the serial band loop and the rayon one tile the same
+        // geometry, and a signal that is local in one and not the other would
+        // be a threading defect hiding behind a correct kernel.
+        for parallel in [false, true] {
+            let (count, max_abs) =
+                locality_probe(LOCALITY_DIMS.0, LOCALITY_DIMS.1, LOCALITY_RECT, parallel);
+            assert_eq!(
+                (count, max_abs),
+                (0, 0.0),
+                "revision 3 (parallel={parallel}) moved {count} retained signals \
+                 outside the changed samples' support (max |delta| {max_abs:.3e}); \
+                 locality is the property this revision exists to restore"
+            );
+        }
+        println!("REV3-LOCALITY-RAN out-of-support: 0 signals (serial and parallel)");
+    }
+
+    /// **The unsupported route returns an ERROR.** Revision 3's moments are
+    /// one reflect-101 box, so a `blur_passes != 1` profile is refused —
+    /// through the public entry, as a `Result`, on the thread the caller is
+    /// on. Not a panic (the draft's `assert!`), and emphatically not a silent
+    /// fall-through to revision 1 arithmetic inside a revision 3 vector.
+    ///
+    /// The same profile must still score normally on the shipped revision, so
+    /// this pins a refusal that is specific to the revision rather than a
+    /// profile that stopped working.
+    #[test]
+    fn rev3_refuses_multi_pass_blur_profiles_through_the_public_entry() {
+        if !run_at_revision(
+            "3",
+            "streaming::tests::rev3_refuses_multi_pass_blur_profiles_through_the_public_entry",
+            "REV3-ROUTE-RAN",
+        ) {
+            return;
+        }
+        use crate::profile::ProfileParams;
+        static MULTI: std::sync::OnceLock<ProfileParams> = std::sync::OnceLock::new();
+        let params = MULTI.get_or_init(|| ProfileParams::builder().blur(5, 3).build());
+        let profile = crate::ZensimProfile::Custom {
+            params,
+            name: "rev3-route-control",
+        };
+        let (w, h) = (96usize, 96usize);
+        let (src, dst) = locality_fixture(w, h);
+        let z = crate::Zensim::new(profile).with_parallel(false);
+        let err = z
+            .compute(&RgbSlice::new(&src, w, h), &RgbSlice::new(&dst, w, h))
+            .expect_err("revision 3 must refuse a multi-pass blur profile");
+        assert!(
+            matches!(err, crate::ZensimError::ModelForwardFailed { .. }),
+            "expected an explicit route refusal, got {err:?}"
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains("blur_passes") && text.contains("revision 3"),
+            "the refusal must name the route and the revision, got {text:?}"
+        );
+        // A single-pass custom profile at the same revision still scores.
+        static ONE: std::sync::OnceLock<ProfileParams> = std::sync::OnceLock::new();
+        let ok_params = ONE.get_or_init(|| ProfileParams::builder().blur(5, 1).build());
+        let ok = crate::Zensim::new(crate::ZensimProfile::Custom {
+            params: ok_params,
+            name: "rev3-route-control-ok",
+        })
+        .with_parallel(false)
+        .compute(&RgbSlice::new(&src, w, h), &RgbSlice::new(&dst, w, h))
+        .expect("revision 3 serves the one-pass route");
+        assert!(
+            ok.score().is_finite(),
+            "a served route must produce a score"
+        );
+        println!("REV3-ROUTE-RAN refusal: {text}");
+    }
+
+    /// The integrated retention route must carry the SAME values the
+    /// canonical primitive produces on the same planes. This is what binds
+    /// "basic, peaks, masked and IW use the same corrected signal" to a
+    /// checkable statement: everything downstream reads `ret.sd`, so if
+    /// `ret.sd` is the canonical plane, they all are.
+    ///
+    /// The bound is the kernel's registered numerical acceptance
+    /// (`2e-10 + 2e-6*|reference|`) rather than bit-equality, because the
+    /// strip walk re-seeds the vertical recurrence at each strip while the
+    /// whole-plane reference accumulates from row 0.
+    #[test]
+    fn rev3_retained_planes_are_the_canonical_stable_signal() {
+        if !run_at_revision(
+            "3",
+            "streaming::tests::rev3_retained_planes_are_the_canonical_stable_signal",
+            "REV3-CANONICAL-RAN",
+        ) {
+            return;
+        }
+        let (w, h) = LOCALITY_DIMS;
+        let (src, dst) = locality_fixture(w, h);
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let params = z.profile().params();
+        let config = crate::metric::config_from_params(params, false);
+        let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
+        let form = crate::ssim_form::active_luma_form();
+        let mut worst = 0.0f64;
+        let mut checked = 0usize;
+        compute_zensim_streaming_with_ref_and_attr_planes(
+            &pre,
+            &RgbSlice::new(&dst, w, h),
+            &config,
+            params.weights,
+            |scale, _stats, r, d, ret, sw, sh| {
+                if scale == 0 {
+                    assert!(
+                        sh > crate::feature_v2::STRIP_ROWS,
+                        "scale 0 fits in one strip ({sh} rows) — this control would \
+                         never compare a re-seeded recurrence against the whole-plane one"
+                    );
+                }
+                let n = sw * sh;
+                let mut want = vec![0.0f32; n];
+                let mut scratch = crate::ssim_form::StableSsimScratch::default();
+                for c in 0..3 {
+                    crate::ssim_form::stable_ssim_plane(
+                        r[c],
+                        d[c],
+                        sw,
+                        sh,
+                        config.blur_radius,
+                        form,
+                        &mut want,
+                        &mut scratch,
+                    );
+                    for i in 0..n {
+                        let (got, exp) = (ret.sd[c][i] as f64, want[i] as f64);
+                        assert!(got.is_finite(), "non-finite retained signal at {i}");
+                        let tol = 2e-10 + 2e-6 * exp.abs();
+                        assert!(
+                            (got - exp).abs() <= tol,
+                            "retained signal {got} != canonical {exp} at plane {sw}x{sh} ch{c} idx {i}"
+                        );
+                        worst = worst.max((got - exp).abs());
+                        checked += 1;
+                    }
+                }
+            },
+        );
+        assert!(checked > 0, "no planes were checked");
+        println!("REV3-CANONICAL-RAN checked {checked} signals, worst |delta| {worst:.3e}");
+    }
+
     fn dump_ssim_precision_from_coherence(path: &str) {
         assert_eq!(
             crate::ssim_form::active_luma_form(),
