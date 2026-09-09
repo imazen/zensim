@@ -395,10 +395,10 @@ pub(crate) const SHIPPED_REVISION: FormulaRevision = FormulaRevision::Rev1;
 /// not is the same defect"*. Every SSIM kernel reads this ONCE, above its
 /// loop, and passes the result down; no call site chooses its own form.
 ///
-/// `ZENSIM_FORMULA_REV=1` pins revision 1 and `=2` pins revision 2, so a
-/// research extraction can reproduce either era's semantics from one binary
+/// `ZENSIM_FORMULA_REV=1`, `=2` and `=3` pin revisions 1, 2 and 3, so a
+/// research extraction can reproduce any era's semantics from one binary
 /// (phase 3's G3.2). Anything else — including unset — is
-/// [`SHIPPED_REVISION`]. The two accepted values are the SAME BYTE LENGTH on
+/// [`SHIPPED_REVISION`]. The accepted values are the SAME BYTE LENGTH on
 /// purpose: this repo has measured an environment block's size shifting a
 /// binary's layout by ~10 % at 2304²
 /// (`benchmarks/era2_perf_break_2026-08-31.md` §22.5), so an A/B that varies
@@ -412,6 +412,33 @@ pub(crate) fn active_revision() -> FormulaRevision {
         Ok("3") => FormulaRevision::Rev3,
         _ => SHIPPED_REVISION,
     })
+}
+
+/// Refuse, EXPLICITLY, any route the active revision does not serve.
+///
+/// [`FormulaRevision::Rev3`] replaces the v1 SSIM signal with
+/// [`stable_ssim_plane`], whose spatial support is exactly ONE reflect-101
+/// box of `blur_radius`. `blur_passes != 1` selects
+/// `streaming::process_strip_channel`'s separate blur+reduce fallback, which
+/// no shipped profile reaches and whose `passes * radius` halo does not
+/// describe a single box. Rev3 therefore does not serve it.
+///
+/// This is the ONLY correct third option. Serving it from the legacy moments
+/// would silently mix two arithmetic eras inside one feature vector, and
+/// panicking would put an abort on a public path; so every fallible entry
+/// that turns a profile into a [`crate::metric::ZensimConfig`] calls this and
+/// returns the error to the caller.
+///
+/// Callers that only inspect a config (pool-mode derivation, fold planning)
+/// do not call it: they run no pixel kernel, and the entry that eventually
+/// does has already refused.
+pub(crate) fn check_route(config: &crate::metric::ZensimConfig) -> Result<(), crate::ZensimError> {
+    if active_revision() == FormulaRevision::Rev3 && config.blur_passes != 1 {
+        return Err(crate::ZensimError::ModelForwardFailed {
+            reason: "formula revision 3 serves blur_passes == 1 only (its stable SSIM moments are one reflect-101 box); use revision 1 or 2 for multi-pass blur profiles",
+        });
+    }
+    Ok(())
 }
 
 /// The luminance form the active revision selects.

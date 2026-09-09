@@ -1661,10 +1661,19 @@ fn process_strip_channel(
         return;
     }
 
+    // Rev3 replaces the v1 SSIM signal with `ssim_form::stable_ssim_plane`,
+    // whose spatial support is exactly ONE reflect-101 box of `blur_radius`.
+    // The separate blur+reduce fallback below is only reachable with
+    // `blur_passes != 1`, which no shipped profile selects and whose halo
+    // (`passes * radius`) does not describe a single box — so Rev3 does not
+    // serve it. The refusal is an explicit `ZensimError` raised at the
+    // fallible entry points (`crate::ssim_form::check_route`), NOT a panic
+    // here and NOT a silent fall-through to the legacy arithmetic; this
+    // assertion only documents that the gate ran.
     let stable = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
-    assert!(
+    debug_assert!(
         !stable || config.blur_passes == 1,
-        "Rev3 SSIM requires the canonical one-pass box window"
+        "Rev3 route gate must have refused blur_passes != 1 before reaching the strip walk"
     );
 
     // Fused path: 1-pass blur (the common case for scale 0).
@@ -1736,10 +1745,15 @@ fn process_strip_channel(
                 crate::fused::FreeExtrasWork::default(),
             );
 
+            // Retain the corrected inner-band signal BEFORE the activity work
+            // below reuses `temp_blur` as blur scratch. `store_sd` was forced
+            // on for exactly this reason, so the masked/IW pools read the same
+            // per-pixel values the basic/peak pools already consumed rather
+            // than re-deriving a second, differently-rounded signal.
             if stable && (config.extended_features || config.compute_iw_features) {
                 let inner = inner_start * width..(inner_start + inner_h) * width;
-                bufs.stable_sd.resize(inner_h * width, 0.0);
-                bufs.stable_sd.copy_from_slice(&bufs.temp_blur[inner]);
+                bufs.stable_sd.clear();
+                bufs.stable_sd.extend_from_slice(&bufs.temp_blur[inner]);
             }
 
             // Accumulate weighted features into diffmap before extended features
@@ -1978,21 +1992,44 @@ fn process_strip_channel(
             // for s12) with 2 SIMD passes (1D V-blur each), saving
             // ~30% of the masked-block setup cost.
             if need_ssim && stable {
-                let ((m, m4, m2), (iw, iw4, iw2)) = crate::simd_ops::ssim_signal_inline_both(
-                    &bufs.stable_sd,
-                    activity_inner,
-                    k,
-                    k_iw,
-                );
-                if do_ext {
-                    accum.masked_ssim_d[c] += m;
-                    accum.masked_ssim_d4[c] += m4;
-                    accum.masked_ssim_d2[c] += m2;
-                }
-                if do_iw {
-                    accum.iw_ssim_d[c] += iw;
-                    accum.iw_ssim_d4[c] += iw4;
-                    accum.iw_ssim_d2[c] += iw2;
+                // Rev3: the canonical signal is already retained, so the two
+                // sigma V-blurs and the covariance re-derivation below are not
+                // just redundant — running them would give the weighted pools
+                // a DIFFERENT `d_raw` than the basic/peak pools. Same weights,
+                // same tiers, same accumulation order as the legacy arms.
+                debug_assert_eq!(bufs.stable_sd.len(), inner_n);
+                if do_ext && do_iw {
+                    let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) =
+                        crate::simd_ops::ssim_signal_inline_both(
+                            &bufs.stable_sd,
+                            activity_inner,
+                            k,
+                            k_iw,
+                        );
+                    accum.masked_ssim_d[c] += sd_m;
+                    accum.masked_ssim_d4[c] += sd4_m;
+                    accum.masked_ssim_d2[c] += sd2_m;
+                    accum.iw_ssim_d[c] += sd_i;
+                    accum.iw_ssim_d4[c] += sd4_i;
+                    accum.iw_ssim_d2[c] += sd2_i;
+                } else if do_ext {
+                    let (sum_d, sum_d4, sum_d2) = crate::simd_ops::ssim_signal_inline_mask(
+                        &bufs.stable_sd,
+                        activity_inner,
+                        k,
+                    );
+                    accum.masked_ssim_d[c] += sum_d;
+                    accum.masked_ssim_d4[c] += sum_d4;
+                    accum.masked_ssim_d2[c] += sum_d2;
+                } else {
+                    let (sum_d, sum_d4, sum_d2) = crate::simd_ops::ssim_signal_iw_inline(
+                        &bufs.stable_sd,
+                        activity_inner,
+                        k_iw,
+                    );
+                    accum.iw_ssim_d[c] += sum_d;
+                    accum.iw_ssim_d4[c] += sum_d4;
+                    accum.iw_ssim_d2[c] += sum_d2;
                 }
             } else if need_ssim {
                 box_blur_v_from_copy(

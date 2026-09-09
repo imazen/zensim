@@ -908,6 +908,14 @@ impl CorruptionHead {
     ) -> Result<(), CorruptionHeadError> {
         let params = profile.params();
         let config = crate::metric::config_from_params(params, false);
+        // A profile the active arithmetic revision refuses cannot serve any
+        // head — the walk that would gate the score never runs. Reported as
+        // NotServable with the refusal's own wording rather than a bare
+        // "mismatch", per this enum's contract.
+        crate::ssim_form::check_route(&config).map_err(|e| CorruptionHeadError::NotServable {
+            profile: profile.name(),
+            detail: e.to_string(),
+        })?;
         let plan = crate::fold_engine::score_plan(params, &config, true).ok_or_else(|| {
             CorruptionHeadError::NotServable {
                 profile: profile.name(),

@@ -663,6 +663,21 @@ pub fn registry() -> &'static Registry {
     REG.get_or_init(|| parse_registry(REGISTRY_JSON).expect("the COMMITTED registry must parse"))
 }
 
+/// The arithmetic revisions this validator admits in stored data.
+///
+/// ONE list. The three admission sites below (registry parse, per-table
+/// metadata, root manifest) previously spelled `matches!(n, 1 | 2)` out
+/// separately, which is exactly how a new revision comes to be accepted in
+/// one place and silently rejected in another. Mirrors
+/// `zensim::feature_v2::FormulaRevision`; extend both together.
+pub const ADMITTED_FORMULA_REVISIONS: &[u64] = &[1, 2, 3];
+
+/// Whether a declared `formula_revision` value names a revision this build
+/// knows how to read.
+pub fn is_admitted_formula_revision(n: u64) -> bool {
+    ADMITTED_FORMULA_REVISIONS.contains(&n)
+}
+
 fn parse_registry(txt: &str) -> Result<Registry, String> {
     let v: serde_json::Value =
         serde_json::from_str(txt).map_err(|e| format!("feature_sets_registry.json: {e}"))?;
@@ -675,7 +690,7 @@ fn parse_registry(txt: &str) -> Result<Registry, String> {
             value
                 .get("formula_revision")
                 .and_then(|x| x.as_u64())
-                .filter(|n| matches!(n, 1 | 2))
+                .filter(|n| is_admitted_formula_revision(*n))
                 .map(|n| (era.clone(), n as u8))
         })
         .collect();
@@ -1249,7 +1264,7 @@ pub fn admit_training_tables(
                 .map(|v| {
                     v.as_u64()
                         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-                        .filter(|n| matches!(n, 1 | 2))
+                        .filter(|n| is_admitted_formula_revision(*n))
                         .map(|n| n as u8)
                         .ok_or_else(|| format!("{}: invalid formula_revision {v}", path.display()))
                 })
@@ -1412,7 +1427,7 @@ pub fn root_formula_revision(root: &Path) -> Result<Option<u8>, String> {
                 .as_u64()
                 .or_else(|| value.as_str().and_then(|s| s.parse().ok()));
             return match n {
-                Some(1 | 2) => Ok(n.map(|n| n as u8)),
+                Some(v) if is_admitted_formula_revision(v) => Ok(Some(v as u8)),
                 _ => Err(format!(
                     "{}: invalid formula_revision {value}",
                     root.display()

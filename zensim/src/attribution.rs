@@ -1383,6 +1383,7 @@ impl crate::metric::Zensim {
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
         let config = config_from_params(params, self.parallel());
+        crate::ssim_form::check_route(&config)?;
         if config.blur_passes != 1 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "attribution density requires blur_passes == 1 (all shipped profiles)",
@@ -4135,6 +4136,7 @@ impl crate::metric::Zensim {
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
         let config = config_from_params(params, self.parallel());
+        crate::ssim_form::check_route(&config)?;
         if config.blur_passes != 1 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "fused attribution requires blur_passes == 1 (all shipped profiles)",
@@ -4424,6 +4426,7 @@ impl crate::metric::Zensim {
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
         let config = config_from_params(params, self.parallel());
+        crate::ssim_form::check_route(&config)?;
         if config.blur_passes != 1 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "fused attribution requires blur_passes == 1 (all shipped profiles)",

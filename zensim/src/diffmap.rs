@@ -776,6 +776,7 @@ impl crate::metric::Zensim {
         let width = distorted.width();
         let height = distorted.height();
         let config = config_from_params(params, self.parallel());
+        crate::ssim_form::check_route(&config)?;
         let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
             params.weights,
             config.num_scales,
@@ -955,6 +956,7 @@ impl crate::metric::Zensim {
         }
 
         let config = config_from_params(params, self.parallel());
+        crate::ssim_form::check_route(&config)?;
         let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
             params.weights,
             config.num_scales,

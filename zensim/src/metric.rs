@@ -1680,6 +1680,7 @@ impl Zensim {
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         self.check_stop()?;
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         let mut result = compute_with_config_inner(
             source,
             distorted,
@@ -1741,6 +1742,7 @@ impl Zensim {
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let mut config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         config.extended_features = true;
         let result = compute_with_config_inner(
             source,
@@ -2377,6 +2379,7 @@ impl Zensim {
         // here. Symmetry across the call path is preserved.
         reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         let (ow, oh) = (distorted.width(), distorted.height());
         // Pad a sub-64px distorted to the pyramid minimum so it aligns with the
         // (also-padded) reference pyramid; score with the original dims. The
@@ -2471,6 +2474,7 @@ impl Zensim {
         }
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
 
         let (stats, mean_offset) = crate::streaming::compute_multiscale_stats_streaming_strips(
             source,
@@ -2556,6 +2560,7 @@ impl Zensim {
         }
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
 
         let (stats, mean_offset) =
             crate::streaming::compute_multiscale_stats_streaming_strips_with_ref(
@@ -2612,6 +2617,7 @@ impl Zensim {
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         let (ow, oh) = (distorted.width(), distorted.height());
         // ENGINE ROUTING (fold-MT lane). `compute_with_ref` has routed to the
         // fold since the fold-engine lane; this entry did not, so a ref LOOP —
@@ -2781,6 +2787,7 @@ impl Zensim {
             }
         }
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         // Identical inputs must score exactly 100.0 through the same
         // `mark_identical` contract the SDR path uses (compares only the
         // valid `3 * width` of each row, so stride padding is ignored here
@@ -2848,6 +2855,7 @@ impl Zensim {
             }
         }
         let mut config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         config.extended_features = true;
         let identical = (0..height).all(|y| {
             ref_rgb[y * ref_stride..y * ref_stride + 3 * width]
@@ -2908,6 +2916,7 @@ impl Zensim {
             }
         }
         let config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         // Same identity short-circuit as the interleaved entry (valid
         // `width` of each plane row only).
         let identical = ref_planes.iter().zip(dist_planes.iter()).all(|(r, d)| {
@@ -2945,6 +2954,7 @@ impl Zensim {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         let mut config = config_from_params(params, self.parallel);
+        crate::ssim_form::check_route(&config)?;
         config.compute_all_features = true;
         let result = compute_with_config_inner(
             source,
@@ -3011,6 +3021,7 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         validate_pair(source, distorted)?;
         let config = config_from_params(params, true);
+        crate::ssim_form::check_route(&config)?;
         let result = compute_with_config_inner(
             source,
             distorted,

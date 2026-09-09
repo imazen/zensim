@@ -2919,13 +2919,22 @@ pub(crate) fn ssim_channel_inline_both(
     k_iw: f32,
 ) -> ((f64, f64, f64), (f64, f64, f64)) {
     incant!(
-        ssim_channel_inline_both_inner(mu1, mu2, sum_sq, s12, activity, k_mask, k_iw, None),
+        ssim_channel_inline_both_inner(mu1, mu2, sum_sq, s12, activity, k_mask, k_iw),
         [v4, v3, neon, wasm128, scalar]
     )
 }
 
-/// Pool a retained canonical SSIM signal using the existing weighted reducer.
-/// All slices are matching, contiguous inner-band pixels.
+/// Weighted masked + IW pools over a RETAINED per-pixel SSIM signal.
+///
+/// The [`crate::feature_defs::FormulaRevision::Rev3`] counterpart of
+/// [`ssim_channel_inline_both`]: the dissimilarity is no longer re-derived
+/// from `(mu1, mu2, ssq, s12)` here, because under Rev3 the ONE canonical
+/// value was already formed by [`crate::ssim_form::stable_ssim_plane`] and
+/// retained. Reductions, weights and accumulation order are the legacy
+/// reducer's, so the only difference between the two is where `d_raw` comes
+/// from — which is exactly the property the parity controls assert.
+///
+/// `signal` and `activity` are matching contiguous inner-band pixels.
 pub(crate) fn ssim_signal_inline_both(
     signal: &[f32],
     activity: &[f32],
@@ -2934,16 +2943,35 @@ pub(crate) fn ssim_signal_inline_both(
 ) -> ((f64, f64, f64), (f64, f64, f64)) {
     assert_eq!(signal.len(), activity.len());
     incant!(
-        ssim_channel_inline_both_inner(
-            signal,
-            signal,
-            signal,
-            signal,
-            activity,
-            k_mask,
-            k_iw,
-            Some(signal)
-        ),
+        ssim_signal_inline_both_inner(signal, activity, k_mask, k_iw),
+        [v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Masked-only pool over a retained Rev3 SSIM signal — the
+/// [`ssim_channel_inline_mask`] counterpart.
+pub(crate) fn ssim_signal_inline_mask(
+    signal: &[f32],
+    activity: &[f32],
+    k_mask: f32,
+) -> (f64, f64, f64) {
+    assert_eq!(signal.len(), activity.len());
+    incant!(
+        ssim_signal_inline_mask_inner(signal, activity, k_mask),
+        [v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// IW-only pool over a retained Rev3 SSIM signal — the
+/// [`ssim_channel_iw_inline`] counterpart.
+pub(crate) fn ssim_signal_iw_inline(
+    signal: &[f32],
+    activity: &[f32],
+    k_iw: f32,
+) -> (f64, f64, f64) {
+    assert_eq!(signal.len(), activity.len());
+    incant!(
+        ssim_signal_iw_inline_inner(signal, activity, k_iw),
         [v4, v3, neon, wasm128, scalar]
     )
 }
@@ -3097,7 +3125,6 @@ fn ssim_channel_inline_both_inner(
     activity: &[f32],
     k_mask: f32,
     k_iw: f32,
-    signal: Option<&[f32]>,
 ) -> ((f64, f64, f64), (f64, f64, f64)) {
     let form = crate::ssim_form::active_luma_form();
     let one = f32x16::splat(token, 1.0);
@@ -3118,13 +3145,12 @@ fn ssim_channel_inline_both_inner(
     let mut sum_d4b = 0.0f64;
     let mut sum_d2b = 0.0f64;
 
-    for (block, ((((m1c, m2c), ssqc), s12c), ac)) in mu1_chunks
+    for ((((m1c, m2c), ssqc), s12c), ac) in mu1_chunks
         .iter()
         .zip(mu2_chunks)
         .zip(ssq_chunks)
         .zip(s12_chunks)
         .zip(act_chunks)
-        .enumerate()
     {
         let m1 = f32x16::from_array(token, *m1c);
         let m2 = f32x16::from_array(token, *m2c);
@@ -3135,11 +3161,7 @@ fn ssim_channel_inline_both_inner(
         let mva = one / kmv.mul_add(av, one); // mask weight inline
         let mvb = kiv.mul_add(av, one); // IW weight inline
 
-        let d_raw = if let Some(sd) = signal {
-            f32x16::from_array(token, sd[block * 16..][..16].try_into().unwrap())
-        } else {
-            ssim_dissim16(token, form, m1, m2, ssq, s12v)
-        };
+        let d_raw = ssim_dissim16(token, form, m1, m2, ssq, s12v);
 
         let da = (d_raw * mva).max(zero);
         let d2a = da * da;
@@ -3159,10 +3181,7 @@ fn ssim_channel_inline_both_inner(
     let off = mu1_chunks.len() * 16;
     for (i, &m1v) in mu1_tail.iter().enumerate() {
         let j = off + i;
-        let d_raw = signal.map_or_else(
-            || ssim_dissim_raw_scalar(form, m1v, mu2[j], sum_sq[j], s12[j]),
-            |sd| sd[j],
-        );
+        let d_raw = ssim_dissim_raw_scalar(form, m1v, mu2[j], sum_sq[j], s12[j]);
         let mask = 1.0f32 / (1.0f32 + k_mask * activity[j]);
         let iw = 1.0f32 + k_iw * activity[j];
         let da = (d_raw * mask).max(0.0f32);
@@ -3235,6 +3254,171 @@ fn ssim_channel_inline_mask_inner(
         let j = off + i;
         let mask = 1.0f32 / (1.0f32 + k_mask * activity[j]);
         let d = ((ssim_dissim_raw_scalar(form, m1v, mu2[j], sum_sq[j], s12[j])) * mask).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d2 += d2 as f64;
+        sum_d4 += (d2 * d2) as f64;
+    }
+
+    (sum_d, sum_d4, sum_d2)
+}
+
+// --- Rev3 retained-signal pools ---
+//
+// One canonical `d_raw` per pixel, formed once by
+// `ssim_form::stable_ssim_plane` and retained, replaces the per-pool
+// re-derivation from `(mu1, mu2, ssq, s12)`. Everything downstream of
+// `d_raw` — the inline mask/IW weights, the `.max(0)` floor, the d/d2/d4
+// tiers and the f64 accumulation order — is copied unchanged from the
+// legacy reducers above, so a parity test that feeds the legacy `d_raw`
+// through these is exact, and the only measured difference is the signal.
+
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn ssim_signal_inline_both_inner(
+    token: Token,
+    signal: &[f32],
+    activity: &[f32],
+    k_mask: f32,
+    k_iw: f32,
+) -> ((f64, f64, f64), (f64, f64, f64)) {
+    let one = f32x16::splat(token, 1.0);
+    let zero = f32x16::zero(token);
+    let kmv = f32x16::splat(token, k_mask);
+    let kiv = f32x16::splat(token, k_iw);
+
+    let (sig_chunks, sig_tail) = signal.as_chunks::<16>();
+    let (act_chunks, _) = activity.as_chunks::<16>();
+
+    let mut sum_da = 0.0f64;
+    let mut sum_d4a = 0.0f64;
+    let mut sum_d2a = 0.0f64;
+    let mut sum_db = 0.0f64;
+    let mut sum_d4b = 0.0f64;
+    let mut sum_d2b = 0.0f64;
+
+    for (sc, ac) in sig_chunks.iter().zip(act_chunks) {
+        let d_raw = f32x16::from_array(token, *sc);
+        let av = f32x16::from_array(token, *ac);
+
+        let mva = one / kmv.mul_add(av, one); // mask weight inline
+        let mvb = kiv.mul_add(av, one); // IW weight inline
+
+        let da = (d_raw * mva).max(zero);
+        let d2a = da * da;
+        let d4a = d2a * d2a;
+        let db = (d_raw * mvb).max(zero);
+        let d2b = db * db;
+        let d4b = d2b * d2b;
+
+        sum_da += da.reduce_add() as f64;
+        sum_d2a += d2a.reduce_add() as f64;
+        sum_d4a += d4a.reduce_add() as f64;
+        sum_db += db.reduce_add() as f64;
+        sum_d2b += d2b.reduce_add() as f64;
+        sum_d4b += d4b.reduce_add() as f64;
+    }
+
+    let off = sig_chunks.len() * 16;
+    for (i, &d_raw) in sig_tail.iter().enumerate() {
+        let j = off + i;
+        let mask = 1.0f32 / (1.0f32 + k_mask * activity[j]);
+        let iw = 1.0f32 + k_iw * activity[j];
+        let da = (d_raw * mask).max(0.0f32);
+        let d2a = da * da;
+        let db = (d_raw * iw).max(0.0f32);
+        let d2b = db * db;
+        sum_da += da as f64;
+        sum_d2a += d2a as f64;
+        sum_d4a += (d2a * d2a) as f64;
+        sum_db += db as f64;
+        sum_d2b += d2b as f64;
+        sum_d4b += (d2b * d2b) as f64;
+    }
+
+    ((sum_da, sum_d4a, sum_d2a), (sum_db, sum_d4b, sum_d2b))
+}
+
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn ssim_signal_inline_mask_inner(
+    token: Token,
+    signal: &[f32],
+    activity: &[f32],
+    k_mask: f32,
+) -> (f64, f64, f64) {
+    let one = f32x16::splat(token, 1.0);
+    let zero = f32x16::zero(token);
+    let kmv = f32x16::splat(token, k_mask);
+
+    let (sig_chunks, sig_tail) = signal.as_chunks::<16>();
+    let (act_chunks, _) = activity.as_chunks::<16>();
+
+    let mut sum_d = 0.0f64;
+    let mut sum_d4 = 0.0f64;
+    let mut sum_d2 = 0.0f64;
+
+    for (sc, ac) in sig_chunks.iter().zip(act_chunks) {
+        let av = f32x16::from_array(token, *ac);
+        let mv = one / kmv.mul_add(av, one);
+
+        let d = (f32x16::from_array(token, *sc) * mv).max(zero);
+        let d2 = d * d;
+        let d4 = d2 * d2;
+
+        sum_d += d.reduce_add() as f64;
+        sum_d2 += d2.reduce_add() as f64;
+        sum_d4 += d4.reduce_add() as f64;
+    }
+
+    let off = sig_chunks.len() * 16;
+    for (i, &d_raw) in sig_tail.iter().enumerate() {
+        let j = off + i;
+        let mask = 1.0f32 / (1.0f32 + k_mask * activity[j]);
+        let d = (d_raw * mask).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d2 += d2 as f64;
+        sum_d4 += (d2 * d2) as f64;
+    }
+
+    (sum_d, sum_d4, sum_d2)
+}
+
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn ssim_signal_iw_inline_inner(
+    token: Token,
+    signal: &[f32],
+    activity: &[f32],
+    k_iw: f32,
+) -> (f64, f64, f64) {
+    let one = f32x16::splat(token, 1.0);
+    let zero = f32x16::zero(token);
+    let kiv = f32x16::splat(token, k_iw);
+
+    let (sig_chunks, sig_tail) = signal.as_chunks::<16>();
+    let (act_chunks, _) = activity.as_chunks::<16>();
+
+    let mut sum_d = 0.0f64;
+    let mut sum_d4 = 0.0f64;
+    let mut sum_d2 = 0.0f64;
+
+    for (sc, ac) in sig_chunks.iter().zip(act_chunks) {
+        let av = f32x16::from_array(token, *ac);
+        let wv = kiv.mul_add(av, one);
+
+        let d = (f32x16::from_array(token, *sc) * wv).max(zero);
+        let d2 = d * d;
+        let d4 = d2 * d2;
+
+        sum_d += d.reduce_add() as f64;
+        sum_d2 += d2.reduce_add() as f64;
+        sum_d4 += d4.reduce_add() as f64;
+    }
+
+    let off = sig_chunks.len() * 16;
+    for (i, &d_raw) in sig_tail.iter().enumerate() {
+        let j = off + i;
+        let iw = 1.0f32 + k_iw * activity[j];
+        let d = (d_raw * iw).max(0.0f32);
         let d2 = d * d;
         sum_d += d as f64;
         sum_d2 += d2 as f64;
