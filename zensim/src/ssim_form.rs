@@ -414,6 +414,87 @@ pub(crate) fn active_revision() -> FormulaRevision {
     })
 }
 
+#[cfg(test)]
+/// Run one `#[test]` body under an explicit `ZENSIM_FORMULA_REV`.
+///
+/// `ssim_form::active_revision` is a `OnceLock`, so a revision cannot be
+/// changed inside a running process and a revision-specific control has
+/// to own its own process. Returns `true` when this process is ALREADY at
+/// `rev` (run the body); otherwise it re-executes THIS test binary with
+/// the variable set, running exactly this one test, and fails if the
+/// child fails.
+///
+/// This is not a skip: the assertions always execute, once, in the
+/// process that can see them. The parent proves the child really ran the
+/// body by requiring `sentinel` on its stdout — without that, a filter
+/// that matched nothing would exit 0 and the control would pass
+/// vacuously.
+pub(crate) fn run_at_revision(rev: &str, test_path: &str, sentinel: &str) -> bool {
+    if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok(rev) {
+        return true;
+    }
+    let exe = std::env::current_exe().expect("test binary path");
+    let out = std::process::Command::new(exe)
+        .args([test_path, "--exact", "--nocapture", "--test-threads=1"])
+        .env("ZENSIM_FORMULA_REV", rev)
+        .output()
+        .expect("re-exec the test binary");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{test_path} failed at ZENSIM_FORMULA_REV={rev}\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains(sentinel),
+        "{test_path} exited 0 at ZENSIM_FORMULA_REV={rev} but never reached its body \
+         (sentinel {sentinel:?} absent) — the control did not run\n{stdout}"
+    );
+    false
+}
+
+#[cfg(test)]
+/// Re-run an EXISTING set of tests under a different `ZENSIM_FORMULA_REV`.
+///
+/// The companion of [`run_at_revision`] for controls whose body already
+/// exists and is already exercised at the shipped revision: rather than
+/// copying a 200-line parity test, run the same one again in a process
+/// pinned to `rev`. `expect` is the number of tests the filter must match —
+/// a filter that silently stops matching would otherwise turn the control
+/// into a no-op that still exits 0.
+pub(crate) fn rerun_tests_at_revision(rev: &str, filter: &str, expect: usize) {
+    if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok(rev) {
+        return; // the child is running the real tests; nothing to re-spawn
+    }
+    let exe = std::env::current_exe().expect("test binary path");
+    let out = std::process::Command::new(exe)
+        .args([filter, "--nocapture", "--test-threads=1"])
+        .env("ZENSIM_FORMULA_REV", rev)
+        .output()
+        .expect("re-exec the test binary");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "`{filter}` failed at ZENSIM_FORMULA_REV={rev}\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let ran = stdout
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("test result: ok. ")?
+                .split(' ')
+                .next()?
+                .parse::<usize>()
+                .ok()
+        })
+        .unwrap_or(0);
+    assert_eq!(
+        ran, expect,
+        "`{filter}` matched {ran} tests at ZENSIM_FORMULA_REV={rev}, expected {expect} — \
+         the control is not running what it claims\n{stdout}"
+    );
+}
+
 /// Refuse, EXPLICITLY, any route the active revision does not serve.
 ///
 /// [`FormulaRevision::Rev3`] replaces the v1 SSIM signal with

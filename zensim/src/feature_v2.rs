@@ -14616,6 +14616,28 @@ pub(crate) mod tests {
         assert!(matches!(err, ZensimError::DimensionMismatch));
     }
 
+    /// **Folded-vs-streaming parity holds at revision 3 too.**
+    ///
+    /// The two `folded720_v1_*` gates below are the crate's exact contract
+    /// between the folded band replay and v1's own strip walk. Revision 3
+    /// changes where the SSIM signal comes from on BOTH sides, so the
+    /// contract has to be re-established at that revision rather than
+    /// assumed to survive; this re-runs those same gates in a process pinned
+    /// to revision 3 instead of copying them.
+    ///
+    /// `training`-gated for the same reason the gates themselves are: their
+    /// v1 side is `compute_zensim_with_config`, a training-only export. The
+    /// wrapper must not exist in a build where the filter would match
+    /// nothing.
+    #[cfg(feature = "training")]
+    #[test]
+    fn fold_parity_gates_hold_at_revision_three() {
+        // This wrapper is deliberately NOT named `folded720_v1_*`: the
+        // filter below must match exactly the two real gates, and a control
+        // that counted itself would hide one of them going missing.
+        crate::ssim_form::rerun_tests_at_revision("3", "folded720_v1_", 2);
+    }
+
     /// FOLD PARITY GATE (2026-07-24). The folded-720 path replays v1's
     /// exact 32-row band tiling over shared H-planes, so its v1 basic
     /// block (`f0..156`) is **BIT-IDENTICAL** to the frozen v1 extraction

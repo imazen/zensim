@@ -876,3 +876,203 @@ fn check_deadband(t: f64) -> Result<(), ZensimError> {
         })
     }
 }
+
+#[cfg(test)]
+mod revision_contract_tests {
+    use crate::feature_defs::FormulaRevision;
+    use crate::ssim_form::{SsimLumaForm, run_at_revision};
+    use crate::{RgbSlice, ZensimError};
+
+    /// A minimal one-input identity bake reading feature `id`, optionally
+    /// declaring an arithmetic revision. Same recipe shape the cross-tier
+    /// attribution gate uses; the campaign bakes are 500 KB+ external
+    /// artifacts, so the committed contract tests build their own.
+    fn bake_declaring(revision: Option<&str>, id: usize) -> Vec<u8> {
+        let mut metadata = vec![serde_json::json!({
+            "key": "zentrain.feature_ids", "type": "utf8", "text": id.to_string()
+        })];
+        if let Some(rev) = revision {
+            metadata.push(serde_json::json!({
+                "key": "zentrain.formula_revision", "type": "utf8", "text": rev
+            }));
+        }
+        let recipe = serde_json::json!({
+            "schema_hash": 1, "scaler_mean": [0.0], "scaler_scale": [1.0],
+            "metadata": metadata,
+            "layers": [{"in_dim":1,"out_dim":1,"activation":"identity",
+                        "dtype":"f32","weights":[1.0],"biases":[0.0]}]
+        });
+        zenpredict_bake::bake_from_json_str(&recipe.to_string()).expect("bake the recipe")
+    }
+
+    fn pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+        let mut src = vec![[200u8, 190, 180]; w * h];
+        let mut dst = vec![[200u8, 190, 180]; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                if (x / 5 + y / 7) % 3 == 0 {
+                    src[i] = [30, 40, 50];
+                }
+                let t = ((x * 7 + y * 11) % 5) as i32 - 2;
+                for c in 0..3 {
+                    dst[i][c] = (src[i][c] as i32 + t * 3).clamp(0, 255) as u8;
+                }
+            }
+        }
+        (src, dst)
+    }
+
+    /// The premise the mismatch test below rests on, asserted rather than
+    /// assumed: revisions 2 and 3 select the SAME luminance form. A refusal
+    /// built on comparing luminance forms would wave this pair straight
+    /// through, which is exactly why `check_pixel_revision` compares the
+    /// REVISION and not only the form it selects.
+    #[test]
+    fn revisions_two_and_three_select_the_same_luminance_form() {
+        assert_eq!(
+            SsimLumaForm::for_revision(FormulaRevision::Rev2),
+            SsimLumaForm::for_revision(FormulaRevision::Rev3),
+            "the two-revisions-one-form case this contract exists for is gone; \
+             re-derive the mismatch control against a pair that still shares a form"
+        );
+        assert_eq!(
+            SsimLumaForm::for_revision(FormulaRevision::Rev3),
+            SsimLumaForm::Clamp
+        );
+    }
+
+    /// **Bake/process revision mismatch is refused — including between two
+    /// revisions that share the Clamp luminance form.**
+    ///
+    /// A Rev2 bake served by a Rev3 process would read Rev2 coefficients
+    /// against Rev3 pixels. Both select `Clamp`, so the pre-existing
+    /// luminance-form comparison could not see the difference; the revision
+    /// comparison can.
+    #[test]
+    fn rev3_process_refuses_a_rev2_bake_despite_the_shared_clamp_form() {
+        if !run_at_revision(
+            "3",
+            "metric::bake::revision_contract_tests::rev3_process_refuses_a_rev2_bake_despite_the_shared_clamp_form",
+            "REV3-BAKE-MISMATCH-RAN",
+        ) {
+            return;
+        }
+        assert_eq!(crate::ssim_form::active_revision(), FormulaRevision::Rev3);
+        let (w, h) = (96usize, 96usize);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+
+        for declared in ["1", "2"] {
+            let bytes = bake_declaring(Some(declared), 5);
+            let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+            let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
+            let err = scorer.compute(&rs, &ds, None).expect_err(
+                "a revision-{declared} bake must not be served by a revision-3 process",
+            );
+            assert!(
+                matches!(err, ZensimError::ModelLoadFailed { .. }),
+                "declared {declared}: expected a load refusal, got {err:?}"
+            );
+        }
+
+        // The matching revision is served, so the refusal is about agreement
+        // and not about revision 3 being unservable.
+        let bytes = bake_declaring(Some("3"), 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
+        let score = scorer
+            .compute(&rs, &ds, None)
+            .expect("a revision-3 bake is served by a revision-3 process");
+        assert!(score.score().is_finite(), "served bake produced {score:?}");
+        println!("REV3-BAKE-MISMATCH-RAN");
+    }
+
+    /// **A revision-3 bake serves a complete scalar score AND a spatial
+    /// attribution map through `BakeScorer`.**
+    ///
+    /// The scalar path alone would not establish map correctness: the
+    /// candidate map entry re-runs basic extraction, so it has its own copy
+    /// of the corrected signal to get right. This pins that the two agree
+    /// bit-for-bit on score and features, and that nothing silently becomes
+    /// an unsupported refinement term at this revision.
+    #[cfg(feature = "feature-regime-v2")]
+    #[test]
+    fn rev3_bake_serves_scalar_and_spatial_attribution() {
+        if !run_at_revision(
+            "3",
+            "metric::bake::revision_contract_tests::rev3_bake_serves_scalar_and_spatial_attribution",
+            "REV3-BAKE-ATTR-RAN",
+        ) {
+            return;
+        }
+        let (w, h) = (128usize, 128usize);
+        let (src, dst) = pair(w, h);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let bytes = bake_declaring(Some("3"), 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
+        let pre = scorer
+            .precompute_reference(&rs)
+            .expect("precompute reference");
+        let mut session = crate::Fused944Session::new();
+        let scalar = scorer.compute(&rs, &ds, None).expect("scalar score");
+        let scored = scorer
+            .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
+            .expect("scored attribution");
+        assert_eq!(
+            scalar.score().to_bits(),
+            scored.result().score().to_bits(),
+            "the attribution entry re-derives the score and must not change it"
+        );
+        assert_eq!(scalar.features(), scored.result().features());
+        assert!(
+            scored.unsupported_refinement_feature_ids().is_empty(),
+            "revision 3 left refinement terms unsupported: {:?}",
+            scored.unsupported_refinement_feature_ids()
+        );
+        println!("REV3-BAKE-ATTR-RAN score {}", scalar.score());
+    }
+
+    /// The same contract from the other side: the SHIPPED process refuses a
+    /// revision-3 bake. An old bake relabelled `3` therefore cannot be served
+    /// as if it had been refit, and a genuine revision-3 bake cannot be
+    /// served against revision-1 pixels.
+    #[test]
+    fn the_shipped_process_refuses_a_rev3_bake() {
+        if crate::ssim_form::active_revision() != crate::ssim_form::SHIPPED_REVISION {
+            return;
+        }
+        let (w, h) = (96usize, 96usize);
+        let (src, dst) = pair(w, h);
+        let bytes = bake_declaring(Some("3"), 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
+        let err = scorer
+            .compute(&RgbSlice::new(&src, w, h), &RgbSlice::new(&dst, w, h), None)
+            .expect_err("the shipped process must not serve a revision-3 bake");
+        assert!(
+            matches!(err, ZensimError::ModelLoadFailed { .. }),
+            "{err:?}"
+        );
+    }
+
+    /// An undeclared bake is the registered pre-stamp era, and a bake naming
+    /// a revision this build does not know is refused at LOAD — never quietly
+    /// treated as the default.
+    #[test]
+    fn undeclared_is_the_shipped_era_and_an_unknown_revision_is_refused() {
+        let bytes = bake_declaring(None, 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        assert_eq!(
+            crate::feature_layout::formula_revision(&model).expect("undeclared resolves"),
+            crate::ssim_form::SHIPPED_REVISION
+        );
+        let bytes = bake_declaring(Some("4"), 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        assert!(
+            crate::feature_layout::formula_revision(&model).is_err(),
+            "an unregistered revision must be refused, not defaulted"
+        );
+    }
+}

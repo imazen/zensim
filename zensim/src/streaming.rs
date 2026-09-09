@@ -6965,44 +6965,6 @@ mod tests {
     /// The existing SSIM diagnostic's precision mode. This is an independent
     /// direct-window f64 reference, never a serving or training implementation.
     /// It holds the actual f32 XYB pyramid fixed to isolate moment arithmetic.
-    /// Run one `#[test]` body under an explicit `ZENSIM_FORMULA_REV`.
-    ///
-    /// `ssim_form::active_revision` is a `OnceLock`, so a revision cannot be
-    /// changed inside a running process and a revision-specific control has
-    /// to own its own process. Returns `true` when this process is ALREADY at
-    /// `rev` (run the body); otherwise it re-executes THIS test binary with
-    /// the variable set, running exactly this one test, and fails if the
-    /// child fails.
-    ///
-    /// This is not a skip: the assertions always execute, once, in the
-    /// process that can see them. The parent proves the child really ran the
-    /// body by requiring `sentinel` on its stdout — without that, a filter
-    /// that matched nothing would exit 0 and the control would pass
-    /// vacuously.
-    pub(crate) fn run_at_revision(rev: &str, test_path: &str, sentinel: &str) -> bool {
-        if std::env::var("ZENSIM_FORMULA_REV").as_deref() == Ok(rev) {
-            return true;
-        }
-        let exe = std::env::current_exe().expect("test binary path");
-        let out = std::process::Command::new(exe)
-            .args([test_path, "--exact", "--nocapture", "--test-threads=1"])
-            .env("ZENSIM_FORMULA_REV", rev)
-            .output()
-            .expect("re-exec the test binary");
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(
-            out.status.success(),
-            "{test_path} failed at ZENSIM_FORMULA_REV={rev}\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert!(
-            stdout.contains(sentinel),
-            "{test_path} exited 0 at ZENSIM_FORMULA_REV={rev} but never reached its body \
-             (sentinel {sentinel:?} absent) — the control did not run\n{stdout}"
-        );
-        false
-    }
-
     /// A deterministic document/screenshot-flavoured pair: flat paper, hard
     /// glyph-like edges, a smooth photographic patch, and a near-lossless
     /// distortion. Flat, high-contrast content is where the raw-moment
@@ -7188,7 +7150,7 @@ mod tests {
     /// kernel that `ssim_form`'s own tests cover.
     #[test]
     fn rev3_retained_signal_is_local_under_a_reference_replacement() {
-        if !run_at_revision(
+        if !crate::ssim_form::run_at_revision(
             "3",
             "streaming::tests::rev3_retained_signal_is_local_under_a_reference_replacement",
             "REV3-LOCALITY-RAN",
@@ -7227,7 +7189,7 @@ mod tests {
     /// profile that stopped working.
     #[test]
     fn rev3_refuses_multi_pass_blur_profiles_through_the_public_entry() {
-        if !run_at_revision(
+        if !crate::ssim_form::run_at_revision(
             "3",
             "streaming::tests::rev3_refuses_multi_pass_blur_profiles_through_the_public_entry",
             "REV3-ROUTE-RAN",
@@ -7285,7 +7247,7 @@ mod tests {
     /// whole-plane reference accumulates from row 0.
     #[test]
     fn rev3_retained_planes_are_the_canonical_stable_signal() {
-        if !run_at_revision(
+        if !crate::ssim_form::run_at_revision(
             "3",
             "streaming::tests::rev3_retained_planes_are_the_canonical_stable_signal",
             "REV3-CANONICAL-RAN",
