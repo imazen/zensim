@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Canonical corruption training now declares the head's feature IDs separately
+  from its source schema, supporting D's existing basic+peak regime. Add a
+  training-only cost screen, separate fit/calibration reports, keyed channel
+  operation diagnostics and complete `BakeScorer` performance arms. The new
+  candidate fails honest-output protection; no default model changes.
+
 - Add an explicit PNG/EXR linear-luminance mode to the existing reference
   overlap audit, using pinned zenexr, exact coverage, source metadata and
   declared untagged-PNG interpretation. The previous PNG hash era is unchanged.

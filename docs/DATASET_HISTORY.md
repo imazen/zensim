@@ -3753,3 +3753,24 @@ prepared rows (including the 5,679 separate evaluation rows), but the full
 pixel audit correctly rejects unsupported companion feature coverage in D's
 fast extraction plan. No pixel scorecard or model qualification is produced;
 the next two seeds are not run. [Evidence and next serving task](../benchmarks/canonical_corruption_refit_2026-09-08.md).
+
+## 2026-09-08 — later D-regime corruption refit and honest-cost screen
+
+The user requests D's existing extraction regime instead of extending it for
+the all-372 head. Canonical source tables and the completed admission receipt
+are unchanged. The trainer explicitly selects f0..227 for the head while
+preserving the full 372-column source contract and original source roles.
+
+Three seeds serve through Rust on all 15,060 original attempts. Array export
+parity and composed pixel/cache/stored-f32 scores pass; one honest row has a
+non-firing confidence difference after f32 rounding. Validation detects all
+tested non-inert RGB swaps and 5,330/5,353 corruptions, but lowers 20/304 honest
+native outputs (22/326 honest rows overall). Strict below-q20 ordering is
+4,877/5,353. The fixed screen fails; no model or default is promoted.
+
+A preregistered follow-up changes honest fit weights by 4/16/64 and evaluates
+only the twelve training origins, including the four separate calibration
+origins. Cost 4 hits a pixel/stored-f32 fire disagreement; costs 16 and 64 fail
+calibration protection/ordering bars across three seeds. No cost arm advances
+to validation. No threshold is retuned or admission rule relaxed.
+[Recipe, chronology, hashes and complete results](../benchmarks/canonical_corruption_d228_2026-09-08.md).

@@ -533,6 +533,7 @@ the active checkout. The wrapper matches all 98 saved fixtures and all 30 UPIQ
 reference outputs exactly; [contract and validation](../../zenextras/benchmarks/zenexr_validation_2026-09-08.md).
 The subsequent fingerprinting/contextual review is now complete: 12 sources
 against all 30 HDR references, no strict flags and two reviewed distinct-content
-matches. The first fitted head passes Rust feature-row parity but requires an
-extraction-plan extension before complete pixel serving. [Current result and
-next task](../benchmarks/canonical_corruption_refit_2026-09-08.md).
+matches. The first all-372 head passes Rust feature-row parity but is unservable
+with D's extraction plan. Later user direction keeps the head within D's regime:
+the new 228-feature fit serves and catches RGB swaps, but fails honest-output
+protection. [Current result and next task](../benchmarks/canonical_corruption_d228_2026-09-08.md).

@@ -4,22 +4,24 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest continuation: **the declared content-admission audit is complete**.
-All 12 training sources were checked against the remaining 30 UPIQ HDR
-references: zero strict flags; two looser paper-versus-photograph matches were
-reviewed as distinct. The earlier 182-reference SDR audit reproduces exactly.
-The first canonical corruption head (seed 4101, 100 trees) trained and matches
-Rust on all 13,892 feature rows, but the full pixel audit correctly refuses it:
-the head declares 372 features and D's extraction plan does not compute them
-all. No development scorecard or product qualification is complete.
-[Admission and first-fit record](benchmarks/canonical_corruption_refit_2026-09-08.md).
+Latest user direction: **keep the corruption head in D's existing feature
+regime**. A new f0..227 HGB head is fully Rust-servable without expanding image
+extraction. All three seeds detect every tested non-inert RGB swap and 99.57%
+of validation corruptions, but lower 20/304 honest native codec outputs. It
+fails the fixed development bars; no model qualifies or replaces a default.
+Three bounded honest-cost follow-ups also fail on training calibration or
+serving precision and never advance to validation. [Exact results, artifacts
+and remaining precision issue](benchmarks/canonical_corruption_d228_2026-09-08.md).
+The earlier full content-admission audit is complete; its all-372 head and
+serving refusal remain preserved. [Admission record](benchmarks/canonical_corruption_refit_2026-09-08.md).
 
 Remaining work, in order:
 
-1. Extend the existing `BakeScorer`/`Plan` composition to compute the complete
-   supported companion feature requirements. Keep unsupported-ID and revision
-   refusals; prove pixel/cache/stored-row equality and measure added extraction
-   cost. Then rerun the registered three-seed fit and Rust pixel screen.
+1. Improve the D-regime corruption head's honest-output protection with broader
+   admitted honest codec/chroma/tone examples and source coverage. Resolve the
+   tree's training/stored-f32 versus pixel-feature precision boundary. Preserve
+   fixed safety bars and full Rust evaluation. The completed cost sweep chose
+   no arm; do not tune its failed arms on validation or expand D's extraction.
 2. Repair base-model identity, near-lossless and codec-floor preferences using
    the strongest existing candidates and native-codec evidence. A corruption
    gate or monotone calibration cannot repair the base model's rank inversions.

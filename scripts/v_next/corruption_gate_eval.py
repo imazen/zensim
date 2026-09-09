@@ -28,6 +28,7 @@ def audit_report(argv):
     ap.add_argument("--inputs-json", required=True)
     ap.add_argument("--out-json", required=True)
     ap.add_argument("--model-context", choices=["historical", "canonical-fit"], default="historical")
+    ap.add_argument("--fit-manifest", help="also report the declared fit/calibration/evaluation roles")
     a = ap.parse_args(argv)
     def require(ok, message):
         if not ok:
@@ -42,6 +43,30 @@ def audit_report(argv):
         require(sha(path) == expected, f"changed input: {path}")
     expected = {r["index"]: r for r in inputs["records"]}
     require(len(expected) == len(inputs["records"]) and bool(expected), "duplicate/empty input keys")
+    # Operation metadata lives in the original keyed generator tables, not
+    # encoded filenames. These tables are already part of the input SHA set.
+    import pyarrow.parquet as pq
+    channel_tables = {}
+    for path in {r["source_table"] for r in expected.values() if r["family"] == "channel"}:
+        require(path in inputs["files_sha256"], "unbound channel metadata table")
+        records = pq.read_table(path, columns=["row_id", "filename", "family", "params_json"]).to_pylist()
+        keyed = {r["row_id"]: r for r in records}
+        require(len(keyed) == len(records), "duplicate channel metadata key")
+        channel_tables[path] = keyed
+    for meta in expected.values():
+        if meta["family"] != "channel":
+            continue
+        row = channel_tables[meta["source_table"]][meta["source_row_id"]]
+        require(row["filename"] == meta["distorted"] and row["family"] == "channel", "channel metadata join")
+        params = json.loads(row["params_json"])["params"]
+        family = params["family"]
+        require(family["family"] == "channel" and len(family) == 2, "channel operation schema")
+        operation = next(k for k in family if k != "family")
+        meta["channel_operation"] = operation
+        # Canonical JSON retains structured regions and opacity values.
+        region = json.dumps(params["region"], sort_keys=True, separators=(",", ":"))
+        severity = json.dumps(params["severity"], sort_keys=True, separators=(",", ":"))
+        meta["channel_case"] = f"{operation}/{region}/{severity}"
     seen, rows, model_inputs, precision_mode = set(), [], None, None
     with open(a.audit_jsonl) as f:
         for line in f:
@@ -130,10 +155,36 @@ def audit_report(argv):
     for role in sorted({r["meta"]["role"] for r in rows}):
         group = [r for r in rows if r["meta"]["role"] == role]
         summary = summarize(group)
-        for field in ("origin", "content_class", "family", "kind", "codec"):
+        for field in ("origin", "content_class", "family", "kind", "codec", "channel_operation", "channel_case"):
             keys = sorted({r["meta"].get(field) for r in group if r["meta"].get(field) is not None})
             summary[f"by_{field}"] = {key: summarize([r for r in group if r["meta"].get(field) == key]) for key in keys}
         result["splits"][role] = summary
+    if a.fit_manifest:
+        manifest = json.loads(Path(a.fit_manifest).read_text())
+        require(manifest["schema"] == "canonical-corruption-fit-v1", "fit manifest schema")
+        roles = manifest["origins"]
+        require(set(roles) == {"fit", "calibrate", "evaluate"}, "fit role schema")
+        owner = {}
+        for role, origins in roles.items():
+            for origin in origins:
+                require(origin not in owner, "overlapping fit roles")
+                owner[origin] = role
+        for r in rows:
+            meta = r["meta"]
+            require(meta["origin"] in owner, "unknown fit origin")
+            require((owner[meta["origin"]] == "evaluate") == (meta["role"] == "validate"), "fit role mismatch")
+        result["fit_manifest_sha256"] = sha(a.fit_manifest)
+        result["fit_roles"] = {}
+        for role in roles:
+            group = [r for r in rows if owner[r["meta"]["origin"]] == role]
+            if not group:
+                continue
+            require({r["meta"]["origin"] for r in group} == set(roles[role]), "incomplete fit origin coverage")
+            summary = summarize(group)
+            for field in ("origin", "family", "codec", "channel_operation"):
+                keys = sorted({r["meta"].get(field) for r in group if r["meta"].get(field) is not None})
+                summary[f"by_{field}"] = {key: summarize([r for r in group if r["meta"].get(field) == key]) for key in keys}
+            result["fit_roles"][role] = summary
     Path(a.out_json).write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
     print(f"complete: {len(rows)} rows; identity={result['identity_rows']}; model remains unqualified")
 

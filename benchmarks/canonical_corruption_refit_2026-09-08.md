@@ -1,6 +1,12 @@
 # Canonical corruption refit — September 8, 2026
 
-**Latest result: content admission is complete; the first canonical head fits
+**Later user-directed D-regime experiment:** a newly trained f0..227 head
+serves with D's existing extraction, detects all tested RGB swaps, but fails
+honest-output protection. [Newer result and stopped cost sweep](canonical_corruption_d228_2026-09-08.md).
+This supersedes the proposed extraction-plan extension below. The admission
+receipt and the first all-372 experiment remain intact.
+
+**Earlier all-372 result: content admission is complete; the first canonical head fits
 and has exact Rust feature-row parity, but complete pixel serving is refused.**
 Seed 4101 produces 100 trees / 6,100 nodes in a 204,790-byte ZCTH. Across 13,892
 rows, raw decision error is 0 ulp, probability error is 0 and the fire set has
@@ -51,7 +57,8 @@ complete result and failed pixel-audit log. Earlier preparation artifacts below
 remain immutable. `thiserror` and its derive companion move from 2.0.19 to
 2.0.20 to meet the pinned zenexr dependency; no other locked package changes.
 
-Next: extend the existing `BakeScorer::plan` using supported complete-model
+Then-proposed next step (superseded by the later D-regime user request): extend
+the existing `BakeScorer::plan` using supported complete-model
 requirements, preserving revision and unsupported-feature rejection. Verify
 pixel/cache/stored-feature parity and cost before rerunning the registered fit.
 Do not truncate the head, weaken coverage checks, alter the feature schema or

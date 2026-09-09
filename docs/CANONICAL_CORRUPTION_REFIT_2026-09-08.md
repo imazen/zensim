@@ -1,5 +1,51 @@
 # Canonical corruption refit — September 8 registration
 
+## D-regime companion — later user direction, before results
+
+The user requests a head using D's existing feature regime. This supersedes
+the proposal to expand D's extraction for the first all-372 head. Keep that
+failed experiment intact. Fit a separate, explicitly declared f0..227 head:
+156 basic and 72 peak features, all X/Y/B channels. `Plan::for_bake` already
+materializes these for D; masked/IW f228..371 are excluded. The source tables
+and parity caller remain full 372-column, revision 1, libm. No extraction
+planner or serving guard changes. Tree inference still has a runtime cost.
+
+Reuse the completed admission receipt, exact source roles, weighting, scaler,
+HGB settings, three seeds, calibration and P>0.9 deadband below. Keep every
+development selection bar unchanged. Train through the existing canonical
+trainer and evaluate each exported ZCTH through the pinned Rust pixel/cache
+audit. This is one bounded registered recipe; failures do not authorize
+validation-based threshold tuning. Report channel operations separately from
+the aggregate channel family, including region/severity and inert identities,
+using keyed generator metadata from the already hash-bound source tables.
+Compare with the prior frozen D+HGB on the same inputs. Low scalar chroma
+weighting is a hypothesis, not a demonstrated sole cause of swap failures.
+
+Artifact: `/mnt/v/output/zensim/canonical-corruption-d228-2026-09-08/`.
+
+### Honest-cost follow-up — after the first D228 screen, before new fits
+
+The first D228 recipe catches all tested RGB swaps, but fails honest-output
+protection and below-q20 ordering. Its separate training calibration origins
+also contain two wrongly lowered near-lossless JXL outputs (1214 and 6064).
+On that calibration set, moving a monotone threshold above the highest honest
+raw response would retain only 83.97% of corruption positives, below the
+95% bar. A threshold change alone cannot satisfy both objectives there.
+
+Bound the follow-up to three fit-cost arms: multiply honest **fit** row weights
+by 4, 16 or 64 before the existing unit-mean normalization and balanced-class
+factory. Keep source roles, scaler, calibration weights, features, HGB shape,
+deadband and three seeds unchanged. This changes the learned boundary, with
+no additional serving work. `--training-screen-only` runs Rust pixel/cache
+scoring on the twelve training origins only; its parity vectors also exclude
+validation. Report fit and calibration roles separately. Select an arm only
+if every seed meets the same five bars on calibration, preferring smaller
+honest weight if multiple arms pass. Only that selected arm may advance to
+the eight validation origins. If none passes, retain the failures and stop
+this cost sweep; do not inspect validation for these arms or relax a bar.
+
+## Earlier admission and all-372 recipe (preserved)
+
 This follows the frozen-head serving screen, before new native admission
 instrument edits or fitting. No historical CV-ensemble metric can stand in for
 the exported single fit. No terminal labels enter this work.

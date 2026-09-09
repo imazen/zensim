@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Train + rigorously evaluate the structural-corruption DETECTOR (2nd head).
 
-The head is 372-FEATURE (v1 f0..f371 — a subset of the 720 already extracted at
-deployment, so zero extra cost) so it can compose directly with the breakthrough
+The historical head is 372-FEATURE (v1 f0..f371; these are NOT all computed by
+D's fast extraction plan) so it can compose directly with the breakthrough
 **negrich** severe-honest hard negatives (266k rows, 372-feat, provenance-gapped →
 cannot be re-extracted at 720). Classes:
   - POSITIVES: structural corruptions from build_corruption_corpus.py (many
@@ -32,7 +32,11 @@ L8/max tier"), while masked/IW (`f228..371`) would force `Full`. So a head for D
 is free on `f0..155` AND on `f0..227`, and NOT free past that. The 2026-07-24
 head read all 372 including masked/IW, so it is not a D companion at any price.
 
-Select the slice with `--feat-range 0:156` / `--feat-range 0:228`.
+Select the slice with `--feat-range 0:156` / `--feat-range 0:228` in legacy mode.
+Canonical manifests keep the full 372-column input contract and declare the
+head's separate `head_feature_ids` (September 8: f0..227 for D). Only estimator
+inputs are sliced; Rust parity and pixel scoring still receive the full row.
+These features add no extraction work to D; tree inference has its own cost.
 
 `--broad-honest LABEL:PATH[:IDCOL]` (repeatable) replaces the hard-coded ext720
 list, so the broad negatives can be an era-matched instrument instead of whatever
@@ -455,6 +459,8 @@ def canonical_main(argv):
     ap.add_argument("--canonical-manifest", required=True, type=Path)
     ap.add_argument("--out-dir", required=True, type=Path)
     ap.add_argument("--prepare-only", action="store_true")
+    ap.add_argument("--training-screen-only", action="store_true",
+                    help="score only fit/calibration origins; select on calibration, never validation")
     a = ap.parse_args(argv)
     def require(ok, message):
         if not ok:
@@ -467,6 +473,15 @@ def canonical_main(argv):
     require(m["schema"] == "canonical-corruption-fit-v1", "canonical manifest schema")
     require(m["feature_ids"] == list(range(372)) and m["formula_revision"] == 1
             and m["root_form"] == "libm", "canonical feature contract")
+    # Keep the original all-372 experiment reproducible. The D companion is
+    # an explicit new declaration, never inferred from the source table width.
+    head_ids = m.get("head_feature_ids", m["feature_ids"])
+    require(head_ids in (list(range(228)), list(range(372)))
+            and all(type(i) is int for i in head_ids), "unregistered head feature regime")
+    negative_fit_weight = m.get("negative_fit_weight", 1)
+    require(type(negative_fit_weight) is int and negative_fit_weight in (1, 4, 16, 64),
+            "unregistered honest fit weight")
+    require(negative_fit_weight == 1 or head_ids == list(range(228)), "honest-weight study requires D regime")
     require(not a.out_dir.exists(), "canonical output directory must be fresh")
     ip = pinned(m["serving_inputs"]); audit_path = pinned(m["serving_audit"])
     base = pinned(m["base_bake"]); extractor = pinned(m["extractor"])
@@ -554,6 +569,7 @@ def canonical_main(argv):
     preparation = dict(schema="canonical-corruption-preparation-v1", raw_rows=len(inputs["records"]),
                        unique_rows=len(rows), removed_duplicates=len(inputs["records"])-len(rows),
                        roles={k:dict(rows=int(v.sum()), positives=int(y[v].sum()), origins=roles[k]) for k,v in masks.items()},
+                       head_feature_ids=head_ids,
                        manifest_sha256=_sha256(a.canonical_manifest), admitted=admission is not None, model_qualified=False)
     (a.out_dir/"PREPARATION.json").write_text(json.dumps(preparation, indent=2)+"\n")
     if a.prepare_only:
@@ -564,34 +580,60 @@ def canonical_main(argv):
         idx = np.array([r["origin"] == origin for r in rows])
         weights[idx] = 1.0 / idx.sum()
     fit, cal = masks["fit"], masks["calibrate"]
-    scaler = StandardScaler().fit(X[fit], sample_weight=weights[fit])
-    Z = np.clip(scaler.transform(X), -8, 8)
+    head_X = X[:, head_ids]
+    scaler = StandardScaler().fit(head_X[fit], sample_weight=weights[fit])
+    Z = np.clip(scaler.transform(head_X), -8, 8)
+    fit_weights = weights.copy()
+    fit_weights[fit & (y == 0)] *= negative_fit_weight
     require(m["hyperparameters"] == {"early_stopping":False,"max_iter":100,"max_leaf_nodes":31}, "unregistered HGB settings")
     require(m["deadband"] == 0.9 and m["seeds"] == [4101,4103,4107], "unregistered threshold/seeds")
+    scoring_inputs, scoring_pairs = ip, Path(m["pairs_tsv"])
+    parity_rows = np.ones(len(rows), dtype=bool)
+    if a.training_screen_only:
+        import csv
+        # Keep original global row keys and complete train coverage. This is
+        # a declared projection of pinned inputs, not a new random split.
+        subset = [r for r in inputs["records"] if owner[r["origin"]] != "evaluate"]
+        scoring_pairs = a.out_dir/"training-pairs.tsv"
+        with scoring_pairs.open("w", newline="") as f:
+            writer = csv.writer(f, delimiter="\t", lineterminator="\n")
+            writer.writerow(["ref_path", "dist_path", "human_score"])
+            writer.writerows((r["reference"], r["distorted"], r["index"]) for r in subset)
+        scoring_inputs = a.out_dir/"TRAINING_INPUTS.json"
+        projected = dict(inputs, records=subset,
+                         files_sha256=dict(inputs["files_sha256"], **{str(scoring_pairs):_sha256(scoring_pairs)}))
+        scoring_inputs.write_text(json.dumps(projected, indent=2)+"\n")
+        parity_rows = ~masks["evaluate"]
     for seed in m["seeds"]:
         run = a.out_dir/f"seed-{seed}"; run.mkdir()
         # Rescale source weights to unit mean so HGB's leaf regularization has
         # its ordinary sample-mass scale; class balancing stays in the factory.
-        clf, iso = fit_canonical_hgb(Z, y, fit, cal, weights, seed, m["hyperparameters"])
+        clf, iso = fit_canonical_hgb(Z, y, fit, cal, fit_weights, seed, m["hyperparameters"])
         head = run/"head.zcth"
         provenance = dict(manifest_sha256=_sha256(a.canonical_manifest), seed=seed,
                           sklearn=_sklearn_version(), trainer_sha256=_sha256(__file__),
-                          feature_ids=list(range(372)), formula_revision=1, root_form="libm")
-        emit_zcth(str(head),372,list(range(372)),scaler.mean_,scaler.scale_,8.0,clf,iso,m["deadband"],provenance)
+                          feature_ids=head_ids, formula_revision=1, root_form="libm",
+                          negative_fit_weight=negative_fit_weight)
+        emit_zcth(str(head),372,head_ids,scaler.mean_,scaler.scale_,8.0,clf,iso,m["deadband"],provenance)
         # Export and evaluate THIS fitted estimator, never a CV ensemble.
-        prob = iso.predict(clf.predict_proba(Z)[:,1])
-        np.savez_compressed(run/"parity.npz", test_X=X, test_raw=clf.decision_function(Z), test_p=prob)
+        prob = iso.predict(clf.predict_proba(Z[parity_rows])[:,1])
+        # The parity owner's matrix is in declared-ID order; Rust scatters
+        # it into a full caller-width row before testing the real gather.
+        np.savez_compressed(run/"parity.npz", test_X=np.ascontiguousarray(head_X[parity_rows]),
+                            test_raw=clf.decision_function(Z[parity_rows]), test_p=prob)
         with (run/"parity.log").open("w") as log:
             subprocess.run([str(parity_bin),"--head",str(head),"--parity",str(run/"parity.npz"),"--set","test"],
                            stdout=log,stderr=subprocess.STDOUT,check=True)
-        command = [str(extractor),"--corpus","pairs","--path",m["pairs_tsv"],"--out",str(run/"features.csv"),
+        command = [str(extractor),"--corpus","pairs","--path",str(scoring_pairs),"--out",str(run/"features.csv"),
                    "--audit-jsonl",str(run/"audit.jsonl"),"--audit-bake",str(base),"--audit-corruption-head",str(head)]
         env = dict(os.environ, ZENSIM_FORMULA_REV="1", ZENSIM_ROOT_FORM="libm", RAYON_NUM_THREADS="8")
         with (run/"surface.log").open("w") as log:
             subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
         subprocess.run([sys.executable,str(Path(__file__).with_name("corruption_gate_eval.py")),"--audit-jsonl",str(run/"audit.jsonl"),
-                        "--inputs-json",str(ip),"--out-json",str(run/"report.json"),"--model-context","canonical-fit"],check=True)
-        summary = json.loads((run/"report.json").read_text())["splits"]["validate"]
+                        "--inputs-json",str(scoring_inputs),"--out-json",str(run/"report.json"),
+                        "--model-context","canonical-fit","--fit-manifest",str(a.canonical_manifest)],check=True)
+        report = json.loads((run/"report.json").read_text())
+        summary = report["fit_roles"]["calibrate"] if a.training_screen_only else report["splits"]["validate"]
         require(set(summary["by_codec"]) == {"jxl", "avif"}, "native codec screen coverage")
         gates = dict(
             zero_native_codec_lowering=all(v["honest_score_lowered"]["count"] == 0 for v in summary["by_codec"].values()),
@@ -599,10 +641,11 @@ def canonical_main(argv):
             detection_ge_95pct=summary["detection"]["rate"] >= .95,
             real_bug_detection_ge_90pct=summary["by_family"]["real_bug"]["detection"]["rate"] >= .90,
             below_q20_ge_99pct=summary["composed_below_q20"]["rate"] >= .99)
-        (run/"SCREEN.json").write_text(json.dumps(dict(scope="registered companion development screen only",
+        scope = "training calibration screen only" if a.training_screen_only else "registered companion development screen only"
+        (run/"SCREEN.json").write_text(json.dumps(dict(scope=scope,
                     gates=gates, selection_pass=all(gates.values()), model_qualified=False),indent=2)+"\n")
         (run/"COMPLETE.json").write_text(json.dumps(dict(head_sha256=_sha256(head), model_qualified=False,
-                    source="exact exported single fit through Rust pixel/cache audit", command=command),indent=2)+"\n")
+                    scope=scope, source="exact exported single fit through Rust pixel/cache audit", command=command),indent=2)+"\n")
 
 
 def main():

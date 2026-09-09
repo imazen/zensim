@@ -45,6 +45,7 @@
 //! | `free156_peaks_raw` | `V1PoolsMode::Peaks` + `V1FreeExtras::RawMoments`, v1-only, 944 layout | the 156+free MLP (A3b/A4b class) |
 //! | `peaks156_no_raw`  | `V1PoolsMode::Peaks`, `V1FreeExtras::Off`, v1-only, 944 layout | the 156+peaks head — the ZERO-marginal-compute half of the free set |
 //! | `add156_plus_corrhead` | identical to `add156_156basic` | the additive head **and** the companion corruption head (`ZEN_HY_CORRHEAD`) — the delta against `add156_156basic` prices attaching the head |
+//! | `bake_surface`, `bake_surface_corruption` | `BakeScorer::compute`, actual declared plan | complete base versus base+tree composition, including calibration and the gate |
 //!
 //! Bake bytes come from the environment so none enter git:
 //! `ZEN_HY_MLP` (the 944 MLP flagship), `ZEN_HY_LIN` (the 944 pools linear),
@@ -389,6 +390,30 @@ fn main() {
                 });
                 // ---- amended-W4: candidate = its own regime + its own forwards
                 if let Some(h) = add {
+                    // The actual candidate surface owns planning and all
+                    // score composition. The older explicit-walk arms below
+                    // remain extraction/forward diagnostics only.
+                    group.bench("bake_surface", move |b| {
+                        let mut scorer = zensim::BakeScorer::new(&h.model).expect("servable bake");
+                        b.iter(move || {
+                            let s = RgbSlice::new(src_s, n, n);
+                            let d = RgbSlice::new(dst_s, n, n);
+                            zenbench::black_box(scorer.compute(&s, &d, None).unwrap().score())
+                        })
+                    });
+                    if let Some(CorrHead::Tree(ch)) = corrhead {
+                        group.bench("bake_surface_corruption", move |b| {
+                            let mut scorer = zensim::BakeScorer::new(&h.model)
+                                .expect("servable bake")
+                                .with_corruption_head(ch, None)
+                                .expect("servable companion");
+                            b.iter(move || {
+                                let s = RgbSlice::new(src_s, n, n);
+                                let d = RgbSlice::new(dst_s, n, n);
+                                zenbench::black_box(scorer.compute(&s, &d, None).unwrap().score())
+                            })
+                        });
+                    }
                     group.bench("add156_156basic", move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();
                         let mut pred = Predictor::new(&h.model);
