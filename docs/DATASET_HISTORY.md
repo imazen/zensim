@@ -3800,3 +3800,18 @@ the two JXL decoder contracts distinct; the current training packet uses only
 the canonical decoder. Source inspection suggests U8 dithering versus f32
 plain rounding, but the decoder packages also differ and a controlled causal
 check remains necessary. [Full record](../benchmarks/corruption_honest_map_2026-09-08.md).
+
+## 2026-09-08 — native JXL delivered-pixel repair, after the honest supplement
+
+The same-decoder on/off control now reproduces all 336 canonical and historical
+hashes. Dithering changes 8,646,810 RGB samples by at most one code; only 178
+samples differ between canonical undithered and historical f32-rounded output.
+Native targeting now uses canonical U8 dithering and rejects older decoder-era
+calibrations. On the unchanged twelve admitted train sources, 756 newly emitted
+bitstreams independently reproduce every decoded hash and f32-reported D score.
+Work: 756 full encodes, 1,512 internal reconstructions/map evaluations/native
+comparisons, and 756 delivered-image comparisons, plus separate audit costs.
+No model fit, validation/terminal scoring, or protected-content admission here.
+The preceding honest-head fit already used canonical pixels; this decoder
+repair does not invalidate or erase its two honest false positives.
+[Controlled measurement and serving contract](../../jxl-encoder/benchmarks/zensim_decode_contract_2026-09-08.md).

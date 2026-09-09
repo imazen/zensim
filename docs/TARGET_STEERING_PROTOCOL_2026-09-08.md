@@ -1,15 +1,25 @@
 # Reachable targets and codec steering — September 8, 2026
 
-**Later September 8 decoder-contract finding:** all 336 reused honest JXL
+**Latest September 8 decoder-contract repair:** the native JXL harness now
+decodes delivered RGB8 with canonical zenjxl-decoder 0.4 U8 dithering enabled.
+Its versioned configuration rejects older calibration files before encoding.
+All 756 regenerated train outputs have exact independent decoded-hash and
+f32-score parity. Same-decoder dither on/off controls account for 8,646,810
+changed samples, leaving only 178 one-code differences against the historical
+undithered decoder. The 336-row control reproduces through final source.
+This repairs measurement consistency; it does not qualify D or its failed
+allocation rule. [Evidence and exact work counts](../../jxl-encoder/benchmarks/zensim_decode_contract_2026-09-08.md).
+
+**Preceding September 8 decoder-contract finding:** all 336 reused honest JXL
 map-arm bitstreams decode to different pixels in the canonical native extractor
 than in the earlier native target loop. Same frozen D, absolute score drift
 median 0.185 / p95 1.807 / max 2.425. All 272 AVIF counterparts are pixel-exact
 (score differences <=3.8e-6 from f32 reporting). Source paths differ in decoder
 and output quantization: upstream jxl f32+plain rounding versus the canonical
-zenjxl-decoder U8 path with default blue-noise dithering. Establish the exact
-cause with a controlled same-decoder comparison, then use the same declared
-delivered-pixel contract for bounds, runtime comparisons and independent
-qualification. Do not silently change old scores or call their old hit counts
+zenjxl-decoder U8 path with default blue-noise dithering. The later controlled
+repair above establishes the cause and uses the same declared delivered-pixel
+contract for bounds, runtime comparisons and independent qualification.
+Do not silently change old scores or call their old hit counts
 evidence under a new decoder contract. [Measured rows and provenance](../benchmarks/corruption_honest_map_2026-09-08.md).
 
 User ruling: establish each image's codec range before judging steering; fit

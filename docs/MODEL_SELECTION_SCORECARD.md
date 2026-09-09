@@ -39,6 +39,13 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+September 8 measurement repair: native JXL delivered decoding now matches
+canonical extraction on all 756 regenerated training outputs (exact pixel
+hashes and f32-reported scores). Earlier target counts belong to the old
+decoder era. This closes the observed decoder inconsistency, with no change
+to the failed/incomplete release disposition above. See the
+[controlled decoder record](../../jxl-encoder/benchmarks/zensim_decode_contract_2026-09-08.md).
+
 **September 8 correction — user ruling:** steering evaluation must first
 establish each image's attained codec range, then compare 1/2/3-shot policies
 using codec-specific calibration fitted only on imazen-26 training families.

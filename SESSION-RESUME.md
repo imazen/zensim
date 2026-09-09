@@ -4,7 +4,20 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest continuation adds 608 retained honest JXL/AVIF map-arm attempts on the
+Latest continuation repairs the native JXL delivered-pixel contract. Controlled
+dither on/off decoding explains nearly all of the earlier drift: 8,646,810
+samples change by at most one code; only 178 samples still differ between the
+undithered canonical and historical decoders. The native loop now uses the
+canonical zenjxl-decoder U8 path. All 756 newly encoded training ladder outputs
+match independent decoded hashes and f32-reported D scores exactly; the 336-row
+historical diagnostic reproduces exactly. Old decoder-era calibration is
+refused before encoding. This closes the measured decoder discrepancy, not
+model accuracy or spatial qualification. Continue with honest protection and
+base-model preferences; do not rerun the already failed fixed D allocation
+policy as though decoder parity qualified it.
+[Decoder repair and evidence](../jxl-encoder/benchmarks/zensim_decode_contract_2026-09-08.md).
+
+The preceding continuation adds 608 retained honest JXL/AVIF map-arm attempts on the
 eight admitted fit origins (402 additional unique pixel pairs), then fits the
 unchanged v2 cost-4 recipe once. Calibration false positives fall from three
 to two, still FAIL. No validation/terminal scoring. More importantly, the
@@ -12,11 +25,9 @@ native JXL target loop's decoded pixels differ from canonical extraction on
 all 336 added JXL attempts: median absolute D drift 0.185, p95 1.807, maximum
 2.425 points. AVIF pixels agree exactly. Source inspection identifies a likely
 cause: native JXL uses upstream jxl f32 output plus plain rounding; canonical
-zenjxl-decoder U8 defaults to blue-noise dithering. This hypothesis needs an
-exact same-decoder on/off control, not an assumed equivalence. Next unify the
-native JXL delivered-pixel contract with canonical independent decoding before
-further steering qualification; preserve the old results as their named decoder
-era. Then expand honest source/geometry coverage if the head still fails.
+zenjxl-decoder U8 defaults to blue-noise dithering. The later controlled test
+and repair above supersede that hypothesis. Preserve the old results as their
+named decoder era. The head still fails honest calibration protection.
 [Honest coverage and decoder evidence](benchmarks/corruption_honest_map_2026-09-08.md).
 
 Latest September 8 continuation establishes the missing numerical release
