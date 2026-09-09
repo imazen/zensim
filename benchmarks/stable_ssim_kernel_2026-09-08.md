@@ -279,6 +279,41 @@ rather than necessary, and is kept as
 `rev3-cost-ab2-CONTENDED-DISCARDED`. "Contended or incomplete timing cannot
 pass" is not a standard one gets to evaluate after seeing the numbers.
 
+### The V-side sigma guard: TRIED, MEASURED, REVERTED
+
+Under revision 3 the `sigma_sq` / `sigma12` moments have no reader on the v1
+strip path, so the obvious first move is to stop accumulating them in the
+V-blur. That was implemented across all four tier variants — 18 vector/scalar
+accumulation runs plus the neon/wasm/scalar variant's array-based ring-fill and
+slide — behind `need_sigma = store_sigma || stable_sd.is_empty()`, derived from
+existing parameters so revisions 1 and 2 are untouched by construction. All 452
+lib tests passed, including the folded-vs-streaming bit-parity gates and the
+cross-revision blast-radius gate.
+
+**It bought nothing measurable, and it is reverted.** Re-running the same
+paired A/B on the rebuilt binary, with the revision-1 arms as cross-build
+anchors (the change cannot affect them) and `fast_ssim2` as an absolute anchor
+(the change cannot even reach it):
+
+| arm @2048 squared | rev1 before -> after | rev3 before -> after |
+|---|---:|---:|
+| `fold944_full` | 265.06 -> 264.97 ms (0.0%) | 336.48 -> 332.74 ms (-1.1%) |
+| `fold156_basic` | 82.31 -> 80.58 ms (-2.1%) | 154.24 -> 148.16 ms (-3.9%) |
+| `fast_ssim2` | 294.05 -> 290.41 ms (-1.2%) | 293.28 -> 287.18 ms (-2.1%) |
+
+`fast_ssim2` moved -1.2% / -2.1% between builds and the change cannot touch it,
+so the revision-3 movements are inside the cross-build noise floor. The
+differential attributable to the guard is <=1%. Twenty branch sites in the
+crate's hottest kernel is not a fair price for a number that cannot be
+distinguished from a rebuild.
+
+**What that tells you, and it is the useful part.** The V accumulators are
+register adds over plane data the H pass has just written and left cache-hot;
+removing them saves almost nothing. The dead moments cost their money in the
+**H pass, which writes two full strip planes**. So the whole saving lives on
+the side that is NOT a call-site substitution — see below. Do not re-attempt
+the V-side guard.
+
 ### Cost headroom, and why the obvious version of it is NOT free
 
 Under revision 3 on the v1 strip path, `sigma_sq` and `sigma12` are computed

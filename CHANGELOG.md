@@ -47,6 +47,11 @@
   336.5 ms and **does not**, which breaks the scorecard's "≤ fast-ssim2"
   clause. Peak RSS is a non-issue: +0.7 to +3.0 MB, every arm far under the
   128 bytes/pixel clause.
+- Skipping the sigma-moment V-blur accumulation under revision 3 (they have no
+  reader there) was implemented, measured at ≤1% — inside cross-build noise,
+  with `fast_ssim2` moving more between builds than the change did — and
+  REVERTED. The dead moments cost their time in the H pass that writes two full
+  strip planes, not in the V accumulators. Recorded so it is not re-attempted.
 - Replaying the 23 registered spatial coherence cells with revision-1 bakes on
   revision-3 pixels (cross-revision diagnostic) moves M3a ≥ 0.70 from 7/23 to
   20/23 and M2 ≥ 0.99 from 16/23 to 19/23, concentrated on the small-block
