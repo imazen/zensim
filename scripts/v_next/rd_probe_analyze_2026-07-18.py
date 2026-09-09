@@ -928,7 +928,142 @@ def interventions_main():
     print("\n".join(text))
 
 
+
+def model_preferences_main():
+    """Compare complete Rust base scores on a pinned training-only ladder."""
+    import argparse
+    import hashlib
+    import itertools
+    import json
+    from pathlib import Path
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model-preferences", required=True, type=Path)
+    root = ap.parse_args().model_preferences
+    def require(ok, message):
+        if not ok:
+            raise SystemExit(message)
+    def sha(path):
+        with Path(path).open("rb") as stream:
+            return hashlib.file_digest(stream, "sha256").hexdigest()
+    def read(path):
+        return json.loads(path.read_text())
+    def jsonl(path):
+        return [json.loads(line) for line in path.read_text().splitlines()]
+    output = root / "preferences.json"
+    require(not output.exists() and not (root / "preferences.md").exists(), "preference output must be fresh")
+    m = read(root / "INPUTS.json")
+    require(m["schema"] == "zensim-model-preference-screen-v1", "preference schema mismatch")
+    require(m["thresholds"] == {"ssim2":0.1,"butteraugli":0.005,"model_tie":1e-6}, "unregistered preference thresholds")
+    names = {"A", "B", "D"} | {f"{family}_{seed}" for family in ("A_plain", "H_anchorlad") for seed in (4004,4005,4006)}
+    require(len(m["models"]) == 9 and {v["name"] for v in m["models"]} == names, "model coverage mismatch")
+    sources = {v["origin"]:v for v in m["sources"]["sources"]}
+    require(len(sources) == len(m["sources"]["sources"]) == 12, "source coverage mismatch")
+    require(len({s["family"] for s in sources.values()}) == 12, "duplicate source family")
+    for s in sources.values():
+        require(s["split"] == "train" and sha(s["path"]) == s["sha256"], "source role/hash mismatch")
+    for path, expected in m["files"].items():
+        require(sha(root/path) == expected, "preference input hash mismatch")
+    for tool in m["tools"].values():
+        require(sha(tool["path"]) == tool["sha256"], "preference tool hash mismatch")
+    rows = m["rows"]
+    require(len(rows) == 264 and [r["index"] for r in rows] == list(range(264)), "pair key/coverage mismatch")
+    groups = defaultdict(list)
+    identities = {}
+    for row in rows:
+        require(row["origin"] in sources, "unknown source origin")
+        source = sources[row["origin"]]
+        require(row["reference"] == source["path"] and row["reference_sha256"] == source["sha256"] and row["content_class"] == source["content_class"], "pair source mismatch")
+        require(sha(row["encoded"]) == row["encoded_sha256"] and sha(row["decoded"]) == row["decoded_file_sha256"], "retained pair hash mismatch")
+        require(math.isfinite(row["distance"]) and row["distance"] >= 0, "invalid distance")
+        if row["identity"]:
+            require(row["origin"] not in identities and row["encoded"] == row["reference"] and row["distance"] == 0, "identity coverage mismatch")
+            identities[row["origin"]] = row["index"]
+        else:
+            groups[row["origin"]].append(row)
+    require(set(groups) == set(identities) == set(sources), "ladder source coverage mismatch")
+    for group in groups.values():
+        group.sort(key=lambda r:r["distance"])
+        require(len(group) == 21 and len({r["distance"] for r in group}) == 21, "ladder distance coverage mismatch")
+    audits = {}
+    for model in m["models"]:
+        require(sha(model["path"]) == model["sha256"], "candidate model hash mismatch")
+        audits[model["name"]] = jsonl(root/"scores"/(model["name"]+".jsonl"))
+    audits["decoded-D"] = jsonl(root/"scores/decoded-D.jsonl")
+    for name, audit in audits.items():
+        require(len(audit) == len(rows), "audit coverage mismatch")
+        model = next(v for v in m["models"] if v["name"] == ("D" if name == "decoded-D" else name))
+        for row, a in zip(rows, audit):
+            decoded = name == "decoded-D"
+            require(a["schema"] == "canonical-feature-audit-v1" and a["human_score"] == row["index"], "audit row identity mismatch")
+            require(a["reference"] == row["reference"] and a["distorted"] == row["decoded" if decoded else "encoded"], "audit pair paths mismatch")
+            require(a["reference_file_sha256"] == row["reference_sha256"] and a["distorted_file_sha256"] == row["decoded_file_sha256" if decoded else "encoded_sha256"], "audit file identity mismatch")
+            require(a["reference_pixels_sha256"] == row["reference_pixels_sha256"] and a["distorted_pixels_sha256"] == row["decoded_pixels_sha256"], "audit decoded pixels mismatch")
+            require(a["model_inputs"] == [[model["path"], model["sha256"]]], "audit model identity mismatch")
+            require(a["pixels_identical"] == (a["reference_pixels_sha256"] == a["distorted_pixels_sha256"]), "audit pixel identity flag mismatch")
+            values = [a[k] for k in ("pixel_composed_score", "cached_composed_score", "stored_f32_composed_score")]
+            require(all(math.isfinite(v) for v in values) and max(values)-min(values) <= 1e-4 and a["max_consumed_feature_abs_delta"] <= 1e-8, "candidate serving parity mismatch")
+            if row["identity"]:
+                require(a["pixels_identical"], "identity pixels differ")
+    for a,b in zip(audits["D"],audits["decoded-D"]):
+        require(a["pixel_composed_score"] == b["pixel_composed_score"], "bitstream/PNG scoring differs")
+    judges = {}
+    for metric,column in (("ssim2","ssim2"),("butteraugli","butteraugli_pnorm3")):
+        with (root/f"judge_{metric}.tsv").open() as f:
+            panel = list(csv.DictReader(f,delimiter="\t"))
+        require(len(panel) == len(rows), "judge coverage mismatch")
+        values = []
+        for row,p in zip(rows,panel):
+            require(p["ref_path"] == row["reference"] and p["dist_path"] == row["decoded"] and float(p["human_score"]) == row["index"], "judge pair identity mismatch")
+            value = float(p[column]); require(math.isfinite(value), "nonfinite judge")
+            values.append(value)
+        judges[metric] = values
+    consensus = []
+    for origin,group in groups.items():
+        for (i,a),(j,b) in itertools.combinations(enumerate(group),2):
+            x,y = a["index"],b["index"]
+            ds = judges["ssim2"][x]-judges["ssim2"][y]
+            db = judges["butteraugli"][y]-judges["butteraugli"][x]
+            sign = 1 if ds > .1 and db > .005 else -1 if ds < -.1 and db < -.005 else 0
+            if sign:
+                consensus.append(dict(origin=origin,content_class=a["content_class"],a=x,b=y,sign=sign,
+                                      adjacent=j==i+1,near_lossless=b["distance"] <= .1))
+    require(consensus, "no resolved independent judge pairs")
+    def tally(name, subset):
+        delta = [(audits[name][p["a"]]["pixel_composed_score"]-audits[name][p["b"]]["pixel_composed_score"])*p["sign"] for p in subset]
+        wrong = sum(d < -1e-6 for d in delta); ties = sum(abs(d) <= 1e-6 for d in delta)
+        return dict(consensus=len(delta),wrong=wrong,ties=ties,unresolved=wrong+ties)
+    summaries = {}
+    for name in sorted(names):
+        values = [a["pixel_composed_score"] for r,a in zip(rows,audits[name]) if not r["identity"]]
+        summaries[name] = dict(identity_100=sum(audits[name][i]["pixel_composed_score"] == 100 for i in identities.values()),
+            distorted_above_100=sum(v > 100 for v in values),minimum=min(values),maximum=max(values),
+            all=tally(name,consensus),adjacent=tally(name,[p for p in consensus if p["adjacent"]]),
+            near_lossless=tally(name,[p for p in consensus if p["near_lossless"]]),
+            by_content={c:tally(name,[p for p in consensus if p["content_class"]==c]) for c in sorted({r["content_class"] for r in rows})},
+            by_origin={o:tally(name,[p for p in consensus if p["origin"]==o]) for o in sorted(sources)},
+            adjacent_distance_inversions=sum(audits[name][a["index"]]["pixel_composed_score"] < audits[name][b["index"]]["pixel_composed_score"]-1e-6 for g in groups.values() for a,b in zip(g,g[1:])))
+    for name,s in summaries.items():
+        s["advancement_pass"] = s["identity_100"]==12 and s["distorted_above_100"]==0 and s["all"]["unresolved"] < summaries["D"]["all"]["unresolved"] and all(v["unresolved"] <= summaries["D"]["by_content"][c]["unresolved"] for c,v in s["by_content"].items())
+    families = {f:all(summaries[f"{f}_{seed}"]["advancement_pass"] for seed in (4004,4005,4006)) for f in ("A_plain","H_anchorlad")}
+    result = dict(schema="zensim-model-preference-result-v1",manifest_sha256=sha(root/"INPUTS.json"),
+                  pairs=264,models=summaries,three_seed_families=families,consensus_pairs=consensus,
+                  model_qualified=False,validation_scored=False,full_encodes=0)
+    text = ["# Base-model preference screen", "", "Training-only canonical JXL pairs; no model qualification or spatial RD claim.", "",
+            "| Model | Identity /12 | Above 100 | Wrong / ties | Adjacent unresolved | Near-lossless unresolved | Advance |",
+            "|---|---:|---:|---:|---:|---:|---|"]
+    for name,s in summaries.items():
+        text.append(f"| {name} | {s['identity_100']} | {s['distorted_above_100']} | {s['all']['wrong']} / {s['all']['ties']} | {s['adjacent']['unresolved']} | {s['near_lossless']['unresolved']} | {s['advancement_pass']} |")
+    text += ["", f"Resolved judge-consensus pairs: {len(consensus)} of 2520. Ties count as unresolved.",
+             "The frozen rule requires strict improvement over D and no content-class regression. A failed advancement test does not prove a model is globally worse."]
+    output.write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
+    (root/"preferences.md").write_text("\n".join(text)+"\n")
+    print("\n".join(text))
+
+
 def main():
+    if "--model-preferences" in sys.argv:
+        return model_preferences_main()
     if "--interventions" in sys.argv:
         return interventions_main()
     if "--target-loop" in sys.argv:

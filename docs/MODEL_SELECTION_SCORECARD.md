@@ -39,6 +39,13 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+September 8 base-model screen: D resolves all 2,471 independent-judge consensus
+pairs on twelve canonical training sources; the newer A_plain/H_anchorlad
+MLPs show many near-lossless reversals. Generation A and B each reverse three.
+All nine pass pixel/cache score parity and identity on this panel. This is
+training evidence, not human-ranking or spatial qualification. No candidate
+advances under the registered rule. [Results and next model experiment](../benchmarks/model_preferences_2026-09-08.md).
+
 September 8 measurement repair: native JXL delivered decoding now matches
 canonical extraction on all 756 regenerated training outputs (exact pixel
 hashes and f32-reported scores). Earlier target counts belong to the old

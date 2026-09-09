@@ -4,7 +4,22 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest continuation repairs the native JXL delivered-pixel contract. Controlled
+Latest continuation compares nine existing 372-class base models on 264
+canonical training pairs, with full Rust pixel/cache scoring and independent
+judges. D has zero disagreements among 2,471 resolved same-source pairs;
+generation A and B each have three. The newer A_plain seeds have 170–202,
+and H_anchorlad seeds 48–69, including substantial near-lossless errors.
+All models pass twelve exact identities and never exceed 100. None advances
+under the registered strict-improvement rule; a zero-error D baseline makes
+that rule unable to resolve equal-perfect candidates. This separates strong
+bulk scalar ordering from the already failed D spatial policy.
+[Results and next registered A/D blend](benchmarks/model_preferences_2026-09-08.md).
+Next exercise `BakeScorer::ensemble` through the existing pixel audit, fit the
+smallest D blend weight on the eight fit origins only, and check four separate
+training-calibration origins. Preserve all release gates and the head's two
+honest false positives; a base blend does not repair those automatically.
+
+The preceding continuation repairs the native JXL delivered-pixel contract. Controlled
 dither on/off decoding explains nearly all of the earlier drift: 8,646,810
 samples change by at most one code; only 178 samples still differ between the
 undithered canonical and historical decoders. The native loop now uses the

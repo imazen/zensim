@@ -3815,3 +3815,17 @@ No model fit, validation/terminal scoring, or protected-content admission here.
 The preceding honest-head fit already used canonical pixels; this decoder
 repair does not invalidate or erase its two honest false positives.
 [Controlled measurement and serving contract](../../jxl-encoder/benchmarks/zensim_decode_contract_2026-09-08.md).
+
+## 2026-09-08 — base preferences after canonical JXL decoder repair
+
+Reuse 252 canonical scalar JXL outputs and twelve identities on the same
+admitted train origins. Nine packed/declared-ID models have complete Rust
+pixel/cache audits; an additional D audit matches the PNG judge inputs to
+bitstream pixels exactly. SSIM2/Butteraugli resolve 2,471 within-source pairs.
+D has zero wrong directions; generation A/B have three each; three A_plain
+seeds have 170–202 and H_anchorlad seeds 48–69. No network fitting or validation
+occurs. The strict-improvement screen advances no model, and cannot distinguish
+new zero-error candidates from D. Preserve its outcome and the separate spatial
+RD failures. A subsequent A/D blend fit is registered on eight fit origins,
+with four separate training-calibration origins and full Rust serving required.
+[Complete record](../benchmarks/model_preferences_2026-09-08.md).
