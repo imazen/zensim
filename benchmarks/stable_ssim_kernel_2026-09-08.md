@@ -390,6 +390,84 @@ win: **f64 tiled** matches Rev3's accuracy with a shorter dependency chain, and
 is spatial steering. Neither has been benchmarked yet; that is the next step,
 and no speed claim is made here.
 
+### Periodic stability resets: bound the damage, never remove it
+
+Re-seeding the sliding recurrence exactly every `reset` positions (horizontally
+and vertically) is the cheap version of the idea — it keeps the single pass and
+just stops a change propagating past its own tile. MEASURED, f32 with the
+direct error form:
+
+| reset period | out-of-support moved | peak abs delta |
+|---|---:|---:|
+| none | 39,468 | 1.752e-5 |
+| 64 | 5,971 | 4.411e-6 |
+| 32 | 4,732 | 4.098e-6 |
+| 16 | 2,159 | 1.088e-6 |
+| 8 | 1,129 | 1.088e-6 |
+| 4 | 390 | 2.701e-7 |
+| tiled (van Herk) | **0** | 0 |
+
+It asymptotes toward zero without reaching it, which is the structural
+prediction: a reset bounds how far a change travels, but inside its own tile it
+still travels. Reset-every-4 already costs more than the recurrence saves —
+re-summing 11 samples every 4 positions — and still leaves 390 moved signals.
+Only the decomposition reaches zero.
+
+### The tiled kernel: exactly local, and ~1.8x too slow
+
+`ssim_form::stable_ssim_plane_tiled` is a real (non-test) implementation,
+`#[autoversion]`-dispatched, with the same `O(width x radius)` scratch bound as
+the sliding kernel. It is BIT-IDENTICAL to `stable_ssim_plane` across the
+kernel controls' geometries, radii and luminance forms
+(`tiled_kernel_matches_the_sliding_kernel_within_the_registered_bound` asserts
+the registered bound and measures worst delta 0.000e0), and exactly local at
+f32 as well as f64.
+
+Paired interleaved timing, both arms in one process alternating every round,
+three planes, radius 5 (`stable_kernel_traversal_ab`):
+
+| geometry | sliding | tiled | ratio |
+|---|---:|---:|---:|
+| 1024^2 | 9.199 ms | 21.143 ms | 2.30x |
+| 2048^2 | 39.155 ms | 70.608 ms | 1.83x |
+
+Four implementations were measured, and the progression is the finding:
+
+| shape | 1024^2 ratio |
+|---|---:|
+| row-sized prefix/suffix, per-moment traversals, `x % d` in the inner loop | 3.44x |
+| tile-local access, row-sized storage | 1.88x |
+| tile-local storage, moments recomputed per pass | 1.99x |
+| tile-local storage, moments hoisted | 1.83x (at 2048^2) |
+
+**It plateaus at ~1.8x, and that plateau is the answer.** The remaining gap is
+arithmetic, not memory: van Herk does ~12 adds per pixel (prefix, suffix,
+combine) against the recurrence's 8 (add, subtract). The advantage it was
+supposed to buy — a dependency chain of `D` instead of the row length — buys
+nothing, because the sliding recurrence carries FOUR INDEPENDENT moment chains
+and an out-of-order core already has enough instruction-level parallelism to
+hide the latency. The recurrence was never latency-bound.
+
+Not selected. Kept in tree because it is the only construction that makes
+locality precision-independent, which is what any f32 variant would need.
+
+### Where the cost actually is
+
+Three things have now been measured and none of them is the cost:
+
+- the dead sigma moments (V-side removal: <=1%, inside build noise);
+- the accumulator width (f64 is load-bearing for the sliding recurrence);
+- the traversal structure (tiling is exactly local but 1.8x slower).
+
+What remains is the thing none of them touch: **there is a SECOND TRAVERSAL of
+the plane at all.** The stable kernel re-walks data the fused H/V pass already
+streams, with its own boundary handling and its own row ring. Folding the two
+new moments into that existing walk is the only lever left that removes work
+rather than re-shaping it. It cannot reuse `mu1`/`mu2` — those are f32 and must
+stay f32 to remain outside the registered blast radius — so the f64 means still
+have to be accumulated separately; the saving is the traversal, the loads and
+the boundary work, not the arithmetic.
+
 ### The V-side sigma guard: TRIED, MEASURED, REVERTED
 
 Under revision 3 the `sigma_sq` / `sigma12` moments have no reader on the v1

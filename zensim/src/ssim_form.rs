@@ -219,6 +219,11 @@ pub(crate) fn ablation_plane(
     form: SsimLumaForm,
     f32_accum: bool,
     direct_error: bool,
+    // Re-seed the recurrence exactly every `reset` positions (0 = never).
+    // The "periodic stability reset": it does NOT make the sum a function of
+    // its own window, but it bounds how far a change propagates — to one tile
+    // instead of the whole row/column.
+    reset: usize,
 ) -> Vec<f32> {
     let r = |x: f64| if f32_accum { x as f32 as f64 } else { x };
     let diameter = radius * 2 + 1;
@@ -250,6 +255,16 @@ pub(crate) fn ablation_plane(
             }
         }
         for (x, cell) in output.iter_mut().enumerate() {
+            if reset != 0 && x != 0 && x % reset == 0 {
+                // Exact re-seed: recompute this window from its own samples.
+                sums = [0.0; 4];
+                for dx in -rad..=rad {
+                    let m = at(mirror(x as isize + dx, width), y);
+                    for k in 0..4 {
+                        sums[k] = r(sums[k] + m[k]);
+                    }
+                }
+            }
             *cell = sums;
             let add = at(mirror(x as isize + rad + 1, width), y);
             let rem = at(mirror(x as isize - rad, width), y);
@@ -305,6 +320,17 @@ pub(crate) fn ablation_plane(
         }
         if y + 1 == height {
             break;
+        }
+        if reset != 0 && (y + 1) % reset == 0 {
+            // Exact vertical re-seed from the ring's own rows.
+            for (x, sum) in vertical.iter_mut().enumerate() {
+                *sum = [0.0; 4];
+                for row in 0..diameter {
+                    for k in 0..4 {
+                        sum[k] = r(sum[k] + rows[row * width + x][k]);
+                    }
+                }
+            }
         }
         let ring = &mut rows[head * width..(head + 1) * width];
         for (sum, rem) in vertical.iter_mut().zip(ring.iter()) {
@@ -475,6 +501,270 @@ pub(crate) fn ablation_plane_tiled(
         };
     }
     out
+}
+
+/// Scratch for [`stable_ssim_plane_tiled`]. Still O(width x radius): two
+/// tiles of raw row sums plus a derived suffix and prefix tile, all
+/// `diameter` rows tall, independent of image height.
+#[derive(Default)]
+pub(crate) struct TiledSsimScratch {
+    /// Raw H-summed rows for the current and next row-tile, rolling.
+    hraw: Vec<f64>,
+    /// Backward cumulative over the current row-tile.
+    suf: Vec<f64>,
+    /// Forward cumulative over the next row-tile.
+    pre: Vec<f64>,
+    /// The horizontal pass's three live tiles (previous suffix, current
+    /// prefix, current suffix) — about 1 KB, so the decomposition stays in L1
+    /// and the padded row is never materialised.
+    hpad: Vec<f64>,
+}
+
+/// Form the SSIM dissimilarity with the moment window computed by a two-level
+/// (van Herk / Gil-Werman) decomposition instead of a sliding recurrence.
+///
+/// Same output contract as [`stable_ssim_plane`] and the same four moments,
+/// but every window sum reads ONLY its own samples — see
+/// `benchmarks/stable_ssim_kernel_2026-09-08.md`. Locality is therefore a
+/// property of the traversal rather than of the accumulator width, and the
+/// serial dependency shrinks from the row/column length to `diameter`.
+///
+/// MEASURED and NOT SELECTED: exactly local at any precision, but ~1.8x the
+/// sliding kernel's time. Kept because it is the only construction that makes
+/// locality precision-independent, and because that is what an f32 variant
+/// would need. See `benchmarks/stable_ssim_kernel_2026-09-08.md`.
+#[cfg_attr(not(test), allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
+#[autoversion]
+pub(crate) fn stable_ssim_plane_tiled(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    form: SsimLumaForm,
+    out: &mut [f32],
+    scratch: &mut TiledSsimScratch,
+) {
+    assert!(width > 0 && height > 0);
+    let n = width.checked_mul(height).expect("plane extent");
+    assert!(src.len() >= n && dst.len() >= n && out.len() >= n);
+    let d = radius * 2 + 1;
+    let rad = radius as isize;
+    let padded = width + 2 * radius;
+    let row_stride = width * 4;
+
+    // Three tiles live at once (previous suffix, current prefix, current
+    // suffix) — about 1 KB, not the ~200 KB three row-sized arrays cost.
+    scratch.hpad.resize(4 * d * 4, 0.0);
+    scratch.hraw.resize(2 * d * row_stride, 0.0);
+    scratch.suf.resize(d * row_stride, 0.0);
+    scratch.pre.resize(d * row_stride, 0.0);
+
+    let mirror = |i: isize, len: usize| {
+        if i >= 0 && (i as usize) < len {
+            i as usize
+        } else {
+            crate::metric::reflect_index(i.unsigned_abs(), len)
+        }
+    };
+
+    // One horizontal van Herk pass, with TILE-LOCAL storage.
+    //
+    // Two earlier shapes were measured and rejected. The first materialised
+    // prefix and suffix over the whole padded row, four separate traversals
+    // (one per moment), with `x % d` — a real division, d = 11 — in the inner
+    // loop: 3.44x the sliding recurrence. Making it tile-local in access but
+    // still row-sized in storage got to 1.88x. The row-sized arrays are the
+    // remaining cost: three of them at 4 moments is ~200 KB per row at
+    // width 2048, which does not fit L1.
+    //
+    // Lagging the combine by one tile means only THREE TILES are ever live —
+    // the previous tile's suffix, and the current tile's prefix and suffix.
+    // That is `3 * d * 4` f64, about 1 KB, so the whole decomposition happens
+    // in L1 and the padded row is never materialised at all.
+    let moments = |i: usize, y: usize| {
+        // Interior indices need no mirroring; only the first and last `radius`
+        // padded positions do, so the branch leaves the hot path.
+        let x = if i >= radius && i < radius + width {
+            i - radius
+        } else {
+            mirror(i as isize - rad, width)
+        };
+        let a = src[y * width + x] as f64;
+        let b = dst[y * width + x] as f64;
+        let e = a - b;
+        [a, b, a * a + b * b, e * e]
+    };
+    let horizontal = |y: usize, dest: &mut [f64], tiles_buf: &mut [f64]| {
+        let (mom, rest) = tiles_buf.split_at_mut(d * 4);
+        let (pre, rest) = rest.split_at_mut(d * 4);
+        let (suf_a, suf_b) = rest.split_at_mut(d * 4);
+        let mut prev_is_a = false;
+        let mut t = 0;
+        while t < padded {
+            let end = (t + d).min(padded);
+            let (suf_cur, suf_prev) = if prev_is_a {
+                (&mut *suf_b, &*suf_a)
+            } else {
+                (&mut *suf_a, &*suf_b)
+            };
+            // Moments ONCE per position into the tile buffer. Computing them
+            // separately in the prefix and suffix loops was measured slightly
+            // slower than materialising the whole padded row: it doubles both
+            // the source loads and the moment arithmetic.
+            for j in t..end {
+                let q = moments(j, y);
+                mom[(j - t) * 4..(j - t) * 4 + 4].copy_from_slice(&q);
+            }
+            let n_t = end - t;
+            // Fixed-size chunks so the four moments are one register quad per
+            // step rather than four bounds-checked indexings.
+            let (mq, _) = mom[..n_t * 4].as_chunks::<4>();
+            let (pq, _) = pre[..n_t * 4].as_chunks_mut::<4>();
+            let mut acc = [0.0f64; 4];
+            for (q, o) in mq.iter().zip(pq.iter_mut()) {
+                for k in 0..4 {
+                    acc[k] += q[k];
+                }
+                o.copy_from_slice(&acc);
+            }
+            let (sq, _) = suf_cur[..n_t * 4].as_chunks_mut::<4>();
+            acc = [0.0; 4];
+            for (q, o) in mq.iter().zip(sq.iter_mut()).rev() {
+                for k in 0..4 {
+                    acc[k] += q[k];
+                }
+                o.copy_from_slice(&acc);
+            }
+            if t > 0 {
+                combine(t - d, width, d, dest, pre, suf_prev);
+            }
+            prev_is_a = !prev_is_a;
+            t = end;
+        }
+        // The final tile contributes only its aligned position: for x past a
+        // tile start, `x + d - 1` would leave the padded row, and
+        // `x < width = padded - (d - 1)` forbids that.
+        let last = padded
+            - if padded.is_multiple_of(d) {
+                d
+            } else {
+                padded % d
+            };
+        let suf_last = if prev_is_a { &*suf_a } else { &*suf_b };
+        if last < width {
+            dest[last * 4..last * 4 + 4].copy_from_slice(&suf_last[0..4]);
+        }
+    };
+
+    // One tile's worth of `out[x] = suf[x] + pre[x + d - 1]`, with the
+    // tile-aligned position (where the window IS the tile) hoisted out.
+    // Both operands are TILE-LOCAL: `suf` is the previous tile's suffix and
+    // `pre` this tile's prefix, so the indices are offsets within a tile.
+    // A nested `fn` rather than a closure so it can be used above its
+    // definition and cannot capture anything by accident.
+    fn combine(start: usize, width: usize, d: usize, dest: &mut [f64], pre: &[f64], suf: &[f64]) {
+        if start >= width {
+            return;
+        }
+        dest[start * 4..start * 4 + 4].copy_from_slice(&suf[0..4]);
+        for x in (start + 1)..(start + d).min(width) {
+            let i = x - start;
+            let sq = &suf[i * 4..i * 4 + 4];
+            let pq = &pre[(i - 1) * 4..(i - 1) * 4 + 4];
+            let o = &mut dest[x * 4..x * 4 + 4];
+            for k in 0..4 {
+                o[k] = sq[k] + pq[k];
+            }
+        }
+    }
+
+    let inv_n = 1.0 / (d as f64 * d as f64);
+    let tiles = height.div_ceil(d);
+    // Padded row index p in 0..height + 2*radius; output row y reads p in
+    // y..y+d-1, so the row-tile grid is over that padded space.
+
+    // Split the scratch ONCE so the row builder can borrow its working arrays
+    // while writing into the tile buffers.
+    let TiledSsimScratch {
+        hraw,
+        suf,
+        pre,
+        hpad,
+    } = scratch;
+
+    let fill = |tile: usize, into: &mut [f64], hpad: &mut [f64]| {
+        for i in 0..d {
+            let p = tile * d + i;
+            let y = mirror(p as isize - rad, height);
+            let dest = &mut into[i * row_stride..(i + 1) * row_stride];
+            horizontal(y, dest, hpad);
+        }
+    };
+
+    let (raw_a, raw_b) = hraw.split_at_mut(d * row_stride);
+    fill(0, raw_a, hpad);
+    let mut cur_is_a = true;
+    for t in 0..tiles {
+        let (cur, next) = if cur_is_a {
+            (&*raw_a, &mut *raw_b)
+        } else {
+            (&*raw_b, &mut *raw_a)
+        };
+        fill(t + 1, next, hpad);
+        // suffix over the current tile, backwards
+        for i in (0..d).rev() {
+            let (dst_i, src_i) = (i * row_stride, (i + 1) * row_stride);
+            for j in 0..row_stride {
+                suf[dst_i + j] = cur[dst_i + j] + if i + 1 < d { suf[src_i + j] } else { 0.0 };
+            }
+        }
+        // prefix over the next tile, forwards
+        for i in 0..d {
+            let (dst_i, prev_i) = (i * row_stride, i.wrapping_sub(1) * row_stride);
+            for j in 0..row_stride {
+                pre[dst_i + j] = next[dst_i + j] + if i > 0 { pre[prev_i + j] } else { 0.0 };
+            }
+        }
+        for i in 0..d {
+            let y = t * d + i;
+            if y >= height {
+                break;
+            }
+            let row = &mut out[y * width..(y + 1) * width];
+            for (x, value) in row.iter_mut().enumerate() {
+                let s = &suf[i * row_stride + x * 4..i * row_stride + x * 4 + 4];
+                let m: [f64; 4] = if i == 0 {
+                    [s[0], s[1], s[2], s[3]]
+                } else {
+                    let q = &pre[(i - 1) * row_stride + x * 4..(i - 1) * row_stride + x * 4 + 4];
+                    [s[0] + q[0], s[1] + q[1], s[2] + q[2], s[3] + q[3]]
+                };
+                *value = finalize(&m, inv_n, form);
+            }
+        }
+        cur_is_a = !cur_is_a;
+    }
+}
+
+/// The per-pixel expression shared by the moment kernels: identical algebra to
+/// [`stable_ssim_plane`]'s tail, factored out so the two traversals provably
+/// differ only in HOW the window sums are formed.
+#[inline(always)]
+fn finalize(m: &[f64; 4], inv_n: f64, form: SsimLumaForm) -> f32 {
+    let a = m[0] * inv_n;
+    let b = m[1] * inv_n;
+    let mean_error2 = (a - b) * (a - b);
+    let error_variance = (m[3] * inv_n - mean_error2).max(0.0);
+    let variance_sum = (m[2] * inv_n - a * a - b * b).max(0.0);
+    let luma_loss = match form {
+        SsimLumaForm::Ssim2Legacy => mean_error2,
+        SsimLumaForm::Clamp => mean_error2.min(1.0),
+        SsimLumaForm::Lorentz => mean_error2 / (1.0 + mean_error2),
+        SsimLumaForm::SsimLumaC1 => mean_error2 / (a * a + b * b + C_SSIM_LUMA as f64),
+    };
+    (luma_loss + (1.0 - luma_loss) * error_variance / (variance_sum + C2 as f64)).max(0.0) as f32
 }
 
 /// Independent direct-window f64 reference, shared by the numerical
@@ -1167,6 +1457,184 @@ mod tests {
             ]);
         }
         out
+    }
+
+    /// The tiled kernel agrees with the sliding one to the registered
+    /// acceptance, across the geometries and radii the kernel controls use.
+    ///
+    /// NOT bit-identical, and must not be: the two traversals sum the same
+    /// samples in different orders. What is asserted is the registered bound
+    /// (`2e-10 + 2e-6*|reference|`) against the SLIDING kernel, plus exact
+    /// identity where the inputs are identical.
+    #[test]
+    fn tiled_kernel_matches_the_sliding_kernel_within_the_registered_bound() {
+        let mut slide_scratch = StableSsimScratch::default();
+        let mut tiled_scratch = TiledSsimScratch::default();
+        let mut worst = 0.0f64;
+        for (w, h) in [(1, 1), (3, 7), (17, 9), (64, 33), (129, 71), (192, 40)] {
+            for radius in [0usize, 1, 5] {
+                let source: Vec<f32> = (0..w * h)
+                    .map(|i| 0.2 + ((i * 17 + i / w * 11) % 137) as f32 / 100.0)
+                    .collect();
+                let distorted: Vec<f32> = source
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| {
+                        if i % 5 == 0 {
+                            v + 0.0001
+                        } else if i % 13 == 0 {
+                            v * 0.7
+                        } else {
+                            v
+                        }
+                    })
+                    .collect();
+                for form in [
+                    SsimLumaForm::Ssim2Legacy,
+                    SsimLumaForm::Clamp,
+                    SsimLumaForm::Lorentz,
+                    SsimLumaForm::SsimLumaC1,
+                ] {
+                    let mut a = vec![0.0f32; w * h];
+                    let mut b = vec![0.0f32; w * h];
+                    stable_ssim_plane(
+                        &source,
+                        &distorted,
+                        w,
+                        h,
+                        radius,
+                        form,
+                        &mut a,
+                        &mut slide_scratch,
+                    );
+                    stable_ssim_plane_tiled(
+                        &source,
+                        &distorted,
+                        w,
+                        h,
+                        radius,
+                        form,
+                        &mut b,
+                        &mut tiled_scratch,
+                    );
+                    for (i, (&x, &y)) in a.iter().zip(&b).enumerate() {
+                        assert!(y.is_finite(), "non-finite at {w}x{h} r{radius} idx {i}");
+                        let (x, y) = (x as f64, y as f64);
+                        let tol = 2e-10 + 2e-6 * x.abs();
+                        assert!(
+                            (x - y).abs() <= tol,
+                            "{w}x{h} r{radius} {form:?} idx {i}: tiled {y} vs sliding {x}"
+                        );
+                        worst = worst.max((x - y).abs());
+                    }
+                    // Exact identity: an identical pair is exactly zero.
+                    let mut z = vec![0.0f32; w * h];
+                    stable_ssim_plane_tiled(
+                        &source,
+                        &source,
+                        w,
+                        h,
+                        radius,
+                        form,
+                        &mut z,
+                        &mut tiled_scratch,
+                    );
+                    assert!(
+                        z.iter().all(|v| *v == 0.0),
+                        "identical inputs must give exactly zero at {w}x{h} r{radius}"
+                    );
+                }
+            }
+        }
+        println!("tiled vs sliding: worst |delta| {worst:.3e}");
+    }
+
+    /// Paired, interleaved timing of the two moment traversals.
+    ///
+    /// Both arms run in the SAME process and alternate every round, so
+    /// thermal/turbo drift is shared rather than accumulated onto whichever
+    /// ran second — the bias an isolated back-to-back comparison would bake
+    /// in. Three planes per round, matching the kernel's registered timing
+    /// receipt so the numbers are comparable to it.
+    ///
+    /// `#[ignore]`: a timing probe, not a gate. Run explicitly:
+    /// `cargo test -p zensim --release --lib stable_kernel_traversal_ab -- --ignored --nocapture`
+    #[test]
+    #[ignore = "timing probe; run explicitly in release"]
+    fn stable_kernel_traversal_ab() {
+        let rounds: usize = std::env::var("ZEN_KAB_ROUNDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+        for (w, h) in [(1024usize, 1024usize), (2048, 2048)] {
+            let src: [Vec<f32>; 3] = core::array::from_fn(|c| {
+                (0..w * h)
+                    .map(|i| 0.2 + ((i * 17 + i / w * 11 + c * 41) % 137) as f32 / 100.0)
+                    .collect()
+            });
+            let dst: [Vec<f32>; 3] = core::array::from_fn(|c| {
+                src[c]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| if i % 13 == 0 { v * 0.7 } else { v + 0.0001 })
+                    .collect()
+            });
+            let mut out: [Vec<f32>; 3] = core::array::from_fn(|_| vec![0.0; w * h]);
+            let mut slide = StableSsimScratch::default();
+            let mut tiled = TiledSsimScratch::default();
+            let (mut ts, mut tt) = (Vec::new(), Vec::new());
+            for round in 0..rounds + 2 {
+                // Alternate which arm goes first so neither owns the cold cache.
+                for first_is_slide in [round % 2 == 0, round % 2 != 0] {
+                    let start = std::time::Instant::now();
+                    for c in 0..3 {
+                        if first_is_slide {
+                            stable_ssim_plane(
+                                &src[c],
+                                &dst[c],
+                                w,
+                                h,
+                                5,
+                                SsimLumaForm::Ssim2Legacy,
+                                &mut out[c],
+                                &mut slide,
+                            );
+                        } else {
+                            stable_ssim_plane_tiled(
+                                &src[c],
+                                &dst[c],
+                                w,
+                                h,
+                                5,
+                                SsimLumaForm::Ssim2Legacy,
+                                &mut out[c],
+                                &mut tiled,
+                            );
+                        }
+                    }
+                    let ms = start.elapsed().as_secs_f64() * 1e3;
+                    std::hint::black_box(&out);
+                    if round >= 2 {
+                        if first_is_slide {
+                            ts.push(ms)
+                        } else {
+                            tt.push(ms)
+                        }
+                    }
+                }
+            }
+            let stat = |v: &mut Vec<f64>| {
+                v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                (v[0], v[v.len() / 2])
+            };
+            let (smin, smed) = stat(&mut ts);
+            let (tmin, tmed) = stat(&mut tt);
+            println!(
+                "{w}x{h} n={}  sliding min {smin:.3} med {smed:.3} ms | tiled min {tmin:.3} med {tmed:.3} ms | tiled/sliding {:.3}x",
+                ts.len(),
+                tmed / smed
+            );
+        }
     }
 
     fn stable_kernel_cases() -> Vec<Vec<u32>> {
