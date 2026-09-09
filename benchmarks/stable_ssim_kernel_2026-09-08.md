@@ -330,6 +330,66 @@ levers are structural, not arithmetic:
    applied but that shape will not vectorize. Splitting interior from boundary
    and going struct-of-arrays is what would let it reach f64x4/f64x8.
 
+### Tiling makes locality STRUCTURAL, not numerical (van Herk / Gil-Werman)
+
+The ablation above says the f64 is load-bearing *for the sliding recurrence*.
+It is load-bearing there because the recurrence has unbounded history: the
+window sum at `x` is a function of every sample the running sum has passed
+over. Resetting periodically bounds that but does not remove it — a change
+still perturbs the rest of its own tile.
+
+The two-level decomposition removes it outright. With tiles of exactly the
+window diameter `D`, and per-tile `prefix`/`suffix` running sums:
+
+```text
+window(x) = suffix[x] + prefix[x + D - 1]
+```
+
+`suffix[x]` reads only `x ..= tile end`; `prefix[x + D - 1]` reads only
+`next tile start ..= x + D - 1`. Both ranges lie INSIDE the window. So the sum
+is a deterministic function of exactly the window's own samples, in an order
+fixed by the window's offset against the tile grid — identical window contents
+give a bit-identical sum **at any precision**.
+
+MEASURED (`precision_ablation_separates_f64_from_the_direct_error_form`), same
+fixture, same out-of-support definition:
+
+| arm | moved | peak abs delta | max err vs direct-f64 windows |
+|---|---:|---:|---:|
+| f64 slide, direct (SHIPPED Rev3) | 0 | 0 | 1.894e-8 |
+| f32 slide, direct | 39,468 | 1.752e-5 | 5.440e-4 |
+| f64 slide, cov subtract | 3,172 | 1.164e-10 | 1.894e-8 |
+| f32 slide, cov subtract (Rev1 form) | 32,855 | 5.298e-4 | 3.378e-3 |
+| **f64 TILED, direct** | **0** | 0 | 1.894e-8 |
+| **f32 TILED, direct** | **0** | 0 | 1.588e-4 |
+| **f32 TILED, cov subtract** | **0** | 0 | 4.962e-4 |
+
+Every tiled arm is exactly local, at f32, in both formulations. Three
+consequences:
+
+1. **Locality stops costing precision.** It is a property of the traversal, not
+   of the accumulator width.
+2. **The direct `(a-b)^2` form still earns its place — on ACCURACY.** 1.588e-4
+   versus 4.962e-4 at f32, a 3x gap, because it removes the dynamic-range
+   problem from the error term.
+3. **f32 tiled is 21x more accurate than what ships today** (1.588e-4 versus
+   Rev1's 3.378e-3) while also being exactly local. It remains 4 orders worse
+   than f64 because `variance_sum = E[a^2+b^2] - abar^2 - bbar^2` still
+   cancels; that term needs f64 or a centered formulation, and the direct error
+   moment is the only one of the four that does not.
+
+Both f64 arms show the SAME 1.894e-8 error, which is the single rounding of the
+f64 result to the f32 output — i.e. f64 tiled is exactly as accurate as f64
+sliding, while also shortening the serial dependency from the row length to
+`D` and making tiles independent (so the prefix/suffix passes vectorize across
+tiles instead of being latency-bound).
+
+So there are two candidate kernels, and the conservative one is already a speed
+win: **f64 tiled** matches Rev3's accuracy with a shorter dependency chain, and
+**f32 tiled** is cheaper again if 1.6e-4 is acceptable for a signal whose job
+is spatial steering. Neither has been benchmarked yet; that is the next step,
+and no speed claim is made here.
+
 ### The V-side sigma guard: TRIED, MEASURED, REVERTED
 
 Under revision 3 the `sigma_sq` / `sigma12` moments have no reader on the v1

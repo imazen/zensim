@@ -323,6 +323,160 @@ pub(crate) fn ablation_plane(
     out
 }
 
+/// **Tiled (van Herk / Gil-Werman) mirror of the moment pass.**
+///
+/// The sliding recurrence's locality failure is that the window sum at `x`
+/// depends on every sample the running sum has passed over, not on the window.
+/// Resetting the recurrence periodically bounds that, but does not remove it —
+/// a change still perturbs the rest of its own tile.
+///
+/// This decomposition removes it outright. With tiles of exactly the window
+/// diameter `D`, and per-tile `prefix` / `suffix` running sums, the window at
+/// `x` is `suffix[x] + prefix[x + D - 1]`: the suffix reads only `x ..= tile
+/// end`, the prefix only `next tile start ..= x + D - 1`, and both ranges lie
+/// INSIDE the window. So the sum is a deterministic function of exactly the
+/// window's own samples, in an order fixed by the window's offset against the
+/// tile grid. Identical window contents therefore give a bit-identical sum at
+/// ANY precision — locality stops being a numerical property and becomes a
+/// structural one.
+///
+/// It is also cheaper where it counts: the serial dependency chain shrinks
+/// from the whole row to `D`, and tiles are independent, so the prefix/suffix
+/// passes vectorize across tiles instead of being latency-bound.
+///
+/// Same knobs as [`ablation_plane`], so the 2x2 can be re-run against this
+/// structure.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn ablation_plane_tiled(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    form: SsimLumaForm,
+    f32_accum: bool,
+    direct_error: bool,
+) -> Vec<f32> {
+    let r = |x: f64| if f32_accum { x as f32 as f64 } else { x };
+    let d = radius * 2 + 1;
+    let rad = radius as isize;
+    let mirror = |i: isize, len: usize| {
+        if i >= 0 && (i as usize) < len {
+            i as usize
+        } else {
+            crate::metric::reflect_index(i.unsigned_abs(), len)
+        }
+    };
+    let moment = |x: usize, y: usize| {
+        let a = src[y * width + x] as f64;
+        let b = dst[y * width + x] as f64;
+        let fourth = if direct_error {
+            let e = r(a - b);
+            r(e * e)
+        } else {
+            r(a * b)
+        };
+        [a, b, r(r(a * a) + r(b * b)), fourth]
+    };
+
+    /// One van Herk pass over `n` outputs whose window is `padded[i ..= i+d-1]`.
+    fn van_herk(padded: &[f64], n: usize, d: usize, r: &dyn Fn(f64) -> f64) -> Vec<f64> {
+        let len = padded.len();
+        let mut prefix = vec![0.0f64; len];
+        let mut suffix = vec![0.0f64; len];
+        let mut i = 0;
+        while i < len {
+            let end = (i + d).min(len);
+            // prefix: left-to-right within the tile
+            let mut acc = 0.0;
+            for j in i..end {
+                acc = r(acc + padded[j]);
+                prefix[j] = acc;
+            }
+            // suffix: right-to-left within the tile
+            acc = 0.0;
+            for j in (i..end).rev() {
+                acc = r(acc + padded[j]);
+                suffix[j] = acc;
+            }
+            i = end;
+        }
+        (0..n)
+            .map(|x| {
+                let last = x + d - 1;
+                if x % d == 0 {
+                    suffix[x]
+                } else {
+                    r(suffix[x] + prefix[last])
+                }
+            })
+            .collect()
+    }
+
+    // Horizontal: one padded row per moment, reflect-101 at the plane edge.
+    let mut hrow = vec![0.0f64; width * height * 4];
+    let mut padded = vec![0.0f64; width + 2 * radius];
+    for y in 0..height {
+        for k in 0..4 {
+            for (i, cell) in padded.iter_mut().enumerate() {
+                let x = mirror(i as isize - rad, width);
+                *cell = moment(x, y)[k];
+            }
+            let out = van_herk(&padded, width, d, &r);
+            for (x, v) in out.into_iter().enumerate() {
+                hrow[(y * width + x) * 4 + k] = v;
+            }
+        }
+    }
+
+    // Vertical: same decomposition down each column of the row sums.
+    let mut vsum = vec![0.0f64; width * height * 4];
+    let mut col = vec![0.0f64; height + 2 * radius];
+    for x in 0..width {
+        for k in 0..4 {
+            for (i, cell) in col.iter_mut().enumerate() {
+                let y = mirror(i as isize - rad, height);
+                *cell = hrow[(y * width + x) * 4 + k];
+            }
+            let out = van_herk(&col, height, d, &r);
+            for (y, v) in out.into_iter().enumerate() {
+                vsum[(y * width + x) * 4 + k] = v;
+            }
+        }
+    }
+
+    let inv_n = r(1.0 / (d as f64 * d as f64));
+    let mut out = vec![0.0f32; width * height];
+    for (i, value) in out.iter_mut().enumerate() {
+        let m = &vsum[i * 4..i * 4 + 4];
+        let a = r(m[0] * inv_n);
+        let b = r(m[1] * inv_n);
+        let mean_error2 = r(r(a - b) * r(a - b));
+        let variance_sum = r(r(r(m[2] * inv_n) - r(a * a)) - r(b * b)).max(0.0);
+        let luma_loss = match form {
+            SsimLumaForm::Ssim2Legacy => mean_error2,
+            SsimLumaForm::Clamp => mean_error2.min(1.0),
+            SsimLumaForm::Lorentz => r(mean_error2 / r(1.0 + mean_error2)),
+            SsimLumaForm::SsimLumaC1 => {
+                r(mean_error2 / r(r(r(a * a) + r(b * b)) + C_SSIM_LUMA as f64))
+            }
+        };
+        *value = if direct_error {
+            let error_variance = r(r(m[3] * inv_n) - mean_error2).max(0.0);
+            r(luma_loss + r(r(1.0 - luma_loss) * r(error_variance / r(variance_sum + C2 as f64))))
+                .max(0.0) as f32
+        } else {
+            let cov = r(r(m[3] * inv_n) - r(a * b));
+            r(1.0
+                - r(r(1.0 - luma_loss)
+                    * r(r(r(2.0 * cov) + C2 as f64) / r(variance_sum + C2 as f64))))
+            .max(0.0) as f32
+        };
+    }
+    out
+}
+
 /// Independent direct-window f64 reference, shared by the numerical
 /// instrument and kernel tests. Centered moments deliberately avoid the
 /// candidate's running-sum algorithm; raw algebra is a separate control.

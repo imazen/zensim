@@ -7353,19 +7353,37 @@ mod tests {
         }
 
         println!(
-            "\n{:<26}{:>12}{:>14}{:>16}",
-            "arm", "moved", "peak |delta|", "max err vs f64ref"
+            "\n{:<30}{:>10}{:>14}{:>16}",
+            "arm", "moved", "peak |d|", "max err vs f64ref"
         );
         let mut shipped_moved = usize::MAX;
-        for (f32_accum, direct) in [(false, true), (true, true), (false, false), (true, false)] {
+        for (f32_accum, direct, tiled) in [
+            (false, true, false),
+            (true, true, false),
+            (false, false, false),
+            (true, false, false),
+            // The tiled (van Herk) decomposition: with tiles of exactly the
+            // window diameter, every window sum reads only its own samples, so
+            // locality should stop being a numerical property — f32 should be
+            // exactly local too.
+            (false, true, true),
+            (true, true, true),
+            (true, false, true),
+        ] {
             let (mut moved, mut peak, mut worst_err) = (0usize, 0.0f64, 0.0f64);
             for (i, (b, c)) in base.iter().zip(&after).enumerate() {
                 let (_, _, sw, sh, r, bd, bs) = b;
                 let (_, _, _, _, _, cd, _) = c;
                 let arm = |d: &[f32]| {
-                    crate::ssim_form::ablation_plane(
-                        r, d, *sw, *sh, radius, form, f32_accum, direct,
-                    )
+                    if tiled {
+                        crate::ssim_form::ablation_plane_tiled(
+                            r, d, *sw, *sh, radius, form, f32_accum, direct,
+                        )
+                    } else {
+                        crate::ssim_form::ablation_plane(
+                            r, d, *sw, *sh, radius, form, f32_accum, direct,
+                        )
+                    }
                 };
                 let (pb, pc) = (arm(bd), arm(cd));
                 // The (f64, direct) arm IS the shipped kernel; prove the
@@ -7373,7 +7391,7 @@ mod tests {
                 // WHOLE-PLANE `stable_ssim_plane`, not against `ret.sd`:
                 // the strip walk re-seeds the recurrence per strip and
                 // legitimately differs by ~6e-11 (measured separately).
-                if !f32_accum && direct {
+                if !f32_accum && direct && !tiled {
                     let mut want = vec![0.0f32; sw * sh];
                     let mut scratch = crate::ssim_form::StableSsimScratch::default();
                     crate::ssim_form::stable_ssim_plane(
@@ -7405,16 +7423,17 @@ mod tests {
                 }
             }
             let label = format!(
-                "{} accum, {}",
+                "{} {}, {}",
                 if f32_accum { "f32" } else { "f64" },
+                if tiled { "TILED" } else { "slide" },
                 if direct {
                     "direct (a-b)^2"
                 } else {
-                    "cov subtraction"
+                    "cov subtract"
                 }
             );
-            println!("{label:<26}{moved:>12}{peak:>14.3e}{worst_err:>16.3e}");
-            if !f32_accum && direct {
+            println!("{label:<30}{moved:>10}{peak:>14.3e}{worst_err:>16.3e}");
+            if !f32_accum && direct && !tiled {
                 shipped_moved = moved;
             }
         }
