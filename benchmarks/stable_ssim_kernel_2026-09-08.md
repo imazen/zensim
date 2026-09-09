@@ -279,6 +279,57 @@ rather than necessary, and is kept as
 `rev3-cost-ab2-CONTENDED-DISCARDED`. "Contended or incomplete timing cannot
 pass" is not a standard one gets to evaluate after seeing the numbers.
 
+### Can the f64 be dropped? NO — measured, 2x2 ablation
+
+The f64 pass is roughly 70% of the cost regression, so the obvious escape is
+to ask whether the PRECISION is doing the work or whether the FORMULATION is.
+The kernel changed both at once — f64 accumulation, and forming the error
+variance directly from a `(a-b)^2` moment instead of recovering it from
+`var1 + var2 - 2*cov` — so the shipped kernel cannot answer this about itself.
+
+`ssim_form::ablation_plane` mirrors the kernel's algorithm with the two knobs
+independent (`streaming::tests::precision_ablation_separates_f64_from_the_direct_error_form`).
+The `f32` mode rounds after every operation, which models f32 EXACTLY rather
+than approximately: for `+ - * /` on f32-representable operands, computing in
+f64 and rounding once is correctly rounded, since 53 bits exceed the 2p+2 = 50
+needed at p = 24. The `(f64, direct)` arm is asserted BIT-IDENTICAL to
+`stable_ssim_plane`, so the mirror is not a second implementation drifting.
+
+Same fixture, same reference replacement, same out-of-support definition as
+the locality control, over the real XYB pyramid planes:
+
+| arm | out-of-support moved | peak abs delta | max err vs direct-f64 windows |
+|---|---:|---:|---:|
+| f64, direct `(a-b)^2` (SHIPPED) | **0** | 0 | 1.894e-8 |
+| f32, direct `(a-b)^2` | **39,468** | 1.752e-5 | 5.440e-4 |
+| f64, cov subtraction | 3,172 | 1.164e-10 | 1.894e-8 |
+| f32, cov subtraction (legacy form) | 32,855 | 5.298e-4 | 3.378e-3 |
+
+**The f64 is load-bearing; the formulation is not, for locality.** f32 with the
+direct error form moves MORE signals than f32 with covariance subtraction. What
+f64 alone buys is the large step — 32,855 to 3,172 moved, peak 5.3e-4 to
+1.2e-10 — and the direct form then closes the remainder, 3,172 to 0.
+
+That is the right mechanism on reflection: locality is a property of whether
+the sliding sum is REVERSIBLE, which is precision. The reformulation fixes
+dynamic range, and that shows up in the accuracy column instead — at f32 the
+direct form is 6x more accurate (5.440e-4 vs 3.378e-3) while still being
+non-local. Both changes are needed and neither substitutes for the other.
+
+**Consequence for cost: speed cannot be bought with precision.** The remaining
+levers are structural, not arithmetic:
+
+1. **Remove the duplicate traversal.** The kernel walks the plane a second
+   time with its own H recurrence, V ring and boundary mirroring, over data the
+   fused pass already streams. Folding the moments into that walk pays for one
+   traversal instead of two. It cannot reuse `mu1`/`mu2` — those are f32 and
+   must stay f32 to remain outside the registered blast radius — so the f64
+   means must be accumulated independently either way.
+2. **Vectorize it.** The inner loop is `[f64; 4]` per pixel (array-of-structs)
+   with a per-pixel `mirror()` branch in the hot path. `#[autoversion]` is
+   applied but that shape will not vectorize. Splitting interior from boundary
+   and going struct-of-arrays is what would let it reach f64x4/f64x8.
+
 ### The V-side sigma guard: TRIED, MEASURED, REVERTED
 
 Under revision 3 the `sigma_sq` / `sigma12` moments have no reader on the v1

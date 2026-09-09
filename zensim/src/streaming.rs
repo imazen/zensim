@@ -7291,6 +7291,139 @@ mod tests {
         );
     }
 
+    /// **Which half of the correction actually restores locality?**
+    ///
+    /// The shipped kernel changed two things together — f64 accumulation, and
+    /// forming the error variance DIRECTLY from a `(a-b)^2` moment instead of
+    /// recovering it from `var1 + var2 - 2*cov`. The cost measurement makes
+    /// the difference matter: the f64 pass is ~70% of a +27..87% regression,
+    /// so if the FORMULATION carries the fix, an f32 kernel would be far
+    /// cheaper and just as local.
+    ///
+    /// Runs the 2x2 on the real XYB pyramid planes, using the same reference
+    /// replacement and the same out-of-support definition as the locality
+    /// control above. Prints the table; asserts only the two facts that are
+    /// not measurements: that the mirror reproduces the shipped kernel
+    /// bit-for-bit, and that the shipped configuration is local.
+    #[test]
+    fn precision_ablation_separates_f64_from_the_direct_error_form() {
+        let (w, h) = LOCALITY_DIMS;
+        let (src, dst) = locality_fixture(w, h);
+        let (x0, y0, x1, y1) = LOCALITY_RECT;
+        let mut refined = dst.clone();
+        for y in y0..y1 {
+            for x in x0..x1 {
+                refined[y * w + x] = src[y * w + x];
+            }
+        }
+        let z = crate::Zensim::new(crate::ZensimProfile::codec_target()).with_parallel(false);
+        let params = z.profile().params();
+        let config = crate::metric::config_from_params(params, false);
+        let pre = z.precompute_reference(&RgbSlice::new(&src, w, h)).unwrap();
+        let base = retained_ssim_planes(&pre, &dst, w, h, &config, params.weights);
+        let after = retained_ssim_planes(&pre, &refined, w, h, &config, params.weights);
+        let form = crate::ssim_form::active_luma_form();
+        let radius = config.blur_radius;
+        let rad = radius as isize;
+
+        // Support mask per plane pair, computed ONCE and shared by all arms:
+        // a pixel is "supported" when any sample in its own reflect-101
+        // window differs between the two distorted planes.
+        let mut masks = Vec::new();
+        for (b, c) in base.iter().zip(&after) {
+            let (_, _, sw, sh, _r, bd, _bs) = b;
+            let (_, _, _, _, _, cd, _) = c;
+            let mut mask = vec![false; sw * sh];
+            for y in 0..*sh {
+                for x in 0..*sw {
+                    let mut supported = false;
+                    for dy in -rad..=rad {
+                        for dx in -rad..=rad {
+                            let xx =
+                                crate::metric::reflect_index((x as isize + dx).unsigned_abs(), *sw);
+                            let yy =
+                                crate::metric::reflect_index((y as isize + dy).unsigned_abs(), *sh);
+                            supported |= bd[yy * sw + xx] != cd[yy * sw + xx];
+                        }
+                    }
+                    mask[y * sw + x] = supported;
+                }
+            }
+            masks.push(mask);
+        }
+
+        println!(
+            "\n{:<26}{:>12}{:>14}{:>16}",
+            "arm", "moved", "peak |delta|", "max err vs f64ref"
+        );
+        let mut shipped_moved = usize::MAX;
+        for (f32_accum, direct) in [(false, true), (true, true), (false, false), (true, false)] {
+            let (mut moved, mut peak, mut worst_err) = (0usize, 0.0f64, 0.0f64);
+            for (i, (b, c)) in base.iter().zip(&after).enumerate() {
+                let (_, _, sw, sh, r, bd, bs) = b;
+                let (_, _, _, _, _, cd, _) = c;
+                let arm = |d: &[f32]| {
+                    crate::ssim_form::ablation_plane(
+                        r, d, *sw, *sh, radius, form, f32_accum, direct,
+                    )
+                };
+                let (pb, pc) = (arm(bd), arm(cd));
+                // The (f64, direct) arm IS the shipped kernel; prove the
+                // mirror rather than assuming it. Compared against a
+                // WHOLE-PLANE `stable_ssim_plane`, not against `ret.sd`:
+                // the strip walk re-seeds the recurrence per strip and
+                // legitimately differs by ~6e-11 (measured separately).
+                if !f32_accum && direct {
+                    let mut want = vec![0.0f32; sw * sh];
+                    let mut scratch = crate::ssim_form::StableSsimScratch::default();
+                    crate::ssim_form::stable_ssim_plane(
+                        r,
+                        bd,
+                        *sw,
+                        *sh,
+                        radius,
+                        form,
+                        &mut want,
+                        &mut scratch,
+                    );
+                    assert!(
+                        pb.iter()
+                            .zip(&want)
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "the ablation mirror is not the shipped kernel at plane {i}"
+                    );
+                }
+                let _ = bs;
+                let (reference, _) =
+                    crate::ssim_form::precision_reference(r, bd, *sw, *sh, radius, form);
+                for (j, m) in masks[i].iter().enumerate() {
+                    worst_err = worst_err.max((pb[j] as f64 - reference[j]).abs());
+                    if !m && pb[j] != pc[j] {
+                        moved += 1;
+                        peak = peak.max((pb[j] as f64 - pc[j] as f64).abs());
+                    }
+                }
+            }
+            let label = format!(
+                "{} accum, {}",
+                if f32_accum { "f32" } else { "f64" },
+                if direct {
+                    "direct (a-b)^2"
+                } else {
+                    "cov subtraction"
+                }
+            );
+            println!("{label:<26}{moved:>12}{peak:>14.3e}{worst_err:>16.3e}");
+            if !f32_accum && direct {
+                shipped_moved = moved;
+            }
+        }
+        assert_eq!(
+            shipped_moved, 0,
+            "the shipped configuration is supposed to be the local one"
+        );
+    }
+
     /// **G3.1 for revision 3's `v1ssimstable` era** — the registry's claim
     /// about WHICH slots this era moves, checked against a real
     /// cross-revision re-extraction rather than against a second list.

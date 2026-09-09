@@ -187,6 +187,142 @@ pub(crate) fn stable_ssim_plane(
     }
 }
 
+/// **Ablation mirror of [`stable_ssim_plane`], for separating the two halves
+/// of the correction.**
+///
+/// The shipped kernel changed TWO things at once: it accumulates in f64, and
+/// it forms the error variance DIRECTLY from a `(a-b)^2` moment instead of
+/// recovering it from `var1 + var2 - 2*cov`. Which of those actually restores
+/// locality is a question the shipped kernel cannot answer, because it does
+/// both. This mirrors its algorithm exactly with the two knobs independent.
+///
+/// `f32_accum` rounds after every arithmetic operation, which models f32
+/// EXACTLY rather than approximately: for `+ - * /` on f32-representable
+/// operands, computing in f64 and rounding once to f32 is correctly rounded,
+/// because f64's 53 bits exceed the 2p+2 = 50 needed at p = 24.
+///
+/// `direct_error` false switches the fourth moment to `a*b` and the final
+/// expression to the legacy `1 - num_m*(2*cov + C2)/(var1 + var2 + C2)`, i.e.
+/// the shipped formulation.
+///
+/// A test asserts `(f64, direct)` is BIT-IDENTICAL to [`stable_ssim_plane`],
+/// so this is a faithful mirror and not a second implementation drifting on
+/// its own.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn ablation_plane(
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    form: SsimLumaForm,
+    f32_accum: bool,
+    direct_error: bool,
+) -> Vec<f32> {
+    let r = |x: f64| if f32_accum { x as f32 as f64 } else { x };
+    let diameter = radius * 2 + 1;
+    let rad = radius as isize;
+    let mirror = |i: isize, len: usize| {
+        if i >= 0 && (i as usize) < len {
+            i as usize
+        } else {
+            crate::metric::reflect_index(i.unsigned_abs(), len)
+        }
+    };
+    let at = |x: usize, y: usize| {
+        let a = src[y * width + x] as f64;
+        let b = dst[y * width + x] as f64;
+        let fourth = if direct_error {
+            let e = r(a - b);
+            r(e * e)
+        } else {
+            r(a * b)
+        };
+        [a, b, r(r(a * a) + r(b * b)), fourth]
+    };
+    let horizontal = |y: usize, output: &mut [[f64; 4]]| {
+        let mut sums = [0.0f64; 4];
+        for dx in -rad..=rad {
+            let m = at(mirror(dx, width), y);
+            for k in 0..4 {
+                sums[k] = r(sums[k] + m[k]);
+            }
+        }
+        for (x, cell) in output.iter_mut().enumerate() {
+            *cell = sums;
+            let add = at(mirror(x as isize + rad + 1, width), y);
+            let rem = at(mirror(x as isize - rad, width), y);
+            if add != rem {
+                for k in 0..4 {
+                    sums[k] = r(r(sums[k] + add[k]) - rem[k]);
+                }
+            }
+        }
+    };
+    let mut rows = vec![[0.0f64; 4]; width * diameter];
+    let mut vertical = vec![[0.0f64; 4]; width];
+    for row in 0..diameter {
+        let y = mirror(row as isize - rad, height);
+        let ring = &mut rows[row * width..(row + 1) * width];
+        horizontal(y, ring);
+        for (sum, add) in vertical.iter_mut().zip(ring) {
+            for k in 0..4 {
+                sum[k] = r(sum[k] + add[k]);
+            }
+        }
+    }
+    let mut out = vec![0.0f32; width * height];
+    let inv_n = r(1.0 / (diameter as f64 * diameter as f64));
+    let mut head = 0;
+    for y in 0..height {
+        for (value, m) in out[y * width..(y + 1) * width].iter_mut().zip(&vertical) {
+            let a = r(m[0] * inv_n);
+            let b = r(m[1] * inv_n);
+            let mean_error2 = r(r(a - b) * r(a - b));
+            let variance_sum = r(r(r(m[2] * inv_n) - r(a * a)) - r(b * b)).max(0.0);
+            let luma_loss = match form {
+                SsimLumaForm::Ssim2Legacy => mean_error2,
+                SsimLumaForm::Clamp => mean_error2.min(1.0),
+                SsimLumaForm::Lorentz => r(mean_error2 / r(1.0 + mean_error2)),
+                SsimLumaForm::SsimLumaC1 => {
+                    r(mean_error2 / r(r(r(a * a) + r(b * b)) + C_SSIM_LUMA as f64))
+                }
+            };
+            *value = if direct_error {
+                let error_variance = r(r(m[3] * inv_n) - mean_error2).max(0.0);
+                r(luma_loss
+                    + r(r(1.0 - luma_loss) * r(error_variance / r(variance_sum + C2 as f64))))
+                .max(0.0) as f32
+            } else {
+                // The SHIPPED formulation: covariance recovered by subtraction.
+                let cov = r(r(m[3] * inv_n) - r(a * b));
+                r(1.0
+                    - r(r(1.0 - luma_loss)
+                        * r(r(r(2.0 * cov) + C2 as f64) / r(variance_sum + C2 as f64))))
+                .max(0.0) as f32
+            };
+        }
+        if y + 1 == height {
+            break;
+        }
+        let ring = &mut rows[head * width..(head + 1) * width];
+        for (sum, rem) in vertical.iter_mut().zip(ring.iter()) {
+            for k in 0..4 {
+                sum[k] = r(sum[k] - rem[k]);
+            }
+        }
+        horizontal(mirror(y as isize + rad + 1, height), ring);
+        for (sum, add) in vertical.iter_mut().zip(ring.iter()) {
+            for k in 0..4 {
+                sum[k] = r(sum[k] + add[k]);
+            }
+        }
+        head = (head + 1) % diameter;
+    }
+    out
+}
+
 /// Independent direct-window f64 reference, shared by the numerical
 /// instrument and kernel tests. Centered moments deliberately avoid the
 /// candidate's running-sum algorithm; raw algebra is a separate control.
