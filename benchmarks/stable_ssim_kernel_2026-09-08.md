@@ -486,6 +486,40 @@ recorded here, not taken. The distorted mean and `a^2+b^2` need f64 either way.
 **Net: there is no cheap sliding kernel.** Per-moment precision does not unlock
 one.
 
+### A vectorisation attempt that was based on a misread, and failed
+
+Disassembling around the dispatched `v4` body showed a predominantly scalar
+instruction mix (44 `vaddsd` against 18 `vaddpd`, 39 `vmulsd` against 2
+`vmulpd`), which suggested the four moments — exactly one AVX2 `f64x4` — were
+not being vectorised, and that the `mirror` branch and the data-dependent
+`if add != rem` were what stopped LLVM forming the vector.
+
+Both obstacles were removed without touching the arithmetic: the interior of a
+row needs no reflection, so the loop splits into boundary / interior /
+boundary; and the guard became a branchless select, which chooses the same
+value it always did (when `add == rem` the old sum wins, which is the point —
+`(s + a) - a` is not exactly `s` in f64).
+
+It was BIT-IDENTICAL, and it was SLOWER: 2048^2 went 38.5 -> 41.9 ms and
+1024^2 went 9.2 -> 10.0 ms, a 7-9% regression. Reverted;
+`stable_ssim_plane` is unchanged.
+
+Two things to carry forward, the second more important than the first:
+
+- The branchless select is a real cost, not a wash. On the flat content this
+  kernel is for, `add == rem` is common and the branch is well predicted, so
+  removing it replaces a predicted branch with unconditional work.
+- **The premise was not soundly measured.** `perf` is broken on this box
+  (missing `libpython3.10.so.1.0`), and the `#[arcane]` wrapper means the
+  kernel body is a closure whose disassembly could not be cleanly isolated from
+  its neighbours in a fixed address window — the instruction counts were
+  identical before and after a restructure that certainly changed the source,
+  which is itself evidence the window was not measuring only the loop. The
+  scalar-codegen claim should be treated as UNVERIFIED until a working profiler
+  or `cargo asm` on the isolated symbol confirms it.
+
+Fix the profiler before optimising this kernel again.
+
 ### Where the cost actually is
 
 Three things have now been measured and none of them is the cost:
