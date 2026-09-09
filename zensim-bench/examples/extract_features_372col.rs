@@ -80,6 +80,8 @@ fn main() {
     let mut audit_out = None;
     let mut audit_bake = None;
     let mut audit_head = None;
+    let mut audit_ensemble = None;
+    let mut audit_weights = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--corpus" => corpus = Some(args.next().unwrap()),
@@ -92,6 +94,8 @@ fn main() {
             "--audit-jsonl" => audit::take_path(&mut audit_out, args.next()),
             "--audit-bake" => audit::take_path(&mut audit_bake, args.next()),
             "--audit-corruption-head" => audit::take_path(&mut audit_head, args.next()),
+            "--audit-ensemble" => audit::take_value(&mut audit_ensemble, args.next()),
+            "--audit-ensemble-weights" => audit::take_value(&mut audit_weights, args.next()),
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -101,8 +105,16 @@ fn main() {
     let corpus = corpus.expect("--corpus REQUIRED (konjnd or aic3)");
     let path = path.expect("--path REQUIRED");
     let out = out.expect("--out REQUIRED");
-    let audit = audit::Config::load(audit_out, audit_bake, audit_head, &out, allow_failures)
-        .expect("audit configuration");
+    let audit = audit::Config::load(
+        audit_out,
+        audit_bake,
+        audit_head,
+        audit_ensemble,
+        audit_weights,
+        &out,
+        allow_failures,
+    )
+    .expect("audit configuration");
     assert!(
         audit.is_none() || matches!(corpus.as_str(), "pairs" | "pairs-tsv"),
         "audit requires explicit pairs or pairs-tsv input"

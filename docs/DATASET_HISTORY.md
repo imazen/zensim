@@ -3829,3 +3829,19 @@ new zero-error candidates from D. Preserve its outcome and the separate spatial
 RD failures. A subsequent A/D blend fit is registered on eight fit origins,
 with four separate training-calibration origins and full Rust serving required.
 [Complete record](../benchmarks/model_preferences_2026-09-08.md).
+
+## 2026-09-08 — fitted A/D composition and actual spatial coverage
+
+The preregistered hundredth-grid fit chooses D weight 0.41 on eight fit origins:
+all 1,647 consensus pairs order correctly. All 824 pairs on the four separate
+training-calibration origins also pass. Rust `BakeScorer::ensemble` reproduces
+the complete calibrated blend exactly, with twelve exact identities and no
+score above 100. No new network, encoding, validation or terminal work occurs.
+
+Actual spatial serving on the same 264 pairs matches scalar scores/features,
+but 252 nonidentity maps omit active pooled-feature terms (169 unique IDs in
+f156..371 across the corpus). The D-only endpoint has complete coverage. The
+scalar screen passes; native steering remains incomplete. Next implement the
+missing v1 pooled integrands in the existing Rust attribution owner, preserving
+feature arithmetic and explicit discontinuity/coverage limits.
+[Model, controls and delivery](../benchmarks/model_blend_2026-09-08.md).

@@ -13,6 +13,7 @@ objectives. B/C/D can be replaced; good rank alone is not product readiness.
 |---|---|---|
 | Feature definitions / read-set planning | `zensim::feature_defs`, `feature_set_id`, `Plan::for_bake` | Actual consumed IDs versus canonical extraction; era, SIMD, geometry and feature-build checks |
 | New candidate inference | `zensim::BakeScorer` | Complete heads/splines/composition; cached-row and pixel/HDR parity |
+| Complete ensemble pixel/spatial audit | `extract_features_372col --audit-ensemble <ordered paths> --audit-ensemble-weights <weights>` through `BakeScorer::ensemble` | Exact member/hash/weight identity, pixel/cache and attribution score parity; unsupported pooled-feature terms remain explicit and block native steering |
 | Cached pair identity / corruption screen | `BakeScorer::score_features_with_identity`, optional audit in `extract_features_372col`, `corruption_gate_eval.py --audit-jsonl` | Proven decoded identity, canonical consumed-feature and stored-f32 parity, complete keyed coverage; raw zero features are not identity proof |
 | Named-profile inference | `zensim::Zensim` | Profile/bake identity and supported pixel contract |
 | Spatial attribution / rectangle queries | `zensim/src/attribution.rs`, retained extraction in `feature_v2` | `BakeScorer::compute_with_ref_and_attribution` binds complete candidate scoring; signed score-unit density, explicit integrand coverage, scalar/feature parity and reusable binned sessions |

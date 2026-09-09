@@ -111,7 +111,9 @@ zensim = { path = "../zensim", default-features = false, features = ["threads", 
 # `add156_plus_corrhead` arm price the CURRENT (ZCTH tree) head, not just
 # the incumbent ZNPR logistic. The arm sniffs the magic, so both formats
 # stay measurable in one binary.
-"corruption-head"] }
+"corruption-head",
+# Complete ensemble spatial audits call BakeScorer reference/attribution APIs.
+"custom-profiles"] }
 # Dedup-K (2026-05-26): profile_compat_report example routes
 # spearman/pearson/kendall_tau through canonical zenstats.
 zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }

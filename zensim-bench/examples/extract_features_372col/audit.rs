@@ -16,6 +16,16 @@ pub(super) fn take_path(slot: &mut Option<PathBuf>, value: Option<String>) {
     *slot = Some(value.into());
 }
 
+pub(super) fn take_value(slot: &mut Option<String>, value: Option<String>) {
+    assert!(slot.is_none(), "duplicate audit option");
+    let value = value.expect("missing audit option value");
+    assert!(
+        !value.starts_with("--") && !value.trim().is_empty(),
+        "missing audit option value"
+    );
+    *slot = Some(value);
+}
+
 fn sha(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -76,7 +86,8 @@ pub(super) fn validate_pairs_input(path: &Path, pairs: &[Pair], max: usize) -> R
 
 pub(super) struct Config {
     out: PathBuf,
-    model: Option<Model>,
+    models: Vec<Model>,
+    weights: Option<Vec<f64>>,
     head: Option<CorruptionHead>,
     inputs: Vec<(PathBuf, String)>,
 }
@@ -86,11 +97,13 @@ impl Config {
         out: Option<PathBuf>,
         bake: Option<PathBuf>,
         head: Option<PathBuf>,
+        ensemble: Option<String>,
+        weights: Option<String>,
         csv: &Path,
         failures: usize,
     ) -> Result<Option<Self>, String> {
         let Some(out) = out else {
-            if bake.is_some() || head.is_some() {
+            if bake.is_some() || head.is_some() || ensemble.is_some() || weights.is_some() {
                 return Err("audit model requires --audit-jsonl".into());
             }
             return Ok(None);
@@ -98,18 +111,49 @@ impl Config {
         if out.exists() || csv.exists() || out == csv || failures != 0 {
             return Err("audit requires distinct fresh outputs and zero allowed failures".into());
         }
-        if head.is_some() && bake.is_none() {
-            return Err("audit companion requires --audit-bake".into());
+        if bake.is_some() && ensemble.is_some() {
+            return Err("audit bake and ensemble are mutually exclusive".into());
         }
-        let mut inputs = Vec::new();
-        let model = bake
-            .map(|p| {
-                let bytes = fs::read(&p).map_err(|e| e.to_string())?;
-                let model = Model::from_bytes(&bytes).map_err(|e| e.to_string())?;
-                inputs.push((p, sha(&bytes)));
-                Ok::<_, String>(model)
+        if ensemble.is_some() != weights.is_some() {
+            return Err("audit ensemble requires explicit weights and members".into());
+        }
+        let paths: Vec<PathBuf> = if let Some(ensemble) = ensemble {
+            let paths: Vec<PathBuf> = ensemble
+                .split(',')
+                .map(|s| PathBuf::from(s.trim()))
+                .collect();
+            let unique: std::collections::BTreeSet<_> = paths.iter().collect();
+            if paths.len() < 2
+                || unique.len() != paths.len()
+                || paths.iter().any(|p| p.as_os_str().is_empty())
+            {
+                return Err("audit ensemble requires distinct nonempty member paths".into());
+            }
+            paths
+        } else {
+            bake.into_iter().collect()
+        };
+        if head.is_some() && paths.is_empty() {
+            return Err("audit companion requires --audit-bake or --audit-ensemble".into());
+        }
+        let weights = weights
+            .map(|w| {
+                w.split(',')
+                    .map(|v| {
+                        v.trim()
+                            .parse::<f64>()
+                            .map_err(|_| "invalid ensemble weight".to_owned())
+                    })
+                    .collect::<Result<Vec<_>, _>>()
             })
             .transpose()?;
+        let mut inputs = Vec::new();
+        let mut models = Vec::new();
+        for p in paths {
+            let bytes = fs::read(&p).map_err(|e| e.to_string())?;
+            models.push(Model::from_bytes(&bytes).map_err(|e| e.to_string())?);
+            inputs.push((p, sha(&bytes)));
+        }
         let head = head
             .map(|p| {
                 let bytes = fs::read(&p).map_err(|e| e.to_string())?;
@@ -121,20 +165,26 @@ impl Config {
                 Ok::<_, String>(head)
             })
             .transpose()?;
-        if let Some(model) = &model {
-            let scorer = BakeScorer::new(model).map_err(|e| e.to_string())?;
-            if let Some(head) = &head {
+        let config = Self {
+            out,
+            models,
+            weights,
+            head,
+            inputs,
+        };
+        if !config.models.is_empty() {
+            let scorer = config.base_scorer()?;
+            if let Some(head) = &config.head {
                 scorer
                     .with_corruption_head(head, None)
                     .map_err(|e| e.to_string())?;
             }
         }
-        Ok(Some(Self {
-            out,
-            model,
-            head,
-            inputs,
-        }))
+        Ok(Some(config))
+    }
+
+    fn base_scorer(&self) -> Result<BakeScorer<'_>, String> {
+        BakeScorer::ensemble(&self.models, self.weights.as_deref()).map_err(|e| e.to_string())
     }
 
     pub(super) fn score(
@@ -161,12 +211,16 @@ impl Config {
             "reference_pixels_sha256":sha(&src.pixels),"distorted_pixels_sha256":sha(&dst.pixels),
             "pixels_identical":identical,
             "canonical_extractions":1,"audit_decodes":2,"model_inputs":self.inputs});
-        if let Some(model) = &self.model {
-            let mut base = BakeScorer::new(model).map_err(|e| e.to_string())?;
+        if !self.models.is_empty() {
+            if let Some(weights) = &self.weights {
+                record["ensemble_weights"] = json!(weights);
+                record["ensemble_member_count"] = json!(self.models.len());
+            }
+            let mut base = self.base_scorer()?;
             let base_score = base
                 .score_features_with_identity(features, src.width, src.height, None, identical)
                 .map_err(|e| e.to_string())?;
-            let mut scorer = BakeScorer::new(model).map_err(|e| e.to_string())?;
+            let mut scorer = self.base_scorer()?;
             if let Some(head) = &self.head {
                 scorer = scorer
                     .with_corruption_head(head, None)
@@ -198,6 +252,47 @@ impl Config {
             let cached_f32 = scorer
                 .score_features_with_identity(&stored, src.width, src.height, None, identical)
                 .map_err(|e| e.to_string())?;
+            if self.weights.is_some() {
+                let rs = RgbSlice::new(
+                    src.pixels.as_chunks::<3>().0,
+                    src.width as usize,
+                    src.height as usize,
+                );
+                let ds = RgbSlice::new(
+                    dst.pixels.as_chunks::<3>().0,
+                    dst.width as usize,
+                    dst.height as usize,
+                );
+                let pre = scorer
+                    .precompute_reference(&rs)
+                    .map_err(|e| e.to_string())?;
+                let mut session = zensim::Fused944Session::new();
+                let spatial = scorer
+                    .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
+                    .map_err(|e| e.to_string())?;
+                if spatial.result().score().to_bits() != score.to_bits()
+                    || spatial.result().features() != computed.features()
+                    || !spatial
+                        .attribution()
+                        .density()
+                        .iter()
+                        .all(|v| v.is_finite())
+                {
+                    return Err("ensemble spatial/scalar parity mismatch".into());
+                }
+                record["spatial_score"] = json!(spatial.result().score());
+                record["spatial_unsupported_feature_ids"] =
+                    json!(spatial.unsupported_feature_ids());
+                record["spatial_has_corruption_gate"] = json!(spatial.has_corruption_gate());
+                record["spatial_map_evaluations"] = json!(1);
+                record["spatial_pixel_comparisons"] = json!(1);
+                record["spatial_density_sha256"] = json!(sha(&spatial
+                    .attribution()
+                    .density()
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<_>>()));
+            }
             let mut max_abs: f64 = 0.0;
             if let Some(head) = &self.head {
                 let mut pixel_features = vec![0.0; head.caller_input_width()];

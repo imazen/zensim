@@ -39,6 +39,13 @@ in SESSION-RESUME.md. The qualification owner must consume evidence for every
 row above before declaring this contract satisfied; its historical five-gate
 JSON alone is insufficient.
 
+September 8 A/D composition: the fitted 59% A / 41% D blend passes the
+registered fit/calibration ordering and Rust pixel/cache screen. Its complete
+spatial scores match, but all 252 nonidentity maps omit active v1 pooled-feature
+terms. Native steering is INCOMPLETE until those integrands are implemented
+and validated; no release gate inherits a pass from this scalar result.
+[Actual model and coverage record](../benchmarks/model_blend_2026-09-08.md).
+
 September 8 base-model screen: D resolves all 2,471 independent-judge consensus
 pairs on twelve canonical training sources; the newer A_plain/H_anchorlad
 MLPs show many near-lossless reversals. Generation A and B each reverse three.

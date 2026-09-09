@@ -4,7 +4,23 @@ Reviewed September 8, 2026. [CLAUDE.md](CLAUDE.md) contains current working rule
 [WAVE_PLAYBOOK](docs/WAVE_PLAYBOOK.md) contains the tool map and experiment cycle.
 Older operational notes are in [docs/history](docs/history/).
 
-Latest continuation compares nine existing 372-class base models on 264
+Latest continuation fits and Rust-serves the registered A/D blend: exact
+weights `[0.5900000000000001, 0.41]`. It resolves all 1,647 fit and 824 separate
+training-calibration consensus pairs, preserves twelve exact identities, and
+matches independent arithmetic exactly. The actual attribution check then
+finds 169 active unsupported feature IDs across f156..371; all 252 nonidentity
+blend maps are incomplete. D-only maps have complete coverage. Do not advance
+this candidate into native steering with incomplete maps. Next price the
+actual blend through `ssim2_speed_bar` against D/SSIM2 before committing to
+full-pool attribution work: the shared extraction must serve A's expensive
+pools too. If cost passes, implement/check those integrands in Rust; otherwise
+repair cost or train a competitive cheaper model. Preserve scalar arithmetic, explicit coverage,
+max/clamp/gate caveats and the existing performance/release bars.
+[Blend recipe, results and spatial gap](benchmarks/model_blend_2026-09-08.md).
+The existing pixel-audit owner now supports explicit ensembles and weights;
+legacy single scores and both endpoint controls reproduce. No new public API.
+
+The preceding continuation compares nine existing 372-class base models on 264
 canonical training pairs, with full Rust pixel/cache scoring and independent
 judges. D has zero disagreements among 2,471 resolved same-source pairs;
 generation A and B each have three. The newer A_plain seeds have 170–202,
@@ -14,10 +30,9 @@ under the registered strict-improvement rule; a zero-error D baseline makes
 that rule unable to resolve equal-perfect candidates. This separates strong
 bulk scalar ordering from the already failed D spatial policy.
 [Results and next registered A/D blend](benchmarks/model_preferences_2026-09-08.md).
-Next exercise `BakeScorer::ensemble` through the existing pixel audit, fit the
-smallest D blend weight on the eight fit origins only, and check four separate
-training-calibration origins. Preserve all release gates and the head's two
-honest false positives; a base blend does not repair those automatically.
+That registered fit and Rust audit now completed as recorded above. Preserve
+all release gates and the head's two honest false positives; the base blend
+does not repair those automatically.
 
 The preceding continuation repairs the native JXL delivered-pixel contract. Controlled
 dither on/off decoding explains nearly all of the earlier drift: 8,646,810
