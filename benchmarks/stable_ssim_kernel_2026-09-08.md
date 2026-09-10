@@ -750,6 +750,35 @@ revision 1 on the same binary, and revision 1 is unchanged against the tree
 before #61, so revision 3 lands where the session started, within the ~1%
 these instruments resolve.
 
+#### Against the last crates.io release (0.2.7): a product comparison
+
+`zensim-bench/benches/crates_io_speed_bar.rs` (feature `crates-io-0-2-7`)
+compiles `zensim 0.2.7` into the same binary as the current tree, so the two
+run as interleaved arms of one zenbench group. Single thread by construction
+(`with_parallel(false)`, `allow_multithreading = false`, `RAYON_NUM_THREADS=1`,
+cpu 8), 30 rounds, 2026-09-10, current tree at `de1ec373`. Raw zenbench
+evidence: `benchmarks/crates_io_speed_bar_2026-09-10.json`.
+
+| arm, 2048 squared | 0.2.7 | current | delta | what it is |
+|---|---:|---:|---:|---|
+| `fast_ssim2` (anchor) | 307.0 ms | — | — | the same external crate in both, once |
+| product entry: `v027_latest` (`PreviewV0_2`) vs `main_B` (profile `B`) | 126.7 ms | 169.5 ms | **+34%** | DIFFERENT METRICS: 228-feature v1 + linear head then, the folded 944 walk + MLP now |
+| like-for-like: `compute_zensim_with_config`, v1 basic 228, buffered | 134.6 ms | 104.8 ms | **-22%** | the same extraction API and width on both versions |
+
+At 1024 squared: product entry 28.5 -> 42.1 ms (+48%), like-for-like
+30.3 -> 22.4 ms (-26%). Confidence intervals are ±1-2% on every arm; the one
+drift flag (`v027_buf228` at 2048, later rounds faster) is inside that.
+
+Read it as two facts, not one. The **engine** — the v1 extraction both
+versions share — is 22-26% faster than it was at 0.2.7. The **product** is
+34-48% slower per call than 0.2.7's product because it computes a different,
+much wider metric (and a different score: 61.3 vs 58.2 on the fixture at
+2048 squared, printed by the bench so nobody reads the timings as agreement).
+Neither number is about revision 3, which the preceding subsection shows
+costs the default path nothing; they answer "what does today's zensim cost
+against the one on crates.io", which is the question a downstream consumer
+asks at upgrade time.
+
 #### Eight threads: no regression the instrument can resolve
 
 Same driver with `THREADS=8` (`RAYON_NUM_THREADS=8`, `taskset -c 8-15`, one

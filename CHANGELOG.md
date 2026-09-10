@@ -72,7 +72,11 @@
   unchanged on the fused build, and a two-binary A/B against the tree before
   any #61 change (`main@f7b9f39a`) shows the DEFAULT path unchanged: every
   2048² arm inside ±1% with the anchor at +0.6%
-  (`benchmarks/rev3_default_path_base_vs_current_2026-09-10.json`). At eight
+  (`benchmarks/rev3_default_path_base_vs_current_2026-09-10.json`). Against
+  crates.io 0.2.7 in one interleaved binary, single thread at 2048²: the
+  shared v1 extraction is 22% faster (134.6 → 104.8 ms) while the product
+  entry is 34% slower (126.7 → 169.5 ms) because it computes a different,
+  wider metric (`benchmarks/crates_io_speed_bar_2026-09-10.json`). At eight
   threads (one CCD) the paired deltas
   are inside the instrument's own 7-17% A-A spread (`fold944_full` +1.0%,
   two-block medians) — no threaded regression the box can resolve
