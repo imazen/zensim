@@ -76,7 +76,12 @@
   crates.io 0.2.7 in one interleaved binary, single thread at 2048²: the
   shared v1 extraction is 22% faster (134.6 → 104.8 ms) while the product
   entry is 34% slower (126.7 → 169.5 ms) because it computes a different,
-  wider metric (`benchmarks/crates_io_speed_bar_2026-09-10.json`). At eight
+  wider metric (`benchmarks/crates_io_speed_bar_2026-09-10.json`). 4K on the
+  current commit (`benchmarks/k4_st_mt_2026-09-10.md`): served profile `B` at
+  4096² is 709 ms single-threaded, 194 ms on eight threads, 102 ms on sixteen
+  cores; the folded 944 extraction scales only 2.2× / 2.5×, the buffered v1
+  path 3.8× / 5.4× — the fold walk's serial share is the threaded-performance
+  target. At eight
   threads (one CCD) the paired deltas
   are inside the instrument's own 7-17% A-A spread (`fold944_full` +1.0%,
   two-block medians) — no threaded regression the box can resolve

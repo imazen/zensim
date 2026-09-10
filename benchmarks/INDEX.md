@@ -27,6 +27,12 @@
 > claims verified.** Reasoning is unauditable — all 10,404 `thinking` blocks persist empty.
 
 > **★★ SSIM FEATURE EXTRACTION WAS NUMERICALLY UNSTABLE, AND NONLOCAL, 2026-09-08/09:**
+> **4K cost on the current commit, ST and MT (2026-09-10):**
+> [`k4_st_mt_2026-09-10.md`](k4_st_mt_2026-09-10.md). At 4096², served profile `B`: 709 ms on
+> one thread, 194 ms on eight (one CCD), 102 ms on sixteen cores; `fast_ssim2` 1.34 s flat. The
+> folded 944 extraction scales only 2.2× / 2.5× (its serial share, not SSIM arithmetic); the
+> buffered v1 path 3.8× / 5.4×. UHD 3840×2160 per-call table included. Raw in `k4_2026-09-10/`.
+
 > [`nonmax_diagnosis_2026-09-08.md`](nonmax_diagnosis_2026-09-08.md) (diagnosis) →
 > [`stable_ssim_kernel_2026-09-08.md`](stable_ssim_kernel_2026-09-08.md) (kernel + the September 9
 > INTEGRATION section) → [`../docs/PLAN_FEATURE_REV3_2026-09-09.md`](../docs/PLAN_FEATURE_REV3_2026-09-09.md)

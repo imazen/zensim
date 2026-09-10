@@ -1,0 +1,14 @@
+# zenbench results (complete)
+# git: 7043cada2fe0f8d636991436973d57fdb6635db8
+# 2026-09-10T08:19:05Z
+#
+# Re-read this file instead of re-running the benchmark.
+# Formats:  cargo bench -- --format=llm|csv|md|json
+# Env var:  ZENBENCH_FORMAT=llm cargo bench
+# Disable:  ZENBENCH_NO_SAVE=1 cargo bench
+#
+# Fields: group | benchmark | vs_base comparison | min mean median mad | throughput | n cv rounds calls
+#
+group=ssim2_bar_4096 benchmark=fast_ssim2  |  vs_base=baseline  |  min=1.32s mean=1.35s median=1.35s mad=14.16ms  |  n=8 cv=1.1% rounds=8 calls=1 mean_ci=[1.34s 1.36s] cold=1.35s
+group=ssim2_bar_4096 benchmark=zensim_B  |  vs_base_pct=-92.43 ci=[-93.06% -91.64%] significant=true effect=-115.60 p=1.0000  |  min=98.48ms mean=101.99ms median=101.65ms mad=1.76ms  |  n=8 cv=2.8% rounds=8 calls=1 mean_ci=[100.39ms 104.05ms] cold=97.83ms
+group=ssim2_bar_4096 benchmark=zensim_D  |  vs_base_pct=-90.78 ci=[-91.94% -89.63%] significant=true effect=-72.12 p=1.0000  |  min=98.30ms mean=124.23ms median=128.24ms mad=18.24ms  |  n=8 cv=15.1% rounds=8 calls=1 mean_ci=[112.30ms 136.61ms] cold=122.61ms

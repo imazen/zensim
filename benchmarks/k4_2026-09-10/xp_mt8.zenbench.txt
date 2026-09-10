@@ -1,0 +1,21 @@
+# zenbench results (complete)
+# git: 7043cada2fe0f8d636991436973d57fdb6635db8
+# 2026-09-10T08:10:32Z
+#
+# Re-read this file instead of re-running the benchmark.
+# Formats:  cargo bench -- --format=llm|csv|md|json
+# Env var:  ZENBENCH_FORMAT=llm cargo bench
+# Disable:  ZENBENCH_NO_SAVE=1 cargo bench
+#
+# Fields: group | benchmark | vs_base comparison | min mean median mad | throughput | n cv rounds calls
+#
+group=extract_paths_4096 benchmark=buf_v1_228  |  vs_base=baseline  |  min=103.64ms mean=107.40ms median=105.62ms mad=1.12ms  |  n=12 cv=3.9% rounds=12 calls=1 mean_ci=[105.31ms 109.91ms] cold=105.08ms
+group=extract_paths_4096 benchmark=buf_v1_372  |  vs_base_pct=+83.89 ci=[+80.60% +87.16%] significant=true effect=20.30 p=0.0025  |  min=191.82ms mean=197.49ms median=195.36ms mad=3.63ms  |  n=12 cv=2.3% rounds=12 calls=1 mean_ci=[195.13ms 200.07ms] cold=203.07ms
+group=extract_paths_4096 benchmark=fold156_basic  |  vs_base_pct=+14.34 ci=[+9.94% +18.64%] significant=true effect=2.94 p=0.0025  |  min=117.66ms mean=122.79ms median=119.03ms mad=2.00ms  |  n=12 cv=4.9% rounds=12 calls=1 mean_ci=[119.64ms 126.11ms] cold=129.33ms
+group=extract_paths_4096 benchmark=fold228_peaks  |  vs_base_pct=+35.00 ci=[+31.86% +37.98%] significant=true effect=8.35 p=0.0039  |  min=136.59ms mean=143.25ms median=143.66ms mad=8.04ms  |  n=12 cv=3.9% rounds=12 calls=1 mean_ci=[140.32ms 146.37ms] cold=137.58ms
+group=extract_paths_4096 benchmark=fold372_full  |  vs_base_pct=+136.43 ci=[+132.18% +140.85%] significant=true effect=22.87 p=0.0025  |  min=247.13ms mean=253.91ms median=250.12ms mad=2.53ms  |  n=12 cv=3.2% rounds=12 calls=1 mean_ci=[250.01ms 258.67ms] cold=249.37ms
+group=extract_paths_4096 benchmark=fold228_moments  |  vs_base_pct=+33.78 ci=[+29.82% +37.83%] significant=true effect=6.57 p=0.0025  |  min=136.98ms mean=143.68ms median=141.83ms mad=6.51ms  |  n=12 cv=4.6% rounds=12 calls=1 mean_ci=[140.20ms 147.26ms] cold=137.31ms
+group=extract_paths_4096 benchmark=fold228_classc  |  vs_base_pct=+33.12 ci=[+29.88% +36.57%] significant=true effect=5.92 p=0.0025  |  min=136.72ms mean=142.97ms median=138.71ms mad=2.54ms  |  n=12 cv=5.2% rounds=12 calls=1 mean_ci=[139.24ms 147.07ms] cold=137.07ms
+group=extract_paths_4096 benchmark=fold944_off  |  vs_base_pct=+269.46 ci=[+263.64% +276.25%] significant=true effect=35.31 p=0.0025  |  min=387.65ms mean=396.78ms median=391.89ms mad=4.57ms  |  n=12 cv=2.7% rounds=12 calls=1 mean_ci=[391.49ms 403.18ms] cold=389.83ms
+group=extract_paths_4096 benchmark=fold944_full  |  vs_base_pct=+356.54 ci=[+350.95% +362.46%] significant=true effect=53.34 p=0.0025  |  min=479.66ms mean=490.31ms median=486.47ms mad=6.04ms  |  n=12 cv=1.9% rounds=12 calls=1 mean_ci=[485.74ms 495.52ms] cold=483.11ms
+group=extract_paths_4096 benchmark=fast_ssim2  |  vs_base_pct=+1148.43 ci=[+1142.54% +1154.66%] significant=true effect=118.07 p=0.0025  |  min=1.32s mean=1.34s median=1.34s mad=9.84ms  |  n=12 cv=1.1% rounds=12 calls=1 mean_ci=[1.33s 1.35s] cold=1.34s

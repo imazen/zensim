@@ -1,0 +1,36 @@
+[zenbench] calibration: int=0.18ns/iter mem_bw=107.9GiB/s mem_lat=8.9ns
+[zenbench] timer resolution: 10ns, loop overhead: 0.18ns/iter, TSC: 4.300 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1789027833-33d908.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1789027833-33d908
+  git: 7043cada2fe0f8d636991436973d57fdb6635db8
+═══════════════════════════════════════════════════════════════
+
+  extract_paths_4096  13 rounds × 1 calls
+                         mean ±mad ms  95% CI vs base       
+  ├─ buf_v1_228           77.6 ±5.1ms  [73.9–81.9]ms        
+  ├─ buf_v1_372         113.4 ±11.1ms  [+37.4%–+46.5%]      
+  ├─ fold156_basic       121.7 ±8.4ms  [+47.6%–+65.3%]      
+  ├─ fold228_peaks      122.6 ±13.4ms  [+47.2%–+68.8%]      
+  ├─ fold372_full       182.4 ±13.3ms  [+122.8%–+147.5%]    
+  ├─ fold228_moments    117.5 ±22.2ms  [+39.4%–+63.7%]      
+  ├─ fold228_classc     119.2 ±23.0ms  [+43.7%–+64.5%]      
+  ├─ fold944_off        386.0 ±20.4ms  [+385.7%–+410.9%]    
+  ├─ fold944_full       446.3 ±17.3ms  [+454.8%–+480.5%]    
+  ╰─ fast_ssim2        1353.0 ±12.1ms  [+1635.4%–+1652.2%]  
+
+  buf_v1_228       ███ 77.58ms
+  buf_v1_372       ████ 113.43ms
+  fold228_moments  █████ 117.53ms
+  fold228_classc   █████ 119.22ms
+  fold156_basic    █████ 121.73ms
+  fold228_peaks    █████ 122.59ms
+  fold372_full     ███████ 182.39ms
+  fold944_off      ███████████████ 386.02ms
+  fold944_full     █████████████████ 446.34ms
+  fast_ssim2       ████████████████████████████████████████████████████ 1.35s
+
+  total: 450.3s  (390 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
