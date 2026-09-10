@@ -162,3 +162,30 @@ regressed, and tiling the H sweep does not shrink the planes the V sweep then
 reads. Step 3 is reverted; the shipped tree is steps 1 + 2 only. The `memmove`
 this step targeted (the packed kernel's per-tile staging) stays; at eight
 threads it is cheaper than the cache cost of removing it.
+
+## rev3 now beats the fastest original, and where the 228 floor is
+
+Two follow-up measurements (2026-09-10, 4096², one binary so the arms differ
+only by `ZENSIM_FORMULA_REV`):
+
+**rev3 vs rev1 on the served walk (steps 1+2 binary).** `buf_v1_372` (B):
+rev1 651.7 → rev3 508.0 ms single-threaded (**−22%**), rev1 210.7 → rev3
+169.2 ms at eight threads (**−20%**). The fused extension makes rev3's 372
+walk faster than revision 1's, at both thread counts — rev3 already beats the
+fastest original for the served metric. `buf_v1_228` is rev-neutral (112 vs
+111 ms MT), as it has neither the masked/IW families nor the direct-moment
+SSIM in a way that changes cost.
+
+**Why `buf_v1_228` (the bar) is near its floor.** Per-symbol profile, 4096²:
+single thread `fused_blur_h_ssim` 28% + `fused_vblur_ssim` 24% = 52%; eight
+threads `fused_vblur_ssim` 26% + `fused_blur_h_ssim` 17% + `memmove` 13% =
+56%. The top half is the H and V SSIM kernels — golden arithmetic whose bytes
+ARE the shipped features, uncuttable without changing the metric. The one
+non-arithmetic cost is the 13%-MT `memmove`, the H column-tile staging, which
+exists for gather locality (16 rows are stride-`width` apart; the tile buffer
+keeps them ~1 KB apart). Removing that staging was measured as a +51%-MT
+regression three ways this session (untiled pitch, tiled pitch, and the
+access-pattern analysis) — the wider or strided working set thrashes L2 once
+eight cores share the L3. So `buf_v1_228` has no byte-neutral lever left; a
+faster 228 needs a byte-changing SSIM kernel, i.e. a new formula revision and
+a model refit — a research cycle, not a perf patch.
