@@ -77,6 +77,15 @@ rev3-cost out blocks="2" sizes="1024,2048" cpu="8":
 # Peak-RSS half of the revision cost question: `/usr/bin/time -v` max RSS per
 # arm per revision, one arm per process so the reading is attributable.
 #   just rev3-rss ~/tmp/rev3-rss
+# Two BUILDS at the default revision, alternating blocks on one pinned core:
+# "what did the default path pay between commit X and commit Y". Copy both
+# bench binaries to equal-length paths first (argv[0] length shifts layout).
+#   just perf-ab-binaries ~/tmp/ab-run ~/tmp/ab/bin_A ~/tmp/ab/bin_B
+[positional-arguments]
+perf-ab-binaries out bin_a bin_b blocks="2" sizes="1024,2048" cpu="8":
+    BIN_A="$2" BIN_B="$3" ./scripts/bench/rev3_cost_ab.sh "$1" "$4" "$5" "$6"
+    python3 scripts/bench/rev3_cost_report.py "$1"
+
 [positional-arguments]
 rev3-rss out sizes="1024 2048" arms="buf_v1_372 fold372_full fold944_full" cpu="8":
     ./scripts/bench/rev3_rss.sh "$1" "$2" "$3" "$4"

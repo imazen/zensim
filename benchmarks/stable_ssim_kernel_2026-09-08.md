@@ -713,6 +713,43 @@ the `err` flag is consumed once, outside the loops, and each loop body is a
 straight-line copy specialised on it. That is what "unswitched" means here,
 and it is why the revision-1 arms did not move.
 
+#### The default path against the tree before issue #61: unchanged
+
+The question the one-binary A/Bs cannot answer directly — "what does a user
+on the DEFAULT revision pay for all of this?" — measured on 2026-09-10 with
+the driver's two-binary mode (`BIN_A`/`BIN_B`, equal-length paths, blocks
+alternating A B A B, both at the default revision, single thread on cpu 8,
+`ZEN_XP_WALL_S=300`, two blocks per binary). A = `main@f7b9f39a`, the tree
+before any #61 integration (the stable kernel existed, nothing served had
+changed); B = `main@792954c8`, fused revision 3 landed and CI green. Raw:
+`benchmarks/rev3_default_path_base_vs_current_2026-09-10.json`.
+
+| arm @2048 squared, default revision | before #61 | after | delta |
+|---|---:|---:|---:|
+| `fast_ssim2` (anchor, same crate in both) | 305.76 ms | 307.43 ms | +0.6% |
+| `fold944_full` | 263.84 ms | 263.63 ms | -0.1% |
+| `fold944_off` | 222.65 ms | 223.82 ms | +0.5% |
+| `fold372_full` | 129.00 ms | 129.03 ms | 0.0% |
+| `buf_v1_372` | 179.93 ms | 178.25 ms | -0.9% |
+| `buf_v1_228` | 113.17 ms | 112.14 ms | -0.9% |
+| `fold156_basic` | 81.52 ms | 81.05 ms | -0.6% |
+
+Every arm is inside ±1% with the anchor at +0.6%, and the per-binary A-A
+replicate spread is 0.0-0.6% on the large arms (2.5% on one `fold372_full`
+pair), so this instrument resolves ~1% and sees nothing. At 1024 squared the
+same holds (anchor -0.02%, `fold944_full` +0.3%) with one arm at the edge:
+`fold156_basic` +2.1% on an 18 ms arm whose own A-A spread is 1.0% — and the
+same arm is -0.6% at 2048 squared, so it is not a cost that scales with
+work. **The shipped default path did not pay for revision 3**, which is what
+the `cargo asm` note predicts: the only code the default path shares with the
+change is a flag read once per call.
+
+For the opt-in revision itself the numbers to combine are this table and
+"Single-thread cost: parity" above: fused revision 3 is -1.3% against
+revision 1 on the same binary, and revision 1 is unchanged against the tree
+before #61, so revision 3 lands where the session started, within the ~1%
+these instruments resolve.
+
 #### Eight threads: no regression the instrument can resolve
 
 Same driver with `THREADS=8` (`RAYON_NUM_THREADS=8`, `taskset -c 8-15`, one

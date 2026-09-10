@@ -29,15 +29,22 @@ struct Pq16Image {
 impl Pq16Image {
     fn from_rgb16(px: &[u16], w: usize, h: usize) -> Self {
         Self {
-            data: px.chunks_exact(3).map(|c| [c[0], c[1], c[2], 65535]).collect(),
+            data: px
+                .chunks_exact(3)
+                .map(|c| [c[0], c[1], c[2], 65535])
+                .collect(),
             w,
             h,
         }
     }
 }
 impl zensim::source::ImageSource for Pq16Image {
-    fn width(&self) -> usize { self.w }
-    fn height(&self) -> usize { self.h }
+    fn width(&self) -> usize {
+        self.w
+    }
+    fn height(&self) -> usize {
+        self.h
+    }
     fn pixel_format(&self) -> zensim::source::PixelFormat {
         zensim::source::PixelFormat::Srgb16Rgba
     }
@@ -47,13 +54,17 @@ impl zensim::source::ImageSource for Pq16Image {
     fn alpha_mode(&self) -> zensim::source::AlphaMode {
         zensim::source::AlphaMode::Opaque
     }
-    fn is_hdr(&self) -> bool { true }
+    fn is_hdr(&self) -> bool {
+        true
+    }
 }
 
 fn decode_png_rgb16(p: &Path) -> Result<(Vec<u16>, usize, usize), String> {
     let f = std::fs::File::open(p).map_err(|e| format!("open {p:?}: {e}"))?;
     let dec = png::Decoder::new(std::io::BufReader::new(f));
-    let mut reader = dec.read_info().map_err(|e| format!("png info {p:?}: {e}"))?;
+    let mut reader = dec
+        .read_info()
+        .map_err(|e| format!("png info {p:?}: {e}"))?;
     let mut buf = vec![0u8; reader.output_buffer_size().expect("png buffer size")];
     let info = reader
         .next_frame(&mut buf)
@@ -61,7 +72,10 @@ fn decode_png_rgb16(p: &Path) -> Result<(Vec<u16>, usize, usize), String> {
     buf.truncate(info.buffer_size());
     let (w, h) = (info.width as usize, info.height as usize);
     if info.bit_depth != png::BitDepth::Sixteen {
-        return Err(format!("{p:?}: expected 16-bit PQ png, got {:?}", info.bit_depth));
+        return Err(format!(
+            "{p:?}: expected 16-bit PQ png, got {:?}",
+            info.bit_depth
+        ));
     }
     let px: Vec<u16> = buf
         .chunks_exact(2)
@@ -84,7 +98,9 @@ fn decode_png_rgb16(p: &Path) -> Result<(Vec<u16>, usize, usize), String> {
 fn decode_png_rgb8(p: &Path) -> Result<(Vec<u8>, usize, usize), String> {
     let f = std::fs::File::open(p).map_err(|e| format!("open {p:?}: {e}"))?;
     let dec = png::Decoder::new(std::io::BufReader::new(f));
-    let mut reader = dec.read_info().map_err(|e| format!("png info {p:?}: {e}"))?;
+    let mut reader = dec
+        .read_info()
+        .map_err(|e| format!("png info {p:?}: {e}"))?;
     let mut buf = vec![0u8; reader.output_buffer_size().expect("png buffer size")];
     let info = reader
         .next_frame(&mut buf)
@@ -155,8 +171,11 @@ fn main() {
             let rs = Pq16Image::from_rgb16(&rb, rw, rh);
             let ds = Pq16Image::from_rgb16(&db, dw, dh);
             z.compute_folded720_append2_features_hdr(
-                &rs, &ds,
-                HdrEncoding::Pq { peak_nits: 10_000.0 },
+                &rs,
+                &ds,
+                HdrEncoding::Pq {
+                    peak_nits: 10_000.0,
+                },
                 V2NewFeatureToggles::default(),
                 &mut scratch,
             )
@@ -166,10 +185,20 @@ fn main() {
             let (db, dw, dh) = decode_png_rgb8(dp).unwrap_or_else(|e| panic!("line {li}: {e}"));
             assert_eq!((rw, rh), (dw, dh), "dim mismatch line {li}");
             let rs = StridedBytes::with_alpha_mode(
-                &rb, rw, rh, rw * 3, PixelFormat::Srgb8Rgb, AlphaMode::Opaque,
+                &rb,
+                rw,
+                rh,
+                rw * 3,
+                PixelFormat::Srgb8Rgb,
+                AlphaMode::Opaque,
             );
             let ds = StridedBytes::with_alpha_mode(
-                &db, dw, dh, dw * 3, PixelFormat::Srgb8Rgb, AlphaMode::Opaque,
+                &db,
+                dw,
+                dh,
+                dw * 3,
+                PixelFormat::Srgb8Rgb,
+                AlphaMode::Opaque,
             );
             z.compute_folded720_append2_features(&rs, &ds)
                 .unwrap_or_else(|e| panic!("compute line {li}: {e:?}"))

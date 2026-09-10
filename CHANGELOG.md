@@ -69,7 +69,11 @@
   instead of V-blurring the two sigma planes and re-deriving the covariance
   per strip), no arm slower beyond noise; `fold944_full` at
   revision 3 is again under `fast_ssim2` (288.6 ms). The revision-1 arms are
-  unchanged on the fused build. At eight threads (one CCD) the paired deltas
+  unchanged on the fused build, and a two-binary A/B against the tree before
+  any #61 change (`main@f7b9f39a`) shows the DEFAULT path unchanged: every
+  2048² arm inside ±1% with the anchor at +0.6%
+  (`benchmarks/rev3_default_path_base_vs_current_2026-09-10.json`). At eight
+  threads (one CCD) the paired deltas
   are inside the instrument's own 7-17% A-A spread (`fold944_full` +1.0%,
   two-block medians) — no threaded regression the box can resolve
   (`benchmarks/rev3_fused_cost_{st,mt,mt2}_2026-09-09.json`,

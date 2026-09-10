@@ -56,9 +56,12 @@ def parse_block(path: pathlib.Path):
 
 def main(out_dir: str) -> int:
     root = pathlib.Path(out_dir)
-    per_rev: dict[int, list] = {1: [], 3: []}
+    # Arms are revision labels ("1", "3") in one-binary mode or binary labels
+    # ("A", "B") in two-binary mode; the pairing logic is the same.
+    per_rev: dict[str, list] = {}
     for log in sorted(root.glob("block*_rev*.txt")):
-        rev = int(log.stem.split("_rev")[1])
+        rev = log.stem.split("_rev")[1]
+        per_rev.setdefault(rev, [])
         # Only COMPLETE blocks. A block still running has a partial results
         # file, and pooling it silently drops arms from one revision and not
         # the other — which is how a paired comparison stops being paired.
@@ -76,22 +79,29 @@ def main(out_dir: str) -> int:
 
     groups = sorted({r["group"] for rows in per_rev.values() for r in rows})
     arms = sorted({r["arm"] for rows in per_rev.values() for r in rows})
-    report = {"groups": {}, "blocks_per_revision": {
+    labels = sorted(per_rev)
+    if len(labels) != 2:
+        print(f"expected exactly two arm labels, found {labels}", file=sys.stderr)
+        return 1
+    la, lb = labels
+    def key(label):  # "rev1_median_ms" stays as it was; binaries become "binA_median_ms"
+        return (f"rev{label}" if label.isdigit() else f"bin{label}") + "_median_ms"
+    report = {"arms": [la, lb], "groups": {}, "blocks_per_revision": {
         k: len({r["group"] for r in v}) and len(v) // max(1, len(groups) * max(1, len(arms)))
         for k, v in per_rev.items()}}
 
     for g in groups:
-        anchor1, anchor3 = pool(1, g, "fast_ssim2"), pool(3, g, "fast_ssim2")
+        anchor1, anchor3 = pool(la, g, "fast_ssim2"), pool(lb, g, "fast_ssim2")
         drift = None
         if anchor1 and anchor3:
             drift = 100.0 * (anchor3 - anchor1) / anchor1
         rows = {}
         for a in arms:
-            v1, v3 = pool(1, g, a), pool(3, g, a)
+            v1, v3 = pool(la, g, a), pool(lb, g, a)
             if v1 and v3:
                 rows[a] = {
-                    "rev1_median_ms": round(v1, 3),
-                    "rev3_median_ms": round(v3, 3),
+                    key(la): round(v1, 3),
+                    key(lb): round(v3, 3),
                     "delta_pct": round(100.0 * (v3 - v1) / v1, 2),
                 }
         report["groups"][g] = {"anchor_drift_pct": None if drift is None else round(drift, 2),
@@ -100,10 +110,10 @@ def main(out_dir: str) -> int:
     print(json.dumps(report, indent=1))
     for g, gd in report["groups"].items():
         print(f"\n== {g} ==  anchor(fast_ssim2) drift {gd['anchor_drift_pct']}%")
-        print(f"{'arm':<18}{'rev1 ms':>10}{'rev3 ms':>10}{'delta':>10}")
+        ka, kb = key(la), key(lb)
+        print(f"{'arm':<18}{ka[:-10] + ' ms':>10}{kb[:-10] + ' ms':>10}{'delta':>10}")
         for a, r in sorted(gd["arms"].items(), key=lambda kv: kv[1]["delta_pct"]):
-            print(f"{a:<18}{r['rev1_median_ms']:>10.2f}{r['rev3_median_ms']:>10.2f}"
-                  f"{r['delta_pct']:>9.1f}%")
+            print(f"{a:<18}{r[ka]:>10.2f}{r[kb]:>10.2f}{r['delta_pct']:>9.1f}%")
     return 0
 
 

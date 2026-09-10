@@ -1,0 +1,146 @@
+{
+ "record": "benchmarks/stable_ssim_kernel_2026-09-08.md#fusion",
+ "what": "TWO-BINARY paired A/B at the DEFAULT revision: bin_A = main@f7b9f39a (the tree before any issue #61 integration; the stable kernel existed but nothing served had changed) vs bin_B = main@792954c8 (fused revision 3 landed, CI green). Same features (custom-profiles,feature-regime-v2,threads,training), equal-length binary paths, single thread pinned to cpu 8, ZEN_XP_WALL_S=300, two blocks per binary alternating A B A B.",
+ "binaries": {
+  "A": "f7b9f39a",
+  "B": "792954c82e1fc5f3496ee06db14b8bf6c411e3c7"
+ },
+ "run_meta": {
+  "host": "Linux 7.0.0-31-generic x86_64 dev",
+  "cpu_pinned": "8",
+  "threads": "1",
+  "sizes": "1024,2048",
+  "rounds_min": "30",
+  "blocks_per_revision": "2",
+  "arms": "A B",
+  "commit": "792954c82e1fc5f3496ee06db14b8bf6c411e3c7",
+  "started_utc": "2026-09-10T05:48:23Z",
+  "finished_utc": "2026-09-10T06:31:39Z"
+ },
+ "binary_sha256": [
+  "9dd65507b6c63c37938c3d6ba2fb95ea5986ac5cb04f136f2b05a45c6d5820a8  /home/lilith/tmp/ab/bin_A",
+  "318846d15d72e3b486d16dfb77bbf46e9ec6c2483fe88cc34e611bc8f1048ba0  /home/lilith/tmp/ab/bin_B"
+ ],
+ "report": {
+  "arms": [
+   "A",
+   "B"
+  ],
+  "groups": {
+   "extract_paths_1024": {
+    "anchor_drift_pct": -0.02,
+    "arms": {
+     "buf_v1_228": {
+      "binA_median_ms": 29.28,
+      "binB_median_ms": 29.565,
+      "delta_pct": 0.97
+     },
+     "buf_v1_372": {
+      "binA_median_ms": 57.865,
+      "binB_median_ms": 56.505,
+      "delta_pct": -2.35
+     },
+     "fast_ssim2": {
+      "binA_median_ms": 69.76,
+      "binB_median_ms": 69.745,
+      "delta_pct": -0.02
+     },
+     "fold156_basic": {
+      "binA_median_ms": 18.03,
+      "binB_median_ms": 18.41,
+      "delta_pct": 2.11
+     },
+     "fold228_classc": {
+      "binA_median_ms": 29.465,
+      "binB_median_ms": 29.455,
+      "delta_pct": -0.03
+     },
+     "fold228_moments": {
+      "binA_median_ms": 26.34,
+      "binB_median_ms": 25.915,
+      "delta_pct": -1.61
+     },
+     "fold228_peaks": {
+      "binA_median_ms": 24.375,
+      "binB_median_ms": 24.46,
+      "delta_pct": 0.35
+     },
+     "fold372_full": {
+      "binA_median_ms": 35.745,
+      "binB_median_ms": 36.015,
+      "delta_pct": 0.76
+     },
+     "fold944_full": {
+      "binA_median_ms": 60.02,
+      "binB_median_ms": 60.215,
+      "delta_pct": 0.32
+     },
+     "fold944_off": {
+      "binA_median_ms": 51.115,
+      "binB_median_ms": 50.515,
+      "delta_pct": -1.17
+     }
+    }
+   },
+   "extract_paths_2048": {
+    "anchor_drift_pct": 0.55,
+    "arms": {
+     "buf_v1_228": {
+      "binA_median_ms": 113.175,
+      "binB_median_ms": 112.14,
+      "delta_pct": -0.91
+     },
+     "buf_v1_372": {
+      "binA_median_ms": 179.93,
+      "binB_median_ms": 178.245,
+      "delta_pct": -0.94
+     },
+     "fast_ssim2": {
+      "binA_median_ms": 305.76,
+      "binB_median_ms": 307.43,
+      "delta_pct": 0.55
+     },
+     "fold156_basic": {
+      "binA_median_ms": 81.515,
+      "binB_median_ms": 81.05,
+      "delta_pct": -0.57
+     },
+     "fold228_classc": {
+      "binA_median_ms": 86.5,
+      "binB_median_ms": 85.76,
+      "delta_pct": -0.86
+     },
+     "fold228_moments": {
+      "binA_median_ms": 85.57,
+      "binB_median_ms": 85.8,
+      "delta_pct": 0.27
+     },
+     "fold228_peaks": {
+      "binA_median_ms": 85.07,
+      "binB_median_ms": 85.035,
+      "delta_pct": -0.04
+     },
+     "fold372_full": {
+      "binA_median_ms": 129.005,
+      "binB_median_ms": 129.025,
+      "delta_pct": 0.02
+     },
+     "fold944_full": {
+      "binA_median_ms": 263.84,
+      "binB_median_ms": 263.635,
+      "delta_pct": -0.08
+     },
+     "fold944_off": {
+      "binA_median_ms": 222.645,
+      "binB_median_ms": 223.82,
+      "delta_pct": 0.53
+     }
+    }
+   }
+  },
+  "blocks_per_revision": {
+   "A": 2,
+   "B": 2
+  }
+ }
+}

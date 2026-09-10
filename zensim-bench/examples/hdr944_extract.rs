@@ -82,12 +82,8 @@ fn decode_ref_png16(path: &Path) -> Result<(Vec<[u16; 3]>, usize, usize), String
 
 fn decode_dist_jxl16(path: &Path) -> Result<(Vec<[u16; 3]>, usize, usize), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read {path:?}: {e}"))?;
-    let out = zenjxl::decode(
-        &bytes,
-        None,
-        &[zenpixels::PixelDescriptor::RGB16_BT2100_PQ],
-    )
-    .map_err(|e| format!("jxl decode {path:?}: {e:?}"))?;
+    let out = zenjxl::decode(&bytes, None, &[zenpixels::PixelDescriptor::RGB16_BT2100_PQ])
+        .map_err(|e| format!("jxl decode {path:?}: {e:?}"))?;
     let buf = out.pixels;
     let w = buf.width() as usize;
     let h = buf.height() as usize;
@@ -168,7 +164,11 @@ fn main() {
             });
         }
     }
-    eprintln!("hdr944_extract: {} cells, {} threads", cells.len(), n_threads);
+    eprintln!(
+        "hdr944_extract: {} cells, {} threads",
+        cells.len(),
+        n_threads
+    );
 
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
@@ -245,6 +245,13 @@ fn main() {
         writeln!(w, "{r}").unwrap();
         n_ok += 1;
     }
-    eprintln!("hdr944_extract: wrote {n_ok}/{} rows -> {out_path:?}", cells.len());
-    assert_eq!(n_ok, cells.len(), "SKIPped cells present — investigate before use");
+    eprintln!(
+        "hdr944_extract: wrote {n_ok}/{} rows -> {out_path:?}",
+        cells.len()
+    );
+    assert_eq!(
+        n_ok,
+        cells.len(),
+        "SKIPped cells present — investigate before use"
+    );
 }

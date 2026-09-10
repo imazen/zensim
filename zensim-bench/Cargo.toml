@@ -15,6 +15,13 @@ publish = false
 [features]
 training = ["zensim/training"]
 
+# `benches/crates_io_speed_bar.rs`: the last crates.io release (0.2.7,
+# `PreviewV0_2`) interleaved against the current tree in ONE binary. A
+# PRODUCT comparison — the two compute different metrics — plus the one
+# like-for-like pair both versions expose, the buffered v1 228-feature
+# extraction (`compute_zensim_with_config`, hence `training` on both).
+crates-io-0-2-7 = ["dep:zensim027", "training"]
+
 # `benches/ssim2_speed_bar.rs`: turn ON fast-ssim2's optional rayon
 # parallelism (it parallelises the Gaussian blur, its dominant kernel).
 # A cargo feature is per-BUILD, not per-arm, so the honest way to price
@@ -116,6 +123,7 @@ zensim = { path = "../zensim", default-features = false, features = ["threads", 
 "custom-profiles"] }
 # Dedup-K (2026-05-26): profile_compat_report example routes
 # spearman/pearson/kendall_tau through canonical zenstats.
+zensim027 = { package = "zensim", version = "=0.2.7", optional = true, default-features = false, features = ["avx512", "threads", "training"] }
 zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 ssimulacra2 = "0.5"
@@ -211,6 +219,12 @@ harness = false
 [[bench]]
 name = "bench_zensim"
 harness = false
+
+[[bench]]
+# Last crates.io release vs the current tree, interleaved in one binary.
+name = "crates_io_speed_bar"
+harness = false
+required-features = ["crates-io-0-2-7"]
 
 [[bench]]
 name = "tier_isolation"
