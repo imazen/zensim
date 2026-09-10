@@ -93,6 +93,12 @@ pub(crate) struct ExtPoolsWork {
     pub k_iw: f32,
 }
 
+// x86_64-only: the AVX-512 (`_v4x`) and AVX2 (`_v4`) V tiers are its only
+// callers, and it uses the `f32x16` generic type which is imported only there.
+// `dead_code` allow for the same reason as the sibling 16-lane helpers: a
+// build without the `avx512` feature never dispatches the tiers that call it.
+#[cfg(target_arch = "x86_64")]
+#[allow(dead_code)]
 #[inline(always)]
 fn ext_accumulate16<T: F32x16Backend + Copy>(
     token: T,
