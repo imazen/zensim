@@ -78,6 +78,7 @@ fi
   echo "rounds_min: $ROUNDS"
   echo "blocks_per_revision: $BLOCKS"
   echo "arms: $ARMS"
+  echo "formula_rev_env: ${ZENSIM_FORMULA_REV:-default}"  # two-binary mode inherits it; one-binary mode overrides per arm
   echo "commit: $(jj log -r @- --no-graph -T 'commit_id' 2>/dev/null || git rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "started_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } | tee "$OUT/run.meta"

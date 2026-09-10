@@ -5589,6 +5589,8 @@ fn fold_v1_one_band(
                 &mut [],
                 false,
                 free,
+                crate::fused::ExtPoolsWork::default(),
+                &[],
             ));
             return b1;
         }
@@ -5657,14 +5659,38 @@ fn fold_v1_one_band(
             &mu1_h[span_h.clone()],
             &mut act_raw[..band_n],
         );
-        crate::blur::box_blur_1pass_into(
-            &act_raw[..band_n],
-            &mut act[..band_n],
-            &mut ssq_v[..band_n],
-            width,
-            h_local,
-            BLUR_RADIUS,
-        );
+        // Revision 3: the SAME fused extension the streaming path runs
+        // (`streaming.rs`, `fused_ext`) — the activity's V blur and every
+        // masked/IW pool ride inside the SSIM V sweep, over the same bands
+        // in the same order, which is what keeps the rev-3 fold/streaming
+        // pool parity gate bit-exact. Here `act` then holds the H-BLURRED
+        // activity the sweep V-blurs in-register.
+        let fused_ext = stable;
+        if fused_ext {
+            crate::blur::box_blur_h(
+                &act_raw[..band_n],
+                &mut act[..band_n],
+                width,
+                h_local,
+                BLUR_RADIUS,
+            );
+        } else {
+            crate::blur::box_blur_1pass_into(
+                &act_raw[..band_n],
+                &mut act[..band_n],
+                &mut ssq_v[..band_n],
+                width,
+                h_local,
+                BLUR_RADIUS,
+            );
+        }
+        let ext = crate::fused::ExtPoolsWork {
+            on: fused_ext,
+            mask: true,
+            iw: true,
+            k_mask: V1_MASK_K,
+            k_iw: V1_IW_K,
+        };
         // `store_sigma` replaces the two `box_blur_v_from_copy(ssq_h →
         // ssq_v)` / `(s12_h → s12_v)` band sweeps the `Full` arm used to
         // run after this call: the fused kernel already carries the same
@@ -5674,7 +5700,7 @@ fn fold_v1_one_band(
         // the only rows the masked/IW SSIM kernel reads). `Carriers`
         // needs no sigma, so it stores none and `ssq_v` simply stays the
         // activity temp.
-        sums.accumulate(&crate::fused::fused_vblur_features_ssim(
+        let acc = crate::fused::fused_vblur_features_ssim(
             &mu1_h[span_h.clone()],
             &mu2_h[span_h.clone()],
             &ssq_h[span_h.clone()],
@@ -5699,7 +5725,27 @@ fn fold_v1_one_band(
             &mut s12_v[..band_n],
             full,
             free,
-        ));
+            ext,
+            if fused_ext { &act[..band_n] } else { &[] },
+        );
+        sums.accumulate(&acc);
+        if fused_ext {
+            if full {
+                sums.masked_mse += acc.masked_mse;
+                sums.iw_mse += acc.iw_mse;
+                sums.masked_ssim_d += acc.masked_ssim_d;
+                sums.masked_ssim_d4 += acc.masked_ssim_d4;
+                sums.masked_ssim_d2 += acc.masked_ssim_d2;
+                sums.iw_ssim_d += acc.iw_ssim_d;
+                sums.iw_ssim_d4 += acc.iw_ssim_d4;
+                sums.iw_ssim_d2 += acc.iw_ssim_d2;
+            }
+            sums.masked_art4 += acc.masked_art4;
+            sums.masked_det4 += acc.masked_det4;
+            sums.iw_art4 += acc.iw_art4;
+            sums.iw_det4 += acc.iw_det4;
+            return b1;
+        }
         let inner = inner_start * width..(inner_start + inner_h) * width;
         let inner_src = &src[span.start + inner.start..span.start + inner.end];
         let inner_dst = &dst[span.start + inner.start..span.start + inner.end];
@@ -5782,6 +5828,8 @@ fn fold_v1_one_band(
             &mut [],
             false,
             free,
+            crate::fused::ExtPoolsWork::default(),
+            &[],
         ));
     }
     b1

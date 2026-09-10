@@ -6707,6 +6707,51 @@ mod tests {
     /// means the same thing under a `ZENSIM_H_TILE` override as it does at
     /// the era-2 default; `base + 2` and `2 * base` are the in-range controls
     /// (first safe remainder, and no remainder tile at all).
+    /// The streaming activity map is `|src - mu1_h|` on the plane
+    /// `fused_blur_h_ssim` already produced (`simd_ops::abs_diff_rows_into`)
+    /// instead of `box_blur_h_into_abs_diff`'s second H sweep. Both must be
+    /// the SAME BYTES at every geometry the H entries are pinned on, ragged
+    /// heights and tiled widths included — otherwise the masked/IW families
+    /// would move on the shipped revision.
+    #[test]
+    fn activity_from_the_fused_h_plane_is_bit_identical() {
+        let tile = super::h_blur_tile_width();
+        let base = if tile == 0 { super::H_TILE_WIDTH } else { tile };
+        let mut checked = 0usize;
+        for &w in &[64usize, 129, 257, base + 1, 2 * base + 1, base + 129] {
+            for &h in &[3usize, 8, 33, 40, 130] {
+                for &radius in &[1usize, 2, 5, 8] {
+                    let src = ring_plane(w, h, 11);
+                    let dst = ring_plane(w, h, 7919);
+                    let n = w * h;
+                    let mut old = vec![0.0f32; n];
+                    super::box_blur_h_into_abs_diff(&src, &mut old, w, h, radius);
+                    let (mut m1, mut m2) = (vec![0.0f32; n], vec![0.0f32; n]);
+                    let (mut sq, mut pr) = (vec![0.0f32; n], vec![0.0f32; n]);
+                    super::fused_blur_h_ssim(
+                        &src, &dst, &mut m1, &mut m2, &mut sq, &mut pr, w, h, radius,
+                    );
+                    let mut got = vec![0.0f32; n];
+                    crate::simd_ops::abs_diff_rows_into(&src, &m1, &mut got, w, w, h);
+                    for i in 0..n {
+                        assert_eq!(
+                            got[i].to_bits(),
+                            old[i].to_bits(),
+                            "{w}x{h} r={radius} tile={tile} idx {i}: {} != {}",
+                            got[i],
+                            old[i]
+                        );
+                    }
+                    checked += n;
+                }
+            }
+        }
+        assert!(
+            checked > 1_000_000,
+            "the probe must cover real planes, covered {checked}"
+        );
+    }
+
     #[test]
     fn h_entries_are_bit_exact_at_a_degenerate_last_column_tile() {
         let tile = super::h_blur_tile_width();

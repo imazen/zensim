@@ -425,6 +425,7 @@ impl FormulaRevision {
                 "scorepow",
                 "v1ssimstable",
                 "v2ssimstable",
+                "v1extfused",
             ],
         }
     }
@@ -672,6 +673,47 @@ const REV_V2_DETROOT: &[Revision] = &[REV_DETROOT];
 /// dissimilarity from it directly rather than as `cov = s12 - mu1*mu2`. A
 /// separate era from `v1ssimstable` because it names a different kernel and a
 /// different slot family; both are in revision 3's list.
+const REV_EXT_FUSED: Revision = Revision {
+    era: "v1extfused",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "Rev3 (issue #61 perf campaign): the masked/IW extension is FUSED \
+           into the SSIM V sweep (`fused::ExtPoolsWork`). The activity is \
+           `blur(|src - H(src)|)` exactly as before — the H-only mu plane the \
+           H pass already wrote, H-blurred once, V-blurred inside the sweep \
+           by the same `sum + add - rem` recurrence — and every masked/IW \
+           pool is formed from the same per-pixel values the separate passes \
+           formed. What moves is the ORDER the f64 chunk sums are added in \
+           (column-group-major inside the sweep, row-major in the passes), so \
+           these slots move at the last f64 bits on every image. The masked/\
+           IW SSIM pools are already `v1ssimstable` movers; this era adds \
+           the v1 MASKED/IW `edge_art_4th`, `edge_det_4th` and `mse` slots. STILL PROPOSED: `SHIPPED_REVISION` \
+           is `Rev1`.",
+};
+/// `v1()`'s default list (`v1postc`) plus the fused-extension era: the v1
+/// MASKED/IW `mse` slots.
+const REV_OPTION_C_AND_EXT_FUSED: &[Revision] = &[
+    Revision {
+        era: "v1postc",
+        commit: "56bbcda2",
+        status: RevisionStatus::Landed,
+        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
+    },
+    REV_EXT_FUSED,
+];
+/// `v1()`'s pooled-root list (`v1postc` + F18) plus the fused-extension era:
+/// the v1 MASKED/IW `edge_art_4th` / `edge_det_4th` slots.
+const REV_DETROOT_AND_EXT_FUSED: &[Revision] = &[
+    Revision {
+        era: "v1postc",
+        commit: "56bbcda2",
+        status: RevisionStatus::Landed,
+        note: "option C: v1 stopped pooling mirror-padded phantom columns.",
+    },
+    REV_DETROOT,
+    REV_EXT_FUSED,
+];
+
 const REV_V2_SSIM_STABLE: Revision = Revision {
     era: "v2ssimstable",
     commit: "-",
@@ -986,6 +1028,38 @@ const fn v1(
     }
 }
 
+/// [`v1`] with an explicit revision list — for slots whose era membership is
+/// not implied by their statistic (the fused-extension pools). The F18
+/// defect is still derived from the statistic exactly as [`v1`] derives it.
+const fn v1_rev(
+    family: ComputeToken,
+    block_local: u16,
+    name: &'static str,
+    statistic: Statistic,
+    kernel: KernelId,
+    revisions: &'static [Revision],
+) -> SignalDef {
+    SignalDef {
+        family,
+        block_local,
+        name,
+        statistic,
+        cost: CostClass::Cheap,
+        tranche: Tranche::None,
+        placement: Placement::AllCells,
+        form: Form::Difference,
+        direction: Direction::HigherIsWorse,
+        kernel,
+        deprecated: false,
+        defect: if uses_pooled_root(statistic) {
+            Some(DEFECT_F18)
+        } else {
+            None
+        },
+        revisions,
+    }
+}
+
 /// A v1 signal carrying a named defect and its proposed revision.
 const fn v1_with_defect(
     family: ComputeToken,
@@ -1207,9 +1281,9 @@ pub(crate) static MASKED: [SignalDef; 6] = {
         v1_defect(F, 0, "ssim_mean", Mean, K),
         v1_defect(F, 1, "ssim_4th", L4, K),
         v1_defect(F, 2, "ssim_2nd", L2, K),
-        v1(F, 3, "edge_art_4th", L4, K),
-        v1(F, 4, "edge_det_4th", L4, K),
-        v1(F, 5, "mse", Mean, K),
+        v1_rev(F, 3, "edge_art_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
+        v1_rev(F, 4, "edge_det_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
+        v1_rev(F, 5, "mse", Mean, K, REV_OPTION_C_AND_EXT_FUSED),
     ]
 };
 
@@ -1226,9 +1300,9 @@ pub(crate) static IW: [SignalDef; 6] = {
         v1_defect(F, 0, "ssim_mean", Mean, K),
         v1_defect(F, 1, "ssim_4th", L4, K),
         v1_defect(F, 2, "ssim_2nd", L2, K),
-        v1(F, 3, "edge_art_4th", L4, K),
-        v1(F, 4, "edge_det_4th", L4, K),
-        v1(F, 5, "mse", Mean, K),
+        v1_rev(F, 3, "edge_art_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
+        v1_rev(F, 4, "edge_det_4th", L4, K, REV_DETROOT_AND_EXT_FUSED),
+        v1_rev(F, 5, "mse", Mean, K, REV_OPTION_C_AND_EXT_FUSED),
     ]
 };
 

@@ -75,12 +75,36 @@ pub fn abs_diff_sum(a: &[f32], b: &[f32]) -> f64 {
 /// — the activity path uses [`crate::blur::box_blur_h_into_abs_diff`]
 /// which fuses the blur with the abs-diff. Kept as a reference
 /// implementation for the SIMD dispatch trio (v4/v3/scalar).
-#[allow(dead_code)]
 pub(crate) fn abs_diff_into(a: &[f32], b: &[f32], out: &mut [f32]) {
     incant!(
         abs_diff_into_inner(a, b, out),
         [v4, v3, neon, wasm128, scalar]
     );
+}
+
+/// `out[y*width + x] = |src[y*width + x] - mu[y*pitch + x]|` for `rows` rows:
+/// the activity map's first step, reading the H-only blurred source straight
+/// out of the (possibly pitched) plane `fused_blur_h_ssim` wrote, instead of
+/// re-blurring `src` (`box_blur_h_into_abs_diff`). Bit-identical to that entry
+/// (both sides equal one scalar recurrence — `blur`'s
+/// `h_entries_are_bit_exact_at_a_degenerate_last_column_tile`; asserted
+/// directly by `activity_from_the_fused_h_plane_is_bit_identical`).
+pub(crate) fn abs_diff_rows_into(
+    src: &[f32],
+    mu: &[f32],
+    out: &mut [f32],
+    width: usize,
+    pitch: usize,
+    rows: usize,
+) {
+    debug_assert!(pitch >= width);
+    for y in 0..rows {
+        abs_diff_into(
+            &src[y * width..y * width + width],
+            &mu[y * pitch..y * pitch + width],
+            &mut out[y * width..y * width + width],
+        );
+    }
 }
 
 /// Like ssim_channel but also computes 8th-power pool and max.

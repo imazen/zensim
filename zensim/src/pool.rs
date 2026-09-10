@@ -18,6 +18,10 @@ pub(crate) struct ScaleBuffers {
     pub stable_sd: Vec<f32>,
     /// Local contrast masking weights (when masking enabled).
     pub mask: Vec<f32>,
+    /// Fused v1-extension activity planes (revision 3): `|src - H(src)|`
+    /// and its H blur, the plane the V sweep V-blurs into the activity.
+    pub act_tmp: Vec<f32>,
+    pub act_h: Vec<f32>,
 }
 
 impl ScaleBuffers {
@@ -38,6 +42,8 @@ impl ScaleBuffers {
             temp_blur: Vec::new(),
             stable_sd: Vec::new(),
             mask: Vec::new(),
+            act_tmp: Vec::new(),
+            act_h: Vec::new(),
         }
     }
 
@@ -53,6 +59,8 @@ impl ScaleBuffers {
             self.sigma12.resize(size, 0.0);
             self.temp_blur.resize(size, 0.0);
             self.mask.resize(size, 0.0);
+            self.act_tmp.resize(size, 0.0);
+            self.act_h.resize(size, 0.0);
         }
     }
 

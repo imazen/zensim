@@ -251,6 +251,15 @@ fn test_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
     (src, dst)
 }
 
+/// `ZEN_S2_ARMS=a,b,c` keeps only the named arms (default: all). For profiling
+/// one arm under `perf record` without the others' samples in the way.
+fn arm_enabled(name: &str) -> bool {
+    match std::env::var("ZEN_S2_ARMS") {
+        Ok(list) if !list.trim().is_empty() => list.split(',').any(|a| a.trim() == name),
+        _ => true,
+    }
+}
+
 fn env_usize(key: &str, dflt: usize) -> usize {
     std::env::var(key)
         .ok()
@@ -463,20 +472,24 @@ fn main() {
                         });
                     }
                 }
-                group.bench("fast_ssim2", move |b| {
-                    b.iter(move || {
-                        let s = Img::new(src_s, n, n);
-                        let d = Img::new(dst_s, n, n);
-                        zenbench::black_box(fast_ssim2::compute_ssimulacra2(s, d).unwrap())
-                    })
-                });
-                group.bench("zensim_B", move |b| {
-                    b.iter(move || {
-                        let s = RgbSlice::new(src_s, n, n);
-                        let d = RgbSlice::new(dst_s, n, n);
-                        zenbench::black_box(zb.compute(&s, &d).unwrap().score())
-                    })
-                });
+                if arm_enabled("fast_ssim2") {
+                    group.bench("fast_ssim2", move |b| {
+                        b.iter(move || {
+                            let s = Img::new(src_s, n, n);
+                            let d = Img::new(dst_s, n, n);
+                            zenbench::black_box(fast_ssim2::compute_ssimulacra2(s, d).unwrap())
+                        })
+                    });
+                }
+                if arm_enabled("zensim_B") {
+                    group.bench("zensim_B", move |b| {
+                        b.iter(move || {
+                            let s = RgbSlice::new(src_s, n, n);
+                            let d = RgbSlice::new(dst_s, n, n);
+                            zenbench::black_box(zb.compute(&s, &d).unwrap().score())
+                        })
+                    });
+                }
                 // ---- the PRODUCT fast-class path, which this bench had no arm
                 // for (added by the kernel lane, 2026-09-05).
                 //
@@ -503,13 +516,15 @@ fn main() {
                 // not redundant — `add156_156basic` requests
                 // `V1PoolsMode::Off`, which `fold_engine::pools_mode_for_need`
                 // never returns, so no production call can produce that walk.
-                group.bench("zensim_D", move |b| {
-                    b.iter(move || {
-                        let s = RgbSlice::new(src_s, n, n);
-                        let d = RgbSlice::new(dst_s, n, n);
-                        zenbench::black_box(zd.compute(&s, &d).unwrap().score())
-                    })
-                });
+                if arm_enabled("zensim_D") {
+                    group.bench("zensim_D", move |b| {
+                        b.iter(move || {
+                            let s = RgbSlice::new(src_s, n, n);
+                            let d = RgbSlice::new(dst_s, n, n);
+                            zenbench::black_box(zd.compute(&s, &d).unwrap().score())
+                        })
+                    });
+                }
                 // ---- amended-W4: candidate = its own regime + its own forwards
                 if let Some(h) = add {
                     // The actual candidate surface owns planning and all

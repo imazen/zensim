@@ -1672,6 +1672,13 @@ fn process_strip_channel(
     // fall-through to the legacy arithmetic; this assertion only documents
     // that the gate ran.
     let stable = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    // Revision 3 fuses the masked/IW extension into the SSIM V sweep
+    // (`fused::ExtPoolsWork`): the activity is H-blurred from the H-only
+    // `mu1` plane the H pass already wrote, V-blurred inside the same sweep
+    // that forms the SSIM signal, and every masked/IW pool is accumulated
+    // there. The separate activity chain, the two V-blurred mu planes it
+    // needed, the retention copy and the swap below are all skipped.
+    let fused_ext = stable && need_ssim && (config.extended_features || config.compute_iw_features);
     debug_assert!(
         !stable || config.blur_passes == 1,
         "Rev3 route gate must have refused blur_passes != 1 before reaching the strip walk"
@@ -1692,13 +1699,17 @@ fn process_strip_channel(
         // Force mu1/mu2 storage when diffmap needs edge/MSE or HF features
         // OR when IW features are required (mu1 is the reference plane for
         // the IW weight's activity-map computation).
-        let store_mu = config.extended_features
-            || config.compute_iw_features
+        // With the extension fused into the sweep (`fused_ext`) nothing
+        // downstream reads the V-blurred mu planes for the masked/IW pools,
+        // so the two plane stores exist only for the diffmap/attribution
+        // readers that ask for them.
+        let store_mu = (!fused_ext && (config.extended_features || config.compute_iw_features))
             || dm_needs_edge
             || dm_needs_hf
             || attr_ret.is_some()
             || attr_fold.is_some();
         if need_ssim {
+            let strip_n = strip_h * width;
             // Fused H-blur: src,dst → 4 H-blurred planes in one pass
             fused_blur_h_ssim(
                 src_c,
@@ -1716,6 +1727,33 @@ fn process_strip_channel(
             // mu1/mu2 outputs go to mask/mul_buf (mu1/mu2 still hold H-blurred values)
             // sd_out goes to temp_blur (only used when store_sd=true, extracted before
             // extended features which also need temp_blur for blurs)
+            let ext = crate::fused::ExtPoolsWork {
+                on: fused_ext,
+                mask: config.extended_features,
+                iw: config.compute_iw_features,
+                k_mask: config.extended_masking_strength,
+                k_iw: config.iw_strength,
+            };
+            if fused_ext {
+                // `|src - H(src)|` from the H-only mu1 plane (bit-identical
+                // to `box_blur_h_into_abs_diff`), then its H blur; the V
+                // sweep below V-blurs that into the activity in-register.
+                crate::simd_ops::abs_diff_rows_into(
+                    &src_c[..strip_n],
+                    &bufs.mu1[..strip_n],
+                    &mut bufs.act_tmp[..strip_n],
+                    width,
+                    width,
+                    strip_h,
+                );
+                crate::blur::box_blur_h(
+                    &bufs.act_tmp[..strip_n],
+                    &mut bufs.act_h[..strip_n],
+                    width,
+                    strip_h,
+                    config.blur_radius,
+                );
+            }
             strip_acc = fused_vblur_features_ssim(
                 &bufs.mu1,
                 &bufs.mu2,
@@ -1744,7 +1782,31 @@ fn process_strip_channel(
                 // v1's 372 layout has no append/append2 block, so the free
                 // raw moments have nowhere to land on this path.
                 crate::fused::FreeExtrasWork::default(),
+                ext,
+                if fused_ext {
+                    &bufs.act_h[..strip_n]
+                } else {
+                    &[]
+                },
             );
+            if fused_ext {
+                accum.masked_ssim_d[c] += strip_acc.masked_ssim_d;
+                accum.masked_ssim_d4[c] += strip_acc.masked_ssim_d4;
+                accum.masked_ssim_d2[c] += strip_acc.masked_ssim_d2;
+                accum.iw_ssim_d[c] += strip_acc.iw_ssim_d;
+                accum.iw_ssim_d4[c] += strip_acc.iw_ssim_d4;
+                accum.iw_ssim_d2[c] += strip_acc.iw_ssim_d2;
+                accum.masked_art4[c] += strip_acc.masked_art4;
+                accum.masked_det4[c] += strip_acc.masked_det4;
+                accum.iw_art4[c] += strip_acc.iw_art4;
+                accum.iw_det4[c] += strip_acc.iw_det4;
+                accum.masked_mse[c] += strip_acc.masked_mse;
+                accum.iw_mse[c] += strip_acc.iw_mse;
+                #[cfg(feature = "iw-diagnostics")]
+                {
+                    accum.iw_a_sum[c] += strip_acc.act_sum;
+                }
+            }
 
             // Retain the inner-band signal BEFORE the activity work below
             // reuses `temp_blur` as blur scratch. `store_sd` was forced on for
@@ -1753,7 +1815,7 @@ fn process_strip_channel(
             // than re-deriving a second, differently-rounded signal. (Under
             // the fused Rev3 the sigma V-blurs the legacy pools needed are
             // also skipped: their fourth plane now holds the error moment.)
-            if stable && (config.extended_features || config.compute_iw_features) {
+            if stable && !fused_ext && (config.extended_features || config.compute_iw_features) {
                 let inner = inner_start * width..(inner_start + inner_h) * width;
                 bufs.stable_sd.clear();
                 bufs.stable_sd.extend_from_slice(&bufs.temp_blur[inner]);
@@ -1880,7 +1942,7 @@ fn process_strip_channel(
         // We need the V-blurred mu1/mu2 for any path that computes activity
         // (extended-features masked block OR compute_iw_features IW block),
         // so swap whenever either is on.
-        if config.extended_features || config.compute_iw_features {
+        if !fused_ext && (config.extended_features || config.compute_iw_features) {
             std::mem::swap(&mut bufs.mu1, &mut bufs.mask);
             std::mem::swap(&mut bufs.mu2, &mut bufs.mul_buf);
         }
@@ -1914,7 +1976,7 @@ fn process_strip_channel(
         let do_ext = config.extended_features;
         let do_iw = config.compute_iw_features;
         let need_activity = do_ext || do_iw;
-        if need_activity {
+        if need_activity && !fused_ext {
             let inner_off = inner_start * width;
             let inner_n = inner_h * width;
             let strip_n = strip_h * width;
@@ -1934,19 +1996,42 @@ fn process_strip_channel(
             // map reference. Prior multi-pass V-blurred bufs.mu1 carried
             // arbitrary cross-channel stale state at overlap rows. See
             // `docs/PRINCIPLED_ACTIVITY.md`.
-            box_blur_h_into_abs_diff(
-                &src_c[..strip_n],
-                &mut bufs.mask[..strip_n],
-                width,
-                strip_h,
-                config.blur_radius,
-            );
+            // Rev-neutral (2026-09-10): on the `need_ssim` route the H-only
+            // blurred source ALREADY EXISTS — `fused_blur_h_ssim` wrote it to
+            // `bufs.mu1`, and the swap above moved it into `bufs.mask` — so
+            // the activity map is one in-place `|src - mask|` instead of a
+            // second H sweep of `src`. Bit-identical to `box_blur_h_into_abs_diff`
+            // (same scalar recurrence: `h_entries_are_bit_exact_at_a_degenerate_
+            // last_column_tile` pins both entries to it; asserted directly by
+            // `activity_from_the_fused_h_plane_is_bit_identical`). The
+            // `fused_blur_h_mu` route keeps the old entry: its scalar tail is
+            // NOT the same recurrence at ragged heights.
+            if need_ssim {
+                // The swap above left the H-only mu1 plane in `bufs.mask`
+                // (packed); the raw activity lands packed in `act_tmp`.
+                crate::simd_ops::abs_diff_rows_into(
+                    &src_c[..strip_n],
+                    &bufs.mask[..strip_n],
+                    &mut bufs.act_tmp[..strip_n],
+                    width,
+                    width,
+                    strip_h,
+                );
+            } else {
+                box_blur_h_into_abs_diff(
+                    &src_c[..strip_n],
+                    &mut bufs.act_tmp[..strip_n],
+                    width,
+                    strip_h,
+                    config.blur_radius,
+                );
+            }
 
             // Step 2: blur the activity map → mul_buf. After this,
             // mul_buf holds the per-pixel blurred reference-activity
             // signal shared by both mask and iw_weight.
             box_blur_1pass_into(
-                &bufs.mask[..strip_n],
+                &bufs.act_tmp[..strip_n],
                 &mut bufs.mul_buf[..strip_n],
                 &mut bufs.temp_blur[..strip_n],
                 width,

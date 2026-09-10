@@ -888,6 +888,8 @@ fn process_channel_banded(
             // The attribution walk emits no append/append2 slots, so it never
             // needs the free raw moments.
             crate::fused::FreeExtrasWork::default(),
+            crate::fused::ExtPoolsWork::default(),
+            &[],
         );
         merge_acc(&mut acc, &band);
         y = inner_end;
