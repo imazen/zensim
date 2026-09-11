@@ -247,6 +247,220 @@ fn rss_mode(arm: &str) {
     println!("{arm} size={size} w={w} h={h} iters={iters} sink={sink:e}");
 }
 
+/// Diagnostic bakes exercise the actual model-selected extraction path.
+/// Nonzero weights on every declared ID prevent dead-input pruning from
+/// turning the full control into the subset. These are checksums, not fits.
+fn subset_model(full: bool) -> zenpredict::Model {
+    let ids: Vec<usize> = (0..228)
+        .filter(|&i| full || !matches!(i, 0..=12 | 26..=38 | 156..=161 | 168..=173))
+        .collect();
+    let n = ids.len();
+    let recipe = serde_json::json!({
+        "schema_hash": 1, "scaler_mean": vec![0.0; n], "scaler_scale": vec![1.0; n],
+        "metadata": [
+            {"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join("\n")},
+            {"key":"zentrain.formula_revision","type":"utf8","text":std::env::var("ZENSIM_FORMULA_REV").unwrap_or_else(|_| "1".into())}
+        ],
+        "layers": [{"in_dim": n, "out_dim": 1, "activation":"identity", "dtype":"f32",
+                    "weights": vec![0.01; n], "biases":[0.0]}]
+    });
+    let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+    zenpredict::Model::from_bytes(&bytes).unwrap()
+}
+
+/// Opt-in paired comparison, so the unrelated wide arms do not consume the
+/// measurement budget. Includes planning, allocations, extraction and forward
+/// through BakeScorer::compute, just as a caller uses it. Raw fold control
+/// reuses scratch and is explicitly distinguished from these serving arms.
+fn subset_bench(sizes: &[usize]) {
+    let full = Box::leak(Box::new(subset_model(true)));
+    let subset = Box::leak(Box::new(subset_model(false)));
+    let z = fold_zensim();
+    // zenbench 0.1.9 mistakes its own lock-heartbeat task for a rival bench.
+    // Keep its exclusive lock and paired statistics; run this opt-in group
+    // on a quiet host without the broken process-name scan.
+    let result = zenbench::run_gated(zenbench::GateConfig::disabled(), |suite| {
+        for &n in sizes {
+            let (src, dst) = test_pair(n, n);
+            let src: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
+            let dst: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
+            suite.compare(format!("fullres_y_{n}"), |group| {
+                let (max_r, min_r, wall_s) = bench_budget();
+                group
+                    .config()
+                    .max_rounds(max_r)
+                    .min_rounds(min_r)
+                    .max_wall_time(std::time::Duration::from_secs(wall_s));
+                for (name, model) in [("bake228_full", &*full), ("bake190_y", &*subset)] {
+                    group.bench(name, move |b| {
+                        let mut scorer = zensim::BakeScorer::new(model).unwrap();
+                        b.iter(move || {
+                            let r = scorer
+                                .compute(&RgbSlice::new(src, n, n), &RgbSlice::new(dst, n, n), None)
+                                .unwrap();
+                            zenbench::black_box(r.score());
+                        });
+                    });
+                }
+                group.bench("fold228_reused_scratch", move |b| {
+                    let mut scratch = zensim::feature_v2::V2Scratch::new();
+                    b.iter(move || {
+                        let r = z
+                            .compute_folded720_features_streaming(
+                                &RgbSlice::new(src, n, n),
+                                &RgbSlice::new(dst, n, n),
+                                toggles_v1_only(zensim::feature_v2::V1PoolsMode::Peaks),
+                                &mut scratch,
+                            )
+                            .unwrap();
+                        zenbench::black_box(r.features()[14]);
+                    });
+                });
+            });
+        }
+    });
+    if let Ok(path) = std::env::var("ZENBENCH_RESULT_PATH") {
+        result.save(&path).unwrap();
+    }
+}
+
+/// Kernel study uses upstream zenresize's own coefficient tables and float
+/// resizer. No copied filters, RGB transfer, quantization, or model scoring.
+fn resize_filter_bench(sizes: &[usize]) {
+    use zenresize::filter::InterpolationDetails;
+    use zenresize::weights::F32WeightTable;
+    use zenresize::{Filter, PixelDescriptor, ResizeConfig, Resizer};
+    let filters = [
+        Filter::Box,
+        Filter::Triangle,
+        Filter::Mitchell,
+        Filter::RobidouxFast,
+        Filter::RobidouxSharp,
+        Filter::Lanczos2,
+        Filter::Lanczos,
+    ];
+    let mut response = Vec::new();
+    for filter in filters {
+        for (num, den) in [(3usize, 2usize), (2, 1), (3, 1)] {
+            let d = num as f64 / den as f64;
+            // Interior exact-ratio polyphase coefficients from the real owner.
+            let table = F32WeightTable::new(
+                576,
+                (576 * den / num) as u32,
+                &InterpolationDetails::create(filter),
+            );
+            for phase in 0..den {
+                let i = 96 * den / num + phase;
+                let taps = table.weights(i);
+                let left = table.left[i];
+                let gain = |f: f64| {
+                    let (re, im) = taps
+                        .iter()
+                        .enumerate()
+                        .fold((0.0, 0.0), |(re, im), (j, &h)| {
+                            let theta = std::f64::consts::TAU * f * (f64::from(left) + j as f64);
+                            (
+                                re + f64::from(h) * theta.cos(),
+                                im + f64::from(h) * theta.sin(),
+                            )
+                        });
+                    re.hypot(im)
+                };
+                let gains: Vec<_> = [4, 8, 16, 32]
+                    .into_iter()
+                    .map(|b| serde_json::json!({"period":b,"amplitude":gain(1.0/f64::from(b))}))
+                    .collect();
+                // Actual float resize: all numerator² input phases of an impulse, so phase
+                // sensitivity and signed lobes are measured rather than inferred.
+                let n = 96usize;
+                let m = n * den / num;
+                let cfg = ResizeConfig::builder(n as u32, n as u32, m as u32, m as u32)
+                    .format(PixelDescriptor::GRAYF32_LINEAR)
+                    .filter(filter)
+                    .build();
+                let mut resizer = Resizer::new(&cfg);
+                let mut input = vec![0.0; n * n];
+                let mut output = vec![0.0; m * m];
+                let mut impulses = Vec::new();
+                for py in 0..num {
+                    for px in 0..num {
+                        input.fill(0.0);
+                        input[(48 + py) * n + 48 + px] = 1.0;
+                        resizer.resize_f32_into(&input, &mut output);
+                        let max = output.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                        let min = output.iter().copied().fold(f32::INFINITY, f32::min);
+                        let energy: f64 = output.iter().map(|&x| f64::from(x).powi(2)).sum();
+                        impulses.push(serde_json::json!({"phase":[px,py],"max":max,"min":min,"mse_ratio":energy*d*d}));
+                    }
+                }
+                for (i, p) in input.iter_mut().enumerate() {
+                    *p = if (i % n + i / n).is_multiple_of(2) {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                }
+                resizer.resize_f32_into(&input, &mut output);
+                let checker_mse = (8..m - 8)
+                    .flat_map(|y| (8..m - 8).map(move |x| y * m + x))
+                    .map(|i| f64::from(output[i]).powi(2))
+                    .sum::<f64>()
+                    / ((m - 16) * (m - 16)) as f64;
+                response.push(serde_json::json!({
+                "filter":filter.name(),"stride":d,"ratio":[num,den],"output_phase":phase,"taps":taps,"left":left,
+                "tap_count":taps.len(),"dc_gain":gain(0.0),"gains":gains,
+                "checkerboard_amplitude":gain(0.5).powi(2),"actual_checkerboard_mse":checker_mse,
+                "white_noise_variance_gain_2d":taps.iter().map(|&h| f64::from(h).powi(2)).sum::<f64>().powi(2),
+                "impulses":impulses
+            }));
+            }
+        }
+    }
+    let path = std::env::var("ZEN_XP_FILTER_RESPONSE")
+        .expect("set ZEN_XP_FILTER_RESPONSE to an output JSON path");
+    std::fs::write(path, serde_json::to_vec_pretty(&response).unwrap()).unwrap();
+    let result = zenbench::run_gated(zenbench::GateConfig::disabled(), |suite| {
+        for &n in sizes {
+            assert_eq!(n % 6, 0, "filter sizes must divide exactly by 2 and 3");
+            let input: &'static [f32] = Box::leak(
+                (0..n * n)
+                    .map(|i| ((i % n * 7 + i / n * 13) % 257) as f32 / 256.0)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            );
+            suite.compare(format!("resize_float_plane_{n}"), |group| {
+                let (max_r, min_r, wall_s) = bench_budget();
+                group
+                    .config()
+                    .max_rounds(max_r)
+                    .min_rounds(min_r)
+                    .max_wall_time(std::time::Duration::from_secs(wall_s));
+                for filter in filters {
+                    for (num, den) in [(3usize, 2usize), (2, 1), (3, 1)] {
+                        let d = num as f64 / den as f64;
+                        let m = n * den / num;
+                        let cfg = ResizeConfig::builder(n as u32, n as u32, m as u32, m as u32)
+                            .format(PixelDescriptor::GRAYF32_LINEAR)
+                            .filter(filter)
+                            .build();
+                        group.bench(format!("{}_{}x", filter.name(), d), move |b| {
+                            let mut resizer = Resizer::new(&cfg);
+                            let mut output = vec![0.0; m * m];
+                            b.iter(move || {
+                                resizer.resize_f32_into(input, &mut output);
+                                zenbench::black_box(&output);
+                            });
+                        });
+                    }
+                }
+            });
+        }
+    });
+    if let Ok(path) = std::env::var("ZENBENCH_RESULT_PATH") {
+        result.save(&path).unwrap();
+    }
+}
+
 fn main() {
     if let Ok(arm) = std::env::var("ZEN_XP_RSS") {
         rss_mode(&arm);
@@ -256,6 +470,14 @@ fn main() {
         .ok()
         .map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect())
         .unwrap_or_else(|| vec![576, 1152, 2304]);
+    if std::env::var_os("ZEN_XP_FILTERS").is_some() {
+        resize_filter_bench(&sizes);
+        return;
+    }
+    if std::env::var_os("ZEN_XP_SUBSET").is_some() {
+        subset_bench(&sizes);
+        return;
+    }
     let z = fold_zensim();
     let (off, full) = (toggles_off(), toggles_full());
     let result = zenbench::run(|suite| {

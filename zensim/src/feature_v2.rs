@@ -1931,6 +1931,9 @@ pub(crate) struct ComputeSet {
     /// The v1 basic fold (`f0..155`). Always on today; a field so that a
     /// v2-only request is expressible rather than impossible.
     pub v1_basic: bool,
+    /// Full-resolution X/B moments. Plans may omit them for basic/peak subsets.
+    /// Conversion and the coarser XYB pyramid always remain complete.
+    pub full_res_xb: bool,
     /// v1's masked/IW/soft-peak pool slots — the 13.6 % pass of item E.
     pub v1_pools: V1PoolsMode,
     /// The v2-era blocks as a group (`f372..`): false for a `v1_only`
@@ -2003,6 +2006,7 @@ impl ComputeSet {
         Self {
             formula_revision: t.formula_revision,
             v1_basic: true,
+            full_res_xb: true,
             v1_pools: t.v1_pools,
             v2_blocks,
             gradient: t.gradient_features && v2_blocks,
@@ -2190,9 +2194,32 @@ impl ComputeSet {
         if self.bounded_err() {
             scattered.extend(class_c_slot_indices(n_scales));
         }
-        SlotSet::from_ranges(ranges)
+        let slots = SlotSet::from_ranges(ranges)
             .union(&SlotSet::from_slots(scattered))
-            .clipped_to(layout_width)
+            .clipped_to(layout_width);
+        if self.full_res_xb {
+            slots
+        } else {
+            SlotSet::from_slots(
+                slots
+                    .iter_slots()
+                    .filter(|&id| !Self::is_full_res_xb(id, n_scales)),
+            )
+        }
+    }
+
+    /// The initial subset specialization excludes cross-channel and extra
+    /// feature families. Unknown/wider requests keep the complete walk.
+    pub(crate) fn allows_full_res_y_subset(&self) -> bool {
+        !self.v2_blocks
+            && self.free_extras == V1FreeExtras::Off
+            && matches!(self.v1_pools, V1PoolsMode::Off | V1PoolsMode::Peaks)
+    }
+
+    pub(crate) fn is_full_res_xb(id: usize, n_scales: usize) -> bool {
+        use crate::feature_defs::Channel;
+        crate::feature_defs::def_at(id, n_scales)
+            .is_some_and(|d| d.scale == 0 && matches!(d.channel, Channel::X | Channel::B))
     }
 
     /// This request's full feature-set id at `era` — the producer-side id an
@@ -2203,6 +2230,12 @@ impl ComputeSet {
         layout_width: usize,
         era: &str,
     ) -> Option<crate::feature_set_id::FeatureSetId> {
+        // Family tokens cannot reconstruct a channel subset. Its explicit
+        // feature IDs and per-slot provenance remain the authoritative identity;
+        // do not issue a shorthand that Request::for_set cannot reproduce.
+        if !self.full_res_xb {
+            return None;
+        }
         // The emitted width rides along as the legacy `@w<N>` hint — a
         // PRODUCER's id is exactly where recording it pays, because a reader
         // rebuilding this sparse set from its compute tokens needs the clip.
@@ -7110,6 +7143,7 @@ pub(crate) fn compute_folded720_impl_with_toggles(
         parallel,
         toggles,
         &mut scratch,
+        None,
     )
 }
 
@@ -7797,6 +7831,7 @@ pub(crate) fn compute_folded720_streaming_impl(
     parallel: bool,
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
+    planned_compute: Option<ComputeSet>,
 ) -> Result<ZensimV2Result, ZensimError> {
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
@@ -7835,6 +7870,7 @@ pub(crate) fn compute_folded720_streaming_impl(
                 parallel,
                 toggles,
                 scratch,
+                planned_compute,
             );
         }
         return Err(ZensimError::HdrInputRequiresPuPath);
@@ -7851,7 +7887,10 @@ pub(crate) fn compute_folded720_streaming_impl(
             toggles,
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
-            FoldWalkExtras::default(),
+            FoldWalkExtras {
+                compute: planned_compute,
+                ..Default::default()
+            },
         ));
     }
     Ok(foldapp_streaming_walk(
@@ -7861,7 +7900,10 @@ pub(crate) fn compute_folded720_streaming_impl(
         toggles,
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
-        FoldWalkExtras::default(),
+        FoldWalkExtras {
+            compute: planned_compute,
+            ..Default::default()
+        },
     ))
 }
 
@@ -7933,6 +7975,7 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
             FoldWalkExtras {
+                compute: plan.map(|p| p.compute),
                 mean_offset: Some(&mut mo),
                 #[cfg(feature = "custom-profiles")]
                 retention,
@@ -7950,6 +7993,7 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
         FoldWalkExtras {
+            compute: plan.map(|p| p.compute),
             mean_offset: Some(&mut mo),
             #[cfg(feature = "custom-profiles")]
             retention,
@@ -8069,6 +8113,7 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
     parallel: bool,
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
+    planned_compute: Option<ComputeSet>,
 ) -> Result<ZensimV2Result, ZensimError> {
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
@@ -8100,7 +8145,10 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
             toggles,
             front_end,
             scratch,
-            FoldWalkExtras::default(),
+            FoldWalkExtras {
+                compute: planned_compute,
+                ..Default::default()
+            },
         ));
     }
     Ok(foldapp_streaming_walk(
@@ -8110,7 +8158,10 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
         toggles,
         front_end,
         scratch,
-        FoldWalkExtras::default(),
+        FoldWalkExtras {
+            compute: planned_compute,
+            ..Default::default()
+        },
     ))
 }
 
@@ -8142,7 +8193,7 @@ pub(crate) fn compute_folded720_append2_hdr_streaming_impl(
     toggles.append_block = true;
     toggles.append2_block = true;
     compute_folded720_hdr_streaming_impl(
-        source, distorted, encoding, max_pixels, parallel, toggles, scratch,
+        source, distorted, encoding, max_pixels, parallel, toggles, scratch, None,
     )
 }
 
@@ -8392,7 +8443,7 @@ pub(crate) fn compute_folded720_csfw_hdr_streaming_impl(
     toggles.append2_block = true;
     toggles.csfw_block = true;
     compute_folded720_hdr_streaming_impl(
-        source, distorted, encoding, max_pixels, parallel, toggles, scratch,
+        source, distorted, encoding, max_pixels, parallel, toggles, scratch, None,
     )
 }
 
@@ -8409,7 +8460,7 @@ pub(crate) fn compute_folded720_append_hdr_streaming_impl(
 ) -> Result<ZensimV2Result, ZensimError> {
     toggles.append_block = true;
     compute_folded720_hdr_streaming_impl(
-        source, distorted, encoding, max_pixels, parallel, toggles, scratch,
+        source, distorted, encoding, max_pixels, parallel, toggles, scratch, None,
     )
 }
 
@@ -8424,7 +8475,9 @@ pub(crate) fn compute_folded720_append_streaming_impl(
     scratch: &mut V2Scratch,
 ) -> Result<ZensimV2Result, ZensimError> {
     toggles.append_block = true;
-    compute_folded720_streaming_impl(source, distorted, max_pixels, parallel, toggles, scratch)
+    compute_folded720_streaming_impl(
+        source, distorted, max_pixels, parallel, toggles, scratch, None,
+    )
 }
 
 /// The streaming walk body (inputs already validated + ≥ 64px).
@@ -8580,6 +8633,8 @@ impl MeanOffsetRows {
 /// byte-for-byte the walk as it was before any of them existed.
 #[derive(Default)]
 pub(crate) struct FoldWalkExtras<'a> {
+    /// Resolved model/research plan; raw public extraction keeps all channels.
+    pub(crate) compute: Option<ComputeSet>,
     /// Appendix-N retention hooks (the fused-944 attribution session).
     pub(crate) retention: Option<&'a mut FoldRetention>,
     /// Per-scale-0-row `Σ_x (src − dst)` sums, for the fold-backed engine's
@@ -8599,15 +8654,40 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     scratch: &mut V2Scratch,
     extras: FoldWalkExtras<'_>,
 ) -> ZensimV2Result {
+    let compute = extras
+        .compute
+        .unwrap_or_else(|| ComputeSet::from_toggles(toggles));
+    if compute.full_res_xb {
+        foldapp_streaming_walk_impl::<S, D, true>(
+            source, distorted, parallel, toggles, front_end, scratch, extras,
+        )
+    } else {
+        assert!(compute.allows_full_res_y_subset());
+        foldapp_streaming_walk_impl::<S, D, false>(
+            source, distorted, parallel, toggles, front_end, scratch, extras,
+        )
+    }
+}
+
+fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB: bool>(
+    source: &S,
+    distorted: &D,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    front_end: crate::feature_v2_stream::FrontEnd,
+    scratch: &mut V2Scratch,
+    extras: FoldWalkExtras<'_>,
+) -> ZensimV2Result {
     let FoldWalkExtras {
         mut retention,
         mut mean_offset,
         ref_planes,
+        compute,
     } = extras;
     use crate::feature_v2_stream::StripPlaneProducer;
     // ITEM D: one derivation of WHAT this request computes. Every local
     // below reads from it instead of re-deriving from `toggles`.
-    let compute = ComputeSet::from_toggles(toggles);
+    let compute = compute.unwrap_or_else(|| ComputeSet::from_toggles(toggles));
     let fold_v1 = compute.v1_basic;
     // BLOCK-SKIPPING: a v1-only request computes NOTHING v2-era. Every
     // v2 toggle is forced off in `ComputeSet::from_toggles` rather than
@@ -8832,6 +8912,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 .zip(accums.par_iter_mut())
                 .enumerate()
                 .for_each(|(ch, (scr, acc))| {
+                    if !FULL_RES_XB && scale == 0 && ch != 1 {
+                        return;
+                    }
                     let __t = crate::fold_timing::start();
                     if self_blur {
                         // Phase A is skipped whole; only the wide-window
@@ -8878,6 +8961,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
                 .par_iter_mut()
                 .enumerate()
                 .for_each(|(ch, scr)| {
+                    if !FULL_RES_XB && scale == 0 && ch != 1 {
+                        return;
+                    }
                     let __t = crate::fold_timing::start();
                     stream_phase_a(
                         &producer,
@@ -8898,6 +8984,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             // fan-outs — pure reads of the phase-A scratches + windows.
             if let Some(ret) = retention.as_deref_mut() {
                 for (ch, scr) in scratches.iter().enumerate() {
+                    if !FULL_RES_XB && scale == 0 && ch != 1 {
+                        continue;
+                    }
                     let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
                     ret.copy_strip(
                         &info,
@@ -8912,6 +9001,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             crate::fold_timing::stop(__t_between, crate::fold_timing::Phase::Between, scale);
             let __t_b = crate::fold_timing::start();
             accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
+                if !FULL_RES_XB && scale == 0 && ch != 1 {
+                    return;
+                }
                 let __t = crate::fold_timing::start();
                 let (src_win, dst_win) =
                     stream_windows_shared(&producer, &info, ch, &scratches[ch]);
@@ -8973,6 +9065,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
             let (stash_x_buf, stash_b_buf) = s_rest.split_at_mut(1);
             let y_active = append_cell_active(append_on, 1, scale);
             for ch in [0usize, 2] {
+                if !FULL_RES_XB && scale == 0 {
+                    continue;
+                }
                 let active = append_cell_active(append_on, ch, scale);
                 stream_phase_a(&producer, &info, ch, active, false, v2_blocks, false, scr);
                 if y_active {
@@ -9091,6 +9186,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
 
         for (ch, acc) in accums.iter().enumerate() {
+            if !FULL_RES_XB && scale == 0 && ch != 1 {
+                continue;
+            }
             let out = &mut features_v12
                 [v1_total + scale_base + ch * FEATURES_PER_CHANNEL_V2_TOTAL..]
                 [..FEATURES_PER_CHANNEL_V2_TOTAL];
@@ -9124,6 +9222,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
         // 1e-9-parity pass-A replication instead).
         if let Some(ret) = retention.as_deref_mut() {
             for (ch, acc) in accums.iter().enumerate() {
+                if !FULL_RES_XB && scale == 0 && ch != 1 {
+                    continue;
+                }
                 ret.cells[scale][ch] = AttrCellSums {
                     dense: acc.dense[scale],
                     grad: acc.grad[scale],
@@ -9141,6 +9242,9 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
 
         if fold_v1 {
             for (ch, acc) in accums.iter().enumerate() {
+                if !FULL_RES_XB && scale == 0 && ch != 1 {
+                    continue;
+                }
                 let base = scale * 39 + ch * 13;
                 acc.v1[scale].finalize_into(n, &mut features_v12[base..base + 13]);
                 // FREE EXTRAS ([`V1FreeExtras::RawMoments`]): the v2-era
@@ -16548,6 +16652,7 @@ pub(crate) mod tests {
                 z_parallel,
                 V2NewFeatureToggles::default(),
                 &mut scratch,
+                None,
             )
             .unwrap();
             assert_eq!(mat_f.features().len(), 720);
@@ -16725,6 +16830,53 @@ pub(crate) mod tests {
         }
         fn is_hdr(&self) -> bool {
             true
+        }
+    }
+
+    #[test]
+    fn fullres_y_subset_hdr_retained_features_are_bit_exact() {
+        use crate::feature_plan::Plan;
+        use crate::feature_set_id::SlotSet;
+        let want = SlotSet::from_slots((0..228).filter(|&id| !ComputeSet::is_full_res_xb(id, 4)));
+        let plan = Plan::derive(&want, 228).unwrap();
+        let mut scratch = V2Scratch::new();
+        for (w, h) in [(17, 9), (97, 131)] {
+            let src = vec![[203.0, 170.0, 100.0]; w * h];
+            let mut dst = src.clone();
+            dst[(h / 2) * w + w / 2] = [1000.0, 2000.0, 500.0];
+            let src = NitsImage::from_rgb_nits(&src, w, h);
+            let dst = NitsImage::from_rgb_nits(&dst, w, h);
+            for parallel in [false, true] {
+                let full = compute_folded720_hdr_streaming_impl(
+                    &src,
+                    &dst,
+                    HdrEncoding::Linear,
+                    None,
+                    parallel,
+                    plan.toggles(),
+                    &mut scratch,
+                    None,
+                )
+                .unwrap();
+                // Exercise the automatic declared-linear-HDR route as well.
+                let sub = compute_folded720_streaming_impl(
+                    &src,
+                    &dst,
+                    None,
+                    parallel,
+                    plan.toggles(),
+                    &mut scratch,
+                    Some(plan.compute),
+                )
+                .unwrap();
+                for id in want.iter_slots() {
+                    assert_eq!(
+                        full.features()[id].to_bits(),
+                        sub.features()[id].to_bits(),
+                        "HDR f{id}"
+                    );
+                }
+            }
         }
     }
 

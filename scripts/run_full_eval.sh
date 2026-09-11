@@ -2,6 +2,7 @@
 # One evaluation pipeline: independently reusable verdict and coherence stages.
 # Rust owns scores/statistics; bake_verdict and m3a_sweep own input identities.
 # Usage: run_full_eval.sh [--stage all|verdict|coherence|qualify] bake name [regime] [root]
+# Or: run_full_eval.sh --stage feature-screen recipe.json fresh-output [--cache directory]
 # Existing ZENSIM_M3_ONLY maps to coherence; M3_REUSE requests only VALID reuse.
 # Historical results lacking identities are never a cache hit. Re-run their
 # stage to establish provenance. Every stage is saved atomically, so an
@@ -11,6 +12,11 @@ set -euo pipefail
 STAGE=${ZENSIM_EVAL_STAGE:-all}
 [[ "${ZENSIM_M3_ONLY:-0}" == 1 ]] && STAGE=coherence
 if [[ "${1:-}" == --stage ]]; then STAGE=${2:?}; shift 2; fi
+if [[ "$STAGE" == feature-screen ]]; then
+    # A bounded development recipe; reuses the Rust extractor, trainer,
+    # BakeScorer audit and panel. Never enters the protected full-eval defaults.
+    exec python3 "$(dirname "${BASH_SOURCE[0]}")/lib/feature_screen.py" "$@"
+fi
 case "$STAGE" in all|verdict|coherence|qualify) ;; *) echo "unknown stage: $STAGE" >&2; exit 2 ;; esac
 if [[ $# -lt 2 ]]; then echo "usage: run_full_eval.sh [--stage all|verdict|coherence|qualify] bake name [regime] [root]" >&2; exit 2; fi
 BAKE=$1; NAME=$2; REGIME=${3:-720}

@@ -1,5 +1,28 @@
 # Start here — one target score, one development path
 
+## September 13: optional finest chroma and an eight-second experiment loop
+
+The [channel/filter experiment](benchmarks/fullres_y_subset_2026-09-12.md)
+adds automatic private const-generic omission of full-resolution X/B work for
+eligible basic/peak declared-ID models, retaining full Y and coarse XYB exactly.
+Full228 versus y190 costs fall 40–46% ST and 26–28% MT8 on the registered
+synthetic 1/4MP benchmark. Current named models keep their inputs. Actual
+zenresize main kernels now have coefficient/phase and speed measurements at
+1.5×/2×/3×, including Triangle, RobidouxSharp and Mitchell; these alternate
+pyramids are not yet integrated into scoring or spatial mapping.
+
+`scripts/run_full_eval.sh --stage feature-screen` completes fresh Rev3
+extraction, two Rust H32 fits and final BakeScorer pixel/cache audits in
+8.75 seconds (8.47 with verified cache). The fixed 264-pair JXL packet uses
+only admitted training origins and metric proxy labels. No protected holdout
+scores, corruption/spatial/HDR qualification or competitive-model claim.
+The earlier September 9 statement that no Rev3 model has been trained is now
+superseded by these two **development** bakes; no qualified Rev3 model exists.
+[Commands and limitations](docs/FULL_EVAL.md#five-minute-feature-development-screen-september-13-2026).
+Next expand the fast packet to discriminating corruption/spatial examples,
+and give any filter/scale variant explicit Rust serving/feature identities
+before fitting it. See the report for negative controls and chronology.
+
 > **Framing (user, 2026-09-09, verbatim):** *"zensim is about being a speedy
 > and consistent dial and steering metric with useful spatial steering across
 > both sdr and hdr."* And, on the SSIM precision correction: *"bounded error is

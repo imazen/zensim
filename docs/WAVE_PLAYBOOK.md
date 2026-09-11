@@ -97,6 +97,13 @@ and negative results. Check that record before proposing another implementation.
 
 ## Commands and artifacts
 
+For feature invention, start with the [bounded T2 development screen](FULL_EVAL.md#five-minute-feature-development-screen-september-13-2026):
+`scripts/run_full_eval.sh --stage feature-screen <recipe.json> <fresh-output> [--cache <directory>]`.
+It reuses the Rust extractor, trainer, BakeScorer audit and panel under a
+300-second deadline; it cannot qualify a model. Build its owners once first.
+It passes `zensim_mlp_train --no-auto-eval` to keep protected holdouts out of
+the repeated development loop.
+
 From the repository root, with explicit paths and a compatible feature root:
 
 ```bash

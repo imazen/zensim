@@ -684,6 +684,7 @@ impl<'a> BakeScorer<'a> {
             true,
             plan.toggles(),
             &mut self.pixel_scratch,
+            Some(plan.compute),
         )?;
         self.score_features_with_identity(
             features.features(),

@@ -3862,3 +3862,26 @@ scalar screen passes; native steering remains incomplete. Next implement the
 missing v1 pooled integrands in the existing Rust attribution owner, preserving
 feature arithmetic and explicit discontinuity/coverage limits.
 [Model, controls and delivery](../benchmarks/model_blend_2026-09-08.md).
+
+
+## 2026-09-13 — Rev3 feature subset development packet
+
+Fresh canonical extraction of the September 8 model-preference packet:
+264 pairs, twelve previously admitted T2 training origins, canonical decoded
+PNG bytes and SSIMULACRA2 proxy labels pinned by the committed
+`benchmarks/feature_screen_2026-09-13.json`. No new content or protected labels.
+The existing eight fit origins remain fit; prior calibration origins1214/6064
+become checkpoint dev,8462/9066 inner-test. All are still T2, previously
+examined; this is not an unseen evaluation claim. Features are f64 Parquet
+with source IDs, era `v1screen_rev3`, formula3, producer hash d16a1091.
+Per-run manifests bind original/decoded bytes, splits, extractor/decoder,
+trainer/panel binaries, cache tables and baked output hashes. No Rev1 table
+was relabelled. Two H32 proxy models train and pass final Rust pixel/cache
+audits; they do not qualify a competitive or production model.
+
+Artifacts: `~/work/zensim-validation-2026-09-13/feature-screen-final-cold-complete/`
+and `feature-screen-final-warm/`; earlier CSV-withinref and Snappy-format
+attempts fail before training and remain preserved. A subsequent preliminary
+fit exposed the trainer's historical automatic full-verdict launch: it refused
+Rev3 before corpus scoring. The final recipe passes the new `--no-auto-eval`
+flag; neither final run launches that evaluator. [Recipe and results](../benchmarks/fullres_y_subset_2026-09-12.md).

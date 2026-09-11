@@ -2978,6 +2978,7 @@ mod owner_gates {
         let width = full_width(NS);
         let off = ComputeSet {
             formula_revision: crate::ssim_form::active_revision(),
+            full_res_xb: true,
             v1_basic: false,
             v1_pools: V1PoolsMode::Off,
             v2_blocks: false,

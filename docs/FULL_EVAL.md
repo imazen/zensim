@@ -231,3 +231,37 @@ verdict identity still matches. It clears the previous qualification decision; r
 Product measurement JSON must carry the same `scoring` block as the verdict.
 Changing any verdict input drops these attachments; graft freshly measured evidence
 through `promote_fulleval.py` before qualifying again.
+# Five-minute feature development screen (September 13, 2026)
+
+Use the existing pipeline's `feature-screen` stage for the small T2-only
+experiment recipe. It runs canonical Rust extraction, two H32 fits, final
+`BakeScorer` pixel/cache audits and Rust correlation panels under one 300-second
+deadline. Input, label, binary, producer/revision and split identities bind the
+feature cache. `FAILED_OR_INCOMPLETE` is never a quality pass.
+
+Build once outside the iteration budget:
+
+```bash
+../scripts/run-heavy --mem 16G --jobs 8 cargo build --release -p zensim-validate --bin zensim_mlp_train --bin panel
+../scripts/run-heavy --mem 16G --jobs 8 cargo build --release --manifest-path zensim-bench/Cargo.toml --example extract_features_372col --features training,zen-decode
+```
+
+Run with a fresh output directory (Python requires pyarrow for Parquet I/O):
+
+```bash
+../scripts/run-heavy --mem 16G --jobs 8 scripts/run_full_eval.sh --stage feature-screen benchmarks/feature_screen_2026-09-13.json "$HOME/work/feature-screen-run" --cache "$HOME/work/feature-screen-cache"
+```
+
+The recipe fits to SSIMULACRA2 proxy labels from 264 admitted JXL pairs, using
+eight fit, two checkpoint-selection and two inner-test origins. All twelve
+origins remain T2 training content; the test images were examined in previous
+experiments. This cannot qualify perceptual quality or a release. It reports
+signed/raw correlations separately from the full panel's absolute/logistic
+statistics. Logistic-rescaled errors are not end-user target-score errors.
+Corruption, HDR, spatial intervention, reachable codec targets and full-size
+performance remain explicitly unmeasured in this first packet.
+
+`zensim_mlp_train --no-auto-eval` suppresses its historical automatic protected
+holdout evaluation. This stage always passes it and evaluates only its explicit
+packet. The existing full-eval and qualification stages remain separate.
+See the [measurement and next experiments](../benchmarks/fullres_y_subset_2026-09-12.md).

@@ -19,6 +19,12 @@
 
 ### Changed
 
+- Basic/peak models and research requests that do not read full-resolution X/B
+  now select a Rust const-generic extraction path retaining full-resolution Y
+  and all coarser XYB. Retained feature arithmetic is unchanged. Other feature
+  families conservatively keep full-resolution X/B. Channel subsets use explicit
+  feature IDs; the family-only feature-set shorthand cannot represent them.
+
 - Bake/process revision disagreement is refused by comparing the REVISION, not
   only the luminance form it selects — revisions 2 and 3 both select `Clamp`,
   so the form comparison alone would serve revision 2 coefficients against

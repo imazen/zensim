@@ -190,6 +190,7 @@ impl Plan {
             // `Plan::for_bake`.
             formula_revision: crate::ssim_form::active_revision(),
             v1_basic: touches(ComputeToken::Basic) || v1_pools != V1PoolsMode::Off,
+            full_res_xb: true,
             v1_pools,
             v2_blocks,
             gradient: v2_blocks,
@@ -202,6 +203,11 @@ impl Plan {
             csfw,
             free_extras,
         };
+        let mut requested = requested;
+        requested.full_res_xb = !requested.allows_full_res_y_subset()
+            || want
+                .iter_slots()
+                .any(|id| ComputeSet::is_full_res_xb(id, ns));
         let plan = Plan::normalized(requested, layout);
         if !plan.emit.covers(&want) {
             return Err(PlanError::Uncomputable {
@@ -234,8 +240,9 @@ impl Plan {
     ///
     /// The fix is a fixed point rather than a second rule: normalize through
     /// the toggles the plan would emit, so
-    /// `compute == ComputeSet::from_toggles(plan.toggles())` **by
-    /// construction** ([`toggle_gates::normalization_is_a_fixed_point`]).
+    /// the family compute agrees with `ComputeSet::from_toggles(plan.toggles())`
+    /// ([`toggle_gates::normalization_is_a_fixed_point`]). The later private
+    /// full-resolution channel restriction is preserved separately below.
     /// `emit` only ever WIDENS, so no request that planned before stops
     /// planning, and nothing that was served changes.
     ///
@@ -251,7 +258,10 @@ impl Plan {
             layout: layout.clone(),
             emit: SlotSet::from_slots([]),
         };
-        let compute = ComputeSet::from_toggles(probe.toggles());
+        let mut compute = ComputeSet::from_toggles(probe.toggles());
+        // Channel selection is private plan data, separate from public family
+        // toggles. Normalization preserves it only for supported families.
+        compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         // `emit` is in ID space and is intersected with what the LAYOUT
         // carries: a dense layout that omits an id the walk computes does not
         // emit it, and saying otherwise would make `covers` lie.
@@ -317,6 +327,7 @@ impl Plan {
         let compute = ComputeSet {
             formula_revision: crate::ssim_form::active_revision(),
             v1_basic: true,
+            full_res_xb: true,
             v1_pools: pools,
             v2_blocks: false,
             gradient: false,
@@ -434,6 +445,7 @@ impl Plan {
             // operation, and both hide the question.
             formula_revision: a.formula_revision,
             v1_basic: a.v1_basic || b.v1_basic,
+            full_res_xb: a.full_res_xb || b.full_res_xb,
             v1_pools: pools_union(a.v1_pools, b.v1_pools),
             v2_blocks: a.v2_blocks || b.v2_blocks,
             gradient: a.gradient || b.gradient,
@@ -550,6 +562,100 @@ pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fullres_y_subset_plan_restores_chroma_for_any_consumer() {
+        let want = SlotSet::from_slots((0..228).filter(|&id| !ComputeSet::is_full_res_xb(id, 4)));
+        let y = Plan::derive(&want, 228).unwrap();
+        assert!(!y.compute.full_res_xb);
+        assert_eq!(y.emit, want);
+        assert_eq!(Plan::normalized(y.compute, y.layout.clone()), y);
+        assert!(!Plan::widened_to_identity(&y, 372).compute.full_res_xb);
+        for id in [0, 26, 156, 168] {
+            let xb = Plan::derive(&SlotSet::from_slots([id]), 228).unwrap();
+            let union = y.union(&xb);
+            assert!(union.compute.full_res_xb);
+            assert!(union.covers(&want.union(&SlotSet::from_slots([id]))));
+        }
+        // Wider owning families conservatively disable this specialization.
+        for id in [228, 372, 720, 924] {
+            let wider = Plan::derive(&want.union(&SlotSet::from_slots([id])), 944).unwrap();
+            assert!(wider.compute.full_res_xb);
+        }
+    }
+
+    #[test]
+    fn fullres_y_subset_retained_features_are_bit_exact() {
+        use crate::RgbSlice;
+        use crate::feature_v2::{V2Scratch, compute_folded_v1_372_streaming_impl};
+        let want = SlotSet::from_slots((0..228).filter(|&id| !ComputeSet::is_full_res_xb(id, 4)));
+        let y = Plan::derive(&want, 228).unwrap();
+        let full = Plan::v1(V1PoolsMode::Peaks, 228);
+        let mut scratch = V2Scratch::new();
+        for (w, h) in [(17, 9), (64, 64), (97, 131), (257, 193)] {
+            let src = vec![[127u8; 3]; w * h];
+            for kind in 0..4 {
+                let mut dst = src.clone();
+                match kind {
+                    1 => {
+                        dst[(h / 2) * w + w / 2] = [255; 3];
+                        dst[0] = [0; 3];
+                    }
+                    2 => {
+                        for (i, p) in dst.iter_mut().enumerate() {
+                            *p = if (i % w + i / w) % 2 == 0 {
+                                [100; 3]
+                            } else {
+                                [154; 3]
+                            };
+                        }
+                    }
+                    3 => {
+                        for (i, p) in dst.iter_mut().enumerate() {
+                            if (i % w) % 8 == 0 || (i / w) % 8 == 0 {
+                                *p = [160, 80, 190];
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                for parallel in [false, true] {
+                    let mut run = |plan: &Plan| {
+                        compute_folded_v1_372_streaming_impl(
+                            &RgbSlice::new(&src, w, h),
+                            &RgbSlice::new(&dst, w, h),
+                            None,
+                            parallel,
+                            &mut scratch,
+                            Some(plan),
+                            #[cfg(feature = "custom-profiles")]
+                            None,
+                        )
+                        .unwrap()
+                    };
+                    let (a, ma) = run(&full);
+                    let (b, mb) = run(&y);
+                    assert_eq!(ma, mb, "raw channel means must remain intact");
+                    for id in want.iter_slots() {
+                        assert_eq!(
+                            a[id].to_bits(),
+                            b[id].to_bits(),
+                            "{w}x{h} kind={kind} parallel={parallel} f{id}"
+                        );
+                    }
+                    for id in (0..228).filter(|&id| !want.contains(id)) {
+                        assert_eq!(b[id], 0.0, "uncomputed f{id}");
+                    }
+                    if kind != 0 {
+                        assert!(
+                            (13..26).any(|id| b[id] != 0.0),
+                            "Y must see luma corruption"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     use super::*;
 
     fn slots(r: impl IntoIterator<Item = (usize, usize)>) -> SlotSet {
@@ -965,6 +1071,7 @@ pub(crate) mod servability_census {
                     ..Default::default()
                 },
                 &mut V2Scratch::new(),
+                None,
             )
             .unwrap();
             assert_eq!(full.features().len(), 956);

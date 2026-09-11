@@ -138,6 +138,12 @@ struct Args {
     #[arg(long, value_name = "REASON")]
     historical_replay: Option<String>,
 
+    /// Do not launch the sibling bake_verdict after fitting. Development
+    /// screens evaluate explicit T2 inputs through the final BakeScorer and
+    /// must not touch protected holdouts on every experiment iteration.
+    #[arg(long)]
+    no_auto_eval: bool,
+
     /// Number of hidden units in the single hidden layer. Default 128
     /// matches the V0_16 ship recipe. Other tested architectures:
     /// h=32 (V0_4 placeholder, too small), h=64 (V0_5, AIC-4-friendly
@@ -4828,7 +4834,9 @@ fn main() {
         .as_ref()
         .and_then(|p| p.parent())
         .map(|dir| dir.join("bake_verdict"));
-    if let Some(ref vb) = verdict_bin {
+    if let Some(ref vb) = verdict_bin
+        && !args.no_auto_eval
+    {
         if vb.exists() {
             println!("\n--- bake_verdict (auto-eval) ---");
             let mut cmd = std::process::Command::new(vb);

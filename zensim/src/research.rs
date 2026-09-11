@@ -53,11 +53,11 @@
 //! pool sizes 1/2/3/8/16 **and** equal to the serial answer — the standard
 //! `v1_feature_width_pure_function.rs` already holds the v1 extractor to.
 
+use crate::ZensimError;
 use crate::feature_defs::{self, Channel, CostClass, RevisionStatus};
 use crate::feature_plan::{Plan, PlanError};
 use crate::feature_set_id::{ComputeToken, FeatureSetId, SlotSet};
 use crate::source::ImageSource;
-use crate::{Zensim, ZensimError, ZensimProfile};
 
 /// The build commit this binary was compiled from, when the build environment
 /// recorded one (`ZENSIM_BUILD_COMMIT`).
@@ -809,8 +809,8 @@ fn provenance_for(plan: &Plan, n_scales: usize) -> Vec<FeatureProvenance> {
 
 /// Run a research extraction over one SDR pair.
 ///
-/// The walk is `Zensim::compute_folded720_features_streaming` driven by the
-/// plan's own toggles — the SAME entry production scores through, so
+/// The walk is the same folded owner as `Zensim::compute_folded720_features_streaming`,
+/// driven by the complete plan (including its channel selection), so
 /// bit-exact parity on every shared id is a property of the code rather than
 /// of a second implementation kept in step by hand.
 ///
@@ -827,12 +827,18 @@ pub fn extract(
     let plan = Plan::derive_with_layout(&req.want, req.layout())?;
     check_revision(req, &plan.emit)?;
 
-    let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(req.parallel);
     let mut scratch = crate::feature_v2::V2Scratch::new();
     let toggles = plan.toggles();
-    let result = z
-        .compute_folded720_features_streaming(source, distorted, toggles, &mut scratch)
-        .map_err(ResearchError::Compute)?;
+    let result = crate::feature_v2::compute_folded720_streaming_impl(
+        source,
+        distorted,
+        Some(120_000_000),
+        req.parallel,
+        toggles,
+        &mut scratch,
+        Some(plan.compute),
+    )
+    .map_err(ResearchError::Compute)?;
 
     // GATHER into the declared LAYOUT. The walk emits at its own identity
     // width; the layout says which id lives at which position, so a narrower

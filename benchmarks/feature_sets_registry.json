@@ -168,6 +168,13 @@
    "rev2_era_count_caveat": "Same as v1postc_rev2: AS EXTRACTED this root predates era `v1detroot` (F18), registered on FormulaRevision::Rev2 on 2026-09-06. At 944 that era moves 156 slots -- the 144 v1 L4/L8 pools plus the 12 v2 ssim_dev4 cells -- by up to one ULP each, so a fresh ZENSIM_FORMULA_REV=2 extraction will NOT reproduce these bytes. Use ZENSIM_ROOT_FORM=libm to reproduce them. See benchmarks/libc_determinism_2026-09-06.md.",
    "produced_by": "zenfleet JobKind::Feature, image ghcr.io/imazen/zenfleet-worker:exec-featrev2glibc-88477e38",
    "formula_revision": 2
+  },
+  "v1screen_rev3": {
+   "build_commit": "see per-run binary/source hashes",
+   "root": null,
+   "label": "September 13 Rev3 canonical 372-column feature experiment packet",
+   "formula_revision": 3,
+   "note": "Fresh extract_features_372col canonical streaming extraction; input and decoder hashes recorded per run. No relabelled Rev1 rows. Research speed screen only; see benchmarks/fullres_y_subset_2026-09-12.md."
   }
  },
  "sets": {
@@ -437,6 +444,17 @@
    "kind": "set",
    "legacy_name": "944",
    "evidence": "zenfleet Feature run rev2feat944-20260906 over the same 8 staged eval corpora"
+  },
+  "basic+peaks+masked+iw@w372/v1screen_rev3": {
+   "compute": "basic+peaks+masked+iw",
+   "layout": 372,
+   "era": "v1screen_rev3",
+   "slots": "0-371",
+   "slots_hash8": "d16a1091",
+   "n_slots": 372,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/fullres_y_subset_2026-09-12.md; scripts/run_full_eval.sh --stage feature-screen"
   }
  },
  "roots": {

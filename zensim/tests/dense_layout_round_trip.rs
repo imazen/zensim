@@ -283,3 +283,102 @@ fn a_dense_bake_refuses_a_feature_vector_that_does_not_reach_its_ids() {
         "the gradient must be nonzero somewhere, else the control proves nothing"
     );
 }
+
+/// A model can select the full-resolution Y subset without a public toggle.
+/// Compare pixel serving and research extraction to full-feature inference.
+#[test]
+fn fullres_y_subset_bake_matches_full_inputs() {
+    let ids: Vec<usize> = (0..228)
+        .filter(|&i| !matches!(i, 0..=12 | 26..=38 | 156..=161 | 168..=173))
+        .collect();
+    let n = ids.len();
+    let recipe = serde_json::json!({
+        "schema_hash": 1, "scaler_mean": vec![0.0; n], "scaler_scale": vec![1.0; n],
+        "metadata": [
+            {"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join("\n")},
+            {"key":"zentrain.formula_revision","type":"utf8","text":std::env::var("ZENSIM_FORMULA_REV").unwrap_or_else(|_| "1".into())}
+        ],
+        "layers": [{"in_dim": n, "out_dim": 1, "activation":"identity", "dtype":"f32",
+                    "weights": (0..n).map(|i| (i+1) as f32 / 1000.0).collect::<Vec<_>>(), "biases":[0.0]}]
+    });
+    let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+    let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+    let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+    let (w, h) = (97, 131);
+    let src = vec![[127u8; 3]; w * h];
+    let mut dst = src.clone();
+    for (i, p) in dst.iter_mut().enumerate() {
+        if (i % w) % 8 == 0 || (i / w) % 8 == 0 {
+            *p = [165, 90, 180];
+        }
+    }
+    let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+    let full = research::extract(
+        &research::Request::for_slots(SlotSet::from_slots(0..228), 228).with_parallel(true),
+        &rs,
+        &ds,
+    )
+    .unwrap();
+    let sub = research::extract(
+        &research::Request::for_slots(SlotSet::from_slots(ids.iter().copied()), 228)
+            .with_parallel(true),
+        &rs,
+        &ds,
+    )
+    .unwrap();
+    let served = scorer.compute(&rs, &ds, None).unwrap();
+    for &id in &ids {
+        assert_eq!(
+            served.features()[id].to_bits(),
+            full.values()[id].to_bits(),
+            "served f{id}"
+        );
+        assert_eq!(
+            sub.values()[id].to_bits(),
+            full.values()[id].to_bits(),
+            "research f{id}"
+        );
+    }
+    let expected = scorer
+        .score_features(full.values(), w as u32, h as u32, None)
+        .unwrap();
+    assert_eq!(served.score().to_bits(), expected.to_bits());
+    let pre = scorer.precompute_reference(&rs).unwrap();
+    let mapped = scorer
+        .compute_with_ref_and_attribution(
+            &rs,
+            &pre,
+            &ds,
+            None,
+            &mut zensim::Fused944Session::new(),
+            8,
+        )
+        .unwrap();
+    assert_eq!(mapped.result().score().to_bits(), served.score().to_bits());
+    for &id in &ids {
+        assert_eq!(
+            mapped.result().features()[id].to_bits(),
+            full.values()[id].to_bits(),
+            "mapped f{id}"
+        );
+    }
+    // Max features have no additive density; retain the owner's explicit
+    // coverage report instead of claiming the whole 190-input model maps.
+    assert!(
+        mapped
+            .unsupported_feature_ids()
+            .iter()
+            .all(|id| ids.contains(id))
+    );
+    eprintln!(
+        "subset density omissions: {:?}; refinement omissions: {:?}",
+        mapped.unsupported_feature_ids(),
+        mapped.unsupported_refinement_feature_ids()
+    );
+    assert_eq!(sub.emitted(), &SlotSet::from_slots(ids.iter().copied()));
+    assert!(
+        sub.feature_set_id().is_none(),
+        "family-only shorthand cannot encode this subset"
+    );
+    assert_eq!(scorer.compute(&rs, &rs, None).unwrap().score(), 100.0);
+}
