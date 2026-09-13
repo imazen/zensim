@@ -324,6 +324,77 @@ fn subset_bench(sizes: &[usize]) {
     }
 }
 
+/// Complete public-API model comparisons, including optional cached spatial
+/// maps. Manifest rows are `name<TAB>bake_path`, without a header.
+fn sampling_models_bench(sizes: &[usize], manifest: &str) {
+    let models: Vec<(String, &'static zenpredict::Model)> = std::fs::read_to_string(manifest)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let (name, path) = line.split_once('\t').expect("name and bake path");
+            let bytes = std::fs::read(path).unwrap();
+            let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+            (name.to_string(), &*Box::leak(Box::new(model)))
+        })
+        .collect();
+    let spatial = std::env::var_os("ZEN_XP_SPATIAL").is_some();
+    let result = zenbench::run_gated(zenbench::GateConfig::disabled(), |suite| {
+        for &n in sizes {
+            let (src, dst) = test_pair(n, n);
+            let src: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
+            let dst: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
+            suite.compare(
+                format!(
+                    "sampling_{}_{n}",
+                    if spatial { "spatial" } else { "scalar" }
+                ),
+                |group| {
+                    let (max_r, min_r, wall_s) = bench_budget();
+                    group
+                        .config()
+                        .max_rounds(max_r)
+                        .min_rounds(min_r)
+                        .max_wall_time(std::time::Duration::from_secs(wall_s));
+                    for (name, model) in &models {
+                        let model = *model;
+                        group.bench(name.clone(), move |b| {
+                            let mut scorer = zensim::BakeScorer::new(model).unwrap();
+                            let rs = RgbSlice::new(src, n, n);
+                            let ds = RgbSlice::new(dst, n, n);
+                            if spatial {
+                                let pre = scorer.precompute_reference(&rs).unwrap();
+                                let mut session = zensim::Fused944Session::new();
+                                b.iter(move || {
+                                    let r = scorer
+                                        .compute_with_ref_and_attribution(
+                                            &rs,
+                                            &pre,
+                                            &ds,
+                                            None,
+                                            &mut session,
+                                            8,
+                                        )
+                                        .unwrap();
+                                    zenbench::black_box(r.refinement_gain(0, 0, n / 2, n / 2));
+                                });
+                            } else {
+                                b.iter(move || {
+                                    zenbench::black_box(
+                                        scorer.compute(&rs, &ds, None).unwrap().score(),
+                                    );
+                                });
+                            }
+                        });
+                    }
+                },
+            );
+        }
+    });
+    if let Ok(path) = std::env::var("ZENBENCH_RESULT_PATH") {
+        result.save(path).unwrap();
+    }
+}
+
 /// Kernel study uses upstream zenresize's own coefficient tables and float
 /// resizer. No copied filters, RGB transfer, quantization, or model scoring.
 fn resize_filter_bench(sizes: &[usize]) {
@@ -470,6 +541,10 @@ fn main() {
         .ok()
         .map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect())
         .unwrap_or_else(|| vec![576, 1152, 2304]);
+    if let Ok(manifest) = std::env::var("ZEN_XP_MODELS") {
+        sampling_models_bench(&sizes, &manifest);
+        return;
+    }
     if std::env::var_os("ZEN_XP_FILTERS").is_some() {
         resize_filter_bench(&sizes);
         return;

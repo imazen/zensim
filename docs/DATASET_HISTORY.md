@@ -7,6 +7,14 @@ rest on a hidden bug, confound, or invalid measurement. This doc exists so we do
 re-add a dataset a confound already poisoned, re-run a dead-end, or trust a retracted
 claim.
 
+**September 13 sampling follow-up:**
+[20-layout/60-fit screen](../benchmarks/sampling_serving_2026-09-13.md),
+using only the fixed T2 JXL proxy packet and reused training corruption PNGs.
+Explicit sampling contracts are served through Rust BakeScorer. All layouts
+have failed spatial cells; no qualification or protected-data evaluation.
+[Legacy coarse-feature audit](../benchmarks/coarse_legacy_features_2026-09-13.md)
+separates September shipped read sets from August measured contribution tables.
+
 **Status flags** on each verdict:
 - **STANDS** — verified, still correct.
 - **RE-FRAMED** — the finding survived but the *stated reason* was wrong/incomplete.

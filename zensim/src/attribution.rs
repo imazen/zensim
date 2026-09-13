@@ -3464,6 +3464,7 @@ fn retain_max_removals(
     src: [&[f32]; 3],
     dst: [&[f32]; 3],
     ret: &crate::streaming::AttrScaleRetention,
+    sampling: Option<&crate::sampling::Geometry>,
 ) {
     if !(0..3).any(|c| {
         (0..3).any(|slot| {
@@ -3474,8 +3475,14 @@ fn retain_max_removals(
     }) {
         return;
     }
-    let xs = max_axis_footprints(logical_width, sw, scale);
-    let ys = max_axis_footprints(logical_height, sh, scale);
+    let xs = sampling.map_or_else(
+        || max_axis_footprints(logical_width, sw, scale),
+        |s| s.footprints(0, scale),
+    );
+    let ys = sampling.map_or_else(
+        || max_axis_footprints(logical_height, sh, scale),
+        |s| s.footprints(1, scale),
+    );
     for c in 0..3 {
         let base = (scale * 3 + c) * 6;
         let mut maps: [Option<MaxRemoval>; 3] = core::array::from_fn(|slot| {
@@ -4031,6 +4038,7 @@ impl crate::metric::Zensim {
         s: &[f64],
         bin: usize,
     ) -> Result<(crate::metric::ZensimResult, AttributionResult), ZensimError> {
+        validate_ref_match(precomputed, distorted)?;
         assert!(bin > 0, "bin must be non-zero");
         if bin == 1 {
             return self.compute_with_ref_score_and_attribution(precomputed, distorted, s);
@@ -4092,6 +4100,7 @@ impl crate::metric::Zensim {
         s: &[f64],
         prime: Option<&mut AttributionSession>,
     ) -> Result<FusedBasicCanvas, ZensimError> {
+        validate_ref_match(precomputed, distorted)?;
         let (_, comp_pw, comp_h) = precomputed.scale(0);
         let mut canvas = vec![0.0f32; comp_pw * comp_h];
         let (result, t_pipe_ms, combine_ms) = self.fused_basic_into(
@@ -4135,7 +4144,7 @@ impl crate::metric::Zensim {
         if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
-        validate_ref_match(precomputed, distorted)?;
+        crate::metric::validate_ref_dimensions(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
         let config = config_from_params(params, self.parallel());
         crate::ssim_form::check_route(&config)?;
@@ -4174,7 +4183,17 @@ impl crate::metric::Zensim {
             let n_f = n as f64;
             if let Some(output) = max_removals.as_deref_mut() {
                 retain_max_removals(
-                    output, s_peaks, scale, width, height, sw, sh, src_planes, dst_planes, ret,
+                    output,
+                    s_peaks,
+                    scale,
+                    width,
+                    height,
+                    sw,
+                    sh,
+                    src_planes,
+                    dst_planes,
+                    ret,
+                    precomputed.sampling_geometry.as_ref(),
                 );
             }
             id_plane[..n].fill(0.0);
@@ -4308,7 +4327,12 @@ impl crate::metric::Zensim {
                         &mut spread_out,
                         config.allow_multithreading && n >= crate::blur::SPREAD_PARALLEL_MIN_N,
                     );
-                    accum.add_scale_plane_f32(&id_plane[..n], sw, sh, 1usize << scale);
+                    if let Some(geometry) = &precomputed.sampling_geometry {
+                        let projected = geometry.project(&id_plane[..n], scale);
+                        accum.add_scale_plane_f32(&projected, width, height, 1);
+                    } else {
+                        accum.add_scale_plane_f32(&id_plane[..n], sw, sh, 1usize << scale);
+                    }
                 }
             }
             combine_ms.set(combine_ms.get() + t_c.elapsed().as_secs_f64() * 1e3);
@@ -4325,13 +4349,15 @@ impl crate::metric::Zensim {
         // Same real-scoring step as `compute_with_ref_and_diffmap` — the
         // scalar golden gate (`fused_score_bit_matches_diffmap_path`) holds
         // this path bit-identical to the fold-diffmap call's score.
-        crate::metric::apply_mlp_scoring_with_codec(
-            &mut result,
-            params,
-            width as u32,
-            height as u32,
-            None,
-        )?;
+        if precomputed.sampling.is_none() {
+            crate::metric::apply_mlp_scoring_with_codec(
+                &mut result,
+                params,
+                width as u32,
+                height as u32,
+                None,
+            )?;
+        }
 
         let t_pipe = t_all.elapsed().as_secs_f64() * 1e3;
         Ok((result, t_pipe, combine_ms.get()))
@@ -4797,6 +4823,7 @@ impl crate::metric::Zensim {
         ),
         ZensimError,
     > {
+        validate_ref_match(precomputed, distorted)?;
         assert!(bin > 0, "bin must be non-zero");
         if bin == 1 {
             return self.compute_folded944_score_and_attribution(

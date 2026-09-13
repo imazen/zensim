@@ -143,6 +143,7 @@ def main():
                           "inputs": recipe["inputs_sha256"], "labels": recipe["labels_sha256"],
                           "extractor": result["binaries"]["extractor"]["sha256"],
                           "revision": recipe["formula_revision"], "producer": recipe["feature_set_id"],
+                          "sampling": recipe.get("sampling"),
                           "roles": recipe["roles"]}
         cache_key = hashlib.sha256(json.dumps(cache_identity, sort_keys=True).encode()).hexdigest()
         cache = (args.cache.resolve() if args.cache else out / "cache") / cache_key
@@ -158,7 +159,11 @@ def main():
         else:
             raw = out / "features.csv"
             run("extract", [bins["extractor"], "--corpus", "pairs-tsv", "--path", pairs,
-                            "--out", raw])
+                            "--out", raw] + (["--sampling", recipe["sampling"]] if recipe.get("sampling") else []))
+            if recipe.get("sampling"):
+                emitted = json.loads(Path(str(raw) + ".manifest.json").read_text())
+                if emitted["feature_set_id"] != recipe["feature_set_id"] or emitted["sampling"] != recipe["sampling"]:
+                    raise ValueError("sampling producer declaration differs from recipe")
             with raw.open() as f:
                 reader = csv.DictReader(f)
                 header = reader.fieldnames
@@ -179,6 +184,7 @@ def main():
             write_json(manifest_path, {"cache_identity": cache_identity,
                        "feature_set_id": recipe["feature_set_id"],
                        "formula_revision": recipe["formula_revision"],
+                       "sampling": recipe.get("sampling"),
                        "decoder_era": "canonical imazen PNG decode; extractor binary pinned",
                        "files": {p.name: {"sha256": sha(p)} for p in tables.values()}})
             result["cache_hit"] = False
@@ -194,13 +200,14 @@ def main():
                 "--target-column", recipe["target"], "--target-scale", str(recipe["target_scale"]),
                 "--hidden", str(recipe["hidden"]), "--epochs", str(recipe["epochs"]),
                 "--pairs-per-epoch", str(recipe["pairs_per_epoch"]),
-                "--seed", str(recipe["seed"]), "--pair-sampling", "stratified",
+                "--seed", str(recipe.get("arm_seeds", {}).get(name, recipe["seed"])), "--pair-sampling", "stratified",
                 "--max-features", "372", "--keep-features", ",".join(map(str, ids)),
                 "--mse-weight", "1", "--out-dtype", "f32", "--log-every", "20",
                 "--no-auto-eval", "--out", bake])
             audit = out / (name + ".audit.jsonl")
             run(name + "-serve", [bins["extractor"], "--corpus", "pairs-tsv", "--path", pairs,
-                "--out", out / (name + ".audit.csv"), "--audit-jsonl", audit, "--audit-bake", bake])
+                "--out", out / (name + ".audit.csv"), "--audit-jsonl", audit, "--audit-bake", bake]
+                + (["--sampling", recipe["sampling"]] if recipe.get("sampling") else []))
             records = [json.loads(line) for line in audit.read_text().splitlines()]
             if len(records) != len(labels):
                 raise ValueError("incomplete final-bake pixel audit")

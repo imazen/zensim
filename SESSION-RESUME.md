@@ -1,5 +1,26 @@
 # Start here — one target score, one development path
 
+## September 13 follow-up: filters served, fitted and spatially tested
+
+The [integrated sampling screen](benchmarks/sampling_serving_2026-09-13.md)
+supersedes the filter-only status below. All 18 Triangle/Mitchell/RobidouxSharp
+contracts (1.5×/2×/3×, full-Y or downsampled-XYB), plus two box controls,
+are now executable through BakeScorer with explicit sampling metadata.
+Sixty fresh Rust fits and public-API audits fit inside five minutes on the
+fixed T2 proxy packet. Actual block replacements test spatial predictions;
+none of these models is qualified, and impulse/color-swap failures remain.
+
+Keep fine luma. The user's proposed coarse-only expensive features have
+[legacy evidence](benchmarks/coarse_legacy_features_2026-09-13.md): B and
+944 models read useful quarter/eighth-scale extras. The next bounded task is
+private per-scale family dispatch, starting with coarse masked/IW on the
+box/Y190 control, then coarse gradient/blockiness/append families. Merely
+choosing coarse IDs still wakes global family computation today. Preserve
+IDs and values, retrain, and measure actual skipped work and spatial edits.
+
+Artifacts: `~/work/zensim-validation-2026-09-13/sampling/` under the existing
+work share; full report and compact data are committed. No named bake changed.
+
 ## September 13: optional finest chroma and an eight-second experiment loop
 
 The [channel/filter experiment](benchmarks/fullres_y_subset_2026-09-12.md)

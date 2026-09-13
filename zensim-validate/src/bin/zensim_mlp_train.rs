@@ -4540,6 +4540,12 @@ fn main() {
     } else {
         bake_bytes
     };
+    let bake_bytes = if let Some(sampling) = table_admission["sampling"].as_str() {
+        zenpredict_bake::append_metadata_utf8(&bake_bytes, "zentrain.sampling", sampling)
+            .expect("sampling metadata")
+    } else {
+        bake_bytes
+    };
     // FEATURE-SET ID (docs/FEATURE_SET_IDS.md §6.1): stamp the bake with the
     // PRODUCER id of the tables it TRAINED on, so a later verdict can say
     // which extractor era its coefficients were fit against instead of

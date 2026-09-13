@@ -1,0 +1,1841 @@
+{
+  "rows": [
+    {
+      "model": "A",
+      "bake": "v47_strict_qat_native_byid_2026-09-06.bin",
+      "bake_sha256": "de0ddb3dc78b8b0a4fc99645f949acb73e7e08bec9ed4d86793605d882e9176a",
+      "scales": [
+        {
+          "scale": 0,
+          "live": 30,
+          "sum_norm": 1.395646450989035,
+          "top": [
+            {
+              "feature_id": 235,
+              "layer0_l2_norm": 0.20864067157112628,
+              "slot": "235",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "1",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 232,
+              "layer0_l2_norm": 0.17890186849750764,
+              "slot": "232",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "0",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 236,
+              "layer0_l2_norm": 0.15571962219751645,
+              "slot": "236",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "1",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 307,
+              "layer0_l2_norm": 0.14038810091608794,
+              "slot": "307",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "1",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 310,
+              "layer0_l2_norm": 0.11625645576525505,
+              "slot": "310",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "1",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 311,
+              "layer0_l2_norm": 0.10657899231831137,
+              "slot": "311",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "1",
+              "name": "mse",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 308,
+              "layer0_l2_norm": 0.09336752745083116,
+              "slot": "308",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "1",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 304,
+              "layer0_l2_norm": 0.07558373046333963,
+              "slot": "304",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "0",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            }
+          ]
+        },
+        {
+          "scale": 1,
+          "live": 32,
+          "sum_norm": 1.7792866531108427,
+          "top": [
+            {
+              "feature_id": 252,
+              "layer0_l2_norm": 0.1948117753321653,
+              "slot": "252",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "1",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 250,
+              "layer0_l2_norm": 0.1565722123481861,
+              "slot": "250",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "0",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 254,
+              "layer0_l2_norm": 0.1422865332640404,
+              "slot": "254",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "1",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 253,
+              "layer0_l2_norm": 0.11651470325912179,
+              "slot": "253",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "1",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 324,
+              "layer0_l2_norm": 0.11519232172320777,
+              "slot": "324",
+              "block": "v1_iw",
+              "scale": "1",
+              "channel": "1",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 331,
+              "layer0_l2_norm": 0.09888987110959774,
+              "slot": "331",
+              "block": "v1_iw",
+              "scale": "1",
+              "channel": "2",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 326,
+              "layer0_l2_norm": 0.09009456252934649,
+              "slot": "326",
+              "block": "v1_iw",
+              "scale": "1",
+              "channel": "1",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 327,
+              "layer0_l2_norm": 0.0899956678462253,
+              "slot": "327",
+              "block": "v1_iw",
+              "scale": "1",
+              "channel": "1",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            }
+          ]
+        },
+        {
+          "scale": 2,
+          "live": 32,
+          "sum_norm": 1.766300897670215,
+          "top": [
+            {
+              "feature_id": 352,
+              "layer0_l2_norm": 0.14238755345137166,
+              "slot": "352",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "2",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 270,
+              "layer0_l2_norm": 0.14233560311944735,
+              "slot": "270",
+              "block": "v1_masked",
+              "scale": "2",
+              "channel": "1",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 274,
+              "layer0_l2_norm": 0.1363603697246901,
+              "slot": "274",
+              "block": "v1_masked",
+              "scale": "2",
+              "channel": "1",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 346,
+              "layer0_l2_norm": 0.1296217309259988,
+              "slot": "346",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "1",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 349,
+              "layer0_l2_norm": 0.12737677477232134,
+              "slot": "349",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "2",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 342,
+              "layer0_l2_norm": 0.11983084404633636,
+              "slot": "342",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "1",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 344,
+              "layer0_l2_norm": 0.10875293855076994,
+              "slot": "344",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "1",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 343,
+              "layer0_l2_norm": 0.08423758279049154,
+              "slot": "343",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "1",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            }
+          ]
+        },
+        {
+          "scale": 3,
+          "live": 34,
+          "sum_norm": 2.251517588991038,
+          "top": [
+            {
+              "feature_id": 294,
+              "layer0_l2_norm": 0.21258156671419773,
+              "slot": "294",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "2",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 357,
+              "layer0_l2_norm": 0.2008403007969491,
+              "slot": "357",
+              "block": "v1_iw",
+              "scale": "3",
+              "channel": "0",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 296,
+              "layer0_l2_norm": 0.16290505013131804,
+              "slot": "296",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "2",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 365,
+              "layer0_l2_norm": 0.13623045709678405,
+              "slot": "365",
+              "block": "v1_iw",
+              "scale": "3",
+              "channel": "1",
+              "name": "mse",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 367,
+              "layer0_l2_norm": 0.11825656422880307,
+              "slot": "367",
+              "block": "v1_iw",
+              "scale": "3",
+              "channel": "2",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 295,
+              "layer0_l2_norm": 0.10504551327677612,
+              "slot": "295",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "2",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 298,
+              "layer0_l2_norm": 0.09722900390625,
+              "slot": "298",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "2",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 361,
+              "layer0_l2_norm": 0.09086681681164449,
+              "slot": "361",
+              "block": "v1_iw",
+              "scale": "3",
+              "channel": "1",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "model": "B",
+      "bake": "b_sdr_linear_cid80_inclwinsor_dense_dial_byid_2026-09-06.bin",
+      "bake_sha256": "a96a5a66cd16282ded84580c37207b403334f1af069c924d9883346d23941276",
+      "scales": [
+        {
+          "scale": 0,
+          "live": 8,
+          "sum_norm": 169.23760986328125,
+          "top": [
+            {
+              "feature_id": 231,
+              "layer0_l2_norm": 53.65625,
+              "slot": "231",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "0",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 243,
+              "layer0_l2_norm": 41.75,
+              "slot": "243",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "2",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 237,
+              "layer0_l2_norm": 32.5,
+              "slot": "237",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "1",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 303,
+              "layer0_l2_norm": 18.4375,
+              "slot": "303",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "0",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 315,
+              "layer0_l2_norm": 12.71875,
+              "slot": "315",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "2",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 311,
+              "layer0_l2_norm": 9.3828125,
+              "slot": "311",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "1",
+              "name": "mse",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 309,
+              "layer0_l2_norm": 0.70947265625,
+              "slot": "309",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "1",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 235,
+              "layer0_l2_norm": 0.08282470703125,
+              "slot": "235",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "1",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            }
+          ]
+        },
+        {
+          "scale": 1,
+          "live": 6,
+          "sum_norm": 105.3037109375,
+          "top": [
+            {
+              "feature_id": 323,
+              "layer0_l2_norm": 32.15625,
+              "slot": "323",
+              "block": "v1_iw",
+              "scale": "1",
+              "channel": "0",
+              "name": "mse",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 333,
+              "layer0_l2_norm": 22.0625,
+              "slot": "333",
+              "block": "v1_iw",
+              "scale": "1",
+              "channel": "2",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 261,
+              "layer0_l2_norm": 17.5,
+              "slot": "261",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "2",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 249,
+              "layer0_l2_norm": 17.078125,
+              "slot": "249",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "0",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 321,
+              "layer0_l2_norm": 14.953125,
+              "slot": "321",
+              "block": "v1_iw",
+              "scale": "1",
+              "channel": "0",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 252,
+              "layer0_l2_norm": 1.5537109375,
+              "slot": "252",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "1",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            }
+          ]
+        },
+        {
+          "scale": 2,
+          "live": 5,
+          "sum_norm": 219.673828125,
+          "top": [
+            {
+              "feature_id": 353,
+              "layer0_l2_norm": 182.375,
+              "slot": "353",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "2",
+              "name": "mse",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 267,
+              "layer0_l2_norm": 21.171875,
+              "slot": "267",
+              "block": "v1_masked",
+              "scale": "2",
+              "channel": "0",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 279,
+              "layer0_l2_norm": 8.7734375,
+              "slot": "279",
+              "block": "v1_masked",
+              "scale": "2",
+              "channel": "2",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 351,
+              "layer0_l2_norm": 5.921875,
+              "slot": "351",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "2",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 339,
+              "layer0_l2_norm": 1.431640625,
+              "slot": "339",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "0",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            }
+          ]
+        },
+        {
+          "scale": 3,
+          "live": 4,
+          "sum_norm": 36.775390625,
+          "top": [
+            {
+              "feature_id": 297,
+              "layer0_l2_norm": 17.984375,
+              "slot": "297",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "2",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 369,
+              "layer0_l2_norm": 10.9453125,
+              "slot": "369",
+              "block": "v1_iw",
+              "scale": "3",
+              "channel": "2",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 363,
+              "layer0_l2_norm": 4.7265625,
+              "slot": "363",
+              "block": "v1_iw",
+              "scale": "3",
+              "channel": "1",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 357,
+              "layer0_l2_norm": 3.119140625,
+              "slot": "357",
+              "block": "v1_iw",
+              "scale": "3",
+              "channel": "0",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "model": "BHdr",
+      "bake": "bhdr_linear_shaped_cvvdpmix_byid_2026-09-06.bin",
+      "bake_sha256": "8461ac55a77e0219cc1cd2b795a5dec362ccce15c1ebf2fddb1c3c390c3bca7a",
+      "scales": [
+        {
+          "scale": 0,
+          "live": 15,
+          "sum_norm": 0.05993717908859253,
+          "top": [
+            {
+              "feature_id": 237,
+              "layer0_l2_norm": 0.0256805419921875,
+              "slot": "237",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "1",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 231,
+              "layer0_l2_norm": 0.005504608154296875,
+              "slot": "231",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "0",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 303,
+              "layer0_l2_norm": 0.004878997802734375,
+              "slot": "303",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "0",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 228,
+              "layer0_l2_norm": 0.00453948974609375,
+              "slot": "228",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "0",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 241,
+              "layer0_l2_norm": 0.0037136077880859375,
+              "slot": "241",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "2",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 313,
+              "layer0_l2_norm": 0.0035343170166015625,
+              "slot": "313",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "2",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 304,
+              "layer0_l2_norm": 0.0032520294189453125,
+              "slot": "304",
+              "block": "v1_iw",
+              "scale": "0",
+              "channel": "0",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 242,
+              "layer0_l2_norm": 0.0029754638671875,
+              "slot": "242",
+              "block": "v1_masked",
+              "scale": "0",
+              "channel": "2",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            }
+          ]
+        },
+        {
+          "scale": 1,
+          "live": 14,
+          "sum_norm": 0.053702712059020996,
+          "top": [
+            {
+              "feature_id": 253,
+              "layer0_l2_norm": 0.01384735107421875,
+              "slot": "253",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "1",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 319,
+              "layer0_l2_norm": 0.0108642578125,
+              "slot": "319",
+              "block": "v1_iw",
+              "scale": "1",
+              "channel": "0",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 259,
+              "layer0_l2_norm": 0.0058441162109375,
+              "slot": "259",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "2",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 258,
+              "layer0_l2_norm": 0.004871368408203125,
+              "slot": "258",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "2",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 332,
+              "layer0_l2_norm": 0.00396728515625,
+              "slot": "332",
+              "block": "v1_iw",
+              "scale": "1",
+              "channel": "2",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 254,
+              "layer0_l2_norm": 0.0038471221923828125,
+              "slot": "254",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "1",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 262,
+              "layer0_l2_norm": 0.0030975341796875,
+              "slot": "262",
+              "block": "v1_masked",
+              "scale": "1",
+              "channel": "2",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 334,
+              "layer0_l2_norm": 0.002635955810546875,
+              "slot": "334",
+              "block": "v1_iw",
+              "scale": "1",
+              "channel": "2",
+              "name": "det_4th",
+              "class": "D",
+              "reads": "same pass group as masked"
+            }
+          ]
+        },
+        {
+          "scale": 2,
+          "live": 5,
+          "sum_norm": 0.027265548706054688,
+          "top": [
+            {
+              "feature_id": 264,
+              "layer0_l2_norm": 0.0096588134765625,
+              "slot": "264",
+              "block": "v1_masked",
+              "scale": "2",
+              "channel": "0",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 347,
+              "layer0_l2_norm": 0.0074005126953125,
+              "slot": "347",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "1",
+              "name": "mse",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 341,
+              "layer0_l2_norm": 0.0041046142578125,
+              "slot": "341",
+              "block": "v1_iw",
+              "scale": "2",
+              "channel": "0",
+              "name": "mse",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 279,
+              "layer0_l2_norm": 0.00370025634765625,
+              "slot": "279",
+              "block": "v1_masked",
+              "scale": "2",
+              "channel": "2",
+              "name": "art_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 272,
+              "layer0_l2_norm": 0.0024013519287109375,
+              "slot": "272",
+              "block": "v1_masked",
+              "scale": "2",
+              "channel": "1",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            }
+          ]
+        },
+        {
+          "scale": 3,
+          "live": 11,
+          "sum_norm": 0.057289183139801025,
+          "top": [
+            {
+              "feature_id": 294,
+              "layer0_l2_norm": 0.0213775634765625,
+              "slot": "294",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "2",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 282,
+              "layer0_l2_norm": 0.015869140625,
+              "slot": "282",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "0",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 289,
+              "layer0_l2_norm": 0.0059814453125,
+              "slot": "289",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "1",
+              "name": "ssim_4th",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 290,
+              "layer0_l2_norm": 0.0047149658203125,
+              "slot": "290",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "1",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 299,
+              "layer0_l2_norm": 0.002765655517578125,
+              "slot": "299",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "2",
+              "name": "mse",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 359,
+              "layer0_l2_norm": 0.0018110275268554688,
+              "slot": "359",
+              "block": "v1_iw",
+              "scale": "3",
+              "channel": "0",
+              "name": "mse",
+              "class": "D",
+              "reads": "same pass group as masked"
+            },
+            {
+              "feature_id": 288,
+              "layer0_l2_norm": 0.0013513565063476562,
+              "slot": "288",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "1",
+              "name": "ssim_mean",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            },
+            {
+              "feature_id": 296,
+              "layer0_l2_norm": 0.0012502670288085938,
+              "slot": "296",
+              "block": "v1_masked",
+              "scale": "3",
+              "channel": "2",
+              "name": "ssim_2nd",
+              "class": "D",
+              "reads": "activity chain + store_sigma + *_inline_both"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "model": "C",
+      "bake": "c_sdr_purity944_byid_2026-09-07.bin",
+      "bake_sha256": "996dfbb16ee0abf1a4d7faeaeab7e390fdc20277bbcaa46c4f3b89b2604041f7",
+      "scales": [
+        {
+          "scale": 0,
+          "live": 118,
+          "sum_norm": 205.5992459914578,
+          "top": [
+            {
+              "feature_id": 411,
+              "layer0_l2_norm": 5.0036372414381844,
+              "slot": "411",
+              "block": "v2_348",
+              "scale": "0",
+              "channel": "1",
+              "name": "ART_SOFT_PEAK",
+              "class": "C-blur",
+              "reads": "mu1,mu2,s,d"
+            },
+            {
+              "feature_id": 752,
+              "layer0_l2_norm": 4.861042628961745,
+              "slot": "752",
+              "block": "append_204",
+              "scale": "0",
+              "channel": "1",
+              "name": "GLOBAL_CLOSS",
+              "class": "C-raw",
+              "reads": "s,d"
+            },
+            {
+              "feature_id": 412,
+              "layer0_l2_norm": 4.336456394997907,
+              "slot": "412",
+              "block": "v2_348",
+              "scale": "0",
+              "channel": "1",
+              "name": "DET_SOFT_PEAK",
+              "class": "C-blur",
+              "reads": "mu1,mu2,s,d"
+            },
+            {
+              "feature_id": 747,
+              "layer0_l2_norm": 4.261971888045379,
+              "slot": "747",
+              "block": "append_204",
+              "scale": "0",
+              "channel": "1",
+              "name": "GMS_DEV2",
+              "class": "E",
+              "reads": "grad stencil"
+            },
+            {
+              "feature_id": 925,
+              "layer0_l2_norm": 4.063526462289743,
+              "slot": "925",
+              "block": "append2_20",
+              "scale": "0",
+              "channel": "1",
+              "name": "BANDVIS_LOSS",
+              "class": "D",
+              "reads": "activity + 2nd-difference stencil (Y)"
+            },
+            {
+              "feature_id": 426,
+              "layer0_l2_norm": 4.051956011585321,
+              "slot": "426",
+              "block": "v2_348",
+              "scale": "0",
+              "channel": "1",
+              "name": "BLOCKINESS",
+              "class": "E",
+              "reads": "lattice pass"
+            },
+            {
+              "feature_id": 746,
+              "layer0_l2_norm": 3.759553190233241,
+              "slot": "746",
+              "block": "append_204",
+              "scale": "0",
+              "channel": "1",
+              "name": "TEXTURE_DISSIM",
+              "class": "D",
+              "reads": "bs2"
+            },
+            {
+              "feature_id": 427,
+              "layer0_l2_norm": 3.7041277043913032,
+              "slot": "427",
+              "block": "v2_348",
+              "scale": "0",
+              "channel": "1",
+              "name": "RINGING",
+              "class": "D",
+              "reads": "activity+grad"
+            }
+          ]
+        },
+        {
+          "scale": 1,
+          "live": 131,
+          "sum_norm": 182.9388194186847,
+          "top": [
+            {
+              "feature_id": 513,
+              "layer0_l2_norm": 4.253616706763012,
+              "slot": "513",
+              "block": "v2_348",
+              "scale": "1",
+              "channel": "1",
+              "name": "BLOCKINESS",
+              "class": "E",
+              "reads": "lattice pass"
+            },
+            {
+              "feature_id": 798,
+              "layer0_l2_norm": 4.169972965834263,
+              "slot": "798",
+              "block": "append_204",
+              "scale": "1",
+              "channel": "1",
+              "name": "GMS_DEV2",
+              "class": "E",
+              "reads": "grad stencil"
+            },
+            {
+              "feature_id": 515,
+              "layer0_l2_norm": 3.618610646013236,
+              "slot": "515",
+              "block": "v2_348",
+              "scale": "1",
+              "channel": "1",
+              "name": "BANDING",
+              "class": "E",
+              "reads": "grad stencil"
+            },
+            {
+              "feature_id": 505,
+              "layer0_l2_norm": 3.2728045292603354,
+              "slot": "505",
+              "block": "v2_348",
+              "scale": "1",
+              "channel": "1",
+              "name": "IW_ART",
+              "class": "D",
+              "reads": "activity"
+            },
+            {
+              "feature_id": 803,
+              "layer0_l2_norm": 3.2379395827510105,
+              "slot": "803",
+              "block": "append_204",
+              "scale": "1",
+              "channel": "1",
+              "name": "GLOBAL_CLOSS",
+              "class": "C-raw",
+              "reads": "s,d"
+            },
+            {
+              "feature_id": 930,
+              "layer0_l2_norm": 2.976930926952655,
+              "slot": "930",
+              "block": "append2_20",
+              "scale": "1",
+              "channel": "1",
+              "name": "BANDVIS_LOSS",
+              "class": "D",
+              "reads": "activity + 2nd-difference stencil (Y)"
+            },
+            {
+              "feature_id": 496,
+              "layer0_l2_norm": 2.9323729807496233,
+              "slot": "496",
+              "block": "v2_348",
+              "scale": "1",
+              "channel": "1",
+              "name": "HF_MAG_LOSS",
+              "class": "C-blur",
+              "reads": "mu1,mu2,s,d"
+            },
+            {
+              "feature_id": 794,
+              "layer0_l2_norm": 2.9165721604684083,
+              "slot": "794",
+              "block": "append_204",
+              "scale": "1",
+              "channel": "1",
+              "name": "MSCN_DIFF_L2",
+              "class": "D",
+              "reads": "bs2"
+            }
+          ]
+        },
+        {
+          "scale": 2,
+          "live": 131,
+          "sum_norm": 120.04892875873115,
+          "top": [
+            {
+              "feature_id": 600,
+              "layer0_l2_norm": 4.347213170579079,
+              "slot": "600",
+              "block": "v2_348",
+              "scale": "2",
+              "channel": "1",
+              "name": "BLOCKINESS",
+              "class": "E",
+              "reads": "lattice pass"
+            },
+            {
+              "feature_id": 629,
+              "layer0_l2_norm": 3.1563999860452956,
+              "slot": "629",
+              "block": "v2_348",
+              "scale": "2",
+              "channel": "2",
+              "name": "BLOCKINESS",
+              "class": "E",
+              "reads": "lattice pass"
+            },
+            {
+              "feature_id": 571,
+              "layer0_l2_norm": 2.8637379364040547,
+              "slot": "571",
+              "block": "v2_348",
+              "scale": "2",
+              "channel": "0",
+              "name": "BLOCKINESS",
+              "class": "E",
+              "reads": "lattice pass"
+            },
+            {
+              "feature_id": 935,
+              "layer0_l2_norm": 2.73902951185785,
+              "slot": "935",
+              "block": "append2_20",
+              "scale": "2",
+              "channel": "1",
+              "name": "BANDVIS_LOSS",
+              "class": "D",
+              "reads": "activity + 2nd-difference stencil (Y)"
+            },
+            {
+              "feature_id": 861,
+              "layer0_l2_norm": 2.291044547456824,
+              "slot": "861",
+              "block": "append_204",
+              "scale": "2",
+              "channel": "2",
+              "name": "MSCN_DIFF_MEAN",
+              "class": "D",
+              "reads": "bs2"
+            },
+            {
+              "feature_id": 844,
+              "layer0_l2_norm": 2.2897687814539287,
+              "slot": "844",
+              "block": "append_204",
+              "scale": "2",
+              "channel": "1",
+              "name": "MSCN_DIFF_MEAN",
+              "class": "D",
+              "reads": "bs2"
+            },
+            {
+              "feature_id": 602,
+              "layer0_l2_norm": 2.2424572577730353,
+              "slot": "602",
+              "block": "v2_348",
+              "scale": "2",
+              "channel": "1",
+              "name": "BANDING",
+              "class": "E",
+              "reads": "grad stencil"
+            },
+            {
+              "feature_id": 573,
+              "layer0_l2_norm": 1.772166465678832,
+              "slot": "573",
+              "block": "v2_348",
+              "scale": "2",
+              "channel": "0",
+              "name": "BANDING",
+              "class": "E",
+              "reads": "grad stencil"
+            }
+          ]
+        },
+        {
+          "scale": 3,
+          "live": 131,
+          "sum_norm": 132.28986012088347,
+          "top": [
+            {
+              "feature_id": 687,
+              "layer0_l2_norm": 6.3653948670866916,
+              "slot": "687",
+              "block": "v2_348",
+              "scale": "3",
+              "channel": "1",
+              "name": "BLOCKINESS",
+              "class": "E",
+              "reads": "lattice pass"
+            },
+            {
+              "feature_id": 716,
+              "layer0_l2_norm": 6.092489900273639,
+              "slot": "716",
+              "block": "v2_348",
+              "scale": "3",
+              "channel": "2",
+              "name": "BLOCKINESS",
+              "class": "E",
+              "reads": "lattice pass"
+            },
+            {
+              "feature_id": 658,
+              "layer0_l2_norm": 5.851715739693703,
+              "slot": "658",
+              "block": "v2_348",
+              "scale": "3",
+              "channel": "0",
+              "name": "BLOCKINESS",
+              "class": "E",
+              "reads": "lattice pass"
+            },
+            {
+              "feature_id": 940,
+              "layer0_l2_norm": 2.995583812322308,
+              "slot": "940",
+              "block": "append2_20",
+              "scale": "3",
+              "channel": "1",
+              "name": "BANDVIS_LOSS",
+              "class": "D",
+              "reads": "activity + 2nd-difference stencil (Y)"
+            },
+            {
+              "feature_id": 689,
+              "layer0_l2_norm": 2.533634738487477,
+              "slot": "689",
+              "block": "v2_348",
+              "scale": "3",
+              "channel": "1",
+              "name": "BANDING",
+              "class": "E",
+              "reads": "grad stencil"
+            },
+            {
+              "feature_id": 895,
+              "layer0_l2_norm": 2.3522876638956,
+              "slot": "895",
+              "block": "append_204",
+              "scale": "3",
+              "channel": "1",
+              "name": "MSCN_DIFF_MEAN",
+              "class": "D",
+              "reads": "bs2"
+            },
+            {
+              "feature_id": 939,
+              "layer0_l2_norm": 2.1882437765868956,
+              "slot": "939",
+              "block": "append2_20",
+              "scale": "3",
+              "channel": "1",
+              "name": "BANDVIS_GAIN",
+              "class": "D",
+              "reads": "activity + 2nd-difference stencil (Y)"
+            },
+            {
+              "feature_id": 912,
+              "layer0_l2_norm": 1.839866734735429,
+              "slot": "912",
+              "block": "append_204",
+              "scale": "3",
+              "channel": "2",
+              "name": "MSCN_DIFF_MEAN",
+              "class": "D",
+              "reads": "bs2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "model": "CHdr",
+      "bake": "c_hdr_l1t1944_byid_2026-09-07.bin",
+      "bake_sha256": "3ea640d3299632eae189bedb6ec47911e2c0dbf5ef8bce81a36815a83d20411a",
+      "scales": [
+        {
+          "scale": 0,
+          "live": 124,
+          "sum_norm": 131.78098553376975,
+          "top": [
+            {
+              "feature_id": 403,
+              "layer0_l2_norm": 3.372317507016979,
+              "slot": "403",
+              "block": "v2_348",
+              "scale": "0",
+              "channel": "1",
+              "name": "SSIM_DEV4",
+              "class": "C-blur",
+              "reads": "mu1,mu2,ssq,s12"
+            },
+            {
+              "feature_id": 928,
+              "layer0_l2_norm": 2.4583479623456417,
+              "slot": "928",
+              "block": "append2_20",
+              "scale": "0",
+              "channel": "1",
+              "name": "HL_BIN2",
+              "class": "A0",
+              "reads": "HDR-route only -> 0 on SDR"
+            },
+            {
+              "feature_id": 734,
+              "layer0_l2_norm": 2.3967089384823446,
+              "slot": "734",
+              "block": "append_204",
+              "scale": "0",
+              "channel": "0",
+              "name": "GLOBAL_CGAIN",
+              "class": "C-raw",
+              "reads": "s,d"
+            },
+            {
+              "feature_id": 432,
+              "layer0_l2_norm": 2.3317657214254144,
+              "slot": "432",
+              "block": "v2_348",
+              "scale": "0",
+              "channel": "2",
+              "name": "SSIM_DEV4",
+              "class": "C-blur",
+              "reads": "mu1,mu2,ssq,s12"
+            },
+            {
+              "feature_id": 426,
+              "layer0_l2_norm": 2.1354902788465293,
+              "slot": "426",
+              "block": "v2_348",
+              "scale": "0",
+              "channel": "1",
+              "name": "BLOCKINESS",
+              "class": "E",
+              "reads": "lattice pass"
+            },
+            {
+              "feature_id": 747,
+              "layer0_l2_norm": 2.073395396589173,
+              "slot": "747",
+              "block": "append_204",
+              "scale": "0",
+              "channel": "1",
+              "name": "GMS_DEV2",
+              "class": "E",
+              "reads": "grad stencil"
+            },
+            {
+              "feature_id": 458,
+              "layer0_l2_norm": 2.045275346825308,
+              "slot": "458",
+              "block": "v2_348",
+              "scale": "0",
+              "channel": "2",
+              "name": "EDGE_WIDTH_CHANGE",
+              "class": "E",
+              "reads": "grad stencil (2 scales)"
+            },
+            {
+              "feature_id": 399,
+              "layer0_l2_norm": 2.007266780099307,
+              "slot": "399",
+              "block": "v2_348",
+              "scale": "0",
+              "channel": "0",
+              "name": "BANDING",
+              "class": "E",
+              "reads": "grad stencil"
+            }
+          ]
+        },
+        {
+          "scale": 1,
+          "live": 139,
+          "sum_norm": 148.48388356875464,
+          "top": [
+            {
+              "feature_id": 489,
+              "layer0_l2_norm": 2.745494825610775,
+              "slot": "489",
+              "block": "v2_348",
+              "scale": "1",
+              "channel": "1",
+              "name": "SSIM_DEV2",
+              "class": "C-blur",
+              "reads": "mu1,mu2,ssq,s12"
+            },
+            {
+              "feature_id": 785,
+              "layer0_l2_norm": 2.607248539029153,
+              "slot": "785",
+              "block": "append_204",
+              "scale": "1",
+              "channel": "0",
+              "name": "GLOBAL_CGAIN",
+              "class": "C-raw",
+              "reads": "s,d"
+            },
+            {
+              "feature_id": 490,
+              "layer0_l2_norm": 2.5521711885160223,
+              "slot": "490",
+              "block": "v2_348",
+              "scale": "1",
+              "channel": "1",
+              "name": "SSIM_DEV4",
+              "class": "C-blur",
+              "reads": "mu1,mu2,ssq,s12"
+            },
+            {
+              "feature_id": 497,
+              "layer0_l2_norm": 2.516742120742565,
+              "slot": "497",
+              "block": "v2_348",
+              "scale": "1",
+              "channel": "1",
+              "name": "SSIM_SOFT_PEAK",
+              "class": "C-blur",
+              "reads": "mu1,mu2,ssq,s12"
+            },
+            {
+              "feature_id": 799,
+              "layer0_l2_norm": 2.1308767786213183,
+              "slot": "799",
+              "block": "append_204",
+              "scale": "1",
+              "channel": "1",
+              "name": "ART_DEV2",
+              "class": "C-blur",
+              "reads": "mu1,mu2,s,d"
+            },
+            {
+              "feature_id": 932,
+              "layer0_l2_norm": 1.9202739479979039,
+              "slot": "932",
+              "block": "append2_20",
+              "scale": "1",
+              "channel": "1",
+              "name": "HL_BIN1",
+              "class": "A0",
+              "reads": "HDR-route only -> 0 on SDR"
+            },
+            {
+              "feature_id": 498,
+              "layer0_l2_norm": 1.9185225241754338,
+              "slot": "498",
+              "block": "v2_348",
+              "scale": "1",
+              "channel": "1",
+              "name": "ART_SOFT_PEAK",
+              "class": "C-blur",
+              "reads": "mu1,mu2,s,d"
+            },
+            {
+              "feature_id": 933,
+              "layer0_l2_norm": 1.8572786726189738,
+              "slot": "933",
+              "block": "append2_20",
+              "scale": "1",
+              "channel": "1",
+              "name": "HL_BIN2",
+              "class": "A0",
+              "reads": "HDR-route only -> 0 on SDR"
+            }
+          ]
+        },
+        {
+          "scale": 2,
+          "live": 139,
+          "sum_norm": 128.35508112285302,
+          "top": [
+            {
+              "feature_id": 584,
+              "layer0_l2_norm": 2.4134684620147624,
+              "slot": "584",
+              "block": "v2_348",
+              "scale": "2",
+              "channel": "1",
+              "name": "SSIM_SOFT_PEAK",
+              "class": "C-blur",
+              "reads": "mu1,mu2,ssq,s12"
+            },
+            {
+              "feature_id": 937,
+              "layer0_l2_norm": 2.3494913089041183,
+              "slot": "937",
+              "block": "append2_20",
+              "scale": "2",
+              "channel": "1",
+              "name": "HL_BIN1",
+              "class": "A0",
+              "reads": "HDR-route only -> 0 on SDR"
+            },
+            {
+              "feature_id": 586,
+              "layer0_l2_norm": 2.3236733907682825,
+              "slot": "586",
+              "block": "v2_348",
+              "scale": "2",
+              "channel": "1",
+              "name": "DET_SOFT_PEAK",
+              "class": "C-blur",
+              "reads": "mu1,mu2,s,d"
+            },
+            {
+              "feature_id": 934,
+              "layer0_l2_norm": 2.1533866544549296,
+              "slot": "934",
+              "block": "append2_20",
+              "scale": "2",
+              "channel": "1",
+              "name": "BANDVIS_GAIN",
+              "class": "D",
+              "reads": "activity + 2nd-difference stencil (Y)"
+            },
+            {
+              "feature_id": 576,
+              "layer0_l2_norm": 2.013636805621127,
+              "slot": "576",
+              "block": "v2_348",
+              "scale": "2",
+              "channel": "1",
+              "name": "SSIM_DEV2",
+              "class": "C-blur",
+              "reads": "mu1,mu2,ssq,s12"
+            },
+            {
+              "feature_id": 836,
+              "layer0_l2_norm": 2.003644153458853,
+              "slot": "836",
+              "block": "append_204",
+              "scale": "2",
+              "channel": "0",
+              "name": "GLOBAL_CGAIN",
+              "class": "C-raw",
+              "reads": "s,d"
+            },
+            {
+              "feature_id": 629,
+              "layer0_l2_norm": 1.9313210688208646,
+              "slot": "629",
+              "block": "v2_348",
+              "scale": "2",
+              "channel": "2",
+              "name": "BLOCKINESS",
+              "class": "E",
+              "reads": "lattice pass"
+            },
+            {
+              "feature_id": 602,
+              "layer0_l2_norm": 1.9275619322312258,
+              "slot": "602",
+              "block": "v2_348",
+              "scale": "2",
+              "channel": "1",
+              "name": "BANDING",
+              "class": "E",
+              "reads": "grad stencil"
+            }
+          ]
+        },
+        {
+          "scale": 3,
+          "live": 139,
+          "sum_norm": 150.01595774048403,
+          "top": [
+            {
+              "feature_id": 939,
+              "layer0_l2_norm": 2.460194415814596,
+              "slot": "939",
+              "block": "append2_20",
+              "scale": "3",
+              "channel": "1",
+              "name": "BANDVIS_GAIN",
+              "class": "D",
+              "reads": "activity + 2nd-difference stencil (Y)"
+            },
+            {
+              "feature_id": 634,
+              "layer0_l2_norm": 2.1336124242132186,
+              "slot": "634",
+              "block": "v2_348",
+              "scale": "3",
+              "channel": "0",
+              "name": "SSIM_DEV2",
+              "class": "C-blur",
+              "reads": "mu1,mu2,ssq,s12"
+            },
+            {
+              "feature_id": 887,
+              "layer0_l2_norm": 2.111061266128862,
+              "slot": "887",
+              "block": "append_204",
+              "scale": "3",
+              "channel": "0",
+              "name": "GLOBAL_CGAIN",
+              "class": "C-raw",
+              "reads": "s,d"
+            },
+            {
+              "feature_id": 671,
+              "layer0_l2_norm": 2.0475190827233303,
+              "slot": "671",
+              "block": "v2_348",
+              "scale": "3",
+              "channel": "1",
+              "name": "SSIM_SOFT_PEAK",
+              "class": "C-blur",
+              "reads": "mu1,mu2,ssq,s12"
+            },
+            {
+              "feature_id": 901,
+              "layer0_l2_norm": 2.046892394699921,
+              "slot": "901",
+              "block": "append_204",
+              "scale": "3",
+              "channel": "1",
+              "name": "ART_DEV2",
+              "class": "C-blur",
+              "reads": "mu1,mu2,s,d"
+            },
+            {
+              "feature_id": 942,
+              "layer0_l2_norm": 2.0076705441973366,
+              "slot": "942",
+              "block": "append2_20",
+              "scale": "3",
+              "channel": "1",
+              "name": "HL_BIN1",
+              "class": "A0",
+              "reads": "HDR-route only -> 0 on SDR"
+            },
+            {
+              "feature_id": 668,
+              "layer0_l2_norm": 1.9422555897298044,
+              "slot": "668",
+              "block": "v2_348",
+              "scale": "3",
+              "channel": "1",
+              "name": "HF_GAIN",
+              "class": "C-blur",
+              "reads": "mu1,mu2,s,d"
+            },
+            {
+              "feature_id": 663,
+              "layer0_l2_norm": 1.9012525226531456,
+              "slot": "663",
+              "block": "v2_348",
+              "scale": "3",
+              "channel": "1",
+              "name": "SSIM_DEV2",
+              "class": "C-blur",
+              "reads": "mu1,mu2,ssq,s12"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "model": "D",
+      "bake": "d_sdr_add156_id100_negrich_dial_byid_2026-09-06.bin",
+      "bake_sha256": "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6",
+      "scales": [
+        {
+          "scale": 0,
+          "live": 0,
+          "sum_norm": 0,
+          "top": []
+        },
+        {
+          "scale": 1,
+          "live": 0,
+          "sum_norm": 0,
+          "top": []
+        },
+        {
+          "scale": 2,
+          "live": 0,
+          "sum_norm": 0,
+          "top": []
+        },
+        {
+          "scale": 3,
+          "live": 0,
+          "sum_norm": 0,
+          "top": []
+        }
+      ]
+    }
+  ],
+  "structural_only": true,
+  "owner": "bake_block_profile --lines; feature IDs mapped by canonical loader",
+  "labels": "benchmarks/free_features_2026-09-01/slot_classification.tsv"
+}

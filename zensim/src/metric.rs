@@ -3298,6 +3298,18 @@ pub(crate) fn validate_ref_match(
     precomputed: &crate::streaming::PrecomputedReference,
     distorted: &impl ImageSource,
 ) -> Result<(), ZensimError> {
+    if precomputed.sampling.is_some() {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "sampling-bound cache requires its BakeScorer surface",
+        });
+    }
+    validate_ref_dimensions(precomputed, distorted)
+}
+
+pub(crate) fn validate_ref_dimensions(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+) -> Result<(), ZensimError> {
     if precomputed.width() != distorted.width() || precomputed.height() != distorted.height() {
         return Err(ZensimError::DimensionMismatch);
     }
@@ -3518,7 +3530,10 @@ pub(crate) fn reflect_pad_to_min(src: &impl ImageSource) -> OwnedImage {
 
 /// Reflect(mirror)-pad `src` up to [`min_pyramid_dim_for_scales`] in each dim.
 pub(crate) fn reflect_pad_for_scales(src: &impl ImageSource, num_scales: usize) -> OwnedImage {
-    let min_dim = min_pyramid_dim_for_scales(num_scales);
+    reflect_pad_to_size(src, min_pyramid_dim_for_scales(num_scales))
+}
+
+pub(crate) fn reflect_pad_to_size(src: &impl ImageSource, min_dim: usize) -> OwnedImage {
     let (w, h) = (src.width(), src.height());
     let bpp = src.pixel_format().bytes_per_pixel();
     let (bw, bh) = (w.max(min_dim), h.max(min_dim));
@@ -4338,6 +4353,13 @@ fn forward_one_bake_with_codec(
     let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::ModelLoadFailed {
         reason: "Model::from_bytes failed to parse the bake header or layer table",
     })?;
+    // Legacy profiles do not bind their front end/reference cache to this
+    // contract. Complete sampling candidates must use BakeScorer directly.
+    if model.metadata().get(crate::sampling::KEY).is_some() {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "sampling-bound bake requires the BakeScorer pixel surface",
+        });
+    }
     let bundle = cached_bake_metadata(bytes, &model)?;
     let mut scorer = BakeScorer::with_metadata(&model, bundle)?;
     scorer.score_features(features, width, height, codec_hint)

@@ -191,6 +191,7 @@ impl Plan {
             formula_revision: crate::ssim_form::active_revision(),
             v1_basic: touches(ComputeToken::Basic) || v1_pools != V1PoolsMode::Off,
             full_res_xb: true,
+            sampling: None,
             v1_pools,
             v2_blocks,
             gradient: v2_blocks,
@@ -262,6 +263,7 @@ impl Plan {
         // Channel selection is private plan data, separate from public family
         // toggles. Normalization preserves it only for supported families.
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
+        compute.sampling = requested.sampling;
         // `emit` is in ID space and is intersected with what the LAYOUT
         // carries: a dense layout that omits an id the walk computes does not
         // emit it, and saying otherwise would make `covers` lie.
@@ -288,6 +290,16 @@ impl Plan {
         let want = bake_read_slots(model).ok_or(PlanError::UnreadableBake)?;
         let mut plan = Plan::derive_with_layout(&want, layout)?;
         plan.compute.formula_revision = revision;
+        let sampling =
+            crate::sampling::Sampling::from_model(model).map_err(|_| PlanError::UnreadableBake)?;
+        if let Some(sampling) = sampling {
+            if !plan.compute.allows_full_res_y_subset()
+                || (sampling.keep_y && plan.compute.full_res_xb)
+            {
+                return Err(PlanError::UnreadableBake);
+            }
+            plan.compute.sampling = Some(sampling);
+        }
         // **The SERVING-plan footprint policy, applied to both branches.**
         // `fold_engine::pools_mode_for_need` owns the rule that `Off` is never
         // the right answer for a served v1 walk: `Off` and `Peaks` compute the
@@ -328,6 +340,7 @@ impl Plan {
             formula_revision: crate::ssim_form::active_revision(),
             v1_basic: true,
             full_res_xb: true,
+            sampling: None,
             v1_pools: pools,
             v2_blocks: false,
             gradient: false,
@@ -446,6 +459,7 @@ impl Plan {
             formula_revision: a.formula_revision,
             v1_basic: a.v1_basic || b.v1_basic,
             full_res_xb: a.full_res_xb || b.full_res_xb,
+            sampling: a.sampling,
             v1_pools: pools_union(a.v1_pools, b.v1_pools),
             v2_blocks: a.v2_blocks || b.v2_blocks,
             gradient: a.gradient || b.gradient,
@@ -1126,7 +1140,7 @@ pub(crate) mod servability_census {
     fn every_registered_producer_set_is_plannable() {
         let ns = crate::NUM_SCALES;
         let mut checked = 0usize;
-        for (compute, width, expect) in registered_producer_sets() {
+        for (compute, width, expect, full_y) in registered_producer_sets() {
             let Some(parts) = crate::feature_set_id::ComputeParts::parse(&compute) else {
                 panic!("unparseable compute {compute:?}");
             };
@@ -1134,7 +1148,13 @@ pub(crate) mod servability_census {
             for t in parts.iter() {
                 want = want.union(&crate::feature_defs::family_slots(t, ns));
             }
-            let want = want.clipped_to(width);
+            let mut want = want.clipped_to(width);
+            if full_y {
+                want = SlotSet::from_slots(
+                    want.iter_slots()
+                        .filter(|&id| !ComputeSet::is_full_res_xb(id, ns)),
+                );
+            }
             assert_eq!(want, expect, "{compute}@w{width}: registry slots");
             let plan = Plan::derive(&want, width)
                 .unwrap_or_else(|e| panic!("{compute}@w{width} is not plannable: {e}"));
@@ -1148,7 +1168,7 @@ pub(crate) mod servability_census {
     }
 
     /// The registry's producer entries as `(compute, layout_width, slots)`.
-    fn registered_producer_sets() -> Vec<(String, usize, SlotSet)> {
+    fn registered_producer_sets() -> Vec<(String, usize, SlotSet, bool)> {
         let json = include_str!("../../benchmarks/feature_sets_registry.json");
         let mut out = Vec::new();
         for chunk in json.split("\"compute\":").skip(1) {
@@ -1179,7 +1199,15 @@ pub(crate) mod servability_census {
             else {
                 continue;
             };
-            out.push((compute, width, slots));
+            let full_y = chunk
+                .split("\"slot_selection\":")
+                .nth(1)
+                .and_then(between_quotes)
+                .is_some_and(|s| {
+                    assert_eq!(s, "full_y_coarse_xyb", "unknown slot selection");
+                    true
+                });
+            out.push((compute, width, slots, full_y));
         }
         out
     }

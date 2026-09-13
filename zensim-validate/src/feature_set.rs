@@ -538,6 +538,7 @@ fn table_metadata(path: &Path) -> Result<serde_json::Value, String> {
                 "formula_revision",
                 "decoder_era",
                 "decoder_revision",
+                "sampling",
             ] {
                 let Some(v) = scope.get(key) else { continue };
                 if let Some(old) = merged.get(key) {
@@ -1296,6 +1297,23 @@ pub fn admit_training_tables(
             "requested_ids": requested,
         }));
     }
+    let samplings: std::collections::BTreeSet<_> = tables
+        .iter()
+        .map(|t| {
+            t["stored_declarations"]
+                .get("sampling")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+                .to_string()
+        })
+        .collect();
+    if samplings.len() > 1 {
+        return Err("mixed sampling contracts in training tables".into());
+    }
+    let sampling = tables
+        .first()
+        .and_then(|t| t["stored_declarations"].get("sampling"))
+        .cloned();
     if revisions.len() > 1 {
         issues.push(format!("mixed formula revisions: {revisions:?}"));
     }
@@ -1327,7 +1345,7 @@ pub fn admit_training_tables(
     };
     Ok(
         serde_json::json!({"tables": tables, "issues": issues, "historical_replay": replay,
-        "formula_revision": revision, "qualified_provenance": issues.is_empty() && replay.is_none() && tables.iter().all(|t|
+        "formula_revision": revision, "sampling": sampling, "qualified_provenance": issues.is_empty() && replay.is_none() && tables.iter().all(|t|
             ["decoder_era", "decoder_revision"].iter().any(|key|
                 t["stored_declarations"].get(key).is_some_and(|v| !v.is_null() && v.as_str() != Some(""))))}),
     )
@@ -1336,6 +1354,52 @@ pub fn admit_training_tables(
 #[cfg(test)]
 mod training_admission_tests {
     use super::*;
+    #[test]
+    fn training_sampling_contract_cannot_be_mixed_even_in_replay() {
+        let dir =
+            std::env::temp_dir().join(format!("zensim-admit-sampling-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = vec![dir.join("a.csv"), dir.join("b.csv")];
+        let header = (0..372)
+            .map(|i| format!("f{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let identity = format!(
+            "basic+peaks@w372/sampling_v1_xyb_triangle_2#{:08x}",
+            zensim::feature_set_id::slots_hash8(0..228)
+        );
+        let metadata = serde_json::json!({"feature_set_id": identity, "formula_revision": 3,
+            "decoder_era": "fixture-pinned", "sampling": "v1:xyb:triangle:2"});
+        for path in &paths {
+            std::fs::write(path, format!("{header}\n")).unwrap();
+            std::fs::write(
+                format!("{}.manifest.json", path.display()),
+                metadata.to_string(),
+            )
+            .unwrap();
+        }
+        let admitted = admit_training_tables(&paths, None, Some(&[0, 227]), Some(372)).unwrap();
+        assert_eq!(admitted["sampling"], "v1:xyb:triangle:2");
+        for sampling in [
+            serde_json::json!("v1:xyb:triangle:3"),
+            serde_json::Value::Null,
+        ] {
+            let mut other = metadata.clone();
+            other["sampling"] = sampling;
+            std::fs::write(
+                format!("{}.manifest.json", paths[1].display()),
+                other.to_string(),
+            )
+            .unwrap();
+            for replay in [None, Some("frozen test recipe")] {
+                let err =
+                    admit_training_tables(&paths, replay, Some(&[0, 227]), Some(372)).unwrap_err();
+                assert!(err.contains("mixed sampling"), "{err}");
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn real_headers_and_file_declarations_are_admitted_before_rows() {
         let dir = std::env::temp_dir().join(format!("zensim-admission-{}", std::process::id()));

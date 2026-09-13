@@ -2979,6 +2979,7 @@ mod owner_gates {
         let off = ComputeSet {
             formula_revision: crate::ssim_form::active_revision(),
             full_res_xb: true,
+            sampling: None,
             v1_basic: false,
             v1_pools: V1PoolsMode::Off,
             v2_blocks: false,
@@ -3227,7 +3228,15 @@ mod owner_gates {
             for t in parts.iter() {
                 derived = derived.union(&family_slots(t, NS));
             }
-            let derived = derived.clipped_to(width);
+            let mut derived = derived.clipped_to(width);
+            if let Some(selection) = json_str_field(&obj, "slot_selection") {
+                assert_eq!(selection, "full_y_coarse_xyb", "unknown slot selection");
+                derived = SlotSet::from_slots(
+                    derived
+                        .iter_slots()
+                        .filter(|&id| !crate::feature_v2::ComputeSet::is_full_res_xb(id, NS)),
+                );
+            }
 
             if role == "consumer" {
                 // A read set is a subset of what its producer populates.

@@ -55,6 +55,7 @@ impl<'a> BakeScorer<'a> {
         metadata: Arc<ScoreMetadata>,
     ) -> Result<Self, ZensimError> {
         crate::feature_layout::formula_revision(model)?;
+        crate::sampling::Sampling::from_model(model)?;
         if model.metadata().get("zentrain.feature_ids").is_some()
             && crate::feature_layout::declared_ids(model)
                 .is_none_or(|ids| ids.len() != model.caller_input_width())
@@ -540,7 +541,9 @@ impl<'a> BakeScorer<'a> {
             })?;
             combined = Some(match combined {
                 Some(plan) => {
-                    if !plan.revisions_agree(&other) {
+                    if !plan.revisions_agree(&other)
+                        || plan.compute.sampling != other.compute.sampling
+                    {
                         return Err(ZensimError::ModelLoadFailed {
                             reason: "ensemble members require different feature revisions",
                         });
@@ -558,6 +561,11 @@ impl<'a> BakeScorer<'a> {
         plan = Plan::widened_to_identity(&plan, plan.walk_width().max(372));
         #[cfg(feature = "corruption-head")]
         if let Some(companion) = &self.corruption {
+            if plan.compute.sampling.is_some() {
+                return Err(ZensimError::ModelLoadFailed {
+                    reason: "sampling variant requires a matching corruption feature contract",
+                });
+            }
             let needed = match companion {
                 Companion::Tree(h, _) => crate::feature_set_id::SlotSet::from_slots(
                     h.declared_feature_ids().iter().map(|&id| usize::from(id)),
@@ -597,7 +605,8 @@ impl<'a> BakeScorer<'a> {
         }
         #[cfg(not(feature = "feature-regime-v2"))]
         {
-            if self.layout.walk_width() > 372
+            if crate::sampling::Sampling::from_model(self.model)?.is_some()
+                || self.layout.walk_width() > 372
                 || crate::feature_layout::formula_revision(self.model)?
                     != crate::ssim_form::active_revision()
             {
@@ -676,6 +685,11 @@ impl<'a> BakeScorer<'a> {
     ) -> Result<f64, ZensimError> {
         self.check_pixel_revision()?;
         let plan = self.plan()?;
+        if plan.compute.sampling.is_some() {
+            return Err(ZensimError::ModelLoadFailed {
+                reason: "sampling v1 is SDR only; HDR needs a separately validated PU sampling contract",
+            });
+        }
         let features = crate::feature_v2::compute_folded720_hdr_streaming_impl(
             source,
             distorted,
@@ -726,6 +740,44 @@ impl<'a> BakeScorer<'a> {
                 reason: "this bake requires feature-regime-v2 for image extraction",
             });
         }
+        #[cfg(feature = "feature-regime-v2")]
+        if let Some(sampling) = plan.compute.sampling {
+            check_within_max_pixels(
+                source.width().max(sampling.min_dim()),
+                source.height().max(sampling.min_dim()),
+                Some(120_000_000),
+            )?;
+            if images_byte_identical(source, distorted) {
+                return Ok(identical_result_at(&config, plan.walk_width()));
+            }
+            let (mut features, mean_offset) =
+                crate::feature_v2::compute_folded_v1_372_streaming_impl(
+                    source,
+                    distorted,
+                    Some(120_000_000),
+                    true,
+                    &mut self.pixel_scratch,
+                    Some(&plan),
+                    #[cfg(feature = "custom-profiles")]
+                    None,
+                )?;
+            features.truncate(plan.walk_width());
+            let (_, raw_distance) =
+                score_v1_layout_features(&mut features, params.weights, &config, config.num_scales);
+            let score = self.score_features(
+                &features,
+                source.width() as u32,
+                source.height() as u32,
+                codec_hint,
+            )?;
+            return Ok(ZensimResult::new(
+                score,
+                raw_distance,
+                features,
+                ZensimProfile::B,
+                mean_offset,
+            ));
+        }
         let mut result = compute_with_config_inner(
             source,
             distorted,
@@ -757,6 +809,16 @@ impl<'a> BakeScorer<'a> {
         source: &impl ImageSource,
     ) -> Result<crate::PrecomputedReference, ZensimError> {
         self.check_pixel_revision()?;
+        if let Some(sampling) = self.plan()?.compute.sampling {
+            validate_pair(source, source)?;
+            check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
+            check_within_max_pixels(
+                source.width().max(sampling.min_dim()),
+                source.height().max(sampling.min_dim()),
+                Some(120_000_000),
+            )?;
+            return Ok(sampling.reference(source, true));
+        }
         Zensim::new(ZensimProfile::B).precompute_reference(source)
     }
 
@@ -802,9 +864,14 @@ impl<'a> BakeScorer<'a> {
         }
         self.check_pixel_revision()?;
         validate_pair(source, distorted)?;
-        validate_ref_match(precomputed, distorted)?;
+        validate_ref_dimensions(precomputed, distorted)?;
         check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
         let plan = self.plan()?;
+        if precomputed.sampling != plan.compute.sampling {
+            return Err(ZensimError::ModelLoadFailed {
+                reason: "reference cache sampling contract differs from model",
+            });
+        }
         let params = ZensimProfile::B.params();
         let config = config_from_params(params, true);
         #[cfg(feature = "corruption-head")]

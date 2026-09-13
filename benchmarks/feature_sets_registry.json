@@ -175,6 +175,114 @@
    "label": "September 13 Rev3 canonical 372-column feature experiment packet",
    "formula_revision": 3,
    "note": "Fresh extract_features_372col canonical streaming extraction; input and decoder hashes recorded per run. No relabelled Rev1 rows. Research speed screen only; see benchmarks/fullres_y_subset_2026-09-12.md."
+  },
+  "sampling_v1_y_triangle_3d2": {
+   "label": "v1:y:triangle:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_triangle_2": {
+   "label": "v1:y:triangle:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_triangle_3": {
+   "label": "v1:y:triangle:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_mitchell_3d2": {
+   "label": "v1:y:mitchell:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_mitchell_2": {
+   "label": "v1:y:mitchell:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_mitchell_3": {
+   "label": "v1:y:mitchell:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_robidouxsharp_3d2": {
+   "label": "v1:y:robidouxsharp:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_robidouxsharp_2": {
+   "label": "v1:y:robidouxsharp:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_y_robidouxsharp_3": {
+   "label": "v1:y:robidouxsharp:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_triangle_3d2": {
+   "label": "v1:xyb:triangle:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_triangle_2": {
+   "label": "v1:xyb:triangle:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_triangle_3": {
+   "label": "v1:xyb:triangle:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_mitchell_3d2": {
+   "label": "v1:xyb:mitchell:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_mitchell_2": {
+   "label": "v1:xyb:mitchell:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_mitchell_3": {
+   "label": "v1:xyb:mitchell:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_robidouxsharp_3d2": {
+   "label": "v1:xyb:robidouxsharp:3/2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_robidouxsharp_2": {
+   "label": "v1:xyb:robidouxsharp:2",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "sampling_v1_xyb_robidouxsharp_3": {
+   "label": "v1:xyb:robidouxsharp:3",
+   "formula_revision": 3,
+   "build_commit": "per-run source and binary hashes",
+   "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
   }
  },
  "sets": {
@@ -455,6 +563,213 @@
    "role": "producer",
    "kind": "set",
    "evidence": "benchmarks/fullres_y_subset_2026-09-12.md; scripts/run_full_eval.sh --stage feature-screen"
+  },
+  "basic+peaks@w372/sampling_v1_y_triangle_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_triangle_3d2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_triangle_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_triangle_2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_triangle_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_triangle_3",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_mitchell_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_mitchell_3d2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_mitchell_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_mitchell_2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_mitchell_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_mitchell_3",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_robidouxsharp_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_robidouxsharp_3d2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_robidouxsharp_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_robidouxsharp_2",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_y_robidouxsharp_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_y_robidouxsharp_3",
+   "slots": "13-25,39-155,162-167,174-227",
+   "slots_hash8": "cf1eae02",
+   "n_slots": 190,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest",
+   "slot_selection": "full_y_coarse_xyb"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_triangle_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_triangle_3d2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_triangle_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_triangle_2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_triangle_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_triangle_3",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_mitchell_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_mitchell_3d2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_mitchell_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_mitchell_2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_mitchell_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_mitchell_3",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_robidouxsharp_3d2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_robidouxsharp_3d2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_robidouxsharp_2": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_robidouxsharp_2",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks@w372/sampling_v1_xyb_robidouxsharp_3": {
+   "compute": "basic+peaks",
+   "layout": 372,
+   "era": "sampling_v1_xyb_robidouxsharp_3",
+   "slots": "0-227",
+   "slots_hash8": "3fb78648",
+   "n_slots": 228,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
   }
  },
  "roots": {

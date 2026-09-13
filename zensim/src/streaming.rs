@@ -2981,6 +2981,9 @@ impl ZensimScratch {
 pub(crate) type XybPyramidLevel = ([Vec<f32>; 3], usize, usize);
 
 pub struct PrecomputedReference {
+    pub(crate) sampling: Option<crate::sampling::Sampling>,
+    #[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))]
+    pub(crate) sampling_geometry: Option<crate::sampling::Geometry>,
     pub(crate) scales: Vec<([Vec<f32>; 3], usize, usize)>,
     // INVARIANT: scales[i].0[0..3].len() == scales[i].1 * scales[i].2
     // (padded_width × height per plane). Enforced at construction.
@@ -3116,6 +3119,8 @@ impl PrecomputedReference {
         }
 
         Self {
+            sampling: None,
+            sampling_geometry: None,
             scales,
             ref_width: 0,
             ref_height: 0,
@@ -4298,6 +4303,53 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
         usize,
     ),
 ) -> crate::metric::ZensimResult {
+    if let Some(sampling) = precomputed.sampling {
+        let levels = sampling.pyramid(distorted, config.allow_multithreading);
+        let mut cfg = *config;
+        cfg.compute_all_features = false;
+        cfg.extended_features = false;
+        cfg.compute_iw_features = false;
+        let mut active_weights = vec![1.0; 228];
+        if sampling.keep_y {
+            for range in [0..13, 26..39, 156..162, 168..174] {
+                active_weights[range].fill(0.0);
+            }
+        }
+        let mut stats = Vec::with_capacity(4);
+        let first = &levels[0];
+        let mean_offset = compute_xyb_mean_offset(
+            precomputed.scale(0).0,
+            [&first.0[0], &first.0[1], &first.0[2]],
+            first.1,
+            first.2,
+            first.1,
+        );
+        let mut retention = AttrScaleRetention::new(first.1 * first.2);
+        for (scale, (dst, w, h)) in levels.iter().enumerate() {
+            let (src, sw, sh) = precomputed.scale(scale);
+            assert_eq!((*w, *h), (sw, sh));
+            let dst = [&dst[0][..], &dst[1][..], &dst[2][..]];
+            let (accum, _) = process_scale_bands_into_accum(
+                src,
+                dst,
+                *w,
+                *h,
+                &cfg,
+                scale,
+                &active_weights,
+                None,
+                None,
+                None,
+                Some(&mut retention),
+                None,
+                None,
+            );
+            let stat = accum.finalize(cfg.iw_strength as f64);
+            on_scale(scale, &stat, src, dst, &retention, *w, *h);
+            stats.push(stat);
+        }
+        return combine_scores(&stats, &active_weights, &cfg, mean_offset);
+    }
     // Reference construction already reflect-pads sub-pyramid images. The
     // retained attribution walk must see the same distorted geometry, just
     // like ordinary cached scoring; otherwise its scale-0 widths disagree.

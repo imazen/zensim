@@ -4,6 +4,12 @@
 
 ### Added
 
+- Opt-in, versioned sampling metadata for basic/peak bakes, using zenresize
+  Triangle, Mitchell and RobidouxSharp at 1.5×, 2× and 3×. Rust extraction,
+  training metadata admission, public BakeScorer serving and spatial ownership
+  share the declared sampling contract. Alternate pyramids require fresh fits;
+  named models and default inference retain their existing sampling.
+
 - `FormulaRevision::Rev3` — the v1 SSIM signal is formed once per pixel from
   a DIRECT error moment `Σ(a−b)²` (no covariance subtraction) inside the
   existing fused H/V pass, and retained, so basic, peak, masked and IW pools

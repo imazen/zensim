@@ -265,6 +265,14 @@ impl Request {
     pub fn for_bake_bytes(bytes: &[u8]) -> Result<Request, ResearchError> {
         let model =
             crate::mlp::Model::from_bytes(bytes).map_err(|_| ResearchError::UnreadableBake)?;
+        // This untyped slot request cannot carry a sampling contract. Use the
+        // complete BakeScorer pixel surface for sampling-bound extraction.
+        if crate::sampling::Sampling::from_model(&model)
+            .map_err(|_| ResearchError::UnreadableBake)?
+            .is_some()
+        {
+            return Err(ResearchError::UnreadableBake);
+        }
         let want =
             crate::feature_plan::bake_read_slots(&model).ok_or(ResearchError::UnreadableBake)?;
         // `want` is in ID space. For an identity bake the caller width IS the

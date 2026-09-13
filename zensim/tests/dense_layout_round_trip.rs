@@ -382,3 +382,169 @@ fn fullres_y_subset_bake_matches_full_inputs() {
     );
     assert_eq!(scorer.compute(&rs, &rs, None).unwrap().score(), 100.0);
 }
+
+#[test]
+fn sampling_contracts_serve_and_spatialize_through_public_api() {
+    for mode in ["y", "xyb"] {
+        let ids: Vec<usize> = (0..228)
+            .filter(|&i| mode != "y" || !matches!(i,0..=12|26..=38|156..=161|168..=173))
+            .collect();
+        for filter in ["triangle", "mitchell", "robidouxsharp"] {
+            for ratio in ["3/2", "2", "3"] {
+                let tag = format!("v1:{mode}:{filter}:{ratio}");
+                let n = ids.len();
+                let recipe = serde_json::json!({"schema_hash":1,"scaler_mean":vec![0.;n],"scaler_scale":vec![1.;n],
+                    "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join("\n")},
+                    {"key":"zentrain.formula_revision","type":"utf8","text":std::env::var("ZENSIM_FORMULA_REV").unwrap_or_else(|_|"1".into())},
+                    {"key":"zentrain.sampling","type":"utf8","text":tag}],
+                    "layers":[{"in_dim":n,"out_dim":1,"activation":"identity","dtype":"f32","weights":vec![-0.1;n],"biases":[100.]}]});
+                let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+                let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+                let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+                for (w, h) in [(17, 9), (97, 131), (257, 259)] {
+                    let src: Vec<_> = (0..w * h)
+                        .map(|i| {
+                            [
+                                (i % 211) as u8,
+                                ((i * 7) % 239) as u8,
+                                ((i * 13) % 251) as u8,
+                            ]
+                        })
+                        .collect();
+                    let mut dst = src.clone();
+                    for y in h / 3..(h / 3 + 8).min(h) {
+                        for x in w / 3..(w / 3 + 8).min(w) {
+                            dst[y * w + x] = [255, 0, 128];
+                        }
+                    }
+                    let rs = RgbSlice::new(&src, w, h);
+                    let ds = RgbSlice::new(&dst, w, h);
+                    let direct = scorer.compute(&rs, &ds, None).unwrap();
+                    let cached = scorer
+                        .score_features(direct.features(), w as u32, h as u32, None)
+                        .unwrap();
+                    assert_eq!(direct.score().to_bits(), cached.to_bits(), "{tag}");
+                    let pre = scorer.precompute_reference(&rs).unwrap();
+                    assert!(
+                        zensim::Zensim::new(zensim::ZensimProfile::B)
+                            .compute_with_ref(&pre, &ds)
+                            .is_err()
+                    );
+                    assert!(
+                        scorer
+                            .compute_hdr(&rs, &ds, zensim::feature_v2::HdrEncoding::Linear, None)
+                            .is_err()
+                    );
+
+                    let legacy = zensim::Zensim::new(zensim::ZensimProfile::B);
+                    assert!(
+                        legacy
+                            .compute_with_ref_score_and_attribution(&pre, &ds, &[0.0; 156])
+                            .is_err()
+                    );
+                    assert!(
+                        legacy
+                            .compute_with_ref_score_and_attribution_binned(
+                                &pre,
+                                &ds,
+                                &[0.0; 156],
+                                8
+                            )
+                            .is_err()
+                    );
+                    let mapped = scorer
+                        .compute_with_ref_and_attribution(
+                            &rs,
+                            &pre,
+                            &ds,
+                            None,
+                            &mut zensim::Fused944Session::new(),
+                            8,
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        mapped.result().features(),
+                        direct.features(),
+                        "{tag} {w}x{h}"
+                    );
+                    assert_eq!(mapped.result().score(), direct.score(), "{tag}");
+                    assert_eq!(
+                        mapped.result().raw_distance(),
+                        direct.raw_distance(),
+                        "{tag}"
+                    );
+                    assert!(mapped.attribution().density().iter().all(|v| v.is_finite()));
+                    assert!(mapped.refinement_gain(0, 0, w, h).is_finite());
+                    assert!(
+                        mapped.unsupported_refinement_feature_ids().is_empty(),
+                        "{tag}: {:?}",
+                        mapped.unsupported_refinement_feature_ids()
+                    );
+                    assert_eq!(scorer.compute(&rs, &rs, None).unwrap().score(), 100.);
+                    let wrong = zensim::Zensim::new(zensim::ZensimProfile::B)
+                        .precompute_reference(&rs)
+                        .unwrap();
+                    assert!(
+                        scorer
+                            .compute_with_ref_and_attribution(
+                                &rs,
+                                &wrong,
+                                &ds,
+                                None,
+                                &mut zensim::Fused944Session::new(),
+                                8
+                            )
+                            .is_err()
+                    );
+                }
+
+                let bytes_static: &'static [u8] = Box::leak(bytes.clone().into_boxed_slice());
+                BAKE.with(|b| b.set(bytes_static));
+                fn sampling_fixture() -> &'static [u8] {
+                    BAKE.with(|b| b.get())
+                }
+                let params = Box::leak(Box::new(
+                    zensim::profile::ProfileParams::builder()
+                        .weights(zensim::WEIGHTS)
+                        .mlp(sampling_fixture)
+                        .skip_score_mapping(true)
+                        .build(),
+                ));
+                let legacy = Zensim::new(ZensimProfile::Custom {
+                    name: "sampling-refusal",
+                    params,
+                });
+                let r = vec![[100, 120, 140]; 64 * 64];
+                let d = vec![[110, 125, 130]; 64 * 64];
+                assert!(
+                    legacy
+                        .compute(&RgbSlice::new(&r, 64, 64), &RgbSlice::new(&d, 64, 64))
+                        .is_err()
+                );
+                let compatible = [
+                    zenpredict::Model::from_bytes(&bytes).unwrap(),
+                    zenpredict::Model::from_bytes(&bytes).unwrap(),
+                ];
+                assert!(zensim::BakeScorer::ensemble(&compatible, None).is_ok());
+                let other_tag = if ratio == "2" {
+                    format!("v1:{mode}:{filter}:3")
+                } else {
+                    format!("v1:{mode}:{filter}:2")
+                };
+                let other =
+                    zenpredict_bake::append_metadata_utf8(&bytes, "zentrain.sampling", &other_tag)
+                        .unwrap();
+                let incompatible = [
+                    zenpredict::Model::from_bytes(&bytes).unwrap(),
+                    zenpredict::Model::from_bytes(&other).unwrap(),
+                ];
+                assert!(zensim::BakeScorer::ensemble(&incompatible, None).is_err());
+                let bad =
+                    zenpredict_bake::append_metadata_utf8(&bytes, "zentrain.sampling", "unknown")
+                        .unwrap();
+                let bad = zenpredict::Model::from_bytes(&bad).unwrap();
+                assert!(zensim::BakeScorer::new(&bad).is_err());
+            }
+        }
+    }
+}

@@ -1934,6 +1934,7 @@ pub(crate) struct ComputeSet {
     /// Full-resolution X/B moments. Plans may omit them for basic/peak subsets.
     /// Conversion and the coarser XYB pyramid always remain complete.
     pub full_res_xb: bool,
+    pub sampling: Option<crate::sampling::Sampling>,
     /// v1's masked/IW/soft-peak pool slots — the 13.6 % pass of item E.
     pub v1_pools: V1PoolsMode,
     /// The v2-era blocks as a group (`f372..`): false for a `v1_only`
@@ -2007,6 +2008,7 @@ impl ComputeSet {
             formula_revision: t.formula_revision,
             v1_basic: true,
             full_res_xb: true,
+            sampling: None,
             v1_pools: t.v1_pools,
             v2_blocks,
             gradient: t.gradient_features && v2_blocks,
@@ -2233,7 +2235,7 @@ impl ComputeSet {
         // Family tokens cannot reconstruct a channel subset. Its explicit
         // feature IDs and per-slot provenance remain the authoritative identity;
         // do not issue a shorthand that Request::for_set cannot reproduce.
-        if !self.full_res_xb {
+        if !self.full_res_xb || self.sampling.is_some() {
             return None;
         }
         // The emitted width rides along as the legacy `@w<N>` hint — a
@@ -7956,6 +7958,28 @@ pub(crate) fn compute_folded_v1_372_streaming_impl(
             ..V2NewFeatureToggles::default()
         },
     };
+    if let Some(p) = plan
+        && let Some(sampling) = p.compute.sampling
+    {
+        let dims = sampling.dims(source.width(), source.height());
+        let mut mo = MeanOffsetRows::new(dims[0].0, dims[0].1);
+        let res = foldapp_streaming_walk(
+            source,
+            distorted,
+            parallel,
+            toggles,
+            crate::feature_v2_stream::FrontEnd::Sdr,
+            scratch,
+            FoldWalkExtras {
+                compute: Some(p.compute),
+                mean_offset: Some(&mut mo),
+                #[cfg(feature = "custom-profiles")]
+                retention,
+                ..Default::default()
+            },
+        );
+        return Ok((res.into_features(), mo.finish()));
+    }
     // Sub-64 reflect-pad BEFORE the walk, exactly as
     // `metric::compute_with_config_inner` does — so both engines' features
     // AND mean_offset are taken over the same padded plane. The two arms are
@@ -8766,7 +8790,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
         }
     }
 
-    let strip_max_n = w0 * (STRIP_ROWS + 2 * HALO_P);
+    if let Some(sampling) = compute.sampling {
+        dims = sampling.dims(w0, h0);
+    }
+    let strip_max_n = dims[0].0 * (STRIP_ROWS + 2 * HALO_P);
     // HOISTED so the strip scratch can be sized to the planes this walk will
     // actually write (fold-footprint lane). Both flags are strip-independent —
     // they were computed inside the loop purely because that is where they are
@@ -8801,6 +8828,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
         stream_pool,
         front_end,
         ref_planes,
+        compute.sampling,
     );
 
     let __t_walk = crate::fold_timing::start();

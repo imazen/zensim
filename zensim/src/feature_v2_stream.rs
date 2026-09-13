@@ -230,12 +230,6 @@ impl RollingPlane {
         &self.buf[start..start + (r1 - r0) * self.width]
     }
 
-    /// One plane row as a slice.
-    #[inline]
-    fn row(&self, r: usize) -> &[f32] {
-        self.rows(r, r + 1)
-    }
-
     /// Make room for `n_rows` new rows at `hi` and return the writable
     /// region for them (compacting or growing first as needed). Caller
     /// fills every element of the returned slice.
@@ -310,6 +304,7 @@ struct ScaleState {
 pub(crate) struct StripPlaneProducer<'a, S: ImageSource, D: ImageSource> {
     source: &'a S,
     distorted: &'a D,
+    sampled: Option<[Vec<crate::streaming::XybPyramidLevel>; 2]>,
     /// `[side][channel][scale]` rolling planes; side 0 = source.
     planes: [[Vec<RollingPlane>; 3]; 2],
     scales: Vec<ScaleState>,
@@ -435,7 +430,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         pool: &mut Vec<Vec<f32>>,
         front_end: FrontEnd,
     ) -> Self {
-        Self::new_with_ref_feed(source, distorted, parallel, pool, front_end, None)
+        Self::new_with_ref_feed(source, distorted, parallel, pool, front_end, None, None)
     }
 
     /// [`Self::new_with_front_end`] with an optional pre-built source-side XYB
@@ -448,7 +443,53 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         pool: &mut Vec<Vec<f32>>,
         front_end: FrontEnd,
         ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
+        sampling: Option<crate::sampling::Sampling>,
     ) -> Self {
+        if let Some(sampling) = sampling {
+            assert!(matches!(front_end, FrontEnd::Sdr));
+            let make_pair = || {
+                [
+                    sampling.pyramid(source, parallel),
+                    sampling.pyramid(distorted, parallel),
+                ]
+            };
+            #[cfg(feature = "threads")]
+            let sampled = if parallel
+                && source.width() * source.height() >= 65_536
+                && rayon::current_num_threads() > 1
+            {
+                let (a, b) = rayon::join(
+                    || sampling.pyramid(source, parallel),
+                    || sampling.pyramid(distorted, parallel),
+                );
+                [a, b]
+            } else {
+                make_pair()
+            };
+            #[cfg(not(feature = "threads"))]
+            let sampled = make_pair();
+            let scales = sampled[0]
+                .iter()
+                .map(|p| ScaleState {
+                    plane_w: p.1,
+                    plane_h: p.2,
+                    next_ks: 0,
+                })
+                .collect();
+            return Self {
+                source,
+                distorted,
+                sampled: Some(sampled),
+                planes: std::array::from_fn(|_| std::array::from_fn(|_| Vec::new())),
+                scales,
+                parallel,
+                front_end,
+                hdr_row: Vec::new(),
+                max_held_rows: vec![0; crate::NUM_SCALES],
+                ref_planes: None,
+                advance_rows: 0,
+            };
+        }
         Self::new_inner(
             source, distorted, parallel, pool, front_end, ref_planes, None,
         )
@@ -528,6 +569,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         Self {
             source,
             distorted,
+            sampled: None,
             planes,
             scales,
             parallel,
@@ -558,6 +600,22 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     /// [`Self::wide_window`] / [`Self::fill_wide`] / [`Self::rows`]) stay
     /// valid until the NEXT `next_strip` call.
     pub(crate) fn next_strip(&mut self) -> Option<StripInfo> {
+        if self.sampled.is_some() {
+            for (scale, st) in self.scales.iter_mut().enumerate() {
+                let y0 = st.next_ks * STRIP_ROWS;
+                if y0 < st.plane_h {
+                    st.next_ks += 1;
+                    return Some(StripInfo {
+                        scale,
+                        y0,
+                        strip_h: STRIP_ROWS.min(st.plane_h - y0),
+                        plane_w: st.plane_w,
+                        plane_h: st.plane_h,
+                    });
+                }
+            }
+            return None;
+        }
         // Retire rows consumed by everything emitted so far, then look
         // for a ready strip; if none, produce more rows and repeat.
         loop {
@@ -843,10 +901,13 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         if !info.interior() {
             return None;
         }
-        Some(
-            self.plane(side, ch, info.scale)
-                .rows(info.y0 - HALO_P, info.y0 + info.strip_h + HALO_P),
-        )
+        Some(self.rows(
+            side,
+            ch,
+            info.scale,
+            info.y0 - HALO_P,
+            info.y0 + info.strip_h + HALO_P,
+        ))
     }
 
     /// Materialize the strip's wide window into `dst`
@@ -857,11 +918,16 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         let w = info.plane_w;
         let wide_h = info.wide_h();
         debug_assert!(dst.len() >= w * wide_h);
-        let plane = self.plane(side, ch, info.scale);
         for i in 0..wide_h {
             let gy = info.y0 as isize - HALO_P as isize + i as isize;
             let gy_r = reflect_101(gy, info.plane_h);
-            dst[i * w..(i + 1) * w].copy_from_slice(plane.row(gy_r));
+            dst[i * w..(i + 1) * w].copy_from_slice(self.rows(
+                side,
+                ch,
+                info.scale,
+                gy_r,
+                gy_r + 1,
+            ));
         }
     }
 
@@ -870,6 +936,14 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
     /// window, which the emission/retire order guarantees for
     /// `[y0 − 1, y0 + strip_h + 1)` of the just-emitted strip).
     pub(crate) fn rows(&self, side: Side, ch: usize, scale: usize, r0: usize, r1: usize) -> &[f32] {
+        if let Some(sampled) = &self.sampled {
+            let si = match side {
+                Side::Source => 0,
+                Side::Distorted => 1,
+            };
+            let p = &sampled[si][scale];
+            return &p.0[ch][r0 * p.1..r1 * p.1];
+        }
         self.plane(side, ch, scale).rows(r0, r1)
     }
 

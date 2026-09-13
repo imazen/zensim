@@ -273,6 +273,7 @@ pub mod source;
 /// Internal wire-format views used by the Rust baking and diagnostics tools.
 #[doc(hidden)]
 pub mod bake_metadata;
+mod sampling;
 #[doc(hidden)]
 pub mod score_math;
 pub(crate) mod ssim_form;

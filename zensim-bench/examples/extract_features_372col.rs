@@ -82,8 +82,10 @@ fn main() {
     let mut audit_head = None;
     let mut audit_ensemble = None;
     let mut audit_weights = None;
+    let mut sampling = None;
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--sampling" => sampling = Some(args.next().expect("--sampling value")),
             "--corpus" => corpus = Some(args.next().unwrap()),
             "--path" => path = Some(args.next().unwrap().into()),
             "--out" => out = Some(args.next().unwrap().into()),
@@ -105,6 +107,7 @@ fn main() {
     let corpus = corpus.expect("--corpus REQUIRED (konjnd or aic3)");
     let path = path.expect("--path REQUIRED");
     let out = out.expect("--out REQUIRED");
+    let producer = sampling.as_deref().map(|tag| sampling_producer(tag, &out));
     let audit = audit::Config::load(
         audit_out,
         audit_bake,
@@ -113,6 +116,7 @@ fn main() {
         audit_weights,
         &out,
         allow_failures,
+        sampling.as_deref(),
     )
     .expect("audit configuration");
     assert!(
@@ -166,7 +170,7 @@ fn main() {
                 eprintln!("  {corpus} {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
             }
             let hashes = audit.as_ref().map(|_| audit::file_hashes(kp)).transpose()?;
-            let row = extract_features(kp)?;
+            let row = extract_features(kp, producer.as_deref())?;
             let record = audit
                 .as_ref()
                 .map(|a| a.score(kp, &row.3, hashes.as_ref().unwrap()))
@@ -289,7 +293,7 @@ fn main() {
 /// corpus was dropped without a word, and (b) decodes an XYB JPEG as an
 /// ordinary JPEG, producing wrong pixels that still parse. See the module doc
 /// of `shared/zen_decode.rs`.
-fn extract_features(kp: &Pair) -> Result<FeatureRow, String> {
+fn extract_features(kp: &Pair, producer: Option<&[u8]>) -> Result<FeatureRow, String> {
     let src = zen_decode::decode_rgb8_path(&kp.reference).map_err(|e| format!("reference: {e}"))?;
     let dst = zen_decode::decode_rgb8_path(&kp.distorted).map_err(|e| format!("distorted: {e}"))?;
     if src.width != dst.width || src.height != dst.height {
@@ -325,6 +329,23 @@ fn extract_features(kp: &Pair) -> Result<FeatureRow, String> {
         .iter()
         .map(|c| [c[0], c[1], c[2]])
         .collect();
+    if let Some(bytes) = producer {
+        let model = zenpredict::Model::from_bytes(bytes).map_err(|e| e.to_string())?;
+        let mut scorer = zensim::BakeScorer::new(&model).map_err(|e| e.to_string())?;
+        let result = scorer
+            .compute(
+                &zensim::RgbSlice::new(&src_pixels, w_us, h_us),
+                &zensim::RgbSlice::new(&dst_pixels, w_us, h_us),
+                None,
+            )
+            .map_err(|e| e.to_string())?;
+        return Ok((
+            kp.ref_basename.clone(),
+            kp.human_score,
+            kp.extra_targets.clone(),
+            result.features().to_vec(),
+        ));
+    }
     let mut config = ZensimConfig::default();
     config.extended_features = true;
     config.compute_iw_features = true;
@@ -1035,4 +1056,39 @@ fn load_qsweep_tsv(path: &Path, max: usize) -> Vec<Pair> {
         }
     }
     pairs
+}
+
+/// A diagnostic all-live read-set bake makes this producer execute exactly the
+/// same public pixel API as a fitted model. It is not a quality predictor.
+fn sampling_producer(tag: &str, out: &Path) -> Vec<u8> {
+    let keep_y = tag.starts_with("v1:y:");
+    let ids: Vec<usize> = (0..228)
+        .filter(|&i| !keep_y || !matches!(i,0..=12|26..=38|156..=161|168..=173))
+        .collect();
+    let n = ids.len();
+    let revision = std::env::var("ZENSIM_FORMULA_REV")
+        .expect("sampling extraction requires explicit ZENSIM_FORMULA_REV");
+    let spec = serde_json::json!({"schema_hash":1,"scaler_mean":vec![0.;n],"scaler_scale":vec![1.;n],
+        "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join("\n")},
+        {"key":"zentrain.formula_revision","type":"utf8","text":revision},
+        {"key":"zentrain.sampling","type":"utf8","text":tag}],
+        "layers":[{"in_dim":n,"out_dim":1,"activation":"identity","dtype":"f32","weights":vec![-0.1;n],"biases":[100.]}]});
+    let bytes = zenpredict_bake::bake_from_json_str(&spec.to_string()).expect("producer bake");
+    let model = zenpredict::Model::from_bytes(&bytes).expect("producer model");
+    zensim::BakeScorer::new(&model).expect("servable sampling contract");
+    let era = format!("sampling_{}", tag.replace(':', "_").replace('/', "d"));
+    let hash = zensim::feature_set_id::slots_hash8(ids.iter().copied());
+    let identity = format!("basic+peaks@w372/{era}#{hash:08x}");
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    let manifest = serde_json::json!({"sampling":tag,"formula_revision":revision,"feature_set_id":identity,
+        "populated_feature_ids":ids,"era":era,"producer_surface":"zensim::BakeScorer::compute"});
+    std::fs::write(
+        format!("{}.manifest.json", out.display()),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(format!("{}.producer.bin", out.display()), &bytes).unwrap();
+    bytes
 }

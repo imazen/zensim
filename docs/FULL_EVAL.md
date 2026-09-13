@@ -265,3 +265,43 @@ performance remain explicitly unmeasured in this first packet.
 holdout evaluation. This stage always passes it and evaluates only its explicit
 packet. The existing full-eval and qualification stages remain separate.
 See the [measurement and next experiments](../benchmarks/fullres_y_subset_2026-09-12.md).
+
+## Opt-in sampling recipes (September 13 follow-up)
+
+The same `feature-screen` owner now accepts a `sampling` string:
+`v1:{y|xyb}:{triangle|mitchell|robidouxsharp}:{3/2|2|3}`.
+`y` retains full-resolution Y and omits finest X/B features; its subsequent
+XYB levels are at d, 2d and 4d. `xyb` starts all channels at d, then 2d, 4d
+and 8d. These are new feature values and require fresh extraction and fitting.
+They use zenresize main's signed floating-point kernels at every transition.
+
+To obtain the producer identity, run the existing extractor with `--sampling`
+and an explicit `ZENSIM_FORMULA_REV=3`. Its `.manifest.json` reports the
+Rust-generated `feature_set_id` and populated feature IDs; its `.producer.bin`
+is a diagnostic extraction model, not a trained quality model. Use those
+IDs and identity in the recipe. Optional `arm_seeds` maps arm names to paired
+training seeds. The trainer admits one sampling contract per fit and embeds
+`zentrain.sampling` in the final bake. The screen checks producer identity,
+passes the contract to the final pixel audit, and binds it into cache identity.
+
+Serve the final model through `BakeScorer::compute`, or cache its reference
+with that same scorer and call `compute_with_ref_and_attribution`. The existing
+`score_features` API consumes feature rows produced under the same contract;
+raw slices cannot carry provenance, so cache admission and pixel audits are
+required. `research::Request::for_bake_bytes` refuses these models instead of
+silently extracting the default pyramid. Mixed sampling ensembles, legacy
+reference caches, unmatched corruption companions and HDR sampling are refused.
+No named/default model is changed.
+
+Attribution uses squared, normalized resizer tap ownership back to logical
+source coordinates, including reflection. This preserves signed map mass;
+it is an approximation to finite pixel edits, not a pixel derivative.
+`refinement_gain` also includes the existing finite-max correction with the
+sampled support. Use `diffmap_block_coherence --bake MODEL --block 8` (also
+16 and 32) to compare these predictions against actual reference-pixel
+replacements scored through the public API. A successful serving audit does
+not imply accurate spatial steering.
+
+The [integrated sampling report](../benchmarks/sampling_serving_2026-09-13.md)
+records all 20 layouts, three paired training seeds, scalar/spatial timings,
+and intervention results. This supersedes the earlier filter-only status.

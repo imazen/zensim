@@ -101,6 +101,7 @@ impl Config {
         weights: Option<String>,
         csv: &Path,
         failures: usize,
+        sampling: Option<&str>,
     ) -> Result<Option<Self>, String> {
         let Some(out) = out else {
             if bake.is_some() || head.is_some() || ensemble.is_some() || weights.is_some() {
@@ -165,6 +166,12 @@ impl Config {
                 Ok::<_, String>(head)
             })
             .transpose()?;
+        if models
+            .iter()
+            .any(|model: &Model| model.metadata().get_utf8("zentrain.sampling").ok() != sampling)
+        {
+            return Err("audit sampling contract differs from feature producer".into());
+        }
         let config = Self {
             out,
             models,

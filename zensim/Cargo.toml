@@ -207,6 +207,7 @@ zenpredict = { workspace = true }
 # Cooperative cancellation (issue #48): the `Stop` trait is part of the
 # public API (`Zensim::with_stop`, `ZensimError::Cancelled`).
 enough = { workspace = true }
+zenresize = { workspace = true }
 
 [dev-dependencies]
 # jxl-encoder-family perceptual diffmap, for the RD block-selection comparison
@@ -238,7 +239,6 @@ zenpredict-bake = { workspace = true }
 # examples that already used them; new example/bench tooling uses these).
 zenpng = { workspace = true }
 zenpixels = { workspace = true }
-zenresize = { workspace = true }
 zenjpeg = { version = "0.8.4", default-features = false, features = ["decoder"] }
 # Pins the shipped Profile C weight bytes (profile_c_tests::weight_sha256_pinned).
 # Same version zensim-validate already uses in this workspace.
