@@ -83,9 +83,11 @@ fn main() {
     let mut audit_ensemble = None;
     let mut audit_weights = None;
     let mut sampling = None;
+    let mut full_944 = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--sampling" => sampling = Some(args.next().expect("--sampling value")),
+            "--full-944" => full_944 = true,
             "--corpus" => corpus = Some(args.next().unwrap()),
             "--path" => path = Some(args.next().unwrap().into()),
             "--out" => out = Some(args.next().unwrap().into()),
@@ -107,7 +109,17 @@ fn main() {
     let corpus = corpus.expect("--corpus REQUIRED (konjnd or aic3)");
     let path = path.expect("--path REQUIRED");
     let out = out.expect("--out REQUIRED");
-    let producer = sampling.as_deref().map(|tag| sampling_producer(tag, &out));
+    assert!(
+        !full_944 || sampling.is_none(),
+        "--full-944 conflicts with --sampling"
+    );
+    let producer = if full_944 {
+        Some(diagnostic_producer(None, &out))
+    } else {
+        sampling
+            .as_deref()
+            .map(|tag| diagnostic_producer(Some(tag), &out))
+    };
     let audit = audit::Config::load(
         audit_out,
         audit_bake,
@@ -229,12 +241,13 @@ fn main() {
     }
 
     let n_feat = rows.first().map(|r| r.3.len()).unwrap_or(0);
-    if n_feat != 372 {
-        eprintln!(
-            "WARNING: expected 372 features per pair, got {n_feat} — \
-             check ZensimConfig extended/iw flags + image dimensions"
-        );
-    }
+    let expected_width = if full_944 { 944 } else { 372 };
+    assert_eq!(n_feat, expected_width, "producer feature width");
+    assert!(
+        rows.iter()
+            .all(|r| r.3.len() == expected_width && r.3.iter().all(|v| v.is_finite())),
+        "invalid producer row"
+    );
 
     // Header layout: ref_basename, human_score, <extra-target columns…>, f0..f<n-1>.
     // Extra target column names come from the first row's `extra_targets`; every row
@@ -283,7 +296,7 @@ fn main() {
     );
 }
 
-/// Extract one pair's 372 features.
+/// Extract one pair's canonical features: default 372, or the explicit producer.
 ///
 /// Returns `Err` — never a silent skip — on every failure path. Decoding goes
 /// through [`zen_decode`], the imazen-only decode owner: magic-byte format
@@ -1060,29 +1073,43 @@ fn load_qsweep_tsv(path: &Path, max: usize) -> Vec<Pair> {
 
 /// A diagnostic all-live read-set bake makes this producer execute exactly the
 /// same public pixel API as a fitted model. It is not a quality predictor.
-fn sampling_producer(tag: &str, out: &Path) -> Vec<u8> {
-    let keep_y = tag.starts_with("v1:y:");
-    let ids: Vec<usize> = (0..228)
+fn diagnostic_producer(sampling: Option<&str>, out: &Path) -> Vec<u8> {
+    let keep_y = sampling.is_some_and(|tag| tag.starts_with("v1:y:"));
+    let ids: Vec<usize> = (0..if sampling.is_some() { 228 } else { 944 })
         .filter(|&i| !keep_y || !matches!(i,0..=12|26..=38|156..=161|168..=173))
         .collect();
     let n = ids.len();
     let revision = std::env::var("ZENSIM_FORMULA_REV")
-        .expect("sampling extraction requires explicit ZENSIM_FORMULA_REV");
-    let spec = serde_json::json!({"schema_hash":1,"scaler_mean":vec![0.;n],"scaler_scale":vec![1.;n],
+        .expect("diagnostic extraction requires explicit ZENSIM_FORMULA_REV");
+    let mut spec = serde_json::json!({"schema_hash":1,"scaler_mean":vec![0.;n],"scaler_scale":vec![1.;n],
         "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join("\n")},
-        {"key":"zentrain.formula_revision","type":"utf8","text":revision},
-        {"key":"zentrain.sampling","type":"utf8","text":tag}],
+        {"key":"zentrain.formula_revision","type":"utf8","text":revision}],
         "layers":[{"in_dim":n,"out_dim":1,"activation":"identity","dtype":"f32","weights":vec![-0.1;n],"biases":[100.]}]});
+    if let Some(tag) = sampling {
+        spec["metadata"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!(
+            {"key":"zentrain.sampling","type":"utf8","text":tag}));
+    }
     let bytes = zenpredict_bake::bake_from_json_str(&spec.to_string()).expect("producer bake");
     let model = zenpredict::Model::from_bytes(&bytes).expect("producer model");
     zensim::BakeScorer::new(&model).expect("servable sampling contract");
-    let era = format!("sampling_{}", tag.replace(':', "_").replace('/', "d"));
+    let era = sampling.map_or_else(
+        || format!("ceiling_rev{revision}"),
+        |tag| format!("sampling_{}", tag.replace(':', "_").replace('/', "d")),
+    );
     let hash = zensim::feature_set_id::slots_hash8(ids.iter().copied());
-    let identity = format!("basic+peaks@w372/{era}#{hash:08x}");
+    let family = if sampling.is_some() {
+        "basic+peaks@w372"
+    } else {
+        "basic+peaks+masked+iw+v2+append+append2@w944"
+    };
+    let identity = format!("{family}/{era}#{hash:08x}");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
-    let manifest = serde_json::json!({"sampling":tag,"formula_revision":revision,"feature_set_id":identity,
+    let manifest = serde_json::json!({"sampling":sampling,"formula_revision":revision,"feature_set_id":identity,
         "populated_feature_ids":ids,"era":era,"producer_surface":"zensim::BakeScorer::compute"});
     std::fs::write(
         format!("{}.manifest.json", out.display()),

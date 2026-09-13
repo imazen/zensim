@@ -112,7 +112,7 @@ fn a_372_bake_reading_f156_371_mismatches_the_944_root() {
 /// `f0..155` — the T.R4 bridge cell measured ≤0.0008 cross-root drift for
 /// exactly this shape.
 #[test]
-fn a_basic_only_bake_is_compatible_with_every_registered_producer() {
+fn basic_only_bake_compatibility_respects_partial_producers() {
     let m = build_model(372, |k| k < 28);
     let bake_ref = feature_set::bake_feature_set_ref(&m, "v1cur").expect("derive");
     assert_eq!(bake_ref.id.compute().to_string(), "basic");
@@ -125,10 +125,10 @@ fn a_basic_only_bake_is_compatible_with_every_registered_producer() {
             .into_iter()
             .filter(|m| m.kind == feature_set::MismatchKind::SlotsNotPopulated)
             .count();
-        assert_eq!(
-            slot_fails, 0,
-            "basic-only must be slot-compatible with {id}"
-        );
+        // September 13 sampling producers intentionally omit fine X/B.
+        // Width 372 does not authorize reading those unpopulated basic slots.
+        let expected = usize::from(id.contains("/sampling_v1_y_"));
+        assert_eq!(slot_fails, expected, "basic slot coverage for {id}");
     }
 }
 

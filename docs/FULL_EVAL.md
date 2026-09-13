@@ -324,3 +324,54 @@ not imply accurate spatial steering.
 The [integrated sampling report](../benchmarks/sampling_serving_2026-09-13.md)
 records all 20 layouts, three paired training seeds, scalar/spatial timings,
 and intervention results. This supersedes the earlier filter-only status.
+# Representative feature/scale capability study (September 13, 2026)
+
+The `feature-screen` owner also accepts `zensim-feature-ceiling-recipe-v1`.
+Its representative preparation is separate from the small T2 screen's strict
+300-second budget. See the preregistered
+[protocol](../benchmarks/feature_ceiling_2026-09-13.md) and
+[recipe](../benchmarks/feature_ceiling_2026-09-13.json).
+
+```bash
+../scripts/run-heavy --mem 16G --jobs 8 scripts/run_full_eval.sh \
+  --stage feature-screen benchmarks/feature_ceiling_2026-09-13.json \
+  /absolute/fresh/output --ceiling-stage prepare
+../scripts/run-heavy --mem 16G --jobs 8 scripts/run_full_eval.sh \
+  --stage feature-screen benchmarks/feature_ceiling_2026-09-13.json \
+  /absolute/fresh/output --ceiling-stage fit
+../scripts/run-heavy --mem 16G --jobs 8 scripts/run_full_eval.sh \
+  --stage feature-screen benchmarks/feature_ceiling_2026-09-13.json \
+  /absolute/fresh/output --ceiling-stage checkpoints
+../scripts/run-heavy --mem 16G --jobs 8 scripts/run_full_eval.sh \
+  --stage feature-screen benchmarks/feature_ceiling_2026-09-13.json \
+  /absolute/fresh/output --ceiling-stage audit
+scripts/run_full_eval.sh --stage feature-screen \
+  benchmarks/feature_ceiling_2026-09-13.json /absolute/fresh/output --ceiling-stage report
+```
+
+Build the existing Rust extractor, trainer, cached predictor and `panel` first.
+The extractor's `--full-944` option uses an all-live diagnostic bake through
+`BakeScorer::compute` and emits an explicit producer manifest; it conflicts with
+`--sampling`. It creates no new feature arithmetic. Fresh 944 tables retain v1
+peaks/masked/IW slots, unlike historical wide producers that left those empty.
+Do not infer compatibility from width. Python preparation/reporting live in the
+bounded `feature_screen_ceiling` module; Rust owns features, fitting and scoring.
+
+Preparation pins original bytes, all row IDs, split/family admission, tools,
+feature ID and formula revision. Fitting validates tables and supports verified
+completed-bake reuse. Eight independent fits run under the campaign's eight-core
+cap. Audit uses actual pixels and finite spatial repairs; unsupported features
+remain explicit. The extra `--ceiling-panel PATH` selects a separately pinned
+raw-error-capable panel binary when preserving an active campaign's original
+tool binaries. No stage enters automatic protected full-eval defaults.
+The optional `checkpoints` follow-up adds 18 frequent-checkpoint controls and
+nine coarse262 fits to the primary 135-fit matrix. Run it before `audit`, which
+requires a fresh audits directory. `all` executes preparation, primary fitting
+and audit; it does not include this follow-up or the final `report` stage.
+
+`panel --batch jobs.tsv --raw-errors` appends **raw** MAE. The existing `mae`
+column is logistic-remapped using the evaluation rows and remains unchanged for
+compatibility. Use raw MAE for calibration/error claims. The literal cached
+feature API has no pixel-identity override; identity-aware pixel audits are
+reported separately. A capacity/data plateau within one MLP family is an
+empirical result, not a mathematical feature ceiling or product qualification.

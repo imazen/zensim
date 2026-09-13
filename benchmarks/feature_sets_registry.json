@@ -283,6 +283,13 @@
    "formula_revision": 3,
    "build_commit": "per-run source and binary hashes",
    "note": "Sampling experiment; benchmarks/sampling_serving_2026-09-13.md"
+  },
+  "ceiling_rev3": {
+   "build_commit": "see per-run binary/source hashes",
+   "root": null,
+   "label": "September 13 representative feature/scale capability study",
+   "formula_revision": 3,
+   "note": "Fresh canonical native-decoded BakeScorer extraction, all 944 IDs requested by diagnostic producer. No Rev1 feature reuse. Experiment only; source and input hashes pinned per run."
   }
  },
  "sets": {
@@ -770,6 +777,17 @@
    "role": "producer",
    "kind": "set",
    "evidence": "benchmarks/sampling_serving_2026-09-13.md; extractor public BakeScorer producer manifest"
+  },
+  "basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "ceiling_rev3",
+   "slots": "0-943",
+   "slots_hash8": "b782e349",
+   "n_slots": 944,
+   "role": "producer",
+   "kind": "set",
+   "evidence": "benchmarks/feature_ceiling_2026-09-13.md; extract_features_372col --full-944"
   }
  },
  "roots": {

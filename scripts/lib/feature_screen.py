@@ -32,9 +32,16 @@ def main():
     ap.add_argument("recipe", type=Path)
     ap.add_argument("out", type=Path, help="fresh output directory")
     ap.add_argument("--cache", type=Path, help="optional verified feature cache")
+    ap.add_argument("--ceiling-stage", choices=("all", "prepare", "fit", "checkpoints", "audit", "report"), default="all")
+    ap.add_argument("--ceiling-panel", type=Path, help="raw-error-capable Rust panel for ceiling audit")
     args = ap.parse_args()
     started = time.monotonic()
     recipe = json.loads(args.recipe.read_text())
+    if recipe["schema"] == "zensim-feature-ceiling-recipe-v1":
+        from feature_screen_ceiling import execute
+        return execute(args, recipe)
+    if args.ceiling_stage != "all" or args.ceiling_panel:
+        raise ValueError("ceiling options require a ceiling recipe")
     if recipe["schema"] != "zensim-feature-screen-recipe-v1":
         raise ValueError("unsupported recipe schema")
     budget = recipe["budget_seconds"]

@@ -255,7 +255,8 @@ struct Args {
     #[arg(long, default_value_t = false)]
     no_sample_coverage: bool,
 
-    /// Log every N epochs.
+    /// Evaluate, select checkpoints, and log every N epochs. This changes
+    /// which checkpoints can be selected; it is not only a verbosity setting.
     #[arg(long, default_value_t = 10)]
     log_every: usize,
 

@@ -1,5 +1,24 @@
 # Start here — one target score, one development path
 
+## September 13, later: representative feature/scale capability study
+
+[162-fit study](benchmarks/feature_ceiling_2026-09-13.md) supersedes the small
+proxy screens for feature capability claims. Fresh Rev3 full944 extraction
+covers 19,958 human/codec/corruption pairs, three seeds, scale read sets,
+H32/H128/H256 capacity and half-data controls. Data and checkpoint selection
+still limit the results; no feature ceiling or model qualification is established.
+Full944 substantially improves corruption detection; dropping finest chroma is
+not universally safe. Reduced v2 read sets currently save almost no compute.
+
+All 162 bakes passed native pixel audits. Spatial checks expose a separate
+blocker: supported v2 rectangle predictions can have very low repair coherence
+despite a good local linear score response. Next: fix those retained failures,
+then implement actual per-scale v2 dispatch with the 619/800/full944 controls.
+Increase codec/corruption source coverage before interpreting a training plateau.
+Cached H128 fits take roughly two minutes; H256 controls exceed five minutes.
+The report records explicit raw errors; legacy Rust `panel` MAE is remapped.
+Artifacts: `~/work/zensim-validation-2026-09-13/ceiling/final/`.
+
 ## September 13: actual coarse-pool dispatch and a one-minute screen
 
 [Coarse-pool dispatch](benchmarks/coarse_pool_dispatch_2026-09-13.md) now derives

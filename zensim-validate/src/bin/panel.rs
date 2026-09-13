@@ -134,6 +134,9 @@
 //! are dropped per job and counted in `n_dropped` (same policy as
 //! aggregate mode). Floats print as `{:.17e}` (round-trip exact).
 //! `--json` is not supported with `--batch` (the TSV is the contract).
+//! `--raw-errors` appends `mae_raw` without fitting a score mapping. The legacy
+//! `mae` column in `--stats full` remains logistic-rescaled; it cannot measure
+//! a target dial's calibration error. Raw errors also work with `--stats srocc`.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -157,6 +160,8 @@ struct Args {
     batch: Option<PathBuf>,
     /// Batch column set: `full` (default) or `srocc` (bootstrap fast path).
     stats_srocc_only: bool,
+    /// Append raw MAE alongside the legacy logistic-rescaled MAE in batch mode.
+    raw_errors: bool,
     json: bool,
     /// Override default column names if a caller's table uses different
     /// headers. Defaults: predicted / target / sigma / band.
@@ -221,6 +226,7 @@ fn print_usage() {
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20lines: '#def N<TAB>csv', 'L<TAB>x-csv<TAB>y-csv',\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20'L<TAB>@X:@Y<TAB>idx-csv|*')\n\
          \x20\x20--stats <full|srocc>    batch column set (default full)\n\
+         \x20\x20--raw-errors            append raw MAE in batch mode (no score remapping)\n\
          \x20\x20--json                  emit JSON instead of text (aggregate mode only)\n\
          \x20\x20--col-predicted <NAME>  override the 'predicted' column name\n\
          \x20\x20--col-target <NAME>     override the 'target' column name\n\
@@ -242,6 +248,7 @@ fn parse_args() -> Result<Args, String> {
     let mut input: Option<PathBuf> = None;
     let mut batch: Option<PathBuf> = None;
     let mut stats_srocc_only = false;
+    let mut raw_errors = false;
     let mut json = false;
     let mut col_predicted = "predicted".to_string();
     let mut col_target = "target".to_string();
@@ -270,6 +277,7 @@ fn parse_args() -> Result<Args, String> {
                 };
             }
             "--json" => json = true,
+            "--raw-errors" => raw_errors = true,
             // Hidden — see Args::emit_rescaled.
             "--emit-rescaled" => emit_rescaled = true,
             "--col-predicted" => {
@@ -318,10 +326,14 @@ fn parse_args() -> Result<Args, String> {
         return Err("--input, --batch or --pairwise is required".to_string());
     }
 
+    if raw_errors && batch.is_none() {
+        return Err("--raw-errors requires --batch".to_string());
+    }
     Ok(Args {
         input,
         batch,
         stats_srocc_only,
+        raw_errors,
         json,
         col_predicted,
         col_target,
@@ -809,7 +821,23 @@ struct BatchRow {
     n_dropped: usize,
     srocc: f64,
     srocc_signed: f64,
+    mae_raw: f64,
     full: Option<(PanelStats, f64, f64)>, // (compute_panel stats, plcc_raw, mae)
+}
+
+// Shared by the existing mapped-MAE and explicit raw-error output. Keeping
+// the arithmetic here makes the rescaling choice visible at the call site.
+fn mean_absolute_error(predicted: &[f64], target: &[f64]) -> f64 {
+    if predicted.is_empty() {
+        f64::NAN
+    } else {
+        predicted
+            .iter()
+            .zip(target.iter())
+            .map(|(r, t)| (r - t).abs())
+            .sum::<f64>()
+            / predicted.len() as f64
+    }
 }
 
 fn compute_batch_row(x: &[f64], y: &[f64], srocc_only: bool) -> BatchRow {
@@ -840,16 +868,7 @@ fn compute_batch_row(x: &[f64], y: &[f64], srocc_only: bool) -> BatchRow {
         // publish, computed by the same owner call, so a band recomputed
         // through this binary carries every field the emitter does.
         let rescaled = panel::rescale_logistic(&xf, &yf);
-        let mae = if rescaled.is_empty() {
-            f64::NAN
-        } else {
-            rescaled
-                .iter()
-                .zip(yf.iter())
-                .map(|(r, t)| (r - t).abs())
-                .sum::<f64>()
-                / rescaled.len() as f64
-        };
+        let mae = mean_absolute_error(&rescaled, &yf);
         Some((stats, plcc_raw, mae))
     };
     BatchRow {
@@ -857,6 +876,7 @@ fn compute_batch_row(x: &[f64], y: &[f64], srocc_only: bool) -> BatchRow {
         n_dropped,
         srocc: srocc_signed.abs(),
         srocc_signed,
+        mae_raw: mean_absolute_error(&xf, &yf),
         full,
     }
 }
@@ -867,6 +887,10 @@ fn fmt_batch_f(v: f64) -> String {
 }
 
 fn run_batch(input: &BatchInput, srocc_only: bool) -> String {
+    run_batch_with_raw(input, srocc_only, false)
+}
+
+fn run_batch_with_raw(input: &BatchInput, srocc_only: bool, raw_errors: bool) -> String {
     use rayon::prelude::*;
 
     let rows: Vec<BatchRow> = input
@@ -900,6 +924,10 @@ fn run_batch(input: &BatchInput, srocc_only: bool) -> String {
             "label\tn\tn_dropped\tsrocc\tsrocc_signed\tplcc\tplcc_raw\tkrocc\tor\tpwrc\tz_rmse\tmae\n",
         );
     }
+    if raw_errors {
+        out.pop();
+        out.push_str("\tmae_raw\n");
+    }
     for ((label, _), r) in input.jobs.iter().zip(&rows) {
         out.push_str(label);
         out.push_str(&format!("\t{}\t{}", r.n, r.n_dropped));
@@ -919,6 +947,9 @@ fn run_batch(input: &BatchInput, srocc_only: bool) -> String {
                 fmt_batch_f(p.z_rmse),
                 fmt_batch_f(*mae)
             ));
+        }
+        if raw_errors {
+            out.push_str(&format!("\t{}", fmt_batch_f(r.mae_raw)));
         }
         out.push('\n');
     }
@@ -1233,7 +1264,14 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         };
-        print!("{}", run_batch(&input, args.stats_srocc_only));
+        if args.raw_errors {
+            print!(
+                "{}",
+                run_batch_with_raw(&input, args.stats_srocc_only, true)
+            );
+        } else {
+            print!("{}", run_batch(&input, args.stats_srocc_only));
+        }
         return ExitCode::SUCCESS;
     }
 
@@ -1752,6 +1790,23 @@ mod tests {
             (r.srocc_signed - 0.884_615_384_615_384_7).abs() < 1e-12,
             "tie-heavy midrank srocc={}",
             r.srocc_signed
+        );
+    }
+
+    #[test]
+    fn raw_error_keeps_calibration_offset_and_finite_row_policy() {
+        let input = parse_batch("offset\t11,12,13,14,NaN\t1,2,3,4,5\n").unwrap();
+        let legacy = run_batch(&input, false);
+        let raw = run_batch_with_raw(&input, false, true);
+        let header: Vec<_> = raw.lines().next().unwrap().split('\t').collect();
+        let row: Vec<_> = raw.lines().nth(1).unwrap().split('\t').collect();
+        assert_eq!(&row[1..3], &["4", "1"]);
+        assert_eq!(header.last(), Some(&"mae_raw"));
+        assert_eq!(row.last().unwrap().parse::<f64>().unwrap(), 10.0);
+        assert_eq!(
+            row[..row.len() - 1].join("\t"),
+            legacy.lines().nth(1).unwrap(),
+            "requesting raw error preserves every legacy statistic"
         );
     }
 }

@@ -7,7 +7,28 @@ rest on a hidden bug, confound, or invalid measurement. This doc exists so we do
 re-add a dataset a confound already poisoned, re-run a dead-end, or trust a retracted
 claim.
 
-**September 13 sampling follow-up:**
+**September 13, later capability study — STANDS within the stated panels:**
+[Protocol/results](../benchmarks/feature_ceiling_2026-09-13.md) and
+[exact read sets](../benchmarks/feature_ceiling_2026-09-13.json).
+Fresh full944 Rev3 extraction through BakeScorer: 11,125 KADID/TID human rows,
+620 codec-proxy rows (30 origins/29 families), 8,213 deduplicated corruption
+rows (12 admitted origins). TID is train-only; KADID terminal/T0 and fixed
+corruption validation origins are untouched. The later source-family manifest
+excludes 8414/8434 and co-locates 7004/7058; digit-only admission was insufficient.
+Old tables provide membership/labels, never feature values. Producer
+`basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3#b782e349` includes
+all 944 slots, unlike older wide producers that omitted v1 pooled features.
+Inputs, byte hashes, family/row IDs, tools, bakes and original codec binary are
+retained under `~/work/zensim-validation-2026-09-13/ceiling/final/`; codec commit
+coverage limitations are explicit in `CODEC_PROVENANCE.json`.
+
+162 fits show data dependence, a checkpoint-cadence confound, useful wide
+corruption features, and weak v2 spatial repair prediction. No reduced layout
+passes every family/error bar. Restricting v2 read sets does not yet save their
+extraction cost. This native-box study does not extend the fractional-plane
+training evidence. No release qualification or universal feature ceiling.
+
+**September 13 sampling follow-up (earlier):**
 [20-layout/60-fit screen](../benchmarks/sampling_serving_2026-09-13.md),
 using only the fixed T2 JXL proxy packet and reused training corruption PNGs.
 Explicit sampling contracts are served through Rust BakeScorer. All layouts
