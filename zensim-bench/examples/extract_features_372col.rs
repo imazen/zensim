@@ -110,11 +110,13 @@ fn main() {
     let path = path.expect("--path REQUIRED");
     let out = out.expect("--out REQUIRED");
     assert!(
-        !full_944 || sampling.is_none(),
-        "--full-944 conflicts with --sampling"
+        !full_944 || sampling.as_deref().is_none_or(|s| s.starts_with("v2:")),
+        "--full-944 sampling requires a direct v2 contract"
     );
+    assert!(full_944 || sampling.as_deref().is_none_or(|s| !s.starts_with("v2:")),
+        "direct v2 sampling requires --full-944");
     let producer = if full_944 {
-        Some(diagnostic_producer(None, &out))
+        Some(diagnostic_producer(sampling.as_deref(), &out))
     } else {
         sampling
             .as_deref()
@@ -1074,8 +1076,9 @@ fn load_qsweep_tsv(path: &Path, max: usize) -> Vec<Pair> {
 /// A diagnostic all-live read-set bake makes this producer execute exactly the
 /// same public pixel API as a fitted model. It is not a quality predictor.
 fn diagnostic_producer(sampling: Option<&str>, out: &Path) -> Vec<u8> {
+    let wide = sampling.is_none_or(|tag| tag.starts_with("v2:"));
     let keep_y = sampling.is_some_and(|tag| tag.starts_with("v1:y:"));
-    let ids: Vec<usize> = (0..if sampling.is_some() { 228 } else { 944 })
+    let ids: Vec<usize> = (0..if wide { 944 } else { 228 })
         .filter(|&i| !keep_y || !matches!(i,0..=12|26..=38|156..=161|168..=173))
         .collect();
     let n = ids.len();
@@ -1097,10 +1100,10 @@ fn diagnostic_producer(sampling: Option<&str>, out: &Path) -> Vec<u8> {
     zensim::BakeScorer::new(&model).expect("servable sampling contract");
     let era = sampling.map_or_else(
         || format!("ceiling_rev{revision}"),
-        |tag| format!("sampling_{}", tag.replace(':', "_").replace('/', "d")),
+        |tag| format!("sampling_{}", tag.replace(':', "_").replace('/', "d").replace(',', "_")),
     );
     let hash = zensim::feature_set_id::slots_hash8(ids.iter().copied());
-    let family = if sampling.is_some() {
+    let family = if !wide {
         "basic+peaks@w372"
     } else {
         "basic+peaks+masked+iw+v2+append+append2@w944"

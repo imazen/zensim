@@ -7,6 +7,20 @@ rest on a hidden bug, confound, or invalid measurement. This doc exists so we do
 re-add a dataset a confound already poisoned, re-run a dead-end, or trust a retracted
 claim.
 
+**September 13, latest scale-selective944 study — STANDS within these panels:**
+[189-fit results](../benchmarks/scale_selective_944_2026-09-13.md) reuse the exact
+19,958-row admission below, with fresh native and direct Triangle extractions.
+Native feature CSV is byte-identical to the prior producer. New explicitly
+versioned direct sampling eras cover 1/2/4/8, 1/3/5/7 and 1/2/3/5; do not mix
+these feature tables or retag old bakes. Each coarse level comes directly from
+original XYB with zenresize binary16 source rounding, independently verified.
+Legacy/v2 masked+IW additions are tested separately at every scale. Three seeds,
+H128, 32 epochs, every-epoch dev selection. Prime effects are mixed; wide
+features remain useful for corruption. Actual v2 scale dispatch now reduces
+native619 cost by 60% ST/58% MT8 on the bounded benchmark, correcting the earlier
+no-compute-savings limitation. Spatial failures and limited source diversity
+still prevent qualification. No protected data or deployed model changed.
+
 **September 13, later capability study — STANDS within the stated panels:**
 [Protocol/results](../benchmarks/feature_ceiling_2026-09-13.md) and
 [exact read sets](../benchmarks/feature_ceiling_2026-09-13.json).

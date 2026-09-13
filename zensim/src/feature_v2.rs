@@ -1940,6 +1940,8 @@ pub(crate) struct ComputeSet {
     /// Scales that run the shared masked/IW activity chain in Full mode.
     /// Public extraction retains all scales; declared-ID plans narrow this.
     pub v1_full_scales: u8,
+    /// Actual v2-era work, including adjacent-scale gradient dependencies.
+    pub v2_scales: u8,
     /// The v2-era blocks as a group (`f372..`): false for a `v1_only`
     /// request, which then computes NOTHING v2-era.
     pub v2_blocks: bool,
@@ -2000,6 +2002,21 @@ pub fn active_formula_revision() -> FormulaRevision {
 impl ComputeSet {
     pub(crate) const ALL_SCALES: u8 = (1 << crate::NUM_SCALES) - 1;
 
+    /// Narrow kernels without changing layout or the within-scale arithmetic.
+    pub(crate) fn at_scale(self, scale: usize) -> Self {
+        let live = self.v2_scales & (1 << scale) != 0;
+        Self {
+            v1_pools: self.pools_at(scale),
+            v2_blocks: self.v2_blocks && live,
+            gradient: self.gradient && live,
+            blockiness: self.blockiness && live,
+            append: self.append && live,
+            append2: self.append2 && live,
+            csfw: self.csfw && live,
+            ..self
+        }
+    }
+
     /// Only Full has a per-scale restriction. Peaks keeps the same basic
     /// and peak accumulators while omitting the activity/weighted-pool chain.
     pub(crate) fn pools_at(&self, scale: usize) -> V1PoolsMode {
@@ -2034,6 +2051,7 @@ impl ComputeSet {
             sampling: None,
             v1_pools: t.v1_pools,
             v1_full_scales: Self::ALL_SCALES,
+            v2_scales: Self::ALL_SCALES,
             v2_blocks,
             gradient: t.gradient_features && v2_blocks,
             blockiness: t.blockiness && v2_blocks,
@@ -2182,6 +2200,22 @@ impl ComputeSet {
         layout_width: usize,
     ) -> crate::feature_set_id::SlotSet {
         use crate::feature_set_id::SlotSet;
+        if self.v2_scales != Self::ALL_SCALES {
+            return SlotSet::from_slots((0..n_scales).flat_map(|scale| {
+                let local = Self {
+                    v2_scales: Self::ALL_SCALES,
+                    ..self.at_scale(scale)
+                };
+                local
+                    .populated_slots(n_scales, layout_width)
+                    .iter_slots()
+                    .filter(move |&id| {
+                        crate::feature_defs::def_at(id, n_scales)
+                            .is_some_and(|d| usize::from(d.scale) == scale)
+                    })
+                    .collect::<Vec<_>>()
+            }));
+        }
         let basic = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_BASIC;
         let peaks_end = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_WITH_PEAKS;
         let masked_end = n_scales * 3 * crate::metric::FEATURES_PER_CHANNEL_EXTENDED;
@@ -2236,7 +2270,7 @@ impl ComputeSet {
     /// also omit finest X/B. Cross-channel and free-extra families retain
     /// the complete walk until their dependencies have their own plan.
     pub(crate) fn allows_full_res_y_subset(&self) -> bool {
-        !self.v2_blocks
+        (!self.v2_blocks || self.v2_scales & 1 == 0)
             && self.free_extras == V1FreeExtras::Off
             && matches!(
                 self.v1_pools,
@@ -8386,6 +8420,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention(
         parallel,
         scratch,
         &mut crate::attribution::AttrSinkF32::Canvas(&mut canvas),
+        None,
     );
     // Trim the (possibly reflect-padded sub-64) canvas to the original.
     let out = if orig_w == w0 && orig_h == h0 {
@@ -8415,6 +8450,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention_into_bins(
     parallel: bool,
     scratch: &mut PassBScratchF32,
     accum: &mut crate::attribution::BinAccum,
+    geometry: Option<&crate::sampling::Geometry>,
 ) {
     retention_pass_b_all_scales(
         ret,
@@ -8424,6 +8460,7 @@ pub(crate) fn compute_v2_append_attribution_from_retention_into_bins(
         parallel,
         scratch,
         &mut crate::attribution::AttrSinkF32::Bins(accum),
+        geometry,
     );
 }
 
@@ -8437,6 +8474,7 @@ fn retention_pass_b_all_scales(
     parallel: bool,
     scratch: &mut PassBScratchF32,
     sink: &mut crate::attribution::AttrSinkF32<'_>,
+    geometry: Option<&crate::sampling::Geometry>,
 ) {
     let n_scales = ret.dims.len();
     let (w0, h0) = ret.dims[0];
@@ -8474,6 +8512,7 @@ fn retention_pass_b_all_scales(
             sink,
             &mut scratch.spread_tmp,
             &mut scratch.spread_out,
+            geometry,
         );
     }
 }
@@ -8881,8 +8920,17 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
             break;
         };
         let scale = info.scale;
+        let local = compute.at_scale(scale);
+        let v2_blocks = local.v2_blocks;
+        let append_on = local.append;
+        let append2_on = local.append2;
+        let append2 = append2.filter(|_| append2_on);
+        let csfw = csfw.filter(|_| local.csfw);
         let toggles = V2NewFeatureToggles {
-            v1_pools: compute.pools_at(scale),
+            v1_pools: local.v1_pools,
+            v1_only: !v2_blocks,
+            gradient_features: local.gradient,
+            blockiness: local.blockiness,
             ..toggles
         };
         crate::fold_timing::stop(__t_prod, crate::fold_timing::Phase::Producer, scale);
@@ -8975,7 +9023,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
         // `fuse_channels` conjunct stays because it is a runtime parallelism
         // fact the compute set does not model.
         #[cfg(feature = "threads")]
-        let self_blur = fuse_channels && compute.self_blur_eligible();
+        let self_blur = fuse_channels && local.self_blur_eligible();
         #[cfg(feature = "threads")]
         if fuse_channels {
             use rayon::prelude::*;
@@ -9252,8 +9300,15 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
 
     #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
     for scale in 0..n_scales {
+        let local = compute.at_scale(scale);
+        let v2_blocks = local.v2_blocks;
+        let append_on = local.append;
+        let append2_on = local.append2;
         let toggles = V2NewFeatureToggles {
-            v1_pools: compute.pools_at(scale),
+            v1_pools: local.v1_pools,
+            v1_only: !v2_blocks,
+            gradient_features: local.gradient,
+            blockiness: local.blockiness,
             ..toggles
         };
         let (width, height) = dims[scale];
@@ -9421,7 +9476,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
 
         for ch in 0..3 {
             let (gsrc, gdst) = grads[ch];
-            if let Some((prev_gsrc, prev_gdst)) = prev_grad[ch] {
+            if let Some((prev_gsrc, prev_gdst)) = prev_grad[ch]
+                && compute.at_scale(scale).gradient
+                && compute.at_scale(scale - 1).gradient
+            {
                 let decay_src = gsrc / (prev_gsrc + C_GRAD_DECAY);
                 let decay_dst = gdst / (prev_gdst + C_GRAD_DECAY);
                 let prev_base = v1_total
@@ -9449,6 +9507,9 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
     if append2_on {
         #[allow(clippy::needless_range_loop)] // scale derives offsets across distinct arrays
         for scale in 0..n_scales {
+            if !compute.at_scale(scale).append2 {
+                continue;
+            }
             let (width, height) = dims[scale];
             let n_f = (width * height) as f64;
             let base = scale * APPEND2_PER_SCALE;
@@ -9473,6 +9534,9 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
     //     from the Y CSFW accumulators (design §4.1). ---
     if csfw_on {
         for scale in 0..n_scales {
+            if !compute.at_scale(scale).csfw {
+                continue;
+            }
             let base = scale * CSFW_PER_SCALE;
             finish_csfw(
                 &accums[1].csfw[scale],
@@ -11746,6 +11810,7 @@ fn attr_pass_b_for_scale_f32(
     sink: &mut crate::attribution::AttrSinkF32<'_>,
     spread_tmp: &mut Vec<f32>,
     spread_out: &mut Vec<f32>,
+    geometry: Option<&crate::sampling::Geometry>,
 ) {
     let tpb = std::time::Instant::now();
     let (ws, hs) = dims[scale];
@@ -11811,7 +11876,13 @@ fn attr_pass_b_for_scale_f32(
             );
         }
         crate::attribution::AttrSinkF32::Bins(accum) => {
-            accum.add_scale_plane_f32(&scale_density[..n], ws, hs, 1usize << scale);
+            if let Some(geometry) = geometry {
+                let projected = geometry.project(&scale_density[..n], scale);
+                let (w, h) = geometry.logical_dimensions();
+                accum.add_scale_plane_f32(&projected, w, h, 1);
+            } else {
+                accum.add_scale_plane_f32(&scale_density[..n], ws, hs, 1usize << scale);
+            }
         }
     }
 }
@@ -13651,6 +13722,97 @@ pub(crate) mod tests {
                     "{w}x{h}: feature {i} diverged under cached moments: \
                      pair={a:e} with_ref={b:e}"
                 );
+            }
+        }
+    }
+
+    /// Independent f64 algebra, not a second call to the pooling helper.
+    /// Exercises actual dispatched SIMD and scalar tails with valid moments.
+    #[test]
+    fn weighted_mse_matches_normalized_positive_measure() {
+        for width in [7, 8, 13, 31, 97, 257] {
+            let height = 9;
+            let n = width * height;
+            for uniform in [false, true] {
+                let src = vec![0.2f32; n];
+                let dst: Vec<f32> = (0..n)
+                    .map(|i| {
+                        if uniform {
+                            0.25
+                        } else {
+                            0.2 + (i % 17) as f32 * 0.017
+                        }
+                    })
+                    .collect();
+                let act: Vec<f32> = (0..n).map(|i| (i % 23) as f32 * 0.023).collect();
+                let ssq: Vec<f32> = src.iter().zip(&dst).map(|(&s, &d)| s * s + d * d).collect();
+                let cross: Vec<f32> = src.iter().zip(&dst).map(|(&s, &d)| s * d).collect();
+                let actual = dense_block_kernel(
+                    &src, &dst, &src, &dst, &ssq, &cross, &act, width, height, true,
+                );
+                let signal: Vec<f64> = src
+                    .iter()
+                    .zip(&dst)
+                    .map(|(&s, &d)| {
+                        let e = (f64::from(s) - f64::from(d)).powi(2);
+                        e / (e + C_MSE)
+                    })
+                    .collect();
+                // Complementary activity weights partition the unweighted mass:
+                // w_mask + w_iw = 1 + floor, at every pixel.
+                let signal_sum: f64 = signal.iter().sum();
+                assert!(
+                    ((actual.ws_mask_mse.num + actual.ws_iw_mse.num) / (n as f64)
+                        - (1.0 + IW_WEIGHT_FLOOR) * signal_sum / (n as f64))
+                        .abs()
+                        < 2e-6
+                );
+                let lo = signal.iter().copied().fold(f64::INFINITY, f64::min);
+                let hi = signal.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                for (iw, pool) in [(false, actual.ws_mask_mse), (true, actual.ws_iw_mse)] {
+                    let weights: Vec<f64> = act
+                        .iter()
+                        .map(|&a| {
+                            let a = f64::from(a);
+                            if iw {
+                                a / (a + C_ACTIVITY) + IW_WEIGHT_FLOOR
+                            } else {
+                                C_ACTIVITY / (a + C_ACTIVITY)
+                            }
+                        })
+                        .collect();
+                    let denominator: f64 = weights.iter().sum();
+                    let reference: f64 =
+                        weights.iter().zip(&signal).map(|(w, e)| w * e).sum::<f64>() / denominator;
+                    let value = pool.finish();
+                    assert!(
+                        (value - reference).abs() < 2e-6,
+                        "width={width} iw={iw}: {value} vs {reference}"
+                    );
+                    assert!(value >= lo - 2e-6 && value <= hi + 2e-6);
+                    // A common weight multiplier must cancel in the ratio.
+                    let rescaled: f64 = weights
+                        .iter()
+                        .zip(&signal)
+                        .map(|(w, e)| 37.0 * w * e)
+                        .sum::<f64>()
+                        / (37.0 * denominator);
+                    assert!((reference - rescaled).abs() < 1e-12);
+                }
+                let identity = dense_block_kernel(
+                    &src,
+                    &src,
+                    &src,
+                    &src,
+                    &vec![0.08; n],
+                    &vec![0.04; n],
+                    &act,
+                    width,
+                    height,
+                    true,
+                );
+                assert_eq!(identity.ws_mask_mse.finish(), 0.0);
+                assert_eq!(identity.ws_iw_mse.finish(), 0.0);
             }
         }
     }
@@ -16944,6 +17106,54 @@ pub(crate) mod tests {
         }
         fn is_hdr(&self) -> bool {
             true
+        }
+    }
+
+    #[test]
+    fn scale_selective_944_hdr_retained_features_are_bit_exact() {
+        use crate::feature_plan::Plan;
+        use crate::feature_set_id::SlotSet;
+        let full = Plan::derive(&SlotSet::from_slots(0..944), 944).unwrap();
+        let mut scratch = V2Scratch::new();
+        for (w, h) in [(17, 9), (97, 131)] {
+            let src = vec![[203.0, 170.0, 100.0]; w * h];
+            let mut dst = src.clone();
+            for (i, p) in dst.iter_mut().enumerate() {
+                if i % 19 == 0 {
+                    *p = [1000.0, 2000.0, 500.0];
+                }
+            }
+            let src = NitsImage::from_rgb_nits(&src, w, h);
+            let dst = NitsImage::from_rgb_nits(&dst, w, h);
+            for parallel in [false, true] {
+                let mut run = |plan: &Plan| {
+                    compute_folded720_streaming_impl(
+                        &src,
+                        &dst,
+                        None,
+                        parallel,
+                        plan.toggles(),
+                        &mut scratch,
+                        Some(plan.compute),
+                    )
+                    .unwrap()
+                };
+                let baseline = run(&full);
+                for mask in 1u8..16 {
+                    let want = SlotSet::from_slots((0..944).filter(|&id| {
+                        mask & (1 << crate::feature_defs::def_at(id, 4).unwrap().scale) != 0
+                    }));
+                    let plan = Plan::derive(&want, 944).unwrap();
+                    let value = run(&plan);
+                    for id in want.iter_slots() {
+                        assert_eq!(
+                            value.features()[id].to_bits(),
+                            baseline.features()[id].to_bits(),
+                            "HDR mask={mask:04b} f{id}"
+                        );
+                    }
+                }
+            }
         }
     }
 

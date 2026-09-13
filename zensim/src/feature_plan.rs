@@ -205,6 +205,21 @@ impl Plan {
             } else {
                 ComputeSet::ALL_SCALES
             },
+            v2_scales: want
+                .iter_slots()
+                .filter_map(|id| {
+                    let d = crate::feature_defs::def_at(id, ns)?;
+                    (id >= 372).then_some((d.scale, d.signal.name))
+                })
+                .fold(0, |mask, (scale, name)| {
+                    let bit = 1 << scale;
+                    if name == "edge_width_change" {
+                        let s = usize::from(scale).min(ns - 2);
+                        mask | (1 << s) | (1 << (s + 1))
+                    } else {
+                        mask | bit
+                    }
+                }),
             v2_blocks,
             gradient: v2_blocks,
             blockiness: v2_blocks,
@@ -217,6 +232,9 @@ impl Plan {
             free_extras,
         };
         let mut requested = requested;
+        if !requested.v2_blocks {
+            requested.v2_scales = ComputeSet::ALL_SCALES;
+        }
         requested.full_res_xb = !requested.allows_full_res_y_subset()
             || want
                 .iter_slots()
@@ -255,7 +273,8 @@ impl Plan {
     /// the toggles the plan would emit, so
     /// the family compute agrees with `ComputeSet::from_toggles(plan.toggles())`
     /// ([`toggle_gates::normalization_is_a_fixed_point`]). The later private
-    /// full-resolution channel restriction is preserved separately below.
+    /// full-resolution channel and per-scale restrictions are preserved
+    /// separately below; the public toggles continue to describe all scales.
     /// `emit` only ever WIDENS, so no request that planned before stops
     /// planning, and nothing that was served changes.
     ///
@@ -263,7 +282,9 @@ impl Plan {
     /// vector could carry a computed append block beside a zeroed CSFW one —
     /// is REGISTERED, not built: it needs a walk change, and this lane's
     /// scope is dispatch. Today the honest answer is that the walk computes
-    /// every block its declared width reaches, and the plan now says so.
+    /// every block its declared width reaches on each selected v2 scale.
+    /// Declared IDs narrow those scales and retain adjacent gradient inputs;
+    /// within-scale block separation remains conservative.
     fn normalized(requested: ComputeSet, layout: Layout) -> Plan {
         let ns = crate::NUM_SCALES;
         let probe = Plan {
@@ -275,6 +296,7 @@ impl Plan {
         // Channel selection is private plan data, separate from public family
         // toggles. Normalization preserves it only for supported families.
         compute.v1_full_scales = requested.v1_full_scales;
+        compute.v2_scales = requested.v2_scales;
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         compute.sampling = requested.sampling;
         // `emit` is in ID space and is intersected with what the LAYOUT
@@ -306,9 +328,10 @@ impl Plan {
         let sampling =
             crate::sampling::Sampling::from_model(model).map_err(|_| PlanError::UnreadableBake)?;
         if let Some(sampling) = sampling {
-            if !plan.compute.allows_full_res_y_subset()
-                || !matches!(plan.compute.v1_pools, V1PoolsMode::Off | V1PoolsMode::Peaks)
-                || (sampling.keep_y && plan.compute.full_res_xb)
+            if !sampling.is_direct()
+                && (!plan.compute.allows_full_res_y_subset()
+                    || !matches!(plan.compute.v1_pools, V1PoolsMode::Off | V1PoolsMode::Peaks)
+                    || (sampling.keep_y && plan.compute.full_res_xb))
             {
                 return Err(PlanError::UnreadableBake);
             }
@@ -357,6 +380,7 @@ impl Plan {
             sampling: None,
             v1_pools: pools,
             v1_full_scales: ComputeSet::ALL_SCALES,
+            v2_scales: ComputeSet::ALL_SCALES,
             v2_blocks: false,
             gradient: false,
             blockiness: false,
@@ -481,6 +505,8 @@ impl Plan {
             } else {
                 ComputeSet::ALL_SCALES
             },
+            v2_scales: (if a.v2_blocks { a.v2_scales } else { 0 })
+                | (if b.v2_blocks { b.v2_scales } else { 0 }),
             v2_blocks: a.v2_blocks || b.v2_blocks,
             gradient: a.gradient || b.gradient,
             blockiness: a.blockiness || b.blockiness,
@@ -640,6 +666,65 @@ mod tests {
         assert!(union.covers(&ids.union(&SlotSet::from_slots([234]))));
         let fine_x = Plan::derive(&SlotSet::from_slots([228]), 372).unwrap();
         assert!(p.union(&fine_x).compute.full_res_xb);
+    }
+
+    #[test]
+    fn every_v2_scale_and_weighted_pool_matches_unrestricted_values() {
+        use crate::feature_v2::{V2Scratch, compute_folded_v1_372_streaming_impl};
+        let full = Plan::derive(&SlotSet::from_slots(0..944), 944).unwrap();
+        let mut scratch = V2Scratch::new();
+        for (w, h) in [(17, 9), (97, 131), (257, 193)] {
+            let src: Vec<_> = (0..w * h)
+                .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 11 % 233) as u8])
+                .collect();
+            let mut dst = src.clone();
+            for (i, p) in dst.iter_mut().enumerate() {
+                if i % 23 == 0 || (i % w) % 8 == 0 {
+                    *p = [17, 220, 99];
+                }
+            }
+            for parallel in [false, true] {
+                let mut run = |plan: &Plan| {
+                    compute_folded_v1_372_streaming_impl(
+                        &crate::RgbSlice::new(&src, w, h),
+                        &crate::RgbSlice::new(&dst, w, h),
+                        None,
+                        parallel,
+                        &mut scratch,
+                        Some(plan),
+                        #[cfg(feature = "custom-profiles")]
+                        None,
+                    )
+                    .unwrap()
+                    .0
+                };
+                let baseline = run(&full);
+                for mask in 1u8..16 {
+                    let want = SlotSet::from_slots((0..944).filter(|&id| {
+                        let d = crate::feature_defs::def_at(id, 4).unwrap();
+                        (id < 228 && !ComputeSet::is_full_res_xb(id, 4))
+                            || (id >= 228 && mask & (1 << d.scale) != 0)
+                    }));
+                    let plan = Plan::derive(&want, 944).unwrap();
+                    let values = run(&plan);
+                    for id in want.iter_slots() {
+                        assert_eq!(
+                            values[id].to_bits(),
+                            baseline[id].to_bits(),
+                            "mask={mask:04b} {w}x{h} parallel={parallel} f{id}"
+                        );
+                    }
+                    assert_eq!(Plan::normalized(plan.compute, plan.layout.clone()), plan);
+                }
+            }
+        }
+        let coarse = Plan::derive(&SlotSet::from_slots(546..720), 944).unwrap();
+        assert_eq!(coarse.compute.v2_scales, 0b1100);
+        assert!(!coarse.compute.at_scale(0).v2_blocks);
+        assert!(!coarse.compute.at_scale(1).append);
+        // Finest edge width reads gradients at both levels 0 and 1.
+        let edge = Plan::derive(&SlotSet::from_slots([400]), 944).unwrap();
+        assert_eq!(edge.compute.v2_scales, 0b0011);
     }
 
     #[test]

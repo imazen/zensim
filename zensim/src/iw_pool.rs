@@ -1,4 +1,5 @@
-//! Information-content-weighted spatial pooling (Wang & Li 2011, IW-SSIM).
+//! Activity-weighted spatial pooling, motivated by Wang & Li 2011 IW-SSIM.
+//! This module's estimators are proxies, not the paper's GSM information model.
 //!
 //! Replaces uniform spatial-mean pooling of per-pixel SSIM-like maps with
 //! pooling weighted by the local information content of the reference
@@ -12,10 +13,11 @@
 //! ## Per-pixel weight estimator
 //!
 //! Wang 2011's exact form uses a Gaussian Scale Mixture model on per-band
-//! wavelet coefficients. We use the practical approximation defended in
-//! the same paper: **local variance of the reference image** is a
-//! computationally cheap proxy with the same information-theoretic
-//! direction (high variance = high information content per pixel).
+//! wavelet coefficients. The standalone local-variance estimator below is a
+//! cheaper activity proxy; it does not establish equivalent information content
+//! or perceptual behavior. The production fused Rev3 944 path has its own
+//! explicitly defined activity weights; these standalone defaults do not
+//! describe that serving path.
 //! Other candidate estimators (configurable via [`IwWeightKind`]):
 //!
 //! - [`IwWeightKind::LocalVariance`] (default) — variance in a 5×5 window.
@@ -54,7 +56,7 @@ pub enum IwWeightKind {
     LocalGradL1,
     /// L2 norm of the gradient — `√((∂x I)² + (∂y I)²)`.
     LocalGradL2,
-    /// **Paper-faithful steerable-pyramid GSM approximation** (spike,
+    /// **Directional-variance proxy inspired by steerable-pyramid GSM** (spike,
     /// 2026-05-15). Replaces the scalar spatial variance with a
     /// **directional max** across 4 oriented gradient orientations
     /// (0°, 45°, 90°, 135°). For each pixel, the local variance of
@@ -70,7 +72,7 @@ pub enum IwWeightKind {
     /// exact divergences.
     ///
     /// MUST be combined with `info_log_sigma_e_sq = Some(σ²_e)` to get
-    /// the paper's `log₂(1 + σ²_p / σ²_e)` weight formula. The variant
+    /// the scalar `log₂(1 + σ²_p / σ²_e)` transform. The variant
     /// produces raw σ²_p; the log transform is applied at
     /// [`compute_iw_weights`] time.
     SteerablePyramidLogGsm,
@@ -95,16 +97,16 @@ pub struct IwWeightConfig {
     ///
     ///   `w(x) ← log₂(1.0 + w_raw(x) / sigma_e_sq)`
     ///
-    /// This is the paper's exact weight formula — `w_raw(x)` plays the
-    /// role of the GSM scale parameter σ²_p(x), and `sigma_e_sq` is
-    /// the noise-floor variance σ²_e. The log saturates high-variance
-    /// regions instead of letting them dominate proportional to σ².
+    /// This scalar log-SNR transform is information-inspired. Substituting
+    /// local variance for the paper's GSM/covariance model does not reproduce
+    /// its full information estimator. The log reduces the influence of large
+    /// activity values relative to direct variance weighting.
     ///
     /// `None` (default for back-compat with V_20a sweep) keeps the raw
     /// estimator output as the weight — variance / gradient magnitude
     /// directly. The default exists so existing experiments stay
     /// reproducible; new work should set `info_log_sigma_e_sq` for
-    /// paper-faithful behavior.
+    /// this explicitly different logarithmic activity proxy.
     ///
     /// Added 2026-05-15 after the V_20a IW-SSIM falsification revealed
     /// our implementation diverged from the paper's `log(1 + σ²_p/σ²_e)`

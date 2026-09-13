@@ -19,6 +19,8 @@ pub(crate) struct Sampling {
     kernel: u8,
     num: usize,
     den: usize,
+    /// Direct-from-original divisors; None retains the historical cascade.
+    divisors: Option<[usize; 4]>,
 }
 
 impl Sampling {
@@ -31,7 +33,7 @@ impl Sampling {
         };
         let value = model.metadata().get_utf8(KEY).map_err(|_| bad())?;
         let parts: Vec<_> = value.split(':').collect();
-        if parts.len() != 4 || parts[0] != "v1" {
+        if parts.len() != 4 || !matches!(parts[0], "v1" | "v2") {
             return Err(bad());
         }
         let keep_y = match parts[1] {
@@ -45,6 +47,24 @@ impl Sampling {
             "robidouxsharp" => 2,
             _ => return Err(bad()),
         };
+        if parts[0] == "v2" {
+            if keep_y {
+                return Err(bad());
+            }
+            let divisors = match parts[3] {
+                "1,2,4,8" => [1, 2, 4, 8],
+                "1,3,5,7" => [1, 3, 5, 7],
+                "1,2,3,5" => [1, 2, 3, 5],
+                _ => return Err(bad()),
+            };
+            return Ok(Some(Self {
+                keep_y,
+                kernel,
+                num: 1,
+                den: 1,
+                divisors: Some(divisors),
+            }));
+        }
         let (num, den) = match parts[3] {
             "3/2" => (3, 2),
             "2" => (2, 1),
@@ -56,7 +76,12 @@ impl Sampling {
             kernel,
             num,
             den,
+            divisors: None,
         }))
+    }
+
+    pub(crate) fn is_direct(self) -> bool {
+        self.divisors.is_some()
     }
 
     fn filter(self) -> Filter {
@@ -68,12 +93,18 @@ impl Sampling {
     }
 
     pub(crate) fn min_dim(self) -> usize {
+        if let Some(d) = self.divisors {
+            return 8 * d[3];
+        }
         // Four real levels, each at least eight pixels on both axes.
         (if self.keep_y { 32 } else { 64 }) * self.num / self.den
     }
 
     pub(crate) fn dims(self, w: usize, h: usize) -> Vec<(usize, usize)> {
         let (mut w, mut h) = (w.max(self.min_dim()), h.max(self.min_dim()));
+        if let Some(d) = self.divisors {
+            return d.into_iter().map(|div| (w / div, h / div)).collect();
+        }
         let mut dims = Vec::with_capacity(4);
         if !self.keep_y {
             w = w * self.den / self.num;
@@ -138,6 +169,14 @@ impl Sampling {
             source.width().max(self.min_dim()),
             source.height().max(self.min_dim()),
         );
+        if self.is_direct() {
+            let mut levels: Vec<_> = dims[1..]
+                .iter()
+                .map(|&(w, h)| self.resize(&original, w, h, parallel))
+                .collect();
+            levels.insert(0, original);
+            return levels;
+        }
         let first = if self.keep_y {
             original
         } else {
@@ -184,7 +223,7 @@ impl Sampling {
             .collect();
         let dims = self.dims(logical, logical);
         for (i, &(len, _)) in dims.iter().enumerate().take(level + 1) {
-            if i == 0 && self.keep_y {
+            if (i == 0 && (self.keep_y || self.is_direct())) || (self.is_direct() && i != level) {
                 continue;
             }
             let table = F32WeightTable::new(
@@ -224,6 +263,9 @@ pub(crate) struct Geometry {
     axes: Vec<[Axis; 2]>,
 }
 impl Geometry {
+    pub(crate) fn logical_dimensions(&self) -> (usize, usize) {
+        (self.width, self.height)
+    }
     pub(crate) fn footprints(&self, axis: usize, level: usize) -> Vec<(usize, usize)> {
         self.axes[level][axis]
             .iter()
@@ -262,6 +304,91 @@ impl Geometry {
 mod tests {
     use super::*;
 
+    #[test]
+    fn direct_scales_match_quantized_separable_f64_tap_algebra() {
+        for divisors in [[1, 2, 4, 8], [1, 3, 5, 7], [1, 2, 3, 5]] {
+            for kernel in 0..3 {
+                let sampling = Sampling {
+                    keep_y: false,
+                    kernel,
+                    num: 1,
+                    den: 1,
+                    divisors: Some(divisors),
+                };
+                let (w, h) = (97usize, 131usize);
+                let pixels: Vec<_> = (0..w * h)
+                    .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 13 % 233) as u8])
+                    .collect();
+                let source = crate::RgbSlice::new(&pixels, w, h);
+                let levels = sampling.pyramid(&source, false);
+                let mut max_unquantized_delta = 0f64;
+                for (level, (planes, ow, oh)) in levels.iter().enumerate() {
+                    assert_eq!((*ow, *oh), (w / divisors[level], h / divisors[level]));
+                    let xs = sampling.axis(w, level);
+                    let ys = sampling.axis(h, level);
+                    for a in xs.iter().chain(&ys) {
+                        assert!((a.iter().map(|p| p.1).sum::<f64>() - 1.).abs() < 1e-12);
+                    }
+                    if level == 0 {
+                        continue;
+                    }
+                    let tx = F32WeightTable::new(
+                        w as u32,
+                        *ow as u32,
+                        &InterpolationDetails::create(sampling.filter()),
+                    );
+                    let ty = F32WeightTable::new(
+                        h as u32,
+                        *oh as u32,
+                        &InterpolationDetails::create(sampling.filter()),
+                    );
+                    for (ch, plane) in planes.iter().enumerate() {
+                        for y in 0..*oh {
+                            for x in 0..*ow {
+                                let mut reference = 0f64;
+                                let mut unquantized = 0f64;
+                                for (dy, &wy) in ty.weights(y).iter().enumerate() {
+                                    for (dx, &wx) in tx.weights(x).iter().enumerate() {
+                                        if wx == 0.0 || wy == 0.0 {
+                                            continue;
+                                        }
+                                        let index = (ty.left[y] as usize + dy) * w
+                                            + tx.left[x] as usize
+                                            + dx;
+                                        let value = f64::from(levels[0].0[ch][index]);
+                                        // Independently round to binary16: 10 fraction bits,
+                                        // with constant 2^-24 spacing in the subnormal range.
+                                        let exponent = if value == 0.0 {
+                                            -24
+                                        } else {
+                                            (value.abs().log2().floor() as i32 - 10).max(-24)
+                                        };
+                                        let step = 2f64.powi(exponent);
+                                        let quantized = (value / step).round_ties_even() * step;
+                                        reference += f64::from(wy) * f64::from(wx) * quantized;
+                                        unquantized += f64::from(wy) * f64::from(wx) * value;
+                                    }
+                                }
+                                max_unquantized_delta = max_unquantized_delta
+                                    .max((unquantized - f64::from(plane[y * ow + x])).abs());
+                                assert!(
+                                    (reference - f64::from(plane[y * ow + x])).abs() < 2e-6,
+                                    "{sampling:?} level={level} ({x},{y}) actual={} reference={reference} unquantized={unquantized}",
+                                    plane[y * ow + x]
+                                );
+                            }
+                        }
+                    }
+                }
+                assert!(
+                    max_unquantized_delta > 1e-6,
+                    "unquantized negative control must fail"
+                );
+                eprintln!("{sampling:?}: max error vs unquantized f64={max_unquantized_delta:e}");
+            }
+        }
+    }
+
     #[cfg(feature = "threads")]
     #[test]
     fn parallel_pyramids_match_serial_bits() {
@@ -280,6 +407,22 @@ mod tests {
             })
             .collect();
         let source = crate::RgbSlice::new(&pixels, w, h);
+        for divisors in [[1, 2, 4, 8], [1, 3, 5, 7], [1, 2, 3, 5]] {
+            for kernel in 0..3 {
+                let sampling = Sampling {
+                    keep_y: false,
+                    kernel,
+                    num: 1,
+                    den: 1,
+                    divisors: Some(divisors),
+                };
+                assert_eq!(
+                    sampling.pyramid(&source, false),
+                    pool.install(|| sampling.pyramid(&source, true)),
+                    "{sampling:?}"
+                );
+            }
+        }
         for keep_y in [true, false] {
             for kernel in 0..3 {
                 for (num, den) in [(3, 2), (2, 1), (3, 1)] {
@@ -288,6 +431,7 @@ mod tests {
                         kernel,
                         num,
                         den,
+                        divisors: None,
                     };
                     let serial = sampling.pyramid(&source, false);
                     let parallel = pool.install(|| sampling.pyramid(&source, true));
@@ -307,6 +451,7 @@ mod tests {
                         kernel,
                         num,
                         den,
+                        divisors: None,
                     };
                     for (width, height) in [(7, 11), (97, 131)] {
                         let geometry = Geometry {

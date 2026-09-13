@@ -4895,6 +4895,7 @@ impl crate::metric::Zensim {
                 self.parallel(),
                 &mut session.pass_b,
                 &mut accum,
+                precomputed.sampling_geometry.as_ref(),
             );
         }
         Ok((result, accum.into_result()))

@@ -375,3 +375,17 @@ compatibility. Use raw MAE for calibration/error claims. The literal cached
 feature API has no pixel-identity override; identity-aware pixel audits are
 reported separately. A capacity/data plateau within one MLP family is an
 empirical result, not a mathematical feature ceiling or product qualification.
+
+Later September 13: [scale-selective 944 study](../benchmarks/scale_selective_944_2026-09-13.md)
+uses the same owner with recipe `log_every: 1` and optional `sampling` metadata.
+`--full-944 --sampling v2:xyb:triangle:1,3,5,7` selects direct-from-original
+scales; the closed alternatives are `1,2,4,8` and `1,2,3,5`, with Triangle,
+Mitchell or RobidouxSharp. This v2 sampling tag is distinct from formula Rev3.
+It includes zenresize's binary16 input-row rounding before float filtering;
+see the independent precision test and report. Historical v1 sampling keeps
+its contract and cannot be combined with `--full-944`.
+
+The native recipe adds masked/IW separately at each scale, for both legacy
+and newer weighted families. All 32-epoch fits retain frequent dev checkpoint
+selection, fresh/native-verified features, raw Rust error panels and actual
+pixel/spatial audits. No capacity-control matrix is repeated in this follow-up.

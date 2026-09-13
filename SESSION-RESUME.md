@@ -1,5 +1,28 @@
 # Start here — one target score, one development path
 
+## September 13, latest: real Rev3 scale dispatch and prime-scale training
+
+[189-fit study](benchmarks/scale_selective_944_2026-09-13.md) supersedes the
+"v2 read sets save no compute" limitation below. Declared IDs now narrow actual
+v2-era scale execution, including adjacent gradient dependencies. Native619
+costs 20.725ms versus 51.691ms ST and 7.521ms versus 17.843ms MT8 on the fixed
+1MP benchmark, with consumed features unchanged. No shipped model changed.
+
+The same 19,958-pair corpus supports per-scale legacy/v2 masked+IW tests and
+fresh direct Triangle 1/2/4/8, 1/3/5/7 and 1/2/3/5 training. Prime schedules
+have mixed accuracy and cost; weighted pools alone do not recover full944's
+corruption benefit. Native619 remains a scalar candidate, but fails spatial
+repair checks. Full944's legacy weighted IDs remain unsupported for refinement.
+Fix those spatial failures and broaden codec/corruption source coverage next;
+no universal feature ceiling, native target-loop gain or model qualification.
+
+Independent mathematical checks found zenresize's float path rounds source
+rows to binary16. Sampling metadata explicitly includes this precision;
+the old v1 cascade already had it. Do not describe either as unquantized f32
+convolution or assume near-identity fidelity. All9 new sampling contracts have
+independent quantization-aware convolution and serial/threaded parity tests.
+Artifacts: `~/work/zensim-validation-2026-09-13/scales944/`.
+
 ## September 13, later: representative feature/scale capability study
 
 [162-fit study](benchmarks/feature_ceiling_2026-09-13.md) supersedes the small

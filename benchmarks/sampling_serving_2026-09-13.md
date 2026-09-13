@@ -1,5 +1,11 @@
 # Sampling filters through Rust serving and spatial steering
 
+Later precision clarification: the [944/prime-scale study](scale_selective_944_2026-09-13.md)
+independently verified that zenresize's public float resizer stores input rows
+as binary16 internally. These earlier v1 experiments therefore include that
+rounding at every transition; they are not full-f32 convolution. Their actual
+trained/served results stand, but near-identity precision needs separate testing.
+
 Registered September 13 before implementation/results. Concrete callers are
 `BakeScorer` scalar/cache/spatial methods, the existing extractor audit,
 `extract_paths_bench`, the bounded feature-screen stage and

@@ -561,3 +561,67 @@ fn sampling_contracts_serve_and_spatialize_through_public_api() {
         }
     }
 }
+
+#[test]
+fn direct_prime_944_sampling_serves_native_and_cached_spatial_values() {
+    for filter in ["triangle", "mitchell", "robidouxsharp"] {
+        for divisors in ["1,2,4,8", "1,3,5,7", "1,2,3,5"] {
+            let tag = format!("v2:xyb:{filter}:{divisors}");
+            for ids in [
+                (0usize..944).collect::<Vec<_>>(),
+                (0usize..944)
+                    .filter(|&i| i < 228 || (546..720).contains(&i))
+                    .collect(),
+            ] {
+                let n = ids.len();
+                let spec = serde_json::json!({"schema_hash":1,"scaler_mean":vec![0.;n],"scaler_scale":vec![1.;n],
+                    "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join("\n")},
+                    {"key":"zentrain.formula_revision","type":"utf8","text":std::env::var("ZENSIM_FORMULA_REV").unwrap_or_else(|_|"1".into())},
+                    {"key":"zentrain.sampling","type":"utf8","text":tag}],
+                    "layers":[{"in_dim":n,"out_dim":1,"activation":"identity","dtype":"f32","weights":vec![-0.1;n],"biases":[100.]}]});
+                let bytes = zenpredict_bake::bake_from_json_str(&spec.to_string()).unwrap();
+                let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+                let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+                for (w, h) in [(17, 9), (97, 131), (257, 193)] {
+                    let r: Vec<_> = (0..w * h)
+                        .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 13 % 233) as u8])
+                        .collect();
+                    let mut d = r.clone();
+                    for (i, p) in d.iter_mut().enumerate() {
+                        if i % 19 == 0 {
+                            *p = [255, 0, 128];
+                        }
+                    }
+                    let rs = zensim::RgbSlice::new(&r, w, h);
+                    let ds = zensim::RgbSlice::new(&d, w, h);
+                    let direct = scorer.compute(&rs, &ds, None).unwrap();
+                    let pre = scorer.precompute_reference(&rs).unwrap();
+                    let mapped = scorer
+                        .compute_with_ref_and_attribution(
+                            &rs,
+                            &pre,
+                            &ds,
+                            None,
+                            &mut zensim::Fused944Session::new(),
+                            8,
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        mapped.result().features(),
+                        direct.features(),
+                        "{tag} {w}x{h}"
+                    );
+                    assert_eq!(mapped.result().score(), direct.score());
+                    assert!(mapped.attribution().density().iter().all(|v| v.is_finite()));
+                    assert!(mapped.refinement_gain(0, 0, w, h).is_finite());
+                    assert_eq!(scorer.compute(&rs, &rs, None).unwrap().score(), 100.);
+                    assert!(
+                        scorer
+                            .compute_hdr(&rs, &ds, zensim::feature_v2::HdrEncoding::Linear, None)
+                            .is_err()
+                    );
+                }
+            }
+        }
+    }
+}

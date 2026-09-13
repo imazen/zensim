@@ -229,7 +229,8 @@ def execute(args, recipe):
             w = csv.writer(f, delimiter="\t")
             w.writerow(["ref_path", "dist_path", "human_score", "row_id"])
             w.writerows((r["reference"], r["distorted"], r["target"], r["row_id"]) for r in rows)
-        run("extract", [bins["extractor"], "--full-944", "--corpus", "pairs-tsv", "--path", pairs, "--out", raw])
+        sampling_args = ["--sampling", recipe["sampling"]] if recipe.get("sampling") else []
+        run("extract", [bins["extractor"], "--full-944", *sampling_args, "--corpus", "pairs-tsv", "--path", pairs, "--out", raw])
         import pyarrow.csv as pc
         table = pc.read_csv(raw)
         row_ids = table["row_id"].to_pylist()
@@ -352,7 +353,7 @@ def execute(args, recipe):
             "--epochs", str(32 if early_control else recipe["epochs"]), "--pairs-per-epoch", str(recipe["pairs_per_epoch"]),
             "--seed", str(seed), "--init-seed", str(seed), "--sample-seed", str(seed+10000),
             "--pair-sampling", "stratified", "--max-features", "944", "--keep-features", ",".join(map(str, ids)),
-            "--mse-weight", "1", "--early-stop-patience", "0", "--out-dtype", "f32", "--log-every", "1" if early_control else "40",
+            "--mse-weight", "1", "--early-stop-patience", "0", "--out-dtype", "f32", "--log-every", "1" if early_control else str(recipe.get("log_every", 40)),
             "--no-auto-eval", "--out", bake]
         run(name + "-train", command)
         predictions = out / (name + ".scores")
@@ -456,7 +457,8 @@ def audit(args, recipe):
             raise ValueError("bake changed")
         pairs, n = pairs_files[fit["task"]]
         records_path = dst / (name + ".jsonl")
-        call([extractor, "--full-944", "--corpus", "pairs-tsv", "--path", pairs,
+        sampling_args = ["--sampling", recipe["sampling"]] if recipe.get("sampling") else []
+        call([extractor, "--full-944", *sampling_args, "--corpus", "pairs-tsv", "--path", pairs,
               "--out", dst / (name + ".csv"), "--audit-jsonl", records_path,
               "--audit-bake", bake], dst / (name + ".log"))
         records = [json.loads(x) for x in records_path.read_text().splitlines()]
