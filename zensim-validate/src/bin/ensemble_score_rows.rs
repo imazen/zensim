@@ -11,6 +11,7 @@
 //!
 //! One header line + one row per parquet pair, ordered as in the input.
 //!
+//! Repeating `--bake` serves a uniform ensemble through the public BakeScorer.
 //! Dispatch matches `bake_verdict::score_row` bit-for-bit (per-sample-α
 //! head and hybrid-head metadata are honored).
 
@@ -25,7 +26,7 @@ fn print_usage() {
         "ensemble_score_rows — per-row bake scoring for EXP-ENSEMBLE-V05\n\
 \n\
 USAGE:\n\
-    ensemble_score_rows --bake <path> --parquet <path> [--output <path>]\n\
+    ensemble_score_rows --bake <path> [--bake <path> ...] --parquet <path> [--output <path>]\n\
 \n\
 OUTPUT (TSV, stdout or --output):\n\
     idx\\thuman\\tscore\n"
@@ -33,13 +34,13 @@ OUTPUT (TSV, stdout or --output):\n\
 }
 
 fn main() -> Result<(), String> {
-    let mut bake: Option<PathBuf> = None;
+    let mut bakes: Vec<PathBuf> = Vec::new();
     let mut parquet: Option<PathBuf> = None;
     let mut output: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--bake" => bake = Some(PathBuf::from(args.next().ok_or("--bake needs value")?)),
+            "--bake" => bakes.push(PathBuf::from(args.next().ok_or("--bake needs value")?)),
             "--parquet" => {
                 parquet = Some(PathBuf::from(args.next().ok_or("--parquet needs value")?))
             }
@@ -51,11 +52,19 @@ fn main() -> Result<(), String> {
             other => return Err(format!("unknown arg: {other}")),
         }
     }
-    let bake = bake.ok_or("--bake required")?;
+    if bakes.is_empty() {
+        return Err("--bake required".into());
+    }
     let parquet = parquet.ok_or("--parquet required")?;
-    let bytes = std::fs::read(&bake).map_err(|e| format!("read {bake:?}: {e}"))?;
-    let model = Model::from_bytes(&bytes).map_err(|e| format!("model parse: {e}"))?;
-    let mut scorer = BakeScorer::new(&model).map_err(|e| e.to_string())?;
+    let bytes: Vec<Vec<u8>> = bakes
+        .iter()
+        .map(|bake| std::fs::read(bake).map_err(|e| format!("read {bake:?}: {e}")))
+        .collect::<Result<_, _>>()?;
+    let models: Vec<Model> = bytes
+        .iter()
+        .map(|b| Model::from_bytes(b).map_err(|e| format!("model parse: {e}")))
+        .collect::<Result<_, _>>()?;
+    let mut scorer = BakeScorer::ensemble(&models, None).map_err(|e| e.to_string())?;
     let g = parquet_loader::load_parquet(&parquet, "rows", "human_score", 1.0)?;
     let humans = g.human_scores;
     let mut writer: Box<dyn std::io::Write> = match output {

@@ -137,6 +137,18 @@ pub(crate) enum HfGainForm {
 }
 
 impl HfGainForm {
+    /// Resolve a per-comparison revision while retaining explicit research defaults.
+    pub(crate) fn at_revision(revision: Option<crate::feature_defs::FormulaRevision>) -> Self {
+        let rev = crate::ssim_form::effective_revision(
+            revision.unwrap_or_else(crate::ssim_form::active_revision),
+        );
+        if rev == crate::ssim_form::active_revision() {
+            active_gain_form()
+        } else {
+            Self::for_revision(rev)
+        }
+    }
+
     /// The form a registered revision selects.
     pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {

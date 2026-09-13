@@ -164,6 +164,11 @@ pub enum DownscaleFilter {
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct ZensimConfig {
+    /// Request-local arithmetic for model-bound serving.
+    pub(crate) formula_revision: Option<crate::feature_defs::FormulaRevision>,
+    pub(crate) local_only: bool,
+    pub(crate) omit_edges: bool,
+    pub(crate) attribution_channels: Option<[[bool; 3]; crate::NUM_SCALES]>,
     /// Box blur radius at scale 0 (default: 5, giving an 11-pixel kernel).
     ///
     /// The blur kernel width is `2 * blur_radius + 1`. Larger radii capture
@@ -284,6 +289,10 @@ pub struct ZensimConfig {
 impl Default for ZensimConfig {
     fn default() -> Self {
         Self {
+            formula_revision: None,
+            local_only: false,
+            omit_edges: false,
+            attribution_channels: None,
             blur_radius: 5,
             blur_passes: 1,
             blur_kernel: BlurKernel::default(),
@@ -808,6 +817,8 @@ pub(crate) struct ScaleStats {
     /// High-frequency energy loss (L2): max(0, 1 - Σ(dst-mu_dst)²/Σ(src-mu_src)²) per channel.
     /// Measures loss of local detail energy relative to source. Sensitive to blur/smoothing.
     pub(crate) hf_energy_loss: [f64; 3],
+    /// Raw destination HF sum for the exact active gain-form derivative.
+    pub(crate) hf_sq_dst_sum: [f64; 3],
     /// High-frequency magnitude loss (L1): max(0, 1 - Σ|dst-mu_dst|/Σ|src-mu_src|) per channel.
     /// Like hf_energy_loss but with L1 norm — more robust to outliers.
     pub(crate) hf_mag_loss: [f64; 3],
@@ -1243,6 +1254,8 @@ use crate::source::ImageSource;
 
 mod bake;
 pub use bake::BakeScorer;
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+pub use bake::SteeringSession;
 
 /// Metric configuration. Methods on this struct are the primary API.
 ///
@@ -3725,6 +3738,10 @@ fn identical_result_at(config: &ZensimConfig, min_width: usize) -> ZensimResult 
 
 pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> ZensimConfig {
     ZensimConfig {
+        formula_revision: None,
+        local_only: false,
+        omit_edges: false,
+        attribution_channels: None,
         blur_radius: params.blur_radius,
         blur_passes: params.blur_passes,
         blur_kernel: BlurKernel::Box {

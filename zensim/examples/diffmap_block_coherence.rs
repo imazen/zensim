@@ -492,21 +492,45 @@ fn run_bake_mode(
     };
     #[cfg(feature = "feature-regime-v2")]
     let (base_spatial, candidate_ms) = {
-        let pre = sensitivity_scorer
-            .precompute_reference(&rs)
-            .expect("candidate reference");
+        let ds = RgbSlice::new(dpx, w, h);
+        let prepared = std::env::var_os("ZENSIM_PREPARED_STEERING").is_some();
+        let mut worker = if prepared {
+            Some(
+                sensitivity_scorer
+                    .prepare_steering(&rs, 1)
+                    .expect("complete prepared steering contract"),
+            )
+        } else {
+            None
+        };
+        let mut fallback = zensim::BakeScorer::ensemble(&models, weights).expect("candidate");
+        let pre = if prepared {
+            None
+        } else {
+            Some(
+                fallback
+                    .precompute_reference(&rs)
+                    .expect("candidate reference"),
+            )
+        };
         let mut session = zensim::Fused944Session::new();
         let start = std::time::Instant::now();
-        let result = sensitivity_scorer
-            .compute_with_ref_and_attribution(
-                &rs,
-                &pre,
-                &RgbSlice::new(dpx, w, h),
-                None,
-                &mut session,
-                1,
-            )
-            .expect("candidate score and attribution");
+        let result = if let Some(worker) = worker.as_mut() {
+            worker
+                .compute(&ds, None)
+                .expect("prepared score and attribution")
+        } else {
+            fallback
+                .compute_with_ref_and_attribution(
+                    &rs,
+                    pre.as_ref().unwrap(),
+                    &ds,
+                    None,
+                    &mut session,
+                    1,
+                )
+                .expect("candidate score and attribution")
+        };
         let elapsed = start.elapsed().as_secs_f64() * 1e3;
         println!(
             "  candidate unsupported spatial IDs: {:?}; corruption gate: {}",

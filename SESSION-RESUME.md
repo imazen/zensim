@@ -1,5 +1,40 @@
 # Start here — one target score, one development path
 
+## September 13, newest: fast local subsets and prepared steering API
+
+[Steerable subset study](benchmarks/steerable_subset_2026-09-13.md) follows the
+scale-selective study below: 195 unique MLP fits, nine deterministic linear
+controls, five-seed finalists and broader real block repairs. Local120 omits
+peaks/HF ratios/weighted/v2 families; fine-Y local100 also omits finest X/B.
+The existing SIMD extraction and map owners skip actual unused work.
+
+`BakeScorer::prepare_steering` binds source/cache/scratch, checks complete
+refinement coverage and serves declared basic/peak Rev1/2/3 arithmetic in one
+process. `with_parallel(false)` gives outer workers scheduling control.
+Cached scalar extraction now reuses the reference pyramid. A real HF-gain
+map derivative bug was fixed using its existing canonical derivative owner.
+Gradients now skip structurally unread inputs through that same read-proof
+owner. The existing densifier reduces MLP artifacts from 499KB to 58–70KB,
+preserving all saved ensemble predictions and 288 spatial case results.
+The actual fine-Y ensemble takes 10.09ms scalar/32.86ms score+map at 1MP ST,
+6.62x faster than fast-ssim2 for scalar. The 1MP map/scalar mean remains
+above 3x; its p95 budget is not established. Full timings are in the study.
+
+The linear local120+spline control passes 96/96 broad development cells,
+25,248 real repairs, but fails corruption quality (saltpepper 76.28, RB 55.44,
+alias 37.73). Five-MLP ensembles improve human test MAE to 7.497/7.560 but pass
+only 84/96 and 87/96 spatial cells. These are **unqualified controls**, not new
+shipping profiles. The public session refuses scalar-only companions rather
+than silently omitting their contribution from steering.
+
+Next: improve local corruption/aliasing sensitivity and head finite-edit
+behavior together, retaining these controls. Only after development gates pass,
+freeze a candidate for terminal human, witnessed per-image target bounds,
+train-calibrated 1/2/3-shot and native JXL/AVIF/JPEG/WebP spatial RD validation.
+Those release gates have not been run for these failed candidates. No named
+model/default changed. Artifacts and executed commands:
+`~/work/zensim-validation-2026-09-13/steerable/`.
+
 ## September 13, latest: real Rev3 scale dispatch and prime-scale training
 
 [189-fit study](benchmarks/scale_selective_944_2026-09-13.md) supersedes the

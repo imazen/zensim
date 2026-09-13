@@ -26,6 +26,7 @@ pub struct BakeScorer<'a> {
     #[cfg(feature = "feature-regime-v2")]
     pixel_scratch: crate::feature_v2::V2Scratch,
     disposition: Option<&'a ProfileParams>,
+    parallel: bool,
     members: Vec<BakeScorer<'a>>,
     weights: Option<Vec<f64>>,
     #[cfg(feature = "corruption-head")]
@@ -48,6 +49,90 @@ impl<'a> BakeScorer<'a> {
         let scorer = Self::with_metadata(model, Arc::new(parse_bake_metadata(model)?))?;
         scorer.check_servable()?;
         Ok(scorer)
+    }
+
+    /// Enable internal parallel work (the default), or disable it when the
+    /// caller parallelizes independent comparisons.
+    #[must_use]
+    pub fn with_parallel(mut self, parallel: bool) -> Self {
+        self.parallel = parallel;
+        self
+    }
+
+    /// Bind a source, its cache and reusable scratch for repeated SDR steering.
+    ///
+    /// The initial contract accepts basic/peak models (IDs below 228). No
+    /// scored term is dropped to make a partial map. Coverage is not a quality
+    /// certification: models still need finite-edit and codec-level validation.
+    /// `bin` is the grid spacing in source pixels; rectangle semantics match
+    /// [`Self::compute_with_ref_and_attribution`]. Negative scores are preserved.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # fn example(model: &zenpredict::Model) -> Result<(), zensim::ZensimError> {
+    /// let source_pixels = vec![[128u8; 3]; 96 * 96];
+    /// let decoded_pixels = vec![[120u8; 3]; 96 * 96];
+    /// let source = zensim::RgbSlice::new(&source_pixels, 96, 96);
+    /// let decoded = zensim::RgbSlice::new(&decoded_pixels, 96, 96);
+    /// let mut scorer = zensim::BakeScorer::new(model)?.with_parallel(false);
+    /// let mut worker = scorer.prepare_steering(&source, 8)?;
+    /// let comparison = worker.compute(&decoded, Some("jxl"))?;
+    /// let score = comparison.result().score();
+    /// let expected_gain = comparison.refinement_gain(0, 0, 32, 32);
+    /// # let _ = (score, expected_gain);
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// # Errors
+    /// Refuses zero bins, invalid sources, unsupported feature families or
+    /// corruption companions, and incompatible arithmetic contracts.
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    pub fn prepare_steering<'s, S: ImageSource>(
+        &'s mut self,
+        source: &'s S,
+        bin: usize,
+    ) -> Result<SteeringSession<'s, 'a, S>, ZensimError> {
+        if bin == 0 {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "steering bin must be nonzero",
+            });
+        }
+        #[cfg(feature = "corruption-head")]
+        if self.corruption.is_some() {
+            return Err(ZensimError::ModelLoadFailed {
+                reason: "steering session requires a model without a corruption companion",
+            });
+        }
+        for (i, model) in std::iter::once(self.model)
+            .chain(self.members.iter().map(|m| m.model))
+            .enumerate()
+        {
+            if self
+                .weights
+                .as_ref()
+                .is_some_and(|weights| weights[i] == 0.0)
+            {
+                continue;
+            }
+            let ids = crate::feature_plan::bake_read_slots(model).ok_or(
+                ZensimError::ModelLoadFailed {
+                    reason: "steering session requires readable feature declarations",
+                },
+            )?;
+            if ids.iter_slots().any(|id| id >= 228) {
+                return Err(ZensimError::ModelLoadFailed {
+                    reason: "steering session currently supports basic/peak feature IDs below 228",
+                });
+            }
+        }
+        let reference = self.precompute_reference(source)?;
+        Ok(SteeringSession {
+            scorer: self,
+            source,
+            reference,
+            scratch: crate::Fused944Session::new(),
+            bin,
+        })
     }
 
     pub(super) fn with_metadata(
@@ -82,6 +167,7 @@ impl<'a> BakeScorer<'a> {
             #[cfg(feature = "feature-regime-v2")]
             pixel_scratch: crate::feature_v2::V2Scratch::default(),
             disposition: None,
+            parallel: true,
             members: Vec::new(),
             weights: None,
             #[cfg(feature = "corruption-head")]
@@ -407,7 +493,8 @@ impl<'a> BakeScorer<'a> {
             .collect();
         let mut values = vec![0.0; indices.len()];
         #[cfg(feature = "threads")]
-        let parallel = if indices.len() >= 128 && rayon::current_num_threads() > 1 {
+        let parallel = if self.parallel && indices.len() >= 128 && rayon::current_num_threads() > 1
+        {
             use rayon::prelude::*;
             let chunk = indices.len().div_ceil(rayon::current_num_threads().min(8));
             values
@@ -439,15 +526,30 @@ impl<'a> BakeScorer<'a> {
         Ok(gradient)
     }
 
-    // Conservative declaration-based read set. Do not infer zero influence
-    // from an observed zero gradient, input value or layer coefficient.
+    // Reuse the extraction planner's structural read proof, including input
+    // transforms and dense IDs. An observed zero gradient is never a proof.
+    // Unknown contracts conservatively retain every declared input.
     fn mark_feature_reads(&self, reads: &mut [bool]) {
         if self.weights.as_ref().is_none_or(|w| w[0] != 0.0) {
-            for pos in 0..self.layout.width() {
-                if let Some(id) = self.layout.slot_at(pos)
-                    && let Some(read) = reads.get_mut(usize::from(id))
-                {
-                    *read = true;
+            #[cfg(feature = "feature-regime-v2")]
+            let known = crate::feature_plan::bake_read_slots(self.model)
+                .map(|slots| {
+                    for id in slots.iter_slots() {
+                        if let Some(read) = reads.get_mut(id) {
+                            *read = true;
+                        }
+                    }
+                })
+                .is_some();
+            #[cfg(not(feature = "feature-regime-v2"))]
+            let known = false;
+            if !known {
+                for pos in 0..self.layout.width() {
+                    if let Some(id) = self.layout.slot_at(pos)
+                        && let Some(read) = reads.get_mut(usize::from(id))
+                    {
+                        *read = true;
+                    }
                 }
             }
         }
@@ -633,9 +735,8 @@ impl<'a> BakeScorer<'a> {
         Ok(())
     }
 
-    // The global-contrast finalizer is per-plan. The existing SSIM kernels
-    // still select their luminance form per process; refuse a mixed formula
-    // instead of claiming that a partially honored revision is correct.
+    // Basic/peak arithmetic is per-model; remaining wide-family kernels
+    // require matching process arithmetic. Research bypasses remain explicit.
     fn check_pixel_revision(&self) -> Result<(), ZensimError> {
         let model = std::iter::once(self.model)
             .chain(self.members.iter().map(|m| m.model))
@@ -646,6 +747,32 @@ impl<'a> BakeScorer<'a> {
                 reason: "ensemble has no active member",
             })?;
         let revision = crate::feature_layout::formula_revision(model)?;
+        // Basic/peak plans carry their arithmetic explicitly through both
+        // SIMD passes and the cached spatial owner. Wide-family kernels still
+        // use process defaults and must retain the mismatch refusal below.
+        #[cfg(feature = "feature-regime-v2")]
+        {
+            let plan = self.plan()?;
+            #[cfg(feature = "corruption-head")]
+            let no_companion = self.corruption.is_none();
+            #[cfg(not(feature = "corruption-head"))]
+            let no_companion = true;
+            if no_companion
+                && crate::ssim_form::effective_revision(revision) == revision
+                && !plan.compute.v2_blocks
+                && matches!(
+                    plan.compute.v1_pools,
+                    crate::feature_v2::V1PoolsMode::Off | crate::feature_v2::V1PoolsMode::Peaks
+                )
+                && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
+                && crate::ssim_form::active_luma_form()
+                    == crate::ssim_form::SsimLumaForm::for_revision(
+                        crate::ssim_form::active_revision(),
+                    )
+            {
+                return Ok(());
+            }
+        }
         if crate::ssim_form::active_revision() != revision
             || crate::ssim_form::active_luma_form()
                 != crate::ssim_form::SsimLumaForm::for_revision(revision)
@@ -695,7 +822,7 @@ impl<'a> BakeScorer<'a> {
             distorted,
             encoding,
             Some(120_000_000),
-            true,
+            self.parallel,
             plan.toggles(),
             &mut self.pixel_scratch,
             Some(plan.compute),
@@ -716,8 +843,8 @@ impl<'a> BakeScorer<'a> {
     /// # Errors
     /// Rejects invalid dimensions, HDR input, unservable feature requirements
     /// or a failed model forward. The normal 120-million-pixel limit applies.
-    /// SSIM kernels currently require the process `ZENSIM_FORMULA_REV` to
-    /// match the bake; a mismatch refuses before extraction.
+    /// Basic/peak kernels honor the bake revision directly. Wide feature families
+    /// still require matching process arithmetic and refuse a mismatch.
     pub fn compute(
         &mut self,
         source: &impl ImageSource,
@@ -731,7 +858,7 @@ impl<'a> BakeScorer<'a> {
         // candidate's own plan determines which feature families run; B's
         // weights only fill the intermediate result and are never returned.
         let params = ZensimProfile::B.params();
-        let config = config_from_params(params, true);
+        let config = config_from_params(params, self.parallel);
         #[cfg(feature = "feature-regime-v2")]
         let plan = self.plan()?;
         #[cfg(not(feature = "feature-regime-v2"))]
@@ -755,7 +882,7 @@ impl<'a> BakeScorer<'a> {
                     source,
                     distorted,
                     Some(120_000_000),
-                    true,
+                    self.parallel,
                     &mut self.pixel_scratch,
                     Some(&plan),
                     #[cfg(feature = "custom-profiles")]
@@ -817,9 +944,11 @@ impl<'a> BakeScorer<'a> {
                 source.height().max(sampling.min_dim()),
                 Some(120_000_000),
             )?;
-            return Ok(sampling.reference(source, true));
+            return Ok(sampling.reference(source, self.parallel));
         }
-        Zensim::new(ZensimProfile::B).precompute_reference(source)
+        Zensim::new(ZensimProfile::B)
+            .with_parallel(self.parallel)
+            .precompute_reference(source)
     }
 
     /// Compare SDR pixels and spatialize this complete candidate's score.
@@ -873,7 +1002,7 @@ impl<'a> BakeScorer<'a> {
             });
         }
         let params = ZensimProfile::B.params();
-        let config = config_from_params(params, true);
+        let config = config_from_params(params, self.parallel);
         #[cfg(feature = "corruption-head")]
         let has_corruption_gate = self.corruption.is_some();
         #[cfg(not(feature = "corruption-head"))]
@@ -894,7 +1023,8 @@ impl<'a> BakeScorer<'a> {
                 has_corruption_gate,
             });
         }
-        let (mut features, mean_offset) = session.planned_features(source, distorted, &plan)?;
+        let (mut features, mean_offset) =
+            session.planned_features(source, precomputed, distorted, &plan, self.parallel)?;
         features.truncate(
             plan.walk_width()
                 .max(crate::fold_engine::v1_feature_width(&config)),
@@ -916,17 +1046,20 @@ impl<'a> BakeScorer<'a> {
         let (spatial, unsupported_feature_ids) =
             crate::attribution::candidate_map_sensitivities(&plan, &sensitivities);
         let mut max_removals = Vec::new();
-        let (_, attribution) = Zensim::new(ZensimProfile::B).attribution_from_retention_binned(
-            precomputed,
-            distorted,
-            &spatial,
-            sensitivities
-                .get(156..sensitivities.len().min(228))
-                .unwrap_or(&[]),
-            Some(&mut max_removals),
-            session,
-            bin,
-        )?;
+        let (_, attribution) = Zensim::new(ZensimProfile::B)
+            .with_parallel(self.parallel)
+            .attribution_from_retention_binned(
+                precomputed,
+                distorted,
+                &spatial,
+                sensitivities
+                    .get(156..sensitivities.len().min(228))
+                    .unwrap_or(&[]),
+                Some(&mut max_removals),
+                session,
+                bin,
+                Some(plan.compute.formula_revision),
+            )?;
         let unsupported_refinement_feature_ids = crate::attribution::bind_max_removals(
             &mut max_removals,
             &features,
@@ -941,6 +1074,47 @@ impl<'a> BakeScorer<'a> {
             unsupported_feature_ids,
             has_corruption_gate,
         })
+    }
+}
+
+/// A source-bound worker created by [`BakeScorer::prepare_steering`].
+/// Reuse it for reconstructions of that source. Source, scorer and model
+/// borrows keep lifetimes explicit; no image or model is installed globally.
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+pub struct SteeringSession<'s, 'a, S: ImageSource> {
+    scorer: &'s mut BakeScorer<'a>,
+    source: &'s S,
+    reference: crate::PrecomputedReference,
+    scratch: crate::Fused944Session,
+    bin: usize,
+}
+
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+impl<S: ImageSource> SteeringSession<'_, '_, S> {
+    /// Score a reconstruction and return complete local refinement predictions.
+    ///
+    /// # Errors
+    /// Returns the underlying pixel/scoring error or refuses incomplete
+    /// refinement coverage. A failed call does not invalidate the session.
+    pub fn compute(
+        &mut self,
+        distorted: &impl ImageSource,
+        codec_hint: Option<&str>,
+    ) -> Result<crate::ScoredAttribution, ZensimError> {
+        let result = self.scorer.compute_with_ref_and_attribution(
+            self.source,
+            &self.reference,
+            distorted,
+            codec_hint,
+            &mut self.scratch,
+            self.bin,
+        )?;
+        if !result.unsupported_refinement_feature_ids().is_empty() || result.has_corruption_gate() {
+            return Err(ZensimError::ModelForwardFailed {
+                reason: "steering comparison has incomplete refinement coverage",
+            });
+        }
+        Ok(result)
     }
 }
 
@@ -966,6 +1140,55 @@ mod revision_contract_tests {
     use crate::ssim_form::run_at_revision;
     #[cfg(feature = "feature-regime-v2")]
     use crate::{RgbSlice, ZensimError};
+
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn structurally_skipped_gradient_matches_exhaustive_probes() {
+        let mut weights = vec![0.0; 944];
+        weights[13] = -0.7;
+        weights[52] = -1.3;
+        let recipe = serde_json::json!({
+            "schema_hash":1,"scaler_mean":vec![0.0;944],"scaler_scale":vec![1.0;944],
+            "layers":[{"in_dim":944,"out_dim":1,"activation":"identity","dtype":"f32",
+                "weights":weights,"biases":[100.0]}]
+        });
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        let models = vec![
+            zenpredict::Model::from_bytes(&bytes).unwrap(),
+            zenpredict::Model::from_bytes(&bake_declaring(None, 91)).unwrap(),
+        ];
+        let mut row: Vec<_> = (0..944).map(|i| (i as f64 + 1.0) / 945.0).collect();
+        for weights in [None, Some([0.0, 1.0]), Some([0.25, 0.75])] {
+            let mut scorer =
+                crate::BakeScorer::ensemble(&models, weights.as_ref().map(|v| v.as_slice()))
+                    .unwrap();
+            let mut reads = vec![false; 944];
+            scorer.mark_feature_reads(&mut reads);
+            assert_eq!(
+                reads.iter().filter(|v| **v).count(),
+                if weights == Some([0.0, 1.0]) { 1 } else { 3 }
+            );
+            let ids: Vec<_> = (0..944).collect();
+            let mut exhaustive = vec![0.0; 944];
+            scorer
+                .fd_gradient_into(&row, &ids, &mut exhaustive, (96, 96), Some("jxl"))
+                .unwrap();
+            for parallel in [false, true] {
+                scorer.parallel = parallel;
+                let skipped = scorer
+                    .score_features_fd_gradient(&row, 96, 96, Some("jxl"))
+                    .unwrap();
+                assert_eq!(skipped, exhaustive);
+            }
+            row[900] = f64::MAX;
+            assert!(
+                scorer
+                    .score_features_fd_gradient(&row, 96, 96, None)
+                    .is_err()
+            );
+            row[900] = 901.0 / 945.0;
+        }
+    }
 
     /// A minimal one-input identity bake reading feature `id`, optionally
     /// declaring an arithmetic revision. Same recipe shape the cross-tier
@@ -1050,7 +1273,7 @@ mod revision_contract_tests {
         let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
 
         for declared in ["1", "2"] {
-            let bytes = bake_declaring(Some(declared), 5);
+            let bytes = bake_declaring(Some(declared), 400);
             let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
             let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
             let err = scorer.compute(&rs, &ds, None).expect_err(
@@ -1137,7 +1360,7 @@ mod revision_contract_tests {
         }
         let (w, h) = (96usize, 96usize);
         let (src, dst) = pair(w, h);
-        let bytes = bake_declaring(Some("3"), 5);
+        let bytes = bake_declaring(Some("3"), 400);
         let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
         let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
         let err = scorer
@@ -1168,7 +1391,7 @@ mod revision_contract_tests {
         } else {
             "3"
         };
-        let bytes = bake_declaring(Some(other), 5);
+        let bytes = bake_declaring(Some(other), 400);
         let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
         let mut scorer = crate::BakeScorer::new(&model).expect("load bake");
         assert!(
@@ -1219,6 +1442,170 @@ mod revision_contract_tests {
             .expect("the armed bypass serves a revision-1 bake on revision-3 pixels");
         assert!(r.score().is_finite());
         println!("{SENTINEL}");
+    }
+
+    /// Each subprocess has a different research default, but serves all three
+    /// explicit model revisions. The matching process supplies an independent
+    /// unrestricted-extractor oracle; equality across processes proves that a
+    /// worker neither inherits nor changes global arithmetic.
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn prepared_workers_honor_model_revision_and_local_subset() {
+        const MARK: &str = "STEERING-MODEL-BITS ";
+        let path = "metric::bake::revision_contract_tests::prepared_workers_honor_model_revision_and_local_subset";
+        if std::env::var("ZENSIM_STEERING_CONTRACT_CHILD").is_err() {
+            let mut expected = None;
+            for process in ["1", "2", "3"] {
+                let out = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([path, "--exact", "--nocapture", "--test-threads=1"])
+                    .env("ZENSIM_FORMULA_REV", process)
+                    .env("ZENSIM_STEERING_CONTRACT_CHILD", "1")
+                    .env_remove("ZENSIM_CROSS_REVISION_DIAGNOSTIC")
+                    .output()
+                    .unwrap();
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                assert!(
+                    out.status.success(),
+                    "{stdout}\n{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                let bits: Vec<_> = stdout
+                    .lines()
+                    .filter_map(|l| l.find(MARK).map(|i| l[i..].to_owned()))
+                    .collect();
+                assert_eq!(bits.len(), 6);
+                if let Some(ref expected) = expected {
+                    assert_eq!(&bits, expected, "process {process}");
+                } else {
+                    expected = Some(bits);
+                }
+            }
+            return;
+        }
+        let (w, h) = (127, 97);
+        let (src, mut dst) = pair(w, h);
+        for (i, px) in dst.iter_mut().enumerate() {
+            *px = [
+                ((i * 71 + 19) % 256) as u8,
+                ((i * 31 + 87) % 256) as u8,
+                ((i * 113 + 3) % 256) as u8,
+            ];
+        }
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        for local_only in [true, false] {
+            let ids: Vec<_> = (0..228)
+                .filter(|id| !local_only || (*id < 156 && id % 13 < 10))
+                .collect();
+            let full = crate::Zensim::new(crate::ZensimProfile::B)
+                .with_parallel(false)
+                .compute_folded720_features_streaming(
+                    &rs,
+                    &ds,
+                    crate::feature_v2::V2NewFeatureToggles {
+                        v1_pools: crate::feature_v2::V1PoolsMode::Peaks,
+                        ..Default::default()
+                    },
+                    &mut crate::feature_v2::V2Scratch::new(),
+                )
+                .unwrap();
+            let mut model_rows = Vec::new();
+            for revision in ["1", "2", "3"] {
+                let recipe = serde_json::json!({
+                    "schema_hash":1,"scaler_mean":vec![0.0;ids.len()],"scaler_scale":vec![1.0;ids.len()],
+                    "metadata":[
+                        {"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")},
+                        {"key":"zentrain.formula_revision","type":"utf8","text":revision}],
+                    "layers":[{"in_dim":ids.len(),"out_dim":1,"activation":"identity","dtype":"f32",
+                        "weights":vec![-1.0;ids.len()],"biases":[100.0]}]
+                });
+                let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+                let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+                let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+                assert_eq!(scorer.plan().unwrap().compute.local_only, local_only);
+                let scalar = scorer.compute(&rs, &ds, None).unwrap();
+                if revision.parse::<u8>().unwrap() == crate::ssim_form::active_revision() as u8 + 1
+                {
+                    for &id in &ids {
+                        assert_eq!(
+                            scalar.features()[id].to_bits(),
+                            full.features()[id].to_bits(),
+                            "f{id}"
+                        );
+                    }
+                }
+                let pre = scorer.precompute_reference(&rs).unwrap();
+                let old = scorer
+                    .compute_with_ref_and_attribution(
+                        &rs,
+                        &pre,
+                        &ds,
+                        None,
+                        &mut crate::Fused944Session::new(),
+                        8,
+                    )
+                    .unwrap();
+                let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
+                let invalid = RgbSlice::new(&dst[..64], 8, 8);
+                assert!(worker.compute(&invalid, None).is_err());
+                let scored = worker.compute(&ds, None).unwrap();
+                assert_eq!(scalar.score().to_bits(), scored.result().score().to_bits());
+                assert_eq!(scalar.features(), scored.result().features());
+                let gain = scored.refinement_gain(8, 8, 40, 40);
+                assert_eq!(gain.to_bits(), old.refinement_gain(8, 8, 40, 40).to_bits());
+                assert!(gain.is_finite());
+                assert_eq!(
+                    gain.to_bits(),
+                    worker
+                        .compute(&ds, None)
+                        .unwrap()
+                        .refinement_gain(8, 8, 40, 40)
+                        .to_bits()
+                );
+                drop(worker);
+                let mut threaded = crate::BakeScorer::new(&model).unwrap().with_parallel(true);
+                let scored_mt = threaded
+                    .prepare_steering(&rs, 8)
+                    .unwrap()
+                    .compute(&ds, None)
+                    .unwrap();
+                assert_eq!(scalar.features(), scored_mt.result().features());
+                assert_eq!(
+                    gain.to_bits(),
+                    scored_mt.refinement_gain(8, 8, 40, 40).to_bits()
+                );
+                if revision == "3" {
+                    assert_eq!(scorer.compute(&rs, &rs, None).unwrap().score(), 100.0);
+                }
+                let bits: Vec<_> = ids
+                    .iter()
+                    .map(|&id| scalar.features()[id].to_bits())
+                    .collect();
+                println!("{MARK}{revision} {bits:?} {}", gain.to_bits());
+                model_rows.push(bits);
+            }
+            assert_ne!(
+                model_rows[0], model_rows[2],
+                "fixture must distinguish arithmetic eras"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn prepared_worker_refuses_incomplete_contracts_before_use() {
+        let (src, _) = pair(96, 96);
+        let rs = RgbSlice::new(&src, 96, 96);
+        for id in [228, 300, 400] {
+            let bytes = bake_declaring(None, id);
+            let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+            let mut scorer = crate::BakeScorer::new(&model).unwrap();
+            assert!(scorer.prepare_steering(&rs, 8).is_err(), "f{id}");
+        }
+        let bytes = bake_declaring(None, 5);
+        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+        let mut scorer = crate::BakeScorer::new(&model).unwrap();
+        assert!(scorer.prepare_steering(&rs, 0).is_err());
+        assert!(scorer.prepare_steering(&rs, 8).is_ok());
     }
 
     /// An undeclared bake is the registered pre-stamp era, and a bake naming

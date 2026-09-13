@@ -355,6 +355,8 @@ def execute(args, recipe):
             "--pair-sampling", "stratified", "--max-features", "944", "--keep-features", ",".join(map(str, ids)),
             "--mse-weight", "1", "--early-stop-patience", "0", "--out-dtype", "f32", "--log-every", "1" if early_control else str(recipe.get("log_every", 40)),
             "--no-auto-eval", "--out", bake]
+        if recipe.get("nonneg_distance", False):
+            command += ["--nonneg-distance"]
         run(name + "-train", command)
         predictions = out / (name + ".scores")
         run(name + "-serve", [bins["predict"], "--bake", bake, "--bake-post", "raw",
@@ -485,7 +487,7 @@ def audit(args, recipe):
                     raise ValueError("spatial intervention coverage drift")
                 supported = d["refinement_available"] and not d["refinement_unsupported_ids"]
                 passed = supported and all(isinstance(d[k], (int, float)) and math.isfinite(d[k])
-                                           for k in ("m2", "m3f")) and d["m2"] >= 0.8 and d["m3f"] >= 0.9
+                                           for k in ("m2", "m3f")) and d["m2"] >= recipe.get("spatial_min_m2", 0.8) and d["m3f"] >= recipe.get("spatial_min_m3f", 0.9)
                 spatial_results.append({"case": case["name"], "sha256": sha(path),
                     "status": "UNSUPPORTED" if not supported else "PASS" if passed else "FAIL",
                     "diagnostic_only": case["name"].startswith("swap_rb"),

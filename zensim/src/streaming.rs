@@ -6,7 +6,7 @@
 
 use crate::blur::{
     box_blur_1pass_into, box_blur_h_into_abs_diff, box_blur_v_from_copy, downscale_2x_inplace,
-    fused_blur_h_mu, fused_blur_h_ssim, pyramid_plane_stride,
+    fused_blur_h_mu, pyramid_plane_stride,
 };
 use crate::color::{
     apply_gamut_matrix, composite_linear_f32_rgba, composite_srgb8_bgra_to_linear,
@@ -541,6 +541,7 @@ impl ScaleAccumulators {
     fn finalize(
         &self,
         #[cfg_attr(not(feature = "iw-diagnostics"), allow(unused_variables))] k_iw: f64,
+        revision: Option<crate::feature_defs::FormulaRevision>,
     ) -> ScaleStats {
         let one_over_n = 1.0 / self.n as f64;
 
@@ -569,12 +570,12 @@ impl ScaleAccumulators {
         #[cfg_attr(not(feature = "iw-diagnostics"), allow(unused_mut))]
         let mut iw_mean_w = [0.0f64; 3];
 
-        let gain_form = crate::hf_gain_form::active_gain_form();
+        let gain_form = crate::hf_gain_form::HfGainForm::at_revision(revision);
         // The pooled 4th/8th roots go through their ONE owner
         // (`crate::det_math`) — F18, the libc-dependent `powf`. Hoisted out
         // of the channel loop for the same reason `gain_form` is: it reads a
         // `OnceLock`.
-        let root_form = crate::det_math::active_root_form();
+        let root_form = crate::det_math::RootForm::at_revision(revision);
 
         for c in 0..3 {
             // f64 sums of per-pixel non-negative values CAN go slightly
@@ -668,6 +669,7 @@ impl ScaleAccumulators {
             edge,
             mse,
             hf_energy_loss,
+            hf_sq_dst_sum: self.hf_sq_dst,
             hf_mag_loss,
             hf_energy_gain,
             ssim_2nd,
@@ -728,6 +730,12 @@ fn active_channels(
     let mut active: ScaleActive = [None; 3];
     let beyond = scale_idx * (basic_fpc * 3) >= weights.len();
     for (c, slot) in active.iter_mut().enumerate() {
+        if config
+            .attribution_channels
+            .is_some_and(|channels| !channels[scale_idx][c])
+        {
+            continue;
+        }
         if beyond {
             if compute_all || extended {
                 *slot = Some((c, true, true));
@@ -1671,7 +1679,11 @@ fn process_strip_channel(
     // (`crate::ssim_form::check_route`), NOT a panic here and NOT a silent
     // fall-through to the legacy arithmetic; this assertion only documents
     // that the gate ran.
-    let stable = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    let stable = crate::ssim_form::effective_revision(
+        config
+            .formula_revision
+            .unwrap_or_else(crate::ssim_form::active_revision),
+    ) == crate::feature_defs::FormulaRevision::Rev3;
     // Revision 3 fuses the masked/IW extension into the SSIM V sweep
     // (`fused::ExtPoolsWork`): the activity is H-blurred from the H-only
     // `mu1` plane the H pass already wrote, V-blurred inside the same sweep
@@ -1711,7 +1723,7 @@ fn process_strip_channel(
         if need_ssim {
             let strip_n = strip_h * width;
             // Fused H-blur: src,dst → 4 H-blurred planes in one pass
-            fused_blur_h_ssim(
+            crate::blur::fused_blur_h_ssim_at_revision(
                 src_c,
                 dst_c,
                 &mut bufs.mu1,
@@ -1721,6 +1733,9 @@ fn process_strip_channel(
                 width,
                 strip_h,
                 config.blur_radius,
+                config
+                    .formula_revision
+                    .unwrap_or_else(crate::ssim_form::active_revision),
             );
 
             // Fused V-blur + ALL feature extraction
@@ -1781,7 +1796,12 @@ fn process_strip_channel(
                 false,
                 // v1's 372 layout has no append/append2 block, so the free
                 // raw moments have nowhere to land on this path.
-                crate::fused::FreeExtrasWork::default(),
+                crate::fused::FreeExtrasWork {
+                    revision: config.formula_revision,
+                    local_only: config.local_only,
+                    omit_edges: config.omit_edges,
+                    ..Default::default()
+                },
                 ext,
                 if fused_ext {
                     &bufs.act_h[..strip_n]
@@ -2479,7 +2499,10 @@ fn process_scale_bands(
         None,
         stop,
     );
-    (accum.finalize(config.iw_strength as f64), diffmap)
+    (
+        accum.finalize(config.iw_strength as f64, config.formula_revision),
+        diffmap,
+    )
 }
 
 /// Per-scale retained planes for the fused score+attribution path (task
@@ -3489,7 +3512,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
     );
     let stats: Vec<ScaleStats> = accums
         .iter()
-        .map(|a| a.finalize(config.iw_strength as f64))
+        .map(|a| a.finalize(config.iw_strength as f64, config.formula_revision))
         .collect();
     let mean_offset = if pixel_count == 0 {
         [0.0; 3]
@@ -3834,7 +3857,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
 
     let final_stats: Vec<ScaleStats> = global_accums
         .iter()
-        .map(|a| a.finalize(config.iw_strength as f64))
+        .map(|a| a.finalize(config.iw_strength as f64, config.formula_revision))
         .collect();
     let final_mean_offset = if mean_offset_pixel_count == 0 {
         [0.0; 3]
@@ -3994,7 +4017,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
 
     let final_stats: Vec<ScaleStats> = global_accums
         .iter()
-        .map(|a| a.finalize(config.iw_strength as f64))
+        .map(|a| a.finalize(config.iw_strength as f64, config.formula_revision))
         .collect();
     let final_mean_offset = if mean_offset_pixel_count == 0 {
         [0.0; 3]
@@ -4344,7 +4367,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
                 None,
                 None,
             );
-            let stat = accum.finalize(cfg.iw_strength as f64);
+            let stat = accum.finalize(cfg.iw_strength as f64, cfg.formula_revision);
             on_scale(scale, &stat, src, dst, &retention, *w, *h);
             stats.push(stat);
         }
@@ -4413,7 +4436,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
             None,
             None,
         );
-        let scale_stat = accum.finalize(config.iw_strength as f64);
+        let scale_stat = accum.finalize(config.iw_strength as f64, config.formula_revision);
         on_scale(scale, &scale_stat, src_planes, dst_view, &retention, w, h);
         stats.push(scale_stat);
 
@@ -4511,7 +4534,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_fold(
             Some((&co, &mut id_plane[..n], &mut win_plane[..n])),
             None,
         );
-        let scale_stat = accum.finalize(config.iw_strength as f64);
+        let scale_stat = accum.finalize(config.iw_strength as f64, config.formula_revision);
         on_scale(
             scale,
             &scale_stat,

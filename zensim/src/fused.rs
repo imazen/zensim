@@ -452,6 +452,12 @@ pub(crate) const C_LUM_T_F32: f32 = 0.35;
 /// instruction sequence, unchanged.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FreeExtrasWork {
+    /// Explicit per-request SSIM arithmetic; None retains research defaults.
+    pub revision: Option<crate::feature_defs::FormulaRevision>,
+    /// Skip peak and whole-plane HF reductions when no declared input reads them.
+    pub local_only: bool,
+    /// SSIM and MSE subset: omit artifact/detail reductions as well.
+    pub omit_edges: bool,
     /// Σs, Σd, Σs², Σd² — the `V1FreeExtras::RawMoments` set.
     pub raw_moments: bool,
     /// Σ `mse_i` — the bounded per-pixel error. Every channel.
@@ -461,6 +467,23 @@ pub(crate) struct FreeExtrasWork {
     /// only channel whose `src` plane IS the reference luma the weight
     /// reads. Requires `bounded_err` (the weights multiply its `mse_i`).
     pub lum_bins: bool,
+}
+
+impl FreeExtrasWork {
+    pub(crate) fn revision(self) -> crate::feature_defs::FormulaRevision {
+        crate::ssim_form::effective_revision(
+            self.revision
+                .unwrap_or_else(crate::ssim_form::active_revision),
+        )
+    }
+    fn luma_form(self) -> crate::ssim_form::SsimLumaForm {
+        let revision = self.revision();
+        if revision == crate::ssim_form::active_revision() {
+            crate::ssim_form::active_luma_form()
+        } else {
+            crate::ssim_form::SsimLumaForm::for_revision(revision)
+        }
+    }
 }
 
 /// Accumulate one row's bounded per-pixel error into the lane sum and return
@@ -870,7 +893,7 @@ pub(crate) fn fused_vblur_features_ssim(
     // replaced measured at 22% of the whole walk (perf, fold944_full@2048^2)
     // and is kept in `ssim_form` as the reference the bounded-error tests
     // measure against.
-    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    let direct = free.revision() == crate::feature_defs::FormulaRevision::Rev3;
     incant!(
         fused_vblur_ssim_inner(
             h_mu1,
@@ -1014,7 +1037,7 @@ fn fused_vblur_ssim_inner_v4(
     ext: ExtPoolsWork,
     h_act: &[f32],
 ) -> StripChannelAccum {
-    let form = crate::ssim_form::active_luma_form();
+    let form = free.luma_form();
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
@@ -1102,8 +1125,10 @@ fn fused_vblur_ssim_inner_v4(
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd_out[base..base + 16].copy_from_slice(&sd.to_array());
                 }
@@ -1126,27 +1151,35 @@ fn fused_vblur_ssim_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // === HF energy (L2): (pixel - mu)² ===
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // === HF magnitude (L1): |pixel - mu| ===
                 // diff1/diff2 already computed above
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // === MSE: (src - dst)² ===
                 let pd = s - d;
@@ -1313,8 +1346,10 @@ fn fused_vblur_ssim_inner_v4(
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd_out[base..base + 8].copy_from_slice(&sd.to_array());
                 }
@@ -1337,26 +1372,34 @@ fn fused_vblur_ssim_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // MSE
                 let pd = s - d;
@@ -1498,8 +1541,10 @@ fn fused_vblur_ssim_inner_v4(
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                }
                 if store_sd {
                     sd_out[y * width + x] = sd;
                 }
@@ -1522,26 +1567,34 @@ fn fused_vblur_ssim_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact as f64;
-                acc.edge_art4 += a4 as f64;
-                acc.edge_art2 += a2 as f64;
-                acc.edge_det += detail_lost as f64;
-                acc.edge_det4 += dl4 as f64;
-                acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if !free.omit_edges {
+                    acc.edge_art += artifact as f64;
+                    acc.edge_art4 += a4 as f64;
+                    acc.edge_art2 += a2 as f64;
+                    acc.edge_det += detail_lost as f64;
+                    acc.edge_det4 += dl4 as f64;
+                    acc.edge_det2 += dl2 as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4) as f64;
+                        acc.edge_det8 += (dl4 * dl4) as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact);
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                    }
+                }
 
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.hf_sq_src += (vs * vs) as f64;
-                acc.hf_sq_dst += (vd * vd) as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs) as f64;
+                    acc.hf_sq_dst += (vd * vd) as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1 as f64;
-                acc.hf_abs_dst += diff2 as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1 as f64;
+                    acc.hf_abs_dst += diff2 as f64;
+                }
 
                 // MSE
                 let pd = sv - dv;
@@ -1637,7 +1690,7 @@ fn fused_vblur_ssim_inner_v4x(
     ext: ExtPoolsWork,
     h_act: &[f32],
 ) -> StripChannelAccum {
-    let form = crate::ssim_form::active_luma_form();
+    let form = free.luma_form();
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
     let r = radius;
@@ -1725,8 +1778,10 @@ fn fused_vblur_ssim_inner_v4x(
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd_out[base..base + 16].copy_from_slice(&sd.to_array());
                 }
@@ -1749,27 +1804,35 @@ fn fused_vblur_ssim_inner_v4x(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // === HF energy (L2): (pixel - mu)² ===
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // === HF magnitude (L1): |pixel - mu| ===
                 // diff1/diff2 already computed above
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // === MSE: (src - dst)² ===
                 let pd = s - d;
@@ -1936,8 +1999,10 @@ fn fused_vblur_ssim_inner_v4x(
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd_out[base..base + 8].copy_from_slice(&sd.to_array());
                 }
@@ -1960,26 +2025,34 @@ fn fused_vblur_ssim_inner_v4x(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // MSE
                 let pd = s - d;
@@ -2121,8 +2194,10 @@ fn fused_vblur_ssim_inner_v4x(
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                }
                 if store_sd {
                     sd_out[y * width + x] = sd;
                 }
@@ -2145,26 +2220,34 @@ fn fused_vblur_ssim_inner_v4x(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact as f64;
-                acc.edge_art4 += a4 as f64;
-                acc.edge_art2 += a2 as f64;
-                acc.edge_det += detail_lost as f64;
-                acc.edge_det4 += dl4 as f64;
-                acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if !free.omit_edges {
+                    acc.edge_art += artifact as f64;
+                    acc.edge_art4 += a4 as f64;
+                    acc.edge_art2 += a2 as f64;
+                    acc.edge_det += detail_lost as f64;
+                    acc.edge_det4 += dl4 as f64;
+                    acc.edge_det2 += dl2 as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4) as f64;
+                        acc.edge_det8 += (dl4 * dl4) as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact);
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                    }
+                }
 
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.hf_sq_src += (vs * vs) as f64;
-                acc.hf_sq_dst += (vd * vd) as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs) as f64;
+                    acc.hf_sq_dst += (vd * vd) as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1 as f64;
-                acc.hf_abs_dst += diff2 as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1 as f64;
+                    acc.hf_abs_dst += diff2 as f64;
+                }
 
                 // MSE
                 let pd = sv - dv;
@@ -2265,7 +2348,7 @@ fn fused_vblur_ssim_inner_v3(
     ext: ExtPoolsWork,
     h_act: &[f32],
 ) -> StripChannelAccum {
-    let form = crate::ssim_form::active_luma_form();
+    let form = free.luma_form();
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
@@ -2344,8 +2427,10 @@ fn fused_vblur_ssim_inner_v3(
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd_out[base..base + 8].copy_from_slice(&sd.to_array());
                 }
@@ -2368,26 +2453,34 @@ fn fused_vblur_ssim_inner_v3(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // MSE
                 let pd = s - d;
@@ -2530,8 +2623,10 @@ fn fused_vblur_ssim_inner_v3(
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                }
                 if store_sd {
                     sd_out[y * width + x] = sd;
                 }
@@ -2554,26 +2649,34 @@ fn fused_vblur_ssim_inner_v3(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact as f64;
-                acc.edge_art4 += a4 as f64;
-                acc.edge_art2 += a2 as f64;
-                acc.edge_det += detail_lost as f64;
-                acc.edge_det4 += dl4 as f64;
-                acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if !free.omit_edges {
+                    acc.edge_art += artifact as f64;
+                    acc.edge_art4 += a4 as f64;
+                    acc.edge_art2 += a2 as f64;
+                    acc.edge_det += detail_lost as f64;
+                    acc.edge_det4 += dl4 as f64;
+                    acc.edge_det2 += dl2 as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4) as f64;
+                        acc.edge_det8 += (dl4 * dl4) as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact);
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                    }
+                }
 
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.hf_sq_src += (vs * vs) as f64;
-                acc.hf_sq_dst += (vd * vd) as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs) as f64;
+                    acc.hf_sq_dst += (vd * vd) as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1 as f64;
-                acc.hf_abs_dst += diff2 as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1 as f64;
+                    acc.hf_abs_dst += diff2 as f64;
+                }
 
                 // MSE
                 let pd = sv - dv;
@@ -2673,7 +2776,7 @@ fn fused_vblur_ssim_inner(
     ext: ExtPoolsWork,
     h_act: &[f32],
 ) -> StripChannelAccum {
-    let form = crate::ssim_form::active_luma_form();
+    let form = free.luma_form();
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
 
@@ -2771,8 +2874,10 @@ fn fused_vblur_ssim_inner(
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                }
                 if store_sd {
                     sd.store((&mut sd_out[base..base + 8]).try_into().unwrap());
                 }
@@ -2795,26 +2900,34 @@ fn fused_vblur_ssim_inner(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact.reduce_add() as f64;
-                acc.edge_art4 += a4.reduce_add() as f64;
-                acc.edge_art2 += a2.reduce_add() as f64;
-                acc.edge_det += detail_lost.reduce_add() as f64;
-                acc.edge_det4 += dl4.reduce_add() as f64;
-                acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if !free.omit_edges {
+                    acc.edge_art += artifact.reduce_add() as f64;
+                    acc.edge_art4 += a4.reduce_add() as f64;
+                    acc.edge_art2 += a2.reduce_add() as f64;
+                    acc.edge_det += detail_lost.reduce_add() as f64;
+                    acc.edge_det4 += dl4.reduce_add() as f64;
+                    acc.edge_det2 += dl2.reduce_add() as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                        acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                    }
+                }
 
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
-                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                    acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1.reduce_add() as f64;
-                acc.hf_abs_dst += diff2.reduce_add() as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1.reduce_add() as f64;
+                    acc.hf_abs_dst += diff2.reduce_add() as f64;
+                }
 
                 // MSE
                 let pd = s - d;
@@ -2965,8 +3078,10 @@ fn fused_vblur_ssim_inner(
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
+                if !free.local_only {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                }
                 if store_sd {
                     sd_out[y * width + x] = sd;
                 }
@@ -2989,26 +3104,34 @@ fn fused_vblur_ssim_inner(
                 let dl2 = detail_lost * detail_lost;
                 let a4 = a2 * a2;
                 let dl4 = dl2 * dl2;
-                acc.edge_art += artifact as f64;
-                acc.edge_art4 += a4 as f64;
-                acc.edge_art2 += a2 as f64;
-                acc.edge_det += detail_lost as f64;
-                acc.edge_det4 += dl4 as f64;
-                acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if !free.omit_edges {
+                    acc.edge_art += artifact as f64;
+                    acc.edge_art4 += a4 as f64;
+                    acc.edge_art2 += a2 as f64;
+                    acc.edge_det += detail_lost as f64;
+                    acc.edge_det4 += dl4 as f64;
+                    acc.edge_det2 += dl2 as f64;
+                    if !free.omit_edges {
+                        acc.edge_art8 += (a4 * a4) as f64;
+                        acc.edge_det8 += (dl4 * dl4) as f64;
+                        acc.edge_art_max = acc.edge_art_max.max(artifact);
+                        acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                    }
+                }
 
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.hf_sq_src += (vs * vs) as f64;
-                acc.hf_sq_dst += (vd * vd) as f64;
+                if !free.local_only {
+                    acc.hf_sq_src += (vs * vs) as f64;
+                    acc.hf_sq_dst += (vd * vd) as f64;
+                }
 
                 // Texture
-                acc.hf_abs_src += diff1 as f64;
-                acc.hf_abs_dst += diff2 as f64;
+                if !free.local_only {
+                    acc.hf_abs_src += diff1 as f64;
+                    acc.hf_abs_dst += diff2 as f64;
+                }
 
                 // MSE
                 let pd = sv - dv;

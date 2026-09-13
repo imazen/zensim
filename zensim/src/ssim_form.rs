@@ -1016,6 +1016,16 @@ pub(crate) fn active_revision() -> FormulaRevision {
     })
 }
 
+/// Explicit research cross-revision replay keeps using the process kernels.
+/// Normal model-bound requests never consult mutable thread/global overrides.
+pub(crate) fn effective_revision(revision: FormulaRevision) -> FormulaRevision {
+    #[cfg(feature = "cross-revision-diagnostic")]
+    if cross_revision_diagnostic() {
+        return active_revision();
+    }
+    revision
+}
+
 #[cfg(test)]
 /// Run one `#[test]` body under an explicit `ZENSIM_FORMULA_REV`.
 ///
@@ -1116,7 +1126,9 @@ pub(crate) fn rerun_tests_at_revision(rev: &str, filter: &str, expect: usize) {
 /// do not call it: they run no pixel kernel, and the entry that eventually
 /// does has already refused.
 pub(crate) fn check_route(config: &crate::metric::ZensimConfig) -> Result<(), crate::ZensimError> {
-    if active_revision() == FormulaRevision::Rev3 && config.blur_passes != 1 {
+    if config.formula_revision.unwrap_or_else(active_revision) == FormulaRevision::Rev3
+        && config.blur_passes != 1
+    {
         return Err(crate::ZensimError::ModelForwardFailed {
             reason: "formula revision 3 serves blur_passes == 1 only (its stable SSIM moments are one reflect-101 box); use revision 1 or 2 for multi-pass blur profiles",
         });

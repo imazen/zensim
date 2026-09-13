@@ -4,6 +4,13 @@
 
 ### Added
 
+- `BakeScorer::prepare_steering` creates a source-bound reusable SDR worker
+  returning the complete score and refinement gains. It rejects unsupported
+  feature contracts before use. `BakeScorer::with_parallel` lets codec workers
+  disable internal threading. Coverage does not certify finite-edit accuracy.
+- Basic/peak bakes honor their declared SSIM revision per comparison, allowing
+  Rev1/Rev2/Rev3 workers in the same process without environment mutation.
+
 - Opt-in, versioned sampling metadata for basic/peak bakes, using zenresize
   Triangle, Mitchell and RobidouxSharp at 1.5×, 2× and 3×. Rust extraction,
   training metadata admission, public BakeScorer serving and spatial ownership
@@ -20,10 +27,25 @@
   ≤ 2e-5), not structural, because the f32 sliding sums stay path-dependent;
   the direct moment removes the cancellation that made the drift ~114× larger.
   Existing bakes and the shipped default stay revision 1; revision 3 needs
-  freshly extracted features and a refit, and an old bake relabelled `3` is
-  refused rather than served.
+  freshly extracted features and a refit, and relabelling an old bake does not make it a valid refit.
+
+### Fixed
+
+- Cached spatial HF-gain coefficients now differentiate the model's actual
+  gain formula. Saturating revision-3 gains previously used the revision-1
+  ratio derivative. Independent finite differences cover all four gain forms;
+  revision-1 coefficient arithmetic is preserved exactly.
 
 ### Changed
+
+- Declared local-only basic subsets skip peak and whole-image HF reductions.
+  Candidate map assembly skips channels with zero sensitivity and unneeded
+  reference HF sweeps, masked/IW pools and the unused intermediate profile head.
+  Prepared basic/peak comparisons reuse the reference pyramid for scalar
+  extraction as well as map assembly. Read feature IDs retain canonical arithmetic.
+- Candidate gradients reuse the canonical structural read analysis to skip
+  unreachable finite-difference probes, including sparse wide bakes and active
+  ensemble unions. Unknown contracts retain the conservative declared-input path.
 
 - Basic/peak models and research requests that do not read full-resolution X/B
   now select a Rust const-generic extraction path retaining full-resolution Y
@@ -31,7 +53,8 @@
   families conservatively keep full-resolution X/B. Channel subsets use explicit
   feature IDs; the family-only feature-set shorthand cannot represent them.
 
-- Bake/process revision disagreement is refused by comparing the REVISION, not
+- For families without request-local arithmetic, bake/process revision disagreement
+  is refused by comparing the REVISION, not
   only the luminance form it selects — revisions 2 and 3 both select `Clamp`,
   so the form comparison alone would serve revision 2 coefficients against
   revision 3 pixels (#61).

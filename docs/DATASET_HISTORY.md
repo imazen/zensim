@@ -7,6 +7,24 @@ rest on a hidden bug, confound, or invalid measurement. This doc exists so we do
 re-add a dataset a confound already poisoned, re-run a dead-end, or trust a retracted
 claim.
 
+**September 13, newest steering-subset study — STANDS within development panels:**
+[Protocol and results](../benchmarks/steerable_subset_2026-09-13.md) retain the
+same 19,958-row/source-family admission and native Rev3 formula era below.
+Fresh extraction and reused tables are hash-bound; no new source or terminal
+data was admitted. There are 195 unique MLP fits (117+60+18), with 27 initial
+fits reused in the 45-fit five-seed finalist directory; nine additional linear
+controls are deterministic. Do not count inherited artifacts as fresh fits.
+The human test split is now feature-selection evidence, not a new terminal
+holdout. Broader spatial work reuses the September 8 max-attribution registration,
+verifies all 24 original image hashes and current train admission, and executes
+four block sizes through the prepared Rust API. The linear local120 control
+passes 96/96 but under-penalizes severe corruption. More accurate uniform MLP
+ensembles fail some spatial cells. No model qualifies, and native RD/targeting
+claims remain unavailable. Local extraction optimizations preserve consumed
+feature arithmetic; corrected HF-gain map derivatives supersede earlier audits.
+All results, failures, model identities and intermediate binaries remain under
+`~/work/zensim-validation-2026-09-13/steerable/`.
+
 **September 13, latest scale-selective944 study — STANDS within these panels:**
 [189-fit results](../benchmarks/scale_selective_944_2026-09-13.md) reuse the exact
 19,958-row admission below, with fresh native and direct Triangle extractions.

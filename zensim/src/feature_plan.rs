@@ -191,6 +191,8 @@ impl Plan {
             formula_revision: crate::ssim_form::active_revision(),
             v1_basic: touches(ComputeToken::Basic) || v1_pools != V1PoolsMode::Off,
             full_res_xb: true,
+            local_only: false,
+            omit_edges: false,
             sampling: None,
             v1_pools,
             v1_full_scales: if v1_pools == V1PoolsMode::Full {
@@ -239,6 +241,9 @@ impl Plan {
             || want
                 .iter_slots()
                 .any(|id| ComputeSet::is_full_res_xb(id, ns));
+        requested.local_only = want.iter_slots().all(|id| id < ns * 3 * 13 && id % 13 < 10);
+        requested.omit_edges =
+            requested.local_only && want.iter_slots().all(|id| matches!(id % 13, 0..=2 | 9));
         let plan = Plan::normalized(requested, layout);
         if !plan.emit.covers(&want) {
             return Err(PlanError::Uncomputable {
@@ -299,6 +304,8 @@ impl Plan {
         compute.v2_scales = requested.v2_scales;
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         compute.sampling = requested.sampling;
+        compute.local_only = requested.local_only;
+        compute.omit_edges = requested.omit_edges;
         // `emit` is in ID space and is intersected with what the LAYOUT
         // carries: a dense layout that omits an id the walk computes does not
         // emit it, and saying otherwise would make `covers` lie.
@@ -377,6 +384,8 @@ impl Plan {
             formula_revision: crate::ssim_form::active_revision(),
             v1_basic: true,
             full_res_xb: true,
+            local_only: false,
+            omit_edges: false,
             sampling: None,
             v1_pools: pools,
             v1_full_scales: ComputeSet::ALL_SCALES,
@@ -498,6 +507,8 @@ impl Plan {
             formula_revision: a.formula_revision,
             v1_basic: a.v1_basic || b.v1_basic,
             full_res_xb: a.full_res_xb || b.full_res_xb,
+            local_only: a.local_only && b.local_only,
+            omit_edges: a.omit_edges && b.omit_edges,
             sampling: a.sampling,
             v1_pools: pools_union(a.v1_pools, b.v1_pools),
             v1_full_scales: if pools_union(a.v1_pools, b.v1_pools) == V1PoolsMode::Full {
@@ -622,6 +633,103 @@ pub(crate) fn bake_read_slots(model: &crate::mlp::Model) -> Option<SlotSet> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_only_plan_preserves_reads_and_restores_dependencies() {
+        use crate::feature_v2::{V2Scratch, compute_folded_v1_372_streaming_impl};
+        let want = SlotSet::from_slots((0..156).filter(|id| id % 13 < 10));
+        let local = Plan::derive(&want, 372).unwrap();
+        assert!(local.compute.local_only);
+        assert_eq!(local.emit, want);
+        assert_eq!(
+            Plan::widened_to_identity(&local, 944).compute,
+            local.compute
+        );
+        for id in [10, 12, 156, 228, 372] {
+            let other = Plan::derive(&SlotSet::from_slots([id]), 944).unwrap();
+            let union = local.union(&other);
+            assert!(!union.compute.local_only);
+            assert!(union.covers(&want.union(&SlotSet::from_slots([id]))));
+        }
+        let full = Plan::v1(V1PoolsMode::Peaks, 372);
+        let mut scratch = V2Scratch::new();
+        for (w, h) in [(17, 9), (96, 96), (127, 97), (129, 257)] {
+            let src: Vec<_> = (0..w * h)
+                .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 11 % 233) as u8])
+                .collect();
+            let dst: Vec<_> = (0..w * h)
+                .map(|i| {
+                    [
+                        (i * 31 % 251) as u8,
+                        (i * 13 % 239) as u8,
+                        (i * 17 % 233) as u8,
+                    ]
+                })
+                .collect();
+            for parallel in [false, true] {
+                let mut run = |p: &Plan| {
+                    compute_folded_v1_372_streaming_impl(
+                        &crate::RgbSlice::new(&src, w, h),
+                        &crate::RgbSlice::new(&dst, w, h),
+                        None,
+                        parallel,
+                        &mut scratch,
+                        Some(p),
+                        #[cfg(feature = "custom-profiles")]
+                        None,
+                    )
+                    .unwrap()
+                    .0
+                };
+                let baseline = run(&full);
+                for (fine_y, omit_edges) in
+                    [(false, false), (true, false), (false, true), (true, true)]
+                {
+                    let ids = SlotSet::from_slots(want.iter_slots().filter(|&id| {
+                        (!fine_y || !ComputeSet::is_full_res_xb(id, 4))
+                            && (!omit_edges || matches!(id % 13, 0..=2 | 9))
+                    }));
+                    let p = Plan::derive(&ids, 372).unwrap();
+                    assert_eq!(p.compute.omit_edges, omit_edges);
+                    let values = run(&p);
+                    for id in (0..228).filter(|id| {
+                        *id >= 156 || id % 13 >= 10 || (omit_edges && (3..9).contains(&(id % 13)))
+                    }) {
+                        assert_eq!(values[id], 0.0, "omitted reduction f{id} still ran");
+                    }
+                    for id in ids.iter_slots() {
+                        assert_eq!(
+                            values[id].to_bits(),
+                            baseline[id].to_bits(),
+                            "{w}x{h} parallel={parallel} f{id}"
+                        );
+                    }
+                    let pre = crate::Zensim::new(crate::ZensimProfile::B)
+                        .with_parallel(parallel)
+                        .precompute_reference(&crate::RgbSlice::new(&src, w, h))
+                        .unwrap();
+                    let wide = Plan::widened_to_identity(&p, 944);
+                    if let Some((cached, _)) =
+                        crate::feature_v2::compute_folded_v1_372_with_ref_impl(
+                            &pre,
+                            &crate::RgbSlice::new(&dst, w, h),
+                            parallel,
+                            &mut V2Scratch::new(),
+                            Some(p.compute.v1_pools),
+                            Some(&wide),
+                        )
+                    {
+                        assert_eq!(cached.len(), 944);
+                        assert_eq!(&cached[..values.len()], &values, "cached {w}x{h}");
+                        assert!(cached[values.len()..].iter().all(|v| *v == 0.0));
+                    } else {
+                        assert!(w != 96 || h != 96, "cache fast path did not run");
+                    }
+                    assert_eq!(Plan::normalized(p.compute, p.layout.clone()), p);
+                }
+            }
+        }
+    }
+
     #[test]
     fn fullres_y_subset_plan_restores_chroma_for_any_consumer() {
         let want = SlotSet::from_slots((0..228).filter(|&id| !ComputeSet::is_full_res_xb(id, 4)));

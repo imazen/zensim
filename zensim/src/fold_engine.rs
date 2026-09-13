@@ -207,6 +207,7 @@ pub(crate) fn compute_fold_backed_with_ref(
         config.allow_multithreading,
         scratch,
         pool_mode,
+        None,
     )?;
     features.truncate(v1_feature_width(config));
     let (score, raw_distance) =
@@ -543,6 +544,8 @@ pub(crate) fn score_plan(
     // Pool skipping is opt-in. Without it the walk computes the whole pool
     // block exactly as it does today, whatever the bakes read.
     if !skip_unread {
+        plan.compute.local_only = false;
+        plan.compute.omit_edges = false;
         plan.compute.v1_pools = crate::feature_v2::V1PoolsMode::Full;
         plan.compute.v1_full_scales = crate::feature_v2::ComputeSet::ALL_SCALES;
         plan.emit = plan

@@ -2979,6 +2979,8 @@ mod owner_gates {
         let off = ComputeSet {
             formula_revision: crate::ssim_form::active_revision(),
             full_res_xb: true,
+            local_only: false,
+            omit_edges: false,
             sampling: None,
             v1_basic: false,
             v1_pools: V1PoolsMode::Off,

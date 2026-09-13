@@ -1934,6 +1934,9 @@ pub(crate) struct ComputeSet {
     /// Full-resolution X/B moments. Plans may omit them for basic/peak subsets.
     /// Conversion and the coarser XYB pyramid always remain complete.
     pub full_res_xb: bool,
+    /// Only basic local SSIM/edge moments and MSE; no peaks or HF ratios.
+    pub local_only: bool,
+    pub omit_edges: bool,
     pub sampling: Option<crate::sampling::Sampling>,
     /// v1's masked/IW/soft-peak pool slots — the 13.6 % pass of item E.
     pub v1_pools: V1PoolsMode,
@@ -2048,6 +2051,8 @@ impl ComputeSet {
             formula_revision: t.formula_revision,
             v1_basic: true,
             full_res_xb: true,
+            local_only: false,
+            omit_edges: false,
             sampling: None,
             v1_pools: t.v1_pools,
             v1_full_scales: Self::ALL_SCALES,
@@ -2097,6 +2102,9 @@ impl ComputeSet {
     pub(crate) fn free_work(&self, ch: usize) -> crate::fused::FreeExtrasWork {
         let bounded_err = self.bounded_err();
         crate::fused::FreeExtrasWork {
+            revision: Some(self.formula_revision),
+            local_only: self.local_only,
+            omit_edges: self.omit_edges,
             raw_moments: self.raw_moments(),
             bounded_err,
             lum_bins: bounded_err && !self.append && ch == APPEND2_CHANNEL,
@@ -2258,7 +2266,10 @@ impl ComputeSet {
             .union(&SlotSet::from_slots(scattered))
             .clipped_to(layout_width);
         SlotSet::from_slots(slots.iter_slots().filter(|&id| {
-            (self.full_res_xb || !Self::is_full_res_xb(id, n_scales))
+            (!self.local_only
+                || (id < basic && id % crate::metric::FEATURES_PER_CHANNEL_BASIC < 10))
+                && (!self.omit_edges || (id < basic && matches!(id % 13, 0..=2 | 9)))
+                && (self.full_res_xb || !Self::is_full_res_xb(id, n_scales))
                 && !(self.v1_pools == V1PoolsMode::Full
                     && (peaks_end..v1_total).contains(&id)
                     && crate::feature_defs::def_at(id, n_scales)
@@ -2296,6 +2307,7 @@ impl ComputeSet {
         // feature IDs and per-slot provenance remain the authoritative identity;
         // do not issue a shorthand that Request::for_set cannot reproduce.
         if !self.full_res_xb
+            || self.local_only
             || self.sampling.is_some()
             || (self.v1_pools == V1PoolsMode::Full && self.v1_full_scales != Self::ALL_SCALES)
         {
@@ -2502,6 +2514,7 @@ fn run_blur_pass(
         // above this call; a nested band fan-out here is not its axis.
         false,
         0,
+        crate::ssim_form::active_revision(),
     );
 }
 
@@ -2550,6 +2563,7 @@ fn run_blur_pass_strip(width: usize, height_local: usize, scratch: &mut ScratchV
         // above this call; a nested band fan-out here is not its axis.
         false,
         0,
+        crate::ssim_form::active_revision(),
     );
 }
 
@@ -2750,6 +2764,7 @@ fn fused_blur_h_ssim_banded(
     width: usize,
     height_local: usize,
     #[allow(unused_variables)] parallel: bool,
+    revision: FormulaRevision,
 ) {
     #[cfg(feature = "threads")]
     if parallel && height_local > H_BLUR_BAND_ROWS && width > 0 {
@@ -2771,7 +2786,7 @@ fn fused_blur_h_ssim_banded(
                 // inside this row band automatically: the band gives the
                 // thread its rows, the tile keeps that band's 6-plane window
                 // dense. Each worker owns its own thread-local tile arena.
-                crate::blur::fused_blur_h_ssim(
+                crate::blur::fused_blur_h_ssim_at_revision(
                     &src[lo..hi],
                     &dst[lo..hi],
                     m1,
@@ -2781,12 +2796,13 @@ fn fused_blur_h_ssim_banded(
                     width,
                     rows,
                     BLUR_RADIUS,
+                    revision,
                 );
                 crate::fold_timing::stop(__t, crate::fold_timing::Phase::BlurBandBusy, 0);
             });
         return;
     }
-    crate::blur::fused_blur_h_ssim(
+    crate::blur::fused_blur_h_ssim_at_revision(
         src,
         dst,
         mu1_h,
@@ -2796,6 +2812,7 @@ fn fused_blur_h_ssim_banded(
         width,
         height_local,
         BLUR_RADIUS,
+        revision,
     );
 }
 
@@ -2823,6 +2840,7 @@ fn run_blur_pass_inner(
     // Diagnostic-only: which `fold_timing` scale slot this call's v2-plane
     // chain is attributed to. Never read by any kernel.
     t_scale: usize,
+    revision: FormulaRevision,
 ) {
     let n = width * height_local;
     let mu1_h = &mut mu1_h[..n];
@@ -2840,6 +2858,7 @@ fn run_blur_pass_inner(
         width,
         height_local,
         parallel,
+        revision,
     );
     crate::fold_timing::stop(__t_h, crate::fold_timing::Phase::BlurHWall, 0);
 
@@ -5290,14 +5309,21 @@ impl V1BasicSums {
     /// `streaming::ScaleAccumulators::finalize` + `metric.rs`'s pass-2/3/4
     /// pushes (`.abs()` on the masked/IW ssim + art/det L4 slots, none on
     /// the peaks / mse).
-    fn finalize_pools_into(&self, n: usize, peaks: &mut [f64], masked: &mut [f64], iw: &mut [f64]) {
+    fn finalize_pools_into(
+        &self,
+        n: usize,
+        peaks: &mut [f64],
+        masked: &mut [f64],
+        iw: &mut [f64],
+        revision: crate::feature_defs::FormulaRevision,
+    ) {
         debug_assert_eq!(peaks.len(), 6);
         debug_assert_eq!(masked.len(), 6);
         debug_assert_eq!(iw.len(), 6);
         let one_over_n = 1.0 / n as f64;
         // Hoisted out of the nine root calls below: it reads a `OnceLock`,
         // which LLVM cannot hoist for you. Same discipline as `gain_form`.
-        let root_form = crate::det_math::active_root_form();
+        let root_form = crate::det_math::RootForm::at_revision(Some(revision));
         peaks[0] = f64::from(self.ssim_max);
         peaks[1] = f64::from(self.edge_art_max);
         peaks[2] = f64::from(self.edge_det_max);
@@ -5403,10 +5429,15 @@ impl V1BasicSums {
     /// three HF ratio features with their `1e-10` guards. `n` is the
     /// scale's full pixel count (`w_s * h_s`) — identical to v1's per-scale
     /// accumulator `n` since both walks cover every row exactly once.
-    fn finalize_into(&self, n: usize, out: &mut [f64]) {
+    fn finalize_into(
+        &self,
+        n: usize,
+        out: &mut [f64],
+        revision: crate::feature_defs::FormulaRevision,
+    ) {
         debug_assert_eq!(out.len(), 13);
         let one_over_n = 1.0 / n as f64;
-        let root_form = crate::det_math::active_root_form();
+        let root_form = crate::det_math::RootForm::at_revision(Some(revision));
         out[0] = (self.ssim_d * one_over_n).abs();
         out[1] = (self.ssim_d4 * one_over_n)
             .max(0.0)
@@ -5429,7 +5460,7 @@ impl V1BasicSums {
         // Same owner as the buffered walk (`crate::hf_gain_form`), which is
         // what keeps the fold's v1 pools bit-identical to v1's under EVERY
         // arm rather than only under the shipped one.
-        let gain_form = crate::hf_gain_form::active_gain_form();
+        let gain_form = crate::hf_gain_form::HfGainForm::at_revision(Some(revision));
         let var_src = self.hf_sq_src * one_over_n;
         let var_dst = self.hf_sq_dst * one_over_n;
         out[10] = crate::hf_gain_form::hf_energy_loss(var_src, var_dst);
@@ -5646,7 +5677,7 @@ fn fold_v1_one_band(
             // emitted peak slots are bit-identical to `Full`'s.
             if self_blur {
                 let [h0, h1, h2, h3] = &mut ps.h;
-                crate::blur::fused_blur_h_ssim(
+                crate::blur::fused_blur_h_ssim_at_revision(
                     &src[span.clone()],
                     &dst[span.clone()],
                     &mut h0[..band_n],
@@ -5656,6 +5687,7 @@ fn fold_v1_one_band(
                     width,
                     h_local,
                     BLUR_RADIUS,
+                    free.revision(),
                 );
             }
             let (mu1_h, mu2_h, ssq_h, s12_h, span_h) = if self_blur {
@@ -5705,8 +5737,7 @@ fn fold_v1_one_band(
             }
         });
         let full = work == BandPoolWork::Full;
-        let stable =
-            crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+        let stable = free.revision() == crate::feature_defs::FormulaRevision::Rev3;
         if stable && full {
             ps.stable_sd.resize(band_cap_n, 0.0);
         }
@@ -5729,7 +5760,7 @@ fn fold_v1_one_band(
             // Bit-identical to reading those rows out of a whole-window call
             // (`phase_a_blur_bands_are_bit_exact`); the point is that these
             // four planes never leave this task.
-            crate::blur::fused_blur_h_ssim(
+            crate::blur::fused_blur_h_ssim_at_revision(
                 &src[span.clone()],
                 &dst[span.clone()],
                 &mut h0[..band_n],
@@ -5739,6 +5770,7 @@ fn fold_v1_one_band(
                 width,
                 h_local,
                 BLUR_RADIUS,
+                free.revision(),
             );
         }
         let (mu1_h, mu2_h, ssq_h, s12_h, span_h) = match h_src {
@@ -7535,6 +7567,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
     // its second axis.
     parallel: bool,
     scr: &mut ScratchV2Strip,
+    revision: FormulaRevision,
 ) {
     use crate::feature_v2_stream::Side;
     let width = info.plane_w;
@@ -7587,6 +7620,7 @@ fn stream_phase_a<S: ImageSource, D: ImageSource>(
         want_v2,
         parallel,
         info.scale,
+        revision,
     );
     // BANDVIS dst self-mask (`append2_dst_activity`, Y channel only): the
     // exact dst twin of the ref activity chain — `box_blur(|dst − mu2|)`
@@ -7671,11 +7705,9 @@ fn stream_phase_b(
     cross: Option<(&[f32], &[f32])>,
     append2: Option<Append2Params>,
     csfw: Option<CsfwParams>,
-    // `ch`: which channel this strip pass is. Only the free-extras work
-    // order reads it (the class-C luminance bins are a register carry on Y
-    // alone — [`ComputeSet::free_work`]); every other decision here is
-    // already carried by an explicit argument.
-    ch: usize,
+    // The resolved per-channel work order. Do not reconstruct it from public
+    // toggles: that loses private subset restrictions and runs dead reductions.
+    free: crate::fused::FreeExtrasWork,
     acc: &mut StreamChannelAccums,
 ) {
     let width = info.plane_w;
@@ -7783,7 +7815,7 @@ fn stream_phase_b(
             // free_work`). With the owning blocks on, their own kernels own
             // those slots and every flag is false, so the full 944 walk is
             // untouched.
-            ComputeSet::from_toggles(toggles).free_work(ch),
+            free,
         );
     }
 
@@ -8155,7 +8187,14 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
     parallel: bool,
     scratch: &mut V2Scratch,
     pool_mode: Option<V1PoolsMode>,
+    plan: Option<&crate::feature_plan::Plan>,
 ) -> Option<(Vec<f64>, [f64; 3])> {
+    if precomputed.sampling.is_some()
+        || plan.is_some_and(|p| p.compute.sampling.is_some() || p.compute.v2_blocks)
+        || distorted.is_hdr()
+    {
+        return None;
+    }
     let (cw, ch) = (precomputed.scales[0].1, precomputed.scales[0].2);
     if distorted.width() != cw || distorted.height() != ch {
         return None;
@@ -8163,11 +8202,14 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
     if !cached_ref_feed_usable(&precomputed.scales, cw, ch) {
         return None;
     }
-    let toggles = V2NewFeatureToggles {
-        v1_pools: pool_mode.unwrap_or(V1PoolsMode::Full),
-        v1_only: true,
-        ..V2NewFeatureToggles::default()
-    };
+    let toggles = plan.map_or(
+        V2NewFeatureToggles {
+            v1_pools: pool_mode.unwrap_or(V1PoolsMode::Full),
+            v1_only: true,
+            ..V2NewFeatureToggles::default()
+        },
+        crate::feature_plan::Plan::toggles,
+    );
     let mut mo = MeanOffsetRows::new(cw, ch);
     // `source` is unused by the producer on the cached feed (every source-side
     // row is copied from the cache); it is still the type parameter, so pass
@@ -8184,6 +8226,7 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
         FoldWalkExtras {
             mean_offset: Some(&mut mo),
             ref_planes: Some(&precomputed.scales),
+            compute: plan.map(|p| p.compute),
             ..Default::default()
         },
     );
@@ -9042,7 +9085,17 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                         // gather it also performs is still needed.
                         stream_gather_windows(&producer, &info, ch, scr);
                     } else {
-                        stream_phase_a(&producer, &info, ch, false, false, v2_blocks, true, scr);
+                        stream_phase_a(
+                            &producer,
+                            &info,
+                            ch,
+                            false,
+                            false,
+                            v2_blocks,
+                            true,
+                            scr,
+                            compute.formula_revision,
+                        );
                     }
                     let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
                     stream_phase_b(
@@ -9060,7 +9113,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                         None,
                         append2,
                         csfw,
-                        ch,
+                        local.free_work(ch),
                         acc,
                     );
                     crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
@@ -9095,6 +9148,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                         v2_blocks,
                         true,
                         scr,
+                        compute.formula_revision,
                     );
                     crate::fold_timing::stop(__t, crate::fold_timing::Phase::ABusy, scale);
                 });
@@ -9153,7 +9207,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                     cross,
                     append2,
                     csfw,
-                    ch,
+                    local.free_work(ch),
                     acc,
                 );
                 crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
@@ -9190,7 +9244,17 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                     continue;
                 }
                 let active = append_cell_active(append_on, ch, scale);
-                stream_phase_a(&producer, &info, ch, active, false, v2_blocks, false, scr);
+                stream_phase_a(
+                    &producer,
+                    &info,
+                    ch,
+                    active,
+                    false,
+                    v2_blocks,
+                    false,
+                    scr,
+                    compute.formula_revision,
+                );
                 if y_active {
                     let stash = if ch == 0 {
                         &mut stash_x_buf[0].activity
@@ -9218,7 +9282,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                     None,
                     append2,
                     csfw,
-                    ch,
+                    local.free_work(ch),
                     &mut accums[ch],
                 );
             }
@@ -9232,6 +9296,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                     v2_blocks,
                     false,
                     scr,
+                    compute.formula_revision,
                 );
                 let cross = if y_active {
                     Some((
@@ -9260,7 +9325,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                     cross,
                     append2,
                     csfw,
-                    1,
+                    local.free_work(1),
                     &mut accums[1],
                 );
             }
@@ -9378,7 +9443,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                     continue;
                 }
                 let base = scale * 39 + ch * 13;
-                acc.v1[scale].finalize_into(n, &mut features_v12[base..base + 13]);
+                acc.v1[scale].finalize_into(
+                    n,
+                    &mut features_v12[base..base + 13],
+                    compute.formula_revision,
+                );
                 // FREE EXTRAS ([`V1FreeExtras::RawMoments`]): the v2-era
                 // slots this walk can finalize from the fused kernel's raw
                 // moments, written ONLY where the owning block is off — so
@@ -9447,7 +9516,13 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                     let mut peaks = [0.0f64; 6];
                     let mut masked = [0.0f64; 6];
                     let mut iw = [0.0f64; 6];
-                    acc.v1[scale].finalize_pools_into(n, &mut peaks, &mut masked, &mut iw);
+                    acc.v1[scale].finalize_pools_into(
+                        n,
+                        &mut peaks,
+                        &mut masked,
+                        &mut iw,
+                        compute.formula_revision,
+                    );
                     if toggles.v1_pools == V1PoolsMode::Full {
                         features_v12[peaks0..peaks0 + 6].copy_from_slice(&peaks);
                         features_v12[masked0..masked0 + 6].copy_from_slice(&masked);
@@ -15333,6 +15408,7 @@ pub(crate) mod tests {
                             raw_moments: true,
                             bounded_err: true,
                             lum_bins: true,
+                            ..Default::default()
                         },
                     );
                     sums

@@ -1697,6 +1697,106 @@ mod tests {
     }
 
     #[test]
+    fn candidate_map_skipping_matches_the_full_legacy_map() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "attribution::tests::candidate_map_skipping_matches_the_full_legacy_map",
+            "LEAN-MAP-PARITY",
+        ) {
+            return;
+        }
+        for (w, h) in [(17, 9), (127, 97), (256, 193)] {
+            let (src, dst) = test_pair(w, h);
+            let (rs, ds) = (
+                crate::RgbSlice::new(&src, w, h),
+                crate::RgbSlice::new(&dst, w, h),
+            );
+            for parallel in [false, true] {
+                let z = crate::Zensim::new(crate::ZensimProfile::B).with_parallel(parallel);
+                let pre = z.precompute_reference(&rs).unwrap();
+                for mode in 0..4 {
+                    let mut s = vec![0.0; 156];
+                    for (id, v) in s.iter_mut().enumerate() {
+                        if (mode == 0 || id % 13 < 10)
+                            && (mode < 2 || !matches!(id,0..13|26..39))
+                            && (mode < 3 || matches!(id % 13, 0..=2 | 9))
+                        {
+                            *v = -(id as f64 + 1.0) / 157.0;
+                        }
+                    }
+                    let run = |revision| {
+                        let mut bins = BinAccum::new(w, h, 8);
+                        z.fused_basic_into_at_revision(
+                            &pre,
+                            &ds,
+                            &s,
+                            &[],
+                            None,
+                            None,
+                            &mut AttrSinkF32::Bins(&mut bins),
+                            revision,
+                        )
+                        .unwrap();
+                        bins.into_result()
+                    };
+                    let full = run(None);
+                    let lean = run(Some(crate::feature_defs::FormulaRevision::Rev3));
+                    for y in (0..h).step_by(8) {
+                        for x in (0..w).step_by(8) {
+                            assert_eq!(
+                                full.query_rect(x, y, x + 17, y + 19).to_bits(),
+                                lean.query_rect(x, y, x + 17, y + 19).to_bits(),
+                                "{w}x{h} mode{mode} parallel{parallel}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        println!("LEAN-MAP-PARITY");
+    }
+
+    #[test]
+    fn cached_hf_gain_coefficients_follow_the_served_formula() {
+        use crate::hf_gain_form::{HfGainForm, hf_energy_gain};
+        // Differentiate the actual pooled feature by perturbing its raw sum.
+        // This fails for the former unconditional 1/sum_src derivative.
+        for form in [
+            HfGainForm::RatioExcess,
+            HfGainForm::SaturatingExcess,
+            HfGainForm::BoundedExcess,
+            HfGainForm::Log1pExcess,
+        ] {
+            for ratio in [1.1, 2.0, 100.0] {
+                let (src, n) = (0.25, 128.0);
+                let dst = src * ratio;
+                let stats = crate::metric::ScaleStats {
+                    hf_sq_dst_sum: [dst; 3],
+                    hf_energy_gain: [hf_energy_gain(form, src / n, dst / n); 3],
+                    ..Default::default()
+                };
+                let mut sensitivities = [0.0; 156];
+                sensitivities[12] = -2.5;
+                let co =
+                    SlotCoeffs::from_scale_stats(&sensitivities, 0, &stats, 0, n, src, 0.5, form);
+                let eps = dst * 1e-5;
+                let fd = -2.5
+                    * (hf_energy_gain(form, src / n, (dst + eps) / n)
+                        - hf_energy_gain(form, src / n, (dst - eps) / n))
+                    / (2.0 * eps);
+                assert!(
+                    (co.c_hfe - fd).abs() <= 1e-8 * fd.abs().max(1e-6),
+                    "{form:?} {ratio}: {} != {fd}",
+                    co.c_hfe
+                );
+                if form == HfGainForm::RatioExcess {
+                    assert_eq!(co.c_hfe, -2.5 / src);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn l8_finite_moment_removal_and_near_zero_coefficients() {
         // Independent closed-form moment interventions, NOT pixel edits:
         // the latter also move neighboring means and need codec experiments.
@@ -3629,6 +3729,7 @@ impl SlotCoeffs {
         n_f: f64,
         hf_sq_src_sum: f64,
         hf_abs_src_sum: f64,
+        gain_form: crate::hf_gain_form::HfGainForm,
     ) -> Self {
         let g = |slot: usize| s.get(base_k + slot).copied().unwrap_or(0.0);
         let inv_n = 1.0 / n_f;
@@ -3649,7 +3750,18 @@ impl SlotCoeffs {
             if stats.hf_energy_loss[c] > 0.0 {
                 -g(10) / hf_sq_src_sum
             } else if stats.hf_energy_gain[c] > 0.0 {
-                g(12) / hf_sq_src_sum
+                if gain_form == crate::hf_gain_form::HfGainForm::RatioExcess {
+                    // Preserve the established revision-1 spelling bit for bit.
+                    g(12) / hf_sq_src_sum
+                } else {
+                    g(12)
+                        * crate::hf_gain_form::hf_energy_gain_d_sum_dst_sq(
+                            gain_form,
+                            hf_sq_src_sum,
+                            stats.hf_sq_dst_sum[c],
+                            inv_n,
+                        )
+                }
             } else {
                 0.0
             }
@@ -3810,9 +3922,25 @@ impl Fused944Session {
     pub(crate) fn planned_features(
         &mut self,
         source: &impl ImageSource,
+        precomputed: &PrecomputedReference,
         distorted: &impl ImageSource,
         plan: &crate::feature_plan::Plan,
+        parallel: bool,
     ) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
+        if plan.toggles().v1_only
+            && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
+            && !source.is_hdr()
+            && let Some(result) = crate::feature_v2::compute_folded_v1_372_with_ref_impl(
+                precomputed,
+                distorted,
+                parallel,
+                &mut self.scratch,
+                Some(plan.compute.v1_pools),
+                Some(plan),
+            )
+        {
+            return Ok(result);
+        }
         // Basic-only maps use the cached v1 owner. Cheap free extras do not
         // populate the v2 retention cells; they are reported as unsupported
         // below rather than read from stale/default accumulators.
@@ -3821,7 +3949,7 @@ impl Fused944Session {
             source,
             distorted,
             Some(120_000_000),
-            true,
+            parallel,
             &mut self.scratch,
             Some(plan),
             retention,
@@ -4135,9 +4263,32 @@ impl crate::metric::Zensim {
         distorted: &impl ImageSource,
         s: &[f64],
         s_peaks: &[f64],
+        max_removals: Option<&mut Vec<MaxRemoval>>,
+        prime: Option<&mut AttributionSession>,
+        sink: &mut AttrSinkF32<'_>,
+    ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
+        self.fused_basic_into_at_revision(
+            precomputed,
+            distorted,
+            s,
+            s_peaks,
+            max_removals,
+            prime,
+            sink,
+            None,
+        )
+    }
+
+    fn fused_basic_into_at_revision(
+        &self,
+        precomputed: &PrecomputedReference,
+        distorted: &impl ImageSource,
+        s: &[f64],
+        s_peaks: &[f64],
         mut max_removals: Option<&mut Vec<MaxRemoval>>,
         mut prime: Option<&mut AttributionSession>,
         sink: &mut AttrSinkF32<'_>,
+        revision: Option<crate::feature_defs::FormulaRevision>,
     ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
         const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
         let params = self.profile().params();
@@ -4146,7 +4297,35 @@ impl crate::metric::Zensim {
         }
         crate::metric::validate_ref_dimensions(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels())?;
-        let config = config_from_params(params, self.parallel());
+        let mut config = config_from_params(params, self.parallel());
+        config.formula_revision = revision;
+        // Only the candidate map owner may skip channels: its score/features
+        // were already computed. Legacy callers also consume the returned row.
+        if revision.is_some() {
+            // This stage consumes only basic/peak signals. The canonical
+            // planned extraction above already handled all scored families;
+            // B's inherited masked/IW switches would run an unused chain here.
+            config.compute_all_features = true;
+            config.extended_features = false;
+            config.compute_iw_features = false;
+            config.attribution_channels = Some(core::array::from_fn(|scale| {
+                core::array::from_fn(|c| {
+                    let basic = (scale * 3 + c) * FPC;
+                    let peaks = (scale * 3 + c) * 6;
+                    (0..FPC).any(|k| s.get(basic + k).is_some_and(|v| *v != 0.0))
+                        || (0..6).any(|k| s_peaks.get(peaks + k).is_some_and(|v| *v != 0.0))
+                })
+            }));
+        }
+        config.local_only = revision.is_some()
+            && s.iter()
+                .enumerate()
+                .all(|(id, v)| *v == 0.0 || id % FPC < 10)
+            && s_peaks.iter().all(|v| *v == 0.0);
+        config.omit_edges = config.local_only
+            && s.iter()
+                .enumerate()
+                .all(|(id, v)| *v == 0.0 || matches!(id % FPC, 0..=2 | 9));
         crate::ssim_form::check_route(&config)?;
         if config.blur_passes != 1 {
             return Err(ZensimError::ModelForwardFailed {
@@ -4198,12 +4377,25 @@ impl crate::metric::Zensim {
             }
             id_plane[..n].fill(0.0);
             win_plane[..n].fill(0.0);
-            let hf: [(f64, f64); 3] =
-                core::array::from_fn(|c| hf_src_sums(&src_planes[c][..n], &ret.mu1[c][..n]));
+            let hf: [(f64, f64); 3] = core::array::from_fn(|c| {
+                let base = (scale * 3 + c) * FPC;
+                if prime.is_some() || (10..13).any(|k| s.get(base + k).is_some_and(|v| *v != 0.0)) {
+                    hf_src_sums(&src_planes[c][..n], &ret.mu1[c][..n])
+                } else {
+                    (0.0, 0.0)
+                }
+            });
             let co32: [[f32; 12]; 3] = core::array::from_fn(|c| {
                 let base_k = scale * FPC * 3 + c * FPC;
                 coeffs_to_f32(&SlotCoeffs::from_scale_stats(
-                    s, base_k, stats, c, n_f, hf[c].0, hf[c].1,
+                    s,
+                    base_k,
+                    stats,
+                    c,
+                    n_f,
+                    hf[c].0,
+                    hf[c].1,
+                    crate::hf_gain_form::HfGainForm::at_revision(config.formula_revision),
                 ))
             });
             let l8_co: [[f64; 3]; 3] =
@@ -4220,6 +4412,9 @@ impl crate::metric::Zensim {
                 let off = band * 64 * sw;
                 let len = idc.len();
                 for c in 0..3 {
+                    if co32[c].iter().all(|v| *v == 0.0) && l8_co[c].iter().all(|v| *v == 0.0) {
+                        continue;
+                    }
                     fused_combine_plane_f32(
                         &ret.sd[c][off..off + len],
                         &src_planes[c][off..off + len],
@@ -4349,7 +4544,10 @@ impl crate::metric::Zensim {
         // Same real-scoring step as `compute_with_ref_and_diffmap` — the
         // scalar golden gate (`fused_score_bit_matches_diffmap_path`) holds
         // this path bit-identical to the fold-diffmap call's score.
-        if precomputed.sampling.is_none() {
+        // Candidate callers already scored their own model. This pass only
+        // supplies its map signals, so do not run the legacy profile's head
+        // against a deliberately narrower feature row.
+        if revision.is_none() && precomputed.sampling.is_none() {
             crate::metric::apply_mlp_scoring_with_codec(
                 &mut result,
                 params,
@@ -4599,7 +4797,14 @@ impl crate::metric::Zensim {
             next_coeffs.push(core::array::from_fn(|c| {
                 let base_k = scale * FPC * 3 + c * FPC;
                 coeffs_to_f32(&SlotCoeffs::from_scale_stats(
-                    s, base_k, stats, c, n_f, hf[c].0, hf[c].1,
+                    s,
+                    base_k,
+                    stats,
+                    c,
+                    n_f,
+                    hf[c].0,
+                    hf[c].1,
+                    crate::hf_gain_form::HfGainForm::at_revision(config.formula_revision),
                 ))
             }));
             tail_ms.set(tail_ms.get() + t_c.elapsed().as_secs_f64() * 1e3);
@@ -4851,6 +5056,7 @@ impl crate::metric::Zensim {
             None,
             session,
             bin,
+            None,
         )?;
         Ok((result, v2res, attribution))
     }
@@ -4867,11 +5073,12 @@ impl crate::metric::Zensim {
         max_removals: Option<&mut Vec<MaxRemoval>>,
         session: &mut Fused944Session,
         bin: usize,
+        revision: Option<crate::feature_defs::FormulaRevision>,
     ) -> Result<(crate::ZensimResult, AttributionResult), ZensimError> {
         let width = distorted.width();
         let height = distorted.height();
         let mut accum = BinAccum::new(width, height, bin);
-        let (result, _, _) = self.fused_basic_into(
+        let (result, _, _) = self.fused_basic_into_at_revision(
             precomputed,
             distorted,
             s,
@@ -4879,6 +5086,7 @@ impl crate::metric::Zensim {
             max_removals,
             None,
             &mut AttrSinkF32::Bins(&mut accum),
+            revision,
         )?;
         let block = |start: usize, end: usize| -> Option<&[f64]> {
             (s.len() > start).then(|| &s[start..s.len().min(end)])

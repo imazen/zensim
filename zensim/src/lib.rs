@@ -476,6 +476,8 @@ pub mod research;
 /// `Stopper` (any `impl Stop` works).
 pub use enough::{Stop, StopReason, Unstoppable};
 pub use error::ZensimError;
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+pub use metric::SteeringSession;
 pub use metric::{
     BakeScorer, FeatureView, Zensim, ZensimResult, dissimilarity_to_score, score_to_dissimilarity,
 };

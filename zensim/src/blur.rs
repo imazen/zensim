@@ -3171,10 +3171,36 @@ pub fn fused_blur_h_ssim(
     height: usize,
     radius: usize,
 ) {
-    // Revision 3 accumulates the direct error moment `Σ(a-b)²` in the
-    // `sigma12` plane in place of `Σab` — the fusion that replaced the exact
-    // f64 second pass. Read ONCE per call; every tier below unswitches on it.
-    let err = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    fused_blur_h_ssim_at_revision(
+        src,
+        dst,
+        out_mu1,
+        out_mu2,
+        out_sigma_sq,
+        out_sigma12,
+        width,
+        height,
+        radius,
+        crate::ssim_form::active_revision(),
+    );
+}
+
+/// Same SIMD kernel with explicit request-local arithmetic; no global mutation.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fused_blur_h_ssim_at_revision(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    revision: crate::feature_defs::FormulaRevision,
+) {
+    let err = crate::ssim_form::effective_revision(revision)
+        == crate::feature_defs::FormulaRevision::Rev3;
     let tile = h_blur_tile_width();
     if tile > 0 && width > tile {
         fused_blur_h_ssim_column_tiled(

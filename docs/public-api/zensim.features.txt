@@ -10,23 +10,24 @@
 ## summary
 #
 #   pub modules                                 2
-#   pub types (struct/enum/trait/alias)        18
+#   pub types (struct/enum/trait/alias)        19
 #   pub consts/statics                         10
 #   free functions                              8
-#   inherent methods                           57
+#   inherent methods                           59
 #   struct fields                              50
 #   enum variants                              14
 #   trait roster entries (type × trait)        51
 #   auto-trait-complete types                  18
+#   auto-trait exceptions                       1
 #
 # per-module pub lines:
-#   (root)                          131
+#   (root)                          134
 #   cvvdp_features                    2
 #   feature_v2                        4
 #   profile                          20
 #   xyb_lms_features                  2
 
-## items (159 lines)
+## items (162 lines)
 
 pub mod cvvdp_features
 pub const cvvdp_features::CVVDP_FEATURE_COUNT: usize
@@ -98,6 +99,7 @@ pub fn AttributionSession::recycle(&mut self, AttributionResult)
 pub fn AttributionSession::reset(&mut self)
 pub fn BakeScorer<'a>::compute_with_ref_and_attribution(&mut self, &impl source::ImageSource, &PrecomputedReference, &impl source::ImageSource, core::option::Option<&str>, &mut Fused944Session, usize) -> core::result::Result<ScoredAttribution, ZensimError>
 pub fn BakeScorer<'a>::precompute_reference(&self, &impl source::ImageSource) -> core::result::Result<PrecomputedReference, ZensimError>
+pub fn BakeScorer<'a>::prepare_steering<'s, S: source::ImageSource>(&'s mut self, &'s S, usize) -> core::result::Result<SteeringSession<'s, 'a, S>, ZensimError>
 pub fn BakeScorer<'a>::with_corruption_head(self, &'a crate::corruption_head::CorruptionHead, core::option::Option<f64>) -> core::result::Result<Self, ZensimError>
 pub fn BakeScorer<'a>::with_linear_corruption_head(self, &'a zenpredict::model::Model, f64) -> core::result::Result<Self, ZensimError>
 #[non_exhaustive] pub struct ClassifiedResult
@@ -144,6 +146,8 @@ pub fn ScoredAttribution::result(&self) -> &ZensimResult
 pub fn ScoredAttribution::sensitivities(&self) -> &[f64]
 pub fn ScoredAttribution::unsupported_feature_ids(&self) -> &[usize]
 pub fn ScoredAttribution::unsupported_refinement_feature_ids(&self) -> &[usize]
+pub struct SteeringSession<'s, 'a, S: source::ImageSource>
+pub fn SteeringSession<'_, '_, S>::compute(&mut self, &impl source::ImageSource, core::option::Option<&str>) -> core::result::Result<ScoredAttribution, ZensimError>
 pub struct UnsupportedFormat(pub &'static str)
 pub struct ZenpixelsSource<'a>
 pub fn ZenpixelsSource<'a>::try_from_buffer(&'a zenpixels::buffer::PixelBuffer) -> core::result::Result<Self, UnsupportedFormat>
@@ -210,3 +214,4 @@ profile::ProfileParamsBuilder: Debug
 ## auto traits
 
 18 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+SteeringSession<'s, 'a, S>: !Freeze !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe

@@ -146,7 +146,7 @@ fn free_toggles(arm: &str) -> zensim::feature_v2::V2NewFeatureToggles {
 }
 
 /// `(max_rounds, min_rounds, max_wall_seconds)` — the defaults, or the
-/// `ZEN_XP_ROUNDS` / `ZEN_XP_WALL_S` overrides. `min_rounds` follows
+/// `ZEN_XP_ROUNDS` / `ZEN_XP_MIN_ROUNDS` / `ZEN_XP_WALL_S` overrides. `min_rounds` follows
 /// `max_rounds` down (a min above the max would never terminate).
 fn bench_budget() -> (usize, usize, u64) {
     let max_r: usize = std::env::var("ZEN_XP_ROUNDS")
@@ -157,7 +157,11 @@ fn bench_budget() -> (usize, usize, u64) {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(600);
-    (max_r, 25.min(max_r), wall_s)
+    let min_r: usize = std::env::var("ZEN_XP_MIN_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(25);
+    (max_r, min_r.min(max_r), wall_s)
 }
 
 /// One-arm loop for external peak-RSS measurement (`/usr/bin/time -v`) and
@@ -186,6 +190,29 @@ fn rss_mode(arm: &str) {
         .and_then(|v| v.parse().ok())
         .unwrap_or(20);
     let (src, dst) = test_pair(w, h);
+    if arm == "bake" {
+        let models: Vec<_> = std::env::var("ZEN_XP_BAKE")
+            .expect("ZEN_XP_BAKE")
+            .split(',')
+            .map(|path| zenpredict::Model::from_bytes(&std::fs::read(path).unwrap()).unwrap())
+            .collect();
+        let parallel = std::env::var("RAYON_NUM_THREADS").as_deref() != Ok("1");
+        let mut scorer = zensim::BakeScorer::ensemble(&models, None)
+            .unwrap()
+            .with_parallel(parallel);
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        if std::env::var_os("ZEN_XP_SPATIAL").is_some() {
+            let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
+            for _ in 0..iters {
+                zenbench::black_box(worker.compute(&ds, None).unwrap());
+            }
+        } else {
+            for _ in 0..iters {
+                zenbench::black_box(scorer.compute(&rs, &ds, None).unwrap());
+            }
+        }
+        return;
+    }
     let _ = size;
     let size = w; // reported below; the walk uses `w`/`h`
     let z = fold_zensim();
@@ -325,19 +352,27 @@ fn subset_bench(sizes: &[usize]) {
 }
 
 /// Complete public-API model comparisons, including optional cached spatial
-/// maps. Manifest rows are `name<TAB>bake_path`, without a header.
+/// maps. Manifest rows are `name<TAB>bake_path[,bake_path...]`, without a
+/// header. Multiple paths use the public uniform ensemble composition.
 fn sampling_models_bench(sizes: &[usize], manifest: &str) {
-    let models: Vec<(String, &'static zenpredict::Model)> = std::fs::read_to_string(manifest)
+    let models: Vec<(String, &'static [zenpredict::Model])> = std::fs::read_to_string(manifest)
         .unwrap()
         .lines()
         .map(|line| {
             let (name, path) = line.split_once('\t').expect("name and bake path");
-            let bytes = std::fs::read(path).unwrap();
-            let model = zenpredict::Model::from_bytes(&bytes).unwrap();
-            (name.to_string(), &*Box::leak(Box::new(model)))
+            let members: Vec<_> = path
+                .split(',')
+                .map(|path| {
+                    let bytes = std::fs::read(path).unwrap();
+                    zenpredict::Model::from_bytes(&bytes).unwrap()
+                })
+                .collect();
+            (name.to_string(), &*Box::leak(members.into_boxed_slice()))
         })
         .collect();
     let spatial = std::env::var_os("ZEN_XP_SPATIAL").is_some();
+    let prepared = std::env::var_os("ZEN_XP_PREPARED").is_some();
+    let parallel = std::env::var("RAYON_NUM_THREADS").as_deref() != Ok("1");
     let result = zenbench::run_gated(zenbench::GateConfig::disabled(), |suite| {
         for &n in sizes {
             let (src, dst) = test_pair(n, n);
@@ -355,13 +390,40 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                         .max_rounds(max_r)
                         .min_rounds(min_r)
                         .max_wall_time(std::time::Duration::from_secs(wall_s));
+                    if std::env::var_os("ZEN_XP_CONTROLS").is_some() && !spatial {
+                        #[cfg(feature = "candidate-profiles")]
+                        group.bench("shipped_D", move |b| {
+                            let z = Zensim::new(ZensimProfile::D).with_parallel(parallel);
+                            let (rs, ds) = (RgbSlice::new(src, n, n), RgbSlice::new(dst, n, n));
+                            b.iter(move || {
+                                zenbench::black_box(z.compute(&rs, &ds).unwrap().score())
+                            });
+                        });
+                        group.bench("fast_ssim2_st", move |b| {
+                            let (rs, ds) =
+                                (imgref::Img::new(src, n, n), imgref::Img::new(dst, n, n));
+                            b.iter(move || {
+                                zenbench::black_box(
+                                    fast_ssim2::compute_ssimulacra2(rs, ds).unwrap(),
+                                )
+                            });
+                        });
+                    }
                     for (name, model) in &models {
                         let model = *model;
                         group.bench(name.clone(), move |b| {
-                            let mut scorer = zensim::BakeScorer::new(model).unwrap();
+                            let mut scorer = zensim::BakeScorer::ensemble(model, None)
+                                .unwrap()
+                                .with_parallel(parallel);
                             let rs = RgbSlice::new(src, n, n);
                             let ds = RgbSlice::new(dst, n, n);
-                            if spatial {
+                            if spatial && prepared {
+                                let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
+                                b.iter(move || {
+                                    let r = worker.compute(&ds, None).unwrap();
+                                    zenbench::black_box(r.refinement_gain(0, 0, n / 2, n / 2));
+                                });
+                            } else if spatial {
                                 let pre = scorer.precompute_reference(&rs).unwrap();
                                 let mut session = zensim::Fused944Session::new();
                                 b.iter(move || {
