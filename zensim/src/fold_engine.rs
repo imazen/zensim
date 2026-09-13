@@ -544,6 +544,7 @@ pub(crate) fn score_plan(
     // block exactly as it does today, whatever the bakes read.
     if !skip_unread {
         plan.compute.v1_pools = crate::feature_v2::V1PoolsMode::Full;
+        plan.compute.v1_full_scales = crate::feature_v2::ComputeSet::ALL_SCALES;
         plan.emit = plan
             .compute
             .populated_slots(crate::NUM_SCALES, plan.layout_width());

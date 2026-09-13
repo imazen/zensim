@@ -193,6 +193,18 @@ impl Plan {
             full_res_xb: true,
             sampling: None,
             v1_pools,
+            v1_full_scales: if v1_pools == V1PoolsMode::Full {
+                let weighted = crate::feature_defs::family_slots(ComputeToken::Masked, ns)
+                    .union(&crate::feature_defs::family_slots(ComputeToken::Iw, ns));
+                weighted.intersect(&want).iter_slots().fold(0, |mask, id| {
+                    mask | (1
+                        << crate::feature_defs::def_at(id, ns)
+                            .expect("registered pool ID")
+                            .scale)
+                })
+            } else {
+                ComputeSet::ALL_SCALES
+            },
             v2_blocks,
             gradient: v2_blocks,
             blockiness: v2_blocks,
@@ -262,6 +274,7 @@ impl Plan {
         let mut compute = ComputeSet::from_toggles(probe.toggles());
         // Channel selection is private plan data, separate from public family
         // toggles. Normalization preserves it only for supported families.
+        compute.v1_full_scales = requested.v1_full_scales;
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         compute.sampling = requested.sampling;
         // `emit` is in ID space and is intersected with what the LAYOUT
@@ -294,6 +307,7 @@ impl Plan {
             crate::sampling::Sampling::from_model(model).map_err(|_| PlanError::UnreadableBake)?;
         if let Some(sampling) = sampling {
             if !plan.compute.allows_full_res_y_subset()
+                || !matches!(plan.compute.v1_pools, V1PoolsMode::Off | V1PoolsMode::Peaks)
                 || (sampling.keep_y && plan.compute.full_res_xb)
             {
                 return Err(PlanError::UnreadableBake);
@@ -342,6 +356,7 @@ impl Plan {
             full_res_xb: true,
             sampling: None,
             v1_pools: pools,
+            v1_full_scales: ComputeSet::ALL_SCALES,
             v2_blocks: false,
             gradient: false,
             blockiness: false,
@@ -461,6 +476,11 @@ impl Plan {
             full_res_xb: a.full_res_xb || b.full_res_xb,
             sampling: a.sampling,
             v1_pools: pools_union(a.v1_pools, b.v1_pools),
+            v1_full_scales: if pools_union(a.v1_pools, b.v1_pools) == V1PoolsMode::Full {
+                a.full_pool_scales() | b.full_pool_scales()
+            } else {
+                ComputeSet::ALL_SCALES
+            },
             v2_blocks: a.v2_blocks || b.v2_blocks,
             gradient: a.gradient || b.gradient,
             blockiness: a.blockiness || b.blockiness,
@@ -598,72 +618,103 @@ mod tests {
     }
 
     #[test]
+    fn coarse_pool_plan_survives_layout_changes_and_union() {
+        let ids = SlotSet::from_slots(
+            (0..228)
+                .chain(264..300)
+                .chain(336..372)
+                .filter(|&id| !ComputeSet::is_full_res_xb(id, 4)),
+        );
+        let p = Plan::derive(&ids, 372).unwrap();
+        assert_eq!(p.compute.v1_full_scales, 0b1100);
+        assert!(!p.compute.full_res_xb);
+        assert_eq!(p.emit, ids);
+        assert_eq!(Plan::normalized(p.compute, p.layout.clone()), p);
+        assert_eq!(Plan::widened_to_identity(&p, 372).compute, p.compute);
+        let peaks = Plan::v1(V1PoolsMode::Peaks, 372);
+        assert_eq!(p.union(&peaks).compute.v1_full_scales, 0b1100);
+        let fine_y = Plan::derive(&SlotSet::from_slots([234]), 372).unwrap();
+        let union = p.union(&fine_y);
+        assert_eq!(union.compute.v1_full_scales, 0b1101);
+        assert!(!union.compute.full_res_xb);
+        assert!(union.covers(&ids.union(&SlotSet::from_slots([234]))));
+        let fine_x = Plan::derive(&SlotSet::from_slots([228]), 372).unwrap();
+        assert!(p.union(&fine_x).compute.full_res_xb);
+    }
+
+    #[test]
     fn fullres_y_subset_retained_features_are_bit_exact() {
         use crate::RgbSlice;
         use crate::feature_v2::{V2Scratch, compute_folded_v1_372_streaming_impl};
-        let want = SlotSet::from_slots((0..228).filter(|&id| !ComputeSet::is_full_res_xb(id, 4)));
-        let y = Plan::derive(&want, 228).unwrap();
-        let full = Plan::v1(V1PoolsMode::Peaks, 228);
-        let mut scratch = V2Scratch::new();
-        for (w, h) in [(17, 9), (64, 64), (97, 131), (257, 193)] {
-            let src = vec![[127u8; 3]; w * h];
-            for kind in 0..4 {
-                let mut dst = src.clone();
-                match kind {
-                    1 => {
-                        dst[(h / 2) * w + w / 2] = [255; 3];
-                        dst[0] = [0; 3];
-                    }
-                    2 => {
-                        for (i, p) in dst.iter_mut().enumerate() {
-                            *p = if (i % w + i / w) % 2 == 0 {
-                                [100; 3]
-                            } else {
-                                [154; 3]
-                            };
+        for weighted in [0u8, 0b1100, 0b1111] {
+            let want = SlotSet::from_slots((0..372).filter(|&id| {
+                !ComputeSet::is_full_res_xb(id, 4)
+                    && (id < 228
+                        || weighted & (1 << crate::feature_defs::def_at(id, 4).unwrap().scale) != 0)
+            }));
+            let y = Plan::derive(&want, 372).unwrap();
+            let full = Plan::v1(V1PoolsMode::Full, 372);
+            let mut scratch = V2Scratch::new();
+            for (w, h) in [(17, 9), (64, 64), (97, 131), (257, 193)] {
+                let src = vec![[127u8; 3]; w * h];
+                for kind in 0..4 {
+                    let mut dst = src.clone();
+                    match kind {
+                        1 => {
+                            dst[(h / 2) * w + w / 2] = [255; 3];
+                            dst[0] = [0; 3];
                         }
-                    }
-                    3 => {
-                        for (i, p) in dst.iter_mut().enumerate() {
-                            if (i % w) % 8 == 0 || (i / w) % 8 == 0 {
-                                *p = [160, 80, 190];
+                        2 => {
+                            for (i, p) in dst.iter_mut().enumerate() {
+                                *p = if (i % w + i / w) % 2 == 0 {
+                                    [100; 3]
+                                } else {
+                                    [154; 3]
+                                };
                             }
                         }
+                        3 => {
+                            for (i, p) in dst.iter_mut().enumerate() {
+                                if (i % w) % 8 == 0 || (i / w) % 8 == 0 {
+                                    *p = [160, 80, 190];
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                }
-                for parallel in [false, true] {
-                    let mut run = |plan: &Plan| {
-                        compute_folded_v1_372_streaming_impl(
-                            &RgbSlice::new(&src, w, h),
-                            &RgbSlice::new(&dst, w, h),
-                            None,
-                            parallel,
-                            &mut scratch,
-                            Some(plan),
-                            #[cfg(feature = "custom-profiles")]
-                            None,
-                        )
-                        .unwrap()
-                    };
-                    let (a, ma) = run(&full);
-                    let (b, mb) = run(&y);
-                    assert_eq!(ma, mb, "raw channel means must remain intact");
-                    for id in want.iter_slots() {
-                        assert_eq!(
-                            a[id].to_bits(),
-                            b[id].to_bits(),
-                            "{w}x{h} kind={kind} parallel={parallel} f{id}"
-                        );
-                    }
-                    for id in (0..228).filter(|&id| !want.contains(id)) {
-                        assert_eq!(b[id], 0.0, "uncomputed f{id}");
-                    }
-                    if kind != 0 {
-                        assert!(
-                            (13..26).any(|id| b[id] != 0.0),
-                            "Y must see luma corruption"
-                        );
+                    for parallel in [false, true] {
+                        let mut run = |plan: &Plan| {
+                            compute_folded_v1_372_streaming_impl(
+                                &RgbSlice::new(&src, w, h),
+                                &RgbSlice::new(&dst, w, h),
+                                None,
+                                parallel,
+                                &mut scratch,
+                                Some(plan),
+                                #[cfg(feature = "custom-profiles")]
+                                None,
+                            )
+                            .unwrap()
+                        };
+                        let (a, ma) = run(&full);
+                        let (b, mb) = run(&y);
+                        assert_eq!(ma, mb, "raw channel means must remain intact");
+                        for id in want.iter_slots() {
+                            assert_eq!(
+                                a[id].to_bits(),
+                                b[id].to_bits(),
+                                "{w}x{h} kind={kind} parallel={parallel} f{id}"
+                            );
+                        }
+                        for id in (0..372).filter(|&id| !want.contains(id)) {
+                            assert_eq!(b[id], 0.0, "uncomputed f{id}");
+                        }
+                        if kind != 0 {
+                            assert!(
+                                (13..26).any(|id| b[id] != 0.0),
+                                "Y must see luma corruption"
+                            );
+                        }
                     }
                 }
             }

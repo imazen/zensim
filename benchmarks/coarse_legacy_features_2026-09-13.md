@@ -82,7 +82,7 @@ four legacy levels, the ideal pixel work is `(5/64)/(85/64) = 1/17`, or 5.9%.
 This excludes shared conversion, pyramid construction, fixed costs, padding
 and retained-map overhead; it is not a measured total-model speedup.
 
-The existing plan has global family switches. Selecting only coarse feature
+At the time of this audit the plan had global family switches. Selecting only coarse feature
 IDs currently does **not** guarantee that the expensive fine-scale kernels
 or their intermediate planes disappear. Add private per-scale compute masks
 at the kernel/retention dispatch, keep canonical feature IDs, and verify both
@@ -98,7 +98,19 @@ training. This directly tests compute saved, while retaining full-resolution
 luma for small errors. The sampling screen's salt/pepper and R/B-swap failures
 remain required checks, not a reason to declare this proposal qualified.
 
+The [subsequent implementation and measured screen](coarse_pool_dispatch_2026-09-13.md)
+supersedes that dispatch limitation for v1 masked/IW. It also confirms an
+important distinction from the July research: these legacy pools have no
+supported spatial integrands. Keep them as scalar cost controls; the next
+spatial candidates need the existing v2 families instead.
+
 ## Channel-swap features to screen next
+
+Later user review lowers this proposal's priority: all 20 sampling models
+already reject the whole-image R/B swap with negative scalar scores. Treat
+that as a scalar rejection check, not the main spatial acceptance criterion.
+Aliasing, salt-and-pepper and ordinary JXL artifact sensitivity take priority.
+The proposal below remains unimplemented research context.
 
 Detection and useful repair guidance are separate problems. The
 [September 8 D228 corruption screen](../docs/CANONICAL_CORRUPTION_REFIT_2026-09-08.md#honest-cost-follow-up--after-the-first-d228-screen-before-new-fits)

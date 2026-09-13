@@ -288,7 +288,20 @@ fn a_dense_bake_refuses_a_feature_vector_that_does_not_reach_its_ids() {
 /// Compare pixel serving and research extraction to full-feature inference.
 #[test]
 fn fullres_y_subset_bake_matches_full_inputs() {
-    let ids: Vec<usize> = (0..228)
+    check_v1_subset_bake(false, false);
+}
+
+#[test]
+fn coarse_pool_subset_bake_matches_full_inputs() {
+    check_v1_subset_bake(true, false);
+    check_v1_subset_bake(true, true);
+}
+
+fn check_v1_subset_bake(weighted: bool, fine: bool) {
+    let width = if weighted { 372 } else { 228 };
+    let ids: Vec<usize> = (0..width)
+        .filter(|&i| i < 228 || fine || matches!(i,264..=299|336..=371))
+        .filter(|&i| !matches!(i,228..=233|240..=245|300..=305|312..=317))
         .filter(|&i| !matches!(i, 0..=12 | 26..=38 | 156..=161 | 168..=173))
         .collect();
     let n = ids.len();
@@ -314,13 +327,13 @@ fn fullres_y_subset_bake_matches_full_inputs() {
     }
     let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
     let full = research::extract(
-        &research::Request::for_slots(SlotSet::from_slots(0..228), 228).with_parallel(true),
+        &research::Request::for_slots(SlotSet::from_slots(0..width), width).with_parallel(true),
         &rs,
         &ds,
     )
     .unwrap();
     let sub = research::extract(
-        &research::Request::for_slots(SlotSet::from_slots(ids.iter().copied()), 228)
+        &research::Request::for_slots(SlotSet::from_slots(ids.iter().copied()), width)
             .with_parallel(true),
         &rs,
         &ds,

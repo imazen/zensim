@@ -1,5 +1,24 @@
 # Start here — one target score, one development path
 
+## September 13: actual coarse-pool dispatch and a one-minute screen
+
+[Coarse-pool dispatch](benchmarks/coarse_pool_dispatch_2026-09-13.md) now derives
+the actual v1 masked/IW scale mask from declared feature IDs. It preserves
+full-resolution Y, omits unread finest X/B, and skips the fine weighted-pool
+kernels. Default extraction retains its full feature set. Canonical consumed
+values and scores are unchanged. The existing feature-screen stage now also
+runs hash-bound training corruption/JXL block-repair diagnostics within its
+five-minute deadline; unsupported maps are explicitly reported.
+
+The next fundamental feature work should target **coarse v2 families with
+spatial integrands**, plus fine-scale impulse/aliasing sensitivity. Legacy
+v1 masked/IW are now inexpensive scalar controls, but lack spatial support
+and did not fix salt-and-pepper in this small proxy fit. Do not promote them
+as steering candidates or read a spatial pass as perceptual approval of JXL.
+Whole-image R/B swaps already receive negative scores; the user accepts that
+rejection and lowers their spatial-correlation priority. The proposed extra
+swap features below are accordingly low priority.
+
 ## September 13: spatial failure gallery
 
 The [sampling report](benchmarks/sampling_serving_2026-09-13.md#served-ab-inspection-gallery--september-13-follow-up)

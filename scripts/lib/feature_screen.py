@@ -81,6 +81,8 @@ def main():
         bins = {"extractor": repo / "zensim-bench/target/release/examples/extract_features_372col",
                 "trainer": repo / "target/release/zensim_mlp_train",
                 "panel": repo / "target/release/panel"}
+        if recipe.get("spatial_checks"):
+            bins["spatial"] = repo / "target/release/examples/diffmap_block_coherence"
         result["binaries"] = {k: {"path": str(v), "sha256": sha(v)} for k, v in bins.items()}
         result["source_diff_sha256"] = hashlib.sha256(subprocess.check_output(
             ["git", "diff", "HEAD"], cwd=repo)).hexdigest()
@@ -126,6 +128,33 @@ def main():
                     verified[path] = sha(path)
                 if verified[path] != digest:
                     raise ValueError(f"input bytes changed: {path}")
+        spatial_cases = []
+        if config := recipe.get("spatial_checks"):
+            case_file = Path(config["manifest"]).expanduser()
+            if sha(case_file) != config["sha256"]:
+                raise ValueError("spatial case manifest changed")
+            verified[str(case_file)] = config["sha256"]
+            spatial_cases = json.loads(case_file.read_text())["cases"]
+            if config["block"] not in (8, 16, 32) or not spatial_cases:
+                raise ValueError("invalid spatial diagnostic geometry")
+            names = set()
+            for case in spatial_cases:
+                name = case["name"]
+                if not name or Path(name).name != name or name in names:
+                    raise ValueError("invalid or duplicate spatial case name")
+                names.add(name)
+                if case["origin"] not in roles or case["reference"] != origins[case["origin"]]["path"]:
+                    raise ValueError("spatial case must inherit an admitted training origin")
+                for side in ("reference", "distorted"):
+                    path, digest = case[side], case[side + "_sha256"]
+                    if sha(path) != digest:
+                        raise ValueError(f"spatial input changed: {path}")
+                    verified[path] = digest
+            result["spatial_scope"] = "Fixed training fixtures only; unsupported maps never pass."
+            result["unmeasured"] = [
+                "spatial generalization beyond the fixed training fixtures"
+                if item == "spatial intervention quality" else item
+                for item in result["unmeasured"]]
         with labels_path.open() as f:
             labels = list(csv.DictReader(f, delimiter="\t"))
         keys = [(r["ref_path"], r["dist_path"]) for r in labels]
@@ -245,6 +274,30 @@ def main():
             run(name + "-signed", [bins["panel"], "--batch", signed_input, "--stats", "full"], signed_out)
             with signed_out.open() as f:
                 arm["signed_panels"] = list(csv.DictReader(f, delimiter="\t"))
+            if spatial_cases:
+                arm["spatial_checks"] = []
+                for case in spatial_cases:
+                    path = out / f"{name}--{case['name']}--b{config['block']}.json"
+                    run(name + "-spatial-" + case["name"], [bins["spatial"],
+                        case["reference"], case["distorted"], "--bake", bake,
+                        "--block", str(config["block"]), "--json", path])
+                    measured = json.loads(path.read_text())
+                    if (measured["schema"] != "zensim-finite-rectangle-coherence-v1"
+                            or measured["models"][0]["sha256"] != arm["bake_sha256"]
+                            or measured["block_size"] != config["block"]
+                            or len(measured["blocks"]) != measured["pixel_interventions"]):
+                        raise ValueError("spatial result does not match the candidate/check")
+                    supported = (measured["refinement_available"] and
+                                 not measured["refinement_unsupported_ids"])
+                    passed = supported and all(
+                        isinstance(measured[k], (int, float)) and math.isfinite(measured[k])
+                        and measured[k] >= bar for k, bar in (("m2", .99), ("m3f", .70)))
+                    arm["spatial_checks"].append({"case": case["name"],
+                        "status": "UNSUPPORTED" if not supported else "PASS" if passed else "FAIL",
+                        "base_score": measured["base_score"], "m2": measured["m2"],
+                        "m3f": measured["m3f"], "unsupported_ids": measured["refinement_unsupported_ids"],
+                        "pixel_interventions": measured["pixel_interventions"],
+                        "report": str(path), "sha256": sha(path)})
             result["arms"][name] = arm
         # Recheck inputs and tools: neither a cache nor an audit excuses changes.
         if any(sha(p) != digest for p, digest in verified.items()) or any(

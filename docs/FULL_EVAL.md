@@ -268,6 +268,25 @@ See the [measurement and next experiments](../benchmarks/fullres_y_subset_2026-0
 
 ## Opt-in sampling recipes (September 13 follow-up)
 
+The feature-screen recipe may also declare `spatial_checks` with a `manifest`
+path, its `sha256`, and a `block` size of 8, 16 or 32. Build the existing
+`zensim` example `diffmap_block_coherence` with
+`custom-profiles,feature-regime-v2,threads,training` first. Every case must
+inherit an admitted training origin, match its reference path and pass both
+PNG hash checks. The stage invokes the Rust block-repair owner for every
+final bake and retains scalar scores, measured gains, M2/M3f and unsupported
+IDs under the same 300-second deadline. Missing spatial support is
+`UNSUPPORTED`, never a passing map. These are fixed development fixtures;
+neither a successful run nor a spatial pass establishes perceptual quality.
+
+The [coarse-pool recipe](../benchmarks/coarse_pool_screen_2026-09-13.json)
+uses this option for four layouts across three seeds. The box pyramid and
+canonical Rev3 feature values are unchanged. Declared IDs now select the
+actual v1 masked/IW scales in Rust, while retaining full-resolution Y and
+omitting unused finest X/B. Masked and IW share a kernel chain, so selecting
+either activates both at that scale. They still lack spatial integrands;
+the screen exposes that limitation explicitly.
+
 The same `feature-screen` owner now accepts a `sampling` string:
 `v1:{y|xyb}:{triangle|mitchell|robidouxsharp}:{3/2|2|3}`.
 `y` retains full-resolution Y and omits finest X/B features; its subsequent

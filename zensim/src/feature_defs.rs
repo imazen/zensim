@@ -2982,6 +2982,7 @@ mod owner_gates {
             sampling: None,
             v1_basic: false,
             v1_pools: V1PoolsMode::Off,
+            v1_full_scales: ComputeSet::ALL_SCALES,
             v2_blocks: false,
             gradient: false,
             blockiness: false,

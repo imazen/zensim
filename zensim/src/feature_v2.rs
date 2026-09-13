@@ -1937,6 +1937,9 @@ pub(crate) struct ComputeSet {
     pub sampling: Option<crate::sampling::Sampling>,
     /// v1's masked/IW/soft-peak pool slots — the 13.6 % pass of item E.
     pub v1_pools: V1PoolsMode,
+    /// Scales that run the shared masked/IW activity chain in Full mode.
+    /// Public extraction retains all scales; declared-ID plans narrow this.
+    pub v1_full_scales: u8,
     /// The v2-era blocks as a group (`f372..`): false for a `v1_only`
     /// request, which then computes NOTHING v2-era.
     pub v2_blocks: bool,
@@ -1995,6 +1998,26 @@ pub fn active_formula_revision() -> FormulaRevision {
 }
 
 impl ComputeSet {
+    pub(crate) const ALL_SCALES: u8 = (1 << crate::NUM_SCALES) - 1;
+
+    /// Only Full has a per-scale restriction. Peaks keeps the same basic
+    /// and peak accumulators while omitting the activity/weighted-pool chain.
+    pub(crate) fn pools_at(&self, scale: usize) -> V1PoolsMode {
+        if self.v1_pools == V1PoolsMode::Full && self.v1_full_scales & (1 << scale) == 0 {
+            V1PoolsMode::Peaks
+        } else {
+            self.v1_pools
+        }
+    }
+
+    pub(crate) fn full_pool_scales(&self) -> u8 {
+        match self.v1_pools {
+            V1PoolsMode::Full => self.v1_full_scales,
+            V1PoolsMode::Carriers => 0b0011,
+            _ => 0,
+        }
+    }
+
     /// The ONE derivation from the public request type. Every `&&
     /// v2_blocks` here was previously written out at a call site; the
     /// invariant is that a v1-only request forces every v2-era block off
@@ -2010,6 +2033,7 @@ impl ComputeSet {
             full_res_xb: true,
             sampling: None,
             v1_pools: t.v1_pools,
+            v1_full_scales: Self::ALL_SCALES,
             v2_blocks,
             gradient: t.gradient_features && v2_blocks,
             blockiness: t.blockiness && v2_blocks,
@@ -2199,23 +2223,25 @@ impl ComputeSet {
         let slots = SlotSet::from_ranges(ranges)
             .union(&SlotSet::from_slots(scattered))
             .clipped_to(layout_width);
-        if self.full_res_xb {
-            slots
-        } else {
-            SlotSet::from_slots(
-                slots
-                    .iter_slots()
-                    .filter(|&id| !Self::is_full_res_xb(id, n_scales)),
-            )
-        }
+        SlotSet::from_slots(slots.iter_slots().filter(|&id| {
+            (self.full_res_xb || !Self::is_full_res_xb(id, n_scales))
+                && !(self.v1_pools == V1PoolsMode::Full
+                    && (peaks_end..v1_total).contains(&id)
+                    && crate::feature_defs::def_at(id, n_scales)
+                        .is_some_and(|d| self.pools_at(usize::from(d.scale)) != V1PoolsMode::Full))
+        }))
     }
 
-    /// The initial subset specialization excludes cross-channel and extra
-    /// feature families. Unknown/wider requests keep the complete walk.
+    /// The v1 activity chains are channel-local, so masked/IW subsets may
+    /// also omit finest X/B. Cross-channel and free-extra families retain
+    /// the complete walk until their dependencies have their own plan.
     pub(crate) fn allows_full_res_y_subset(&self) -> bool {
         !self.v2_blocks
             && self.free_extras == V1FreeExtras::Off
-            && matches!(self.v1_pools, V1PoolsMode::Off | V1PoolsMode::Peaks)
+            && matches!(
+                self.v1_pools,
+                V1PoolsMode::Off | V1PoolsMode::Peaks | V1PoolsMode::Full
+            )
     }
 
     pub(crate) fn is_full_res_xb(id: usize, n_scales: usize) -> bool {
@@ -2235,7 +2261,10 @@ impl ComputeSet {
         // Family tokens cannot reconstruct a channel subset. Its explicit
         // feature IDs and per-slot provenance remain the authoritative identity;
         // do not issue a shorthand that Request::for_set cannot reproduce.
-        if !self.full_res_xb || self.sampling.is_some() {
+        if !self.full_res_xb
+            || self.sampling.is_some()
+            || (self.v1_pools == V1PoolsMode::Full && self.v1_full_scales != Self::ALL_SCALES)
+        {
             return None;
         }
         // The emitted width rides along as the legacy `@w<N>` hint — a
@@ -5421,6 +5450,12 @@ enum BandPoolWork {
     Full,
 }
 
+#[cfg(test)]
+thread_local! {
+    // Observe actual weighted-pool execution, not planner declarations.
+    static POOL_TEST_WIDTHS: std::cell::RefCell<Option<Vec<usize>>> = const { std::cell::RefCell::new(None) };
+}
+
 /// Band-local planes for the v1 pool replay (`V2NewFeatureToggles::v1_pools`):
 /// sized for one v1 band buffer (`V1_BAND_ROWS + 2 * V1_BAND_OVERLAP` rows ×
 /// width), grown on first use per channel accumulator and reused across
@@ -5629,6 +5664,12 @@ fn fold_v1_one_band(
             ));
             return b1;
         }
+        #[cfg(test)]
+        POOL_TEST_WIDTHS.with_borrow_mut(|widths| {
+            if let Some(widths) = widths {
+                widths.push(width);
+            }
+        });
         let full = work == BandPoolWork::Full;
         let stable =
             crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
@@ -8840,6 +8881,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
             break;
         };
         let scale = info.scale;
+        let toggles = V2NewFeatureToggles {
+            v1_pools: compute.pools_at(scale),
+            ..toggles
+        };
         crate::fold_timing::stop(__t_prod, crate::fold_timing::Phase::Producer, scale);
 
         // mean_offset side-channel (fold-engine lane): the scale-0 strips
@@ -9207,6 +9252,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
 
     #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
     for scale in 0..n_scales {
+        let toggles = V2NewFeatureToggles {
+            v1_pools: compute.pools_at(scale),
+            ..toggles
+        };
         let (width, height) = dims[scale];
         let n = width * height;
         let scale_base = scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
@@ -16818,6 +16867,43 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn coarse_pools_execute_only_at_requested_resolutions() {
+        use crate::feature_plan::Plan;
+        use crate::feature_set_id::SlotSet;
+        let (w, h) = (256, 192);
+        let src = vec![[127u8; 3]; w * h];
+        let mut dst = src.clone();
+        dst[w + 1] = [255, 0, 255];
+        let ids = (0..228)
+            .chain(264..300)
+            .chain(336..372)
+            .filter(|&id| !ComputeSet::is_full_res_xb(id, 4));
+        let coarse = Plan::derive(&SlotSet::from_slots(ids), 372).unwrap();
+        for (plan, expected) in [
+            (Plan::v1(V1PoolsMode::Full, 372), vec![32, 64, 128, 256]),
+            (coarse, vec![32, 64]),
+            (Plan::v1(V1PoolsMode::Peaks, 372), vec![]),
+        ] {
+            POOL_TEST_WIDTHS.with_borrow_mut(|v| *v = Some(Vec::new()));
+            compute_folded_v1_372_streaming_impl(
+                &RgbSlice::new(&src, w, h),
+                &RgbSlice::new(&dst, w, h),
+                None,
+                false,
+                &mut V2Scratch::new(),
+                Some(&plan),
+                #[cfg(feature = "custom-profiles")]
+                None,
+            )
+            .unwrap();
+            let mut widths = POOL_TEST_WIDTHS.with_borrow_mut(|v| v.take().unwrap());
+            widths.sort_unstable();
+            widths.dedup();
+            assert_eq!(widths, expected, "actual weighted-pool kernel widths");
+        }
+    }
+
     // ========================================================================
     // HDR route gates (HDR_PLAN chunk 2 — streaming PU front-end)
     // ========================================================================
@@ -16865,44 +16951,49 @@ pub(crate) mod tests {
     fn fullres_y_subset_hdr_retained_features_are_bit_exact() {
         use crate::feature_plan::Plan;
         use crate::feature_set_id::SlotSet;
-        let want = SlotSet::from_slots((0..228).filter(|&id| !ComputeSet::is_full_res_xb(id, 4)));
-        let plan = Plan::derive(&want, 228).unwrap();
-        let mut scratch = V2Scratch::new();
-        for (w, h) in [(17, 9), (97, 131)] {
-            let src = vec![[203.0, 170.0, 100.0]; w * h];
-            let mut dst = src.clone();
-            dst[(h / 2) * w + w / 2] = [1000.0, 2000.0, 500.0];
-            let src = NitsImage::from_rgb_nits(&src, w, h);
-            let dst = NitsImage::from_rgb_nits(&dst, w, h);
-            for parallel in [false, true] {
-                let full = compute_folded720_hdr_streaming_impl(
-                    &src,
-                    &dst,
-                    HdrEncoding::Linear,
-                    None,
-                    parallel,
-                    plan.toggles(),
-                    &mut scratch,
-                    None,
-                )
-                .unwrap();
-                // Exercise the automatic declared-linear-HDR route as well.
-                let sub = compute_folded720_streaming_impl(
-                    &src,
-                    &dst,
-                    None,
-                    parallel,
-                    plan.toggles(),
-                    &mut scratch,
-                    Some(plan.compute),
-                )
-                .unwrap();
-                for id in want.iter_slots() {
-                    assert_eq!(
-                        full.features()[id].to_bits(),
-                        sub.features()[id].to_bits(),
-                        "HDR f{id}"
-                    );
+        for coarse in [false, true] {
+            let want = SlotSet::from_slots((0..372).filter(|&id| {
+                !ComputeSet::is_full_res_xb(id, 4)
+                    && (id < 228 || coarse && matches!(id,264..=299|336..=371))
+            }));
+            let plan = Plan::derive(&want, 372).unwrap();
+            let mut scratch = V2Scratch::new();
+            for (w, h) in [(17, 9), (97, 131)] {
+                let src = vec![[203.0, 170.0, 100.0]; w * h];
+                let mut dst = src.clone();
+                dst[(h / 2) * w + w / 2] = [1000.0, 2000.0, 500.0];
+                let src = NitsImage::from_rgb_nits(&src, w, h);
+                let dst = NitsImage::from_rgb_nits(&dst, w, h);
+                for parallel in [false, true] {
+                    let full = compute_folded720_hdr_streaming_impl(
+                        &src,
+                        &dst,
+                        HdrEncoding::Linear,
+                        None,
+                        parallel,
+                        plan.toggles(),
+                        &mut scratch,
+                        None,
+                    )
+                    .unwrap();
+                    // Exercise the automatic declared-linear-HDR route as well.
+                    let sub = compute_folded720_streaming_impl(
+                        &src,
+                        &dst,
+                        None,
+                        parallel,
+                        plan.toggles(),
+                        &mut scratch,
+                        Some(plan.compute),
+                    )
+                    .unwrap();
+                    for id in want.iter_slots() {
+                        assert_eq!(
+                            full.features()[id].to_bits(),
+                            sub.features()[id].to_bits(),
+                            "HDR f{id}"
+                        );
+                    }
                 }
             }
         }
