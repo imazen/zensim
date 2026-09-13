@@ -206,3 +206,37 @@ A rebuilt final extractor re-audited all 60 bakes against all 264 pairs in
 The later legacy-profile guard rejects nonidentity sampled bakes installed
 through Custom profiles; complete candidates use BakeScorer. This guard
 does not alter sampling extraction or model arithmetic.
+
+## Served A/B inspection gallery — September 13 follow-up
+
+The existing gauntlet renderer now builds a static spatial gallery from this
+packet, without rerunning inference or recomputing correlations:
+
+```sh
+python3 scripts/v_next/gauntlet.py \
+  --spatial-gallery "$HOME/work/zensim-validation-2026-09-13/sampling" \
+  --out "$HOME/work/zensim-validation-2026-09-13/spatial-gallery/index.html"
+```
+
+Use a fresh output path; existing HTML is never overwritten. Serve the whole
+output directory, including `images/`, `data/` and `manifest.json`, and open
+`index.html`. Source PNG hashes must match `SPATIAL_CASES.json`; the renderer
+requires a successful matrix, unique cells, supported refinement and complete
+block partitions. Original result hashes remain in the downloadable index.
+
+The default view shows **235 of 420 cells** failing M2 ≥ 0.99 or M3f ≥ 0.70;
+185 passing controls remain selectable. Filters cover model, case and block
+size. A/B views, a wipe, exact pixel zoom, signed actual/predicted/error maps,
+scatter points and block rows share a selected rectangle. The repair preview
+copies that reference rectangle onto B; its displayed score comes from the
+recorded Rust evaluation. This is inspection of development failures, not
+new qualification evidence. Whole-image R/B is the only permutation in this
+packet; additional channel operations need separately recorded checks.
+
+Browser checks cover failure/control counts, channel filtering, A/B wipe,
+block selection, exact repair pixels inside/outside the rectangle, true 4×
+zoom, permalink reload and a 390-pixel viewport without page overflow. No
+page errors or failed HTTP responses occurred. Generator negative controls
+reject failed matrices, duplicate cells and incorrect PNG hashes before
+creating output, and preserve existing HTML. Script lint and CI-exact clippy
+pass; inference is unchanged.

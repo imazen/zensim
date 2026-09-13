@@ -1,5 +1,17 @@
 # Start here — one target score, one development path
 
+## September 13: spatial failure gallery
+
+The [sampling report](benchmarks/sampling_serving_2026-09-13.md#served-ab-inspection-gallery--september-13-follow-up)
+documents `gauntlet.py --spatial-gallery`: 420 recorded checks, 235 failures
+shown by default, original A/B images, signed gain/error maps and selectable
+reference-block repair previews. Static output is served by the existing
+local gallery service under `/zensim/reports/spatial-failures-2026-09-13/index.html`.
+Use this machine's configured LAN hostname. No scores or bakes changed.
+The [coarse-feature report](benchmarks/coarse_legacy_features_2026-09-13.md#channel-swap-features-to-screen-next)
+also records a proposed channel-correspondence feature screen, distinguishing
+swap detection from correct spatial repair predictions; it is not implemented.
+
 ## September 13 follow-up: filters served, fitted and spatially tested
 
 The [integrated sampling screen](benchmarks/sampling_serving_2026-09-13.md)

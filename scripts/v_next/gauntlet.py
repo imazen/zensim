@@ -4300,6 +4300,7 @@ if(typeof MutationObserver==='function'&&document.documentElement){
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
+    ap.add_argument("--spatial-gallery", help="Render a recorded SPATIAL_MATRIX.json / SPATIAL_CASES.json directory as an A/B gallery")
     ap.add_argument("--fulleval-dir", default="/mnt/v/output/zensim/reports/fulleval")
     ap.add_argument("--best-per-day", default=None)
     ap.add_argument("--loop-targeting", default=DEFAULT_LOOP_TARGETING,
@@ -4315,6 +4316,11 @@ if __name__ == "__main__":
     ap.add_argument("--fairness-tsv", default=None,
                     help="also write the per-row fairness audit TSV here")
     a = ap.parse_args()
+    if a.spatial_gallery:
+        from gauntlet_spatial import build_spatial_gallery
+        out, size, failed, total = build_spatial_gallery(a.spatial_gallery, a.out)
+        print(f"wrote {out} ({size // 1024} KB); {failed}/{total} failed cells")
+        raise SystemExit(0)
     bakes = load_fulleval(a.fulleval_dir, a.best_per_day)
     if a.fairness_tsv:
         tp, n = write_fairness_tsv(bakes, a.fairness_tsv)

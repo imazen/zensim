@@ -97,3 +97,35 @@ measure scalar cost and public-API spatial interventions before broadening
 training. This directly tests compute saved, while retaining full-resolution
 luma for small errors. The sampling screen's salt/pepper and R/B-swap failures
 remain required checks, not a reason to declare this proposal qualified.
+
+## Channel-swap features to screen next
+
+Detection and useful repair guidance are separate problems. The
+[September 8 D228 corruption screen](../docs/CANONICAL_CORRUPTION_REFIT_2026-09-08.md#honest-cost-follow-up--after-the-first-d228-screen-before-new-fits)
+already caught all RGB swaps it tested, but penalized some honest near-lossless
+outputs. Low B weighting is therefore not an established sole cause. In this
+new sampling packet, the box/Y190 model gives the R/B swap a very low scalar
+score while its 8-pixel repair correlation is negative. More scalar penalty
+alone cannot establish useful spatial steering.
+
+A proposed cheap additional signal is a **channel correspondence margin**.
+For each RGB permutation P, accumulate `E(P) = mean(sum_i (A_i-B_P(i))²)`;
+compare identity error with the minimum over the five nonidentity
+permutations. `max(0, E(identity)-min_P E(P))` is zero for exact identity
+and for an exactly achromatic reference, but can expose swapped channel
+correspondence that channel-energy summaries hide. Bound/normalize it using
+an explicitly specified chroma-energy floor. The nine cross-channel second
+moments let these errors share one accumulation pass; actual conversion and
+retention costs still need measurement. This is a proposal, not a new
+implemented or trained feature.
+
+Screen global and local pooled versions against existing D228 inputs, with
+unchanged honest-output protection. Cover all five permutations, local and
+whole-image swaps, grayscale/inert controls, ordinary chroma subsampling,
+desaturation, color shifts and near-lossless codec negatives. Coarse sampling
+may miss small swapped regions, so do not assume it is sufficient. Before a
+fit, define the color domain, scale/feature IDs and local contribution rule
+in the Rust feature/attribution owners. Train through the existing owner and
+evaluate complete final bakes through BakeScorer, including actual block
+repairs and measured extraction cost. It must improve separation and spatial
+guidance without adding another end-user control.
