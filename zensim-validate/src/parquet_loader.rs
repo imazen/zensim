@@ -1363,6 +1363,9 @@ pub fn load_optional_scalar_column(
             continue;
         }
         let col = batch.column(0);
+        if col.null_count() != 0 {
+            return Err(format!("{path:?}: column {column:?} contains null values"));
+        }
         match col.data_type() {
             DataType::Float64 => {
                 let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
@@ -1381,6 +1384,61 @@ pub fn load_optional_scalar_column(
     }
 
     Ok(Some(values))
+}
+
+/// Optional decoded-pixel identity evidence, in the same row order as
+/// [`load_parquet`]. The producer must verify equality of the decoded pixels;
+/// zero feature values alone are not evidence. Missing means unknown.
+///
+/// The unpublished row scorer and verdict corpus scorer consume this column.
+/// Only non-null numeric 0/1 values and exact row coverage are admitted.
+pub fn load_pixel_identities(path: &PathBuf, rows: usize) -> Result<Option<Vec<bool>>, String> {
+    let Some(values) = load_optional_scalar_column(path, "pixels_identical")? else {
+        return Ok(None);
+    };
+    if values.len() != rows || values.iter().any(|&v| v != 0.0 && v != 1.0) {
+        return Err(format!(
+            "{path:?}: pixels_identical requires {rows} verified 0/1 values"
+        ));
+    }
+    Ok(Some(values.into_iter().map(|v| v == 1.0).collect()))
+}
+
+#[cfg(test)]
+mod pixel_identity_tests {
+    use super::*;
+    use arrow::datatypes::{Field, Schema};
+    use parquet::arrow::ArrowWriter;
+    use std::sync::Arc;
+
+    #[test]
+    fn pixel_identity_column_requires_complete_non_null_binary_evidence() {
+        let path =
+            std::env::temp_dir().join(format!("zensim-identities-{}.parquet", std::process::id()));
+        let write = |name: &str, values: Vec<Option<f64>>| {
+            let schema = Arc::new(Schema::new(vec![Field::new(name, DataType::Float64, true)]));
+            let batch =
+                RecordBatch::try_new(schema.clone(), vec![Arc::new(Float64Array::from(values))])
+                    .unwrap();
+            let mut writer =
+                ArrowWriter::try_new(File::create(&path).unwrap(), schema, None).unwrap();
+            writer.write(&batch).unwrap();
+            writer.close().unwrap();
+        };
+        write("pixels_identical", vec![Some(0.0), Some(1.0)]);
+        assert_eq!(
+            load_pixel_identities(&path, 2).unwrap(),
+            Some(vec![false, true])
+        );
+        assert!(load_pixel_identities(&path, 1).is_err());
+        for bad in [None, Some(f64::NAN), Some(0.5), Some(-1.0)] {
+            write("pixels_identical", vec![Some(0.0), bad]);
+            assert!(load_pixel_identities(&path, 2).is_err());
+        }
+        write("other", vec![Some(0.0)]);
+        assert_eq!(load_pixel_identities(&path, 1).unwrap(), None);
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 /// KONJND-AGGREGATION-HEAD owned data pool (task #4, 2026-05-24).

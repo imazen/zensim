@@ -60,3 +60,17 @@ Stop after this fixed comparison and report the accuracy/latency frontier and
 failures. Additional feature/head tuning requires a new training-only design.
 Artifacts and exact commands live under
 `~/work/zensim-validation-2026-09-13/minimal-top/`.
+
+## Evaluation correction registered September 14
+
+Before publishing: KADID contains decoded identities. Feature-only cached scoring
+without that evidence differs from the public pixel API's exact-identity path.
+Keep the fits frozen. Re-extract the admitted eval pairs with the existing Rust
+native audit to obtain pixel hashes and identity flags; preserve earlier cached
+panels as superseded diagnostics. Add an optional strict `pixels_identical`
+column reader to the unpublished validation loader, consumed by the existing
+`ensemble_score_rows` and `bake_verdict` corpus paths. Call the existing
+`BakeScorer::score_features_with_identity`; do not synthesize scores in Python.
+No supported zensim API change. Final seed/ensemble panels and gauntlet verdicts
+must use this same identity-bearing eval view. A fixture must distinguish known
+identity from zero features without identity proof and reject invalid flags.

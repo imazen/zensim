@@ -1751,23 +1751,41 @@ fn score_rows_surface(
     companion: Option<(&CompanionHead, f64)>,
     rows: &[Vec<f64>],
 ) -> Vec<f64> {
-    let score_range = |src: &[Vec<f64>], dst: &mut [f64]| {
+    score_rows_surface_with_identity(models, weights, companion, rows, None)
+}
+
+fn score_rows_surface_with_identity(
+    models: &[Model],
+    weights: Option<&[f64]>,
+    companion: Option<(&CompanionHead, f64)>,
+    rows: &[Vec<f64>],
+    identities: Option<&[bool]>,
+) -> Vec<f64> {
+    assert!(identities.is_none_or(|v| v.len() == rows.len()));
+    let score_range = |start: usize, src: &[Vec<f64>], dst: &mut [f64]| {
         let mut scorer = candidate_surface(models, weights, companion)
             .unwrap_or_else(|e| panic!("candidate surface refused model: {e}"));
-        for (out, row) in dst.iter_mut().zip(src) {
+        for (i, (out, row)) in dst.iter_mut().zip(src).enumerate() {
             *out = scorer
-                .score_features(row, 0, 0, None)
+                .score_features_with_identity(
+                    row,
+                    0,
+                    0,
+                    None,
+                    identities.is_some_and(|v| v[start + i]),
+                )
                 .unwrap_or_else(|e| panic!("candidate surface refused feature row: {e}"));
         }
     };
     let mut out = vec![0.0; rows.len()];
     if rows.len() < SCORE_PARALLEL_MIN_ROWS || rayon::current_num_threads() <= 1 {
-        score_range(rows, &mut out);
+        score_range(0, rows, &mut out);
     } else {
         zensim_validate::parallel::init();
         out.par_chunks_mut(SCORE_CHUNK_ROWS)
             .zip(rows.par_chunks(SCORE_CHUNK_ROWS))
-            .for_each(|(dst, src)| score_range(src, dst));
+            .enumerate()
+            .for_each(|(i, (dst, src))| score_range(i * SCORE_CHUNK_ROWS, src, dst));
     }
     out
 }
@@ -3658,7 +3676,16 @@ fn render_corpus(
     // bit-identically). The f32 scratch buffer is reused across rows inside
     // `score_grid_one` to avoid the per-row allocation that would otherwise
     // dominate wall time on the bigger corpora (KADID has 10k rows × 372 f32s).
-    let scores: Vec<f64> = ens.score_rows(&g.feature_rows);
+    let identities = parquet_loader::load_pixel_identities(&path, g.feature_rows.len())?;
+    let scores: Vec<f64> = score_rows_surface_with_identity(
+        &ens.models,
+        ens.weights.as_deref(),
+        ens.corruption_head
+            .as_ref()
+            .map(|h| (h, ens.corruption_threshold)),
+        &g.feature_rows,
+        identities.as_deref(),
+    );
     // Release the feature matrix the instant the forward is done. It is by
     // far the largest allocation in a corpus (11 356 rows × 944 f64 ≈ 86 MB
     // on the biggest one) and NOTHING below reads it — while the stats tail
@@ -6633,6 +6660,41 @@ Run the dedicated q-sweep harness for those._\n",
 mod tests {
     use super::load_peer_dial_scores;
     use zensim_validate::parquet_loader::DialGrid;
+
+    #[test]
+    fn verified_pixel_identity_is_served_without_guessing_from_zero_features() {
+        let recipe = serde_json::json!({
+            "schema_hash":1, "scaler_mean":[0.0], "scaler_scale":[1.0],
+            "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":"0"}],
+            "layers":[{"in_dim":1,"out_dim":1,"activation":"identity",
+                "dtype":"f32","weights":[2.0],"biases":[17.0]}]
+        });
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        let models = [zenpredict::Model::from_bytes(&bytes).unwrap()];
+        let rows: Vec<_> = (0..2053).map(|i| vec![-((i % 23) as f64)]).collect();
+        let known: Vec<_> = (0..rows.len()).map(|i| i % 3 == 1).collect();
+        for threads in [1, 4] {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+                .install(|| {
+                    let raw = super::score_rows_surface(&models, None, None, &rows);
+                    let served = super::score_rows_surface_with_identity(
+                        &models,
+                        None,
+                        None,
+                        &rows,
+                        Some(&known),
+                    );
+                    assert_eq!(served[0], 17.0); // Zero features without identity proof.
+                    for i in 0..rows.len() {
+                        assert_eq!(served[i], if known[i] { 100.0 } else { raw[i] });
+                    }
+                    assert!(served.iter().any(|&v| v < 0.0));
+                });
+        }
+    }
 
     /// A three-row two-ladder grid, including a fractional q (the JXL
     /// q-equivalent `100 − 4·distance` shape) so the key rounding is exercised.

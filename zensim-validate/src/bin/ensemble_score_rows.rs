@@ -77,6 +77,7 @@ fn main() -> Result<(), String> {
     let mut scorer =
         BakeScorer::ensemble(&models, weights.as_deref()).map_err(|e| e.to_string())?;
     let g = parquet_loader::load_parquet(&parquet, "rows", "human_score", 1.0)?;
+    let identities = parquet_loader::load_pixel_identities(&parquet, g.feature_rows.len())?;
     let humans = g.human_scores;
     let mut writer: Box<dyn std::io::Write> = match output {
         Some(p) => Box::new(std::fs::File::create(&p).map_err(|e| format!("create {p:?}: {e}"))?),
@@ -85,7 +86,13 @@ fn main() -> Result<(), String> {
     writeln!(writer, "idx\thuman\tscore").map_err(|e| format!("write header: {e}"))?;
     for (i, row) in g.feature_rows.iter().enumerate() {
         let score = scorer
-            .score_features(row, 0, 0, None)
+            .score_features_with_identity(
+                row,
+                0,
+                0,
+                None,
+                identities.as_ref().is_some_and(|v| v[i]),
+            )
             .map_err(|e| e.to_string())?;
         writeln!(writer, "{}\t{:.6}\t{:.6}", i, humans[i], score)
             .map_err(|e| format!("write row {i}: {e}"))?;

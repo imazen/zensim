@@ -476,3 +476,15 @@ The native recipe adds masked/IW separately at each scale, for both legacy
 and newer weighted families. All 32-epoch fits retain frequent dev checkpoint
 selection, fresh/native-verified features, raw Rust error panels and actual
 pixel/spatial audits. No capacity-control matrix is repeated in this follow-up.
+
+### Verified pixel identity in cached eval (September 14)
+
+`ensemble_score_rows` and `bake_verdict` corpus scoring accept an optional
+`pixels_identical` Float32/Float64 column containing only non-null 0/1 values.
+It must come from equality of decoded pixels, pinned to the same row keys and
+input hashes. Both owners call `BakeScorer::score_features_with_identity`.
+A missing column means unknown identity and retains the historical feature-only
+behavior; zero features never prove identity. Do not compare that diagnostic
+as pixel-equivalent when the admitted corpus contains identities. Native audit
+JSONL from `extract_features_372col` supplies the evidence. The September 13
+minimal/wide study's final eval corrects this distinction without retraining.
