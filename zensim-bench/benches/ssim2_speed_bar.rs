@@ -34,7 +34,8 @@
 //! cannot be combined with `ZEN_S2_SINGLE_CALL=1`. Batched means are not
 //! individual-call latency percentiles.
 //! `ZENBENCH_RESULT_PATH` saves completed paired rounds, including actual call
-//! counts, raw/compensated total durations, and execution order. Use raw totals
+//! counts, raw/compensated total durations, execution order and pre-round gate
+//! status (clean, flagged, or disabled/unknown). Use raw totals
 //! from rounds with exactly one call for latency distributions. Warmup and gate
 //! waits are excluded; sample retention alone does not establish quiet-machine
 //! admission or representative-input coverage. Historical summary-only files

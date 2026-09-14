@@ -1,5 +1,12 @@
 # Basic feature and head decomposition — September 14, 2026
 
+Later September 14 timing-admission correction: the model comparison owner used
+`GateConfig::disabled()`. Its saved `unreliable=false` flag cannot establish
+quiet conditions; the existing process records and descriptive medians remain
+historical evidence. The [native latency study](native_latency_2026-09-14.md)
+enables strict gating and retains actual individual-call rounds. No older
+performance qualification is inferred or retroactively repaired.
+
 Registered before fitting. The preceding [scale frontier](product_scales_2026-09-14.md)
 finds basic228 substantially better than local120 on the same TRAIN scalar
 development rows, but slower prepared maps and only 2/5 spatial passes. Separate

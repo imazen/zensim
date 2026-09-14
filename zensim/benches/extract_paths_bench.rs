@@ -50,6 +50,148 @@
 use zensim::profile::ProfileParams;
 use zensim::{RgbSlice, Zensim, ZensimConfig, ZensimProfile, compute_zensim_with_config};
 
+// Reuse the established example/benchmark decode owner; native timing accepts
+// only already admitted RGB8 PNG pairs, never original codec inputs or HDR.
+#[path = "../examples/support/zen_io.rs"]
+mod zen_io;
+
+struct TimingPair {
+    label: String,
+    width: usize,
+    height: usize,
+    source: Vec<[u8; 3]>,
+    distorted: Vec<[u8; 3]>,
+}
+
+fn timing_sha(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// ZEN_XP_PAIRS supplies a registered TRAIN-development JSON manifest.
+/// ZEN_XP_PAIRS_SHA256 binds its exact bytes. All role metadata is checked
+/// before pixel reads. Native geometry is never resized or implicitly replaced.
+fn timing_pairs(sizes: &[usize]) -> Vec<TimingPair> {
+    let Some(path) = std::env::var_os("ZEN_XP_PAIRS") else {
+        assert!(
+            std::env::var_os("ZEN_XP_PAIRS_SHA256").is_none(),
+            "pair hash without manifest"
+        );
+        return sizes
+            .iter()
+            .map(|&n| {
+                let (source, distorted) = test_pair(n, n);
+                TimingPair {
+                    label: n.to_string(),
+                    width: n,
+                    height: n,
+                    source,
+                    distorted,
+                }
+            })
+            .collect();
+    };
+    assert!(
+        std::env::var_os("ZEN_XP_SIZES").is_none(),
+        "native pairs conflict with synthetic sizes"
+    );
+    let bytes = std::fs::read(path).expect("pair manifest");
+    assert_eq!(
+        timing_sha(&bytes),
+        std::env::var("ZEN_XP_PAIRS_SHA256").expect("pair manifest hash"),
+        "pair manifest hash mismatch"
+    );
+    let manifest: serde_json::Value = serde_json::from_slice(&bytes).expect("pair JSON");
+    assert_eq!(
+        manifest["role"], "train",
+        "native timing permits TRAIN only"
+    );
+    assert_eq!(
+        manifest["partition"], "development",
+        "native timing partition"
+    );
+    let cases = manifest["cases"].as_array().expect("pair cases");
+    assert!(!cases.is_empty(), "empty pair manifest");
+    let mut labels = std::collections::HashSet::new();
+    for case in cases {
+        assert_eq!(case["role"], "train", "native timing permits TRAIN only");
+        assert_eq!(case["partition"], "development", "native timing partition");
+        let label = case["id"].as_str().expect("pair id");
+        assert!(
+            !label.is_empty()
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
+            "invalid pair id"
+        );
+        assert!(labels.insert(label), "duplicate pair id");
+        for field in [
+            "reference",
+            "png",
+            "reference_sha256",
+            "png_sha256",
+            "reference_pixels_sha256",
+            "distorted_pixels_sha256",
+        ] {
+            assert!(case[field].as_str().is_some(), "missing pair field {field}");
+        }
+        for field in ["width", "height"] {
+            assert!(
+                case[field]
+                    .as_u64()
+                    .is_some_and(|n| n > 0 && usize::try_from(n).is_ok()),
+                "invalid dimension"
+            );
+        }
+    }
+    cases
+        .iter()
+        .map(|case| {
+            let width = case["width"].as_u64().unwrap() as usize;
+            let height = case["height"].as_u64().unwrap() as usize;
+            let decode = |path_key: &str, bytes_key: &str, pixels_key: &str| {
+                let path = std::path::Path::new(case[path_key].as_str().unwrap());
+                let bytes = std::fs::read(path).expect("native PNG");
+                assert_eq!(
+                    timing_sha(&bytes),
+                    case[bytes_key].as_str().unwrap(),
+                    "native PNG hash mismatch"
+                );
+                assert!(
+                    bytes.len() >= 33
+                        && &bytes[..8] == b"\x89PNG\r\n\x1a\n"
+                        && &bytes[12..16] == b"IHDR"
+                        && bytes[24] == 8
+                        && bytes[25] == 2,
+                    "native timing requires RGB8 PNG"
+                );
+                let (pixels, w, h) = zen_io::decode_rgb8(path);
+                assert_eq!((w, h), (width, height), "native dimensions mismatch");
+                assert_eq!(
+                    timing_sha(bytemuck::cast_slice(&pixels)),
+                    case[pixels_key].as_str().unwrap(),
+                    "native pixel hash mismatch"
+                );
+                pixels
+            };
+            let source = decode("reference", "reference_sha256", "reference_pixels_sha256");
+            let distorted = decode("png", "png_sha256", "distorted_pixels_sha256");
+            let label = format!("native_{}", case["id"].as_str().unwrap());
+            eprintln!("# admitted {label} {width}x{height} RGB8, byte and pixel hashes verified");
+            TimingPair {
+                label,
+                width,
+                height,
+                source,
+                distorted,
+            }
+        })
+        .collect()
+}
+
 /// Deterministic textured pair — the same content family the attribution
 /// tests and `fold_pools_bench` use, so numbers are comparable across both.
 fn test_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
@@ -402,14 +544,20 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
     let spatial = std::env::var_os("ZEN_XP_SPATIAL").is_some();
     let prepared = std::env::var_os("ZEN_XP_PREPARED").is_some();
     let parallel = std::env::var("RAYON_NUM_THREADS").as_deref() != Ok("1");
-    let result = zenbench::run_gated(zenbench::GateConfig::disabled(), |suite| {
-        for &n in sizes {
-            let (src, dst) = test_pair(n, n);
+    let pairs = timing_pairs(sizes);
+    let result_path = std::env::var_os("ZENBENCH_RESULT_PATH").map(std::path::PathBuf::from);
+    if let Some(path) = &result_path {
+        assert!(!path.exists(), "refusing to overwrite timing evidence");
+    }
+    let result = zenbench::run_gated(zenbench::GateConfig::strict(), |suite| {
+        for pair in pairs {
+            let (w, h, label) = (pair.width, pair.height, pair.label);
+            let (src, dst) = (pair.source, pair.distorted);
             let src: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
             let dst: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
             suite.compare(
                 format!(
-                    "sampling_{}_{n}",
+                    "sampling_{}_{label}",
                     if spatial { "spatial" } else { "scalar" }
                 ),
                 |group| {
@@ -419,18 +567,23 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                         .max_rounds(max_r)
                         .min_rounds(min_r)
                         .max_wall_time(std::time::Duration::from_secs(wall_s));
+                    // This model comparison reports per-call latency, never
+                    // percentiles of automatically batched per-iteration means.
+                    group.config().min_iterations = 1;
+                    group.config().max_iterations = 1;
+
                     if std::env::var_os("ZEN_XP_CONTROLS").is_some() && !spatial {
                         #[cfg(feature = "candidate-profiles")]
-                        group.bench("shipped_D", move |b| {
+                        group.bench("D_current_revision", move |b| {
                             let z = Zensim::new(ZensimProfile::D).with_parallel(parallel);
-                            let (rs, ds) = (RgbSlice::new(src, n, n), RgbSlice::new(dst, n, n));
+                            let (rs, ds) = (RgbSlice::new(src, w, h), RgbSlice::new(dst, w, h));
                             b.iter(move || {
                                 zenbench::black_box(z.compute(&rs, &ds).unwrap().score())
                             });
                         });
                         group.bench("fast_ssim2_st", move |b| {
                             let (rs, ds) =
-                                (imgref::Img::new(src, n, n), imgref::Img::new(dst, n, n));
+                                (imgref::Img::new(src, w, h), imgref::Img::new(dst, w, h));
                             b.iter(move || {
                                 zenbench::black_box(
                                     fast_ssim2::compute_ssimulacra2(rs, ds).unwrap(),
@@ -446,13 +599,13 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                                 .unwrap()
                                 .with_parallel(parallel)
                                 .with_finite_moment_refinement(finite_moments);
-                            let rs = RgbSlice::new(src, n, n);
-                            let ds = RgbSlice::new(dst, n, n);
+                            let rs = RgbSlice::new(src, w, h);
+                            let ds = RgbSlice::new(dst, w, h);
                             if spatial && prepared {
                                 let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
                                 b.iter(move || {
                                     let r = worker.compute(&ds, None).unwrap();
-                                    zenbench::black_box(r.refinement_gain(0, 0, n / 2, n / 2));
+                                    zenbench::black_box(r.refinement_gain(0, 0, w / 2, h / 2));
                                 });
                             } else if spatial {
                                 let pre = scorer.precompute_reference(&rs).unwrap();
@@ -468,7 +621,7 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                                             8,
                                         )
                                         .unwrap();
-                                    zenbench::black_box(r.refinement_gain(0, 0, n / 2, n / 2));
+                                    zenbench::black_box(r.refinement_gain(0, 0, w / 2, h / 2));
                                 });
                             } else {
                                 b.iter(move || {
@@ -483,7 +636,7 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
             );
         }
     });
-    if let Ok(path) = std::env::var("ZENBENCH_RESULT_PATH") {
+    if let Some(path) = result_path {
         result.save(path).unwrap();
     }
 }

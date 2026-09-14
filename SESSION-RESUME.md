@@ -1,5 +1,34 @@
 # Start here — one target score, one development path
 
+## September 14, newest: native latency measured; quiet admission rejected
+
+[Native TRAIN latency screen](benchmarks/native_latency_2026-09-14.md) measures
+seven frozen scalar ensembles and six supported prepared score/map ensembles,
+five original-size JXL TRAIN pairs across five content classes, plus synthetic
+1MP/4MP textures. All four runs completed 30 one-call rounds per group, 3,150
+observations. Basic228 native map/scalar p95 ratios are3.16–4.69; y60 is cheapest
+but retains its known quality failures. Full944 synthetic scalar p95 is54.66 /
+243.22ms, above absolute budgets. These are descriptive, not qualified timings.
+
+The old model instrument disabled its resource gate. Enabling it exposed a
+second owner defect: Engine never propagated the strict verdict, leaving saved
+unreliable=false. Runs recorded15/15/5/1 noisy checks; their original driver
+acceptance flags are superseded by final quiet-qualification refusal. No noisy
+rounds were dropped or runs repeated to obtain a favorable gate.
+
+Zenbench53941021 fixes strict-verdict propagation and exports per-round
+checked-clean/flagged/disabled status; a forced insufficient-RAM regression
+fails before and passes after. Multi-run aggregation preserves unreliability.
+Both Zensim benchmark dependencies now use the corrected owner. The root model
+benchmark accepts SHA-bound native TRAIN PNGs with byte/pixel/dimension checks,
+strict gating, one-call timing, and explicitly named D_current_revision context.
+
+Next use these costs with the existing TRAIN quality/spatial panels to reduce
+actual map work. Any new latency qualification needs sufficient preregistered
+clean rounds, complete in-run contention/memory evidence and representative4MP
+coverage. No fitting, EVAL/TEST or model promotion occurred; the full goal remains.
+
+
 ## September 14, newest: paired latency observations now retained
 
 [Latency evidence infrastructure](benchmarks/latency_evidence_2026-09-14.md)

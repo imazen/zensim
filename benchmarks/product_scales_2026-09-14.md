@@ -1,5 +1,12 @@
 # Product TRAIN scale frontier — September 14, 2026
 
+Later September 14 timing-admission correction: the model comparison owner used
+`GateConfig::disabled()`. Its saved `unreliable=false` flag cannot establish
+quiet conditions; the existing process records and descriptive medians remain
+historical evidence. The [native latency study](native_latency_2026-09-14.md)
+enables strict gating and retains actual individual-call rounds. No older
+performance qualification is inferred or retroactively repaired.
+
 Registered after the [mixed-TRAIN baseline](product_train_2026-09-14.md), before
 new fits. That experiment supports a scalar advantage for full944 and a spatial
 advantage for small local features. This comparison tests whether richer coarse

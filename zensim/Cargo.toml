@@ -253,7 +253,7 @@ level = "warn"
 check-cfg = ['cfg(feature, values("training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom", "custom-profiles", "feature-regime-v2"))']
 
 [dev-dependencies.zenbench]
-version = "0.1.8"
+workspace = true
 
 [[example]]
 name = "fused_compare_bench"
