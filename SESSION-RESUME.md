@@ -1,5 +1,15 @@
 # Start here — one target score, one development path
 
+## September 14, current: color/HBD/HDR status after native scoring
+
+[Current assessment](benchmarks/color_hbd_hdr_current_2026-09-14.md) supersedes
+the decoder-only status below. Native SDR extraction now exists and has bounded
+TRAIN serving evidence. Nine revised models retain their six SDR EVAL panels
+and NO-SHIP verdicts; native HBD/HDR product qualification remains missing.
+The newest September 13–14 discussion links the exact twelve-model comparison
+and all recent TRAIN studies. Complete ensemble canonical-feature auditing,
+color provenance and matching TRAIN-era admission/refits remain dependencies.
+
 ## September 14, newest: native SDR scoring and complete serving audit
 
 [Contract and results](benchmarks/native_sdr_contract_2026-09-14.md) add

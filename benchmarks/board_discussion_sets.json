@@ -454,6 +454,28 @@
       "report_url": "/zensim/reports/native-sdr-contract-2026-09-14/index.html",
       "bakes": [],
       "note": "214/214 TRAIN-fit pairs now pass native372 base/head and native944 ensemble serving audits, including 626,249 refinement queries. Legacy CSV/audit bytes remain exact. P3 provenance, q85 and matching refit remain open; no model or HDR qualification."
+    },
+    {
+      "id": "2026-09-14-two-day-native-color-hbd-hdr",
+      "date": "2026-09-14",
+      "label": "2026-09-13–14 · Current feature / color / HBD / HDR assessment",
+      "report_url": "/zensim/reports/color-hbd-hdr-current-2026-09-14/index.html",
+      "bakes": [
+        "MT913_y40_h32_ens5",
+        "MT913_y40_h128_ens5",
+        "MT913_y60_h32_ens5",
+        "MT913_y60_h128_ens5",
+        "MT913_local120_h128_ens5",
+        "MT913_selected619_h128_ens5",
+        "MT913_full944_h128_ens5",
+        "MT913_full944_h256_ens5",
+        "MT913_linear60",
+        "MT914_matched_B",
+        "MT914_matched_D",
+        "peer_ssim2_mt914"
+      ],
+      "preferred_corpus": "imazen26",
+      "note": "Updated through c1819e29: native SDR color/depth extraction and public scoring now audited on 214 TRAIN pairs. Nine revised models have six SDR EVAL panels and remain NO-SHIP. Native HBD/HDR quality, complete ensemble canonical-feature auditing and spatial RD qualification remain incomplete. Includes all recent TRAIN studies, chronology and exact matched EVAL comparison."
     }
   ],
   "incumbent_notes": [
