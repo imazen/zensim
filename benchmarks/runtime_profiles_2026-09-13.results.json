@@ -1,0 +1,3489 @@
+{
+  "schema": "zensim-runtime-profiles-2026-09-13-v1",
+  "status": "COMPLETE_UNQUALIFIED",
+  "model_qualified": false,
+  "new_mlp_fits": 56,
+  "new_deterministic_linear_fits": 2,
+  "models": {
+    "luma40": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_local40-h128-full-s5101.bin",
+          "sha256": "46b68b9b32c4c7ab7cc8b21141e350329a2bfc6f20222d2554494901c51e60c6"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_local40-h128-full-s5103.bin",
+          "sha256": "e80e68d286c6444f80090c8fbbd6c62c7dea7781577bfa529ecb48aa5789b013"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_local40-h128-full-s5107.bin",
+          "sha256": "51b823325959beb643a8256c107e21ba4a8e7bfa4deae95cb7668928a52b9dc4"
+        }
+      ],
+      "weights": null,
+      "human_dev_mae": 8.27282834800001,
+      "human_test_mae": 8.533957779519998,
+      "human_test_srocc": 0.9148848370136878,
+      "human_test_rows": 3125,
+      "spatial_passes": 94,
+      "spatial_cases": 96,
+      "min_m2": 0.9789473684210456,
+      "min_m3f": 0.8499921717070318,
+      "interventions": 25248,
+      "failed_cells": [
+        {
+          "model": "luma40",
+          "origin": "7066",
+          "content_class": "graphic",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 70.66771443684895,
+          "m2": 0.9882352941176441,
+          "m3f": 0.9558823529411736,
+          "interventions": 16,
+          "pass": false,
+          "report": "luma40-143-b64.json",
+          "sha256": "79888a04d6dd628150b18d513ba72d2189b26a3c144c55a5c63827915de346d0",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_7066.png.scale256x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/7066-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/luma40-143-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_local40-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_local40-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_local40-h128-full-s5107.bin",
+            "--ensemble-weights",
+            "0.3333333333333333,0.3333333333333333,0.3333333333333333"
+          ]
+        },
+        {
+          "model": "luma40",
+          "origin": "8384",
+          "content_class": "screen",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 70.88984680175781,
+          "m2": 0.9789473684210456,
+          "m3f": 0.991244952698753,
+          "interventions": 12,
+          "pass": false,
+          "report": "luma40-227-b64.json",
+          "sha256": "2413b38ec6fcffbb39d9abc02b9ba53228cffa7f077bcbb20e55fc46a80223c3",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8384.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8384-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/luma40-227-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_local40-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_local40-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_local40-h128-full-s5107.bin",
+            "--ensemble-weights",
+            "0.3333333333333333,0.3333333333333333,0.3333333333333333"
+          ]
+        }
+      ],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 83.20401000976562,
+          "m2": 0.99958988380041,
+          "m3f": 0.989131920710868,
+          "sha256": "f51b911483529fb47c71ce9f7951e6f8b2c6325ea9abeb9b9755e7c491094a5d"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 85.98697408040364,
+          "m2": 0.9999999999999999,
+          "m3f": 0.9974025974025973,
+          "sha256": "641e8ab70923505daa4fa0424424fbcfc148f072b23ebbfd04884a5b43e23133"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 86.27398681640625,
+          "m2": 0.9996247654784238,
+          "m3f": 0.9934333958724201,
+          "sha256": "0f5a49eee12690b24a52f1422bede5b9448d1664c04d81c102b79f3f578f5b5b"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 89.49130503336588,
+          "m2": 1.0,
+          "m3f": 0.9504993486756405,
+          "sha256": "d21e115b74a2dc0dcaa033aff53e8294a500f036ab5c17fbbdaaf5d3831a3fb2"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 67.88287607828775,
+          "m2": 1.0,
+          "m3f": 0.6225658654855362,
+          "sha256": "7b97a93fd903f7a92e46eb5171b92eaef205dca1cc7e066b4b7d45cd694ba720"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 73.16840362548828,
+          "m2": 0.9991114149008885,
+          "m3f": 0.39466848940533145,
+          "sha256": "0150b098c0eee18d130b66942c781eee7d006f7c28f23f67589f7fa483a17888"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 54.57369867960612,
+          "m2": 0.9981544771018453,
+          "m3f": 0.968762816131237,
+          "sha256": "f9a93532f61252c0ac40da98e5cc15ff4449acc0aec636260c9af4a1d23c1054"
+        }
+      ],
+      "timing": {
+        "before-scalar-t1-1024": {
+          "n": 30,
+          "min": 9.736905,
+          "max": 10.691483,
+          "mean": 9.967132966666668,
+          "variance": 0.05833196195555045,
+          "median": 9.864527,
+          "mad": 0.0893133066
+        },
+        "before-scalar-t1-2048": {
+          "n": 30,
+          "min": 45.097257,
+          "max": 48.630744,
+          "mean": 46.166444633333334,
+          "variance": 0.6145016452498281,
+          "median": 45.957703,
+          "mad": 0.4900600866
+        },
+        "after-scalar-t1-1024": {
+          "n": 30,
+          "min": 7.817641,
+          "max": 8.356215,
+          "mean": 7.976281666666667,
+          "variance": 0.024767689561678168,
+          "median": 7.9138265,
+          "mad": 0.09892574369999999
+        },
+        "after-scalar-t1-2048": {
+          "n": 30,
+          "min": 37.289103,
+          "max": 38.83609,
+          "mean": 37.74885543333333,
+          "variance": 0.15961674425535724,
+          "median": 37.5923065,
+          "mad": 0.2868942195
+        },
+        "before-spatial-t1-1024": {
+          "n": 30,
+          "min": 28.195199,
+          "max": 30.343961,
+          "mean": 28.814522533333335,
+          "variance": 0.20697116340246455,
+          "median": 28.75014,
+          "mad": 0.361339272
+        },
+        "before-spatial-t1-2048": {
+          "n": 30,
+          "min": 114.670174,
+          "max": 120.58908,
+          "mean": 116.90379433333331,
+          "variance": 2.2033465610604392,
+          "median": 116.5101955,
+          "mad": 1.3603047737999998
+        },
+        "after-spatial-t1-1024": {
+          "n": 30,
+          "min": 26.098284,
+          "max": 27.508368,
+          "mean": 26.59850873333333,
+          "variance": 0.08266162262358137,
+          "median": 26.545933,
+          "mad": 0.2621926209
+        },
+        "after-spatial-t1-2048": {
+          "n": 30,
+          "min": 105.185445,
+          "max": 109.636178,
+          "mean": 107.39410726666667,
+          "variance": 1.1815138998813801,
+          "median": 107.409246,
+          "mad": 1.1102850402
+        },
+        "after-scalar-t8-1024": {
+          "n": 35,
+          "min": 3.639919,
+          "max": 4.487032,
+          "mean": 4.023657085714286,
+          "variance": 0.032036125235080704,
+          "median": 4.026084,
+          "mad": 0.16743743099999997
+        },
+        "after-scalar-t8-2048": {
+          "n": 35,
+          "min": 16.962782,
+          "max": 18.662807,
+          "mean": 17.618308828571433,
+          "variance": 0.16481305861720455,
+          "median": 17.566715,
+          "mad": 0.3729168954
+        },
+        "after-spatial-t8-1024": {
+          "n": 35,
+          "min": 11.999741,
+          "max": 13.193172,
+          "mean": 12.712744942857142,
+          "variance": 0.10051199524940849,
+          "median": 12.714707,
+          "mad": 0.29618196719999995
+        },
+        "after-spatial-t8-2048": {
+          "n": 30,
+          "min": 53.713807,
+          "max": 56.985457,
+          "mean": 55.1052022,
+          "variance": 0.7576709128308553,
+          "median": 54.9415035,
+          "mad": 0.9074186582999999
+        }
+      },
+      "rss_mib": {}
+    },
+    "coarse60": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5101.bin",
+          "sha256": "f48ffd38af299dca6fabef1b64aa5bed445cc5df328e287c20befca671b3ffe9"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5103.bin",
+          "sha256": "ee811f698b88c630d2d2230355cd643d2a30b51bf219b4e22bd8957092b38c2e"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5107.bin",
+          "sha256": "5a34e8b30b01c3a948f923704874f92b891b12ba386f9ec25bae2effa56fd0b3"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5113.bin",
+          "sha256": "2a4cf49370d7c9ece08db52d6b2a2e1957bb74a9c3844859b4d11b8dda89d2e4"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5119.bin",
+          "sha256": "c2fb4fb4e3b892d670a77b0cbd223426292399f474e031edd964a2a14e72b0f1"
+        }
+      ],
+      "weights": null,
+      "human_dev_mae": 6.844861985999996,
+      "human_test_mae": 7.487170044160017,
+      "human_test_srocc": 0.933959856183588,
+      "human_test_rows": 3125,
+      "spatial_passes": 95,
+      "spatial_cases": 96,
+      "min_m2": 0.9860139860139792,
+      "min_m3f": 0.7022794975499395,
+      "interventions": 25248,
+      "failed_cells": [
+        {
+          "model": "coarse60",
+          "origin": "8206",
+          "content_class": "screen",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 70.41997833251953,
+          "m2": 0.9860139860139792,
+          "m3f": 0.8671328671328611,
+          "interventions": 12,
+          "pass": false,
+          "report": "coarse60-206-b64.json",
+          "sha256": "856745efaa202d86f66b6c03cdd3bda0a81adf110746423eeff8674f404549e7",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/coarse60-206-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        }
+      ],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 83.47837524414064,
+          "m2": 0.9999999999999999,
+          "m3f": 0.9861244019138755,
+          "sha256": "2a424b90b137a4ba74a5efbe3006ac272f1554f28f3e5e920ec8765a83df7a0b"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 85.62473754882814,
+          "m2": 0.9996582365003417,
+          "m3f": 0.9959671907040327,
+          "sha256": "5e9e1b3b029a48f05db869be2ce6ccf43a3da24730174e7e0e6dc7e6236caa7c"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 86.13521881103516,
+          "m2": 0.9996247654784238,
+          "m3f": 0.9834896810506565,
+          "sha256": "30e462b1e2f58ba9894dafeebebe7cfac39baed706da0afb8640cd11283e6421"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 89.04546051025392,
+          "m2": 1.0,
+          "m3f": 0.8276161528441164,
+          "sha256": "5d48736810e3b17809101e7305fb8ad3aea24d68e53ed65bf8d58cd5cdf67960"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 65.0352035522461,
+          "m2": 1.0,
+          "m3f": 0.4957728737260875,
+          "sha256": "35810d7e541f5b48f9b0500d9cb352aa6d2cb5aa2eb1e2f1e4e806eff3b1faab"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 27.02170562744141,
+          "m2": 0.919753930280246,
+          "m3f": 0.6425837320574161,
+          "sha256": "aee92dc65333ce4c33668fb931313bebf69b5fb228811c9941fb6107f29c6edf"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 51.537715148925784,
+          "m2": 0.9872180451127819,
+          "m3f": 0.9581681476418318,
+          "sha256": "3eacbb3265736e3612577ad6e934938a6fda3aff891e50a88442b142a56a56a2"
+        }
+      ],
+      "timing": {
+        "before-scalar-t1-1024": {
+          "n": 30,
+          "min": 9.781685,
+          "max": 10.495139,
+          "mean": 9.974639066666667,
+          "variance": 0.03415139382068499,
+          "median": 9.908198,
+          "mad": 0.0772820076
+        },
+        "before-scalar-t1-2048": {
+          "n": 30,
+          "min": 45.25063,
+          "max": 47.692276,
+          "mean": 46.048511100000006,
+          "variance": 0.2952338973091953,
+          "median": 46.040545,
+          "mad": 0.38396374799999994
+        },
+        "after-scalar-t1-1024": {
+          "n": 30,
+          "min": 7.951289,
+          "max": 8.504634,
+          "mean": 8.081956966666667,
+          "variance": 0.010310812778447129,
+          "median": 8.064721,
+          "mad": 0.0625471875
+        },
+        "after-scalar-t1-2048": {
+          "n": 30,
+          "min": 37.388429,
+          "max": 39.1565,
+          "mean": 38.15786513333333,
+          "variance": 0.14172403954280982,
+          "median": 38.1320005,
+          "mad": 0.3324048504
+        },
+        "before-spatial-t1-1024": {
+          "n": 30,
+          "min": 28.659928,
+          "max": 30.172338,
+          "mean": 29.19106083333333,
+          "variance": 0.12245116046152334,
+          "median": 29.1842785,
+          "mad": 0.17239969319999998
+        },
+        "before-spatial-t1-2048": {
+          "n": 30,
+          "min": 115.49072,
+          "max": 120.392306,
+          "mean": 117.43270456666669,
+          "variance": 1.4394891593118408,
+          "median": 117.3493665,
+          "mad": 1.1444930699999998
+        },
+        "after-spatial-t1-1024": {
+          "n": 30,
+          "min": 26.799151,
+          "max": 28.152654,
+          "mean": 27.208154033333333,
+          "variance": 0.07966699032796429,
+          "median": 27.22732,
+          "mad": 0.25569957419999995
+        },
+        "after-spatial-t1-2048": {
+          "n": 30,
+          "min": 105.503558,
+          "max": 110.991261,
+          "mean": 108.11053930000001,
+          "variance": 2.1664480677018756,
+          "median": 107.962252,
+          "mad": 1.6537083486
+        },
+        "after-scalar-t8-1024": {
+          "n": 35,
+          "min": 3.718322,
+          "max": 4.548944,
+          "mean": 4.074456171428571,
+          "variance": 0.045070211327616794,
+          "median": 4.069016,
+          "mad": 0.2595988122
+        },
+        "after-scalar-t8-2048": {
+          "n": 35,
+          "min": 17.329076,
+          "max": 19.334163,
+          "mean": 18.0469836,
+          "variance": 0.18123892704307104,
+          "median": 18.012512,
+          "mad": 0.3230852268
+        },
+        "after-spatial-t8-1024": {
+          "n": 35,
+          "min": 12.418114,
+          "max": 14.189521,
+          "mean": 13.215553057142856,
+          "variance": 0.09932473405476192,
+          "median": 13.245182,
+          "mad": 0.2076692646
+        },
+        "after-spatial-t8-2048": {
+          "n": 30,
+          "min": 54.862198,
+          "max": 57.27502,
+          "mean": 55.804318633333324,
+          "variance": 0.3305180214616898,
+          "median": 55.780686,
+          "mad": 0.47267956679999995
+        }
+      },
+      "rss_mib": {
+        "1024": 80.546875,
+        "2048": 266.48046875
+      }
+    },
+    "mid80": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5101.bin",
+          "sha256": "952a941acb230ac0b163a4cb2051273e81d637805b09fbab98eb673336f8766c"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5103.bin",
+          "sha256": "ce07377da028409546a912d8167fbad58c6f2c08e83ad1031f2388fa03b3dabf"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5107.bin",
+          "sha256": "9e8143d899e733b6b273aafac22c156d34150dfb1725d3b8dceae639d3abcb0f"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5113.bin",
+          "sha256": "c9a2894087dd860047ed65cec849f80d7725ca773b906a665316160f9fd32b9f"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5119.bin",
+          "sha256": "3f12019ada69bc7b74abf9cd0976f2fa01c046c76c6a1029f3ea885c11075dc4"
+        }
+      ],
+      "weights": null,
+      "human_dev_mae": 6.826137845999997,
+      "human_test_mae": 7.464839946879997,
+      "human_test_srocc": 0.9327017639938009,
+      "human_test_rows": 3125,
+      "spatial_passes": 90,
+      "spatial_cases": 96,
+      "min_m2": 0.9095387371249438,
+      "min_m3f": 0.7499116558282438,
+      "interventions": 25248,
+      "failed_cells": [
+        {
+          "model": "mid80",
+          "origin": "1054",
+          "content_class": "photo",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 62.46929092407227,
+          "m2": 0.9790209790209722,
+          "m3f": 0.9790209790209722,
+          "interventions": 12,
+          "pass": false,
+          "report": "mid80-38-b64.json",
+          "sha256": "7e408c8936b092ed2e50e17165e0708e005c7b2683af2d524ea4dfe5ebba6ae5",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/mid80-38-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "mid80",
+          "origin": "2010",
+          "content_class": "photo",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 81.28316650390624,
+          "m2": 0.9882352941176441,
+          "m3f": 0.9617647058823501,
+          "interventions": 16,
+          "pass": false,
+          "report": "mid80-13-b64.json",
+          "sha256": "e04cd4d3fa8e4e05e0c25fffabd5f8120b90771996c2880d1f5bf653aa595860",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_2010.png.scale205x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/2010-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/mid80-13-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "mid80",
+          "origin": "2010",
+          "content_class": "photo",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 58.3132194519043,
+          "m2": 0.973529411764703,
+          "m3f": 0.9941176470588206,
+          "interventions": 16,
+          "pass": false,
+          "report": "mid80-17-b64.json",
+          "sha256": "2772ee7f88d0a46b1c80ab7aec82dae12a9c9b29efa20b15e27617e3fbcb589e",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_2010.png.scale205x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/2010-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/mid80-17-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "mid80",
+          "origin": "7066",
+          "content_class": "graphic",
+          "distance": 0.5,
+          "block": 64,
+          "score": 90.08828582763672,
+          "m2": 0.9852941176470559,
+          "m3f": 0.9794117647058794,
+          "interventions": 16,
+          "pass": false,
+          "report": "mid80-136-b64.json",
+          "sha256": "e525a5003a57a1995c22c15343e74c6998c21c39b8a373d2002e451db3bba124",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_7066.png.scale256x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/7066-scalar-10.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/mid80-136-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "mid80",
+          "origin": "7066",
+          "content_class": "graphic",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 65.21873779296877,
+          "m2": 0.9235294117647032,
+          "m3f": 0.844117647058821,
+          "interventions": 16,
+          "pass": false,
+          "report": "mid80-143-b64.json",
+          "sha256": "5c98af825f2491421660bc3e23eaf207e19b3d71d988473d9a46c38a83432764",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_7066.png.scale256x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/7066-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/mid80-143-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "mid80",
+          "origin": "9380",
+          "content_class": "graphic",
+          "distance": 7.731237411499023,
+          "block": 32,
+          "score": 64.34246292114257,
+          "m2": 0.9095387371249438,
+          "m3f": 0.8333223376857257,
+          "interventions": 48,
+          "pass": false,
+          "report": "mid80-164-b32.json",
+          "sha256": "2475fde57f23871737432fe76a77687b8de8f23cffb1218bd90a7505c0e47a8d",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_9380.png.scale171x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/9380-scalar-17.png",
+            "--block",
+            "32",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/mid80-164-b32.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_mid80-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        }
+      ],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 85.52166595458985,
+          "m2": 0.9992481203007517,
+          "m3f": 0.9882433356117566,
+          "sha256": "16a697441c8e8769a45a8573204f275f57c1600ff692327355eeb7531118e35b"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 86.21359710693359,
+          "m2": 0.9999999999999999,
+          "m3f": 0.989883800410116,
+          "sha256": "f512ead25f9bac4ff92b29fdeb3b6ebfb56788800866d8c090f677159e4f8c6c"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 87.54507598876954,
+          "m2": 0.9990619136960599,
+          "m3f": 0.9924953095684801,
+          "sha256": "0114bbae7e37ee2e07fa37bdc96122ac5fd44e5683926606ddba47c44fb74b3b"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 90.81447753906251,
+          "m2": 1.0,
+          "m3f": 0.705601389491967,
+          "sha256": "faf2daa19ad18e2fd292601e4ee88d60a65b80eb5e4700f6ca7ad0024eee5d6a"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 69.90138702392579,
+          "m2": 1.0,
+          "m3f": 0.6520281374296404,
+          "sha256": "c11cd83ccad71b11dc889544d2585605dcfac7022349ef71ce9dcd34336b1c77"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 21.257564544677734,
+          "m2": 0.9884483937115515,
+          "m3f": -0.622282980177717,
+          "sha256": "33084241342d102a2d1a44f5ae70a25df78071c07f8ada251f1199950bcf2383"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 51.3900016784668,
+          "m2": 0.9998632946001366,
+          "m3f": 0.9903622693096376,
+          "sha256": "0b509295578b3f52aaae6736290b3beeb732c66e223a77e8cdb6dd4507c4f3d9"
+        }
+      ],
+      "timing": {
+        "before-scalar-t1-1024": {
+          "n": 30,
+          "min": 9.831886,
+          "max": 11.05726,
+          "mean": 10.108661666666665,
+          "variance": 0.06952926377595414,
+          "median": 10.025665,
+          "mad": 0.21523348979999998
+        },
+        "before-scalar-t1-2048": {
+          "n": 30,
+          "min": 45.184918,
+          "max": 47.805078,
+          "mean": 46.278825399999995,
+          "variance": 0.44305591974376524,
+          "median": 46.05923,
+          "mad": 0.5204244759
+        },
+        "after-scalar-t1-1024": {
+          "n": 30,
+          "min": 8.2865,
+          "max": 8.964403,
+          "mean": 8.434326866666668,
+          "variance": 0.019067894757636747,
+          "median": 8.396572,
+          "mad": 0.0455113722
+        },
+        "after-scalar-t1-2048": {
+          "n": 30,
+          "min": 39.060594,
+          "max": 40.545887,
+          "mean": 39.69266223333334,
+          "variance": 0.1910093330375645,
+          "median": 39.527493,
+          "mad": 0.3705625266
+        },
+        "before-spatial-t1-1024": {
+          "n": 30,
+          "min": 29.112657,
+          "max": 30.615136,
+          "mean": 29.751864100000006,
+          "variance": 0.13698085497147247,
+          "median": 29.6978885,
+          "mad": 0.24762829979999998
+        },
+        "before-spatial-t1-2048": {
+          "n": 30,
+          "min": 118.288885,
+          "max": 124.245731,
+          "mean": 120.6708751,
+          "variance": 3.0102518432498218,
+          "median": 120.1461865,
+          "mad": 1.9114502043
+        },
+        "after-spatial-t1-1024": {
+          "n": 30,
+          "min": 27.679669,
+          "max": 28.81196,
+          "mean": 28.11987586666667,
+          "variance": 0.10134050547025684,
+          "median": 28.055578,
+          "mad": 0.28146716219999995
+        },
+        "after-spatial-t1-2048": {
+          "n": 30,
+          "min": 110.246764,
+          "max": 115.312944,
+          "mean": 112.40804689999999,
+          "variance": 1.568691644872922,
+          "median": 112.5313765,
+          "mad": 1.4089214517
+        },
+        "after-scalar-t8-1024": {
+          "n": 35,
+          "min": 3.807646,
+          "max": 4.544604,
+          "mean": 4.1343312857142855,
+          "variance": 0.035604862350504196,
+          "median": 4.153409,
+          "mad": 0.22649087159999998
+        },
+        "after-scalar-t8-2048": {
+          "n": 35,
+          "min": 18.063974,
+          "max": 20.130003,
+          "mean": 18.738848199999996,
+          "variance": 0.16698499890040047,
+          "median": 18.691618,
+          "mad": 0.23611294559999998
+        },
+        "after-spatial-t8-1024": {
+          "n": 35,
+          "min": 12.674147,
+          "max": 13.826868,
+          "mean": 13.302834428571432,
+          "variance": 0.08357087201001678,
+          "median": 13.350233,
+          "mad": 0.3172348872
+        },
+        "after-spatial-t8-2048": {
+          "n": 30,
+          "min": 55.905987,
+          "max": 58.515211,
+          "mean": 57.09753656666666,
+          "variance": 0.5208834111604603,
+          "median": 56.9831325,
+          "mad": 0.6280137927
+        }
+      },
+      "rss_mib": {
+        "1024": 81.04296875,
+        "2048": 270.59765625
+      }
+    },
+    "fine100_small": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5101.bin",
+          "sha256": "4e107273c65be1791f2193bda6fd77aff9304eaf38fb36673deef3dc1fb2d1f0"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5103.bin",
+          "sha256": "53a212730675aab078c3e593075f4010e6f469aadeb2c1d416e273ac389c094f"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5107.bin",
+          "sha256": "2baa67033e0863989f237f3f8f4a15035f519652e5f38074c517ad5919811e33"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5113.bin",
+          "sha256": "8df679cdfc15538f00e30ab91c77263e9e38780cfa5aa314c00cb74f637da492"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5119.bin",
+          "sha256": "43a10b1e80fcef438e75ea7efe57d56b54a9cb98d050c25d5bdad121c6d7bec9"
+        }
+      ],
+      "weights": null,
+      "human_dev_mae": 6.7510153180000065,
+      "human_test_mae": 7.494161568640003,
+      "human_test_srocc": 0.9326791563096608,
+      "human_test_rows": 3125,
+      "spatial_passes": 90,
+      "spatial_cases": 96,
+      "min_m2": 0.9441176470588207,
+      "min_m3f": 0.6628710887769815,
+      "interventions": 25248,
+      "failed_cells": [
+        {
+          "model": "fine100_small",
+          "origin": "2010",
+          "content_class": "photo",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 81.4995086669922,
+          "m2": 0.9764705882352912,
+          "m3f": 0.9852941176470559,
+          "interventions": 16,
+          "pass": false,
+          "report": "fine100_small-13-b64.json",
+          "sha256": "bd7c36768fab2ec1e706516b5590055ec0958c6f5f9de83c5035423ecd145378",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_2010.png.scale205x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/2010-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_small-13-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_small",
+          "origin": "2010",
+          "content_class": "photo",
+          "distance": 7.731237411499023,
+          "block": 32,
+          "score": 57.004816436767584,
+          "m2": 0.9887218045112781,
+          "m3f": 0.9632946001367053,
+          "interventions": 56,
+          "pass": false,
+          "report": "fine100_small-17-b32.json",
+          "sha256": "542c56a2c54be25fd516ebd3c8195b77f2ce55172cc14adc1de95cec575c2f51",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_2010.png.scale205x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/2010-scalar-17.png",
+            "--block",
+            "32",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_small-17-b32.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_small",
+          "origin": "7066",
+          "content_class": "graphic",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 61.046630859375,
+          "m2": 0.9441176470588207,
+          "m3f": 0.9441176470588207,
+          "interventions": 16,
+          "pass": false,
+          "report": "fine100_small-143-b64.json",
+          "sha256": "b3318336ebe9f1bc923a04500c2ef9df1dfc9df640bcc8ba4b0e6ecb97eecf9f",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_7066.png.scale256x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/7066-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_small-143-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_small",
+          "origin": "8206",
+          "content_class": "screen",
+          "distance": 7.731237411499023,
+          "block": 8,
+          "score": 72.013818359375,
+          "m2": 0.9996188663466353,
+          "m3f": 0.6628710887769815,
+          "interventions": 576,
+          "pass": false,
+          "report": "fine100_small-206-b8.json",
+          "sha256": "82bd84c9a8352d5457262c9dc4acb48607bd0c50b4974a461ee16314f4336a81",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-17.png",
+            "--block",
+            "8",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_small-206-b8.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_small",
+          "origin": "9380",
+          "content_class": "graphic",
+          "distance": 0.5,
+          "block": 32,
+          "score": 91.85113220214843,
+          "m2": 0.9783588818755635,
+          "m3f": 0.9574242637484325,
+          "interventions": 48,
+          "pass": false,
+          "report": "fine100_small-157-b32.json",
+          "sha256": "ce3f6dc8ef3eed3793016327565e2ab4d7e8bffcec42eced96b3f411f80d56b4",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_9380.png.scale171x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/9380-scalar-10.png",
+            "--block",
+            "32",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_small-157-b32.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_small",
+          "origin": "9380",
+          "content_class": "graphic",
+          "distance": 7.731237411499023,
+          "block": 32,
+          "score": 66.91742858886718,
+          "m2": 0.9828705776981637,
+          "m3f": 0.861434150903064,
+          "interventions": 48,
+          "pass": false,
+          "report": "fine100_small-164-b32.json",
+          "sha256": "311aabd1da893d051f383d7cd310f5a3cb8930222b7664fa1a64e170925a3c04",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_9380.png.scale171x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/9380-scalar-17.png",
+            "--block",
+            "32",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_small-164-b32.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        }
+      ],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 85.21688995361328,
+          "m2": 0.9998632946001366,
+          "m3f": 0.9904306220095692,
+          "sha256": "9bdfcdbf73b1dc257eef5a915e5c644009972901bea9c5bd1fca2a81ead7c570"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 88.94602966308595,
+          "m2": 0.9999999999999999,
+          "m3f": 0.994531784005468,
+          "sha256": "1484201b862ce2cccda1f867a82b6d2d33df72c9632eadcac96bb53e3848be2a"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 89.79034423828125,
+          "m2": 0.9999999999999998,
+          "m3f": 0.9789868667917446,
+          "sha256": "1bb725c09be699580b94550fcf968b188e89cfda8a9f1c687df34a57945b96e9"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 91.16287536621094,
+          "m2": 0.9738384715588363,
+          "m3f": 0.7031046461137647,
+          "sha256": "80f005c2525b14e9f25b18e6468736fe201638ed22ae82b1575ecc685902375e"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 73.5701904296875,
+          "m2": 1.0,
+          "m3f": 0.6457147934416181,
+          "sha256": "88cdb4ce4b90123ea9e9b2351a4c3fdefafc06e8f2c4f2c000b522b1571ee97f"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 30.52189674377442,
+          "m2": 0.9955570745044428,
+          "m3f": -0.8416951469583047,
+          "sha256": "889ffa9787171c023d36bbdea0148820700f0cad873d62016402a1d55ba7d8f7"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 45.22155761718751,
+          "m2": 0.9991114149008885,
+          "m3f": 0.9790840738209158,
+          "sha256": "5a41d1720b4a18b9520236b72fa06a1a47526f93dead88c6c94adc0740368934"
+        }
+      ],
+      "timing": {
+        "after-scalar-t1-1024": {
+          "n": 30,
+          "min": 9.681768,
+          "max": 10.266695,
+          "mean": 9.852257566666667,
+          "variance": 0.020463898706805744,
+          "median": 9.8309125,
+          "mad": 0.09307688669999999
+        },
+        "after-scalar-t1-2048": {
+          "n": 30,
+          "min": 45.830209,
+          "max": 48.213469,
+          "mean": 46.542521666666666,
+          "variance": 0.2406018515002314,
+          "median": 46.372838,
+          "mad": 0.27592149689999995
+        },
+        "after-spatial-t1-1024": {
+          "n": 30,
+          "min": 31.474816,
+          "max": 33.548657,
+          "mean": 32.532166966666665,
+          "variance": 0.20344490506086096,
+          "median": 32.5290015,
+          "mad": 0.31341719219999997
+        },
+        "after-spatial-t1-2048": {
+          "n": 30,
+          "min": 134.339819,
+          "max": 140.180656,
+          "mean": 136.6848145,
+          "variance": 1.7576272820994978,
+          "median": 136.540905,
+          "mad": 1.2919272618
+        },
+        "after-scalar-t8-1024": {
+          "n": 35,
+          "min": 4.094467,
+          "max": 4.898538,
+          "mean": 4.403431571428571,
+          "variance": 0.039395063294899155,
+          "median": 4.43911,
+          "mad": 0.0628207272
+        },
+        "after-scalar-t8-2048": {
+          "n": 35,
+          "min": 20.731907,
+          "max": 22.930921,
+          "mean": 21.750469657142855,
+          "variance": 0.236355343210761,
+          "median": 21.625811,
+          "mad": 0.35270905739999997
+        },
+        "after-spatial-t8-1024": {
+          "n": 35,
+          "min": 14.017579,
+          "max": 14.973158,
+          "mean": 14.419100399999998,
+          "variance": 0.05736044954654118,
+          "median": 14.388223,
+          "mad": 0.2131252326
+        },
+        "after-spatial-t8-2048": {
+          "n": 30,
+          "min": 62.537129,
+          "max": 65.567017,
+          "mean": 63.90959903333333,
+          "variance": 0.5470990993685165,
+          "median": 63.851541,
+          "mad": 0.757475166
+        }
+      },
+      "rss_mib": {}
+    },
+    "full120_small": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5101.bin",
+          "sha256": "d0e9819152558012e6fb31a25bd3d4ea1770170b5734077aa51fce4a50f9874d"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5103.bin",
+          "sha256": "f0018a2382466c6790830212fe2e25f7ff5937f82c6ebebfdd04bd32dd03e733"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5107.bin",
+          "sha256": "4d9d66633bd9e6a0e71bf6bdd5cd5913c059105bc5a483f8fbdbb7b19d65477a"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5113.bin",
+          "sha256": "34db7b30e8158af5c03df1a39cccbcbe72c48122664c08acc489eb68018f02e5"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5119.bin",
+          "sha256": "55d2cb20b19b4bf7d6fc3707837fb6d2261f1aec8ccb95c48d7e8940437828d7"
+        }
+      ],
+      "weights": null,
+      "human_dev_mae": 6.697784341000015,
+      "human_test_mae": 7.52550110399998,
+      "human_test_srocc": 0.9323993034438867,
+      "human_test_rows": 3125,
+      "spatial_passes": 91,
+      "spatial_cases": 96,
+      "min_m2": 0.9617647058823501,
+      "min_m3f": 0.691871322683739,
+      "interventions": 25248,
+      "failed_cells": [
+        {
+          "model": "full120_small",
+          "origin": "1054",
+          "content_class": "photo",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 83.68768615722657,
+          "m2": 0.9720279720279653,
+          "m3f": 0.9650349650349583,
+          "interventions": 12,
+          "pass": false,
+          "report": "full120_small-34-b64.json",
+          "sha256": "12748cd4a22fbe03b2b66bf3186a4ab729f6b7b4d2c3762a0bfcf107f48f1dbd",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_small-34-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_small",
+          "origin": "7066",
+          "content_class": "graphic",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 80.27644348144531,
+          "m2": 0.9617647058823501,
+          "m3f": 0.9764705882352912,
+          "interventions": 16,
+          "pass": false,
+          "report": "full120_small-139-b64.json",
+          "sha256": "a24c42d4c9391b0edfdc2ee5a69c957162088ba87ae8c219755da5c176906d1a",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_7066.png.scale256x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/7066-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_small-139-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_small",
+          "origin": "8206",
+          "content_class": "screen",
+          "distance": 7.731237411499023,
+          "block": 8,
+          "score": 70.25784454345704,
+          "m2": 0.9999950054638618,
+          "m3f": 0.691871322683739,
+          "interventions": 576,
+          "pass": false,
+          "report": "full120_small-206-b8.json",
+          "sha256": "9c2a99272ec0ff69c9bcce87ee6946df1feeed964661468af4e9524a2d8b6faa",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-17.png",
+            "--block",
+            "8",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_small-206-b8.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_small",
+          "origin": "8384",
+          "content_class": "screen",
+          "distance": 0.5,
+          "block": 64,
+          "score": 93.00110931396485,
+          "m2": 0.9789473684210456,
+          "m3f": 0.9702291586486027,
+          "interventions": 12,
+          "pass": false,
+          "report": "full120_small-220-b64.json",
+          "sha256": "90dfb3febf6cd724edde933a92245adac602b82932f3d7e1082d8f805480f449",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8384.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8384-scalar-10.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_small-220-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_small",
+          "origin": "9380",
+          "content_class": "graphic",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 66.05281677246094,
+          "m2": 0.9790209790209722,
+          "m3f": 0.9580419580419514,
+          "interventions": 12,
+          "pass": false,
+          "report": "full120_small-164-b64.json",
+          "sha256": "82509e2763476eda48b0115bc8113405c916bd342bac5d67629d93309cf2f254",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_9380.png.scale171x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/9380-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_small-164-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h32-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        }
+      ],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 80.79032897949219,
+          "m2": 0.9997265892002732,
+          "m3f": 0.9889952153110046,
+          "sha256": "972c51b6f5927a9d0a8dd7916ffc8a195d61d4725ac1d3261ba72b54a6e27677"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 90.97154388427735,
+          "m2": 0.9999999999999999,
+          "m3f": 0.9943950786056048,
+          "sha256": "7352d0c32478c2335c952b5e8124d7d1252392d49f492b0dc632c12f8d400c52"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 91.07075195312501,
+          "m2": 0.9998123827392118,
+          "m3f": 0.9934333958724201,
+          "sha256": "59f7fa5445f2cc099af383378923e0fc8e5b04e4890608f02b5c32e84d9baebe"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 91.7369598388672,
+          "m2": 1.0,
+          "m3f": 0.5476552323056882,
+          "sha256": "711fa2e5439b12a3365320e25cbcd652f1578dcad39f66bf60ac2ad43d95ec6f"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 79.20939331054689,
+          "m2": 0.9996625421822273,
+          "m3f": 0.737082910601608,
+          "sha256": "61d5d3b8e8fe1d77d5409612ae560942777547d76adfb7c7ba929e442538fd23"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 19.65155267715454,
+          "m2": 0.9494190020505808,
+          "m3f": -0.6566643882433355,
+          "sha256": "c20d886b0a86d7e7a9a9ed26c73ab25fb7a981f1c0457b4ef783b9cbd7fb3240"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 44.71160125732422,
+          "m2": 0.9993164730006834,
+          "m3f": 0.97634996582365,
+          "sha256": "61bcdd9996eaf1adb5037db6374025b875a2853bf6bef8a565445d8b4bf6e725"
+        }
+      ],
+      "timing": {
+        "after-scalar-t1-1024": {
+          "n": 30,
+          "min": 15.344074,
+          "max": 16.032587,
+          "mean": 15.603306933333338,
+          "variance": 0.02529608453516771,
+          "median": 15.593124,
+          "mad": 0.1922012988
+        },
+        "after-scalar-t1-2048": {
+          "n": 30,
+          "min": 76.103351,
+          "max": 79.1091,
+          "mean": 77.28393663333333,
+          "variance": 0.5170030269454144,
+          "median": 77.288636,
+          "mad": 0.4341697731
+        },
+        "after-spatial-t1-1024": {
+          "n": 30,
+          "min": 55.361129,
+          "max": 57.144367,
+          "mean": 56.2794241,
+          "variance": 0.29096995124981695,
+          "median": 56.307908,
+          "mad": 0.5389517868
+        },
+        "after-spatial-t1-2048": {
+          "n": 30,
+          "min": 218.504399,
+          "max": 224.576729,
+          "mean": 221.45020983333333,
+          "variance": 2.4543764965947066,
+          "median": 221.2556065,
+          "mad": 1.5867015003
+        },
+        "after-scalar-t8-1024": {
+          "n": 35,
+          "min": 5.763351,
+          "max": 6.287351,
+          "mean": 5.954071514285714,
+          "variance": 0.016463833818963027,
+          "median": 5.941178,
+          "mad": 0.1489627524
+        },
+        "after-scalar-t8-2048": {
+          "n": 35,
+          "min": 30.654378,
+          "max": 31.775531,
+          "mean": 31.177366371428572,
+          "variance": 0.08619459410429944,
+          "median": 31.164968,
+          "mad": 0.31140233879999996
+        },
+        "after-spatial-t8-1024": {
+          "n": 35,
+          "min": 19.344469,
+          "max": 20.778032,
+          "mean": 19.84918528571429,
+          "variance": 0.09241682224773981,
+          "median": 19.775153,
+          "mad": 0.2211016206
+        },
+        "after-spatial-t8-2048": {
+          "n": 30,
+          "min": 87.218997,
+          "max": 92.185183,
+          "mean": 88.89157806666665,
+          "variance": 1.5345015746744077,
+          "median": 88.490354,
+          "mad": 0.7675049549999999
+        }
+      },
+      "rss_mib": {}
+    },
+    "fine100_large": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5101.bin",
+          "sha256": "e5f5f6df29464bf8606d974d5830060eb40c941cf7d161e70406dba05dcb3ae1"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5103.bin",
+          "sha256": "2191595158c07e002b44f7a04de214c2f59fdbf124671ce791798f6ef4b2836a"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5107.bin",
+          "sha256": "ab0f6c9dbed8c88a7421c87830ad0e2897511c78de178e5b25ad5a2b4ce2b86c"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5113.bin",
+          "sha256": "ce36875f6ec8f78b55123425ab951f90539b9a59c917cf9434778a3653cd9a5c"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5119.bin",
+          "sha256": "c10c01315dbb51f59bd182a75d369b8e60980973430c90d086b8a764d5a944be"
+        }
+      ],
+      "weights": null,
+      "human_dev_mae": 6.584807433999992,
+      "human_test_mae": 7.559728543039996,
+      "human_test_srocc": 0.9341610080147136,
+      "human_test_rows": 3125,
+      "spatial_passes": 87,
+      "spatial_cases": 96,
+      "min_m2": 0.9411764705882325,
+      "min_m3f": 0.6478256814846641,
+      "interventions": 25248,
+      "failed_cells": [
+        {
+          "model": "fine100_large",
+          "origin": "1054",
+          "content_class": "photo",
+          "distance": 0.5,
+          "block": 64,
+          "score": 94.1564193725586,
+          "m2": 0.9790209790209722,
+          "m3f": 0.9930069930069861,
+          "interventions": 12,
+          "pass": false,
+          "report": "fine100_large-31-b64.json",
+          "sha256": "066abdd839fbedf46ebc888502047829edf7dd625e87077df5a3d9f8e06b286c",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-10.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_large-31-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_large",
+          "origin": "2010",
+          "content_class": "photo",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 82.14660491943359,
+          "m2": 0.9411764705882325,
+          "m3f": 0.9323529411764678,
+          "interventions": 16,
+          "pass": false,
+          "report": "fine100_large-13-b64.json",
+          "sha256": "fd669c2c26aed40b0fad557199cba600a255542539e66f4ac757ba59a7804017",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_2010.png.scale205x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/2010-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_large-13-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_large",
+          "origin": "7066",
+          "content_class": "graphic",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 85.90076446533203,
+          "m2": 0.9794117647058794,
+          "m3f": 0.9823529411764677,
+          "interventions": 16,
+          "pass": false,
+          "report": "fine100_large-139-b64.json",
+          "sha256": "781855084791b113c54f9ca954ed90b3ef223d7b06434481798574a11f63a730",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_7066.png.scale256x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/7066-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_large-139-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_large",
+          "origin": "8206",
+          "content_class": "screen",
+          "distance": 1.6168174743652344,
+          "block": 8,
+          "score": 90.81282958984374,
+          "m2": 0.9933112778416902,
+          "m3f": 0.6937497464421373,
+          "interventions": 576,
+          "pass": false,
+          "report": "fine100_large-202-b8.json",
+          "sha256": "2f9a6fb7ec527601ff31023627c342c39adf175f952ed2828be8eb5fd63cb326",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-13.png",
+            "--block",
+            "8",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_large-202-b8.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_large",
+          "origin": "8206",
+          "content_class": "screen",
+          "distance": 1.6168174743652344,
+          "block": 32,
+          "score": 90.81282958984374,
+          "m2": 0.9829268292682926,
+          "m3f": 0.8302063789868667,
+          "interventions": 40,
+          "pass": false,
+          "report": "fine100_large-202-b32.json",
+          "sha256": "a35c61adc7f4cdf0916b1c56ab290f732033f2a901a97c47799887818c891671",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-13.png",
+            "--block",
+            "32",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_large-202-b32.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_large",
+          "origin": "8206",
+          "content_class": "screen",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 90.81282958984374,
+          "m2": 0.9510489510489444,
+          "m3f": 0.9930069930069861,
+          "interventions": 12,
+          "pass": false,
+          "report": "fine100_large-202-b64.json",
+          "sha256": "4c9ec6c1aa9c26e8e72d11e974998d77de145b4fd38344301217ef0804e1433e",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_large-202-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_large",
+          "origin": "8206",
+          "content_class": "screen",
+          "distance": 7.731237411499023,
+          "block": 8,
+          "score": 75.76226806640625,
+          "m2": 0.9999692583189471,
+          "m3f": 0.69867092997597,
+          "interventions": 576,
+          "pass": false,
+          "report": "fine100_large-206-b8.json",
+          "sha256": "0bea8a4b66b032a6c0325016e7178e906eb9e57c8c33cb08d2c7ca01d5fc265c",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-17.png",
+            "--block",
+            "8",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_large-206-b8.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_large",
+          "origin": "8384",
+          "content_class": "screen",
+          "distance": 0.5,
+          "block": 8,
+          "score": 93.45689239501954,
+          "m2": 0.9964179760143587,
+          "m3f": 0.6478256814846641,
+          "interventions": 768,
+          "pass": false,
+          "report": "fine100_large-220-b8.json",
+          "sha256": "73a2cc1bcda99e321a01fbd0d740483ff1bf7ffcd29e975369188346215b1346",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8384.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8384-scalar-10.png",
+            "--block",
+            "8",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_large-220-b8.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "fine100_large",
+          "origin": "9380",
+          "content_class": "graphic",
+          "distance": 1.6168174743652344,
+          "block": 32,
+          "score": 91.44478912353516,
+          "m2": 0.9686654643823264,
+          "m3f": 0.8551058021959744,
+          "interventions": 48,
+          "pass": false,
+          "report": "fine100_large-160-b32.json",
+          "sha256": "e7533083ae6782efb4655baac0afcff8776d931abfac439d9e2b9feb285c700e",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_9380.png.scale171x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/9380-scalar-13.png",
+            "--block",
+            "32",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/fine100_large-160-b32.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-fine_y_local100-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        }
+      ],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 85.9150604248047,
+          "m2": 0.9989063568010935,
+          "m3f": 0.9906356801093642,
+          "sha256": "d7a60f4333edbd199786985d05748bbcc97550b45314bf3fd6b3d54d1aba2b08"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 90.7958251953125,
+          "m2": 0.9981544771018453,
+          "m3f": 0.9946001367053997,
+          "sha256": "6af59452912e6b76fc31e38e94932c5c3a1095ddbece341cfe07bf93940184ce"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 92.04584655761718,
+          "m2": 0.9994371482176359,
+          "m3f": 0.9759849906191368,
+          "sha256": "e3de43d620a6e348de6f3d2932916965c3b0df95a226aa8ca8614e4661f7cb26"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 94.5845458984375,
+          "m2": 0.9577724706904038,
+          "m3f": 0.7275293095961789,
+          "sha256": "821659d5612d6461e3fa2be5267267e83ea07fbfafbdb904bfdb4413fadfe30b"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 77.21237335205079,
+          "m2": 1.0,
+          "m3f": 0.6965722866784647,
+          "sha256": "ca242edc14d42f62865abe71864cb0c3e0664e40dc7ba00406d1ae70c5b4b4cb"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 22.8103572845459,
+          "m2": 0.9773752563226247,
+          "m3f": -0.840874914559125,
+          "sha256": "a79fa693bbeead805de7780e5dc57f17356909318e520cf154c92eff58797711"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 39.89167404174805,
+          "m2": 0.9990430622009568,
+          "m3f": 0.9887901572112098,
+          "sha256": "998f911e4b2eff38d2033ede7b692eef793bb4db9cddaff290f05841199004b7"
+        }
+      ],
+      "timing": {
+        "before-scalar-t1-1024": {
+          "n": 30,
+          "min": 9.874497,
+          "max": 10.460678,
+          "mean": 10.0485098,
+          "variance": 0.028833742137544784,
+          "median": 9.973954,
+          "mad": 0.0763405566
+        },
+        "before-scalar-t1-2048": {
+          "n": 30,
+          "min": 45.462834,
+          "max": 47.967191,
+          "mean": 46.31836749999999,
+          "variance": 0.41538797864922405,
+          "median": 46.1568115,
+          "mad": 0.48028233959999994
+        },
+        "after-scalar-t1-1024": {
+          "n": 30,
+          "min": 9.647686,
+          "max": 10.243133,
+          "mean": 9.849775433333331,
+          "variance": 0.014703731423357506,
+          "median": 9.827667,
+          "mad": 0.08871730139999999
+        },
+        "after-scalar-t1-2048": {
+          "n": 30,
+          "min": 45.721982,
+          "max": 51.103881,
+          "mean": 46.65814720000001,
+          "variance": 0.878311836827684,
+          "median": 46.5031215,
+          "mad": 0.46617317669999997
+        },
+        "before-spatial-t1-1024": {
+          "n": 30,
+          "min": 32.795519,
+          "max": 34.313318,
+          "mean": 33.2417758,
+          "variance": 0.10166028460106218,
+          "median": 33.169566,
+          "mad": 0.19049556749999996
+        },
+        "before-spatial-t1-2048": {
+          "n": 30,
+          "min": 135.240065,
+          "max": 142.699991,
+          "mean": 137.4392022,
+          "variance": 2.131984036687402,
+          "median": 137.105697,
+          "mad": 1.0189961691
+        },
+        "after-spatial-t1-1024": {
+          "n": 30,
+          "min": 32.430616,
+          "max": 33.542666,
+          "mean": 33.0053525,
+          "variance": 0.08513451131743095,
+          "median": 33.021686,
+          "mad": 0.24532878719999998
+        },
+        "after-spatial-t1-2048": {
+          "n": 30,
+          "min": 133.985956,
+          "max": 140.093785,
+          "mean": 136.31517753333335,
+          "variance": 2.2827570715987444,
+          "median": 136.196242,
+          "mad": 1.3495277544
+        },
+        "after-scalar-t8-1024": {
+          "n": 35,
+          "min": 4.085167,
+          "max": 4.732291,
+          "mean": 4.409236685714286,
+          "variance": 0.03030911248622186,
+          "median": 4.42439,
+          "mad": 0.1313791164
+        },
+        "after-scalar-t8-2048": {
+          "n": 35,
+          "min": 21.08624,
+          "max": 23.278454,
+          "mean": 21.755895514285715,
+          "variance": 0.20220796828172793,
+          "median": 21.723235,
+          "mad": 0.40519457999999997
+        },
+        "after-spatial-t8-1024": {
+          "n": 35,
+          "min": 14.208891,
+          "max": 15.533463,
+          "mean": 14.84104805714286,
+          "variance": 0.08419133254858494,
+          "median": 14.828797,
+          "mad": 0.2715856332
+        },
+        "after-spatial-t8-2048": {
+          "n": 30,
+          "min": 63.174295,
+          "max": 66.101612,
+          "mean": 64.33243366666666,
+          "variance": 0.4907591764401615,
+          "median": 64.193039,
+          "mad": 0.4570455498
+        }
+      },
+      "rss_mib": {
+        "1024": 85.60546875,
+        "2048": 289.10546875
+      }
+    },
+    "full120_large": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin",
+          "sha256": "8746ae971fa5df969cce5c3eb92feec062e0a18752b77afe73dd2ba7e386c744"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin",
+          "sha256": "a8b93c01a4173c4e3dafe07a935fcf678da1f07849478e791230e3183a25fd67"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin",
+          "sha256": "0cce96f012b99768c0ad57c681ae19f660344904c0eeb03cea1b2a36a918f356"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin",
+          "sha256": "886db437813a1ca15fe2eff1dab26c90033ca82f1855d478994707fa05e5d7e4"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+          "sha256": "60f2f20abd9e7f6d91aaccab91e69cd7c67e4085a3f7b1e8dd8fc08c759a9f68"
+        }
+      ],
+      "weights": null,
+      "human_dev_mae": 6.608138264999989,
+      "human_test_mae": 7.496856700159997,
+      "human_test_srocc": 0.9340898038040846,
+      "human_test_rows": 3125,
+      "spatial_passes": 84,
+      "spatial_cases": 96,
+      "min_m2": 0.9580419580419514,
+      "min_m3f": 0.6379993816942938,
+      "interventions": 25248,
+      "failed_cells": [
+        {
+          "model": "full120_large",
+          "origin": "1054",
+          "content_class": "photo",
+          "distance": 0.5,
+          "block": 64,
+          "score": 93.79792785644533,
+          "m2": 0.9860139860139792,
+          "m3f": 0.9860139860139792,
+          "interventions": 12,
+          "pass": false,
+          "report": "full120_large-31-b64.json",
+          "sha256": "ef4e732c843c5bdfb2f64170aaf591583d7feeef2c9cad63216d44627188b24d",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-10.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-31-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "1054",
+          "content_class": "photo",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 82.60975952148436,
+          "m2": 0.9580419580419514,
+          "m3f": 0.9580419580419514,
+          "interventions": 12,
+          "pass": false,
+          "report": "full120_large-34-b64.json",
+          "sha256": "c12c056d2b723fc2221dce6446549976a25dfb6465603e5efc99ec3d90692314",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_1054.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/1054-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-34-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "2010",
+          "content_class": "photo",
+          "distance": 0.5,
+          "block": 64,
+          "score": 88.38898315429688,
+          "m2": 0.9794117647058794,
+          "m3f": 0.973529411764703,
+          "interventions": 16,
+          "pass": false,
+          "report": "full120_large-10-b64.json",
+          "sha256": "363d600558ee87c318574d76ad038a62d7ecabf585d7768397c908cce4bd2d16",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_2010.png.scale205x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/2010-scalar-10.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-10-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "2010",
+          "content_class": "photo",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 78.52668914794921,
+          "m2": 0.9617647058823501,
+          "m3f": 0.9499999999999972,
+          "interventions": 16,
+          "pass": false,
+          "report": "full120_large-13-b64.json",
+          "sha256": "73c9c7844501b9c1092357a27418a796546cdd7af88307d6cf5581f515528a5f",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_2010.png.scale205x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/2010-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-13-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "2010",
+          "content_class": "photo",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 52.966806793212896,
+          "m2": 0.9676470588235265,
+          "m3f": 0.9911764705882323,
+          "interventions": 16,
+          "pass": false,
+          "report": "full120_large-17-b64.json",
+          "sha256": "85254c759489eac16e2d91da0a653da341fd80d3c1db697291ea9458f0ce3c43",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_2010.png.scale205x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/2010-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-17-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "8206",
+          "content_class": "screen",
+          "distance": 0.5,
+          "block": 64,
+          "score": 92.95500946044923,
+          "m2": 0.9720279720279653,
+          "m3f": 0.9440559440559375,
+          "interventions": 12,
+          "pass": false,
+          "report": "full120_large-199-b64.json",
+          "sha256": "251366f5f4797135ffd8ef79bf6e8a2cb145f8f5845aa070f2b404061587371a",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-10.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-199-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "8206",
+          "content_class": "screen",
+          "distance": 7.731237411499023,
+          "block": 8,
+          "score": 74.21161193847657,
+          "m2": 0.9998774212963275,
+          "m3f": 0.6379993816942938,
+          "interventions": 576,
+          "pass": false,
+          "report": "full120_large-206-b8.json",
+          "sha256": "ff09a4ddb8c941db383652248fdf7cbf51d6a7a6bbcfba47a20a5d2b78da2ed5",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-17.png",
+            "--block",
+            "8",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-206-b8.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "8384",
+          "content_class": "screen",
+          "distance": 0.5,
+          "block": 16,
+          "score": 95.97328796386721,
+          "m2": 0.9763522834024215,
+          "m3f": 0.9318741946954169,
+          "interventions": 192,
+          "pass": false,
+          "report": "full120_large-220-b16.json",
+          "sha256": "90608b80691cba29c0c488699a82df50272a1aef50f5cadbf4c3b2160ee05824",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8384.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8384-scalar-10.png",
+            "--block",
+            "16",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-220-b16.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "8384",
+          "content_class": "screen",
+          "distance": 1.6168174743652344,
+          "block": 32,
+          "score": 91.23014678955079,
+          "m2": 0.9863270481861286,
+          "m3f": 0.8707120504176258,
+          "interventions": 48,
+          "pass": false,
+          "report": "full120_large-223-b32.json",
+          "sha256": "09dfacd1c8e35eed3819e03c14c78b9601eed122a49d951dbc72b096c1d1e35d",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8384.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8384-scalar-13.png",
+            "--block",
+            "32",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-223-b32.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "8384",
+          "content_class": "screen",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 91.23014678955079,
+          "m2": 0.9789473684210456,
+          "m3f": 0.907181776498152,
+          "interventions": 12,
+          "pass": false,
+          "report": "full120_large-223-b64.json",
+          "sha256": "7b20bc3468d9099862b25ca7413b2dbba8668779ecce87a8d5f0adfa4edab8fe",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8384.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8384-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-223-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "8384",
+          "content_class": "screen",
+          "distance": 7.731237411499023,
+          "block": 32,
+          "score": 65.96634674072266,
+          "m2": 0.989635020399162,
+          "m3f": 0.9778757688801583,
+          "interventions": 48,
+          "pass": false,
+          "report": "full120_large-227-b32.json",
+          "sha256": "4f6af92c7a29aa9ac4e9430283c7767f4247143ea69fb95ed6da873008688473",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8384.png.scale192x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8384-scalar-17.png",
+            "--block",
+            "32",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-227-b32.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        },
+        {
+          "model": "full120_large",
+          "origin": "9380",
+          "content_class": "graphic",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 66.32682952880859,
+          "m2": 0.9790209790209722,
+          "m3f": 0.9580419580419514,
+          "interventions": 12,
+          "pass": false,
+          "report": "full120_large-164-b64.json",
+          "sha256": "c8e4a5694d39224e0db300e71c362972a0b69f6f159ac256e140dd6589b59806",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_9380.png.scale171x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/9380-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/full120_large-164-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-local120-h128-full-s5119.bin",
+            "--ensemble-weights",
+            "0.2,0.2,0.2,0.2,0.2"
+          ]
+        }
+      ],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 80.84274444580079,
+          "m2": 0.9985645933014353,
+          "m3f": 0.9841421736158577,
+          "sha256": "aebf595b22a3e23d797fee1a2d88ec98f187c04650207a45f9c8c3dfad1d5bd1"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 90.95862731933593,
+          "m2": 0.9999316473000682,
+          "m3f": 0.99377990430622,
+          "sha256": "c8a32b592c92dacc74479fe5d8ff16f0c2b578f89ceef247ce07609f91a16adf"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 91.34388885498048,
+          "m2": 0.9990619136960599,
+          "m3f": 0.9825515947467165,
+          "sha256": "8d66783811610504ef614928d02ee75c043a8f1f2acaf60d50d67337a53c6fb4"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 94.08393096923828,
+          "m2": 0.9996743378202345,
+          "m3f": 0.7620495006513244,
+          "sha256": "40b9b3b4cc10805e5392dc54817855761e59a2256eb6d8d959b17cf73bd51a2b"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 81.22282257080077,
+          "m2": 1.0,
+          "m3f": 0.7352415186051016,
+          "sha256": "5609f4b8131b8ea3c6a04b480d73b50669bec1146a981e0f7483fa33c37e6b49"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 25.962742614746094,
+          "m2": 0.9958304853041694,
+          "m3f": -0.5918660287081339,
+          "sha256": "c45fb08576276de8c8f6667247a4acc9ab20dcfbc1ddca91b923d72f01aa572d"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 44.51050720214844,
+          "m2": 0.9999999999999999,
+          "m3f": 0.9882433356117566,
+          "sha256": "9ffbb7a880a960f5d4f508083251a503d97778f345b18ea602155e9beb601ad6"
+        }
+      ],
+      "timing": {
+        "before-scalar-t1-1024": {
+          "n": 30,
+          "min": 15.507384,
+          "max": 16.384411,
+          "mean": 15.8704895,
+          "variance": 0.0498026369679139,
+          "median": 15.813345,
+          "mad": 0.17982010619999997
+        },
+        "before-scalar-t1-2048": {
+          "n": 30,
+          "min": 74.619348,
+          "max": 78.212546,
+          "mean": 76.10990876666666,
+          "variance": 0.8560795944966029,
+          "median": 75.9550835,
+          "mad": 0.8902738719
+        },
+        "after-scalar-t1-1024": {
+          "n": 30,
+          "min": 15.375666,
+          "max": 16.260941,
+          "mean": 15.710549433333334,
+          "variance": 0.062216173085081816,
+          "median": 15.645543,
+          "mad": 0.1494038259
+        },
+        "after-scalar-t1-2048": {
+          "n": 30,
+          "min": 76.617694,
+          "max": 79.187335,
+          "mean": 77.6704716,
+          "variance": 0.35777309866011014,
+          "median": 77.6136915,
+          "mad": 0.5663220654
+        },
+        "before-spatial-t1-1024": {
+          "n": 30,
+          "min": 55.827058,
+          "max": 57.614622,
+          "mean": 56.98635746666666,
+          "variance": 0.20801573717232694,
+          "median": 57.0966525,
+          "mad": 0.4305181293
+        },
+        "before-spatial-t1-2048": {
+          "n": 30,
+          "min": 220.12362,
+          "max": 229.977832,
+          "mean": 224.0502299,
+          "variance": 4.180895014609938,
+          "median": 224.1631085,
+          "mad": 1.3898752308
+        },
+        "after-spatial-t1-1024": {
+          "n": 30,
+          "min": 54.929535,
+          "max": 58.259997,
+          "mean": 56.62397413333334,
+          "variance": 0.5154830035608785,
+          "median": 56.772928,
+          "mad": 0.6683175323999999
+        },
+        "after-spatial-t1-2048": {
+          "n": 30,
+          "min": 219.348948,
+          "max": 224.027483,
+          "mean": 221.69594816666665,
+          "variance": 1.8821016952713823,
+          "median": 221.63626,
+          "mad": 1.6533228726
+        },
+        "after-scalar-t8-1024": {
+          "n": 35,
+          "min": 5.344575,
+          "max": 6.272311,
+          "mean": 5.933683628571427,
+          "variance": 0.025597212977299073,
+          "median": 5.921337,
+          "mad": 0.1259957958
+        },
+        "after-scalar-t8-2048": {
+          "n": 35,
+          "min": 30.786693,
+          "max": 33.277009,
+          "mean": 31.255958142857153,
+          "variance": 0.18694231353436078,
+          "median": 31.254591,
+          "mad": 0.3209502828
+        },
+        "after-spatial-t8-1024": {
+          "n": 35,
+          "min": 19.53443,
+          "max": 21.442748,
+          "mean": 20.548674857142853,
+          "variance": 0.17828728115094963,
+          "median": 20.58881,
+          "mad": 0.32504818919999995
+        },
+        "after-spatial-t8-2048": {
+          "n": 30,
+          "min": 87.910374,
+          "max": 93.779538,
+          "mean": 89.59018610000003,
+          "variance": 1.677891422059672,
+          "median": 89.361247,
+          "mad": 1.2234526395
+        }
+      },
+      "rss_mib": {}
+    },
+    "linear60": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_coarse60-lam0.01.bin",
+          "sha256": "102987bae7ce4c317a0791d58e16237db7fb08e7466f488867346dc91128e810"
+        }
+      ],
+      "weights": null,
+      "human_dev_mae": 9.892351035000004,
+      "human_test_mae": 10.522858810560027,
+      "human_test_srocc": 0.8954069176254031,
+      "human_test_rows": 3125,
+      "spatial_passes": 95,
+      "spatial_cases": 96,
+      "min_m2": 0.9866747764581737,
+      "min_m3f": 0.7975012887926183,
+      "interventions": 25248,
+      "failed_cells": [
+        {
+          "model": "linear60",
+          "origin": "9380",
+          "content_class": "graphic",
+          "distance": 0.5,
+          "block": 8,
+          "score": 86.74866788111316,
+          "m2": 0.9866747764581737,
+          "m3f": 0.9064592973696175,
+          "interventions": 704,
+          "pass": false,
+          "report": "linear60-157-b8.json",
+          "sha256": "0edc0028711079666681ddcacabbb8f74c5891af8e7bc2c6d2545fb941ed97b3",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_9380.png.scale171x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/9380-scalar-10.png",
+            "--block",
+            "8",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/linear60-157-b8.json",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_coarse60-lam0.01.bin"
+          ]
+        }
+      ],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 70.55806893592343,
+          "m2": 0.9999316473000682,
+          "m3f": 0.9732057416267942,
+          "sha256": "4ce0cdf60812a9d99bc8a44d91f93795fdc83ab10b04262716c63f9e4e42046c"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 73.18756618654182,
+          "m2": 0.9999316473000682,
+          "m3f": 0.9907040328092959,
+          "sha256": "6ad9921dbc3b8a913e00d452f8cc516658117356b51325ce6e98d63323390cce"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 74.85042748216519,
+          "m2": 0.9999999999999998,
+          "m3f": 0.9887429643527202,
+          "sha256": "c20248e49c17bfc734aeef3e5c8479a0083f48c87a9b980b26e599ec1e984e95"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 85.713401990649,
+          "m2": 0.9998914459400782,
+          "m3f": 0.8678897090751194,
+          "sha256": "5cb9277c0380c3067f5e7e6bf366b012990d317e930f3a88b90c339370965393"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 64.04824674456692,
+          "m2": 1.0,
+          "m3f": 0.6391383934540948,
+          "sha256": "d24cd1605c0e6e5ff9d0c35c3bfb607fdea80e5f0de27ecf97f77f1cbaa6e2c8"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 47.78672009320124,
+          "m2": 0.9999316473000682,
+          "m3f": 0.39336978810663015,
+          "sha256": "d372e2be0e153830476628cce5423a82f7bb555068627f1a6e68f781f40e20c4"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 38.98926629418234,
+          "m2": 0.9999999999999999,
+          "m3f": 0.979630895420369,
+          "sha256": "95b022b86760d0b604268c36faafdd68bf52708cbfdcfe36e6237d40d64fbe06"
+        }
+      ],
+      "timing": {},
+      "rss_mib": {}
+    },
+    "linear80": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_mid80-lam0.01.bin",
+          "sha256": "1142a3152a52b5cbb5a04e785e5d5acfa942a2f990fe6529d8c2ac171576bc54"
+        }
+      ],
+      "weights": null,
+      "human_dev_mae": 9.999143416999999,
+      "human_test_mae": 10.599296958400002,
+      "human_test_srocc": 0.8947694131358811,
+      "human_test_rows": 3125,
+      "spatial_passes": 96,
+      "spatial_cases": 96,
+      "min_m2": 0.9941954478145955,
+      "min_m3f": 0.7531525022527275,
+      "interventions": 25248,
+      "failed_cells": [],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 72.53444682133718,
+          "m2": 0.9999316473000682,
+          "m3f": 0.9749145591250853,
+          "sha256": "8736d22179d52ba0cf39e4387aca0dac5b0d3bb8e24270d5e35e0df1259dfc74"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 73.54271142924841,
+          "m2": 0.9999999999999999,
+          "m3f": 0.9926862611073136,
+          "sha256": "3ceadbbdd82f0669dc64825db7b648e6f119a317cbe3930847e03669a2d63a36"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 75.48969962649475,
+          "m2": 0.9999999999999998,
+          "m3f": 0.9902439024390243,
+          "sha256": "56bedc88bbd205e408725a673aeab59c6fd8535146974a1d5d06941d6bf464d8"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 86.81260236572585,
+          "m2": 1.0,
+          "m3f": 0.8306556665219279,
+          "sha256": "81c4c04fcd0ea3caa7813a3239b96edea76b210875802c3532768f8f65274150"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 64.26404685456245,
+          "m2": 1.0,
+          "m3f": 0.7598810972250221,
+          "sha256": "857514cb1506a7263e68da66bb852b99662bc14da0240b913938b8bae8d1d441"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 51.53444760717727,
+          "m2": 0.9999999999999999,
+          "m3f": 0.5256322624743677,
+          "sha256": "ee0736e8b28efabafebc6892430b3d5031c52434d2afe0f29d4224f8b9d0edd9"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 39.394742480057175,
+          "m2": 0.9999999999999999,
+          "m3f": 0.9799043062200956,
+          "sha256": "38b539060c498b05d28369f47dc2c4009345be350b038a429b4381329ef0669f"
+        }
+      ],
+      "timing": {
+        "after-scalar-t1-1024": {
+          "n": 30,
+          "min": 8.194664,
+          "max": 8.969033,
+          "mean": 8.374223633333331,
+          "variance": 0.03841377513520586,
+          "median": 8.3057265,
+          "mad": 0.11298894599999999
+        },
+        "after-scalar-t1-2048": {
+          "n": 30,
+          "min": 39.045633,
+          "max": 40.682976,
+          "mean": 39.72383960000001,
+          "variance": 0.2286726947051445,
+          "median": 39.663692,
+          "mad": 0.49447082159999994
+        },
+        "after-spatial-t1-1024": {
+          "n": 30,
+          "min": 26.799501,
+          "max": 28.707789,
+          "mean": 27.587891,
+          "variance": 0.17653577963820724,
+          "median": 27.572893,
+          "mad": 0.24224497919999996
+        },
+        "after-spatial-t1-2048": {
+          "n": 30,
+          "min": 109.890251,
+          "max": 114.369284,
+          "mean": 111.6169448,
+          "variance": 1.567061317304513,
+          "median": 111.2765445,
+          "mad": 1.1323394564999998
+        },
+        "after-scalar-t8-1024": {
+          "n": 35,
+          "min": 3.6455,
+          "max": 4.418029,
+          "mean": 3.9823698,
+          "variance": 0.038920120592164736,
+          "median": 3.989313,
+          "mad": 0.199921197
+        },
+        "after-scalar-t8-2048": {
+          "n": 35,
+          "min": 17.834175,
+          "max": 19.588163,
+          "mean": 18.586478628571427,
+          "variance": 0.12434729965424039,
+          "median": 18.524832,
+          "mad": 0.32247884339999994
+        },
+        "after-spatial-t8-1024": {
+          "n": 35,
+          "min": 12.229633,
+          "max": 13.618926,
+          "mean": 12.806281257142858,
+          "variance": 0.08581219911243188,
+          "median": 12.786778,
+          "mad": 0.21843294060000001
+        },
+        "after-spatial-t8-2048": {
+          "n": 30,
+          "min": 55.637225,
+          "max": 58.586372,
+          "mean": 56.81922406666667,
+          "variance": 0.5429546150354452,
+          "median": 56.6602445,
+          "mad": 0.7007872137
+        }
+      },
+      "rss_mib": {}
+    },
+    "linear120": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/local120-lam0.01.bin",
+          "sha256": "7b1127963d2d64465170b83d57441bc12cb304d188a3be3084d09d6d1f1855c1"
+        }
+      ],
+      "weights": null,
+      "human_dev_mae": 9.598346201999998,
+      "human_test_mae": 10.187589252800006,
+      "human_test_srocc": 0.8954834289762696,
+      "human_test_rows": 3125,
+      "spatial_passes": 96,
+      "spatial_cases": 96,
+      "min_m2": 0.9930069930069861,
+      "min_m3f": 0.75524475524475,
+      "interventions": 25248,
+      "failed_cells": [],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 74.21635335688656,
+          "m2": 0.9999829116790115,
+          "m3f": 0.9940361251643615,
+          "sha256": "bb7ef05078b24905540c573cc8f3735a94011f9567f2943279770a12383d3137"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 79.65678376955833,
+          "m2": 0.9999999999999999,
+          "m3f": 0.9885167464114831,
+          "sha256": "f73082b36bd6b78a2f0bf0a23c9f401ef6763469c7ca8432071f3d4aaa3a207d"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 79.17496258923458,
+          "m2": 0.9999999999999998,
+          "m3f": 0.994559099437148,
+          "sha256": "f62c50e2b86258b9b7f2f3150e269b8c3813d5fa2393f1d609928aaff4473243"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 81.26069013930403,
+          "m2": 0.9999457214969611,
+          "m3f": 0.8692938187913274,
+          "sha256": "42a498fe2ea6b9cc5e6956240c4c76f3a021ff6ae4bbaa89e9ee34833a07b2dd"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 76.28398948963186,
+          "m2": 1.0,
+          "m3f": 0.7591796145596862,
+          "sha256": "d187ba10817325b9b612fc14c4a58f0b264213cee29d786d17d25fc2bdc64102"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 55.44002887158306,
+          "m2": 0.9999316473000682,
+          "m3f": 0.5280246069719753,
+          "sha256": "3c5982a047e65772fefbcb055b8c104fa5540cabcda4dedc9b4e3b6d91f18166"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 37.73259518849415,
+          "m2": 0.9998632946001366,
+          "m3f": 0.9780587833219411,
+          "sha256": "73545886c120ce617f618cb0efb52c25f837cb963e972d58fd13e33d68c015fe"
+        }
+      ],
+      "timing": {
+        "after-scalar-t1-1024": {
+          "n": 30,
+          "min": 15.239367,
+          "max": 15.952732,
+          "mean": 15.475723899999998,
+          "variance": 0.029564094638782706,
+          "median": 15.458416,
+          "mad": 0.1457114106
+        },
+        "after-scalar-t1-2048": {
+          "n": 30,
+          "min": 76.032597,
+          "max": 78.971612,
+          "mean": 77.44459943333334,
+          "variance": 0.5267905689905293,
+          "median": 77.3149675,
+          "mad": 0.6155547635999999
+        },
+        "after-spatial-t1-1024": {
+          "n": 30,
+          "min": 54.331279,
+          "max": 56.258058,
+          "mean": 55.38503506666666,
+          "variance": 0.2798546739388914,
+          "median": 55.41433,
+          "mad": 0.42429417449999995
+        },
+        "after-spatial-t1-2048": {
+          "n": 30,
+          "min": 218.128396,
+          "max": 227.79733,
+          "mean": 221.25714086666665,
+          "variance": 3.9574277305646013,
+          "median": 221.1306,
+          "mad": 1.4850907679999998
+        },
+        "after-scalar-t8-1024": {
+          "n": 35,
+          "min": 5.497091,
+          "max": 6.030161,
+          "mean": 5.768637542857143,
+          "variance": 0.014441078163490769,
+          "median": 5.765321,
+          "mad": 0.1364332998
+        },
+        "after-scalar-t8-2048": {
+          "n": 35,
+          "min": 30.582095,
+          "max": 32.839252,
+          "mean": 30.98451754285714,
+          "variance": 0.167894663394432,
+          "median": 30.906748,
+          "mad": 0.2912819742
+        },
+        "after-spatial-t8-1024": {
+          "n": 35,
+          "min": 18.262299,
+          "max": 19.744882,
+          "mean": 18.89555722857143,
+          "variance": 0.12776278843759473,
+          "median": 18.809964,
+          "mad": 0.2482050312
+        },
+        "after-spatial-t8-2048": {
+          "n": 30,
+          "min": 86.066567,
+          "max": 97.853586,
+          "mean": 88.30726300000002,
+          "variance": 4.7598569224763345,
+          "median": 87.6698565,
+          "mad": 1.2009912495
+        }
+      },
+      "rss_mib": {}
+    },
+    "coarse60_mix1": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5101.bin",
+          "sha256": "f48ffd38af299dca6fabef1b64aa5bed445cc5df328e287c20befca671b3ffe9"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5103.bin",
+          "sha256": "ee811f698b88c630d2d2230355cd643d2a30b51bf219b4e22bd8957092b38c2e"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5107.bin",
+          "sha256": "5a34e8b30b01c3a948f923704874f92b891b12ba386f9ec25bae2effa56fd0b3"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5113.bin",
+          "sha256": "2a4cf49370d7c9ece08db52d6b2a2e1957bb74a9c3844859b4d11b8dda89d2e4"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5119.bin",
+          "sha256": "c2fb4fb4e3b892d670a77b0cbd223426292399f474e031edd964a2a14e72b0f1"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_coarse60-lam0.01.bin",
+          "sha256": "102987bae7ce4c317a0791d58e16237db7fb08e7466f488867346dc91128e810"
+        }
+      ],
+      "weights": [
+        0.16666666666666666,
+        0.16666666666666666,
+        0.16666666666666666,
+        0.16666666666666666,
+        0.16666666666666666,
+        0.16666666666666666
+      ],
+      "human_dev_mae": 7.037188021000006,
+      "human_test_mae": 7.672992727680009,
+      "human_test_srocc": 0.933013222863981,
+      "human_test_rows": 3125,
+      "spatial_passes": 93,
+      "spatial_cases": 96,
+      "min_m2": 0.9806314375279891,
+      "min_m3f": 0.7281438084497736,
+      "interventions": 25248,
+      "failed_cells": [
+        {
+          "model": "coarse60_mix1",
+          "origin": "8206",
+          "content_class": "screen",
+          "distance": 7.731237411499023,
+          "block": 64,
+          "score": 69.15279924695962,
+          "m2": 0.9860139860139792,
+          "m3f": 0.8531468531468472,
+          "interventions": 12,
+          "pass": false,
+          "report": "coarse60_mix1-206-b64.json",
+          "sha256": "380f9b9b03739cea61ab719a374bbe28fb7232cd3a19c56bc527d0eb8032dfc9",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_8206.png.scale256x144.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/8206-scalar-17.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/coarse60_mix1-206-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5119.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_coarse60-lam0.01.bin",
+            "--ensemble-weights",
+            "0.16666666666666666,0.16666666666666666,0.16666666666666666,0.16666666666666666,0.16666666666666666,0.16666666666666666"
+          ]
+        },
+        {
+          "model": "coarse60_mix1",
+          "origin": "9380",
+          "content_class": "graphic",
+          "distance": 0.5,
+          "block": 8,
+          "score": 89.01154377811847,
+          "m2": 0.9867734748460659,
+          "m3f": 0.9350960159221163,
+          "interventions": 704,
+          "pass": false,
+          "report": "coarse60_mix1-157-b8.json",
+          "sha256": "315637e4f94964173805aab8f773245592d5c72c9b03613cf6b4a1e204a45eb9",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_9380.png.scale171x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/9380-scalar-10.png",
+            "--block",
+            "8",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/coarse60_mix1-157-b8.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5119.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_coarse60-lam0.01.bin",
+            "--ensemble-weights",
+            "0.16666666666666666,0.16666666666666666,0.16666666666666666,0.16666666666666666,0.16666666666666666,0.16666666666666666"
+          ]
+        },
+        {
+          "model": "coarse60_mix1",
+          "origin": "9380",
+          "content_class": "graphic",
+          "distance": 7.731237411499023,
+          "block": 32,
+          "score": 62.47901178135996,
+          "m2": 0.9806314375279891,
+          "m3f": 0.9345248652681435,
+          "interventions": 48,
+          "pass": false,
+          "report": "coarse60_mix1-164-b32.json",
+          "sha256": "0e95f952de4f87c31f363c8fc4ffa138d83436bff6977e06ec57266dd9503c71",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_9380.png.scale171x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/9380-scalar-17.png",
+            "--block",
+            "32",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/coarse60_mix1-164-b32.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5119.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_coarse60-lam0.01.bin",
+            "--ensemble-weights",
+            "0.16666666666666666,0.16666666666666666,0.16666666666666666,0.16666666666666666,0.16666666666666666,0.16666666666666666"
+          ]
+        }
+      ],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 81.32499085943775,
+          "m2": 0.9998632946001366,
+          "m3f": 0.9853725222146273,
+          "sha256": "c7b499f3e28d391615148628ba58641c03b221797377dcd967ec419bf04f94ae"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 83.55187565511373,
+          "m2": 0.9993164730006834,
+          "m3f": 0.9935064935064933,
+          "sha256": "92cca8cef1529cbb86c36c7e0797d03b40c7a3f0c40b70356290c2daf750b640"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 84.25442025622348,
+          "m2": 0.9998123827392118,
+          "m3f": 0.9866791744840524,
+          "sha256": "a44d7215d7833477307ec5c1141fbce6f8d4ffc012f209f224f020bf9f244cf2"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 88.49011742365307,
+          "m2": 0.9998914459400782,
+          "m3f": 0.8055796786799826,
+          "sha256": "18acd0f94ce4891832c75db3352e733010f978f1291e38af8165dca3e6332132"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 64.87071075096623,
+          "m2": 1.0,
+          "m3f": 0.5796000522337175,
+          "sha256": "d60235fca3bd35825ee6dc9e69c9ac1242c3dcdf2d6d43723f306a5dec0fd7b3"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 30.48254137173471,
+          "m2": 0.9377990430622009,
+          "m3f": 0.6192071086807928,
+          "sha256": "e25fd619114ec7e252cfbf6ae4ae4bf23fa52d64d48fbb9c315919a91293ad31"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 49.44630700646854,
+          "m2": 0.9963089542036909,
+          "m3f": 0.9658920027341079,
+          "sha256": "c27a4bc22f8ca4326503139227b3ca14a068176a55a99b697c176f907e729b5c"
+        }
+      ],
+      "timing": {},
+      "rss_mib": {}
+    },
+    "coarse60_mix2": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5101.bin",
+          "sha256": "f48ffd38af299dca6fabef1b64aa5bed445cc5df328e287c20befca671b3ffe9"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5103.bin",
+          "sha256": "ee811f698b88c630d2d2230355cd643d2a30b51bf219b4e22bd8957092b38c2e"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5107.bin",
+          "sha256": "5a34e8b30b01c3a948f923704874f92b891b12ba386f9ec25bae2effa56fd0b3"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5113.bin",
+          "sha256": "2a4cf49370d7c9ece08db52d6b2a2e1957bb74a9c3844859b4d11b8dda89d2e4"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5119.bin",
+          "sha256": "c2fb4fb4e3b892d670a77b0cbd223426292399f474e031edd964a2a14e72b0f1"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_coarse60-lam0.01.bin",
+          "sha256": "102987bae7ce4c317a0791d58e16237db7fb08e7466f488867346dc91128e810"
+        }
+      ],
+      "weights": [
+        0.14285714285714285,
+        0.14285714285714285,
+        0.14285714285714285,
+        0.14285714285714285,
+        0.14285714285714285,
+        0.2857142857142857
+      ],
+      "human_dev_mae": 7.278826326999998,
+      "human_test_mae": 7.897763343999997,
+      "human_test_srocc": 0.9313056208780847,
+      "human_test_rows": 3125,
+      "spatial_passes": 96,
+      "spatial_cases": 96,
+      "min_m2": 0.9911764705882323,
+      "min_m3f": 0.7605934351805679,
+      "interventions": 25248,
+      "failed_cells": [],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 79.78685915607856,
+          "m2": 0.9998632946001366,
+          "m3f": 0.986397812713602,
+          "sha256": "c899e1a94a277c9eef66a62186d08643fa8499d85357860c36f190177fb56dea"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 82.07126001674632,
+          "m2": 0.9997949419002049,
+          "m3f": 0.9939849624060149,
+          "sha256": "133f50f67d891b76cadcd291655a3e5defbafe416532792f5d50f833667b0c25"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 82.9109927170723,
+          "m2": 0.9994371482176359,
+          "m3f": 0.9870544090056284,
+          "sha256": "98190a0230b95748013e4fdd58071f71b6d3a20c129bafbf3bcf68c7de028a04"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 88.09344379036679,
+          "m2": 0.9997828918801563,
+          "m3f": 0.8079678679982631,
+          "sha256": "232011fe6569e687b52f3b11c87584168e5b1767ae9b2a7909de73bd694ace6b"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 64.7532158929092,
+          "m2": 1.0,
+          "m3f": 0.6226535508187031,
+          "sha256": "33b9b210abb4dab5a742ba72caa11730ccb5751e3cd13ef48e1fa3a9f65e83b2"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 32.954566903372786,
+          "m2": 0.9404647983595351,
+          "m3f": 0.5751196172248804,
+          "sha256": "1096d7a92f929f9174fb33216695792105234e5a265c337dd7f8d27650befcd6"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 47.95244404757051,
+          "m2": 0.9983595352016403,
+          "m3f": 0.9793574846206424,
+          "sha256": "aac1d288cc4d568c589c290dcbba00a802f317845a898298ed61decb9e928003"
+        }
+      ],
+      "timing": {
+        "after-scalar-t1-1024": {
+          "n": 30,
+          "min": 8.012773,
+          "max": 8.522495,
+          "mean": 8.138142566666668,
+          "variance": 0.016119829564943646,
+          "median": 8.098533,
+          "mad": 0.0690854535
+        },
+        "after-scalar-t1-2048": {
+          "n": 30,
+          "min": 37.502516,
+          "max": 39.181401,
+          "mean": 38.13512143333333,
+          "variance": 0.17175168375673783,
+          "median": 38.0201685,
+          "mad": 0.3250437414
+        },
+        "after-spatial-t1-1024": {
+          "n": 30,
+          "min": 26.425597,
+          "max": 28.389956,
+          "mean": 27.232115966666665,
+          "variance": 0.15799926778686077,
+          "median": 27.24937,
+          "mad": 0.3012524592
+        },
+        "after-spatial-t1-2048": {
+          "n": 30,
+          "min": 106.067783,
+          "max": 115.361574,
+          "mean": 108.81082666666663,
+          "variance": 3.532641864060156,
+          "median": 108.4792415,
+          "mad": 1.2838552461
+        },
+        "after-scalar-t8-1024": {
+          "n": 35,
+          "min": 3.687831,
+          "max": 5.427478,
+          "mean": 4.112431542857142,
+          "variance": 0.09116408059478488,
+          "median": 4.107637,
+          "mad": 0.1230009438
+        },
+        "after-scalar-t8-2048": {
+          "n": 35,
+          "min": 17.504142,
+          "max": 19.051172,
+          "mean": 18.12244642857143,
+          "variance": 0.1232516945980752,
+          "median": 18.047643,
+          "mad": 0.3090746568
+        },
+        "after-spatial-t8-1024": {
+          "n": 35,
+          "min": 12.747928,
+          "max": 14.06602,
+          "mean": 13.23900297142857,
+          "variance": 0.0697977055978521,
+          "median": 13.159831,
+          "mad": 0.2034883326
+        },
+        "after-spatial-t8-2048": {
+          "n": 30,
+          "min": 54.642196,
+          "max": 58.41776,
+          "mean": 56.37933363333333,
+          "variance": 0.8015375508284477,
+          "median": 56.299451,
+          "mad": 0.6918767876999999
+        }
+      },
+      "rss_mib": {
+        "1024": 80.49609375,
+        "2048": 266.25
+      }
+    },
+    "coarse60_mix5": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5101.bin",
+          "sha256": "f48ffd38af299dca6fabef1b64aa5bed445cc5df328e287c20befca671b3ffe9"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5103.bin",
+          "sha256": "ee811f698b88c630d2d2230355cd643d2a30b51bf219b4e22bd8957092b38c2e"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5107.bin",
+          "sha256": "5a34e8b30b01c3a948f923704874f92b891b12ba386f9ec25bae2effa56fd0b3"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5113.bin",
+          "sha256": "2a4cf49370d7c9ece08db52d6b2a2e1957bb74a9c3844859b4d11b8dda89d2e4"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5119.bin",
+          "sha256": "c2fb4fb4e3b892d670a77b0cbd223426292399f474e031edd964a2a14e72b0f1"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_coarse60-lam0.01.bin",
+          "sha256": "102987bae7ce4c317a0791d58e16237db7fb08e7466f488867346dc91128e810"
+        }
+      ],
+      "weights": [
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.5
+      ],
+      "human_dev_mae": 7.885182418,
+      "human_test_mae": 8.480679674560008,
+      "human_test_srocc": 0.9256951600325154,
+      "human_test_rows": 3125,
+      "spatial_passes": 94,
+      "spatial_cases": 96,
+      "min_m2": 0.9764705882352912,
+      "min_m3f": 0.8062182229219439,
+      "interventions": 25248,
+      "failed_cells": [
+        {
+          "model": "coarse60_mix5",
+          "origin": "2010",
+          "content_class": "photo",
+          "distance": 1.6168174743652344,
+          "block": 64,
+          "score": 74.21933874281696,
+          "m2": 0.9764705882352912,
+          "m3f": 0.9852941176470559,
+          "interventions": 16,
+          "pass": false,
+          "report": "coarse60_mix5-13-b64.json",
+          "sha256": "110f598d8d9dfd9a20b807bd9a1f5f0ecaa3674eb9ae5939d00cb851cd256185",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_2010.png.scale205x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/2010-scalar-13.png",
+            "--block",
+            "64",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/coarse60_mix5-13-b64.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5119.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_coarse60-lam0.01.bin",
+            "--ensemble-weights",
+            "0.1,0.1,0.1,0.1,0.1,0.5"
+          ]
+        },
+        {
+          "model": "coarse60_mix5",
+          "origin": "9380",
+          "content_class": "graphic",
+          "distance": 7.731237411499023,
+          "block": 32,
+          "score": 60.37099225325957,
+          "m2": 0.9860053739364082,
+          "m3f": 0.9425725608166364,
+          "interventions": 48,
+          "pass": false,
+          "report": "coarse60_mix5-164-b32.json",
+          "sha256": "7a9978b9e8a179ce2bfb0f5fa0f7cda69967a50b2fab206a300d0b9300f888be",
+          "argv": [
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/tools/spatial",
+            "/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23/o_9380.png.scale171x256.png",
+            "/mnt/v/output/zensim/jxl-decode-contract-2026-09-08/train-rebased/9380-scalar-17.png",
+            "--block",
+            "32",
+            "--json",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/broad-served/coarse60_mix5-164-b32.json",
+            "--ensemble",
+            "/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5101.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5103.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5107.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5113.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/human-y_coarse60-h128-full-s5119.bin,/home/lilith/work/zensim-validation-2026-09-13/runtime-profiles/packed/y_coarse60-lam0.01.bin",
+            "--ensemble-weights",
+            "0.1,0.1,0.1,0.1,0.1,0.5"
+          ]
+        }
+      ],
+      "pixel_pairs": 43,
+      "max_consumed_feature_abs_delta": 0,
+      "max_pixel_cached_delta": 0.0,
+      "artifacts": [
+        {
+          "case": "jxl_2010",
+          "score": 77.01822209003203,
+          "m2": 0.9997265892002732,
+          "m3f": 0.9851674641148324,
+          "sha256": "a238234ad1296ff630ec35add2ebd360789cd4d41421ce3fdae3bd99cf223729"
+        },
+        {
+          "case": "jxl_6610",
+          "score": 79.40615186768497,
+          "m2": 0.9999316473000682,
+          "m3f": 0.9930963773069035,
+          "sha256": "4f835d9312b6fee0b8d578cc0a206e5c4146d1a2d553a013e5ba974ccf5dcafd"
+        },
+        {
+          "case": "jxl_8462",
+          "score": 80.49282314660017,
+          "m2": 0.9996247654784238,
+          "m3f": 0.9883677298311443,
+          "sha256": "182fea681b7b65b3efadd7f5f01ea74035d8a0360d9362a31da3c6f97e97069a"
+        },
+        {
+          "case": "jxl_9066",
+          "score": 87.37943125045146,
+          "m2": 0.9998914459400782,
+          "m3f": 0.8389057750759878,
+          "sha256": "31151bc31d1e83758b9ab462d85edb9259f172ae9956f9b69002e43269161000"
+        },
+        {
+          "case": "saltpepper16_2010",
+          "score": 64.54172514840651,
+          "m2": 0.9998875140607424,
+          "m3f": 0.7311203079462536,
+          "sha256": "5cc40bc03508f5b5e14843f34a6490c2d62b252f4a0a2a787e112f3ad815709c"
+        },
+        {
+          "case": "swap_rb_2010",
+          "score": 37.40421286032132,
+          "m2": 0.9578263841421735,
+          "m3f": 0.38817498291182495,
+          "sha256": "173d37eb791a38710fdc03266fb82b77443b44dd41b8e6fbd4f0187cb11b09b7"
+        },
+        {
+          "case": "aliasing_2010",
+          "score": 45.263490721554064,
+          "m2": 0.9974025974025973,
+          "m3f": 0.9814764183185235,
+          "sha256": "16c9362ea3f3d5723f08765ce403735f6c198842a79a87203eb13abe530291ea"
+        }
+      ],
+      "timing": {},
+      "rss_mib": {}
+    }
+  },
+  "controls": {
+    "shipped_D": {
+      "before-scalar-t1-1024": {
+        "n": 30,
+        "min": 16.296819,
+        "max": 17.322019,
+        "mean": 16.601876366666666,
+        "variance": 0.06602809993913672,
+        "median": 16.495413,
+        "mad": 0.1633928982
+      },
+      "before-scalar-t1-2048": {
+        "n": 30,
+        "min": 77.730497,
+        "max": 92.802983,
+        "mean": 79.48397820000001,
+        "variance": 7.12939097148685,
+        "median": 78.9027595,
+        "mad": 0.8667442686
+      },
+      "after-scalar-t1-1024": {
+        "n": 30,
+        "min": 16.051228,
+        "max": 16.671457,
+        "mean": 16.291868266666665,
+        "variance": 0.022577105798202147,
+        "median": 16.2687115,
+        "mad": 0.11486369369999999
+      },
+      "after-scalar-t1-2048": {
+        "n": 30,
+        "min": 78.976462,
+        "max": 81.623028,
+        "mean": 80.12413900000003,
+        "variance": 0.3766223038498594,
+        "median": 80.1095385,
+        "mad": 0.5076882006
+      }
+    },
+    "fast_ssim2_st": {
+      "before-scalar-t1-1024": {
+        "n": 30,
+        "min": 66.267839,
+        "max": 68.332418,
+        "mean": 67.13870250000001,
+        "variance": 0.29524464947046564,
+        "median": 66.9977675,
+        "mad": 0.5498703945
+      },
+      "before-scalar-t1-2048": {
+        "n": 30,
+        "min": 287.433143,
+        "max": 294.435066,
+        "mean": 290.8751802999999,
+        "variance": 2.374747221378658,
+        "median": 290.7960765,
+        "mad": 1.3903125978
+      },
+      "after-scalar-t1-1024": {
+        "n": 30,
+        "min": 65.786603,
+        "max": 67.388624,
+        "mean": 66.46546456666667,
+        "variance": 0.23986257274521863,
+        "median": 66.4420845,
+        "mad": 0.6384928095
+      },
+      "after-scalar-t1-2048": {
+        "n": 30,
+        "min": 287.597471,
+        "max": 293.860904,
+        "mean": 290.45391019999994,
+        "variance": 2.066055464876052,
+        "median": 290.3423085,
+        "mad": 1.5271217367
+      }
+    }
+  },
+  "timing_contract": {
+    "geometry": [
+      1024,
+      2048
+    ],
+    "min_samples": 30,
+    "reported": "mean, median, extrema and variance; p95 not retained",
+    "cpu": "AMD Ryzen 9 9950X3D",
+    "st_affinity": "8",
+    "mt8_affinity": "8-15",
+    "build": "release, no target-cpu=native"
+  },
+  "artifact_hashes": {
+    "served-models.json": "5d1296ff9834b6535ff29d2c9b8dfe8221369b36926331f4609b0c79b1abf93a",
+    "packed/RESULT.json": "92fe2324d4c0f8ac6a1fbac625d5ddae27bc6bdbabf4f0ebea72b29b9feac7ab",
+    "screen/RESULT.json": "d766b09f264dcdb22c72d92bed29b8977422d824c99b4af4271d6f0ad5ca4c44",
+    "screen/INPUTS.json": "504f649d89847d4a2c97e7f4152bac4850efbf63b1419ec566e8f1158354cd57",
+    "screen/_MANIFEST.json": "593a68f6bc6570be583bc194d4a623858b3c464f0f768ab0a72a96f1e9994ecf",
+    "screen/SUMMARY.json": "a3e3461ff6094712cfd1abbc5cb8ac61de33fe0df8c3081b4388ec5651cca168",
+    "confirm-small/RESULT.json": "f91844e3054673d01ada36aefbd0249e378e1c2855a160828c8fb26d9b8ff73b",
+    "confirm-coarse/RESULT.json": "fd56f1978d2bfd986a11c09f907c7dc76cdb2c7c1d98ca8fd8014e4475ae99ee",
+    "linear/RESULT.json": "5f9b997a0e45cec0918863620ae3c27ae23fda12dd5c71930a50d92236baadbb",
+    "mixtures/RESULT.json": "a4330649bb5a6d84c268538d4764b1ba87ac6cfe0f4ff3d1e51165274716176c",
+    "weighted-scores/RESULT.json": "ddc1d0ef91ae47c1d79aa72fd3a64e0e100417f2a8712994f3d82e86536f1f9f",
+    "WEIGHTED_PARITY.json": "5ec4a80a2552ffb646e7e28a09b4d6ce5fc77f168580f73c4f5992225337ad3d",
+    "pixel-served/RESULT.json": "e2e6f9ed3c064fe1b846e5c62526355f3771b9dfc1cfacbb1ee297b2cbead867",
+    "broad-served/RESULT.json": "0dff3fb1dd0b8a80f306da815169d665c6176edc3b93cb18ac5057d8ef35f22d",
+    "timing/RESULT.json": "bf1f9191b70a6067e60020422ada08b7372107429807fb82ced09db2d5766aac",
+    "TOOLS.json": "51cc2cae1fd8c128e13a0620de7b7fac26fd7a97914eea23e100e7036b9836bb",
+    "WEIGHTED_TOOLS.json": "6b5a60658bf299d9f5d6f6ace18bd8e6980879b5b0e27f4f5848a73438cd448e"
+  },
+  "initial_fit_seconds": {
+    "median": 17.56391808099579,
+    "min": 4.364316331979353,
+    "max": 32.50534269603668
+  },
+  "unqualified_reasons": [
+    "retained saltpepper/aliasing/swap scores remain unacceptable",
+    "mixture weights selected on reused development spatial panel",
+    "p95 map/scalar performance not established",
+    "severity-reviewed corruption head and prepared companion API pending",
+    "terminal human, native RD, witnessed target loops and HDR model qualification not performed"
+  ]
+}

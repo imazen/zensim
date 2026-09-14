@@ -38,6 +38,14 @@
 
 ### Changed
 
+- Local basic-feature plans can omit X/B moment computation at selected coarse
+  scales as well as full resolution. Y and the shared XYB pyramid remain intact;
+  retained features match canonical extraction. Wider families keep conservative
+  dependency coverage. No named model or default profile changed.
+- The feature-screen owner can reuse explicitly hash-bound prepared tables,
+  select objectives and compare configurable head capacities. Existing ensemble
+  row-scoring and performance instruments accept explicit ensemble weights.
+
 - Corruption companions now activate strictly below their score threshold,
   then return `min(perceptual, corruption_score)` instead of flooring to zero.
   Inactive companions leave the perceptual score unchanged. Activation remains

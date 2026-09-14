@@ -197,7 +197,10 @@ fn rss_mode(arm: &str) {
             .map(|path| zenpredict::Model::from_bytes(&std::fs::read(path).unwrap()).unwrap())
             .collect();
         let parallel = std::env::var("RAYON_NUM_THREADS").as_deref() != Ok("1");
-        let mut scorer = zensim::BakeScorer::ensemble(&models, None)
+        let weights: Option<Vec<f64>> = std::env::var("ZEN_XP_WEIGHTS")
+            .ok()
+            .map(|v| v.split(',').map(|x| x.parse().unwrap()).collect());
+        let mut scorer = zensim::BakeScorer::ensemble(&models, weights.as_deref())
             .unwrap()
             .with_parallel(parallel);
         let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
@@ -353,13 +356,26 @@ fn subset_bench(sizes: &[usize]) {
 
 /// Complete public-API model comparisons, including optional cached spatial
 /// maps. Manifest rows are `name<TAB>bake_path[,bake_path...]`, without a
-/// header. Multiple paths use the public uniform ensemble composition.
+/// header. An optional third TAB column supplies comma-separated weights.
+/// Without weights, multiple paths use the public uniform ensemble composition.
 fn sampling_models_bench(sizes: &[usize], manifest: &str) {
-    let models: Vec<(String, &'static [zenpredict::Model])> = std::fs::read_to_string(manifest)
+    struct Case {
+        name: String,
+        models: &'static [zenpredict::Model],
+        weights: Option<&'static [f64]>,
+    }
+    let models: Vec<Case> = std::fs::read_to_string(manifest)
         .unwrap()
         .lines()
         .map(|line| {
-            let (name, path) = line.split_once('\t').expect("name and bake path");
+            let mut fields = line.split('\t');
+            let name = fields.next().expect("name");
+            let path = fields.next().expect("bake paths");
+            let weights = fields.next().map(|s| {
+                let values: Vec<f64> = s.split(',').map(|v| v.parse().unwrap()).collect();
+                &*Box::leak(values.into_boxed_slice())
+            });
+            assert!(fields.next().is_none(), "unexpected model manifest column");
             let members: Vec<_> = path
                 .split(',')
                 .map(|path| {
@@ -367,7 +383,11 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                     zenpredict::Model::from_bytes(&bytes).unwrap()
                 })
                 .collect();
-            (name.to_string(), &*Box::leak(members.into_boxed_slice()))
+            Case {
+                name: name.to_string(),
+                models: Box::leak(members.into_boxed_slice()),
+                weights,
+            }
         })
         .collect();
     let spatial = std::env::var_os("ZEN_XP_SPATIAL").is_some();
@@ -409,10 +429,10 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                             });
                         });
                     }
-                    for (name, model) in &models {
-                        let model = *model;
-                        group.bench(name.clone(), move |b| {
-                            let mut scorer = zensim::BakeScorer::ensemble(model, None)
+                    for case in &models {
+                        let (model, weights) = (case.models, case.weights);
+                        group.bench(case.name.clone(), move |b| {
+                            let mut scorer = zensim::BakeScorer::ensemble(model, weights)
                                 .unwrap()
                                 .with_parallel(parallel);
                             let rs = RgbSlice::new(src, n, n);

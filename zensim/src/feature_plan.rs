@@ -191,6 +191,7 @@ impl Plan {
             formula_revision: crate::ssim_form::active_revision(),
             v1_basic: touches(ComputeToken::Basic) || v1_pools != V1PoolsMode::Off,
             full_res_xb: true,
+            coarse_y_only_scales: 0,
             local_only: false,
             omit_edges: false,
             sampling: None,
@@ -241,6 +242,20 @@ impl Plan {
             || want
                 .iter_slots()
                 .any(|id| ComputeSet::is_full_res_xb(id, ns));
+        if want.iter_slots().all(|id| id < 156 && id % 13 < 10) {
+            requested.coarse_y_only_scales = (1..ns).fold(0, |mask, scale| {
+                let reads_xb = want.iter_slots().any(|id| {
+                    crate::feature_defs::def_at(id, ns).is_some_and(|d| {
+                        usize::from(d.scale) == scale
+                            && matches!(
+                                d.channel,
+                                crate::feature_defs::Channel::X | crate::feature_defs::Channel::B
+                            )
+                    })
+                });
+                mask | if reads_xb { 0 } else { 1 << scale }
+            });
+        }
         requested.local_only = want.iter_slots().all(|id| id < ns * 3 * 13 && id % 13 < 10);
         requested.omit_edges =
             requested.local_only && want.iter_slots().all(|id| matches!(id % 13, 0..=2 | 9));
@@ -304,6 +319,14 @@ impl Plan {
         compute.v2_scales = requested.v2_scales;
         compute.full_res_xb = requested.full_res_xb || !compute.allows_full_res_y_subset();
         compute.sampling = requested.sampling;
+        compute.coarse_y_only_scales = if !compute.v2_blocks
+            && compute.free_extras == V1FreeExtras::Off
+            && compute.v1_pools != V1PoolsMode::Full
+        {
+            requested.coarse_y_only_scales
+        } else {
+            0
+        };
         compute.local_only = requested.local_only;
         compute.omit_edges = requested.omit_edges;
         // `emit` is in ID space and is intersected with what the LAYOUT
@@ -384,6 +407,7 @@ impl Plan {
             formula_revision: crate::ssim_form::active_revision(),
             v1_basic: true,
             full_res_xb: true,
+            coarse_y_only_scales: 0,
             local_only: false,
             omit_edges: false,
             sampling: None,
@@ -507,6 +531,7 @@ impl Plan {
             formula_revision: a.formula_revision,
             v1_basic: a.v1_basic || b.v1_basic,
             full_res_xb: a.full_res_xb || b.full_res_xb,
+            coarse_y_only_scales: a.coarse_y_only_scales & b.coarse_y_only_scales,
             local_only: a.local_only && b.local_only,
             omit_edges: a.omit_edges && b.omit_edges,
             sampling: a.sampling,
@@ -681,11 +706,24 @@ mod tests {
                     .0
                 };
                 let baseline = run(&full);
-                for (fine_y, omit_edges) in
-                    [(false, false), (true, false), (false, true), (true, true)]
-                {
+                for (fine_y, omit_edges, coarse_y) in [
+                    (false, false, 0u8),
+                    (true, false, 0),
+                    (false, true, 0),
+                    (true, true, 0),
+                    (true, false, 6),
+                    (true, false, 14),
+                ] {
                     let ids = SlotSet::from_slots(want.iter_slots().filter(|&id| {
                         (!fine_y || !ComputeSet::is_full_res_xb(id, 4))
+                            && !crate::feature_defs::def_at(id, 4).is_some_and(|d| {
+                                coarse_y & (1 << d.scale) != 0
+                                    && matches!(
+                                        d.channel,
+                                        crate::feature_defs::Channel::X
+                                            | crate::feature_defs::Channel::B
+                                    )
+                            })
                             && (!omit_edges || matches!(id % 13, 0..=2 | 9))
                     }));
                     let p = Plan::derive(&ids, 372).unwrap();
@@ -836,12 +874,37 @@ mod tests {
     }
 
     #[test]
+    fn coarse_channel_union_restores_every_consumers_inputs() {
+        let ids = SlotSet::from_slots((0..156).filter(|id| id / 13 % 3 == 1 && id % 13 < 10));
+        let y = Plan::derive(&ids, 372).unwrap();
+        assert_eq!(y.compute.coarse_y_only_scales, 0b1110);
+        assert_eq!(Plan::normalized(y.compute, y.layout.clone()), y);
+        for id in [39, 78, 117, 372, 720] {
+            let extra = SlotSet::from_slots([id]);
+            let merged = y.union(&Plan::derive(&extra, 944).unwrap());
+            assert!(merged.covers(&ids.union(&extra)), "missing consumer f{id}");
+            assert_eq!(
+                Plan::normalized(merged.compute, merged.layout.clone()),
+                merged
+            );
+        }
+    }
+
+    #[test]
     fn fullres_y_subset_retained_features_are_bit_exact() {
         use crate::RgbSlice;
         use crate::feature_v2::{V2Scratch, compute_folded_v1_372_streaming_impl};
-        for weighted in [0u8, 0b1100, 0b1111] {
+        for (weighted, coarse_y) in [(0u8, 0u8), (0, 2), (0, 6), (0, 14), (12, 0), (15, 0)] {
             let want = SlotSet::from_slots((0..372).filter(|&id| {
                 !ComputeSet::is_full_res_xb(id, 4)
+                    && (coarse_y == 0 || (id < 156 && id % 13 < 10))
+                    && !crate::feature_defs::def_at(id, 4).is_some_and(|d| {
+                        coarse_y & (1 << d.scale) != 0
+                            && matches!(
+                                d.channel,
+                                crate::feature_defs::Channel::X | crate::feature_defs::Channel::B
+                            )
+                    })
                     && (id < 228
                         || weighted & (1 << crate::feature_defs::def_at(id, 4).unwrap().scale) != 0)
             }));

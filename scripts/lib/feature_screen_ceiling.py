@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 from pathlib import Path
 import struct
 import subprocess
@@ -170,6 +171,9 @@ def execute(args, recipe):
     for name, ids in recipe["arms"].items():
         if Path(name).name != name or not ids or ids != sorted(set(ids)) or not 0 <= min(ids) <= max(ids) < 944:
             raise ValueError("invalid layout")
+    tasks = recipe.get("tasks", ["human", "codec", "corruption"])
+    if not tasks or len(set(tasks)) != len(tasks) or set(tasks) - {"human", "codec", "corruption"}:
+        raise ValueError("invalid task selection")
     bins = {"extractor": repo / "zensim-bench/target/release/examples/extract_features_372col",
             "trainer": repo / "target/release/zensim_mlp_train",
             "predict": repo / "target/release/predict_features_with_bake", "panel": repo / "target/release/panel"}
@@ -212,7 +216,31 @@ def execute(args, recipe):
             stage["seconds"] = time.monotonic()-t
             save_result()
 
-    if args.ceiling_stage in ("all", "prepare"):
+    reuse = recipe.get("reuse_prepared")
+    if reuse and args.ceiling_stage in ("all", "prepare"):
+        src = Path(reuse["path"]).expanduser().resolve()
+        if sha(src / "RESULT.json") != reuse["result_sha256"]:
+            raise ValueError("source preparation result changed")
+        old = json.loads((src / "RESULT.json").read_text())
+        if sha(src / "INPUTS.json") != old["input_sha256"] or sha(src / "_MANIFEST.json") != old["manifest_sha256"]:
+            raise ValueError("source preparation declarations changed")
+        manifest = json.loads((src / "_MANIFEST.json").read_text())
+        if int(manifest["formula_revision"]) != recipe["formula_revision"] or manifest.get("sampling") != recipe.get("sampling"):
+            raise ValueError("reused preparation arithmetic/sampling mismatch")
+        for name, entry in manifest["files"].items():
+            if Path(name).name != name or sha(src / name) != entry["sha256"]:
+                raise ValueError("invalid or changed prepared table")
+            shutil.copy2(src / name, out / name)
+        for name in ("INPUTS.json", "_MANIFEST.json"):
+            shutil.copy2(src / name, out / name)
+        result.update(input_sha256=old["input_sha256"], manifest_sha256=old["manifest_sha256"],
+                      tables=old["tables"], status="PREPARED",
+                      reused_preparation=dict(reuse, extraction_identity=old["identity"]))
+        save_result()
+        if args.ceiling_stage == "prepare":
+            return
+
+    if args.ceiling_stage in ("all", "prepare") and not reuse:
         rows, sources = inputs()
         hashes = {str(p): sha(p) for p in sources}
         for r in rows:
@@ -308,7 +336,8 @@ def execute(args, recipe):
         result["tables_validated"] = True
     specs = [(arm, recipe["hidden"], "full") for arm in recipe["arms"]]
     specs += [(arm, h, "full") for arm in recipe["control_arms"] for h in recipe["capacity_hidden"]]
-    specs += [(arm, recipe["hidden"], "half") for arm in recipe["control_arms"]]
+    if recipe.get("half_data_controls", True):
+        specs += [(arm, recipe["hidden"], "half") for arm in recipe["control_arms"]]
     dense_checkpoints = args.ceiling_stage == "checkpoints"
     layouts = dict(recipe["arms"], **result.get("extra_layouts", {}))
     if dense_checkpoints:
@@ -389,7 +418,7 @@ def execute(args, recipe):
 
     jobs = [(task, arm, hidden, fraction, seed)
             for arm, hidden, fraction in specs
-            for task in ("human", "codec", "corruption") for seed in recipe["seeds"]]
+            for task in tasks for seed in recipe["seeds"]]
     with ThreadPoolExecutor(max_workers=8) as pool:
         # Every future is inspected; an error never becomes campaign completion.
         for future in [pool.submit(fit_one, spec) for spec in jobs]:
@@ -529,10 +558,12 @@ def report(args, recipe):
             or audits["fits_sha256"] != sha(root / "RESULT.json")
             or fits["input_sha256"] != sha(root / "INPUTS.json")):
         raise ValueError("report inputs changed since fitting/audit")
-    expected = (len(recipe["arms"]) + len(recipe["control_arms"])*(1+len(recipe["capacity_hidden"]))) * len(recipe["seeds"]) * 3
+    n_tasks = len(recipe.get("tasks", ["human", "codec", "corruption"]))
+    expected = (len(recipe["arms"]) + len(recipe["control_arms"])*
+                (int(recipe.get("half_data_controls", True))+len(recipe["capacity_hidden"]))) * len(recipe["seeds"]) * n_tasks
     if fits.get("checkpoint_followup"):
-        expected += len(recipe["control_arms"]) * len(recipe["seeds"]) * 3
-    expected += len(fits.get("extra_layouts", {})) * len(recipe["seeds"]) * 3
+        expected += len(recipe["control_arms"]) * len(recipe["seeds"]) * n_tasks
+    expected += len(fits.get("extra_layouts", {})) * len(recipe["seeds"]) * n_tasks
     layouts = dict(recipe["arms"], **fits.get("extra_layouts", {}))
     if len(fits["arms"]) != expected or set(fits["arms"]) != set(audits["pixel"]):
         raise ValueError("incomplete campaign")
@@ -566,18 +597,23 @@ def report(args, recipe):
         entry["spatial"] = [dict(run=name, **s) for name, _, _ in runs for s in audits["spatial"][name]]
         summary["groups"].append(entry)
     lookup = {(g["task"], g["layout"], g["hidden"], g["fraction"]): g for g in summary["groups"]}
-    for task in ("human", "codec", "corruption"):
+    for task in recipe.get("tasks", ["human", "codec", "corruption"]):
         for layout in recipe["control_arms"]:
-            def metric(h, fraction):
-                return lookup[task, layout, h, fraction]["panels"]["test"]
-            base, high, half = metric(128, "full"), metric(256, "full"), metric(128, "half")
+            base = lookup[task, layout, recipe["hidden"], "full"]["panels"]["dev"]
             mae = lambda p: p["mae_raw"]["median"]
             rho = lambda p: p["srocc_signed"]["median"]
-            summary["capacity_and_data"].append(dict(task=task, layout=layout,
-                h256_mae_change_fraction=mae(high)/mae(base)-1,
-                full_data_mae_change_fraction=mae(base)/mae(half)-1,
-                capacity_unresolved=mae(high)<0.95*mae(base) or rho(high)>rho(base)+0.01,
-                data_unresolved=mae(base)<0.95*mae(half) or rho(base)>rho(half)+0.01))
+            for high_h in recipe["capacity_hidden"]:
+                high = lookup[task, layout, high_h, "full"]["panels"]["dev"]
+                summary["capacity_and_data"].append(dict(task=task, layout=layout,
+                    panel="dev", base_hidden=recipe["hidden"], comparison_hidden=high_h,
+                    mae_change_fraction=mae(high)/mae(base)-1,
+                    capacity_unresolved=mae(high)<0.95*mae(base) or rho(high)>rho(base)+0.01))
+            if recipe.get("half_data_controls", True):
+                half = lookup[task, layout, recipe["hidden"], "half"]["panels"]["dev"]
+                summary["capacity_and_data"].append(dict(task=task, layout=layout,
+                    panel="dev", base_hidden=recipe["hidden"],
+                    full_data_mae_change_fraction=mae(base)/mae(half)-1,
+                    data_unresolved=mae(base)<0.95*mae(half) or rho(base)>rho(half)+0.01))
     # Thresholding already served diagnostic class scores is a row-count report,
     # not probability calibration. A score of 50 is the frozen class midpoint.
     declared = json.loads((root / "INPUTS.json").read_text())
@@ -606,12 +642,12 @@ def report(args, recipe):
     write_json(root / "SUMMARY.json", summary)
     lines = ["# Feature/scale capability study", "", "Development evidence; no model is qualified.", "",
              "Raw errors come from Rust panel --raw-errors. No evaluation-set score remapping.", "",
-             "| Task | Layout | Features | Test signed SROCC | Raw MAE |", "|---|---|---:|---:|---:|"]
+             "| Task | Layout | Hidden | Features | Test signed SROCC | Raw MAE |", "|---|---|---:|---:|---:|---:|"]
     for g in summary["groups"]:
-        if g["hidden"] == 128 and g["fraction"] == "full":
+        if g["fraction"] == "full":
             p = g["panels"]["test"]
-            lines.append(f"| {g['task']} | {g['layout']} | {g['features']} | {p['srocc_signed']['median']:.4f} | {p['mae_raw']['median']:.3f} |")
-    lines += ["", "Values are medians of three paired seeds. Corruption scores are 0/100 class targets, not quality grades.",
+            lines.append(f"| {g['task']} | {g['layout']} | {g['hidden']} | {g['features']} | {p['srocc_signed']['median']:.4f} | {p['mae_raw']['median']:.3f} |")
+    lines += ["", "Values are medians of the registered paired seeds. Corruption scores are 0/100 class targets, not quality grades.",
               "Codec targets are SSIMULACRA2 proxies. KADID selection is human-rated; TID is train-only.",
               "The literal feature-score path has no pixel-identity override; native identity behavior is checked separately in pixel audits.",
               "No universal feature ceiling, native codec RD improvement, HDR qualification or shippable calibration is claimed."]

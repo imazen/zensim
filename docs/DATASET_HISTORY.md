@@ -7,6 +7,19 @@ rest on a hidden bug, confound, or invalid measurement. This doc exists so we do
 re-add a dataset a confound already poisoned, re-run a dead-end, or trust a retracted
 claim.
 
+**September 13, later runtime profiles — development evidence:**
+[Runtime study](../benchmarks/runtime_profiles_2026-09-13.md) reuses the exact
+admitted native Rev3 tables below with their input/table/extractor identities;
+no new source, split, feature formula or corruption label is admitted. The
+existing owner verifies hashes before reuse. There are 48 screening MLP fits
+and eight additional human finalist seeds, plus two deterministic linear fits.
+Human and codec-proxy objectives remain separate; no new corruption classifier
+is trained under the old binary labels. Mixtures add no fits. The 96-cell broad
+repair panel is now used to select mixture weights and is not independent
+evidence for those weights. Final weighted compositions are replayed through
+the Rust surface. No terminal human panel or native target/RD qualification
+was run, and retained artifact scores still block product qualification.
+
 **September 13, newest steering-subset study — STANDS within development panels:**
 [Protocol and results](../benchmarks/steerable_subset_2026-09-13.md) retain the
 same 19,958-row/source-family admission and native Rev3 formula era below.

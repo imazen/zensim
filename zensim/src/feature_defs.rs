@@ -2979,6 +2979,7 @@ mod owner_gates {
         let off = ComputeSet {
             formula_revision: crate::ssim_form::active_revision(),
             full_res_xb: true,
+            coarse_y_only_scales: 0,
             local_only: false,
             omit_edges: false,
             sampling: None,

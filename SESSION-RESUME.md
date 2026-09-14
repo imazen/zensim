@@ -1,5 +1,27 @@
 # Start here — one target score, one development path
 
+## September 13, latest: measured runtime-profile candidates
+
+[Runtime profile study](benchmarks/runtime_profiles_2026-09-13.md) continues the
+local-subset study: 56 new MLP fits, two deterministic linear controls, and
+13 complete compositions. Coarse X/B moments now skip actual Rust work when
+their local-feature consumers are absent; canonical SDR/HDR and cached values
+remain intact. No feature arithmetic or named model changed.
+
+Y at all four native scales plus X/B only at 1/8 resolution gives 60 features.
+Its five-MLP ensemble achieves human development-test MAE 7.487 and 95/96 broad
+spatial passes. A mixture with 2/7 weight on its linear+spline control passes
+96/96 at MAE 7.898, versus 10.188 for the prior consistent linear120 control.
+These are development-selected results, not independent qualification.
+The smaller-head 80/100/120 variants and luma-only control retain their failures.
+
+All candidates still over-score the retained salt/pepper and aliasing examples;
+the new severity-aware corruption head is not fitted or attached. Prepared
+steering still refuses companions. Next: reviewed corruption labels/operating
+points and inactive-companion steering support; improve the remaining map/scalar
+cost, then independently validate frozen candidates in native codec loops.
+Artifacts: `~/work/zensim-validation-2026-09-13/runtime-profiles/`.
+
 ## September 13, latest: thresholded corruption minimum and severity policy
 
 The [activation contract](docs/CORRUPTION_ACTIVATION_2026-09-13.md) records the

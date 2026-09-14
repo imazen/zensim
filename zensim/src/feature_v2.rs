@@ -1934,6 +1934,8 @@ pub(crate) struct ComputeSet {
     /// Full-resolution X/B moments. Plans may omit them for basic/peak subsets.
     /// Conversion and the coarser XYB pyramid always remain complete.
     pub full_res_xb: bool,
+    /// Coarse scales whose basic/peak moments need only Y (bits 1..3).
+    pub coarse_y_only_scales: u8,
     /// Only basic local SSIM/edge moments and MSE; no peaks or HF ratios.
     pub local_only: bool,
     pub omit_edges: bool,
@@ -2051,6 +2053,7 @@ impl ComputeSet {
             formula_revision: t.formula_revision,
             v1_basic: true,
             full_res_xb: true,
+            coarse_y_only_scales: 0,
             local_only: false,
             omit_edges: false,
             sampling: None,
@@ -2270,6 +2273,14 @@ impl ComputeSet {
                 || (id < basic && id % crate::metric::FEATURES_PER_CHANNEL_BASIC < 10))
                 && (!self.omit_edges || (id < basic && matches!(id % 13, 0..=2 | 9)))
                 && (self.full_res_xb || !Self::is_full_res_xb(id, n_scales))
+                && !crate::feature_defs::def_at(id, n_scales).is_some_and(|d| {
+                    d.scale > 0
+                        && self.coarse_y_only_scales & (1 << d.scale) != 0
+                        && matches!(
+                            d.channel,
+                            crate::feature_defs::Channel::X | crate::feature_defs::Channel::B
+                        )
+                })
                 && !(self.v1_pools == V1PoolsMode::Full
                     && (peaks_end..v1_total).contains(&id)
                     && crate::feature_defs::def_at(id, n_scales)
@@ -2287,6 +2298,16 @@ impl ComputeSet {
                 self.v1_pools,
                 V1PoolsMode::Off | V1PoolsMode::Peaks | V1PoolsMode::Full
             )
+    }
+
+    #[inline]
+    fn channel_active(&self, scale: usize, channel: usize) -> bool {
+        channel == 1
+            || if scale == 0 {
+                self.full_res_xb
+            } else {
+                self.coarse_y_only_scales & (1 << scale) == 0
+            }
     }
 
     pub(crate) fn is_full_res_xb(id: usize, n_scales: usize) -> bool {
@@ -2307,6 +2328,7 @@ impl ComputeSet {
         // feature IDs and per-slot provenance remain the authoritative identity;
         // do not issue a shorthand that Request::for_set cannot reproduce.
         if !self.full_res_xb
+            || self.coarse_y_only_scales != 0
             || self.local_only
             || self.sampling.is_some()
             || (self.v1_pools == V1PoolsMode::Full && self.v1_full_scales != Self::ALL_SCALES)
@@ -8804,7 +8826,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     let compute = extras
         .compute
         .unwrap_or_else(|| ComputeSet::from_toggles(toggles));
-    if compute.full_res_xb {
+    if compute.full_res_xb && compute.coarse_y_only_scales == 0 {
         foldapp_streaming_walk_impl::<S, D, true>(
             source, distorted, parallel, toggles, front_end, scratch, extras,
         )
@@ -8816,7 +8838,7 @@ fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
     }
 }
 
-fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB: bool>(
+fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNELS: bool>(
     source: &S,
     distorted: &D,
     parallel: bool,
@@ -9076,7 +9098,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                 .zip(accums.par_iter_mut())
                 .enumerate()
                 .for_each(|(ch, (scr, acc))| {
-                    if !FULL_RES_XB && scale == 0 && ch != 1 {
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                         return;
                     }
                     let __t = crate::fold_timing::start();
@@ -9135,7 +9157,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
                 .par_iter_mut()
                 .enumerate()
                 .for_each(|(ch, scr)| {
-                    if !FULL_RES_XB && scale == 0 && ch != 1 {
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                         return;
                     }
                     let __t = crate::fold_timing::start();
@@ -9159,7 +9181,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
             // fan-outs — pure reads of the phase-A scratches + windows.
             if let Some(ret) = retention.as_deref_mut() {
                 for (ch, scr) in scratches.iter().enumerate() {
-                    if !FULL_RES_XB && scale == 0 && ch != 1 {
+                    if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                         continue;
                     }
                     let (src_win, dst_win) = stream_windows_shared(&producer, &info, ch, scr);
@@ -9176,7 +9198,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
             crate::fold_timing::stop(__t_between, crate::fold_timing::Phase::Between, scale);
             let __t_b = crate::fold_timing::start();
             accums.par_iter_mut().enumerate().for_each(|(ch, acc)| {
-                if !FULL_RES_XB && scale == 0 && ch != 1 {
+                if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                     return;
                 }
                 let __t = crate::fold_timing::start();
@@ -9240,7 +9262,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
             let (stash_x_buf, stash_b_buf) = s_rest.split_at_mut(1);
             let y_active = append_cell_active(append_on, 1, scale);
             for ch in [0usize, 2] {
-                if !FULL_RES_XB && scale == 0 {
+                if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                     continue;
                 }
                 let active = append_cell_active(append_on, ch, scale);
@@ -9383,7 +9405,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
         let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
 
         for (ch, acc) in accums.iter().enumerate() {
-            if !FULL_RES_XB && scale == 0 && ch != 1 {
+            if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                 continue;
             }
             let out = &mut features_v12
@@ -9419,7 +9441,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
         // 1e-9-parity pass-A replication instead).
         if let Some(ret) = retention.as_deref_mut() {
             for (ch, acc) in accums.iter().enumerate() {
-                if !FULL_RES_XB && scale == 0 && ch != 1 {
+                if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                     continue;
                 }
                 ret.cells[scale][ch] = AttrCellSums {
@@ -9439,7 +9461,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const FULL_RES_XB
 
         if fold_v1 {
             for (ch, acc) in accums.iter().enumerate() {
-                if !FULL_RES_XB && scale == 0 && ch != 1 {
+                if !ALL_CHANNELS && !compute.channel_active(scale, ch) {
                     continue;
                 }
                 let base = scale * 39 + ch * 13;
@@ -17237,9 +17259,10 @@ pub(crate) mod tests {
     fn fullres_y_subset_hdr_retained_features_are_bit_exact() {
         use crate::feature_plan::Plan;
         use crate::feature_set_id::SlotSet;
-        for coarse in [false, true] {
+        for (coarse, y_only) in [(false, false), (true, false), (false, true)] {
             let want = SlotSet::from_slots((0..372).filter(|&id| {
                 !ComputeSet::is_full_res_xb(id, 4)
+                    && (!y_only || (id < 156 && id % 13 < 10 && id / 13 % 3 == 1))
                     && (id < 228 || coarse && matches!(id,264..=299|336..=371))
             }));
             let plan = Plan::derive(&want, 372).unwrap();

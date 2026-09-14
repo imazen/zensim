@@ -544,6 +544,7 @@ pub(crate) fn score_plan(
     // Pool skipping is opt-in. Without it the walk computes the whole pool
     // block exactly as it does today, whatever the bakes read.
     if !skip_unread {
+        plan.compute.coarse_y_only_scales = 0;
         plan.compute.local_only = false;
         plan.compute.omit_edges = false;
         plan.compute.v1_pools = crate::feature_v2::V1PoolsMode::Full;
