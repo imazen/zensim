@@ -1,5 +1,22 @@
 # Start here — one target score, one development path
 
+## September 14, newest: broad honest integrity controls scored and inspected
+
+[TRAIN control audit](benchmarks/corruption_honest_train_2026-09-14.md) measures
+26/8,880 product reconstructions active (0.293%) and0/264 distinct native JXL
+pairs (272 attempts). All26 have negative bases: scalar composition hides the
+activation, but all26 reject prepared steering. Native maps remain exact over
+14,144 queries. All10,771 pixel/cache/f32 results and original pixel hashes
+reproduce; the gallery contains every active control.
+
+Low-q rates are higher (AVIF q5 3.38%, JPEG q5 4.73%). A q85 AVIF pink cast also
+appears with an independent decoder; retain its conservative valid label and
+investigate before clean-negative training admission. Stored contexts are
+singletons, not matched quality ladders. This is a frozen Rev1 TRAIN diagnostic,
+not a Rev3 fit or qualification. The original strict trainer still requires an
+explicit registered extension and a unified family-role admission before new
+Rev3 training. No EVAL or TEST rows were extracted or scored. Broader recovery remains open.
+
 ## September 14, newest: corruption heads now bind arithmetic revisions
 
 [Serving correction](benchmarks/corruption_revision_contract_2026-09-14.md)

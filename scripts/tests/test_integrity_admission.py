@@ -14,6 +14,85 @@ import corruption_gate_eval as evaluator
 
 
 class Admission(unittest.TestCase):
+    @staticmethod
+    def honest_pair(index, knob, active):
+        meta = dict(index=index, origin='2010', source_family='origin:2010', role='train',
+                    reference='ref', distorted=f'dist{index}', expected_distorted_file_sha256=f'dfile{index}',
+                    reference_sha256='rfile', expected_distorted_pixels_sha256=f'dpixels{index}',
+                    fit_role='development', disposition='valid', family='honest_jpeg',
+                    kind='honest_codec', content_class='fixture', codec='jpeg', knob=knob,
+                    knob_axis='quality', knob_direction='higher_is_better', knob_context='reference/config')
+        audit = dict(human_score=index, reference='ref', distorted=f'dist{index}',
+                     distorted_file_sha256=f'dfile{index}', reference_file_sha256='rfile',
+                     distorted_pixels_sha256=f'dpixels{index}', reference_pixels_sha256='rpixels',
+                     head_probability=float(active), stored_f32_head_probability=float(active), head_threshold=.9,
+                     pixel_composed_score=0. if active else 40., cached_composed_score=0. if active else 40.,
+                     stored_f32_composed_score=0. if active else 40., pixels_identical=False, base_score=40., model_inputs={})
+        return meta, audit
+
+    def test_explicit_quality_orientation_and_spatial_controls(self):
+        low, a = self.honest_pair(1, 5., True)
+        high, b = self.honest_pair(2, 95., False)
+        rows, audits = [low, high], {1:a, 2:b}
+        result = evaluator.integrity_summary(rows, audits)
+        self.assertEqual(result['worst_stored_native']['honest_activation']['count'], 1)
+        for row in rows:
+            row['knob_direction'] = 'higher_is_worse'
+        self.assertEqual(evaluator.integrity_summary(rows, audits)['worst_stored_native']['honest_activation']['count'], 0)
+        low['knob_direction'] = 'higher_is_better'
+        with self.assertRaisesRegex(ValueError, 'conflicting knob'):
+            evaluator.integrity_summary(rows, audits)
+        high['knob_context'] = 'another configuration'
+        self.assertEqual(evaluator.integrity_summary(rows, audits)['worst_stored_native']['n'], 2)
+        for row in rows:
+            del row['knob_direction']
+        with self.assertRaisesRegex(ValueError, 'declare knob orientation'):
+            evaluator.integrity_summary(rows, audits)
+        for row in rows:
+            row['codec'] = 'jxl'
+        self.assertEqual(evaluator.integrity_summary(rows, audits)['worst_stored_native']['honest_activation']['count'], 0)
+        for row in rows:
+            row['kind'] = 'honest_spatial'
+            row['knob'] = None
+        result = evaluator.integrity_summary(rows, audits)
+        self.assertEqual(result['worst_stored_native']['n'], 0)
+        self.assertEqual(result['by_codec']['jxl']['native_activation']['count'], 1)
+
+    def test_reference_pixels_and_identity_shortcut_are_bound(self):
+        meta, audit = self.honest_pair(1, 5., True)
+        meta['expected_reference_pixels_sha256'] = 'rpixels'
+        meta['pixels_identical'] = False
+        evaluator.integrity_summary([meta], {1:audit})
+        audit['reference_pixels_sha256'] = 'different-reference'
+        with self.assertRaisesRegex(ValueError, 'reference pixel mismatch'):
+            evaluator.integrity_summary([meta], {1:audit})
+        audit['reference_pixels_sha256'] = 'rpixels'
+        audit['pixels_identical'] = True
+        with self.assertRaisesRegex(ValueError, 'identity flag mismatch'):
+            evaluator.integrity_summary([meta], {1:audit})
+        audit['pixels_identical'] = False
+        meta['pixels_identical'] = True
+        with self.assertRaisesRegex(ValueError, 'identity flag mismatch'):
+            evaluator.integrity_summary([meta], {1:audit})
+
+    def test_train_diagnostic_keeps_development_and_refuses_test(self):
+        meta, audit = self.honest_pair(1, 5., False)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = root/'admission.json'; log = root/'audit.jsonl'; out = root/'result.json'
+            data = dict(schema='integrity-train-diagnostic-v1',
+                        origins={'fit':[], 'development':['2010'], 'calibration':[]}, records=[meta])
+            manifest.write_text(json.dumps(data)); log.write_text(json.dumps(audit)+'\n')
+            args = ['--integrity-admission',str(manifest),'--audit-jsonl',str(log),'--out-json',str(out)]
+            evaluator.integrity_report(args)
+            self.assertEqual(json.loads(out.read_text())['by_role']['development']['n'], 1)
+            out.unlink(); log.unlink()
+            data['records'][0]['role'] = 'test'
+            manifest.write_text(json.dumps(data))
+            with self.assertRaisesRegex(ValueError, 'forbidden integrity source role'):
+                evaluator.integrity_report(args)
+            self.assertFalse(out.exists())
+
     def test_pixel_duplicates_preserve_known_labels_and_refuse_conflicts(self):
         def pair(index, disposition, family):
             meta = dict(index=index, origin='2010', reference='ref', distorted='dist',

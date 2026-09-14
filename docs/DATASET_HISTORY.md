@@ -1,5 +1,16 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, broad honest integrity TRAIN audit:**
+[Results](../benchmarks/corruption_honest_train_2026-09-14.md) reuse all10,499
+admitted product pairs and272 original TRAIN-development JXL interventions.
+Frozen Rev1 D/HGB inference, unchanged threshold, fresh hashes and exact public
+surface parity. Product and native source-family roles are preserved; no new
+fit, calibration, encodes or protected data. All26 observed activations retain
+their conservative valid labels; one q85 AVIF color cast needs investigation
+before future clean-negative admission. All26 reject prepared steering despite
+unchanged scalar scores; all272 native attempts remain accepted. All active
+A/Bs are bound to the original pixels. No model qualifies.
+
 **September 14, quarter-resolution chroma TRAIN fit:**
 [Results](../benchmarks/chroma_scale_train_2026-09-14.md) reuse the admitted
 product human/codec fitting and development tables, plus native development

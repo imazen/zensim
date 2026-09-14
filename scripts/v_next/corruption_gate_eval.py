@@ -32,6 +32,12 @@ def integrity_summary(records, audits):
                 or a["reference_file_sha256"] != meta["reference_sha256"]
                 or a["distorted_pixels_sha256"] != meta["expected_distorted_pixels_sha256"]):
             raise ValueError("integrity audit identity mismatch")
+        if ("expected_reference_pixels_sha256" in meta
+                and a["reference_pixels_sha256"] != meta["expected_reference_pixels_sha256"]):
+            raise ValueError("integrity reference pixel mismatch")
+        identical = a["reference_pixels_sha256"] == a["distorted_pixels_sha256"]
+        if a["pixels_identical"] != identical or ("pixels_identical" in meta and meta["pixels_identical"] != identical):
+            raise ValueError("integrity pixel identity flag mismatch")
         for field in ("head_probability", "stored_f32_head_probability", "head_threshold", "base_score",
                       "pixel_composed_score", "cached_composed_score", "stored_f32_composed_score"):
             if not math.isfinite(a[field]):
@@ -46,6 +52,9 @@ def integrity_summary(records, audits):
                      family=meta["family"], kind=meta["kind"], codec=meta.get("codec"), knob=meta.get("knob"),
                      content_class=meta["content_class"], active=active,
                      lowered=a["pixel_composed_score"] < a["base_score"], probability=a["head_probability"])
+        for field in ("knob_direction", "knob_axis", "knob_context", "intervention"):
+            if field in meta:
+                value[field] = meta[field]
         value["catalog_dispositions"] = [value["disposition"]]
         value["catalog_families"] = [value["family"]]
         if identity in unique:
@@ -66,7 +75,7 @@ def integrity_summary(records, audits):
             unique[identity] = value
     def rates(rs):
         honest = [x for x in rs if x["disposition"] == "valid"]
-        native = [x for x in honest if x["kind"] == "honest_codec"]
+        native = [x for x in honest if x["kind"] in ("honest_codec", "honest_spatial")]
         positives = [x for x in rs if x["disposition"] == "catastrophic_proxy"]
         real = [x for x in positives if x["family"] == "real_bug"]
         def rate(xs):
@@ -77,15 +86,31 @@ def integrity_summary(records, audits):
                     honest_lowered=sum(x["lowered"] for x in honest))
     rows = list(unique.values())
     native = [x for x in rows if x["kind"] == "honest_codec"]
+    codec_rows = [x for x in rows if x["kind"] in ("honest_codec", "honest_spatial")]
     worst = {}
+    directions = {}
     for x in native:
         key = (x["origin"], x["codec"])
-        if x["codec"] not in ("jxl", "avif"):
+        direction = x.get("knob_direction")
+        if direction is None and x["codec"] in ("jxl", "avif"):
+            direction = "higher_is_worse"  # original native distance/CQ packets
+        if direction not in ("higher_is_worse", "higher_is_better"):
             raise ValueError("declare knob orientation before native lower-quality stratification")
-        if key not in worst or x["knob"] > worst[key]["knob"]:
+        if "knob_direction" in x:
+            if not x.get("knob_axis") or not x.get("knob_context"):
+                raise ValueError("explicit knob orientation requires axis and comparison context")
+            key += (x["knob_axis"], x["knob_context"])
+        if directions.setdefault(key, direction) != direction:
+            raise ValueError("conflicting knob orientations in one comparison context")
+        if not isinstance(x["knob"], (int, float)) or not math.isfinite(x["knob"]):
+            raise ValueError("native knob must be finite")
+        worse = key not in worst or (
+            x["knob"] > worst[key]["knob"] if direction == "higher_is_worse"
+            else x["knob"] < worst[key]["knob"])
+        if worse:
             worst[key] = x
     return dict(raw_rows=len(records), unique_rows=len(rows), rows=rows,
-                by_codec={codec:rates([x for x in native if x["codec"]==codec]) for codec in sorted({x["codec"] for x in native})},
+                by_codec={codec:rates([x for x in codec_rows if x["codec"]==codec]) for codec in sorted({x["codec"] for x in codec_rows})},
                 worst_stored_native= rates(list(worst.values())),
                 by_content={content:rates([x for x in rows if x["content_class"]==content]) for content in sorted({x["content_class"] for x in rows})},
                 disposition_inventory={d:{"n":len([x for x in rows if x["disposition"]==d]),
@@ -107,14 +132,19 @@ def integrity_report(argv):
         raise ValueError("fresh integrity report required")
     admission = json.loads(a.integrity_admission.read_text())
     schema = admission.get("schema")
-    if schema not in ("integrity-train-admission-v1", "integrity-eval-admission-v1"):
+    if schema not in ("integrity-train-admission-v1", "integrity-eval-admission-v1", "integrity-train-diagnostic-v1"):
         raise ValueError("explicit train/eval admission required")
-    source_role = "train" if schema == "integrity-train-admission-v1" else "validate"
+    source_role = "train" if schema in ("integrity-train-admission-v1", "integrity-train-diagnostic-v1") else "validate"
     roles = {"fit", "calibrate"} if source_role == "train" else {"evaluate"}
+    if schema == "integrity-train-diagnostic-v1":
+        roles = {"fit", "development", "calibration"}
     if set(admission["origins"]) != roles:
         raise ValueError("invalid source-role map")
     records = admission["records"]
+    families = {}
     for row in records:
+        if families.setdefault(row["source_family"], row["fit_role"]) != row["fit_role"]:
+            raise ValueError("source family crosses integrity roles")
         if row["role"] != source_role or row["fit_role"] not in roles or row["origin"] not in admission["origins"][row["fit_role"]] or row["origin"] in ("8462", "9066"):
             raise ValueError("forbidden integrity source role")
     audits = {}

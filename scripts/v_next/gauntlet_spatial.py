@@ -11,6 +11,87 @@ import shutil
 from pathlib import Path
 
 
+def build_integrity_gallery(root, out):
+    """Show every active TRAIN control using the recorded scalar and PNG audits."""
+    from html import escape
+    from corruption_gate_eval import integrity_summary
+
+    root, out = Path(root), Path(out)
+    if out.exists():
+        raise ValueError(f"refusing to overwrite an existing gallery: {out}")
+    sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()
+    read = lambda name: json.loads((root / name).read_text())
+    admission, assessment = read("ADMISSION.json"), read("ASSESSMENT.json")
+    if (admission["schema"] != "integrity-train-diagnostic-v1"
+            or any(r["role"] != "train" for r in admission["records"])
+            or assessment["admission_sha256"] != sha(root / "ADMISSION.json")
+            or assessment["audit_sha256"] != sha(root / "audit.jsonl")):
+        raise ValueError("integrity gallery requires bound TRAIN evidence")
+
+    def audits(name):
+        rows = [json.loads(line) for line in (root / name).read_text().splitlines()]
+        keyed = {int(r["human_score"]): r for r in rows}
+        if len(keyed) != len(rows) or any(int(r["human_score"]) != r["human_score"] for r in rows):
+            raise ValueError("duplicate/noninteger integrity gallery key")
+        return keyed
+
+    original, png, prepared = audits("audit.jsonl"), audits("gallery-audit.jsonl"), audits("prepared-audit.jsonl")
+    checked = integrity_summary(admission["records"], original)
+    if any(checked[k] != assessment[k] for k in checked):
+        raise ValueError("integrity gallery assessment differs from owner")
+    active = {r["index"] for r in checked["rows"] if r["active"]}
+    if set(png) != active or not active.issubset(prepared):
+        raise ValueError("integrity gallery must show every active control")
+    metadata = {r["index"]: r for r in admission["records"]}
+    examples, assets = [], {}
+    for key in sorted(active):
+        a, p, m = original[key], png[key], metadata[key]
+        for field in ("reference_pixels_sha256", "distorted_pixels_sha256", "base_score",
+                      "head_probability", "pixel_composed_score", "model_inputs"):
+            if a[field] != p[field] or a[field] != prepared[key][field]:
+                raise ValueError("gallery PNG/prepared evidence differs from scored pixels")
+        if prepared[key]["prepared_steering"]["status"] != "REJECTED_INTEGRITY":
+            raise ValueError("active gallery control lacks prepared rejection")
+        images = []
+        for side in ("reference", "distorted"):
+            path = Path(p[side])
+            if sha(path) != p[side + "_file_sha256"]:
+                raise ValueError("integrity gallery image hash mismatch")
+            rel = "images/" + p[side + "_file_sha256"] + ".png"
+            assets[rel] = path
+            images.append(f'<figure><figcaption>{side}</figcaption><a href="{rel}"><img loading="lazy" src="{rel}" alt="{side}, control {key}"></a></figure>')
+        examples.append(f'<article id="case-{key}"><h2>{escape(m["origin"])} · {escape(m["codec"])} q{m["knob"]:g} · row {key}</h2>'
+                        f'<p>{escape(m["content_class"])} · TRAIN {escape(m["fit_role"])}. '
+                        f'Probability {a["head_probability"]:.6f} &gt; {a["head_threshold"]:g}; '
+                        f'base {a["base_score"]:.4f}; composed {a["pixel_composed_score"]:.4f}. '
+                        'Prepared steering: REJECTED_INTEGRITY.</p><div class="pair">' + "".join(images) + '</div></article>')
+    codec_rows = []
+    for codec, result in checked["by_codec"].items():
+        rate = result["honest_activation"]
+        codec_rows.append(f'<tr><td>{escape(codec)}</td><td>{rate["count"]}/{rate["n"]}</td><td>{rate["rate"]:.3%}</td><td>{result["honest_lowered"]}</td></tr>')
+    page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Integrity head: honest TRAIN controls</title><style>
+body{font:16px system-ui;max-width:1200px;margin:auto;padding:24px;background:#f5f6f8;color:#182230}
+article{background:white;padding:18px;margin:24px 0;border:1px solid #ccd3db}h2{font-size:19px}
+.pair{display:flex;flex-wrap:wrap;gap:20px}figure{margin:0;flex:1;min-width:240px}img{max-width:100%;height:auto;min-width:192px}
+td,th{text-align:left;padding:8px 20px 8px 0}a{color:#1457a5}</style>
+<h1>Frozen integrity head on honest TRAIN controls</h1>
+<p><strong>TRAIN diagnostic only. No model qualifies.</strong> Every observed activation is shown below, using exact decoded pixels.
+These controls retain their preregistered valid labels. Successful encoding does not prove freedom from bugs; visual concerns remain explicit in the report.</p>
+<p>The scalar minimum can conceal an active corruption head when the perceptual score is already lower. Prepared steering still rejects the input.</p>
+<p><a href="REPORT.md">Full report and limitations</a> · <a href="RESULTS.json">Measured results</a> · <a href="replay.zip">Replay evidence</a></p>
+<table><thead><tr><th>Codec</th><th>Active / reconstructed controls</th><th>Rate</th><th>Scalar scores lowered</th></tr></thead><tbody>'''
+    page += "".join(codec_rows) + '</tbody></table><p>JXL includes product encodes and distinct native interventions. Images may be enlarged by the browser; click for original PNGs.</p>'
+    page += "".join(examples) + '</html>\n'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    for rel, source in assets.items():
+        dest = out.parent / rel
+        dest.parent.mkdir(exist_ok=True)
+        shutil.copyfile(source, dest)
+    out.write_text(page)
+    return out, len(examples)
+
+
 def build_spatial_gallery(root, out):
     root, out = Path(root), Path(out)
     if out.exists():
