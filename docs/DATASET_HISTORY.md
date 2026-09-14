@@ -1,5 +1,16 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, newest spatial coverage:**
+[Protocol/results](../benchmarks/spatial_coverage_2026-09-14.md) reuse existing
+admitted TRAIN development origins and frozen models; no new source admission,
+fit, calibration or EVAL/test access. A preregistered 30-cell content/size/JXL-q
+grid has 23 available pairs and seven explicit gaps. All 69 model/pair checks
+and 4,878 repairs pass native input and scalar parity; twelve spatial gate
+failures remain. Six bin1 diagnostic calls on the two M3f-failing images add
+210 repairs and reproduce all ranks unchanged. The previous five-case spatial
+pass does not generalize for basic228/H32. No model qualification changes.
+
+
 **September 14, newest aligned-bin optimization:**
 [Protocol/results](../benchmarks/aligned_bins_2026-09-14.md) replay the same
 forty admitted TRAIN finite-moment cases exactly (1,176 repairs). No source

@@ -80,6 +80,8 @@ def build_spatial_gallery(root, out):
         (assets / "data" / (key + ".json")).write_text(json.dumps(data, separators=(",", ":")) + "\n")
     payload = dict(cells=cells, total=len(cells), failed=sum(c["fail_m2"] or c["fail_m3f"] for c in cells),
                    thresholds=dict(m2=.99, m3f=.70), seed=manifest["seed"],
+                   evidence_label=manifest.get("evidence_label", "ZENSIM · DEVELOPMENT EVIDENCE"),
+                   scope_note=manifest.get("scope_note", "Recorded development checks; see the source experiment for dataset roles and model provenance."),
                    spatial_cases_sha256=hashlib.sha256((root / "SPATIAL_CASES.json").read_bytes()).hexdigest())
     (assets / "manifest.json").write_text(json.dumps(payload, indent=2) + "\n")
     template = Path(__file__).with_name("gauntlet_spatial.html").read_text()

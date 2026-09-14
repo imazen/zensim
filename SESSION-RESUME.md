@@ -1,5 +1,32 @@
 # Start here — one target score, one development path
 
+## September 14, newest: wider spatial screen rejects the five-case shortcut
+
+[Registered coverage/results](benchmarks/spatial_coverage_2026-09-14.md) test
+three frozen ensembles on 23 native JXL TRAIN development pairs across five
+origins, two size bands and exact q5/50/90 nominations. Seven of thirty cells
+are unavailable. All 69 calls / 4,878 repairs have finite supported maps and
+native-pixel/cache-score parity. Basic228/H128 and H32 each pass 17/23, while
+y60/H32 passes 23/23 but has weaker human TRAIN rank. No model is qualified.
+
+Failures split into model-linearization (M2) and map-prediction (M3f) limits.
+Tiny report/screenshot cases expose M3f failures and large magnitude errors.
+Six separately registered bin1 follow-ups / 210 repairs leave all ranks
+unchanged; scalar, actual-gain and linearization records remain exact. Finer
+storage does not fix these aligned-rectangle failures. Finite moments also
+worsen rank on some cases, so the earlier five-case improvement is not universal.
+
+The gauntlet A/B gallery retains all 69 checks, initially showing 12 failures.
+Its date/scope, model count and block-size controls now follow the packet.
+Next use the existing per-feature diagnosis on these TRAIN failures before
+changing feature/head formulas; investigate M2 separately from map projection.
+Do not promote the cheap spatial control using this narrow screen. Native RD,
+corruption, full scalar assessment, HDR, p95 and frozen qualification remain.
+
+Artifacts: `~/work/zensim-validation-2026-09-14/spatial-coverage/`.
+All 75 public-API calls and rank analysis finished. No new fit, calibration,
+EVAL or TEST access. The full production goal remains active.
+
 ## September 14, newest: aligned bins improve complete finite-map cost
 
 [Aligned bin folding](benchmarks/aligned_bins_2026-09-14.md) adds a private
