@@ -1,5 +1,17 @@
 # Start here — one target score, one development path
 
+## September 13, latest: rigor review before extending the feature set
+
+The [runtime study's Claude-era gate review](benchmarks/runtime_profiles_2026-09-13.md#claude-era-gate-review-after-the-runtime-study)
+records the continuation requirements and audits the actual manifests. Its 96
+repair cells already cover four content classes, but only two training origins
+per class; coarse60's sole failure is screen content. The selected mixture's
+96/96 is development evidence. The new candidates have no full gauntlet rows;
+the existing fair board's render/data gates pass, which does not qualify them.
+Compare matched per-seed models and final ensembles separately, use one spatial
+instrument/rule, retain floor/tail/native-loop gates, and measure p95 before
+claiming a wider feature set improves the product. No new training in this audit.
+
 ## September 13, latest: measured runtime-profile candidates
 
 [Runtime profile study](benchmarks/runtime_profiles_2026-09-13.md) continues the

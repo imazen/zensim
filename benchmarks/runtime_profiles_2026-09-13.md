@@ -2,6 +2,10 @@
 
 ## Results: several executable options, none qualified yet
 
+The later [Claude-era gate review](#claude-era-gate-review-after-the-runtime-study)
+below records the evidence still needed before extending or selecting these
+profiles. In particular, these results are not full gauntlet evaluations.
+
 The useful low-cost layout keeps local Y features at 1×, 1/2, 1/4 and 1/8,
 with X/B features only at 1/8: **60 features**. Its five-H128 ensemble roughly
 matches the prior large local120 ensemble on the observed human test panel,
@@ -194,3 +198,111 @@ linear fractions 1/6, 2/7 and 1/2 through the existing uniform ensemble API.
 No new fit, label or source is involved. Evaluate all 96 cells for each, with
 dev error and complete runtime; choose the smallest linear fraction that
 passes every cell if any does. This is development selection, not qualification.
+
+## Claude-era gate review after the runtime study
+
+September 13, in response to the user's request for rigor when extending toward
+944 features. This is an evidence audit and a continuation protocol, not another
+fit result or a retrospective change to the earlier acceptance rules.
+
+Reviewed the original late-August/September user turns in the recovered Claude
+transcript, relevant project memories, the cookbook/B methodology, the zenpapers
+feature adjudications, and the current playbook/scorecard. The earlier
+[transcript audit](science_workflow_audit_2026-09-07.md) indexes the private
+sources. This follow-up does not claim to reread every historical tool result.
+Later split, feature-serving, floor-ruler and corruption rulings take precedence
+over old memory headlines. In particular, July's broad impossibility claims about
+maps and September 5's width-based serving restrictions are not current contracts.
+
+### What the existing evidence actually covers
+
+The saved broad result contains two origins each of photo, document, graphic
+and screen content, three JXL levels and four block sizes: 24 cells per class.
+Coarse60 passes 24/24, 24/24, 24/24 and **23/24** respectively; the selected
+mixture passes 24/24 in each. The screen failure must remain visible beside
+the pooled 95/96. This panel is already content-stratified; its limitation is
+only eight previously used training origins, small images and block restoration
+rather than native codec allocation. The mixture was selected on this panel.
+Neither another replay nor more block sizes supplies independent source evidence.
+
+Audit source: `runtime-profiles/broad-served/RESULT.json` in the shared artifact
+root, SHA256 `0dff3fb1dd0b8a80f306da815169d665c6176edc3b93cb18ac5057d8ef35f22d`.
+
+The earlier scale-selective study used M2 >= .8 and M3f >= .9 for its diagnostic
+screen; this runtime study uses M2 >= .99 and M3f >= .70. Their pass counts are
+not directly comparable. M3f block-refinement evidence also does not silently
+substitute for every historical M3/M3a instrument or for native RD.
+
+The 944-versus-228 table is a matched three-seed, single-model training study.
+The newer 60-feature headline is a five-member ensemble. Comparing those
+headlines cannot isolate feature availability. Likewise, a corruption-trained
+944 class predictor's error is not the human-trained 944 scorer's bug-detection
+performance. The old class labels predate the revised severity contract.
+
+The fair gauntlet currently has 174 rendered model rows and none of these
+runtime candidates. Its existing gate script passed on this audit: both script
+blocks, render/SSR/badges, compare-link negative controls, and strict JSON for
+511 input fullevals. That verifies the existing board, not the new models'
+scientific qualification. No new fulleval was manufactured from the partial
+runtime report and no historical board values were overwritten.
+
+### Requirements for the next feature comparison
+
+1. **Match the experiment before attributing a gain.** Compare coarse60,
+   local120, basic228, selected619 and full944 controls on the same admitted
+   source rows, Rev3 arithmetic, training objective, head size, checkpoint
+   cadence, packing and calibration. Vary added feature families/scales in a
+   separate axis from head architecture or corruption composition. Retain B/D,
+   the relevant historical MLP/additive controls and independent metric peers
+   on compatible evaluation surfaces; their historical scalar numbers are not
+   transferable to a new feature era. Exact extension IDs and the bounded fit
+   matrix must be registered before running them.
+2. **Use replicated recipes, with attributable randomness.** Three paired
+   initialization/order streams for screening, five for finalists; report
+   per-seed values, mean and spread, plus the actual final ensemble separately.
+   Preserve sampler configuration and sequence/coverage evidence. The September
+   5 subset study falsified the assumption that favorable seeds merely covered
+   more rows: order mattered and coverage had saturated. Check current trainer
+   behavior instead of repeating that old hypothesis. Reuse hash-compatible
+   prior fits where these conditions match; do not retrain merely for new names.
+3. **Separate development from confirmation.** These KADID development-test
+   rows have already influenced research. Keep them labeled exposed. Report
+   per-distortion, quality-tail and content-class errors with counts, not only
+   pooled MAE/SROCC. Keep teacher-proxy axes out of independent-human superiority
+   claims. For uncertainty over content, use paired reference-cluster resampling;
+   image pairs and training seeds are not independent reference samples. Freeze
+   noninferiority margins before new comparisons; an interval containing zero
+   does not prove equivalence. Terminal CID22/AIC/T0 data stay out of iteration.
+4. **Gate spatial capability before expensive promotion.** Require complete
+   Rust refinement coverage and scalar/map/pixel parity for the exact packed
+   composition. Re-evaluate controls and candidates on one instrument/rule,
+   with photo, dense text/documents, graphics and UI, native codec block sizes,
+   larger images, odd geometry and bin/rectangle alignment cases. Register
+   additional admitted sources before scoring them. Full944 remains a scalar
+   information control while legacy weighted refinement is unsupported; do not
+   silently omit those features from its map. Cheap kill tests precede sweeps.
+5. **Keep product gates intact.** Use the current
+   [scorecard](../docs/MODEL_SELECTION_SCORECARD.md), G-ADDR ladder/resolvable
+   ruler and [target protocol](../docs/TARGET_STEERING_PROTOCOL_2026-09-08.md).
+   Identity, above-identity failures, negative tails, tied regions and every
+   required codec floor are separate from rank. Establish per-image codec
+   bounds before judging 1/2/3-shot targeting; keep bounds hidden from the
+   controller and seeds calibrated only on training families. Spatial value
+   requires active/neutral controls and bytes at equal independently judged
+   quality in the existing native JXL/AVIF/JPEG/WebP owners. SDR results cannot
+   qualify HDR. The revised corruption gate must not fire on ordinary low-quality
+   encodes; frozen severity labels and false-activation counts precede a new fit.
+6. **Measure actual cost and keep the gauntlet current.** Benchmark complete
+   final compositions on the same quiet build, inputs and threads, retaining
+   samples sufficient for p95, cache/map costs and incremental worker RSS.
+   Bin-8 output does not imply that full-resolution feature work disappears.
+   After each completed owner fulleval, update the existing gauntlet and its
+   review set, annotations and fairness grouping; run its render/data/negative
+   controls. Missing, unsupported, failed and qualified remain distinct. A
+   cohort-average floor cannot erase an individual seed's failure, and a cached
+   composite cannot survive changed component statistics without recomputation.
+
+The next comparison must establish a useful accuracy/runtime/steering tradeoff,
+not a feature-count winner. Current candidate disposition remains **unqualified**:
+artifact responses fail, full gauntlet/target/RD/HDR coverage is missing, and the
+p95 map/scalar and release memory requirements have not been established.
