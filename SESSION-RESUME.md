@@ -1,5 +1,36 @@
 # Start here — one target score, one development path
 
+## September 14, newest: basic feature decomposition and a spatial mechanism
+
+[Basic/peak comparison](benchmarks/product_peaks_2026-09-14.md) completes twelve
+paired TRAIN fits, four full ensembles, 21,344 canonical panels, source-cluster
+uncertainty, twenty native audits and 588 pixel repairs. Fit/pack/export takes
+214 seconds, scalar panels five more. Raw/packed predictions are bit-exact on
+31,548 rows. No EVAL/test data or calibration were used.
+
+Hard-max pools buy most of basic228's codec rank gain: basic156 .8998,
+L8-only .9156, max-only .9489. Their removal saves about 27% prepared-map median
+cost but essentially no scalar time. Basic228/H32 retains codec rank .9549 and
+passes all five M2 / four M3f cases, but loses .0197 human SROCC versus H128 and
+has four distorted scores above 100. None qualifies. Full raw tails, scatter,
+Mohammadi and per-codec/source/class panels are retained; MAE is supplementary.
+
+For H32's remaining map failure (TRAIN screenshot row 5316), M2=1 and M3f=.6739.
+Oracle max substitution worsens it; edge-only or L8-only observed contributions
+bring M3f above .70. This isolates a non-max approximation issue, not a proven
+new formula bug. Existing L8 tests already establish finite-removal curvature
+can be up to eight times the derivative estimate. Next separate finite pool
+curvature from changed blur neighborhoods using existing diagnostic owners;
+preserve scalar semantics and measure prepared/query cost. Human-rank loss,
+identity ordering, broader TRAIN coverage, corruption, native targeting/RD,
+frozen qualification, HDR and p95 remain outstanding. Full goal remains active.
+
+Artifacts: `~/work/zensim-validation-2026-09-14/product-peaks/`. The descriptive
+bootstrap initially refused an old rounded control export; corrected to the
+prior verified round-trip export without weakening assertions. All experiment
+processes finished. Current source is unchanged; this packet adds scientific
+evidence, not a new production inference implementation.
+
 ## September 14, newest: coarse-feature frontier and a real attribution fix
 
 [Scale frontier](benchmarks/product_scales_2026-09-14.md) completes 18 paired

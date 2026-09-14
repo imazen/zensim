@@ -1,5 +1,18 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, newest basic/peak decomposition:**
+[Protocol/results](../benchmarks/product_peaks_2026-09-14.md) reuse the same
+admitted native product-TRAIN packet without new extraction, calibration or
+EVAL/test access. Twelve paired fits and four full ensembles separate HF,
+L8, hard-max and head-capacity effects. All 31,548 raw/packed predictions are
+bit-exact, twenty original-bitstream native audits pass, and 588 finite pixel
+repairs locate a remaining non-max approximation failure. All 23 codec
+development sources are distinct source families for descriptive paired
+bootstrap. An old rounded control export was refused; the prior verified
+round-trip export is used instead. Full panels/scatter, source uncertainty,
+failed gates and matched timing are retained. No model qualifies; no inference
+formula changed. Artifacts: `~/work/zensim-validation-2026-09-14/product-peaks/`.
+
 **September 14, later product scale frontier:**
 [Protocol/results](../benchmarks/product_scales_2026-09-14.md) reuse the exact
 preceding product-TRAIN tables and source-family roles. No new source admission,
