@@ -3808,6 +3808,8 @@ impl MaxRemoval {
         }
     }
 
+    // Bounds are inclusive source-coordinate extrema, not half-open ranges.
+    // A single physical sample owns (x, x), (y, y).
     fn add(&mut self, value: f32, x: (usize, usize), y: (usize, usize)) {
         self.left[x.0 + 1] = self.left[x.0 + 1].max(value);
         self.right[x.1] = self.right[x.1].max(value);

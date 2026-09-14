@@ -1,5 +1,30 @@
 # Start here — one target score, one development path
 
+## September 14, newest: shared window moments pass accuracy, fail dense cost
+
+[Shared-moment response](benchmarks/shared_moment_response_2026-09-14.md) retains
+canonical blurred moments and updates local changes through reflected f64 SATs,
+then pools via the existing fused kernel. All 138 checks / 9,756 predictions on
+six frozen models and 23 admitted TRAIN pairs pass: max error .003697 points,
+minimum rank .999555, no material wrong signs, exact bases. No fit or EVAL/test.
+
+Initial synthetic failure was a prototype-only endpoint defect: MaxRemoval
+expects inclusive bounds, the helper passed exclusive ends. Direct enumeration
+failed before correction and passes afterward; all original synthetic gates pass.
+Production extrema arithmetic was correct. A comment clarifies its contract.
+
+Cost still fails: dense8 row4589/1024² takes 1.557s for basic228/H32, 28.09 scalar
+calls; moment/feature work alone takes 1.216s. H128 is 30.03 calls. Dense8 accuracy,
+native RD and p95/memory qualification are unmeasured. Large-image accuracy
+witnesses remain block64. This is not a controlled speedup or narrow-model test.
+
+Prototype, failures, measured binaries and sources are archived under
+`~/work/zensim-validation-2026-09-14/moment-response/`; experimental code is removed.
+Next investigate shared pixel-response computation against the preserved finite
+witnesses and native interventions. Avoid more per-query tile/capacity sweeps.
+The complete product goal remains active; no candidate qualifies. All jobs finished.
+
+
 ## September 14, newest: bounded replay passes accuracy but fails the fine-grid cost
 
 [Tile-response study](benchmarks/tile_response_2026-09-14.md) uses existing

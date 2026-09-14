@@ -1,0 +1,172 @@
+{
+  "date": "2026-09-14",
+  "role": "train",
+  "partition": "development",
+  "qualified": false,
+  "verdict": "ACCURACY_PASS_COST_FAIL",
+  "production_arithmetic_changed": false,
+  "prototype_removed": true,
+  "synthetic_defect": "Experimental helper passed exclusive upper endpoints to inclusive MaxRemoval::add. Corrected only in prototype; existing production owner was correct.",
+  "cases": 138,
+  "repairs": 9756,
+  "accuracy": {
+    "PS914_basic228_h128_plain_ens3": {
+      "cases": 23,
+      "accuracy_passes": 23,
+      "min_rank": 0.9998196406348538,
+      "max_gain_error": 0.003697077433272966,
+      "max_repaired_score_error": 0.003697077433272966,
+      "dense_scalar_ratio_range": [
+        6.39651072494701,
+        19.99976551367536
+      ],
+      "band_only_ratio_range": [
+        3.77218096485409,
+        17.38150323771502
+      ],
+      "dense_within_3_scalar_calls": 0
+    },
+    "PP914_basic228_h32_plain_ens3": {
+      "cases": 23,
+      "accuracy_passes": 23,
+      "min_rank": 0.9998987546825959,
+      "max_gain_error": 0.0025882720947265625,
+      "max_repaired_score_error": 0.0025882720947265625,
+      "dense_scalar_ratio_range": [
+        6.319211769768828,
+        19.43264634194583
+      ],
+      "band_only_ratio_range": [
+        3.7440793648293234,
+        17.593647586502794
+      ],
+      "dense_within_3_scalar_calls": 0
+    },
+    "PT914U_y60_h32_plain_ens3": {
+      "cases": 23,
+      "accuracy_passes": 23,
+      "min_rank": 0.999812382739212,
+      "max_gain_error": 0.0006345113118513268,
+      "max_repaired_score_error": 0.0006345113118513268,
+      "dense_scalar_ratio_range": [
+        14.854714546912323,
+        28.92633319495688
+      ],
+      "band_only_ratio_range": [
+        8.824859672652261,
+        24.65793816983039
+      ],
+      "dense_within_3_scalar_calls": 0
+    },
+    "PT914U_local120_h128_plain_ens3": {
+      "cases": 23,
+      "accuracy_passes": 23,
+      "min_rank": 0.9995550611790879,
+      "max_gain_error": 0.0013491312662665678,
+      "max_repaired_score_error": 0.0013491312662665678,
+      "dense_scalar_ratio_range": [
+        6.528925939484663,
+        21.068059187010977
+      ],
+      "band_only_ratio_range": [
+        3.863929182206813,
+        18.873181416088084
+      ],
+      "dense_within_3_scalar_calls": 0
+    },
+    "PP914_basic156_h128_plain_ens3": {
+      "cases": 23,
+      "accuracy_passes": 23,
+      "min_rank": 0.9995550611790879,
+      "max_gain_error": 0.0010121663411410964,
+      "max_repaired_score_error": 0.0010121663411410964,
+      "dense_scalar_ratio_range": [
+        6.212782343155328,
+        19.456181264948896
+      ],
+      "band_only_ratio_range": [
+        3.817172937756082,
+        17.264775703139232
+      ],
+      "dense_within_3_scalar_calls": 0
+    },
+    "PP914_basic192l8_h128_plain_ens3": {
+      "cases": 23,
+      "accuracy_passes": 23,
+      "min_rank": 0.9998914459400782,
+      "max_gain_error": 0.0014292399088446928,
+      "max_repaired_score_error": 0.0014292399088446928,
+      "dense_scalar_ratio_range": [
+        6.18081642857132,
+        19.096912020628924
+      ],
+      "band_only_ratio_range": [
+        3.6482706275772663,
+        16.714224593983616
+      ],
+      "dense_within_3_scalar_calls": 0
+    }
+  },
+  "dense8": {
+    "qualified": false,
+    "accuracy_measured": false,
+    "timing_qualification": false,
+    "queries": 16384,
+    "setup_seconds": 0.150597827,
+    "moment_seconds": 1.216385379,
+    "pyramid_seconds": 0.066787793,
+    "restore_seconds": 0.026561675,
+    "models": {
+      "PP914_basic156_h128_plain_ens3": {
+        "total_seconds": 1.6095034529999996,
+        "inference_seconds": 0.138553546,
+        "scalar_seconds": 0.055093917,
+        "ratio": 29.213814167542303
+      },
+      "PP914_basic192l8_h128_plain_ens3": {
+        "total_seconds": 1.6461936109999997,
+        "inference_seconds": 0.175243704,
+        "scalar_seconds": 0.055657319,
+        "ratio": 29.577307002516594
+      },
+      "PP914_basic228_h32_plain_ens3": {
+        "total_seconds": 1.5571224719999996,
+        "inference_seconds": 0.086172565,
+        "scalar_seconds": 0.055430879,
+        "ratio": 28.091246252833184
+      },
+      "PS914_basic228_h128_plain_ens3": {
+        "total_seconds": 1.6629048539999995,
+        "inference_seconds": 0.19195494700000001,
+        "scalar_seconds": 0.055368811,
+        "ratio": 30.033241168931724
+      },
+      "PT914U_local120_h128_plain_ens3": {
+        "total_seconds": 1.5841400779999997,
+        "inference_seconds": 0.113190171,
+        "scalar_seconds": 0.053882574,
+        "ratio": 29.399858997085023
+      },
+      "PT914U_y60_h32_plain_ens3": {
+        "total_seconds": 1.4992460049999996,
+        "inference_seconds": 0.028296098,
+        "scalar_seconds": 0.023929304,
+        "ratio": 62.65313880420424
+      }
+    }
+  },
+  "dense8_accuracy": "UNMEASURED",
+  "native_rd": "NOT_RUN",
+  "performance_p95": "NOT_MEASURED",
+  "evidence_sha256": {
+    "REGISTRATION.json": "872384d8c7bbdd2f005921520d2848845b6c21736cdcb28f2c9815bafe7d0fc4",
+    "RESULT.json": "cd2d1f58ed5ad4cd6479397faff27c768ad2d142ca1e08b39ca9da5b8113aa8c",
+    "SUMMARY.json": "43adece057dcf4b766c16b907c40c4e84bddefe13f8ba067654615cf6968ccbd",
+    "TOOLS.json": "1ec16f3c01eb99e9dc340bce4b7cd5528b5004fa83841e4b6a4624216ea7dd48",
+    "prototype.patch": "bb0eaf8910e53696ba2a8e241e2d2c852ab2abe63c29f7db8ede5c6f3ef0b591",
+    "NEGATIVE_CONTROLS.json": "70f3bd924bfecc084095a998dc7a0ffea2efcd737c28b7fb70291a5d504d2cd4",
+    "dense8/RESULT.json": "26c260fdcc12fe3c3e2df950f1fe24f056804f02159eeccd7fcfad5404b61ca5",
+    "dense8/TOOLS.json": "34810c8cfab8d82aa967f23291d4b2eaa71d63cfe934152d65a9cc49dbf4121e",
+    "dense8/SUMMARY.json": "bf162923fe3f6f76fa453b19ec5b336e423da882960d6ca283c2b73b634796c3"
+  }
+}
