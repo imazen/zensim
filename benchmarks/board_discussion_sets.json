@@ -378,6 +378,15 @@
       "report_url": "/zensim/reports/native-phase-2026-09-14/index.html",
       "bakes": [],
       "note": "Two frozen models, 130 translated cells and all original native interventions. The focal preference changes with sampling alignment. Twelve of 48 whole-cell period controls fail narrowly in Y SSIM-L4; the focal pair passes. No refit or model promotion."
+    },
+    {
+      "id": "2026-09-14-native-filter",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Four sampling contracts: phase variation and feature direction",
+      "report_url": "/zensim/reports/native-filter-2026-09-14/index.html",
+      "bakes": [],
+      "note": "Neutral Rust feature instruments, not trained candidates. Direct filters reduce focal B ART L4 span 68–71% but increase mean span 15–24%; no quality-conflict fix or model advancement. Same period-control failures retained."
     }
   ],
   "incumbent_notes": [

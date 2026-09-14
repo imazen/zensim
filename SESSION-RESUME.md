@@ -1,5 +1,22 @@
 # Start here — one target score, one development path
 
+## September 14, newest: direct filters reduce L4 phase span, not the conflict
+
+[Four-contract comparison](benchmarks/native_filter_2026-09-14.md) measures the
+same60 y60 features through neutral Rust instruments on the same130 TRAIN
+alignments. Triangle/Mitchell/RobidouxSharp reduce focal B ART L4 span68–71%,
+but increase mean span15–24%; triangle/Mitchell make L4's adverse response
+positive at all64 phases. This is not a refitted-model quality result.
+
+All273,720 live box features and4,562 pixel/peer rows reproduce exactly;
+full-resolution features match every contract. Each contract retains the same
+six failing whole-cell period controls at f14; focal-pair controls pass.
+The independent resizer reference passes and explicitly includes binary16
+input quantization. No uniform feature improvement or model advancement.
+Do not silently retag trained bakes or start a kernel-parameter sweep. Further
+contract comparisons require admitted TRAIN re-extraction/refitting and complete
+quality/native/runtime assessment. All product qualification remains open.
+
 ## September 14, newest: coarse-B native preference is phase-sensitive
 
 [Phase diagnostic](benchmarks/native_phase_2026-09-14.md) translates the exact

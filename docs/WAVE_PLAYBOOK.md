@@ -99,6 +99,14 @@ from actual codec RD. A local phase response is not a replacement-model verdict.
 Native galleries may attach `diagnostic_figures` with a local SVG/PNG filename,
 title, caption and SHA-256; bad identities fail before publication.
 
+The [four-contract filter comparison](../benchmarks/native_filter_2026-09-14.md)
+uses neutral declared-ID ZNPR instruments to expose features through the same
+Rust replay. Their scores are not trained quality predictions. Current direct
+zenresize paths include binary16 input quantization; kernel, pyramid and
+precision effects must not be conflated. Reduced phase span alone does not
+select a sampling contract: the focal L4 span falls while mean span rises.
+Refit against matching TRAIN extraction before assessing model quality.
+
 ## A complete experiment
 
 1. Register the hypothesis, baseline, exact intervention, sources, seeds,

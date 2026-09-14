@@ -1,5 +1,15 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, native filter feature comparison:**
+[Results](../benchmarks/native_filter_2026-09-14.md) reuse the native phase
+packet's eight TRAIN-development cells and130 translations with four neutral
+60-feature Rust instruments: cascade box and direct triangle/Mitchell/
+RobidouxSharp at1/2/4/8. No fitting, calibration, new sources, encodes or
+protected populations. Exact box-feature and pixel/peer reproduction passes.
+Direct contracts include binary16 input quantization. Focal L4 span falls,
+mean span rises, and no trained-model quality improvement is established.
+The same f14 period-control failures persist; all focal-pair controls pass.
+
 **September 14, native sampling-phase diagnostic:**
 [Results](../benchmarks/native_phase_2026-09-14.md) reuse the same four TRAIN
 development families and eight native cells, with frozen plain/constrained
