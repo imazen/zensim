@@ -1,5 +1,19 @@
 # Start here — one target score, one development path
 
+## September 13, latest: thresholded corruption minimum and severity policy
+
+The [activation contract](docs/CORRUPTION_ACTIVATION_2026-09-13.md) records the
+user's clarification after the subset study: the catcher signals integrity
+failure, not ordinary spatial allocation damage. The Rust composition is now
+`C < T ? min(P, C) : P`, with equality inactive and negative tails preserved.
+The fit screen checks false activation independently of score lowering, which
+can hide false positives on already poor valid encodes. Review catastrophic,
+recoverable, valid low-quality and ambiguous strata before the next fit;
+historical synthetic labels and q20 ordering do not establish that distinction.
+No labels, trained artifacts or qualification results were changed. Prepared
+steering still refuses companions; inactive pass-through and an explicit failure
+return remain the next API step, without a corruption-gradient requirement.
+
 ## September 13, newest: fast local subsets and prepared steering API
 
 [Steerable subset study](benchmarks/steerable_subset_2026-09-13.md) follows the

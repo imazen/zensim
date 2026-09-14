@@ -267,7 +267,9 @@ impl<'a> BakeScorer<'a> {
 
     /// Attach a Rust tree corruption head. Its baked deadband is used unless
     /// the model author explicitly supplies an override. The returned score
-    /// includes the gate on every scoring surface.
+    /// includes the gate on every scoring surface: below the head's score
+    /// threshold, take the minimum of perceptual and head scores; otherwise
+    /// preserve the perceptual score. Equality at the threshold is inactive.
     ///
     /// # Errors
     /// The deadband must be finite and within 0–100 score units.
@@ -286,6 +288,8 @@ impl<'a> BakeScorer<'a> {
 
     /// Attach the historical ZNPR corruption head with an explicit deadband.
     /// Its own head and spline execute through this same Rust surface.
+    /// The gate uses the same thresholded minimum as [`Self::with_corruption_head`],
+    /// preserving negative scores from either model.
     ///
     /// # Errors
     /// Rejects malformed head models or a nonfinite/out-of-range deadband.
@@ -1210,6 +1214,32 @@ mod revision_contract_tests {
                         "dtype":"f32","weights":[1.0],"biases":[0.0]}]
         });
         zenpredict_bake::bake_from_json_str(&recipe.to_string()).expect("bake the recipe")
+    }
+
+    #[test]
+    #[cfg(feature = "corruption-head")]
+    fn znpr_companion_applies_threshold_before_minimum_through_surface() {
+        let recipe = serde_json::json!({
+            "schema_hash":1, "scaler_mean":[0.0], "scaler_scale":[1.0],
+            "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":"13"}],
+            "layers":[{"in_dim":1,"out_dim":1,"activation":"identity",
+                "dtype":"f32","weights":[-1.0],"biases":[83.0]}]
+        });
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+        let catcher = zenpredict::Model::from_bytes(&bake_declaring(None, 13)).unwrap();
+        let mut scorer = crate::BakeScorer::new(&model)
+            .unwrap()
+            .with_linear_corruption_head(&catcher, 10.0)
+            .unwrap();
+        let mut features = vec![0.0; 372];
+        for (head_score, expected) in [(55.0, 28.0), (2.0, 2.0), (10.0, 73.0), (-60.0, -60.0)] {
+            features[13] = head_score;
+            assert_eq!(
+                scorer.score_features(&features, 96, 96, None).unwrap(),
+                expected
+            );
+        }
     }
 
     #[cfg(feature = "feature-regime-v2")]

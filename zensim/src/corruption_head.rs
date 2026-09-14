@@ -309,23 +309,22 @@ fn schema_descriptor(
 /// **THE deploy composition**, in the dial's SCORE units — one owner, used by
 /// the runtime companion and by `bake_verdict` for BOTH head kinds.
 ///
-/// A flagged row is forced to `min(perceptual, 0)` so it can no longer
-/// out-rank its own honest anchor; an unflagged row passes through untouched.
-/// This is, verbatim, the rule `bake_verdict` computed inline before this
-/// function existed (`if h < thr { d.min(0.0) } else { d }`) and the rule the
-/// theory lane measured in Python (`np.where(p > T, np.minimum(dial, 0), dial)`,
-/// with `T` and the score threshold related by `thr = 100 * (1 - T)`), so
-/// adopting it moves no number. `scripts/verify_corrhead_composition.sh` gates
-/// that on a full `--full-json`.
+/// Activate only when `head_score < deadband_score`, then return
+/// `min(perceptual, head_score)`. Otherwise pass the perceptual score through
+/// unchanged, including equality at the threshold. Both scores are quality
+/// oriented (lower is worse). For a tree head, `head_score = 100 * (1 - p)`
+/// and the score threshold is `100 * (1 - probability_deadband)`.
 ///
-/// The head is **not** a second ranker. It cannot raise a score, only floor
-/// one — which is what makes attaching it safe for a dial that is already
-/// calibrated.
+/// Activation signals an integrity failure, even when the perceptual score
+/// is already lower and its number does not change. Callers must not infer
+/// activation from score lowering. The head never raises a score and must
+/// be calibrated against valid low-quality encodes as well as high-quality
+/// ones; severe ordinary compression alone should not activate it.
 #[inline]
 #[must_use]
 pub fn gate_score(perceptual: f64, head_score: f64, deadband_score: f64) -> f64 {
     if head_score < deadband_score {
-        perceptual.min(0.0)
+        perceptual.min(head_score)
     } else {
         perceptual
     }
@@ -803,12 +802,13 @@ pub struct CorruptionVerdict {
     pub probability: f64,
     /// The head's score in the dial's units, `100 * (1 - probability)`.
     pub head_score: f64,
-    /// Whether the deadband fired (`probability > head.deadband()`).
+    /// Whether `head_score < head.deadband_score()`. This signals an integrity
+    /// failure even if the perceptual score was already lower than the head.
     pub fired: bool,
     /// The perceptual score before the gate — unchanged, kept so a caller can
     /// see the delta without re-reading the result.
     pub perceptual_score: f64,
-    /// [`gate_score`] applied: `min(perceptual, 0)` when fired, else
+    /// [`gate_score`] applied: `min(perceptual, head_score)` when fired, else
     /// `perceptual`.
     pub gated_score: f64,
 }
@@ -1281,16 +1281,35 @@ mod tests {
     }
 
     #[test]
-    fn gate_score_floors_only_a_flagged_row_and_never_raises() {
+    fn gate_score_takes_the_minimum_only_after_activation() {
         // Not flagged (head score above the deadband): passthrough.
         assert_eq!(gate_score(83.0, 55.0, 10.0), 83.0);
-        // Flagged, positive dial: floored to 0.
-        assert_eq!(gate_score(83.0, 2.0, 10.0), 0.0);
+        // Flagged, positive dial: capped by the catcher's own score.
+        assert_eq!(gate_score(83.0, 2.0, 10.0), 2.0);
         // Flagged, already-negative dial: left alone (min, not clamp).
         assert_eq!(gate_score(-40.0, 2.0, 10.0), -40.0);
+        // A ZNPR catcher can supply a negative failure score too.
+        assert_eq!(gate_score(-40.0, -60.0, 10.0), -60.0);
         // Exactly at the deadband is NOT flagged (strict `<`), matching the
         // Python rule's strict `p > T`.
         assert_eq!(gate_score(83.0, 10.0, 10.0), 83.0);
+        assert_eq!(
+            gate_score(83.0, 10.0_f64.next_down(), 10.0),
+            10.0_f64.next_down()
+        );
+        assert_eq!(gate_score(83.0, 10.0_f64.next_up(), 10.0), 83.0);
+    }
+
+    #[test]
+    fn active_verdict_does_not_require_lowering_an_already_bad_score() {
+        let head = CorruptionHead::from_bytes(&Builder::single_stump(3, 0.5, -10.0, 10.0).build())
+            .unwrap();
+        let mut features = vec![0.0_f64; head.caller_input_width()];
+        features[3] = 1.0;
+        let verdict = head.verdict(&features, -40.0).unwrap();
+        assert!(verdict.fired);
+        assert!(verdict.head_score > -40.0);
+        assert_eq!(verdict.gated_score, -40.0);
     }
 
     #[test]
@@ -1421,10 +1440,10 @@ mod wiring_tests {
     fn an_attached_head_flips_an_ordering_the_dial_gets_wrong() {
         let refimg = fx::reference(W, H);
         // The honest anchor is a plain 3x3 blur — a heavy but HONEST loss,
-        // and (measured) a POSITIVE dial score, which is what a q20 encode
-        // looks like. That matters: the composition floors a flagged row to
-        // `min(score, 0)`, so it can only sort a corruption below an anchor
-        // whose own score is above zero.
+        // and (measured) a positive dial score. The oracle catcher's active
+        // score is near zero, so it can sort this defect below this anchor.
+        // This wiring fixture establishes neither a universal q20 score nor
+        // a catastrophic label for every duplicated row.
         let honest = fx::honest_blur_quantize(&refimg, W, H, true, 1);
         // `edge_duplicate_top_row` — the record's WORST family for the linear
         // head (17.2 % recall) and, measured here, one D's dial calls nearly
@@ -1447,7 +1466,7 @@ mod wiring_tests {
         );
         assert!(
             r_honest.score() > 0.0,
-            "the honest anchor must score above zero for the floor to be able \
+            "the honest anchor must score above zero for this oracle head to \
              to sort below it; got {:.4}",
             r_honest.score()
         );
@@ -1463,7 +1482,15 @@ mod wiring_tests {
             .unwrap()
             .with_corruption_head(&head, None)
             .unwrap();
-        for (pixels, expected) in [(&corrupt, 0.0), (&honest, r_honest.score())] {
+        for (pixels, expected) in [
+            (
+                &corrupt,
+                r_corrupt
+                    .score()
+                    .min(head.score_f64(r_corrupt.features()).unwrap()),
+            ),
+            (&honest, r_honest.score()),
+        ] {
             let result = candidate
                 .compute(
                     &crate::RgbSlice::new(&refimg, W, H),

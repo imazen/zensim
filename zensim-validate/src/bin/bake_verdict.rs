@@ -925,9 +925,9 @@ struct Args {
     corruption_head: Option<PathBuf>,
     /// `--corruption-head-threshold <score>`: the DEPLOY deadband, in the
     /// head bake's own OUTPUT units. The registered composition is
-    /// `final = min(perceptual, gate)` with `gate = 100` unless
-    /// `P(corruption) > T`; a head baked to emit `100*(1-P)` turns that
-    /// into `head_score < 100*(1-T)`, so `T = 0.9` is `10.0` here.
+    /// `head_score < threshold ? min(perceptual, head_score) : perceptual`.
+    /// A head baked to emit `100*(1-P)` maps probability deadband T to
+    /// score threshold `100*(1-T)`, so `T = 0.9` is approximately `10.0` here.
     corruption_head_threshold: f64,
     /// Whether the caller passed `--corruption-head-threshold` explicitly. A
     /// ZCTH head carries its own baked deadband; when the caller did not ask

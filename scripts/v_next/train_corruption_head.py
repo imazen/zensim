@@ -649,6 +649,8 @@ def canonical_main(argv):
         summary = report["fit_roles"]["calibrate"] if a.training_screen_only else report["splits"]["validate"]
         require(set(summary["by_codec"]) == {"jxl", "avif"}, "native codec screen coverage")
         gates = dict(
+            zero_native_codec_activation=all(v["head_fp"]["count"] == 0 for v in summary["by_codec"].values()),
+            honest_activation_le_1pct=summary["head_fp"]["rate"] <= .01,
             zero_native_codec_lowering=all(v["honest_score_lowered"]["count"] == 0 for v in summary["by_codec"].values()),
             honest_lowering_le_1pct=summary["honest_score_lowered"]["rate"] <= .01,
             detection_ge_95pct=summary["detection"]["rate"] >= .95,

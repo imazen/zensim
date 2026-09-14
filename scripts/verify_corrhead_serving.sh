@@ -13,6 +13,10 @@
 #
 # Pre-registration: docs/PLAN_CORRHEAD_SERVING_2026-09-06.md
 # Record:           benchmarks/corruption_head_serving_2026-09-06.md
+# Historical replay: G3/G4 require the September 6 zero-floor composition.
+# The September 13 thresholded minimum intentionally changes that composition;
+# old identity/published gate rates are not acceptance bars for the new owner.
+# See docs/CORRUPTION_ACTIVATION_2026-09-13.md and current Rust wiring tests.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

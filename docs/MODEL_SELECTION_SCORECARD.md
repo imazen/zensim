@@ -1,9 +1,24 @@
 # Production release scorecard
 
+## September 13 corruption clarification
+
+The later [activation and severity contract](CORRUPTION_ACTIVATION_2026-09-13.md)
+supersedes the unconditional catastrophic interpretation of synthetic defect
+labels below. Activation means integrity failure; valid low-quality encodes
+and ordinary spatial allocation must not activate the catcher. Require zero
+honest native activations and <=1% overall honest activations as well as score
+lowering limits: an unchanged negative score can hide a false activation.
+Review and freeze catastrophic/recoverable/ambiguous strata and appropriate
+source-matched ordering anchors before the next fit. Existing aggregate
+detection and universal q20 ordering remain legacy diagnostics, not evidence
+of catastrophic detection at very low qualities. No existing failed candidate
+becomes qualified through this clarification; the new stratified evaluation
+and its preregistered acceptance bars are still missing.
+
 ## September 8 production contract — registered before new candidate validation
 
-This section is the current release contract. The older measurement history
-below remains evidence, not an alternate set of acceptance criteria. These
+This section is the release contract except where superseded above. The older
+measurement history below remains evidence, not an alternate set of acceptance criteria. These
 new numerical tolerances are engineering requirements established under the
 user's September 8 directive; they are not claimed to be perceptually validated
 JNDs or previously agreed consumer tolerances. No candidate is qualified yet.

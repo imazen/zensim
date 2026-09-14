@@ -38,6 +38,12 @@
 
 ### Changed
 
+- Corruption companions now activate strictly below their score threshold,
+  then return `min(perceptual, corruption_score)` instead of flooring to zero.
+  Inactive companions leave the perceptual score unchanged. Activation remains
+  a failure signal even when an already lower perceptual score is unchanged.
+  Existing head thresholds require reevaluation; no named profile was replaced.
+
 - Declared local-only basic subsets skip peak and whole-image HF reductions.
   Candidate map assembly skips channels with zero sensitivity and unneeded
   reference HF sweeps, masked/IW pools and the unused intermediate profile head.
