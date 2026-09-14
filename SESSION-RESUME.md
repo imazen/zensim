@@ -1,5 +1,20 @@
 # Start here — one target score, one development path
 
+## September 14, newest: native decoder retains color metadata and precision
+
+[Native admission](benchmarks/native_color_admission_2026-09-14.md) adds a
+hash-bound inspection mode to the existing decode owner. All215 admitted
+TRAIN-fit files reproduce their old RGB8 hashes, while native u16 buffers and
+source/decoded metadata are retained separately.17 codec tests and five CLI
+refusals pass. Synced AVIF/JXL decoder updates are pinned in the receipt.
+
+None of180 P3-derived reconstructions retains the source520-byte ICC; that
+does not establish whether original encoding converted to sRGB correctly.
+The native hash identifier does not recognize this profile. Use the existing
+full CMS where required; do not blindly retag outputs or reapply XYB ICC.
+The feature extractor still requests legacy RGB8. Corrected color/precision
+scoring and restored TRAIN coverage remain the next work; no model advances.
+
 ## September 14, newest: color/HBD/HDR audit and two-day gauntlet discussion
 
 [Status and chronology](benchmarks/color_hbd_hdr_status_2026-09-14.md) distinguish

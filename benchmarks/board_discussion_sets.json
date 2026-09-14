@@ -436,6 +436,15 @@
       ],
       "preferred_corpus": "imazen26",
       "note": "Nine frozen Rev3 models have six SDR panels and remain NO-SHIP. Read the linked two-day review for TRAIN feature/spatial/corruption studies, 65 fresh correctness checks, ICC loss, RGB8 precision reduction, HDR primaries and sampling limitations. No new HBD/HDR qualification is implied."
+    },
+    {
+      "id": "2026-09-14-native-color-admission",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Native color and precision admission",
+      "report_url": "/zensim/reports/native-color-admission-2026-09-14/index.html",
+      "bakes": [],
+      "note": "215/215 TRAIN-file legacy pixels reproduce while native depth and source/decoded metadata are retained. No P3-derived reconstruction retains the source ICC; original conversion remains unproven. 17 codec tests and five CLI refusal checks pass. No model scoring or qualification."
     }
   ],
   "incumbent_notes": [

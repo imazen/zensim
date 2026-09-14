@@ -1,5 +1,16 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, native color/depth inspection:**
+[Native admission](../benchmarks/native_color_admission_2026-09-14.md) retains
+the existing product/honest-control TRAIN-fit assignments for214 pairs and215
+distinct files, including the P3 sources and unresolved q85 control. The new
+native decoder report separates file metadata from decoded samples. All215
+legacy RGB8 hashes reproduce after syncing AVIF/JXL decoder updates; no scores,
+labels, training, protected populations or previous receipts change. None of
+180 P3-derived reconstructions retains the source ICC, but original encoder
+conversion remains unproven. Native precision retention is now available;
+the feature-extraction caller still uses its explicit legacy RGB8 contract.
+
 **September 14, Rev3 integrity TRAIN pilot and color correction:**
 [Registration/results](../benchmarks/integrity_rev3_train_2026-09-14.md) preserve
 the product family partitions. Native corruption generation completed35 of36

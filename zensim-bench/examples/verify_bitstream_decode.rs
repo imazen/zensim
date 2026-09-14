@@ -40,6 +40,12 @@
 //!
 //! ## Build
 //!
+//! `--inspect-list LIST.tsv --out FRESH.jsonl` (requires `zen-decode`) reads
+//! explicit `path`/`sha256` rows, verifies each file, and retains native pixel
+//! precision and source/decoded color metadata in a complete JSONL report.
+//! It uses the shared decoder, never a directory scan or a color transform.
+//! A legacy RGB8 projection is hashed separately for historical replay.
+//!
 //! JPEG only (lightest — `zenjpeg` is already a workspace dep):
 //! ```text
 //! cargo build --release -p zensim-bench --example verify_bitstream_decode \
@@ -73,6 +79,10 @@ fn main() {
 #[cfg(feature = "verify-decode")]
 #[path = "shared/zen_decode.rs"]
 mod zen_decode;
+
+#[cfg(feature = "zen-decode")]
+#[path = "verify_bitstream_decode/inspect.rs"]
+mod inspect;
 
 #[cfg(feature = "verify-decode")]
 mod real {
@@ -159,6 +169,21 @@ mod real {
 
     pub fn run() {
         let argv: Vec<String> = std::env::args().collect();
+        if argv.iter().any(|a| a == "--inspect-list") {
+            #[cfg(feature = "zen-decode")]
+            {
+                if let Err(error) = super::inspect::run(&argv[1..]) {
+                    eprintln!("native inspection: {error}");
+                    std::process::exit(2);
+                }
+                return;
+            }
+            #[cfg(not(feature = "zen-decode"))]
+            {
+                eprintln!("--inspect-list requires --features zen-decode");
+                std::process::exit(2);
+            }
+        }
         if let Some(i) = argv.iter().position(|a| a == "--decode-list") {
             let list = PathBuf::from(argv.get(i + 1).expect("--decode-list <tsv>"));
             let out_dir = argv

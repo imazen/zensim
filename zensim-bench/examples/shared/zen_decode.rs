@@ -1,6 +1,7 @@
 //! `zen_decode` — THE decode owner for zensim-bench's corpus extractors.
 //!
-//! One implementation of "bytes on disk → packed RGB8", built entirely from
+//! One implementation of bytes → native pixels/metadata → optional legacy RGB8,
+//! built entirely from
 //! imazen codecs, shared by every example that reads a corpus image. Per the
 //! workspace rule *IMAZEN-ONLY IMAGING/CODEC SOFTWARE* (`~/work/zen/CLAUDE.md`)
 //! and *NO DUPLICATE IMPLEMENTATIONS* (`zensim/CLAUDE.md`): nothing here may
@@ -88,6 +89,35 @@ pub struct DecodedRgb8 {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<u8>,
+}
+
+/// Decoder output before the legacy RGB8 projection. The descriptor and color
+/// context describe the decoded samples; source metadata describes the file.
+/// These can differ after codec-owned transforms (for example XYB JPEG).
+pub(crate) struct DecodedNative {
+    pub pixels: PixelBuffer,
+    pub metadata: NativeMetadata,
+}
+
+pub(crate) enum NativeMetadata {
+    Png(Box<zenpng::PngInfo>),
+    Codec(Box<zencodec::ImageInfo>),
+}
+
+impl DecodedNative {
+    /// Explicit legacy projection; no ICC reinterpretation or new arithmetic.
+    pub fn to_rgb8(&self, label: &str) -> Result<DecodedRgb8, DecodeError> {
+        let pixels =
+            pixelbuffer_to_rgb8(&self.pixels).map_err(|message| DecodeError::PixelLayout {
+                path: label.to_owned(),
+                message,
+            })?;
+        Ok(DecodedRgb8 {
+            width: self.pixels.width(),
+            height: self.pixels.height(),
+            pixels,
+        })
+    }
 }
 
 /// Every way decoding can fail. All variants are hard errors — none of them is
@@ -178,6 +208,11 @@ pub fn decode_rgb8_path(path: &Path) -> Result<DecodedRgb8, DecodeError> {
 
 /// Decode `bytes` to packed RGB8. `label` is used only in error messages.
 pub fn decode_rgb8_bytes(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+    decode_native_bytes(bytes, label)?.to_rgb8(label)
+}
+
+/// Preserve native sample precision and source metadata without applying a CMS.
+pub(crate) fn decode_native_bytes(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     let format = ImageFormatRegistry::common().detect(bytes).ok_or_else(|| {
         let head: String = bytes
             .iter()
@@ -260,26 +295,20 @@ macro_rules! zc_decode {
                 format: $fmt,
                 message: format!("decode: {e}"),
             })?;
-        let pb = out.into_buffer();
-        let (w, h) = (pb.width(), pb.height());
-        let pixels = pixelbuffer_to_rgb8(&pb).map_err(|message| DecodeError::PixelLayout {
-            path: $label.to_string(),
-            message,
-        })?;
-        Ok(DecodedRgb8 {
-            width: w,
-            height: h,
-            pixels,
+        let metadata = NativeMetadata::Codec(Box::new(out.info().clone()));
+        Ok(DecodedNative {
+            pixels: out.into_buffer(),
+            metadata,
         })
     }};
 }
 
-fn decode_jpeg(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_jpeg(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     zc_decode!(zenjpeg::JpegDecoderConfig::new(), bytes, label, "JPEG")
 }
 
 #[cfg(feature = "verify-webp")]
-fn decode_webp(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_webp(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     zc_decode!(
         zenwebp::zencodec::WebpDecoderConfig::new(),
         bytes,
@@ -288,7 +317,7 @@ fn decode_webp(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
     )
 }
 #[cfg(not(feature = "verify-webp"))]
-fn decode_webp(_bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_webp(_bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     Err(DecodeError::UnsupportedFormat {
         path: label.to_string(),
         format: "WebP",
@@ -296,11 +325,11 @@ fn decode_webp(_bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
 }
 
 #[cfg(feature = "verify-avif")]
-fn decode_avif(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_avif(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     zc_decode!(zenavif::AvifDecoderConfig::new(), bytes, label, "AVIF")
 }
 #[cfg(not(feature = "verify-avif"))]
-fn decode_avif(_bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_avif(_bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     Err(DecodeError::UnsupportedFormat {
         path: label.to_string(),
         format: "AVIF",
@@ -308,26 +337,26 @@ fn decode_avif(_bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
 }
 
 #[cfg(feature = "verify-jxl")]
-fn decode_jxl(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_jxl(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     zc_decode!(zenjxl::JxlDecoderConfig::new(), bytes, label, "JXL")
 }
 #[cfg(not(feature = "verify-jxl"))]
-fn decode_jxl(_bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_jxl(_bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     Err(DecodeError::UnsupportedFormat {
         path: label.to_string(),
         format: "JXL",
     })
 }
 
-fn decode_bmp(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_bmp(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     zc_decode!(zenbitmaps::BmpDecoderConfig::new(), bytes, label, "BMP")
 }
 
-fn decode_pnm(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_pnm(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     zc_decode!(zenbitmaps::PnmDecoderConfig::new(), bytes, label, "PNM")
 }
 
-fn decode_farbfeld(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_farbfeld(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     zc_decode!(
         zenbitmaps::FarbfeldDecoderConfig::new(),
         bytes,
@@ -339,7 +368,7 @@ fn decode_farbfeld(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError
 /// PNG goes through `zenpng`'s native entry point rather than the `zencodec`
 /// trait path: this repo pins `zenpng 0.1.4`, whose `zencodec` adapter landed
 /// in 0.2. Same decoder either way.
-fn decode_png(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
+fn decode_png(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     let out = zenpng::decode(
         bytes,
         &zenpng::PngDecodeConfig::default(),
@@ -350,15 +379,9 @@ fn decode_png(bytes: &[u8], label: &str) -> Result<DecodedRgb8, DecodeError> {
         format: "PNG",
         message: format!("decode: {e}"),
     })?;
-    let (w, h) = (out.info.width, out.info.height);
-    let pixels = pixelbuffer_to_rgb8(&out.pixels).map_err(|message| DecodeError::PixelLayout {
-        path: label.to_string(),
-        message,
-    })?;
-    Ok(DecodedRgb8 {
-        width: w,
-        height: h,
-        pixels,
+    Ok(DecodedNative {
+        pixels: out.pixels,
+        metadata: NativeMetadata::Png(Box::new(out.info)),
     })
 }
 
