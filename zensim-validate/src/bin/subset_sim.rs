@@ -91,6 +91,13 @@ struct Args {
     #[arg(long)]
     expect_digest: Option<String>,
 
+    /// Refuse overlapping raw RNG windows across seeds before reading group tables.
+    /// For the uniform sampler, four words per attempted pair is a conservative
+    /// bound. This checks sampler streams, not arbitrary auxiliary trainer RNGs.
+    /// Historical seeds are stream offsets, so nearby values overlap heavily.
+    #[arg(long)]
+    require_disjoint_sampler_windows: bool,
+
     /// Write descriptor rows here as JSON.
     #[arg(long)]
     out: Option<PathBuf>,
@@ -198,10 +205,15 @@ fn main() {
         if let Some(t) = repro.get("target_scale").and_then(|v| v.as_f64()) {
             target_scale = t;
         }
-        if seeds.is_empty()
-            && let Some(s) = repro.get("seed").and_then(|v| v.as_u64())
-        {
-            seeds.push(s);
+        if seeds.is_empty() {
+            match recorded_sampling_seed(&repro) {
+                Ok(Some(seed)) => seeds.push(seed),
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("subset_sim: {e}");
+                    std::process::exit(2);
+                }
+            }
         }
         // Sampling knobs live only in argv.
         if let Some(argv) = repro.get("argv").and_then(|v| v.as_array()) {
@@ -262,6 +274,20 @@ fn main() {
         eprintln!("subset_sim: no seeds (need --seeds or a fulleval with repro.seed)");
         std::process::exit(2);
     }
+
+    let disjoint_words = if args.require_disjoint_sampler_windows {
+        let checked = if strat_pairs {
+            Err("disjoint-window check requires the uniform sampler".to_string())
+        } else {
+            disjoint_sampler_windows(&seeds, epochs, ppe)
+        };
+        Some(checked.unwrap_or_else(|e| {
+            eprintln!("subset_sim: {e}");
+            std::process::exit(2);
+        }))
+    } else {
+        None
+    };
 
     // Load target + ref columns once per distinct path; many arms and seeds
     // share corpora, and this is the only I/O the replay needs.
@@ -329,7 +355,7 @@ fn main() {
         // `zentrain.sample_coverage` block a bake embeds are the same shape
         // (one owner — zensim CLAUDE.md "no duplicate implementations").
         let enc = sampling::coverage_json;
-        rows.push(json!({
+        let mut row = json!({
             "source": source,
             "seed": seed,
             "sample_stream_seed": if psa {
@@ -346,7 +372,11 @@ fn main() {
             "early_digest": r.early_digest.hex(),
             "full": enc(&r.full),
             "early": enc(&r.early),
-        }));
+        });
+        if let Some(words) = disjoint_words {
+            row["disjoint_sampler_window_words"] = json!(words);
+        }
+        rows.push(row);
         eprintln!(
             "  seed {seed}: digest {} pooled_cov {:.6} early_cov {:.6} share_l1 {:.6}",
             r.digest.hex(),
@@ -368,5 +398,121 @@ fn main() {
     }
     if !digest_ok {
         std::process::exit(3);
+    }
+}
+
+// The legacy initializer is s*gamma+C and the generator advances by gamma.
+// Seed differences are therefore exact offsets in raw RNG-word positions.
+// draw_pair consumes at most four words; skipped small groups consume fewer.
+fn disjoint_sampler_windows(seeds: &[u64], epochs: usize, pairs: usize) -> Result<u64, String> {
+    let words = (epochs as u128)
+        .checked_mul(pairs as u128)
+        .and_then(|n| n.checked_mul(4))
+        .and_then(|n| u64::try_from(n).ok())
+        .filter(|&n| n > 0)
+        .ok_or("invalid or overflowing sampler window")?;
+    for (i, &a) in seeds.iter().enumerate() {
+        for &b in &seeds[i + 1..] {
+            let distance = a.wrapping_sub(b).min(b.wrapping_sub(a));
+            if distance < words {
+                return Err(format!(
+                    "overlapping sampler windows: seeds {a} and {b} are {distance} raw words apart; \
+                     each window is bounded by {words} words. Use recorded, well-separated seeds"
+                ));
+            }
+        }
+    }
+    Ok(words)
+}
+
+#[cfg(test)]
+mod stream_window_tests {
+    use super::disjoint_sampler_windows;
+
+    #[test]
+    fn nearby_duplicate_wraparound_and_disjoint_windows() {
+        assert!(disjoint_sampler_windows(&[17103, 17107], 32, 8192).is_err());
+        assert!(disjoint_sampler_windows(&[42, 42], 1, 1).is_err());
+        assert!(disjoint_sampler_windows(&[u64::MAX - 3, 0], 1, 2).is_err());
+        assert_eq!(disjoint_sampler_windows(&[u64::MAX - 3, 0], 1, 1), Ok(4));
+        assert_eq!(
+            disjoint_sampler_windows(&[0, 1 << 40], 32, 8192),
+            Ok(1048576)
+        );
+        assert!(disjoint_sampler_windows(&[0], 0, 1).is_err());
+        assert!(disjoint_sampler_windows(&[0], usize::MAX, usize::MAX).is_err());
+    }
+}
+
+/// Honor the trainer's separate sampling seed when replaying recorded runs.
+/// Explicit CLI --seeds still takes precedence at the caller.
+fn recorded_sampling_seed(repro: &Value) -> Result<Option<u64>, String> {
+    for key in ["sample_seed", "seed"] {
+        let structured = match repro.get(key).filter(|v| !v.is_null()) {
+            Some(v) => Some(v.as_u64().ok_or_else(|| format!("invalid repro.{key}"))?),
+            None => None,
+        };
+        let flag = format!("--{}", key.replace('_', "-"));
+        let from_argv = if let Some(argv) = repro.get("argv").and_then(Value::as_array) {
+            if argv.iter().any(|v| v.as_str() == Some(&flag)) {
+                Some(
+                    argv_val(argv, &flag)
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .ok_or_else(|| format!("invalid repro argv {flag}"))?,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let (Some(a), Some(b)) = (structured, from_argv)
+            && a != b
+        {
+            return Err(format!("conflicting repro.{key} and argv {flag}"));
+        }
+        if let Some(seed) = structured.or(from_argv) {
+            return Ok(Some(seed));
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(test)]
+mod replay_seed_tests {
+    use super::*;
+
+    #[test]
+    fn sampling_seed_precedes_legacy_seed_and_conflicts_are_refused() {
+        assert_eq!(
+            recorded_sampling_seed(&json!({"seed":7101,"sample_seed":17101})),
+            Ok(Some(17101))
+        );
+        assert_eq!(
+            recorded_sampling_seed(&json!({"seed":7101,"argv":["--sample-seed","17101"]})),
+            Ok(Some(17101))
+        );
+        assert_eq!(
+            recorded_sampling_seed(&json!({"seed":7101,"sample_seed":null})),
+            Ok(Some(7101))
+        );
+        assert_eq!(
+            recorded_sampling_seed(&json!({"argv":["--seed","42"]})),
+            Ok(Some(42))
+        );
+        assert_eq!(
+            recorded_sampling_seed(&json!({"sample_seed":u64::MAX})),
+            Ok(Some(u64::MAX))
+        );
+        assert_eq!(recorded_sampling_seed(&json!({})), Ok(None));
+        for invalid in [
+            json!({"sample_seed":-1,"seed":7101}),
+            json!({"sample_seed":17,"argv":["--sample-seed","18"]}),
+            json!({"seed":7101,"argv":["--sample-seed"]}),
+            json!({"seed":7101,"argv":["--sample-seed","bad"]}),
+            json!({"seed":7101,"argv":["--seed","42"]}),
+        ] {
+            assert!(recorded_sampling_seed(&invalid).is_err(), "{invalid}");
+        }
     }
 }

@@ -16,8 +16,8 @@
 //!
 //! # The contract that makes re-simulation exact
 //!
-//! The trainer runs **two independent `SplitMix64` streams**, both derived
-//! from one `--seed`:
+//! The trainer uses separate `SplitMix64` states for initialization and
+//! sampling, defaulting to one `--seed` with explicit seed overrides:
 //!
 //! - init: `SplitMix64::new(seed)` — He-normal weights.
 //! - sample: [`sample_stream_seed`] — every pair draw.
@@ -31,6 +31,12 @@
 //! matrix, the architecture, or the loss. A subset can therefore be
 //! reconstructed from a bake's embedded `zentrain.repro` block without
 //! reading a single feature column.
+//!
+//! The legacy sample initializer maps seed differences to exact raw-stream
+//! offsets: adjacent sample seeds do not provide disjoint sampling windows.
+//! Use recorded, well-separated sampling seeds and `subset_sim`'s opt-in
+//! `--require-disjoint-sampler-windows` preflight for uniform-sampler studies.
+//! Distinct digests prove distinct sequences, not independent sampling replicas.
 //!
 //! [`SampleSequenceDigest`] is what proves the reconstruction is faithful:
 //! the same rolling hash is computed by the training loop (under
@@ -1093,8 +1099,33 @@ mod tests {
         assert_eq!(a.early.pooled_row_coverage, b.early.pooled_row_coverage);
     }
 
+    /// Different digests do not establish independent sampling: these actual
+    /// within-reference pair streams coincide after dropping one attempted pair.
     #[test]
-    fn different_seeds_give_different_subsets() {
+    fn nearby_legacy_seeds_are_shifted_withinref_streams() {
+        let refs = vec![0, 0, 1, 1, 2, 2, 3, 3];
+        let buckets = [RefBuckets::build(&refs)];
+        let ctx = PairDrawCtx {
+            cdf: &[1.0],
+            row_counts: &[8],
+            per_row_cdfs: &[None],
+            ref_buckets: &buckets,
+            strat_bands: &[],
+            plan: None,
+            draw_index: 0,
+        };
+        for initialize in [sample_stream_seed, sample_stream_seed_per_sample_alpha] {
+            let mut earlier = SplitMix64::new(initialize(17103));
+            let mut later = SplitMix64::new(initialize(17107));
+            let _ = draw_pair(&ctx, &mut earlier);
+            for _ in 0..262143 {
+                assert_eq!(draw_pair(&ctx, &mut earlier), draw_pair(&ctx, &mut later));
+            }
+        }
+    }
+
+    #[test]
+    fn different_seeds_give_different_digests() {
         let gs = two_groups();
         let a = simulate(&gs, &params(4004));
         let b = simulate(&gs, &params(4005));

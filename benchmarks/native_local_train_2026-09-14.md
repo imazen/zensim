@@ -1,5 +1,11 @@
 # Native local supervision: a measured tradeoff, not a qualified model
 
+Later September 14 correction: the [explicit-pair study](native_robust_train_2026-09-14.md)
+proves that this study's nearby sampling seeds overlap as raw-stream windows.
+Its point scores and initialization variation remain valid; distinct digests
+do not establish independent sampling replicas. The later study preserves
+historical arithmetic and uses recorded disjoint windows for its primary fits.
+
 September 14, 2026. **Neither treatment advances.** Native-local training reduces some scalar preference failures in basic156, but loses human-quality rank and introduces a native linearization failure. Y60 gains rank while introducing a screenshot preference error. Keep the existing release gates and all previous no-ship verdicts.
 
 ## Frozen TRAIN experiment

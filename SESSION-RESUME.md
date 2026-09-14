@@ -1,5 +1,30 @@
 # Start here — one target score, one development path
 
+## September 14, newest: robust native pairs assessed; sampler replay corrected
+
+[Robust-pair experiment](benchmarks/native_robust_train_2026-09-14.md) reuses
+the eight-fit/four-development TRAIN packet, without encodes, extraction or
+EVAL/TEST. Twelve primary Rust fits compare explicit all-pair versus two-mentor
+robust native supervision. Basic156 conflicts improve 2→1/79 but human rank
+fails the frozen untreated-control tolerance. Y60 retains zero conflicts and
+passes the numeric screen, yet human tails worsen and five of eight native
+map cells remain below the .70 diagnostic line. Neither profile is promoted.
+
+The first twelve fits are also retained: neighboring legacy sampling seeds
+are raw-stream offsets, not independent sampling replicas. A real-draw test
+proves 262,143 shifted attempts match; corrected fits use recorded disjoint
+windows. `subset_sim` adds an opt-in overlap preflight and now honors recorded
+sample seeds in fulleval metadata. Explicit historical replay is byte-exact;
+the corrected metadata replay reproduces the actual training digest.
+
+All primary members/ensembles have full canonical TRAIN panels/scatter and
+public pixel/cache parity. Report/gallery:
+`/zensim/reports/native-robust-train-2026-09-14/index.html`.
+Before more fitting, reconcile existing constrained best-of-all/two-reference
+training with these tail and native-response failures; do not start a broad
+pair-weight sweep. Native RD, targeting, corruption, frozen qualification,
+memory/transcript audit and cleanup remain open. The full goal stays active.
+
 ## September 14, newest: native local training completed; neither recipe advances
 
 [Registered experiment and results](benchmarks/native_local_train_2026-09-14.md)

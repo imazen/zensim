@@ -92,6 +92,15 @@ and negative results. Check that record before proposing another implementation.
    on the permitted selection data, retain failures, then evaluate final packed
    bytes through the surface. The frozen `bestofall_wave.sh` is a historical
    replay owner, not a default recipe for a new qualified model.
+   September 14 correction: legacy sampling seeds are raw-stream offsets.
+   Different digests do not prove disjoint sampling. For uniform-sampler
+   comparisons, record well-separated `--sample-seed` values and preflight
+   them together using `subset_sim --require-disjoint-sampler-windows` with
+   the actual epoch/draw budget. This checks replay sampler windows, not all
+   auxiliary trainer randomness; stratified schedules are explicitly refused.
+   Metadata replay now prefers recorded sample seeds to legacy seeds. See the
+   [robust native-pair study](../benchmarks/native_robust_train_2026-09-14.md)
+   for real-draw overlap proof and unchanged historical explicit replay.
 5. Run evaluation through the owner. A stage is reusable only if its full scorer
    composition, instrument options, inputs and binaries match. Never create
    corpus fixtures silently during evaluation. Completed verdicts survive a

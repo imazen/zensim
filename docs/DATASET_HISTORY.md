@@ -1,5 +1,18 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, explicit robust native-pair comparison:**
+[Results](../benchmarks/native_robust_train_2026-09-14.md) reuse the preceding
+eight TRAIN fit/four TRAIN development families and exact Rev3 features.
+Two-row pair buckets preserve family assignments: 500 all-pairs versus 214
+two-mentor robust pairs, using existing native pixels. No new admission,
+encodes, extraction, calibration, EVAL or TEST. Both SSIM2 and Butteraugli
+select training pairs, so their agreement is mentor consistency evidence.
+Twelve initial fits are retained with an initialization-only interpretation:
+nearby legacy sample seeds overlap. Twelve amended primary fits use recorded
+disjoint sampler windows. All primary members and ensembles receive complete
+canonical TRAIN panels/scatter; basic156 fails original-control rank tolerance,
+y60 retains unresolved tail/map tradeoffs. Neither is promoted.
+
 **September 14, native local TRAIN recipe comparison:**
 [Protocol/results](../benchmarks/native_local_train_2026-09-14.md) admits12existing
 product TRAIN families (8fit/4development), with original family assignments.
