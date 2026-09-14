@@ -54,11 +54,31 @@
 //! are explicitly oracle-only; they do not change runtime map predictions.
 //! M3f measures the non-additive `ScoredAttribution::refinement_gain`; M3a
 //! remains the density-only control. Neither establishes an encoder RD gain.
+//!
+//! `--native-interventions MANIFEST --sha256 HASH --json NEW_OUTPUT` replays
+//! already admitted native encoder probes. It predicts additive mass over exact
+//! transform unions before scoring probe pixels, retains incomplete density
+//! coverage explicitly, and measures complete ensembles plus same-buffer peers.
+//! This separate native mechanism diagnostic does not fabricate reference
+//! repairs or claim that union density includes non-additive maximum terms.
 
 use zensim::{DiffmapWeighting, RgbSlice, Zensim, ZensimProfile};
 
+#[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+#[path = "support/native_interventions.rs"]
+mod native_interventions;
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    if args.first().map(String::as_str) == Some("--native-interventions") {
+        assert!(
+            args.len() == 6 && args[2] == "--sha256" && args[4] == "--json",
+            "expected --native-interventions MANIFEST --sha256 HASH --json NEW_OUTPUT"
+        );
+        native_interventions::run(&args[1], &args[3], &args[5]);
+        return;
+    }
     #[cfg(feature = "custom-profiles")]
     if args.first().map(String::as_str) == Some("--refinement-analysis") {
         assert!(

@@ -1,0 +1,286 @@
+{
+  "role": "train",
+  "qualified": false,
+  "models": [
+    {
+      "model": "PS914_basic228_h128_plain_ens3",
+      "cells": 12,
+      "complete_density_cells": 0,
+      "m2_below_reference_line": 4,
+      "m2_min": 0.9204545454545454,
+      "native_mass_rank_below_reference_line": 11,
+      "native_mass_rank_min": -0.18823529411764706,
+      "native_mass_rank_median": 0.15735294117647058,
+      "density_byte_rank_min": -0.18235294117647058,
+      "density_byte_rank_median": 0.18224789915966388,
+      "opposite_native_score_directions": 83,
+      "complete_map_gate_eligible": false
+    },
+    {
+      "model": "PP914_basic228_h32_plain_ens3",
+      "cells": 12,
+      "complete_density_cells": 0,
+      "m2_below_reference_line": 2,
+      "m2_min": 0.9336510263929618,
+      "native_mass_rank_below_reference_line": 12,
+      "native_mass_rank_min": -0.2735294117647059,
+      "native_mass_rank_median": 0.22352941176470587,
+      "density_byte_rank_min": -0.11764705882352941,
+      "density_byte_rank_median": 0.3123949579831933,
+      "opposite_native_score_directions": 90,
+      "complete_map_gate_eligible": false
+    },
+    {
+      "model": "PT914U_y60_h32_plain_ens3",
+      "cells": 12,
+      "complete_density_cells": 12,
+      "m2_below_reference_line": 0,
+      "m2_min": 0.999633431085044,
+      "native_mass_rank_below_reference_line": 7,
+      "native_mass_rank_min": 0.36176470588235293,
+      "native_mass_rank_median": 0.6514705882352941,
+      "density_byte_rank_min": -0.40588235294117647,
+      "density_byte_rank_median": 0.5176470588235293,
+      "opposite_native_score_directions": 17,
+      "complete_map_gate_eligible": true
+    },
+    {
+      "model": "PT914U_local120_h128_plain_ens3",
+      "cells": 12,
+      "complete_density_cells": 12,
+      "m2_below_reference_line": 0,
+      "m2_min": 0.9959677419354839,
+      "native_mass_rank_below_reference_line": 11,
+      "native_mass_rank_min": -0.023529411764705882,
+      "native_mass_rank_median": 0.40147058823529413,
+      "density_byte_rank_min": -0.38235294117647056,
+      "density_byte_rank_median": 0.23676470588235293,
+      "opposite_native_score_directions": 66,
+      "complete_map_gate_eligible": true
+    },
+    {
+      "model": "PP914_basic156_h128_plain_ens3",
+      "cells": 12,
+      "complete_density_cells": 12,
+      "m2_below_reference_line": 0,
+      "m2_min": 0.9941348973607038,
+      "native_mass_rank_below_reference_line": 11,
+      "native_mass_rank_min": -0.08823529411764706,
+      "native_mass_rank_median": 0.3764705882352941,
+      "density_byte_rank_min": -0.3382352941176471,
+      "density_byte_rank_median": 0.16176470588235295,
+      "opposite_native_score_directions": 70,
+      "complete_map_gate_eligible": true
+    },
+    {
+      "model": "PP914_basic192l8_h128_plain_ens3",
+      "cells": 12,
+      "complete_density_cells": 12,
+      "m2_below_reference_line": 1,
+      "m2_min": 0.9886363636363636,
+      "native_mass_rank_below_reference_line": 11,
+      "native_mass_rank_min": -0.1588235294117647,
+      "native_mass_rank_median": 0.36911764705882355,
+      "density_byte_rank_min": -0.36470588235294116,
+      "density_byte_rank_median": 0.1296218487394958,
+      "opposite_native_score_directions": 93,
+      "complete_map_gate_eligible": true
+    },
+    {
+      "model": "D_frozen_revision1",
+      "cells": 12,
+      "complete_density_cells": 12,
+      "m2_below_reference_line": 0,
+      "m2_min": 0.999633431085044,
+      "native_mass_rank_below_reference_line": 4,
+      "native_mass_rank_min": 0.4117647058823529,
+      "native_mass_rank_median": 0.8147058823529412,
+      "density_byte_rank_min": -0.08529411764705883,
+      "density_byte_rank_median": 0.7153361344537815,
+      "opposite_native_score_directions": 26,
+      "complete_map_gate_eligible": true
+    }
+  ],
+  "consensus": {
+    "protocol": "secondary diagnosis registered before calculation",
+    "ssim2_margin": 0.1,
+    "ba_quality_margin": 0.005,
+    "opposite_zensim_margin": 0.1,
+    "models": [
+      {
+        "model": "PS914_basic228_h128_plain_ens3",
+        "consensus_cases": 160,
+        "consensus_improvements": 50,
+        "consensus_deteriorations": 110,
+        "conflicts": 14,
+        "conflict_improvements": 3,
+        "conflict_deteriorations": 11
+      },
+      {
+        "model": "PP914_basic228_h32_plain_ens3",
+        "consensus_cases": 160,
+        "consensus_improvements": 50,
+        "consensus_deteriorations": 110,
+        "conflicts": 13,
+        "conflict_improvements": 3,
+        "conflict_deteriorations": 10
+      },
+      {
+        "model": "PT914U_y60_h32_plain_ens3",
+        "consensus_cases": 160,
+        "consensus_improvements": 50,
+        "consensus_deteriorations": 110,
+        "conflicts": 0,
+        "conflict_improvements": 0,
+        "conflict_deteriorations": 0
+      },
+      {
+        "model": "PT914U_local120_h128_plain_ens3",
+        "consensus_cases": 160,
+        "consensus_improvements": 50,
+        "consensus_deteriorations": 110,
+        "conflicts": 11,
+        "conflict_improvements": 3,
+        "conflict_deteriorations": 8
+      },
+      {
+        "model": "PP914_basic156_h128_plain_ens3",
+        "consensus_cases": 160,
+        "consensus_improvements": 50,
+        "consensus_deteriorations": 110,
+        "conflicts": 15,
+        "conflict_improvements": 2,
+        "conflict_deteriorations": 13
+      },
+      {
+        "model": "PP914_basic192l8_h128_plain_ens3",
+        "consensus_cases": 160,
+        "consensus_improvements": 50,
+        "consensus_deteriorations": 110,
+        "conflicts": 27,
+        "conflict_improvements": 8,
+        "conflict_deteriorations": 19
+      },
+      {
+        "model": "D_frozen_revision1",
+        "consensus_cases": 160,
+        "consensus_improvements": 50,
+        "consensus_deteriorations": 110,
+        "conflicts": 0,
+        "conflict_improvements": 0,
+        "conflict_deteriorations": 0
+      }
+    ],
+    "worst_per_model": [
+      {
+        "cell": "coarse-multigroup-final-7066-d3",
+        "model": "PS914_basic228_h128_plain_ens3",
+        "content": "graphic",
+        "probe": "r5-down",
+        "direction": -1,
+        "score_delta": 1.1949488321940152,
+        "ssim2_delta": -0.6107738610380409,
+        "ba_quality_delta": -0.059956303330732874
+      },
+      {
+        "cell": "coarse-multigroup-final-2010-d3",
+        "model": "PP914_basic228_h32_plain_ens3",
+        "content": "photo",
+        "probe": "r7-up",
+        "direction": 1,
+        "score_delta": -0.817368825276688,
+        "ssim2_delta": 0.1482272078488336,
+        "ba_quality_delta": 0.00944258455632041
+      },
+      {
+        "cell": "coarse-final-7066-d1",
+        "model": "PT914U_local120_h128_plain_ens3",
+        "content": "graphic",
+        "probe": "r10-down",
+        "direction": -1,
+        "score_delta": 0.6118672688802036,
+        "ssim2_delta": -0.20282296150647028,
+        "ba_quality_delta": -0.006712018101033945
+      },
+      {
+        "cell": "coarse-final-7066-d1",
+        "model": "PP914_basic156_h128_plain_ens3",
+        "content": "graphic",
+        "probe": "r6-down",
+        "direction": -1,
+        "score_delta": 0.9035771687825473,
+        "ssim2_delta": -0.13895031443395567,
+        "ba_quality_delta": -0.007396351486321784
+      },
+      {
+        "cell": "coarse-final-7066-d1",
+        "model": "PP914_basic192l8_h128_plain_ens3",
+        "content": "graphic",
+        "probe": "r10-down",
+        "direction": -1,
+        "score_delta": 4.164044698079422,
+        "ssim2_delta": -0.20282296150647028,
+        "ba_quality_delta": -0.006712018101033945
+      }
+    ]
+  },
+  "primary_work": {
+    "candidate_maps": 72,
+    "candidate_pixel_scores": 2448,
+    "peer_comparisons": 816
+  },
+  "baseline_work": {
+    "candidate_maps": 12,
+    "candidate_pixel_scores": 408,
+    "peer_comparisons": 816
+  },
+  "primary_reproduced_byte_exact": true,
+  "native_decodes": 408,
+  "source_families": 3,
+  "cells": 12,
+  "excluded_origins": [
+    "6068"
+  ],
+  "evidence_sha256": {
+    "PROTOCOL.md": "1a7d5ccbb97937fda434b40b6c02f8225aa4fffa29b442d993ae94c3959954eb",
+    "REGISTRATION.json": "d812b97ff0645a903f45bd48368505ae52b21f3581f209134c4e1c8ff95740c9",
+    "ADMISSION.json": "a57f8eaa30a8ea4bb265c200f641105a04889e0310373c9cb35f9e099328911b",
+    "REPLAY.json": "3d1d3458b345d99f5a72e90a5e2934287dcbb5c9eb51f90552037abe4a7ad1b8",
+    "RESULT.json": "cd0cf2fcc6ac01e93cacd6e4800ce6d2c3dae6253895bdc81fc04dff7ec5d69c",
+    "ASSESSMENT.json": "7c675708db68d7fb3012d5bd4733a1e1162debdb86f0b2d3713f52e82ed0ebe6",
+    "BASELINE_ASSESSMENT.json": "bc790e60992325c80062b303070df89ca0752b44e0b32cf9dddcf177bb5f520f",
+    "CONSENSUS.json": "327c99e085608e26fe9858ba72d1317a18dbafeea79ac0da65e0b82254c98fb9",
+    "REPRODUCTION.json": "d13f8e8613d6e06410a96f7f0984224876ccdd9e0dfd7c82da50461435573c91",
+    "NEGATIVE_CONTROLS.json": "b2379cf9c96891f659c57b8dda565e56b8cea5ebab04df41997c872440a65ded",
+    "CHECKS.json": "e2ebccefb05d19e5719f378eee1aa1a6747183ff8319951009350bdfb7c64177",
+    "GALLERY_CHECKS.json": "55045ff7f5682cffe79c504a6b620a11f07bd0e4136d39594657a8bac0228fc2",
+    "final-gallery-owner.py": "c0b7427c59e4f0f7521ebd10f597ed994be837afd1ac3c754564efb66d247df8",
+    "final-native_interventions.rs": "dbff756853452836ee5d8a4510fb3d414442ba3218a9dea83a3274dd9840447c",
+    "final-diffmap_block_coherence.rs": "938b80e1f34ac56d434ea06e0f4ff6ee2043090b3f1703335655ef4d9277db3b",
+    "PRIMARY_PROTOCOL.md": "f1ed6f5d43e0f3e512fe6f4deb5eacacc8139cd02eae08f9bc6ba88af3bfbc13"
+  },
+  "checks": {
+    "rust_cli_negative_controls": 11,
+    "gallery_negative_controls": 6,
+    "models": 7,
+    "cells_per_model": 12,
+    "primary_reproduction": "BYTE_EXACT",
+    "baseline_revision": 1,
+    "primary_revision": 3,
+    "peer_and_neutral_parity": "EXACT",
+    "clippy": "PASS",
+    "minimal_build": "PASS_WITH_PREEXISTING_APPEND_ON_UNUSED_WARNING",
+    "script_lint": "PASS_615",
+    "format": "PASS",
+    "browser_preview": "FIREFOX_HEADLESS_INSPECTED",
+    "production_library_changed": false,
+    "goal_complete": false,
+    "work_including_reproduction_and_rejected_bad_neutral": {
+      "native_jxl_decodes": 408,
+      "candidate_maps": 162,
+      "candidate_pixel_scores": 5310,
+      "peer_comparisons": 2450
+    },
+    "partial_refusal_count_basis": "bad-neutral reaches six base maps, six baseline ordinary calls, two peer calls; expected neutral-pixel refusal proves this point reached. Others stop before scoring."
+  }
+}

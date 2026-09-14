@@ -1,5 +1,19 @@
 # Zensim Dataset & Experiment History — accurate record
 
+
+**September 14, native local-quantizer replay:**
+[Protocol/results](../benchmarks/native_map_replay_2026-09-14.md) reuses only
+origins2010/7066/8206 from the saved September8 coarse intervention packets.
+Canonical TRAIN family admission excludes document6068 under the later suffix8
+reservation before pixels. Both256/512 renditions and distances1/3 yield408
+retained bitstreams, freshly decoded with the pinned canonical decoder. Old
+pixels and peers are not reused across decoder eras. Six frozen Rev3 ensembles
+plus frozen Rev1 D are measured through public Rust scoring, with fresh native
+same-buffer peers and exact final-source reproduction. This may overlap fitting
+content; it is TRAIN mechanism development, not EVAL or new independent families.
+No fits, new encodes, calibration, TEST/terminal or model promotion. It reveals
+native map and scalar-preference failures; all earlier failed gates remain.
+
 **September 14, newest real TRAIN precision checks:**
 [Protocol/results](../benchmarks/precision_rev3_2026-09-14.md) reuse report,
 screenshot and photo pairs from the existing admitted TRAIN development packet.

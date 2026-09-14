@@ -1,6 +1,29 @@
 # Start here — one target score, one development path
 
 
+
+## September 14, newest: native JXL replay exposes model and map weaknesses
+
+[Actual native interventions](benchmarks/native_map_replay_2026-09-14.md) freshly
+decodes408 retained JXL outputs for three admissible TRAIN families, two sizes,
+two distances. Reserved document6068 is excluded. Six frozen Rev3 ensembles
+and frozen Rev1 D use the public Rust API; final-source primary output reproduces
+byte-for-byte. No training, EVAL/TEST, new encodes or allocator optimization.
+
+Y60's23/23 reference-repair result does not establish native guidance: native
+mass/response rank falls below the .70 diagnostic line in7/12 cells; D in4/12.
+Richer complete-density models miss it in11/12. Hard-max ensembles have partial
+additive density and cannot qualify that map. D's median native association is
+.815 versus y60 .651 and richer complete maps .369–.401.
+
+Among160 robust same-buffer SSIM2/Butteraugli consensus comparisons, D and y60
+have zero opposite scalar preferences; richer models have11–27. This exposes
+scalar preference weaknesses as well as map weaknesses. No model qualifies.
+Next register broader TRAIN native-local preference supervision with source-family
+separation, then compare unchanged human/codec/tail/scatter panels and native
+allocation. Do not spend another cycle proving local gradient algebra.
+
+
 ## September 14, newest: maximum projection parity passes; timings remain unqualified
 
 [Exact max projection](benchmarks/max_projection_2026-09-14.md) reduces redundant
