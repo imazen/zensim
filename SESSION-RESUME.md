@@ -1,5 +1,28 @@
 # Start here — one target score, one development path
 
+## September 14, newest: Rev3 integrity pilot trained; color coverage blocks EVAL
+
+[Registered fit and comparison](benchmarks/integrity_rev3_train_2026-09-14.md)
+produces a real198,624-byte Rev3 D228/HGB head through the strict trainer.
+Calibration154/154 and development267/267 severe proxies are detected; honest
+nonidentity activations are0/792 and2/1,666. All272 native attempts preserve
+steering maps. Exact Rust/Python and pixel/cache/f32 parity passes. The two
+false alarms are new cases, including a JPEG heatmap score drop55.67→0.
+
+No advancement: source1556/8012/8014 carry Display P3 profiles (33 references,
+213 TRAIN-fit pairs), while the PNG extractor currently flattens samples
+without applying ICC. Native generation correctly refused both mobile sources.
+The sRGB pilot excludes these rows and retains the failed36-source request;
+35 admitted sources were used. P3/mobile coverage and the earlier AVIF q85
+cast remain explicit blockers. Do not strip profiles, silently drop the class,
+retag source roles, or declare the pilot qualified.
+
+All35,582 binary/unlabelled candidate audits are retained. The head activates
+on7,094/22,627 distinct ambiguous/recoverable pairs; correctness is unmeasured
+there. No EVAL was scored. Next resolve native color admission and broader
+error-label scope before any new fit or EVAL. Other product gates and broader
+chronology recovery remain open.
+
 ## September 14, newest: broad honest integrity controls scored and inspected
 
 [TRAIN control audit](benchmarks/corruption_honest_train_2026-09-14.md) measures

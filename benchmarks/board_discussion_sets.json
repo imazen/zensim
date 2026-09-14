@@ -405,6 +405,15 @@
       "report_url": "/zensim/reports/corruption-honest-train-2026-09-14/index.html",
       "bakes": [],
       "note": "26/8,880 product reconstructions activate; 0/264 native pairs. Scalar scores hide all 26 prepared-steering rejections. Low-quality activation is concentrated; q85 AVIF cast remains unresolved. All active A/Bs shown. TRAIN only; no model qualifies."
+    },
+    {
+      "id": "2026-09-14-integrity-rev3-train",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Rev3 integrity pilot versus frozen Rev1",
+      "report_url": "/zensim/reports/integrity-rev3-train-2026-09-14/index.html",
+      "bakes": [],
+      "note": "Rev3 detects154/154 calibration and267/267 development severe proxies;0/792 and2/1,666 honest nonidentity activations. Native steering remains accepted. P3/mobile coverage and unresolved labels block EVAL. Two exact false-alarm A/Bs and all-catalog inventory; no model qualifies."
     }
   ],
   "incumbent_notes": [

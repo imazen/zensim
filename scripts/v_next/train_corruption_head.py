@@ -473,6 +473,7 @@ def fit_canonical_hgb(Z, y, fit, calibrate, weights, seed, hyperparameters):
 
 def strict_train_main(argv):
     """One fit on an explicitly admitted, severity-reviewed TRAIN-only packet."""
+    from collections import Counter
     from pathlib import Path
     import pandas as pd
     from corruption_gate_eval import integrity_summary
@@ -483,19 +484,23 @@ def strict_train_main(argv):
     m = json.loads(args.strict_train_manifest.read_text())
     def require(ok, why):
         if not ok: raise ValueError(why)
-    require(m["schema"] == "integrity-head-train-v1", "strict training schema")
-    require(m["formula_revision"] == 1 and m["head_feature_ids"] == list(range(228)), "registered D228 arithmetic")
+    require(m["schema"] in ("integrity-head-train-v1", "integrity-head-train-v2"), "strict training schema")
+    rev3 = m["schema"] == "integrity-head-train-v2"
+    revision = 3 if rev3 else 1
+    require(m["formula_revision"] == revision and m["head_feature_ids"] == list(range(228)), "registered D228 arithmetic")
     require(m["seed"] == 4101 and m["deadband"] == 0.9, "registered seed/threshold")
     require(not args.out_dir.exists(), "fresh fit output required")
     # Bind all roles BEFORE opening feature payloads. No test/eval path is legal.
     admission_path = Path(m["admission"]["path"])
     require(_sha256(admission_path) == m["admission"]["sha256"], "changed admission")
     admission = json.loads(admission_path.read_text())
-    require(admission["schema"] == "integrity-train-admission-v1", "train admission schema")
+    require(admission["schema"] == ("integrity-train-diagnostic-v1" if rev3 else "integrity-train-admission-v1"), "train admission schema")
     roles = admission["origins"]
-    require(set(roles) == {"fit", "calibrate"} and not set(roles["fit"]) & set(roles["calibrate"]), "train-only source roles")
+    expected_roles = {"fit", "development", "calibration"} if rev3 else {"fit", "calibrate"}
+    require(set(roles) == expected_roles, "train-only source roles")
+    require(sum(len(v) for v in roles.values()) == len(set().union(*map(set, roles.values()))), "overlapping source roles")
     records = admission["records"]
-    require(not (set(roles["fit"]) | set(roles["calibrate"])) & {"8462", "9066"}, "retired test origins forbidden")
+    require(not set().union(*map(set, roles.values())) & {"8462", "9066"}, "retired test origins forbidden")
     families = {}
     for row in records:
         require(families.setdefault(row["source_family"], row["fit_role"]) == row["fit_role"], "source family crosses train roles")
@@ -515,8 +520,8 @@ def strict_train_main(argv):
     X = np.stack([frame.loc[r["index"], [f"f{i}" for i in range(372)]].to_numpy(dtype=np.float32).astype(np.float64) for r in records])
     require(np.isfinite(X).all(), "nonfinite train features")
     y = np.array([r["disposition"] == "catastrophic_proxy" for r in records], dtype=np.int64)
-    fit = np.array([r["fit_role"] == "fit" for r in records]); cal = ~fit
-    weights = np.array([1/sum(q["origin"] == r["origin"] for q in records) for r in records])
+    fit = np.array([r["fit_role"] == "fit" for r in records])
+    cal = np.array([r["fit_role"] == ("calibration" if rev3 else "calibrate") for r in records])
     # Deduplicate using native decoded hashes from the bound extractor audit.
     native = {}
     for role, spec in m["audit"].items():
@@ -534,30 +539,58 @@ def strict_train_main(argv):
             require(y[seen[key]]==y[i] and np.array_equal(X[seen[key]],X[i]), "duplicate conflict")
         else:seen[key]=i;keep.append(i)
     X=X[keep];y=y[keep];fit=fit[keep];cal=cal[keep];fit_records=[records[i] for i in keep]
-    weights=np.array([1/sum(q["origin"]==r["origin"] for q in fit_records) for r in fit_records])
+    origin_counts = Counter(r["origin"] for r in fit_records)
+    weights=np.array([1/origin_counts[r["origin"]] for r in fit_records])
     require(set(y[fit])=={0,1} and set(y[cal])=={0,1}, "both classes in each train role")
     scaler=StandardScaler().fit(X[fit,:228], sample_weight=weights[fit])
     Z=np.clip(scaler.transform(X[:,:228]),-8,8);fw=weights.copy();fw[fit & (y==0)]*=4
     clf,iso=fit_canonical_hgb(Z,y,fit,cal,fw,4101,dict(early_stopping=False,max_iter=100,max_leaf_nodes=31))
     args.out_dir.mkdir(parents=True)
     head=args.out_dir/"head.zcth"
-    provenance=dict(manifest_sha256=_sha256(args.strict_train_manifest),trainer_sha256=_sha256(__file__),seed=4101,formula_revision=1,input_precision="f32",fit_rows=int(fit.sum()),calibration_rows=int(cal.sum()),model_qualified=False)
-    emit_zcth(str(head),372,list(range(228)),scaler.mean_,scaler.scale_,8.0,clf,iso,0.9,provenance,input_precision="f32")
+    provenance=dict(manifest_sha256=_sha256(args.strict_train_manifest),trainer_sha256=_sha256(__file__),seed=4101,formula_revision=revision,input_precision="f32",fit_rows=int(fit.sum()),calibration_rows=int(cal.sum()),development_rows=int((~fit & ~cal).sum()),model_qualified=False)
+    export_options = {"formula_revision": 3} if rev3 else {}
+    emit_zcth(str(head),372,list(range(228)),scaler.mean_,scaler.scale_,8.0,clf,iso,0.9,provenance,input_precision="f32",**export_options)
     np.savez_compressed(args.out_dir/"parity.npz",train_X=X[:,:228],train_raw=clf.decision_function(Z),train_p=iso.predict(clf.predict_proba(Z)[:,1]))
     subprocess.run([m["parity_binary"]["path"],"--head",str(head),"--parity",str(args.out_dir/"parity.npz"),"--set","train"],check=True)
     audits={}
     for role in roles:
         pairs=m["pairs"][role];require(_sha256(pairs["path"])==pairs["sha256"],"changed scoring paths")
         command=[m["extractor"]["path"],"--corpus","pairs","--path",pairs["path"],"--out",str(args.out_dir/(role+".csv")),"--audit-jsonl",str(args.out_dir/(role+".jsonl")),"--audit-bake",m["base_bake"]["path"],"--audit-corruption-head",str(head)]
+        prepared_env = {"ZENSIM_AUDIT_PREPARED_STEERING": "1"} if rev3 and role == "development" else {}
         with (args.out_dir/(role+".log")).open("w") as log:
-            subprocess.run(command,env=dict(os.environ,ZENSIM_FORMULA_REV="1",ZENSIM_ROOT_FORM="libm",RAYON_NUM_THREADS="8"),stdout=log,stderr=subprocess.STDOUT,check=True)
+            subprocess.run(command,env=dict(os.environ,ZENSIM_FORMULA_REV=str(revision),ZENSIM_ROOT_FORM="libm",RAYON_NUM_THREADS="8",**prepared_env),stdout=log,stderr=subprocess.STDOUT,check=True)
         for line in (args.out_dir/(role+".jsonl")).read_text().splitlines():
             a=json.loads(line);key=int(a["human_score"]);require(key not in audits,"duplicate score audit");audits[key]=a
-    report=integrity_summary(records,audits);c=report["by_role"]["calibrate"]
+    report=integrity_summary(records,audits);c=report["by_role"]["calibration" if rev3 else "calibrate"]
     gates=dict(zero_native_activation=c["native_activation"]["n"]>0 and c["native_activation"]["count"]==0,
                honest_activation_le_1pct=c["honest_activation"]["rate"] is not None and c["honest_activation"]["rate"]<=.01,
                catastrophic_recall_ge_95pct=c["catastrophic_detection"]["rate"] is not None and c["catastrophic_detection"]["rate"]>=.95,
                real_bug_recall_ge_90pct=c["real_bug_detection"]["rate"] is not None and c["real_bug_detection"]["rate"]>=.9)
+    if rev3:
+        # Development stays out of both the estimator and probability calibration.
+        # Score all registered gates using the same deduplication/assessment owner.
+        gates = {}
+        for role in ("calibration", "development"):
+            subset = [r for r in records if r["fit_role"] == role and not audits[r["index"]]["pixels_identical"]]
+            scoped = integrity_summary(subset, {r["index"]: audits[r["index"]] for r in subset})
+            values = scoped["by_role"][role]
+            for name, field, limit, higher in (
+                    ("honest_activation_le_1pct", "honest_activation", .01, False),
+                    ("catastrophic_recall_ge_95pct", "catastrophic_detection", .95, True),
+                    ("real_bug_recall_ge_90pct", "real_bug_detection", .90, True)):
+                rate = values[field]["rate"]
+                gates[role + "_" + name] = rate is not None and (rate >= limit if higher else rate <= limit)
+            swaps = [r for r in scoped["rows"] if r["family"] == "channel" and r["disposition"] == "catastrophic_proxy"]
+            gates[role + "_channel_detection_100pct"] = bool(swaps) and all(r["active"] for r in swaps)
+        spatial = [r for r in report["rows"] if r["kind"] == "honest_spatial"]
+        gates["zero_native_spatial_activation"] = bool(spatial) and not any(r["active"] for r in spatial)
+        gates["native_prepared_steering"] = bool(spatial) and all(
+            audits[r["index"]].get("prepared_steering", {}).get("status") == "ACCEPTED"
+            and audits[r["index"]]["prepared_steering"].get("map_queries", 0) > 0 for r in spatial)
+        blockers = admission.get("qualification_blockers", [])
+        require(isinstance(blockers, list) and all(isinstance(v, str) for v in blockers), "invalid qualification blockers")
+        report["qualification_blockers"] = blockers
+        gates["registered_coverage_complete"] = not blockers
     report.update(schema="integrity-training-screen-v1",gates=gates,advance_to_eval=all(gates.values()),model_qualified=False,head_sha256=_sha256(head),provenance=provenance)
     (args.out_dir/"REPORT.json").write_text(json.dumps(report,indent=2,allow_nan=False)+"\n")
     print(json.dumps(dict(gates=gates,calibration=c,advance_to_eval=all(gates.values()))),flush=True)

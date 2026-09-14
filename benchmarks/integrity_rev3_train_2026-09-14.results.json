@@ -1,0 +1,560 @@
+{
+  "schema": "integrity-rev3-pilot-results-v1",
+  "role": "train-development",
+  "model_qualified": false,
+  "advance_to_eval": false,
+  "gates": {
+    "calibration_honest_activation_le_1pct": true,
+    "calibration_catastrophic_recall_ge_95pct": true,
+    "calibration_real_bug_recall_ge_90pct": true,
+    "calibration_channel_detection_100pct": true,
+    "development_honest_activation_le_1pct": true,
+    "development_catastrophic_recall_ge_95pct": true,
+    "development_real_bug_recall_ge_90pct": true,
+    "development_channel_detection_100pct": true,
+    "zero_native_spatial_activation": true,
+    "native_prepared_steering": true,
+    "registered_coverage_complete": false
+  },
+  "qualification_blockers": [
+    "P3 source normalization and original mobile corruption coverage unresolved",
+    "The q85 AVIF control remains unresolved"
+  ],
+  "model": {
+    "head_sha256": "03bf70c6d03f521c009325aa38332d5bea251d6dbb2b6df14809b541863d2838",
+    "base_sha256": "a8871222a19ec22b66add5c10840165b4b0fb5fbee96c953a0410b25014e0462",
+    "training_manifest_sha256": "13987d18710b5ce17364a54d10912baeb9984e18f945e9a30866838ed3b4881f",
+    "report_sha256": "b1680b7349ed44786ad8c92ad0f78a9f367403a1221c1aa1501f84847c356251",
+    "trainer_sha256": "7225f10411ae6d7c74e562faeb289b08de5cfc2c6ee31b2ae97352d8929396c0",
+    "model_qualified": false
+  },
+  "head_bytes": 198624,
+  "head_trees": 100,
+  "head_nodes": 6050,
+  "generation": {
+    "requested_sources": 36,
+    "completed_srgb_sources": 35,
+    "generated_rows": 25025,
+    "selected_severe_proxies": 853,
+    "selected_honest_anchors": 70,
+    "ambiguous_or_recoverable": 23483,
+    "inert": 619
+  },
+  "admitted_rows": 11480,
+  "unique_binary_pairs": 11472,
+  "train_partitions": {
+    "calibration": 1089,
+    "development": 2182,
+    "fit": 8201
+  },
+  "corruption_controls_nonidentity": {
+    "fit": {
+      "n": 7007,
+      "honest_activation": {
+        "n": 6575,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 6539,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 432,
+        "count": 432,
+        "rate": 1.0
+      },
+      "real_bug_detection": {
+        "n": 277,
+        "count": 277,
+        "rate": 1.0
+      },
+      "honest_lowered": 0
+    },
+    "development": {
+      "n": 1933,
+      "honest_activation": {
+        "n": 1666,
+        "count": 2,
+        "rate": 0.0012004801920768306
+      },
+      "native_activation": {
+        "n": 1644,
+        "count": 2,
+        "rate": 0.0012165450121654502
+      },
+      "catastrophic_detection": {
+        "n": 267,
+        "count": 267,
+        "rate": 1.0
+      },
+      "real_bug_detection": {
+        "n": 168,
+        "count": 168,
+        "rate": 1.0
+      },
+      "honest_lowered": 1
+    },
+    "calibration": {
+      "n": 946,
+      "honest_activation": {
+        "n": 792,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 780,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 154,
+        "count": 154,
+        "rate": 1.0
+      },
+      "real_bug_detection": {
+        "n": 99,
+        "count": 99,
+        "rate": 1.0
+      },
+      "honest_lowered": 0
+    }
+  },
+  "matched_frozen_rev1": {
+    "calibration": {
+      "n": 1089,
+      "honest_activation": {
+        "n": 935,
+        "count": 1,
+        "rate": 0.0010695187165775401
+      },
+      "native_activation": {
+        "n": 780,
+        "count": 1,
+        "rate": 0.001282051282051282
+      },
+      "catastrophic_detection": {
+        "n": 154,
+        "count": 150,
+        "rate": 0.974025974025974
+      },
+      "real_bug_detection": {
+        "n": 99,
+        "count": 95,
+        "rate": 0.9595959595959596
+      },
+      "honest_lowered": 0
+    },
+    "development": {
+      "n": 2182,
+      "honest_activation": {
+        "n": 1915,
+        "count": 4,
+        "rate": 0.0020887728459530026
+      },
+      "native_activation": {
+        "n": 1644,
+        "count": 4,
+        "rate": 0.0024330900243309003
+      },
+      "catastrophic_detection": {
+        "n": 267,
+        "count": 264,
+        "rate": 0.9887640449438202
+      },
+      "real_bug_detection": {
+        "n": 168,
+        "count": 166,
+        "rate": 0.9880952380952381
+      },
+      "honest_lowered": 0
+    },
+    "fit": {
+      "n": 8201,
+      "honest_activation": {
+        "n": 7769,
+        "count": 20,
+        "rate": 0.0025743338911056765
+      },
+      "native_activation": {
+        "n": 6539,
+        "count": 20,
+        "rate": 0.003058571647040832
+      },
+      "catastrophic_detection": {
+        "n": 432,
+        "count": 429,
+        "rate": 0.9930555555555556
+      },
+      "real_bug_detection": {
+        "n": 277,
+        "count": 275,
+        "rate": 0.9927797833935018
+      },
+      "honest_lowered": 0
+    }
+  },
+  "pilot_rev3": {
+    "calibration": {
+      "n": 1089,
+      "honest_activation": {
+        "n": 935,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 780,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 154,
+        "count": 154,
+        "rate": 1.0
+      },
+      "real_bug_detection": {
+        "n": 99,
+        "count": 99,
+        "rate": 1.0
+      },
+      "honest_lowered": 0
+    },
+    "development": {
+      "n": 2182,
+      "honest_activation": {
+        "n": 1915,
+        "count": 2,
+        "rate": 0.0010443864229765013
+      },
+      "native_activation": {
+        "n": 1644,
+        "count": 2,
+        "rate": 0.0012165450121654502
+      },
+      "catastrophic_detection": {
+        "n": 267,
+        "count": 267,
+        "rate": 1.0
+      },
+      "real_bug_detection": {
+        "n": 168,
+        "count": 168,
+        "rate": 1.0
+      },
+      "honest_lowered": 1
+    },
+    "fit": {
+      "n": 8201,
+      "honest_activation": {
+        "n": 7769,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 6539,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 432,
+        "count": 432,
+        "rate": 1.0
+      },
+      "real_bug_detection": {
+        "n": 277,
+        "count": 277,
+        "rate": 1.0
+      },
+      "honest_lowered": 0
+    }
+  },
+  "errors": [
+    {
+      "index": 3974,
+      "origin": "7042",
+      "role": "development",
+      "disposition": "valid",
+      "family": "honest_jpeg",
+      "kind": "honest_codec",
+      "codec": "jpeg",
+      "knob": 5.0,
+      "content_class": "7000-lilith-plots",
+      "active": true,
+      "lowered": true,
+      "probability": 1.0,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "1c71e620a93c261976cdb09624a48ef2f40b5594d8f923cc63d0c55ddfac0919:{\"cell\":\"jp3_t0_small_xybBq\",\"fp\":\"a4d9d95864101c1b\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_jpeg"
+      ],
+      "base_score": 55.67475128173828,
+      "composed_score": 0.0,
+      "prepared_status": "REJECTED_INTEGRITY"
+    },
+    {
+      "index": 5283,
+      "origin": "8286",
+      "role": "development",
+      "disposition": "valid",
+      "family": "honest_avif",
+      "kind": "honest_codec",
+      "codec": "avif",
+      "knob": 15.0,
+      "content_class": "8100-lilith-web-screenshots",
+      "active": true,
+      "lowered": false,
+      "probability": 1.0,
+      "knob_direction": "higher_is_better",
+      "knob_axis": "generic_quality",
+      "knob_context": "a155fe4b6511f6fa0441158828b38834402768584b67c29b3c0ed528b4cf00fe:{\"cell\":\"s2-rgb\",\"fp\":\"940f4425e4ce3dc1\",\"plan\":\"modes_full\"}",
+      "catalog_dispositions": [
+        "valid"
+      ],
+      "catalog_families": [
+        "honest_avif"
+      ],
+      "base_score": -50.26371765136719,
+      "composed_score": -50.26371765136719,
+      "prepared_status": "REJECTED_INTEGRITY"
+    }
+  ],
+  "native": {
+    "attempts": 272,
+    "unique_pairs": 264,
+    "activations": 0,
+    "accepted": 272,
+    "unchanged_queries": 14144
+  },
+  "ambiguity": {
+    "schema": "frozen-integrity-unlabelled-inventory-v1",
+    "raw_additional_rows": 24102,
+    "total_surface_audits": 35582,
+    "unique_pairs": 34099,
+    "disposition_inventory": {
+      "ambiguous_or_recoverable": {
+        "n": 22627,
+        "active": 7094
+      },
+      "catastrophic_proxy": {
+        "n": 853,
+        "active": 853
+      },
+      "valid": {
+        "n": 10619,
+        "active": 2
+      }
+    },
+    "by_catalog_family": {
+      "aliasing": {
+        "n": 591,
+        "active": 17
+      },
+      "block": {
+        "n": 3024,
+        "active": 1782
+      },
+      "channel": {
+        "n": 4513,
+        "active": 1614
+      },
+      "chroma_boundary": {
+        "n": 550,
+        "active": 0
+      },
+      "composite": {
+        "n": 1800,
+        "active": 946
+      },
+      "edge": {
+        "n": 838,
+        "active": 438
+      },
+      "geometric": {
+        "n": 2295,
+        "active": 679
+      },
+      "noise": {
+        "n": 3644,
+        "active": 32
+      },
+      "overlay": {
+        "n": 1854,
+        "active": 368
+      },
+      "real_bug": {
+        "n": 857,
+        "active": 182
+      },
+      "tone": {
+        "n": 3021,
+        "active": 1237
+      }
+    },
+    "interpretation": "Activation inventory only; unknown labels cannot establish recall/false positives. Family cohorts overlap. Known pixel-identical labels supersede unlabelled catalog membership."
+  },
+  "color_scope": {
+    "icc_reference_renditions": 33,
+    "affected_fit_pairs": 213,
+    "origins": [
+      "1556",
+      "8012",
+      "8014"
+    ],
+    "profile_sha256": "b5ff90cbab6d61fe6b6fe7bc9be835bd92838c02754ed606af7814353f801903",
+    "profile_description": "Display P3 Gamut with sRGB Transfer",
+    "uncorrected_source_hash_matches": 33
+  },
+  "validation": {
+    "total_pilot_surface_audits": 35582,
+    "pinned_pixel_hash_checks": 71164,
+    "consumed_feature_max_abs_delta": 0,
+    "complete_pixel_cache_f32_max_abs_delta": 0,
+    "python_rust_head_raw_max_ulp": 0,
+    "python_rust_probability_max_abs_delta": 0,
+    "python_rust_activation_disagreements": 0,
+    "raw_parity_rows": 11472,
+    "admission_unit_tests": 6,
+    "clippy": "PASS"
+  },
+  "measured_execution_seconds": {
+    "fresh_binary_extraction": 32.06938633299433,
+    "fit_export_parity_and_public_validation": 61,
+    "unlabelled_audit": 14.1
+  },
+  "environment": {
+    "python": "3.14.7",
+    "packages": {
+      "numpy": "2.5.2",
+      "pandas": "3.0.5",
+      "scikit-learn": "1.9.0"
+    }
+  },
+  "limitations": [
+    "TRAIN pilot, not EVAL qualification; complete model quality and latency gates remain open.",
+    "The generated real_bug family reproduces bug patterns; counts are not broad independent field-bug recall.",
+    "Known-label proxy gates exclude the large ambiguous/recoverable population.",
+    "The two newly introduced honest false alarms replace four different development false alarms in the frozen baseline.",
+    "This complete-recipe comparison changes training data and formula revision; it cannot isolate their effects.",
+    "Pretrained perceptual base is an instrument; its historical training included the newly identified P3 limitation."
+  ],
+  "files": {
+    "ADMISSION.json": {
+      "sha256": "1ecad72fd6ec85a362ab7e4dda146e6a28197c36c2357a9b4fa679a1650b6e14",
+      "bytes": 15089795
+    },
+    "LABEL_REVIEW.json": {
+      "sha256": "44fbf58ecf92f3779ae4766c459f2be37ea78791b712e5e648a546632c8eb1a9",
+      "bytes": 34452268
+    },
+    "SOURCES.json": {
+      "sha256": "29af95f6e0f74fd0a817fa6eb2088c0438374d70c95fcf71acf603c108125392",
+      "bytes": 15485
+    },
+    "SOURCES_FINAL.json": {
+      "sha256": "6aba8bac8f4eaf61664e59c5d73a0471ee791bbfb0690af1eac9af82489f8995",
+      "bytes": 15485
+    },
+    "SOURCES_SRGB.json": {
+      "sha256": "0a234bc2cf8088af29290f2de7a6b64c2409f72aaeb270879a7c6bd34b03559d",
+      "bytes": 15065
+    },
+    "GENERATION.json": {
+      "sha256": "15efe3cabcad199056361851f45115a1dfa63d385a560a9cda7b820cd97cd617",
+      "bytes": 1294
+    },
+    "GENERATED.json": {
+      "sha256": "b02b45fa80d1dcef67b72dcf2d7772482e1df3bbc1adbbed6746c28770b9c427",
+      "bytes": 5610
+    },
+    "COLOR_ADMISSION.json": {
+      "sha256": "addf5a70cea9432f9d4069f0f99d6443bb6195907ff5077fad05d4fc053ae71b",
+      "bytes": 932321
+    },
+    "TRAIN.json": {
+      "sha256": "13987d18710b5ce17364a54d10912baeb9984e18f945e9a30866838ed3b4881f",
+      "bytes": 4822
+    },
+    "EXTRACTED.json": {
+      "sha256": "d49e1a81937d8115c7f4ff445c275c3b47bfc2d52a3d79dbbb353149b224858f",
+      "bytes": 2961
+    },
+    "FROZEN_MODEL.json": {
+      "sha256": "5d3905f694eb225251a82d1df44f4196aabc88ed2dcb6947c6e7dc43629574ab",
+      "bytes": 474
+    },
+    "fit-model/REPORT.json": {
+      "sha256": "b1680b7349ed44786ad8c92ad0f78a9f367403a1221c1aa1501f84847c356251",
+      "bytes": 7550824
+    },
+    "AMBIGUOUS_INVENTORY.json": {
+      "sha256": "4534296cd20a89979a39c181aaee8187e5267c78c4a3f4f21666feeaf72dc751",
+      "bytes": 1290
+    },
+    "ALL_CATALOG_ASSESSMENT.json": {
+      "sha256": "9cbfe26d5cd595c92d6bba09ce7442fc8fecad6b4a55ee0a74873c76b6859fda",
+      "bytes": 18512951
+    },
+    "baseline-controls.jsonl": {
+      "sha256": "b5a7370c381bc72b4dd400015e4bfb1e3a15993c32407db0a53a3b885ad7555e",
+      "bytes": 18864855
+    },
+    "baseline-generated.jsonl": {
+      "sha256": "e463ea85088ac0cf2862618904fff75d117966d091fdbc6be09b0d9ad7a5571a",
+      "bytes": 1577513
+    },
+    "train.log": {
+      "sha256": "6ea696f40e19bc4dfda452dec9fd2dfe687e5a8a7929193c133ffff32da3e6d8",
+      "bytes": 2125
+    },
+    "generation.log": {
+      "sha256": "b194c6f4b77b0998c3d030dcf416b5c3ce4d3bd9e93f96122e7714386ecda508",
+      "bytes": 3435
+    },
+    "admission-v2.log": {
+      "sha256": "0370d7c2158ee74eb378a4a71493ed7b8fb47ef1e545976361dc9b24cda8a5a1",
+      "bytes": 469
+    },
+    "admission-tests-final.log": {
+      "sha256": "910d72640e3bea5a4967d99c4926869cc4be90d36ec908afadd15f647e732a23",
+      "bytes": 707
+    },
+    "clippy.log": {
+      "sha256": "ed44d76c939f64f42cf1b382c59719d25635a104e539f6a3c4ace8a09990f88f",
+      "bytes": 339
+    },
+    "tools/train_corruption_head.py": {
+      "sha256": "7225f10411ae6d7c74e562faeb289b08de5cfc2c6ee31b2ae97352d8929396c0",
+      "bytes": 70786
+    },
+    "tools/corruption_gate_eval.py": {
+      "sha256": "8dccf1ec423a798e935acc224de0d95d2656e2be89094bc161c66c5572ceca68",
+      "bytes": 26597
+    },
+    "bin/extract": {
+      "sha256": "04835f2ae0c1f5246a21c6f7655a5e31e27f8fa1e2ba4eb09c62fde606ab2472",
+      "bytes": 13587568
+    },
+    "bin/generate": {
+      "sha256": "d48326d0fc210c5feb2b91d59c77a598af7b9663659cc504a00f9bdf52082225",
+      "bytes": 3659536
+    },
+    "models/base.bin": {
+      "sha256": "a8871222a19ec22b66add5c10840165b4b0fb5fbee96c953a0410b25014e0462",
+      "bytes": 37806
+    },
+    "fit-model/head.zcth": {
+      "sha256": "03bf70c6d03f521c009325aa38332d5bea251d6dbb2b6df14809b541863d2838",
+      "bytes": 198624
+    },
+    "COLOR_RAW_BINDING.json": {
+      "sha256": "7ed2ed88fafc077eadfb19524378243080b9da418de74587703e82164147de08",
+      "bytes": 9485
+    }
+  },
+  "gallery_renderer_sha256": "fd7acdcf2e49a297a8e13ca97a33e3993ce753c822036de57c8990610671023e"
+}

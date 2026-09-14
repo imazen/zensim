@@ -27,7 +27,7 @@ legacy default corpus/terminal scans to fill missing evidence.
 | Spatial attribution / rectangle queries | `zensim/src/attribution.rs`, retained extraction in `feature_v2` | `BakeScorer::compute_with_ref_and_attribution` binds complete candidate scoring; signed density with L8, separate finite-max `ScoredAttribution::refinement_gain` and coverage, scalar/feature parity and reusable binned sessions |
 | MLP training / capability admission | `zensim_mlp_train`, `mlp_train::capabilities` | Explicit recipe, table declarations, source-disjoint selection, reproducible random streams |
 | Historical corruption head replay (not an approved new-data default) | `train_corruption_head.py --canonical-manifest`, existing ZCTH exporter and `corrhead_parity` | Complete admission; source/pixel keys; explicit head IDs within a declared regime; separate fit/calibration; exact exported single-fit Rust evaluation; `--prepare-only` never fits and `--training-screen-only` never scores validation |
-| Strict train-only integrity head fit | `train_corruption_head.py --strict-train-manifest` | Severity-reviewed admitted train/calibration, no test origins or mixed tables; pinned Rust extraction, ZCTH export, parity and calibration gate before eval |
+| Strict train-only integrity head fit | `train_corruption_head.py --strict-train-manifest` | Original v1 Rev1 recipe; explicit v2 Rev3 D228 recipe keeps fit/development/calibration disjoint, audits complete Rust composition and native prepared maps, and blocks advancement on incomplete registered coverage. [Pilot and color admission limits](../benchmarks/integrity_rev3_train_2026-09-14.md). |
 | Severity-aware integrity assessment | `corruption_gate_eval.py --integrity-admission --audit-jsonl --out-json` | Exact decoded identities, known-label versus unlabelled duplicate handling, honest activations by codec/content, real-bug recall and unresolved disposition inventory |
 | Prepared steering with integrity check | `BakeScorer::prepare_steering`, extractor audit with `ZENSIM_AUDIT_PREPARED_STEERING=1` | Active head returns `CorruptionDetected`; inactive map equals perceptual branch; restoration after failed calls; finite queries do not establish native RD |
 | Scatter geometry / raw density / envelopes | `zenstats::scatter::diagnose`, `panel --scatter`, `bake_verdict::scatter_assessment` | Complete population before plot sampling, tie-aware quantiles, raw density beside normalized shape, p99/max and robust tails, missing peer/range evidence is INCOMPLETE |
@@ -74,7 +74,9 @@ The [tree revision contract](../benchmarks/corruption_revision_contract_2026-09-
 closes the missing arithmetic check for tree companions. Slot coverage alone
 does not admit a Rev1 head to a Rev3 base. New heads must be refitted on matching
 features; changing a header is not a refit. The strict integrity trainer's
-current v1 manifest remains a Rev1 recipe, and its historical head is unchanged.
+v1 manifest remains a Rev1 recipe, and its historical head is unchanged. The
+explicit v2 route serves the registered Rev3 D228 pilot; it cannot bypass
+unresolved source-color coverage or source-family separation.
 Fractional sampling still has no matching tree-head contract and is refused.
 
 Native controllers stay in their codec repositories. The

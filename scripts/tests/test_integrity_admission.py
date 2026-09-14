@@ -147,6 +147,47 @@ class Admission(unittest.TestCase):
                         trainer.strict_train_main(['--strict-train-manifest',str(mp),'--out-dir',str(root/'output')])
                 self.assertFalse((root/'output').exists())
 
+    def test_rev3_development_is_not_probability_calibration(self):
+        import numpy as np
+        import pandas as pd
+        class ObservedMasks(Exception):
+            pass
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            roles = {'fit':['2010'], 'calibration':['1214'], 'development':['1054']}
+            records, features, audits = [], {}, {}
+            for pos, (role, origins) in enumerate(roles.items()):
+                ids = [pos*2, pos*2+1]
+                for i in ids:
+                    records.append(dict(index=i, role='train', fit_role=role, origin=origins[0],
+                                        source_family=origins[0], disposition='valid' if i%2==0 else 'catastrophic_proxy',
+                                        expected_distorted_file_sha256=str(i), expected_distorted_pixels_sha256=str(i)))
+                frame = pd.DataFrame({f'f{k}':[float(i) for i in ids] for k in range(372)})
+                frame['human_score'] = ids
+                path=root/(role+'.csv');frame.to_csv(path,index=False)
+                features[role]=dict(path=str(path),sha256=trainer._sha256(path))
+                path=root/(role+'.jsonl')
+                path.write_text(''.join(json.dumps(dict(human_score=i,distorted_file_sha256=str(i),distorted_pixels_sha256=str(i),reference_pixels_sha256='ref'))+'\n' for i in ids))
+                audits[role]=dict(path=str(path),sha256=trainer._sha256(path))
+            admission=root/'admission.json'
+            admission.write_text(json.dumps(dict(schema='integrity-train-diagnostic-v1',origins=roles,records=records)))
+            tool=root/'tool';tool.write_bytes(b'synthetic tool identity')
+            spec=dict(path=str(tool),sha256=trainer._sha256(tool))
+            manifest=root/'fit.json'
+            manifest.write_text(json.dumps(dict(schema='integrity-head-train-v2',formula_revision=3,
+                head_feature_ids=list(range(228)),seed=4101,deadband=.9,
+                admission=dict(path=str(admission),sha256=trainer._sha256(admission)),
+                features=features,audit=audits,base_bake=spec,extractor=spec,parity_binary=spec)))
+            def observe(z, y, fit, cal, weights, seed, parameters):
+                np.testing.assert_array_equal(np.flatnonzero(fit),[0,1])
+                np.testing.assert_array_equal(np.flatnonzero(cal),[2,3])
+                np.testing.assert_allclose(z[:2],np.broadcast_to([[-1.],[1.]],(2,228)))
+                raise ObservedMasks()
+            with patch.object(trainer,'fit_canonical_hgb',side_effect=observe):
+                with self.assertRaises(ObservedMasks):
+                    trainer.strict_train_main(['--strict-train-manifest',str(manifest),'--out-dir',str(root/'out')])
+            self.assertFalse((root/'out').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

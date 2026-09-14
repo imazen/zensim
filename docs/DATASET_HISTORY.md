@@ -1,5 +1,22 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, Rev3 integrity TRAIN pilot and color correction:**
+[Registration/results](../benchmarks/integrity_rev3_train_2026-09-14.md) preserve
+the product family partitions. Native corruption generation completed35 of36
+requested sources, refusing ICC-tagged mobile content; the alternative mobile
+source refused too. Source1556/8012/8014 have33 Display-P3 renditions affecting
+213 fitting pairs. The current PNG flattening path does not apply that profile.
+Keep these as a documented color limitation of the earlier product packet;
+numerical replay equality does not establish correct sRGB interpretation.
+
+The explicitly incomplete sRGB pilot excludes those213 fitting pairs plus the
+previously unresolved AVIF q85 pair, without changing calibration/development.
+One Rev3 D228/HGB fit on11,472 distinct binary pairs passes its known-label
+numerical gates, but coverage blocks EVAL. Six admission tests and exact public
+Rust parity pass. All25,025 generated catalog attempts and all35,582 scored
+candidate attempts remain retained; ambiguous labels are not binary negatives.
+No protected source segments were accessed or reassigned.
+
 **September 14, broad honest integrity TRAIN audit:**
 [Results](../benchmarks/corruption_honest_train_2026-09-14.md) reuse all10,499
 admitted product pairs and272 original TRAIN-development JXL interventions.

@@ -69,6 +69,23 @@ def build_integrity_gallery(root, out):
     for codec, result in checked["by_codec"].items():
         rate = result["honest_activation"]
         codec_rows.append(f'<tr><td>{escape(codec)}</td><td>{rate["count"]}/{rate["n"]}</td><td>{rate["rate"]:.3%}</td><td>{result["honest_lowered"]}</td></tr>')
+    comparison = ""
+    if (root / "COMPARISON.json").exists():
+        context = read("COMPARISON.json")
+        comparison = '<h2>Frozen TRAIN comparison</h2><p>' + escape(context["note"]) + '</p><table><tr><th>Head</th><th>TRAIN partition</th><th>Severe proxies detected</th><th>Real-bug proxies detected</th><th>Honest controls activated</th></tr>'
+        for model in context["models"]:
+            path = root / model["file"]
+            if Path(model["file"]).name != model["file"] or sha(path) != model["sha256"]:
+                raise ValueError("integrity comparison report identity mismatch")
+            result = json.loads(path.read_text())
+            for role in ("calibration", "development"):
+                values = result["by_role"][role]
+                comparison += '<tr><td>' + escape(model["label"]) + '</td><td>' + role + '</td>'
+                for field in ("catastrophic_detection", "real_bug_detection", "honest_activation"):
+                    value = values[field]
+                    comparison += f'<td>{value["count"]}/{value["n"]}</td>'
+                comparison += '</tr>'
+        comparison += '</table><p>Honest counts in this comparison include identities; the full report also gives nonidentity denominators. Shared catalog parameters limit generalization claims.</p>'
     page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Integrity head: honest TRAIN controls</title><style>
 body{font:16px system-ui;max-width:1200px;margin:auto;padding:24px;background:#f5f6f8;color:#182230}
@@ -81,7 +98,7 @@ These controls retain their preregistered valid labels. Successful encoding does
 <p>The scalar minimum can conceal an active corruption head when the perceptual score is already lower. Prepared steering still rejects the input.</p>
 <p><a href="REPORT.md">Full report and limitations</a> · <a href="RESULTS.json">Measured results</a> · <a href="replay.zip">Replay evidence</a></p>
 <table><thead><tr><th>Codec</th><th>Active / reconstructed controls</th><th>Rate</th><th>Scalar scores lowered</th></tr></thead><tbody>'''
-    page += "".join(codec_rows) + '</tbody></table><p>JXL includes product encodes and distinct native interventions. Images may be enlarged by the browser; click for original PNGs.</p>'
+    page += "".join(codec_rows) + '</tbody></table>' + comparison + '<p>JXL includes product encodes and distinct native interventions. Images may be enlarged by the browser; click for original PNGs.</p>'
     page += "".join(examples) + '</html>\n'
     out.parent.mkdir(parents=True, exist_ok=True)
     for rel, source in assets.items():
