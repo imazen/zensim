@@ -117,6 +117,14 @@ checks unchanged ordinary output and exact decomposition on frozen TRAIN cases.
    Metadata replay now prefers recorded sample seeds to legacy seeds. See the
    [robust native-pair study](../benchmarks/native_robust_train_2026-09-14.md)
    for real-draw overlap proof and unchanged historical explicit replay.
+   Checkpoint selection is separate from early stopping: `--early-stop-patience
+   0` still exports the best observed checkpoint. If every validation weight is
+   zero, the historical trainer averages **all** group reporting scores,
+   including zero-train-weight/zero-validation-weight groups. To keep an
+   auxiliary TV-only group out of checkpoint selection, give the intended TRAIN
+   selection groups explicit positive validation weights and select the intended
+   policy (for example, equal weights with `--val-policy mean`). A group called
+   `report` in the log is not proof that it cannot influence the fallback.
 5. Run evaluation through the owner. A stage is reusable only if its full scorer
    composition, instrument options, inputs and binaries match. Never create
    corpus fixtures silently during evaluation. Completed verdicts survive a

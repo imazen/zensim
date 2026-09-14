@@ -1929,14 +1929,16 @@ impl OutputPolarity {
     }
 }
 
-/// TV (total-variation) regularizer for adjacent-q monotonicity.
+/// TV pair-margin regularizer for known quality preferences.
 ///
 /// `pairs[k] = (lo_idx, hi_idx)` references rows in the concatenated
 /// trainer-feature space (group 0 rows first, then group 1, etc.).
-/// Penalty per pair = `max(0, pred[hi_idx] - pred[lo_idx])` — Rust
-/// trainer outputs are distance-like (lower = better quality), so a
-/// monotone curve has `pred[lo_q] > pred[hi_q]`. Violations have
-/// `pred[hi_q] > pred[lo_q]`.
+/// `lo_idx` is the worse-quality member and `hi_idx` is the better-quality
+/// member, independently of the codec's parameter orientation. With `s` equal
+/// to the run's [`OutputPolarity::ladder_sign`], the pair penalty is
+/// `max(0, s * (pred[hi_idx] - pred[lo_idx]) + margin)`. Distance runs use
+/// `s = 1`; score runs use `s = -1`. A pair may express a measured local
+/// preference rather than an assumed adjacent-q ordering.
 pub struct TvRegularizer {
     pub pairs: Vec<(usize, usize)>,
     pub features: Vec<Vec<f64>>,
@@ -1957,7 +1959,7 @@ pub struct TvRegularizer {
     /// harder than other bands.
     pub band_weights: Option<[f64; 4]>,
     /// Anti-collapse margin for the within-ladder hinge. The penalty
-    /// becomes `max(0, y_harsher - y_milder + margin)`, forcing a
+    /// uses the run's score/distance polarity (see the struct docs), forcing a
     /// minimum per-step gap of `margin` between adjacent severity
     /// levels instead of merely non-increasing. A pure hinge
     /// (margin=0) is minimized by collapsing every ladder flat, which
@@ -2825,11 +2827,11 @@ pub fn train_mlp_strategy(
                 steps_since_adam = 0;
             }
 
-            // TV regularizer step (per-curve adjacent-q monotonicity).
-            // Apply every `apply_every` pair updates. Penalty per TV pair:
-            // max(0, pred[hi_q] - pred[lo_q]) — Rust trainer output is
-            // distance-like (lower = better), so a monotone curve has
-            // pred[lo_q] > pred[hi_q]; the ReLU penalizes the opposite.
+            // TV regularizer: `lo` is worse quality, `hi` is better quality.
+            // Apply every `apply_every` loss-bearing main pair updates using
+            // the run's polarity (see the actual hinge below). TV pair draws
+            // consume the SAME RNG as the main sampler; enabling TV changes
+            // its subsequent draws and adds Adam updates for active hinges.
             if let (Some(tv_cfg), Some(tv_buf)) = (tv, tv_std.as_ref())
                 && tv_cfg.weight > 0.0
                 && tv_cfg.apply_every > 0

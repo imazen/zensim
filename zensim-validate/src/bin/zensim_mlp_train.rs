@@ -349,7 +349,8 @@ struct Args {
     /// TV-regularizer pair indices TSV. Two columns: lo_trainer_idx,
     /// hi_trainer_idx. Indices reference rows in the concatenated
     /// trainer-feature space (group 0 first, then group 1, etc.).
-    /// Penalty per pair: `max(0, pred[hi] - pred[lo])`.
+    /// lo is worse quality and hi is better quality, regardless of codec q.
+    /// Penalty: `max(0, polarity.ladder_sign() * (pred[hi] - pred[lo]) + margin)`.
     #[arg(long)]
     tv_pairs_file: Option<PathBuf>,
 
@@ -368,12 +369,12 @@ struct Args {
     tv_batch: usize,
 
     /// Anti-collapse margin for the within-ladder TV hinge. Penalty
-    /// becomes `max(0, y_harsher - y_milder + margin)`, forcing a
+    /// uses the run's score/distance polarity, forcing a
     /// minimum per-step gap between adjacent severity levels. 0.0 =
     /// pure hinge (can collapse the ladder flat under high weight).
     /// A small positive value (raw-output units) spreads the ladder,
-    /// preserving dynamic range + analytic-corpus rank while keeping
-    /// monotonicity. Only affects the --per-sample-alpha-head path.
+    /// encouraging separation. This is not a guarantee of preserved rank.
+    /// Applies to the plain path and the supported auxiliary-head paths.
     #[arg(long, default_value_t = 0.0)]
     tv_margin: f64,
 

@@ -27,8 +27,8 @@
 use zenpredict::Model;
 use zensim::BakeScorer;
 use zensim_validate::mlp_train::{
-    FeatureRows, GroupLossMode, MlpHyperparams, OutputPolarity, TrainingGroup, ValidationPolicy,
-    train_mlp_strategy,
+    FeatureRows, GroupLossMode, MlpHyperparams, OutputPolarity, TrainingGroup, TvRegularizer,
+    ValidationPolicy, train_mlp_strategy,
 };
 
 /// Deterministic synthetic corpus: `quality = w · x + 0.1·x0² + noise`, so a
@@ -144,6 +144,78 @@ fn output_polarity_owner_maps_conventions_to_signs() {
     assert_eq!(OutputPolarity::Score.ladder_sign(), -1.0);
     assert!(OutputPolarity::Distance.label().contains("LOWER"));
     assert!(OutputPolarity::Score.label().contains("HIGHER"));
+}
+
+/// The auxiliary pair constrains an axis absent from the main training rows.
+/// Swapping its endpoints must reverse the served preference under BOTH output
+/// conventions. This exercises the actual plain-path hinge and exporter, not
+/// just the polarity multiplier or a change in bake bytes.
+#[test]
+fn plain_tv_pair_order_controls_the_served_preference_in_both_polarities() {
+    let main_rows: [&[f64]; 2] = [&[-1.0, 0.0], &[1.0, 0.0]];
+    let targets = [0.0, 1.0];
+    let endpoints = vec![vec![0.0, -1.0], vec![0.0, 1.0]];
+    for loss_mode in [GroupLossMode::Rank, GroupLossMode::Both] {
+        for reverse in [false, true] {
+            let hyper = MlpHyperparams {
+                n_hidden: 12,
+                n_epochs: 20,
+                pairs_per_epoch: 400,
+                initial_lr: 0.01,
+                mse_weight: if loss_mode == GroupLossMode::Both {
+                    1.0
+                } else {
+                    0.0
+                },
+                early_stop_patience: 0,
+                seed: 7101,
+                ..Default::default()
+            };
+            let mut groups = [TrainingGroup {
+                name: "synthetic-main-axis".into(),
+                human_scores: &targets,
+                features: FeatureRows::Borrowed(&main_rows),
+                metric_sigmas: None,
+                train_weight: 1.0,
+                validation_weight: 0.0,
+                ref_ids: None,
+                loss_mode,
+            }];
+            let polarity = OutputPolarity::for_groups(&groups, &hyper);
+            let tv = TvRegularizer {
+                pairs: vec![if reverse { (1, 0) } else { (0, 1) }],
+                features: endpoints.clone(),
+                weight: 0.5,
+                apply_every: 1,
+                batch: 1,
+                band_id: None,
+                band_weights: None,
+                margin: 0.5,
+            };
+            let bytes = train_mlp_strategy(
+                &mut groups,
+                2,
+                &hyper,
+                &mut Vec::new(),
+                Some(&tv),
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            let model = Model::from_bytes(&bytes).expect("trained bake loads");
+            let mut scorer = BakeScorer::new(&model).unwrap();
+            let low = scorer.score_features(&endpoints[0], 0, 0, None).unwrap();
+            let high = scorer.score_features(&endpoints[1], 0, 0, None).unwrap();
+            let oriented_gap =
+                -polarity.ladder_sign() * (high - low) * if reverse { -1.0 } else { 1.0 };
+            assert!(
+                oriented_gap > 0.1,
+                "{loss_mode:?}, reverse={reverse}: low={low}, high={high}, gap={oriented_gap}"
+            );
+        }
+    }
 }
 
 /// Rank-only recipes are DISTANCE-shaped on every path. This is the legacy

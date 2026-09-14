@@ -1,5 +1,29 @@
 # Start here — one target score, one development path
 
+## September 14, newest: native TV recipe fails; checkpoint trap caught
+
+[Pair-margin study](benchmarks/native_tv_train_2026-09-14.md) completes six
+local120/H128 scientific fits and two integrity controls on admitted TRAIN.
+The existing TV hinge is direction-tested through Rust serving. With explicit
+human/codec fitting-group checkpoint weights, zero-native removal and TV repeat
+controls reproduce all predictions. Raw/packed and native pixel/cache parity pass.
+
+The TV ensemble improves human rank .86965→.87354 but increases robust native
+conflicts9→10/79. Map/M2 improve; raw clumping and maximum residual worsen.
+Only95/214 fitting margins are satisfied; mean hinge is worse than control.
+This fails the recipe, not proof of a feature-set ceiling. No model advances.
+Full10,792 panels, all seeds and exact A/Bs are served at
+`/zensim/reports/native-tv-train-2026-09-14/index.html`.
+
+The first attempt caught a checkpoint-selection trap: all-zero validation
+weights select by ALL group reports, including zero-weight native. Early-stop0
+still returns best_bake. The removal control changed968/1,000 predictions; those
+three fits are diagnostic only. Use explicit positive TRAIN selection weights
+and the intended policy. Historical arithmetic is preserved; the playbook now
+documents this. Do not start an immediate TV weight/margin sweep. Coarse-B phase/
+filter diagnosis, broader science and all product qualification remain open.
+Memory full-read audit30/99; no EVAL/TEST, encodes or extraction in this study.
+
 ## September 14, newest: native conflicts traced through signed features
 
 [Contribution diagnosis](benchmarks/native_contributions_2026-09-14.md) reuses
