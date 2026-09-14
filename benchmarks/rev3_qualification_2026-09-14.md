@@ -99,7 +99,9 @@ complete population raw/shape diagnostics are in the
 
 The unchanged G-OUT owner, using matched SSIMULACRA2 peer bars, finds failures
 for all nine: KADID normalized raw-residual severity and KonJND outlier rate.
-The range clause remains unmeasured without a declared spline range. Independently,
+The linear60 spline declares dial knots [8.25, 90]; its range clause passes,
+while its severity/rate failures remain. The other eight have no output spline
+and their lower-range clause remains unmeasured. Independently,
 wide models violate the identity ceiling on distorted pairs: full944/H128
 reaches 116.22 on KonJND and selected619 reaches approximately 120. This is an
 actual serving defect for a target dial, not a reason to clip the report.

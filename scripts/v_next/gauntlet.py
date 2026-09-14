@@ -1606,7 +1606,10 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
     _ds, _inc = [], []
     if _dp.exists():
         _dj = json.loads(_dp.read_text())
-        _ds = sorted(_dj.get("sets", []), key=lambda x: x.get("date", ""), reverse=True)
+        # Registry entries are append-only. On the same date the later entry
+        # supersedes the earlier discussion, so keep that chronology explicit.
+        _ds = [entry for _, entry in sorted(enumerate(_dj.get("sets", [])),
+               key=lambda item: (item[1].get("date", ""), item[0]), reverse=True)]
         _inc = _dj.get("incumbents", [])
     _cp = Path(__file__).resolve().parents[2] / "benchmarks" / "loop_eval_coverage.json"
     _cov = json.loads(_cp.read_text()).get("rows", []) if _cp.exists() else []
