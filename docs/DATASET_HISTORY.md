@@ -1,5 +1,20 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, native local TRAIN recipe comparison:**
+[Protocol/results](../benchmarks/native_local_train_2026-09-14.md) admits12existing
+product TRAIN families (8fit/4development), with original family assignments.
+The prior replay's three families and all historical protected families remain
+excluded. Canonical full944 Rev3 extraction on812 new fixed native JXL outputs
+retains516fit/264development local rows after exact pixel deduplication. One
+ICC-bearing source fails; a documented metadata-only replacement uses the next
+eligible fitting-family hash, without color stripping or role reassignment.
+All1,016 encoder attempts including204 from that failure are retained.
+Twelve Rust fits with matched seeds compare unchanged profiles/control recipes
+against10% local ranking supervision. Both treatments fail preregistered
+advancement. No EVAL/TEST, calibration or release qualification. Sparse canonical
+panel statistics are explicitly null where undefined; no fabricated passes.
+
+
 
 **September 14, native local-quantizer replay:**
 [Protocol/results](../benchmarks/native_map_replay_2026-09-14.md) reuses only

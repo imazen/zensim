@@ -1,5 +1,32 @@
 # Start here — one target score, one development path
 
+## September 14, newest: native local training completed; neither recipe advances
+
+[Registered experiment and results](benchmarks/native_local_train_2026-09-14.md)
+adds812 native JXL outputs across8fit/4development families, preserving product
+partitions and excluding the prior replay families. Twelve real Rust fits compare
+control versus10% native-local RankNet sampling in y60/H32 and basic156/H128;
+all seeds pack and reproduce cached scores. Controls exactly reproduce1,624
+frozen native pixel scores;1,056 new development pixel/cache comparisons agree.
+No EVAL/TEST, calibration, new kernels, or release qualification.
+
+Basic156 development peer conflicts improve9→5/79 and median native mass rank
+.343→.440, but human rank falls.00583 (beyond registered.005 tolerance), human
+geometric out4 grows.4%→.9%, and one native M2 check fails. Y60 gains rank but
+introduces one screen conflict; its native map association remains weak.
+Frozen D has0/79 conflicts and median association.638 on the same development
+pixels. Both treatments fail advancement; do not promote them or tune on EVAL.
+
+Full canonical panels/scatter, all12seeds/4ensembles, explicit undefined sparse
+statistics, commands/models and exact development A/B gallery are retained in
+`~/work/zensim-validation-2026-09-14/native-local-train/`. Served report:
+`/zensim/reports/native-local-train-2026-09-14/index.html`.
+Next register explicit robust local preference pairs versus indiscriminate
+within-cell draws using the existing trainer, preserving feature profiles and
+human/codec supervision. Native RD, targeting, corruption, full qualification,
+Claude-memory audit and cleanup remain open. The full goal remains active.
+
+
 
 
 ## September 14, newest: native JXL replay exposes model and map weaknesses

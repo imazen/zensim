@@ -118,6 +118,14 @@ def build_native_gallery(root, out):
     if any(c["role"] != "train" or any(p["role"] != "train" for p in c["probes"])
            for c in cases.values()):
         raise ValueError("native gallery TRAIN cases only")
+    context = read("GALLERY.json") if (root / "GALLERY.json").exists() else {}
+    report_stem = context.get("report_stem", "native_map_replay_2026-09-14")
+    if not isinstance(report_stem, str) or not report_stem.replace("_", "").replace("-", "").isalnum():
+        raise ValueError("native gallery report stem must be a plain filename")
+    population = (f"{len({c['family'] for c in cases.values()})} source families, "
+                  f"{len(cases)} cells and {sum(len(c['probes']) for c in cases.values())} "
+                  "native bitstreams, freshly decoded. ")
+    population += context.get("population_note", "Source admission and exclusions are recorded in the report.")
     peer = {m["model"]: m for m in consensus["models"]}
     models = primary["models"] + baseline["models"]
     if set(peer) != {m["model"] for m in models}:
@@ -154,7 +162,8 @@ def build_native_gallery(root, out):
                 raise ValueError(f"native gallery PNG hash mismatch: {path}")
             rel = f"images/{item['sha256']}.png"
             assets[rel] = path
-            views.append(f'<figure><a href="{rel}"><img loading="lazy" src="{rel}" alt="{label}"></a>'
+            views.append(f'<figure><a href="{rel}"><img loading="eager" src="{rel}" alt="{label}" '
+                         f'width="{case["width"]}" height="{case["height"]}"></a>'
                          f'<figcaption>{label} · {case["width"]}×{case["height"]}</figcaption></figure>')
         examples.append("<section><h2>" + escape(example["model"]) + "</h2><p>"
                         + escape(example["cell"] + " / " + example["probe"])
@@ -169,14 +178,17 @@ h1{font-size:1.7rem}h2{font-size:1.1rem;overflow-wrap:anywhere}.notice{padding:1
 .table{overflow-x:auto}table{border-collapse:collapse;background:white;width:100%;font-size:13px}td,th{padding:.6rem;text-align:left;border-bottom:1px solid #d6ddea}td:first-child{overflow-wrap:anywhere;max-width:260px}
 section{background:white;padding:1rem;margin:1.5rem 0}.views{display:flex;gap:1rem;align-items:flex-start}.views figure{margin:0;flex:1;min-width:0}.views img{max-width:100%;height:auto}figcaption{color:#536078}.plot{width:100%;height:auto}a{color:#125cba}@media(max-width:700px){.views{flex-wrap:wrap}.views figure{min-width:45%}}</style>
 <h1>Native JXL steering comparison · September 14, 2026</h1>
-<p class="notice"><strong>TRAIN development only. No model qualifies.</strong> Three source families, two sizes, two distances; twelve cells and 408 retained native bitstreams, freshly decoded. The reserved document family is excluded. These are actual encoder interventions, not reference-pixel replacements.</p>
+<p class="notice"><strong>TRAIN development only. No model qualifies.</strong> NATIVE_POPULATION These are actual encoder interventions, not reference-pixel replacements.</p>
 <p>Complete Rust models score every output. Maps are predicted from baseline pixels before probe scoring. Hard-max additive maps are explicitly partial. Native correlations are mechanism diagnostics, not the original repair gates or a matched-rate–distortion win.</p>
 <div class="table"><table><thead><tr><th>Model</th><th>Additive map coverage</th><th>Native M2 minimum</th><th>Mass/response rank median / min</th><th>Density/gain-per-byte rank median</th><th>Robust peer conflicts</th></tr></thead><tbody>"""
     page += "".join(rows) + """</tbody></table></div>
-<p>Peer conflicts require both SSIM2 and Butteraugli to agree beyond the registered margins and Zensim to move oppositely by more than .1. These peers are not human truth. D uses its frozen revision1; the six new ensembles use revision3.</p>
+<p>Peer conflicts require both SSIM2 and Butteraugli to agree beyond the registered margins and Zensim to move oppositely by more than .1. These peers are not human truth. D uses its frozen revision1; candidate ensembles use revision3.</p>
 <p><a href="native_map_replay_2026-09-14.md">Full report and limitations</a> · <a href="native_map_replay_2026-09-14.results.json">Results and evidence hashes</a> · <a href="FILES.json">Evidence index</a></p>
 <h2>Raw native response scatter</h2><a href="native_scatter.svg"><img class="plot" src="native_scatter.svg" alt="Per-model and per-image raw attribution mass versus actual native quantizer response"></a>
 <h2>Exact A/B failure examples</h2><p>Largest signed peer-consensus conflict for each affected model. Selected illustrations, not a representative population. Click an image for original-size PNG bytes. No synthetic repair or image resizing is stored.</p>"""
+    page = page.replace("NATIVE_POPULATION", escape(population))
+    page = page.replace("native_map_replay_2026-09-14.md", report_stem + ".md")
+    page = page.replace("native_map_replay_2026-09-14.results.json", report_stem + ".results.json")
     page += "".join(examples) + "</html>\n"
     out.parent.mkdir(parents=True, exist_ok=True)
     for rel, path in assets.items():
