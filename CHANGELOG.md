@@ -4,6 +4,10 @@
 
 ### Added
 
+- Saved spatial-intervention analysis separates finite L2/L4/L8 root curvature
+  from remaining map error, without new pixel comparisons. These are diagnostic
+  oracle results; production features, scores and steering are unchanged.
+
 - Prepared `BakeScorer` steering accepts servable corruption companions. It
   returns the perceptual map when the head is inactive and the typed
   `ZensimError::CorruptionDetected` when active, including activations that

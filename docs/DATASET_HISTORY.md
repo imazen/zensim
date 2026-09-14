@@ -1,5 +1,17 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, newest moment-curvature diagnosis:**
+[Protocol/results](../benchmarks/moment_curvature_2026-09-14.md) reuse twenty
+immutable TRAIN reports from the basic/peak campaign, without new decoding,
+scoring, fitting, calibration or EVAL/test access. The existing Rust analysis
+owner separates finite root curvature from remaining map error. For basic228/H32,
+the curvature-only oracle passes all five M3f cells and removes 92.9% of aggregate
+squared error against observed feature linearization. Repaired-image features
+make this an unavailable-to-runtime oracle; scalar/map verdicts are unchanged.
+All prior fields and the guarded replay are exact, with independent algebra
+tests and discriminating input controls. Artifacts:
+`~/work/zensim-validation-2026-09-14/moment-curvature/`.
+
 **September 14, newest basic/peak decomposition:**
 [Protocol/results](../benchmarks/product_peaks_2026-09-14.md) reuse the same
 admitted native product-TRAIN packet without new extraction, calibration or

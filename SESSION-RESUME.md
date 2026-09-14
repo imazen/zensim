@@ -1,5 +1,34 @@
 # Start here — one target score, one development path
 
+## September 14, newest: finite-root curvature is worth correcting
+
+[Moment diagnosis](benchmarks/moment_curvature_2026-09-14.md) reuses all twenty
+saved TRAIN intervention reports (588 repairs), with zero new pixel comparisons
+or fits. The Rust saved-data analysis now separates finite L2/L4/L8 root curvature
+from remaining map error. All prior fields are exactly unchanged. Mathematical
+tests, inconsistent/singular/legacy input controls, Clippy and hygiene pass.
+
+For basic228/H32, a curvature-only oracle raises the failed screenshot's M3f
+from .6739 to .9148; all five cases pass M3f, and aggregate squared error against
+observed feature linearization falls 92.9%. This meets the preregistered bar for
+implementing a base-image finite-moment approximation. **It is not a runtime map
+or qualification**: the oracle uses repaired-image features. Production scores,
+maps, M2 and above-identity failures are unchanged. Other H128 heads' M2 failures
+remain distinct even when their root-corrected M3f passes.
+
+Next derive finite pool removals from base-image moments through the existing
+retained attribution owner; test frozen-signal versus actual-neighborhood effects
+before choosing a per-feature storage layout. Preserve the current density and
+scalar scores as controls; measure prepared/query cost. No new optimizer or fit
+is justified by this result. Identity ordering, human quality, corruption,
+broader TRAIN spatial coverage, native bounded targeting/RD, HDR, frozen EVAL
+qualification and p95 still require work. The full production goal stays active.
+
+Artifacts: `~/work/zensim-validation-2026-09-14/moment-curvature/`, especially
+`RESULT-final.json`, `analysis-final/`, `CONTROLS.json` and the input registration.
+The initial analysis and guarded replay are preserved and numerically identical.
+All experiment processes finished; no EVAL/test or calibration was used.
+
 ## September 14, newest: basic feature decomposition and a spatial mechanism
 
 [Basic/peak comparison](benchmarks/product_peaks_2026-09-14.md) completes twelve

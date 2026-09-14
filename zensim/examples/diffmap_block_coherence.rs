@@ -49,6 +49,9 @@
 //! also retain per-feature linear deltas and six-family density decomposition.
 //! The saved-data analysis reports one-family oracle substitutions; these are
 //! diagnostic only. Four extra basic-family map calls are counted separately.
+//! For saved basic/peak reports, analysis also separates finite root curvature
+//! from remaining map error. Its corrections use observed feature changes and
+//! are explicitly oracle-only; they do not change runtime map predictions.
 //! M3f measures the non-additive `ScoredAttribution::refinement_gain`; M3a
 //! remains the density-only control. Neither establishes an encoder RD gain.
 
@@ -291,6 +294,93 @@ fn sha(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// Convert a finite root-feature change into its first-order moment change.
+/// A geometric sum avoids cancellation in (after^p - base^p).
+#[cfg(feature = "custom-profiles")]
+fn moment_linear_delta(base: f64, delta: f64, p: u32) -> Option<f64> {
+    if !matches!(p, 2 | 4 | 8) || !base.is_finite() || !delta.is_finite() || base < 0.0 {
+        return None;
+    }
+    let after = base + delta;
+    if !after.is_finite() || after < 0.0 {
+        return None;
+    }
+    if delta == 0.0 {
+        return Some(0.0);
+    }
+    if base == 0.0 {
+        return None;
+    }
+    let ratio = after / base;
+    let mut sum = 1.0;
+    for _ in 1..p {
+        sum = 1.0 + ratio * sum;
+    }
+    let linear = delta * (sum / f64::from(p));
+    linear.is_finite().then_some(linear)
+}
+
+#[cfg(feature = "custom-profiles")]
+fn root_exponent(id: usize) -> Option<u32> {
+    if id < 156 {
+        match id % 13 {
+            1 | 4 | 7 => Some(4),
+            2 | 5 | 8 => Some(2),
+            _ => None,
+        }
+    } else if id < 228 && (id - 156) % 6 >= 3 {
+        Some(8)
+    } else {
+        None
+    }
+}
+
+#[cfg(all(test, feature = "custom-profiles"))]
+mod moment_tests {
+    use super::moment_linear_delta;
+
+    #[test]
+    fn moment_change_matches_independent_power_algebra() {
+        for p in [2_u32, 4, 8] {
+            for base in [0.001_f64, 0.3, 2.0, 100.0] {
+                for fraction in [-1.0, -0.9, -0.1, 0.2, 1.0] {
+                    let delta = base * fraction;
+                    let after = base + delta;
+                    let expected = (after.powi(p as i32) - base.powi(p as i32))
+                        / (f64::from(p) * base.powi(p as i32 - 1));
+                    let actual = moment_linear_delta(base, delta, p).unwrap();
+                    for sensitivity in [-17.0, 0.01, 2.0] {
+                        assert!(
+                            (sensitivity * (actual - expected)).abs()
+                                <= 2e-12 * (sensitivity * expected).abs().max(1e-12)
+                        );
+                    }
+                }
+                let tiny = moment_linear_delta(base, base * 1e-15, p).unwrap();
+                assert!((tiny / (base * 1e-15) - 1.0).abs() < 1e-13);
+                let full = moment_linear_delta(base, -base, p).unwrap();
+                assert_eq!(full, -base / f64::from(p));
+            }
+        }
+    }
+
+    #[test]
+    fn singular_or_invalid_moments_are_not_zero_filled() {
+        assert_eq!(moment_linear_delta(0.0, 0.0, 8), Some(0.0));
+        for (base, delta, p) in [
+            (0.0, 1.0, 8),
+            (1.0, -2.0, 4),
+            (-1.0, 0.0, 2),
+            (f64::NAN, 0.0, 2),
+            (1.0, f64::INFINITY, 4),
+            (1.0, 1.0, 3),
+            (1e-300, 1.0, 8),
+        ] {
+            assert_eq!(moment_linear_delta(base, delta, p), None);
+        }
+    }
+}
+
 /// Diagnose stored interventions with the SAME statistics owner, without
 /// decoding images or repeating any feature/model computation. Oracle arms
 /// identify approximation errors; they are not available to runtime steering.
@@ -396,6 +486,79 @@ fn analyze_refinement(input: &str, output: &str) {
         }).collect();
         report["families"] = serde_json::json!(families);
         report["family_reconstruction_max_abs"] = serde_json::json!(residual_max);
+        if let (Some(base), Some(sensitivity)) = (
+            value["base_features"].as_array(),
+            value["base_sensitivities"].as_array(),
+        ) {
+            assert_eq!(base.len(), sensitivity.len());
+            let mut corrections = vec![[0.0; 6]; blocks.len()];
+            let mut invalid = Vec::new();
+            for (i, b) in blocks.iter().enumerate() {
+                let deltas = b["feature_linear_deltas"]
+                    .as_array()
+                    .expect("feature deltas");
+                assert_eq!(deltas.len(), base.len());
+                let mut reconstructed = [0.0_f64; 6];
+                for (id, a) in deltas.iter().enumerate() {
+                    let a = number(a);
+                    let family = if id < 156 {
+                        basic_family(id)
+                    } else if id < 228 {
+                        if (id - 156) % 6 >= 3 { 4 } else { 5 }
+                    } else {
+                        assert_eq!(a, 0.0, "non-basic/peak contribution in family diagnostic");
+                        continue;
+                    };
+                    reconstructed[family] += a;
+                    let Some(p) = root_exponent(id) else { continue };
+                    let g = number(&sensitivity[id]);
+                    if g == 0.0 {
+                        assert_eq!(a, 0.0);
+                        continue;
+                    }
+                    let Some(b) = moment_linear_delta(number(&base[id]), a / g, p)
+                        .map(|b| g * b)
+                        .filter(|b| b.is_finite())
+                    else {
+                        invalid.push(serde_json::json!({"block":i,"feature_id":id}));
+                        continue;
+                    };
+                    corrections[i][family] += a - b;
+                }
+                for (f, a) in reconstructed.into_iter().enumerate() {
+                    let expected = observed[f][i];
+                    assert!(
+                        (a - expected).abs() <= 1e-6 + 1e-5 * a.abs().max(expected.abs()),
+                        "per-feature family reconstruction mismatch"
+                    );
+                }
+            }
+            let mut curvature = serde_json::json!({
+                "status":if invalid.is_empty() { "COMPLETE_ORACLE_ONLY" } else { "INCOMPLETE" },
+                "deployable":false,"invalid_cells":invalid,
+                "new_pixel_comparisons":0,
+                "definition":"predicted map + observed finite root contribution - observed first-order moment contribution"
+            });
+            if invalid.is_empty() {
+                let arms: Vec<_> = [("ssim", vec![0]), ("edge", vec![1]),
+                    ("l8", vec![4]), ("all_roots", vec![0, 1, 4])]
+                    .into_iter().map(|(name, selected)| {
+                        let gains: Vec<f64> = refinement.iter().enumerate().map(|(i, d)| {
+                            d + selected.iter().map(|&f| corrections[i][f]).sum::<f64>()
+                        }).collect();
+                        let before: f64 = refinement.iter().zip(&linear).map(|(d,a)| (d-a).powi(2)).sum();
+                        let after: f64 = gains.iter().zip(&linear).map(|(d,a)| (d-a).powi(2)).sum();
+                        serde_json::json!({"family":name,"srocc":spearman(&gains,&actual),
+                            "linearization_squared_error_before":before,
+                            "linearization_squared_error_after":after,
+                            "error_fraction_removed":if before > 0.0 { Some(1.0-after/before) } else { None },
+                            "gains":gains})
+                    }).collect();
+                curvature["arms"] = serde_json::json!(arms);
+                curvature["family_curvature_residuals"] = serde_json::json!(corrections);
+            }
+            report["moment_curvature"] = curvature;
+        }
     }
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
