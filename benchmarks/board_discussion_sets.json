@@ -303,6 +303,27 @@
       ],
       "preferred_corpus": "konjnd",
       "note": "Frozen candidates evaluated through Rust on 3,125 KADID SELECT, 404 KonJND JPEG SELECT and 436 KonFiG origin-validation pairs. Matched B/D use native Rev1 extraction and complete pixel/cache audits; their legacy bake-era metadata is unknown and does not pass provenance qualification. All other inherited incumbents/peers are historical context, not matched comparisons. New models improve KADID but trail matched B/D on KonJND; no composite or product qualification. Selected619 fails spatial/scalar parity on 836/840 additional pairs; full944 lacks complete refinement. KonFiG has only four sources and was used to tune SSIMULACRA2: no independent superiority claim there. Existing rank CIs resample rows; source-cluster uncertainty is retained in the qualification report. T0/CID22 terminal populations remain untouched under the current split ruling. Record: benchmarks/rev3_qualification_2026-09-14.md."
+    },
+    {
+      "id": "2026-09-14-rev3-codec-eval",
+      "date": "2026-09-14",
+      "label": "2026-09-14 · Rev3: six measured panels, human + codec validation",
+      "bakes": [
+        "MT913_y40_h32_ens5",
+        "MT913_y40_h128_ens5",
+        "MT913_y60_h32_ens5",
+        "MT913_y60_h128_ens5",
+        "MT913_local120_h128_ens5",
+        "MT913_selected619_h128_ens5",
+        "MT913_full944_h128_ens5",
+        "MT913_full944_h256_ens5",
+        "MT913_linear60",
+        "MT914_matched_B",
+        "MT914_matched_D",
+        "peer_ssim2_mt914"
+      ],
+      "preferred_corpus": "imazen26",
+      "note": "All nine frozen candidates and matched native B/D have six measured panels: KADID SELECT 3,125; KonJND JPEG SELECT 404; KonFiG validation 436; imazen26 validate 6,953; nonphoto validate 6,142; hfnlproxy validate 7,717. The last three overlap (20,655 unique pairs across 20,812 memberships) and are ONE historical SSIMULACRA2 proxy instrument, not three independent human studies. The matched SSIMULACRA2 row retains only its three human panels; teacher self-agreement is deliberately excluded. Native Rev3 and Rev1 extraction use identical original bitstreams; no size-dependent drops. Earlier human results are unchanged. All candidates remain NO-SHIP: wide models emit distorted scores above 100, small models compress the high-quality range, selected619 retains failed spatial parity, and full944 lacks complete refinement. No complete product composite (3/6 required axes), native targeting/RD or p95 qualification. B/D legacy training-era metadata remains unknown despite exact native prediction audits. Source-cluster uncertainty and teacher drift are reported separately; all models remain frozen and no test/terminal segment is accessed. Record: benchmarks/rev3_codec_eval_2026-09-14.md."
     }
   ],
   "incumbent_notes": [

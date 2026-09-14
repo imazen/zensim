@@ -90,19 +90,30 @@ pub(super) struct Config {
     weights: Option<Vec<f64>>,
     head: Option<CorruptionHead>,
     inputs: Vec<(PathBuf, String)>,
+    ssim2: bool,
+}
+
+pub(super) struct CandidateInputs {
+    pub bake: Option<PathBuf>,
+    pub head: Option<PathBuf>,
+    pub ensemble: Option<String>,
+    pub weights: Option<String>,
 }
 
 impl Config {
     pub(super) fn load(
         out: Option<PathBuf>,
-        bake: Option<PathBuf>,
-        head: Option<PathBuf>,
-        ensemble: Option<String>,
-        weights: Option<String>,
+        candidates: CandidateInputs,
         csv: &Path,
         failures: usize,
         sampling: Option<&str>,
     ) -> Result<Option<Self>, String> {
+        let CandidateInputs {
+            bake,
+            head,
+            ensemble,
+            weights,
+        } = candidates;
         let Some(out) = out else {
             if bake.is_some() || head.is_some() || ensemble.is_some() || weights.is_some() {
                 return Err("audit model requires --audit-jsonl".into());
@@ -178,6 +189,7 @@ impl Config {
             weights,
             head,
             inputs,
+            ssim2: false,
         };
         if !config.models.is_empty() {
             let scorer = config.base_scorer()?;
@@ -192,6 +204,10 @@ impl Config {
 
     fn base_scorer(&self) -> Result<BakeScorer<'_>, String> {
         BakeScorer::ensemble(&self.models, self.weights.as_deref()).map_err(|e| e.to_string())
+    }
+
+    pub(super) fn enable_ssim2(&mut self) {
+        self.ssim2 = true;
     }
 
     pub(super) fn score(
@@ -218,6 +234,29 @@ impl Config {
             "reference_pixels_sha256":sha(&src.pixels),"distorted_pixels_sha256":sha(&dst.pixels),
             "pixels_identical":identical,
             "canonical_extractions":1,"audit_decodes":2,"model_inputs":self.inputs});
+        if self.ssim2 {
+            // Same decoded RGB8 buffers and geometry as the candidate audit.
+            // Reuse the existing fast-ssim2 crate; no peer decoding or kernel here.
+            let reference = imgref::Img::new(
+                bytemuck::cast_slice::<u8, [u8; 3]>(&src.pixels),
+                src.width as usize,
+                src.height as usize,
+            );
+            let distorted = imgref::Img::new(
+                bytemuck::cast_slice::<u8, [u8; 3]>(&dst.pixels),
+                dst.width as usize,
+                dst.height as usize,
+            );
+            let score = fast_ssim2::compute_ssimulacra2(reference, distorted)
+                .map_err(|e| format!("fast-ssim2 audit: {e}"))?;
+            if !score.is_finite() {
+                return Err("nonfinite fast-ssim2 audit score".into());
+            }
+            record["peer_ssim2"] = json!({"score":score,
+                "implementation":"fast-ssim2", "input":"same decoded RGB8 buffers",
+                "reference_pixels_sha256":record["reference_pixels_sha256"],
+                "distorted_pixels_sha256":record["distorted_pixels_sha256"]});
+        }
         if !self.models.is_empty() {
             if let Some(weights) = &self.weights {
                 record["ensemble_weights"] = json!(weights);

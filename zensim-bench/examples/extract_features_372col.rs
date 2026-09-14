@@ -28,6 +28,11 @@
 //! small for the pyramid is a HARD failure that aborts the run. Tolerating any
 //! is the caller's explicit decision: `--allow-failures N` (default 0).
 //!
+//! For admitted `pairs-tsv` inputs, `--audit-jsonl PATH --audit-ssim2`
+//! additionally records fast-ssim2 scores on the audit's decoded RGB8 buffers.
+//! Pixel hashes bind both metrics to the same inputs. This flag does not alter
+//! feature extraction or permit dropped pairs.
+//!
 //! Usage:
 //!   cargo run --release -p zensim-bench --example extract_features_372col -- \
 //!     --corpus konjnd \
@@ -82,6 +87,7 @@ fn main() {
     let mut audit_head = None;
     let mut audit_ensemble = None;
     let mut audit_weights = None;
+    let mut audit_ssim2 = false;
     let mut sampling = None;
     let mut full_944 = false;
     while let Some(a) = args.next() {
@@ -100,6 +106,7 @@ fn main() {
             "--audit-corruption-head" => audit::take_path(&mut audit_head, args.next()),
             "--audit-ensemble" => audit::take_value(&mut audit_ensemble, args.next()),
             "--audit-ensemble-weights" => audit::take_value(&mut audit_weights, args.next()),
+            "--audit-ssim2" => audit_ssim2 = true,
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -113,8 +120,10 @@ fn main() {
         !full_944 || sampling.as_deref().is_none_or(|s| s.starts_with("v2:")),
         "--full-944 sampling requires a direct v2 contract"
     );
-    assert!(full_944 || sampling.as_deref().is_none_or(|s| !s.starts_with("v2:")),
-        "direct v2 sampling requires --full-944");
+    assert!(
+        full_944 || sampling.as_deref().is_none_or(|s| !s.starts_with("v2:")),
+        "direct v2 sampling requires --full-944"
+    );
     let producer = if full_944 {
         Some(diagnostic_producer(sampling.as_deref(), &out))
     } else {
@@ -122,17 +131,25 @@ fn main() {
             .as_deref()
             .map(|tag| diagnostic_producer(Some(tag), &out))
     };
-    let audit = audit::Config::load(
+    let mut audit = audit::Config::load(
         audit_out,
-        audit_bake,
-        audit_head,
-        audit_ensemble,
-        audit_weights,
+        audit::CandidateInputs {
+            bake: audit_bake,
+            head: audit_head,
+            ensemble: audit_ensemble,
+            weights: audit_weights,
+        },
         &out,
         allow_failures,
         sampling.as_deref(),
     )
     .expect("audit configuration");
+    if audit_ssim2 {
+        audit
+            .as_mut()
+            .expect("--audit-ssim2 requires --audit-jsonl")
+            .enable_ssim2();
+    }
     assert!(
         audit.is_none() || matches!(corpus.as_str(), "pairs" | "pairs-tsv"),
         "audit requires explicit pairs or pairs-tsv input"
@@ -1100,7 +1117,12 @@ fn diagnostic_producer(sampling: Option<&str>, out: &Path) -> Vec<u8> {
     zensim::BakeScorer::new(&model).expect("servable sampling contract");
     let era = sampling.map_or_else(
         || format!("ceiling_rev{revision}"),
-        |tag| format!("sampling_{}", tag.replace(':', "_").replace('/', "d").replace(',', "_")),
+        |tag| {
+            format!(
+                "sampling_{}",
+                tag.replace(':', "_").replace('/', "d").replace(',', "_")
+            )
+        },
     );
     let hash = zensim::feature_set_id::slots_hash8(ids.iter().copied());
     let family = if !wide {

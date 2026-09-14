@@ -4032,3 +4032,28 @@ final identity-bearing view copies the same features/labels and adds verified
 consume it through `BakeScorer::score_features_with_identity`. Earlier raw
 feature-only eval artifacts are retained but superseded by `final-eval/`.
 This correction changes no training input, checkpoint, calibration or model.
+
+## September 14: native codec validation for frozen Rev3 candidates
+
+[Protocol and results](../benchmarks/rev3_codec_eval_2026-09-14.md) admit the
+hash-bound R1b D1 validation keys for imazen26/nonphoto/hfnlproxy, with canonical
+source suffixes {1,3,5}. All 20,655 distinct original bitstream pairs produce
+finite native Rev3 full944 features; 20,812 original slice memberships are
+preserved. No size-dependent row dropping or old944 feature reuse. These are
+overlapping historical SSIMULACRA2 proxy views, not independent human studies.
+Original imazen26 targets are raw SSIMULACRA2; the other two are divided by 100.
+New tables explicitly normalize all three to score/100 and retain original units.
+
+The audit optionally calls existing fast-ssim2 on its exact decoded RGB8 buffers.
+Historical/current teacher drift is recorded separately; high-band membership
+is unchanged. Matched native B/D Rev1 extraction covers every pair and every
+reported baseline prediction matches its image score exactly. Unknown legacy
+bake training-era metadata remains unqualified. Nine frozen candidate verdicts
+run through public BakeScorer on native features. Prior human panels are reused
+only after manifest/hash checks and remain unchanged. All candidates remain
+NO-SHIP, with complete product composite, targeting/RD and performance missing.
+
+Artifacts: `~/work/zensim-validation-2026-09-14/rev3-codec-eval/`, including
+original protocol/binary, admission, per-file/pixel hashes, full row predictions,
+source bootstrap, codec panels and teacher drift. No test/terminal table or
+historical internal test segment was opened or reclassified.

@@ -1,5 +1,30 @@
 # Start here — one target score, one development path
 
+## September 14, latest: six measured panels for the frozen Rev3 comparison
+
+[Codec-family assessment](benchmarks/rev3_codec_eval_2026-09-14.md) adds all
+20,655 distinct admitted imazen26 validation pairs: 6,953 broad, 6,142 nonphoto,
+7,717 near-lossless proxy memberships. These overlap and form one historical
+SSIMULACRA2 instrument. All nine candidates and matched B/D now have six
+populated panels; previous human results are unchanged. No fitting or test reads.
+
+B/D outperform every new candidate on the three aggregate proxy point scores.
+Full944/H128 has signed SROCC .6776 / .6202 / -.0607, versus B
+.8603 / .8498 / .3500. Wide models emit distorted scores above 100; small
+models compress the near-lossless range. Source-cluster uncertainty and
+same-decoded-pixel teacher drift are retained. Complete B/D native image scores
+match every new verdict prediction exactly. The new comparison is served on the
+all-rows gauntlet; all nine remain NO-SHIP with composite coverage only 3/6.
+
+Artifacts: `~/work/zensim-validation-2026-09-14/rev3-codec-eval/`.
+The original extraction binary and protocol are preserved. New family candidate
+scores use public BakeScorer with native canonical features; complete per-model
+image/map audits on this added population remain unmeasured. Selected619's
+prior spatial failure and full944's unsupported refinement remain blockers.
+The full goal remains active: representative train-side development, complete
+composition/spatial/corruption qualification, native bounded targeting/RD and
+controlled p95/memory still require work. Do not tune the frozen models on eval.
+
 ## September 14, latest: frozen Rev3 models now have broader matched eval
 
 [Qualification expansion](benchmarks/rev3_qualification_2026-09-14.md) adds

@@ -1,0 +1,5448 @@
+{
+  "status": "NO_SHIP",
+  "role": "eval",
+  "model_changes": false,
+  "train_or_test_reads": false,
+  "unique_new_pairs": 20655,
+  "new_slice_memberships": 20812,
+  "total_panel_memberships_per_model": 24777,
+  "corpora": {
+    "imazen26": {
+      "rows": 6953,
+      "sources": 87,
+      "codec_counts": {
+        "zenavif": 1968,
+        "zenjpeg": 1930,
+        "zenjxl": 1832,
+        "zenwebp": 1223
+      }
+    },
+    "nonphoto": {
+      "rows": 6142,
+      "sources": 61,
+      "codec_counts": {
+        "zenavif": 1734,
+        "zenjpeg": 1698,
+        "zenjxl": 1619,
+        "zenwebp": 1091
+      }
+    },
+    "hfnlproxy": {
+      "rows": 7717,
+      "sources": 87,
+      "codec_counts": {
+        "zenavif": 4710,
+        "zenjpeg": 1379,
+        "zenjxl": 854,
+        "zenwebp": 774
+      }
+    }
+  },
+  "models": {
+    "MT913_full944_h128_ens5": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.17193426042983564,
+          "krocc": 0.039864113430487826,
+          "n": 7717,
+          "or": 0.032007256705973826,
+          "per_ref_mean": 0.4760875485075049,
+          "per_ref_n": 791,
+          "plcc": 0.09358124395493192,
+          "pwrc": 0.7585568986951445,
+          "srocc": 0.060723719941172455,
+          "srocc_ci": [
+            0.03962448090914626,
+            0.08254278189606637
+          ],
+          "srocc_signed": -0.060723719941172455,
+          "train_eq_val": false,
+          "z_rmse": 0.995611646566995
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.004206098843322818,
+          "krocc": 0.49988313354044217,
+          "n": 6953,
+          "or": 0.031209549834603768,
+          "per_ref_mean": 0.8422037032579003,
+          "per_ref_n": 951,
+          "plcc": 0.6958492847123487,
+          "pwrc": 0.9048133640209498,
+          "srocc": 0.6775941956409057,
+          "srocc_ci": [
+            0.6623133205094589,
+            0.6916945169791248
+          ],
+          "srocc_signed": 0.6775941956409057,
+          "train_eq_val": false,
+          "z_rmse": 0.7181878396111377
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.5854324442118551,
+              "lo": null,
+              "mae": 0.051151780838327304,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.0040290088638195,
+              "plcc": 0.7936101897406367,
+              "pwrc": 0.946257874660066,
+              "span": 0.38499999999999984,
+              "srocc": 0.7809937030867243,
+              "srocc_signed": 0.7809937030867243,
+              "z_rmse": 0.6084265499958321
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.6832718654723547,
+              "lo": 0.4,
+              "mae": 0.06103692143578704,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.0005307855626326964,
+              "plcc": 0.8740576651379589,
+              "pwrc": 0.9717270638442845,
+              "span": 0.5825,
+              "srocc": 0.8724852595170931,
+              "srocc_signed": 0.8724852595170931,
+              "z_rmse": 0.48582218765056207
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.7925655460616191,
+          "n": 3125,
+          "or": 0.00032,
+          "per_ref_mean": 0.9543932912459566,
+          "per_ref_n": 25,
+          "plcc": 0.9443229520467258,
+          "pwrc": 0.9892388402478334,
+          "srocc": 0.9433007769990879,
+          "srocc_ci": [
+            0.9386998390691554,
+            0.9471428330686881
+          ],
+          "srocc_signed": 0.9433007769990879,
+          "train_eq_val": true,
+          "z_rmse": 0.3290200027927827
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6791456677866496,
+          "n": 436,
+          "or": 0.006880733944954129,
+          "per_ref_mean": 0.865046716262081,
+          "per_ref_n": 4,
+          "plcc": 0.8404721022545465,
+          "pwrc": 0.9594406244736644,
+          "srocc": 0.8398518912578928,
+          "srocc_ci": [
+            0.7999936008724722,
+            0.8724952487684475
+          ],
+          "srocc_signed": 0.8398518912578928,
+          "train_eq_val": false,
+          "z_rmse": 0.5418548194228974
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.11951760827882504,
+          "n": 404,
+          "or": 0.0594059405940594,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.18828485627827932,
+          "pwrc": 0.7103864135024591,
+          "srocc": 0.17759998442228903,
+          "srocc_ci": [
+            0.07624218122704131,
+            0.27311340338847445
+          ],
+          "srocc_signed": -0.17759998442228903,
+          "train_eq_val": false,
+          "z_rmse": 0.9821144648602816
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.005961251862891207,
+          "krocc": 0.45584180004930824,
+          "n": 6142,
+          "or": 0.032888309996743734,
+          "per_ref_mean": 0.8221039523301303,
+          "per_ref_n": 671,
+          "plcc": 0.6628066346782878,
+          "pwrc": 0.890615751453763,
+          "srocc": 0.620228773641429,
+          "srocc_ci": [
+            0.6022033103853833,
+            0.638160957991417
+          ],
+          "srocc_signed": 0.620228773641429,
+          "train_eq_val": false,
+          "z_rmse": 0.7487906015879536
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0001295840352468576,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.024146824505999975,
+              "maxd": 1.0227487968771891,
+              "out4": 0.0,
+              "p99d": 0.9282381898845076,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.13619282104444733,
+              "cov": 0.8,
+              "mad": 12.552788487138521,
+              "max": 3.7964714503023873,
+              "p99": 2.5344732501056466,
+              "pred_max": 113.58052368164063,
+              "pred_min": 37.856866455078126,
+              "residual_max": 47.65630311310589,
+              "residual_p99": 31.814706634886708,
+              "slope": -39.91583170868683
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.157240123026,
+              "maxd": 1.0161717206688967,
+              "out4": 0.03307924636847404,
+              "p99d": 0.6514574780469521,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.14655544369336976,
+              "cov": 0.8,
+              "mad": 12.430264968641493,
+              "max": 5.300226058694989,
+              "p99": 3.4892840434627463,
+              "pred_max": 114.69201202392578,
+              "pred_min": -7.381290459632874,
+              "residual_max": 65.88321430327709,
+              "residual_p99": 43.37272521109472,
+              "slope": 42.394488310043776
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00032,
+              "clampLo": 0.00032,
+              "clump": 0.08448,
+              "cov": 0.95,
+              "mad": 0.07413000000000006,
+              "maxd": 0.6222222222222222,
+              "out4": 0.00608,
+              "p99d": 0.30555555555555564,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.06912,
+              "cov": 0.95,
+              "mad": 8.477623952007995,
+              "max": 6.2032556385062785,
+              "p99": 3.070280551022637,
+              "pred_max": 104.53492736816406,
+              "pred_min": -8.335136699676514,
+              "residual_max": 52.58886858142948,
+              "residual_p99": 26.028683938733817,
+              "slope": 94.28955892043741
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0022935779816513763,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.11582812499999999,
+              "maxd": 0.7758620689655172,
+              "out4": 0.022935779816513763,
+              "p99d": 0.580172413793103,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.11009174311926606,
+              "cov": 1.0,
+              "mad": 10.980225950058703,
+              "max": 4.315972140498459,
+              "p99": 3.2831582321417914,
+              "pred_max": 105.44661865234374,
+              "pred_min": 8.608467292785644,
+              "residual_max": 47.39034929683158,
+              "residual_p99": 36.04981921871215,
+              "slope": 66.74121617419642
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 11.438258999999993,
+              "maxd": 1.0875106631064093,
+              "out4": 0.0,
+              "p99d": 0.8790008732390093,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.1782178217821782,
+              "cov": 0.6,
+              "mad": 6.6091668109635995,
+              "max": 4.779795543657443,
+              "p99": 2.9808449588163732,
+              "pred_max": 116.22309265136718,
+              "pred_min": 56.54667510986328,
+              "residual_max": 31.590466070332486,
+              "residual_p99": 19.70090157043733,
+              "slope": -0.15650842051114716
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.1503281973480001,
+              "maxd": 1.039459067795361,
+              "out4": 0.037935525887333114,
+              "p99d": 0.6772319013864205,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.1248778899381309,
+              "cov": 0.85,
+              "mad": 13.90535008880802,
+              "max": 4.874558707268668,
+              "p99": 3.1200648638983886,
+              "pred_max": 113.11977081298828,
+              "pred_min": -4.694987034797668,
+              "residual_max": 67.78244535301829,
+              "residual_p99": 43.38559423229624,
+              "slope": 42.17372391315709
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 1221,
+      "new_score_min": -7.381290459632874,
+      "new_score_max": 114.69201202392578
+    },
+    "MT913_full944_h256_ens5": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.19089759797724398,
+          "krocc": 0.02687642695429913,
+          "n": 7717,
+          "or": 0.03122975249449268,
+          "per_ref_mean": 0.4863202502323015,
+          "per_ref_n": 791,
+          "plcc": 0.06627675102062916,
+          "pwrc": 0.6624314861085873,
+          "srocc": 0.041419162039974984,
+          "srocc_ci": [
+            0.020163937753301303,
+            0.06292757787755329
+          ],
+          "srocc_signed": -0.041419162039974984,
+          "train_eq_val": false,
+          "z_rmse": 0.9978016348821918
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.013669821240799159,
+          "krocc": 0.5199771521821077,
+          "n": 6953,
+          "or": 0.030202790162519776,
+          "per_ref_mean": 0.8146519918323094,
+          "per_ref_n": 951,
+          "plcc": 0.7048957791700217,
+          "pwrc": 0.9170276379117048,
+          "srocc": 0.7014477714686321,
+          "srocc_ci": [
+            0.6871425980384592,
+            0.714627548035017
+          ],
+          "srocc_signed": 0.7014477714686321,
+          "train_eq_val": false,
+          "z_rmse": 0.7093108912939998
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.5831489603535387,
+              "lo": null,
+              "mae": 0.05087963530386467,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.0040290088638195,
+              "plcc": 0.7905489305777547,
+              "pwrc": 0.945263575686826,
+              "span": 0.38499999999999984,
+              "srocc": 0.7788393285604438,
+              "srocc_signed": 0.7788393285604438,
+              "z_rmse": 0.6123988801119487
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.6823846611663326,
+              "lo": 0.4,
+              "mae": 0.06133514428349532,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.0,
+              "plcc": 0.8741149159110712,
+              "pwrc": 0.9718870392952718,
+              "span": 0.5825,
+              "srocc": 0.8724176207630333,
+              "srocc_signed": 0.8724176207630333,
+              "z_rmse": 0.4857191717255777
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.7916251511815232,
+          "n": 3125,
+          "or": 0.00032,
+          "per_ref_mean": 0.9536200890917526,
+          "per_ref_n": 25,
+          "plcc": 0.9439719490204711,
+          "pwrc": 0.98919242031681,
+          "srocc": 0.9429820612731363,
+          "srocc_ci": [
+            0.938587780942149,
+            0.946855338654042
+          ],
+          "srocc_signed": 0.9429820612731363,
+          "train_eq_val": true,
+          "z_rmse": 0.3300256951549302
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6678103491078726,
+          "n": 436,
+          "or": 0.006880733944954129,
+          "per_ref_mean": 0.8509783692602891,
+          "per_ref_n": 4,
+          "plcc": 0.8288213954619174,
+          "pwrc": 0.9554177771566041,
+          "srocc": 0.8277824267674595,
+          "srocc_ci": [
+            0.7835093038492874,
+            0.8618108140553256
+          ],
+          "srocc_signed": 0.8277824267674595,
+          "train_eq_val": false,
+          "z_rmse": 0.5595132656376962
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.05572245847069719,
+          "n": 404,
+          "or": 0.05693069306930693,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.11501100759386138,
+          "pwrc": 0.642810650648669,
+          "srocc": 0.08232361555342076,
+          "srocc_ci": [
+            0.007435353522890239,
+            0.18226185047260895
+          ],
+          "srocc_signed": -0.08232361555342076,
+          "train_eq_val": false,
+          "z_rmse": 0.993364217299991
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.013412816691505217,
+          "krocc": 0.47677557782839397,
+          "n": 6142,
+          "or": 0.03353956366004559,
+          "per_ref_mean": 0.7983214880226541,
+          "per_ref_n": 671,
+          "plcc": 0.6700154699591623,
+          "pwrc": 0.9024577942254117,
+          "srocc": 0.6455091814563007,
+          "srocc_ci": [
+            0.6280617265716227,
+            0.6624262647863138
+          ],
+          "srocc_signed": 0.6455091814563007,
+          "train_eq_val": false,
+          "z_rmse": 0.7423471357898593
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0001295840352468576,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.02416630586999993,
+              "maxd": 1.0462825421556512,
+              "out4": 0.0,
+              "p99d": 0.9131926355789074,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.1552416742257354,
+              "cov": 0.7,
+              "mad": 11.553879969157169,
+              "max": 4.533937639876357,
+              "p99": 2.781233810395276,
+              "pred_max": 114.87864837646484,
+              "pred_min": 33.18252182006836,
+              "residual_max": 52.38457127877517,
+              "residual_p99": 32.134041611468646,
+              "slope": -28.71186029461146
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.14991176466000014,
+              "maxd": 1.0044564797238764,
+              "out4": 0.03667481662591687,
+              "p99d": 0.6412889543315321,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.15647921760391198,
+              "cov": 0.75,
+              "mad": 12.118073833958402,
+              "max": 5.504566667504126,
+              "p99": 3.5533311169967683,
+              "pred_max": 114.56421966552735,
+              "pred_min": -13.215633463859557,
+              "residual_max": 66.70474530076135,
+              "residual_p99": 43.05952883226872,
+              "slope": 43.84182857045477
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00032,
+              "clampLo": 0.00032,
+              "clump": 0.08448,
+              "cov": 0.95,
+              "mad": 0.07413000000000006,
+              "maxd": 0.6222222222222222,
+              "out4": 0.0064,
+              "p99d": 0.30555555555555564,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.07072,
+              "cov": 1.0,
+              "mad": 8.234765779496753,
+              "max": 6.331285004132715,
+              "p99": 3.08659045984376,
+              "pred_max": 103.58990783691407,
+              "pred_min": -3.6046937465667725,
+              "residual_max": 52.13664909227304,
+              "residual_p99": 25.417349494042544,
+              "slope": 92.95342367869351
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0022935779816513763,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.11582812499999999,
+              "maxd": 0.7758620689655172,
+              "out4": 0.022935779816513763,
+              "p99d": 0.603448275862069,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.10091743119266056,
+              "cov": 1.0,
+              "mad": 11.684948027444742,
+              "max": 4.1644034336833595,
+              "p99": 3.2976791112606905,
+              "pred_max": 104.61838073730469,
+              "pred_min": 9.152047538757325,
+              "residual_max": 48.660837687902486,
+              "residual_p99": 38.53320902627134,
+              "slope": 66.44046089538548
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 10.422678000000007,
+              "maxd": 1.003720099135342,
+              "out4": 0.0,
+              "p99d": 0.8787283015248863,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.18564356435643564,
+              "cov": 0.65,
+              "mad": 7.134285239356667,
+              "max": 4.5511193336096865,
+              "p99": 2.743091891838281,
+              "pred_max": 112.77908477783203,
+              "pred_min": 48.60560913085938,
+              "residual_max": 32.46898348432234,
+              "residual_p99": 19.569999994140804,
+              "slope": -0.08843653889566987
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.139330389156,
+              "maxd": 1.018309671920395,
+              "out4": 0.04542494301530446,
+              "p99d": 0.6698314911546072,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.13546076196678605,
+              "cov": 0.85,
+              "mad": 13.26851249711811,
+              "max": 5.2100600821660485,
+              "p99": 3.297526348662213,
+              "pred_max": 112.6442367553711,
+              "pred_min": -3.1210923910140993,
+              "residual_max": 69.12974731095642,
+              "residual_p99": 43.75326956680082,
+              "slope": 43.76878678871307
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 1032,
+      "new_score_min": -13.215633463859557,
+      "new_score_max": 114.87864837646484
+    },
+    "MT913_local120_h128_ens5": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.4134007585335019,
+          "krocc": 0.03172361686556074,
+          "n": 7717,
+          "or": 0.029804328106777245,
+          "per_ref_mean": 0.10965322326311827,
+          "per_ref_n": 791,
+          "plcc": 0.10216150846811382,
+          "pwrc": 0.6001711323428376,
+          "srocc": 0.05039635807799672,
+          "srocc_ci": [
+            0.030071252183138945,
+            0.0725698731321216
+          ],
+          "srocc_signed": -0.05039635807799672,
+          "train_eq_val": false,
+          "z_rmse": 0.9947678252675412
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0010515247108307045,
+          "krocc": 0.6049494903709718,
+          "n": 6953,
+          "or": 0.026175751474183804,
+          "per_ref_mean": 0.8818052741711806,
+          "per_ref_n": 951,
+          "plcc": 0.7347368834780285,
+          "pwrc": 0.9193728104365676,
+          "srocc": 0.7748995732940883,
+          "srocc_ci": [
+            0.762107387390761,
+            0.7876067566930236
+          ],
+          "srocc_signed": 0.7748995732940883,
+          "train_eq_val": false,
+          "z_rmse": 0.678352203546941
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.5385697846845652,
+              "lo": null,
+              "mae": 0.05597932732128439,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.010475423045930701,
+              "plcc": 0.7455543808607984,
+              "pwrc": 0.9270761717044957,
+              "span": 0.38499999999999984,
+              "srocc": 0.7330911037874863,
+              "srocc_signed": 0.7330911037874863,
+              "z_rmse": 0.6664447952976078
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.6698398197674624,
+              "lo": 0.4,
+              "mae": 0.06384743879661499,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.004246284501061571,
+              "plcc": 0.8576342285374211,
+              "pwrc": 0.9667311652411769,
+              "span": 0.5825,
+              "srocc": 0.8587362984798224,
+              "srocc_signed": 0.8587362984798224,
+              "z_rmse": 0.5142601773820547
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.7746943377557688,
+          "n": 3125,
+          "or": 0.00032,
+          "per_ref_mean": 0.9437252071008254,
+          "per_ref_n": 25,
+          "plcc": 0.9331651267421798,
+          "pwrc": 0.9868785248444404,
+          "srocc": 0.9328174625534501,
+          "srocc_ci": [
+            0.9274020576203551,
+            0.9373136111189161
+          ],
+          "srocc_signed": 0.9328174625534501,
+          "train_eq_val": true,
+          "z_rmse": 0.3594479743054048
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6311219894147317,
+          "n": 436,
+          "or": 0.006880733944954129,
+          "per_ref_mean": 0.8335733435534707,
+          "per_ref_n": 4,
+          "plcc": 0.8016985680066064,
+          "pwrc": 0.9455739624345673,
+          "srocc": 0.7981392372709142,
+          "srocc_ci": [
+            0.7487693560108365,
+            0.8380074016167103
+          ],
+          "srocc_signed": 0.7981392372709142,
+          "train_eq_val": false,
+          "z_rmse": 0.5977285387666845
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.14922806132891234,
+          "n": 404,
+          "or": 0.06683168316831684,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.19106341809793895,
+          "pwrc": 0.6037906183650285,
+          "srocc": 0.2247732371888017,
+          "srocc_ci": [
+            0.12489388491925262,
+            0.3160064589354844
+          ],
+          "srocc_signed": -0.2247732371888017,
+          "train_eq_val": false,
+          "z_rmse": 0.9815776944616927
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0014903129657228018,
+          "krocc": 0.6160657553597103,
+          "n": 6142,
+          "or": 0.028492347769456205,
+          "per_ref_mean": 0.8827591046955277,
+          "per_ref_n": 671,
+          "plcc": 0.7308502707640905,
+          "pwrc": 0.9290812598037752,
+          "srocc": 0.7859822035028513,
+          "srocc_ci": [
+            0.7725937723165959,
+            0.7993125078440292
+          ],
+          "srocc_signed": 0.7859822035028513,
+          "train_eq_val": false,
+          "z_rmse": 0.6825378243907511
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0001295840352468576,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.0232556188200002,
+              "maxd": 1.0724681916076568,
+              "out4": 0.0,
+              "p99d": 0.8597506581963448,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.4655954386419593,
+              "cov": 0.8,
+              "mad": 2.203548112634749,
+              "max": 19.18509217715599,
+              "p99": 14.379325695123011,
+              "pred_max": 93.56371154785157,
+              "pred_min": 41.99780349731445,
+              "residual_max": 42.27527365769577,
+              "residual_p99": 31.685535996448664,
+              "slope": -2.1287799653932904
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.10781777063400005,
+              "maxd": 1.0491644905321225,
+              "out4": 0.06759672083992521,
+              "p99d": 0.6343257959225147,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.1666906371350496,
+              "cov": 0.7,
+              "mad": 7.184090818969476,
+              "max": 9.228731498920292,
+              "p99": 5.270069118344809,
+              "pred_max": 96.80966186523438,
+              "pred_min": -1.6306925535202026,
+              "residual_max": 66.30004523212767,
+              "residual_p99": 37.8606551684355,
+              "slope": 36.551982485804125
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.032,
+              "clampLo": 0.00032,
+              "clump": 0.08448,
+              "cov": 1.0,
+              "mad": 0.07646509500000005,
+              "maxd": 0.5944444444444446,
+              "out4": 0.01024,
+              "p99d": 0.3396666666666647,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.08768,
+              "cov": 0.8,
+              "mad": 7.906165463246847,
+              "max": 5.628286710325692,
+              "p99": 3.4245907479532725,
+              "pred_max": 100.0,
+              "pred_min": -18.930387115478517,
+              "residual_max": 44.49816600642819,
+              "residual_p99": 27.07538109722285,
+              "slope": 83.37609532123811
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.009174311926605505,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.11582812499999999,
+              "maxd": 0.8620689655172413,
+              "out4": 0.034403669724770644,
+              "p99d": 0.603448275862069,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.0963302752293578,
+              "cov": 0.95,
+              "mad": 10.681301514310347,
+              "max": 4.423591536261148,
+              "p99": 3.4696759740388954,
+              "pred_max": 100.0,
+              "pred_min": 3.071535962820053,
+              "residual_max": 47.24971497495664,
+              "residual_p99": 37.06065523566788,
+              "slope": 57.20632848944915
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 12.350058000000002,
+              "maxd": 1.1286488014416016,
+              "out4": 0.0,
+              "p99d": 0.8676613851690678,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.11138613861386139,
+              "cov": 0.9,
+              "mad": 5.601883159782357,
+              "max": 2.809496150170453,
+              "p99": 2.4032106921569376,
+              "pred_max": 88.33997802734375,
+              "pred_min": 58.71109161376953,
+              "residual_max": 15.738469171113227,
+              "residual_p99": 13.462505505802852,
+              "slope": -0.09751126018919898
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.09235749211499984,
+              "maxd": 1.0855211149315198,
+              "out4": 0.08222077499185933,
+              "p99d": 0.6415867512862303,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.17062845978508628,
+              "cov": 0.8,
+              "mad": 6.411177100959637,
+              "max": 9.343710214038458,
+              "p99": 5.599030536146378,
+              "pred_max": 94.18658905029297,
+              "pred_min": 1.3504547595977783,
+              "residual_max": 59.90418096224603,
+              "residual_p99": 35.89637636091542,
+              "slope": 36.97612940889611
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 0,
+      "new_score_min": -1.6306925535202026,
+      "new_score_max": 96.80966186523438
+    },
+    "MT913_selected619_h128_ens5": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.17446270543615677,
+          "krocc": 0.04666458786014981,
+          "n": 7717,
+          "or": 0.030452248283011532,
+          "per_ref_mean": 0.471086805460507,
+          "per_ref_n": 791,
+          "plcc": 0.09304086443528704,
+          "pwrc": 0.61504064122388,
+          "srocc": 0.07160967677506799,
+          "srocc_ci": [
+            0.05058086323444192,
+            0.09340914929833427
+          ],
+          "srocc_signed": -0.07160967677506799,
+          "train_eq_val": false,
+          "z_rmse": 0.9956622909125058
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.002103049421661409,
+          "krocc": 0.48308283003934316,
+          "n": 6953,
+          "or": 0.031209549834603768,
+          "per_ref_mean": 0.8632889737581975,
+          "per_ref_n": 951,
+          "plcc": 0.6866184431178494,
+          "pwrc": 0.8910592526839833,
+          "srocc": 0.6553706711638355,
+          "srocc_ci": [
+            0.6397332975610044,
+            0.6714604013074208
+          ],
+          "srocc_signed": 0.6553706711638355,
+          "train_eq_val": false,
+          "z_rmse": 0.7270179595927663
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.5638536531364876,
+              "lo": null,
+              "mae": 0.053226986676240574,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.004834810636583401,
+              "plcc": 0.7714170952816635,
+              "pwrc": 0.9392500533574976,
+              "span": 0.38499999999999984,
+              "srocc": 0.7601629034684417,
+              "srocc_signed": 0.7601629034684417,
+              "z_rmse": 0.6363298398686024
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.6771645651938585,
+              "lo": 0.4,
+              "mae": 0.062281781398193924,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.0005307855626326964,
+              "plcc": 0.8700601080552154,
+              "pwrc": 0.9706703575752682,
+              "span": 0.5825,
+              "srocc": 0.8685090291032095,
+              "srocc_signed": 0.8685090291032095,
+              "z_rmse": 0.49294564443855826
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.7853300620398154,
+          "n": 3125,
+          "or": 0.00032,
+          "per_ref_mean": 0.95250741074328,
+          "per_ref_n": 25,
+          "plcc": 0.9407828217486792,
+          "pwrc": 0.9885289297827783,
+          "srocc": 0.9398894079987155,
+          "srocc_ci": [
+            0.9352027879770834,
+            0.94384382668974
+          ],
+          "srocc_signed": 0.9398894079987155,
+          "train_eq_val": true,
+          "z_rmse": 0.3390098557602623
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.689074887774357,
+          "n": 436,
+          "or": 0.0045871559633027525,
+          "per_ref_mean": 0.8691885601344542,
+          "per_ref_n": 4,
+          "plcc": 0.8487572986018086,
+          "pwrc": 0.9625059060432964,
+          "srocc": 0.8481311946976946,
+          "srocc_ci": [
+            0.8078919258379362,
+            0.8786858884930385
+          ],
+          "srocc_signed": 0.8481311946976946,
+          "train_eq_val": false,
+          "z_rmse": 0.5287826094626814
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.08968428321446942,
+          "n": 404,
+          "or": 0.0594059405940594,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.14472868600755545,
+          "pwrc": 0.648030415417823,
+          "srocc": 0.1328770976182885,
+          "srocc_ci": [
+            0.03290618641781325,
+            0.23251845045804873
+          ],
+          "srocc_signed": -0.1328770976182885,
+          "train_eq_val": false,
+          "z_rmse": 0.9894713777830315
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0,
+          "krocc": 0.43682460279564206,
+          "n": 6142,
+          "or": 0.03239986974926734,
+          "per_ref_mean": 0.8528073111787783,
+          "per_ref_n": 671,
+          "plcc": 0.6519125758057795,
+          "pwrc": 0.86595105007818,
+          "srocc": 0.5955034394824161,
+          "srocc_ci": [
+            0.5774271111402705,
+            0.6144519647193656
+          ],
+          "srocc_signed": 0.5955034394824161,
+          "train_eq_val": false,
+          "z_rmse": 0.7582941338994235
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0001295840352468576,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.02451793411199994,
+              "maxd": 1.0484793277770972,
+              "out4": 0.0,
+              "p99d": 0.9090038046973482,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.14046909420759363,
+              "cov": 0.8,
+              "mad": 13.659365756255859,
+              "max": 3.296337456519798,
+              "p99": 2.292077395082418,
+              "pred_max": 119.16290435791015,
+              "pred_min": 40.26817779541015,
+              "residual_max": 45.02587897465006,
+              "residual_p99": 31.30832348107691,
+              "slope": -49.89747079028178
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.15652291527599996,
+              "maxd": 1.0002119650758368,
+              "out4": 0.03466129728174889,
+              "p99d": 0.664707802648334,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.16007478786135482,
+              "cov": 0.7,
+              "mad": 12.727424360768966,
+              "max": 5.577754281973731,
+              "p99": 3.479580111858215,
+              "pred_max": 120.1805191040039,
+              "pred_min": -21.687767791748048,
+              "residual_max": 70.99044572677587,
+              "residual_p99": 44.28609268091145,
+              "slope": 42.19590340803585
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00032,
+              "clampLo": 0.00032,
+              "clump": 0.08448,
+              "cov": 0.95,
+              "mad": 0.07413000000000006,
+              "maxd": 0.6222222222222222,
+              "out4": 0.00736,
+              "p99d": 0.3055555555555555,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.06976,
+              "cov": 0.95,
+              "mad": 8.754495997391485,
+              "max": 6.079567601675945,
+              "p99": 3.0009099165974984,
+              "pred_max": 106.79196624755859,
+              "pred_min": -6.360086476802826,
+              "residual_max": 53.22355023474301,
+              "residual_p99": 26.271453853385214,
+              "slope": 94.48520182215712
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0022935779816513763,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.11582812499999999,
+              "maxd": 0.6896551724137931,
+              "out4": 0.020642201834862386,
+              "p99d": 0.603448275862069,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.11009174311926606,
+              "cov": 1.0,
+              "mad": 9.808733514069036,
+              "max": 3.7787630526394156,
+              "p99": 3.4437217228835495,
+              "pred_max": 105.32062683105468,
+              "pred_min": 13.871420860290527,
+              "residual_max": 37.06487979615005,
+              "residual_p99": 33.778548676375436,
+              "slope": 62.53380176703593
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 11.215869000000007,
+              "maxd": 0.9908486570795455,
+              "out4": 0.0,
+              "p99d": 0.8822565909354765,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.1485148514851485,
+              "cov": 0.65,
+              "mad": 7.645583718598439,
+              "max": 4.571627437084405,
+              "p99": 2.513247335231936,
+              "pred_max": 120.27572937011719,
+              "pred_min": 62.323509979248044,
+              "residual_max": 34.95276030047044,
+              "residual_p99": 19.215242907060205,
+              "slope": -0.11245811239348313
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.15245338584,
+              "maxd": 1.07346884443434,
+              "out4": 0.03630739172907848,
+              "p99d": 0.6967302689886897,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.14018235102572452,
+              "cov": 0.8,
+              "mad": 14.182708328544077,
+              "max": 4.773978505428013,
+              "p99": 3.091244407737483,
+              "pred_max": 115.99342346191406,
+              "pred_min": -6.248165190219879,
+              "residual_max": 67.70794470922428,
+              "residual_p99": 43.8422178071837,
+              "slope": 41.46486152979546
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 1329,
+      "new_score_min": -21.687767791748048,
+      "new_score_max": 120.1805191040039
+    },
+    "MT913_y40_h32_ens5": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0316055625790139,
+          "krocc": 0.17418836011934222,
+          "n": 7717,
+          "or": 0.043928987948684724,
+          "per_ref_mean": 0.7515760931318421,
+          "per_ref_n": 791,
+          "plcc": 0.3191188581594869,
+          "pwrc": 0.6620430713890446,
+          "srocc": 0.24745149642378272,
+          "srocc_ci": [
+            0.22464487015672463,
+            0.2680643804655125
+          ],
+          "srocc_signed": 0.24745149642378272,
+          "train_eq_val": false,
+          "z_rmse": 0.9477147009343188
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0010515247108307045,
+          "krocc": 0.6762225185386119,
+          "n": 6953,
+          "or": 0.02603192866388609,
+          "per_ref_mean": 0.9086153938204853,
+          "per_ref_n": 951,
+          "plcc": 0.7791152941348182,
+          "pwrc": 0.9429297881420625,
+          "srocc": 0.8262701623983373,
+          "srocc_ci": [
+            0.8141521235145002,
+            0.8374182344101314
+          ],
+          "srocc_signed": 0.8262701623983373,
+          "train_eq_val": false,
+          "z_rmse": 0.6268806572946471
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.52543384014173,
+              "lo": null,
+              "mae": 0.05759816832885796,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.0032232070910556,
+              "plcc": 0.7365054950415867,
+              "pwrc": 0.927105225668961,
+              "span": 0.38499999999999984,
+              "srocc": 0.7184996367982206,
+              "srocc_signed": 0.7184996367982206,
+              "z_rmse": 0.6764315603027001
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.6250394146375957,
+              "lo": 0.4,
+              "mae": 0.07238345767630275,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.00583864118895966,
+              "plcc": 0.8147780116671832,
+              "pwrc": 0.9529070007786801,
+              "span": 0.5825,
+              "srocc": 0.8173857773970158,
+              "srocc_signed": 0.8173857773970158,
+              "z_rmse": 0.579773051895025
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.7414918931297564,
+          "n": 3125,
+          "or": 0.00096,
+          "per_ref_mean": 0.9202459241332146,
+          "per_ref_n": 25,
+          "plcc": 0.9073305658155036,
+          "pwrc": 0.9808187088975165,
+          "srocc": 0.9091208337387385,
+          "srocc_ci": [
+            0.9015633019620499,
+            0.9164892245853266
+          ],
+          "srocc_signed": 0.9091208337387385,
+          "train_eq_val": true,
+          "z_rmse": 0.42041794007502153
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6677670845327628,
+          "n": 436,
+          "or": 0.009174311926605505,
+          "per_ref_mean": 0.8478992505943849,
+          "per_ref_n": 4,
+          "plcc": 0.8312415251187344,
+          "pwrc": 0.9515256551689678,
+          "srocc": 0.824163965697083,
+          "srocc_ci": [
+            0.7774270741886308,
+            0.8631535483862837
+          ],
+          "srocc_signed": 0.824163965697083,
+          "train_eq_val": false,
+          "z_rmse": 0.5559114380171367
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.23713070033649067,
+          "n": 404,
+          "or": 0.0594059405940594,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.3067321861632491,
+          "pwrc": 0.7434630615228428,
+          "srocc": 0.3535437038050427,
+          "srocc_ci": [
+            0.2650094402159134,
+            0.4440636372556289
+          ],
+          "srocc_signed": -0.3535437038050427,
+          "train_eq_val": false,
+          "z_rmse": 0.9517958636028595
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0014903129657228018,
+          "krocc": 0.663163775778184,
+          "n": 6142,
+          "or": 0.02507326603712146,
+          "per_ref_mean": 0.9147994869191942,
+          "per_ref_n": 671,
+          "plcc": 0.7596363858328822,
+          "pwrc": 0.9359699989016467,
+          "srocc": 0.811453086845474,
+          "srocc_ci": [
+            0.797703941276424,
+            0.8244756515114519
+          ],
+          "srocc_signed": 0.811453086845474,
+          "train_eq_val": false,
+          "z_rmse": 0.6503480320272816
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0001295840352468576,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.0172174782780002,
+              "maxd": 0.9674585577132242,
+              "out4": 0.0,
+              "p99d": 0.7891654855410082,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.7294285344045613,
+              "cov": 0.6,
+              "mad": 0.6558991784595751,
+              "max": 54.53791565576746,
+              "p99": 38.24484603532368,
+              "pred_max": 84.5531997680664,
+              "pred_min": 45.42616271972656,
+              "residual_max": 35.77137407351548,
+              "residual_p99": 25.084763094881744,
+              "slope": 13.317180974814494
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.07689383326800005,
+              "maxd": 0.9357739946660001,
+              "out4": 0.08744426866100964,
+              "p99d": 0.6245607986405867,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.15762980008629368,
+              "cov": 0.85,
+              "mad": 4.4564154693335185,
+              "max": 11.36029937750215,
+              "p99": 7.243085770390476,
+              "pred_max": 84.81084594726562,
+              "pred_min": 13.087615203857421,
+              "residual_max": 50.62621388216052,
+              "residual_p99": 32.2781994728776,
+              "slope": 33.9544730564802
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.032,
+              "clampLo": 0.00032,
+              "clump": 0.08448,
+              "cov": 1.0,
+              "mad": 0.08895599999999991,
+              "maxd": 0.7138888888888889,
+              "out4": 0.01248,
+              "p99d": 0.4083333333333334,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.09312,
+              "cov": 0.9,
+              "mad": 8.181809087305508,
+              "max": 5.805649373777868,
+              "p99": 3.3446102717486377,
+              "pred_max": 100.0,
+              "pred_min": 0.9186991214752197,
+              "residual_max": 47.50071480408529,
+              "residual_p99": 27.36496271488835,
+              "slope": 73.49154085225418
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.009174311926605505,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.11582812499999999,
+              "maxd": 0.8620689655172413,
+              "out4": 0.022935779816513763,
+              "p99d": 0.6594827586206877,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.09862385321100918,
+              "cov": 0.8,
+              "mad": 9.737634413289728,
+              "max": 5.297095372986675,
+              "p99": 3.9286133980362066,
+              "pred_max": 100.0,
+              "pred_min": 0.8618499755859375,
+              "residual_max": 51.581178194472834,
+              "residual_p99": 38.25540102122846,
+              "slope": 56.93563132871831
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 14.210721000000001,
+              "maxd": 0.9532438557792776,
+              "out4": 0.0,
+              "p99d": 0.8537602277488102,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.1311881188118812,
+              "cov": 0.85,
+              "mad": 4.259657636456257,
+              "max": 4.14267177068005,
+              "p99": 2.5077426483144127,
+              "pred_max": 80.39935150146485,
+              "pred_min": 55.91101150512695,
+              "residual_max": 17.646363443309042,
+              "residual_p99": 10.682125122159526,
+              "slope": -0.14374692994489394
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.06767945944199998,
+              "maxd": 1.0532769349810365,
+              "out4": 0.10289807880169326,
+              "p99d": 0.6224726039584477,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.19065450993161837,
+              "cov": 0.85,
+              "mad": 3.613467662029378,
+              "max": 14.137980417263496,
+              "p99": 8.910134406847586,
+              "pred_max": 84.54241027832032,
+              "pred_min": 13.616848754882813,
+              "residual_max": 51.087135044186255,
+              "residual_p99": 32.196482543479064,
+              "slope": 34.19603472615399
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 0,
+      "new_score_min": 13.087615203857421,
+      "new_score_max": 84.81084594726562
+    },
+    "MT913_y40_h128_ens5": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.02654867256637168,
+          "krocc": 0.11305959574440878,
+          "n": 7717,
+          "or": 0.03822729039782299,
+          "per_ref_mean": 0.7592934062939439,
+          "per_ref_n": 791,
+          "plcc": 0.21135164290140745,
+          "pwrc": 0.6206825066461593,
+          "srocc": 0.16644362675664026,
+          "srocc_ci": [
+            0.14430889433056826,
+            0.18762297264073885
+          ],
+          "srocc_signed": 0.16644362675664026,
+          "train_eq_val": false,
+          "z_rmse": 0.9774201305398308
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.002103049421661409,
+          "krocc": 0.6535128695131234,
+          "n": 6953,
+          "or": 0.025600460232992953,
+          "per_ref_mean": 0.8917982562738757,
+          "per_ref_n": 951,
+          "plcc": 0.77065705898498,
+          "pwrc": 0.9383795212706881,
+          "srocc": 0.811526844414526,
+          "srocc_ci": [
+            0.799149934413598,
+            0.8225439898785561
+          ],
+          "srocc_signed": 0.811526844414526,
+          "train_eq_val": false,
+          "z_rmse": 0.6372501059291318
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.5410923905579642,
+              "lo": null,
+              "mae": 0.056001466101374305,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.004834810636583401,
+              "plcc": 0.7501143718040502,
+              "pwrc": 0.9322290142969738,
+              "span": 0.38499999999999984,
+              "srocc": 0.7352686936377184,
+              "srocc_signed": 0.7352686936377184,
+              "z_rmse": 0.6613081197240921
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.6299270004106436,
+              "lo": 0.4,
+              "mae": 0.07142154361965214,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.00583864118895966,
+              "plcc": 0.8212342224531783,
+              "pwrc": 0.9547002604547254,
+              "span": 0.5825,
+              "srocc": 0.8222172790216257,
+              "srocc_signed": 0.8222172790216257,
+              "z_rmse": 0.5705912301041138
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.7471869640498467,
+          "n": 3125,
+          "or": 0.00096,
+          "per_ref_mean": 0.9245200239081072,
+          "per_ref_n": 25,
+          "plcc": 0.9128640803112298,
+          "pwrc": 0.9820379520447619,
+          "srocc": 0.9134543014980091,
+          "srocc_ci": [
+            0.9063468433040465,
+            0.9202330739536325
+          ],
+          "srocc_signed": 0.9134543014980091,
+          "train_eq_val": true,
+          "z_rmse": 0.40826360464476646
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6851378114393619,
+          "n": 436,
+          "or": 0.009174311926605505,
+          "per_ref_mean": 0.8598259046582493,
+          "per_ref_n": 4,
+          "plcc": 0.849515847645461,
+          "pwrc": 0.9581775267685084,
+          "srocc": 0.8436316110935089,
+          "srocc_ci": [
+            0.7989629327225412,
+            0.8794563956335217
+          ],
+          "srocc_signed": 0.8436316110935089,
+          "train_eq_val": false,
+          "z_rmse": 0.5275631001114608
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.23575453377668512,
+          "n": 404,
+          "or": 0.05693069306930693,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.3118830569803273,
+          "pwrc": 0.7510696783530306,
+          "srocc": 0.3527395025953178,
+          "srocc_ci": [
+            0.26550411299720345,
+            0.44135762005711726
+          ],
+          "srocc_signed": -0.3527395025953178,
+          "train_eq_val": false,
+          "z_rmse": 0.950120496973203
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0014903129657228018,
+          "krocc": 0.6375613142461373,
+          "n": 6142,
+          "or": 0.02523607945294692,
+          "per_ref_mean": 0.8987627685487457,
+          "per_ref_n": 671,
+          "plcc": 0.7527563095180265,
+          "pwrc": 0.9322334670701062,
+          "srocc": 0.794523150278072,
+          "srocc_ci": [
+            0.7805563525688256,
+            0.8077351035183444
+          ],
+          "srocc_signed": 0.794523150278072,
+          "train_eq_val": false,
+          "z_rmse": 0.6582992806725936
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0001295840352468576,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.019968798401999863,
+              "maxd": 0.9591540723337156,
+              "out4": 0.0,
+              "p99d": 0.7999659365662783,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.6550472981728651,
+              "cov": 0.65,
+              "mad": 0.8716387183102284,
+              "max": 37.001266294774496,
+              "p99": 26.03947804970413,
+              "pred_max": 83.04675598144532,
+              "pred_min": 47.49554595947266,
+              "residual_max": 32.251736329032695,
+              "residual_p99": 22.697017272711435,
+              "slope": 10.359870921058857
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.08645747800199993,
+              "maxd": 0.9509895371232188,
+              "out4": 0.07967783690493312,
+              "p99d": 0.6151487604184744,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.18107291816482093,
+              "cov": 0.85,
+              "mad": 4.3973743744744525,
+              "max": 11.007024084781847,
+              "p99": 7.097765679659029,
+              "pred_max": 83.88583831787109,
+              "pred_min": 13.15051622390747,
+              "residual_max": 48.40200564964281,
+              "residual_p99": 31.211532915756862,
+              "slope": 32.071200693477294
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.032,
+              "clampLo": 0.00032,
+              "clump": 0.08448,
+              "cov": 1.0,
+              "mad": 0.08524950000000008,
+              "maxd": 0.7055555555555556,
+              "out4": 0.0128,
+              "p99d": 0.4035555555555535,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.10272,
+              "cov": 0.9,
+              "mad": 7.667465055480654,
+              "max": 5.8223377549012705,
+              "p99": 3.3852259029422247,
+              "pred_max": 100.0,
+              "pred_min": -0.6021215438842773,
+              "residual_max": 44.64257127691118,
+              "residual_p99": 25.95610131571745,
+              "slope": 72.17472166238208
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.009174311926605505,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.11582812499999999,
+              "maxd": 0.8620689655172413,
+              "out4": 0.020642201834862386,
+              "p99d": 0.5620689655172398,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.11238532110091744,
+              "cov": 0.8,
+              "mad": 8.643624371365675,
+              "max": 5.600072517897104,
+              "p99": 3.9254236579747253,
+              "pred_max": 100.0,
+              "pred_min": 5.341469755768776,
+              "residual_max": 48.40492329711055,
+              "residual_p99": 33.929887598005735,
+              "slope": 55.522572718055315
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 14.336741999999996,
+              "maxd": 0.937848601555678,
+              "out4": 0.0,
+              "p99d": 0.8537450848758035,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.1188118811881188,
+              "cov": 0.8,
+              "mad": 4.233253101864967,
+              "max": 3.8539180948127805,
+              "p99": 2.252199871984721,
+              "pred_max": 78.72569274902344,
+              "pred_min": 56.19306259155273,
+              "residual_max": 16.314610729199725,
+              "residual_p99": 9.534132094099201,
+              "slope": -0.14195911437106903
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.07779159204599996,
+              "maxd": 1.023076175892262,
+              "out4": 0.09394334093129274,
+              "p99d": 0.6354169377967317,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.20123738196027352,
+              "cov": 0.85,
+              "mad": 3.674865304057212,
+              "max": 14.09584454432655,
+              "p99": 8.599875759232884,
+              "pred_max": 83.50758514404296,
+              "pred_min": 14.056971168518066,
+              "residual_max": 51.80033004732978,
+              "residual_p99": 31.603385046807595,
+              "slope": 32.47743044172577
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 0,
+      "new_score_min": 13.15051622390747,
+      "new_score_max": 83.88583831787109
+    },
+    "MT913_y60_h32_ens5": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.041719342604298354,
+          "krocc": 0.11748718434376634,
+          "n": 7717,
+          "or": 0.03926396267979785,
+          "per_ref_mean": 0.729897174203429,
+          "per_ref_n": 791,
+          "plcc": 0.2127818134441284,
+          "pwrc": 0.6119282203523608,
+          "srocc": 0.17074716145231225,
+          "srocc_ci": [
+            0.14843392664405594,
+            0.1931065821905892
+          ],
+          "srocc_signed": 0.17074716145231225,
+          "train_eq_val": false,
+          "z_rmse": 0.9770997389557686
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0010515247108307045,
+          "krocc": 0.6540142636665026,
+          "n": 6953,
+          "or": 0.024881346181504387,
+          "per_ref_mean": 0.8967417122375534,
+          "per_ref_n": 951,
+          "plcc": 0.7675638114977684,
+          "pwrc": 0.9447785189897352,
+          "srocc": 0.8173619891951821,
+          "srocc_ci": [
+            0.8055461977344305,
+            0.8282772123422882
+          ],
+          "srocc_signed": 0.8173619891951821,
+          "train_eq_val": false,
+          "z_rmse": 0.6409725386309546
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.5445557182049849,
+              "lo": null,
+              "mae": 0.0557161279127975,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.0064464141821112,
+              "plcc": 0.7515888180944893,
+              "pwrc": 0.9323760362726455,
+              "span": 0.38499999999999984,
+              "srocc": 0.738118155625469,
+              "srocc_signed": 0.738118155625469,
+              "z_rmse": 0.6596319038034216
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.6485071059733006,
+              "lo": 0.4,
+              "mae": 0.06785518449335375,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.002653927813163482,
+              "plcc": 0.842087250962456,
+              "pwrc": 0.9620946666693067,
+              "span": 0.5825,
+              "srocc": 0.8408369518791065,
+              "srocc_signed": 0.8408369518791065,
+              "z_rmse": 0.5393413221388591
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.7678303609404981,
+          "n": 3125,
+          "or": 0.00032,
+          "per_ref_mean": 0.9420440214056359,
+          "per_ref_n": 25,
+          "plcc": 0.929290479635992,
+          "pwrc": 0.9860421389520649,
+          "srocc": 0.9289546754662054,
+          "srocc_ci": [
+            0.9235569260688807,
+            0.9334177973134848
+          ],
+          "srocc_signed": 0.9289546754662054,
+          "train_eq_val": true,
+          "z_rmse": 0.36934970482986984
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6308840342516276,
+          "n": 436,
+          "or": 0.006880733944954129,
+          "per_ref_mean": 0.8276378608500923,
+          "per_ref_n": 4,
+          "plcc": 0.8048866329906641,
+          "pwrc": 0.9449500770000465,
+          "srocc": 0.7976925852952506,
+          "srocc_ci": [
+            0.7486245187144521,
+            0.838960872888589
+          ],
+          "srocc_signed": 0.7976925852952506,
+          "train_eq_val": false,
+          "z_rmse": 0.5934286039895227
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.31358166761425865,
+          "n": 404,
+          "or": 0.04950495049504951,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.4101837616897218,
+          "pwrc": 0.8205279378847216,
+          "srocc": 0.45655434450285415,
+          "srocc_ci": [
+            0.3763651123504602,
+            0.5416150947930283
+          ],
+          "srocc_signed": -0.45655434450285415,
+          "train_eq_val": false,
+          "z_rmse": 0.9120028956346948
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0014903129657228018,
+          "krocc": 0.6448273433885189,
+          "n": 6142,
+          "or": 0.02637577336372517,
+          "per_ref_mean": 0.9009407582104128,
+          "per_ref_n": 671,
+          "plcc": 0.7535154391394819,
+          "pwrc": 0.9416624369403759,
+          "srocc": 0.8085742312580485,
+          "srocc_ci": [
+            0.7955567862215139,
+            0.8210342313728958
+          ],
+          "srocc_signed": 0.8085742312580485,
+          "train_eq_val": false,
+          "z_rmse": 0.6574302119510231
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0001295840352468576,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.019008829728000068,
+              "maxd": 1.0472472704414963,
+              "out4": 0.0,
+              "p99d": 0.8112675013883669,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.4601529091615913,
+              "cov": 0.75,
+              "mad": 1.006615581409303,
+              "max": 37.27599121579234,
+              "p99": 27.34965426785788,
+              "pred_max": 86.40807037353515,
+              "pred_min": 43.86915283203125,
+              "residual_max": 37.52259357029288,
+              "residual_p99": 27.530588132183183,
+              "slope": 14.051444276930102
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.09291323731200003,
+              "maxd": 1.0045728969553482,
+              "out4": 0.07478786135481087,
+              "p99d": 0.6232322392933708,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.13806989788580468,
+              "cov": 0.8,
+              "mad": 6.233200860949042,
+              "max": 9.418892851761065,
+              "p99": 5.205797287904604,
+              "pred_max": 86.02621307373047,
+              "pred_min": 8.095175838470459,
+              "residual_max": 58.709851032783845,
+              "residual_p99": 32.44878013689316,
+              "slope": 33.48035274553983
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.032,
+              "clampLo": 0.00032,
+              "clump": 0.08448,
+              "cov": 1.0,
+              "mad": 0.08524949999999999,
+              "maxd": 0.6777777777777778,
+              "out4": 0.00672,
+              "p99d": 0.34444444444444444,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.08672,
+              "cov": 0.9,
+              "mad": 8.075592786700218,
+              "max": 5.8030348768100595,
+              "p99": 3.10117407935111,
+              "pred_max": 100.0,
+              "pred_min": -6.160680510476231,
+              "residual_max": 46.86294659213711,
+              "residual_p99": 25.043819025509514,
+              "slope": 78.85949011953011
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.009174311926605505,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.11582812499999999,
+              "maxd": 0.8620689655172413,
+              "out4": 0.02981651376146789,
+              "p99d": 0.6603448275862062,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.11009174311926606,
+              "cov": 0.85,
+              "mad": 10.680819595433958,
+              "max": 4.5218908853131285,
+              "p99": 3.493273376241997,
+              "pred_max": 100.0,
+              "pred_min": 2.556996154785156,
+              "residual_max": 48.29750077626667,
+              "residual_p99": 37.31102272917326,
+              "slope": 54.56163144631218
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 14.944608000000002,
+              "maxd": 1.003720099135342,
+              "out4": 0.0,
+              "p99d": 0.9002639907527512,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.09900990099009901,
+              "cov": 0.9,
+              "mad": 3.5361068115633936,
+              "max": 3.1483251321673644,
+              "p99": 2.6499436838281896,
+              "pred_max": 81.58719787597656,
+              "pred_min": 61.758087921142575,
+              "residual_max": 11.132813944873238,
+              "residual_p99": 9.370483910644253,
+              "slope": -0.16749997323292493
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.08642553538500009,
+              "maxd": 1.00784190612124,
+              "out4": 0.08156952132855748,
+              "p99d": 0.6357966989571561,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.16672093780527517,
+              "cov": 0.85,
+              "mad": 5.388686223068597,
+              "max": 9.449825498633961,
+              "p99": 5.829155574319876,
+              "pred_max": 86.79403533935547,
+              "pred_min": 12.32062225341797,
+              "residual_max": 50.92214447489116,
+              "residual_p99": 31.411490335461032,
+              "slope": 33.95521227092368
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 0,
+      "new_score_min": 8.095175838470459,
+      "new_score_max": 86.79403533935547
+    },
+    "MT913_y60_h128_ens5": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.029077117572692796,
+          "krocc": 0.1704109402140488,
+          "n": 7717,
+          "or": 0.040948555138007,
+          "per_ref_mean": 0.7973666797415924,
+          "per_ref_n": 791,
+          "plcc": 0.31347427006229656,
+          "pwrc": 0.694083964443388,
+          "srocc": 0.24956098276060418,
+          "srocc_ci": [
+            0.22848458718465886,
+            0.270514731643446
+          ],
+          "srocc_signed": 0.24956098276060418,
+          "train_eq_val": false,
+          "z_rmse": 0.9495966943965826
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0,
+          "krocc": 0.6504268553301168,
+          "n": 6953,
+          "or": 0.02545663742269524,
+          "per_ref_mean": 0.8959110711938983,
+          "per_ref_n": 951,
+          "plcc": 0.764843024090673,
+          "pwrc": 0.942255154020533,
+          "srocc": 0.8127128104480138,
+          "srocc_ci": [
+            0.8007252049711698,
+            0.8240069095437438
+          ],
+          "srocc_signed": 0.8127128104480138,
+          "train_eq_val": false,
+          "z_rmse": 0.6442166938799976
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.5537080476394108,
+              "lo": null,
+              "mae": 0.054510500796452796,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.008863819500402902,
+              "plcc": 0.7615366182986724,
+              "pwrc": 0.9347168906739808,
+              "span": 0.38499999999999984,
+              "srocc": 0.7475842141722869,
+              "srocc_signed": 0.7475842141722869,
+              "z_rmse": 0.6481218859059015
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.6569651203573789,
+              "lo": 0.4,
+              "mae": 0.06620948359723865,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.004246284501061571,
+              "plcc": 0.8479624442597485,
+              "pwrc": 0.9636113963981874,
+              "span": 0.5825,
+              "srocc": 0.8471321150396073,
+              "srocc_signed": 0.8471321150396073,
+              "z_rmse": 0.5300563112774288
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.7733619744317801,
+          "n": 3125,
+          "or": 0.00032,
+          "per_ref_mean": 0.9436455382495637,
+          "per_ref_n": 25,
+          "plcc": 0.9329804194596718,
+          "pwrc": 0.9868409614632411,
+          "srocc": 0.9322808329336395,
+          "srocc_ci": [
+            0.9272140086844449,
+            0.9366222680162528
+          ],
+          "srocc_signed": 0.9322808329336395,
+          "train_eq_val": true,
+          "z_rmse": 0.3599271272144658
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6491200526604235,
+          "n": 436,
+          "or": 0.006880733944954129,
+          "per_ref_mean": 0.8387848737144512,
+          "per_ref_n": 4,
+          "plcc": 0.8178628180798854,
+          "pwrc": 0.9507994241691432,
+          "srocc": 0.8150632866760608,
+          "srocc_ci": [
+            0.7706264386787497,
+            0.8516809888950985
+          ],
+          "srocc_signed": 0.8150632866760608,
+          "train_eq_val": false,
+          "z_rmse": 0.575413252195696
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.30507892422688876,
+          "n": 404,
+          "or": 0.05198019801980198,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.4101060972981588,
+          "pwrc": 0.8121531935690296,
+          "srocc": 0.4425202235503427,
+          "srocc_ci": [
+            0.3557959532058736,
+            0.530975348763756
+          ],
+          "srocc_signed": -0.4425202235503427,
+          "train_eq_val": false,
+          "z_rmse": 0.9120378221098472
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0014903129657228018,
+          "krocc": 0.642819142801618,
+          "n": 6142,
+          "or": 0.025561706284597852,
+          "per_ref_mean": 0.8987064912320589,
+          "per_ref_n": 671,
+          "plcc": 0.7497843337810496,
+          "pwrc": 0.939616328077254,
+          "srocc": 0.8049946231907936,
+          "srocc_ci": [
+            0.7917959366447408,
+            0.8175822321630948
+          ],
+          "srocc_signed": 0.8049946231907936,
+          "train_eq_val": false,
+          "z_rmse": 0.6616822900034195
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0002591680704937152,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.017877546623999995,
+              "maxd": 0.9766417866376447,
+              "out4": 0.0,
+              "p99d": 0.7735447914612791,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.49539976674873654,
+              "cov": 0.75,
+              "mad": 1.003237017404871,
+              "max": 37.97337841084591,
+              "p99": 28.511262354003318,
+              "pred_max": 87.35369110107422,
+              "pred_min": 44.118445587158206,
+              "residual_max": 38.096298897683575,
+              "residual_p99": 28.60355380647807,
+              "slope": 20.099981180634067
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.094586040066,
+              "maxd": 0.9568172909903587,
+              "out4": 0.07363727887242917,
+              "p99d": 0.6165454397946291,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.15849273694807997,
+              "cov": 0.75,
+              "mad": 5.958749345908454,
+              "max": 9.292442432637447,
+              "p99": 5.534890050322562,
+              "pred_max": 86.45393676757813,
+              "pred_min": 3.99763645529747,
+              "residual_max": 55.371335267370355,
+              "residual_p99": 32.98102246703478,
+              "slope": 34.416186005844665
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.032,
+              "clampLo": 0.00032,
+              "clump": 0.08448,
+              "cov": 1.0,
+              "mad": 0.07413000000000022,
+              "maxd": 0.6277777777777778,
+              "out4": 0.01152,
+              "p99d": 0.3333333333333334,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.08096,
+              "cov": 0.9,
+              "mad": 7.882470521537397,
+              "max": 5.776215664758429,
+              "p99": 3.1636070968668055,
+              "pred_max": 100.0,
+              "pred_min": -7.344823408126831,
+              "residual_max": 45.530849703500856,
+              "residual_p99": 24.937039682779098,
+              "slope": 80.85887299272356
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.009174311926605505,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.11582812499999999,
+              "maxd": 0.8620689655172413,
+              "out4": 0.02981651376146789,
+              "p99d": 0.603448275862069,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.11009174311926606,
+              "cov": 0.8,
+              "mad": 9.900001960702717,
+              "max": 4.758050173298027,
+              "p99": 3.57425248612094,
+              "pred_max": 100.0,
+              "pred_min": 1.6407376766204833,
+              "residual_max": 47.10470604477237,
+              "residual_p99": 35.38510662064387,
+              "slope": 56.27971548117609
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 14.611023,
+              "maxd": 1.0024581930514405,
+              "out4": 0.0,
+              "p99d": 0.9390852695179001,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.11138613861386139,
+              "cov": 0.8,
+              "mad": 3.1268622518327045,
+              "max": 3.963669091672405,
+              "p99": 2.845564857474946,
+              "pred_max": 81.845361328125,
+              "pred_min": 61.16140899658203,
+              "residual_max": 12.393847261506467,
+              "residual_p99": 8.897689337980118,
+              "slope": -0.15299153368784452
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.08425188069899989,
+              "maxd": 1.018309671920395,
+              "out4": 0.08694236405079779,
+              "p99d": 0.6343980304565163,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.18072289156626506,
+              "cov": 0.85,
+              "mad": 4.970330453409355,
+              "max": 10.805275296800605,
+              "p99": 6.465602044227084,
+              "pred_max": 88.30736083984375,
+              "pred_min": 11.363863754272462,
+              "residual_max": 53.70578886515986,
+              "residual_p99": 32.136178740047654,
+              "slope": 34.53325182525115
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 0,
+      "new_score_min": 3.99763645529747,
+      "new_score_max": 88.30736083984375
+    },
+    "MT913_linear60": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.02654867256637168,
+          "krocc": 0.1416165079945169,
+          "n": 7717,
+          "or": 0.038875210574057274,
+          "per_ref_mean": 0.7544944514892236,
+          "per_ref_n": 791,
+          "plcc": 0.2587009601017982,
+          "pwrc": 0.7001588268532726,
+          "srocc": 0.2107986506988662,
+          "srocc_ci": [
+            0.19023093320368445,
+            0.23219553888167624
+          ],
+          "srocc_signed": 0.2107986506988662,
+          "train_eq_val": false,
+          "z_rmse": 0.9659574593336924
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0,
+          "krocc": 0.689255070937055,
+          "n": 6953,
+          "or": 0.02142959873435927,
+          "per_ref_mean": 0.903546239948877,
+          "per_ref_n": 951,
+          "plcc": 0.8047643749508832,
+          "pwrc": 0.9607911197676534,
+          "srocc": 0.8533808147307239,
+          "srocc_ci": [
+            0.8433794745643339,
+            0.8623047832417001
+          ],
+          "srocc_signed": 0.8533808147307239,
+          "train_eq_val": false,
+          "z_rmse": 0.5935943908174236
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.43445958280089586,
+              "lo": null,
+              "mae": 0.06855128026470382,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.008863819500402902,
+              "plcc": 0.6142423568083406,
+              "pwrc": 0.8804648158143646,
+              "span": 0.38499999999999984,
+              "srocc": 0.6103386836218309,
+              "srocc_signed": 0.6103386836218309,
+              "z_rmse": 0.7891174355585697
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.5856498183330464,
+              "lo": 0.4,
+              "mae": 0.08073087104812733,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.0037154989384288748,
+              "plcc": 0.7774833014017584,
+              "pwrc": 0.9418104587292272,
+              "span": 0.5825,
+              "srocc": 0.7814409164621692,
+              "srocc_signed": 0.7814409164621692,
+              "z_rmse": 0.628903582468267
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.7157138150075582,
+          "n": 3125,
+          "or": 0.00032,
+          "per_ref_mean": 0.9170766977202203,
+          "per_ref_n": 25,
+          "plcc": 0.8961971074379645,
+          "pwrc": 0.9782785501102539,
+          "srocc": 0.8964696787971517,
+          "srocc_ci": [
+            0.8892730027978132,
+            0.9029086399274229
+          ],
+          "srocc_signed": 0.8964696787971517,
+          "train_eq_val": true,
+          "z_rmse": 0.4436561107657853
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6370492362047793,
+          "n": 436,
+          "or": 0.009174311926605505,
+          "per_ref_mean": 0.8437852510505655,
+          "per_ref_n": 4,
+          "plcc": 0.8064225388059404,
+          "pwrc": 0.9459446925269784,
+          "srocc": 0.8019816043966234,
+          "srocc_ci": [
+            0.7536752234671706,
+            0.8406366828395555
+          ],
+          "srocc_signed": 0.8019816043966234,
+          "train_eq_val": false,
+          "z_rmse": 0.5913397406785568
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.2805431060935326,
+          "n": 404,
+          "or": 0.06683168316831684,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.35699989811035504,
+          "pwrc": 0.7718470322407234,
+          "srocc": 0.4035617070458371,
+          "srocc_ci": [
+            0.31521471434616655,
+            0.493133499685105
+          ],
+          "srocc_signed": -0.4035617070458371,
+          "train_eq_val": false,
+          "z_rmse": 0.9341044228292664
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0014903129657228018,
+          "krocc": 0.6764187788090481,
+          "n": 6142,
+          "or": 0.020840117225659396,
+          "per_ref_mean": 0.9098032833693711,
+          "per_ref_n": 671,
+          "plcc": 0.7969626657920733,
+          "pwrc": 0.9594009788348526,
+          "srocc": 0.8421440550282052,
+          "srocc_ci": [
+            0.8318661257718533,
+            0.8521258523416425
+          ],
+          "srocc_signed": 0.8421440550282052,
+          "train_eq_val": false,
+          "z_rmse": 0.6040285666535993
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0001295840352468576,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.018584643041999895,
+              "maxd": 1.0878035042364873,
+              "out4": 0.0,
+              "p99d": 0.800232216807262,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.366722819748607,
+              "cov": 0.7,
+              "mad": 2.37335231827586,
+              "max": 16.532054784798863,
+              "p99": 10.577138408218804,
+              "pred_max": 93.66774958753477,
+              "pred_min": 43.729293601070104,
+              "residual_max": 39.23639054936591,
+              "residual_p99": 25.10327596187074,
+              "slope": 39.40563455505096
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.08777166946799994,
+              "maxd": 0.9234597705544659,
+              "out4": 0.07378110168272688,
+              "p99d": 0.5478230921277468,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.1523083561052783,
+              "cov": 0.8,
+              "mad": 6.359185489886048,
+              "max": 8.182567636529747,
+              "p99": 4.940165908008732,
+              "pred_max": 94.09608626105877,
+              "pred_min": 8.338795363117654,
+              "residual_max": 52.03446538423114,
+              "residual_p99": 31.415431359838863,
+              "slope": 39.12352536841928
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.032,
+              "clampLo": 0.0112,
+              "clump": 0.08448,
+              "cov": 1.0,
+              "mad": 0.1000755,
+              "maxd": 0.6583333333333334,
+              "out4": 0.00352,
+              "p99d": 0.388888888888889,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.10176,
+              "cov": 0.9,
+              "mad": 9.340718957296353,
+              "max": 4.545191720926193,
+              "p99": 2.883937854690183,
+              "pred_max": 100.0,
+              "pred_min": 8.25,
+              "residual_max": 42.45535847220173,
+              "residual_p99": 26.93805299096917,
+              "slope": 71.97641906810482
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.009174311926605505,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.11582812499999999,
+              "maxd": 0.8620689655172413,
+              "out4": 0.01834862385321101,
+              "p99d": 0.5732758620689635,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.11009174311926606,
+              "cov": 0.9,
+              "mad": 9.39653151489349,
+              "max": 4.6140761287535055,
+              "p99": 3.4335492156962095,
+              "pred_max": 100.0,
+              "pred_min": 10.26946774956322,
+              "residual_max": 43.35631175595006,
+              "residual_p99": 32.26345341322725,
+              "slope": 48.34216860482206
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 13.632506999999995,
+              "maxd": 1.035015370016102,
+              "out4": 0.0,
+              "p99d": 0.8654732400195846,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.20297029702970298,
+              "cov": 0.7,
+              "mad": 4.259566785053586,
+              "max": 3.5353067388407515,
+              "p99": 2.419144123295553,
+              "pred_max": 84.66991331933299,
+              "pred_min": 59.606089525054955,
+              "residual_max": 15.058875159742177,
+              "residual_p99": 10.304505955847315,
+              "slope": -0.15101959598291
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.08067118672200005,
+              "maxd": 1.0009574643254784,
+              "out4": 0.08140670791273201,
+              "p99d": 0.5631720871400223,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.14799739498534678,
+              "cov": 0.8,
+              "mad": 5.8846646011692725,
+              "max": 9.219633390872085,
+              "p99": 5.194971965596313,
+              "pred_max": 95.0894510667655,
+              "pred_min": 9.811924535434688,
+              "residual_max": 54.25445025102319,
+              "residual_p99": 30.57066763001138,
+              "slope": 39.51827976765869
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 0,
+      "new_score_min": 8.338795363117654,
+      "new_score_max": 95.0894510667655
+    },
+    "MT914_matched_B": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.02654867256637168,
+          "krocc": 0.2363851371249282,
+          "n": 7717,
+          "or": 0.040559803032266424,
+          "per_ref_mean": 0.765156639355605,
+          "per_ref_n": 791,
+          "plcc": 0.43949690883833425,
+          "pwrc": 0.7918226501014476,
+          "srocc": 0.34999434940390156,
+          "srocc_ci": [
+            0.32994282535675123,
+            0.3699985141368522
+          ],
+          "srocc_signed": 0.34999434940390156,
+          "train_eq_val": false,
+          "z_rmse": 0.8982441021913504
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0010515247108307045,
+          "krocc": 0.7205099358111631,
+          "n": 6953,
+          "or": 0.026751042715374658,
+          "per_ref_mean": 0.9288109910248733,
+          "per_ref_n": 951,
+          "plcc": 0.7928056627651139,
+          "pwrc": 0.9489913511305037,
+          "srocc": 0.8602723203036933,
+          "srocc_ci": [
+            0.8502363128842326,
+            0.8692284713741376
+          ],
+          "srocc_signed": 0.8602723203036933,
+          "train_eq_val": false,
+          "z_rmse": 0.6094745122610901
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.28204704450439794,
+              "lo": null,
+              "mae": 0.08216861257461448,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.004834810636583401,
+              "plcc": 0.4206391508172725,
+              "pwrc": 0.7746306990485679,
+              "span": 0.38499999999999984,
+              "srocc": 0.41308856001786026,
+              "srocc_signed": 0.41308856001786026,
+              "z_rmse": 0.9072280335173313
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.5262492151620249,
+              "lo": 0.4,
+              "mae": 0.09194986193751287,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.006900212314225053,
+              "plcc": 0.7082802098323125,
+              "pwrc": 0.9114902350974805,
+              "span": 0.5825,
+              "srocc": 0.7119929204093915,
+              "srocc_signed": 0.7119929204093915,
+              "z_rmse": 0.7059314020213975
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6194110155825975,
+          "n": 3125,
+          "or": 0.00256,
+          "per_ref_mean": 0.8224177213064608,
+          "per_ref_n": 25,
+          "plcc": 0.8075878769149291,
+          "pwrc": 0.953751188052414,
+          "srocc": 0.8126427152773832,
+          "srocc_ci": [
+            0.7982247149542802,
+            0.8252210601481857
+          ],
+          "srocc_signed": 0.8126427152773832,
+          "train_eq_val": true,
+          "z_rmse": 0.5897472612274163
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6648899902879587,
+          "n": 436,
+          "or": 0.009174311926605505,
+          "per_ref_mean": 0.8321834474864951,
+          "per_ref_n": 4,
+          "plcc": 0.8293226207611275,
+          "pwrc": 0.9500589696330988,
+          "srocc": 0.819090115267044,
+          "srocc_ci": [
+            0.7754855680853138,
+            0.855737104737677
+          ],
+          "srocc_signed": 0.819090115267044,
+          "train_eq_val": false,
+          "z_rmse": 0.5587700696117276
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.3968397444824933,
+          "n": 404,
+          "or": 0.03217821782178218,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.5826933535273963,
+          "pwrc": 0.9054028108979238,
+          "srocc": 0.5705561900347779,
+          "srocc_ci": [
+            0.5005904557884856,
+            0.6386127574412281
+          ],
+          "srocc_signed": -0.5705561900347779,
+          "train_eq_val": false,
+          "z_rmse": 0.81269210390836
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0014903129657228018,
+          "krocc": 0.7086815789675321,
+          "n": 6142,
+          "or": 0.026212959947899708,
+          "per_ref_mean": 0.9321599555698346,
+          "per_ref_n": 671,
+          "plcc": 0.7872449967187846,
+          "pwrc": 0.9475986515138343,
+          "srocc": 0.8498075746795654,
+          "srocc_ci": [
+            0.8377012821980953,
+            0.8604355625729397
+          ],
+          "srocc_signed": 0.8498075746795654,
+          "train_eq_val": false,
+          "z_rmse": 0.6166403491605699
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0001295840352468576,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.01646110023600007,
+              "maxd": 0.977492698665048,
+              "out4": 0.0001295840352468576,
+              "p99d": 0.7067972305847148,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.32512634443436567,
+              "cov": 0.55,
+              "mad": 3.2638021022838855,
+              "max": 18.939683799410272,
+              "p99": 12.271976191875737,
+              "pred_max": 95.7778008667357,
+              "pred_min": 24.097963825679024,
+              "residual_max": 61.81537980110729,
+              "residual_p99": 40.05330169422182,
+              "slope": 96.60610781448479
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.06259350392400004,
+              "maxd": 0.9277529247012068,
+              "out4": 0.1120379692219186,
+              "p99d": 0.5991704792396618,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.09233424421113189,
+              "cov": 1.0,
+              "mad": 13.181362729880238,
+              "max": 6.16234386935101,
+              "p99": 3.801578233013132,
+              "pred_max": 95.24133481994326,
+              "pred_min": 3.3825289909900276,
+              "residual_max": 81.22808980816937,
+              "residual_p99": 50.10998163536327,
+              "slope": 61.099642227989115
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.032,
+              "clampLo": 0.00032,
+              "clump": 0.08448,
+              "cov": 1.0,
+              "mad": 0.13714049999999986,
+              "maxd": 0.7222222222222223,
+              "out4": 0.00416,
+              "p99d": 0.5431111111111098,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.17568,
+              "cov": 0.95,
+              "mad": 14.18283990026271,
+              "max": 4.312153073870642,
+              "p99": 2.933979416930846,
+              "pred_max": 100.0,
+              "pred_min": 2.502786046333089,
+              "residual_max": 61.158576672133044,
+              "residual_p99": 41.612160340996326,
+              "slope": 72.2926078264311
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.009174311926605505,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.11582812499999999,
+              "maxd": 0.8620689655172413,
+              "out4": 0.022935779816513763,
+              "p99d": 0.5732758620689635,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.22477064220183487,
+              "cov": 0.95,
+              "mad": 11.516026299058828,
+              "max": 5.931587712736841,
+              "p99": 4.623146781795096,
+              "pred_max": 100.0,
+              "pred_min": 7.082828296119116,
+              "residual_max": 68.30832009505166,
+              "residual_p99": 53.240279923561516,
+              "slope": 70.15351917859793
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 14.447936999999996,
+              "maxd": 1.0748916022673929,
+              "out4": 0.0,
+              "p99d": 0.9295805928939525,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.16831683168316833,
+              "cov": 0.75,
+              "mad": 5.347632363650924,
+              "max": 4.231774091116588,
+              "p99": 2.7194572216820805,
+              "pred_max": 73.48461409837365,
+              "pred_min": 35.54417626250441,
+              "residual_max": 22.62997208531454,
+              "residual_p99": 14.54265745023132,
+              "slope": -0.3704520717764043
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.05331849917100004,
+              "maxd": 1.0322338463018244,
+              "out4": 0.1281341582546402,
+              "p99d": 0.5916308756431157,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.10110713122761315,
+              "cov": 1.0,
+              "mad": 12.515814886573082,
+              "max": 7.305836440264227,
+              "p99": 3.998242078023534,
+              "pred_max": 95.26181169664757,
+              "pred_min": 3.727628276078504,
+              "residual_max": 91.4384964779271,
+              "residual_p99": 50.041257720249845,
+              "slope": 62.932517393669436
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 0,
+      "new_score_min": 3.3825289909900276,
+      "new_score_max": 95.7778008667357
+    },
+    "MT914_matched_D": {
+      "rank": {
+        "hfnlproxy": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.02402022756005057,
+          "krocc": 0.21025508134776558,
+          "n": 7717,
+          "or": 0.04781650900609045,
+          "per_ref_mean": 0.7993294417083769,
+          "per_ref_n": 791,
+          "plcc": 0.38774811927016795,
+          "pwrc": 0.7158174559072764,
+          "srocc": 0.29472693305802894,
+          "srocc_ci": [
+            0.273549221576863,
+            0.3152473114598345
+          ],
+          "srocc_signed": 0.29472693305802894,
+          "train_eq_val": false,
+          "z_rmse": 0.9217653692792183
+        },
+        "imazen26": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0010515247108307045,
+          "krocc": 0.7179060953779437,
+          "n": 6953,
+          "or": 0.02444987775061125,
+          "per_ref_mean": 0.9294427356404882,
+          "per_ref_n": 951,
+          "plcc": 0.8075852191002069,
+          "pwrc": 0.951203665485267,
+          "srocc": 0.8545880996665977,
+          "srocc_ci": [
+            0.843878533566198,
+            0.8642395152559926
+          ],
+          "srocc_signed": 0.8545880996665977,
+          "train_eq_val": false,
+          "z_rmse": 0.5897508947533657
+        },
+        "kadid": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B3",
+              "hi": 0.4,
+              "krocc": 0.3746018635044384,
+              "lo": null,
+              "mae": 0.07570790685806816,
+              "n": 1241,
+              "not_measured_reason": null,
+              "or": 0.010475423045930701,
+              "plcc": 0.5371536688350754,
+              "pwrc": 0.8419053926645608,
+              "span": 0.38499999999999984,
+              "srocc": 0.5364731369771663,
+              "srocc_signed": 0.5364731369771663,
+              "z_rmse": 0.8434844017864329
+            },
+            {
+              "band": "B4-B9",
+              "hi": null,
+              "krocc": 0.48063440197688656,
+              "lo": 0.4,
+              "mae": 0.10002265998227171,
+              "n": 1884,
+              "not_measured_reason": null,
+              "or": 0.004246284501061571,
+              "plcc": 0.6687562508084108,
+              "pwrc": 0.8975191295033786,
+              "span": 0.5825,
+              "srocc": 0.6694375473377395,
+              "srocc_signed": 0.6694375473377395,
+              "z_rmse": 0.7434817260731285
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.6189934888681417,
+          "n": 3125,
+          "or": 0.0016,
+          "per_ref_mean": 0.8282169278104555,
+          "per_ref_n": 25,
+          "plcc": 0.8080621589256815,
+          "pwrc": 0.9534930224717981,
+          "srocc": 0.8107175050541336,
+          "srocc_ci": [
+            0.7967173827411866,
+            0.8236824031989597
+          ],
+          "srocc_signed": 0.8107175050541336,
+          "train_eq_val": true,
+          "z_rmse": 0.5890972307797544
+        },
+        "konfig": {
+          "band_scheme": {
+            "base_bands": 10,
+            "doc": "campaign appendix V: fixed deciles accumulated into the finest partition whose every band has n >= n_min AND target span >= span_min",
+            "n_min": 1000,
+            "name": "merged-decile-2026-08-06",
+            "span_min": 0.08
+          },
+          "bands": [
+            {
+              "band": "B0-B9",
+              "hi": null,
+              "krocc": null,
+              "lo": null,
+              "mae": null,
+              "n": 436,
+              "not_measured_reason": "n=436 < 1000: too few pairs to rank models",
+              "or": null,
+              "plcc": null,
+              "pwrc": null,
+              "span": 0.9375,
+              "srocc": null,
+              "srocc_signed": null,
+              "z_rmse": null
+            }
+          ],
+          "frac_negative": 0.0,
+          "krocc": 0.5730176650422221,
+          "n": 436,
+          "or": 0.011467889908256881,
+          "per_ref_mean": 0.7394061447453367,
+          "per_ref_n": 4,
+          "plcc": 0.7574244247943103,
+          "pwrc": 0.9172868469707772,
+          "srocc": 0.7227246614838595,
+          "srocc_ci": [
+            0.6633509520314292,
+            0.7766028454539206
+          ],
+          "srocc_signed": 0.7227246614838595,
+          "train_eq_val": false,
+          "z_rmse": 0.6529228443889886
+        },
+        "konjnd": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": null,
+          "krocc": 0.41357491282584274,
+          "n": 404,
+          "or": 0.024752475247524754,
+          "per_ref_mean": null,
+          "per_ref_n": null,
+          "plcc": 0.5934506722538909,
+          "pwrc": 0.9111797820686129,
+          "srocc": 0.5882869249435096,
+          "srocc_ci": [
+            0.5147753970230607,
+            0.6594102418444903
+          ],
+          "srocc_signed": -0.5882869249435096,
+          "train_eq_val": false,
+          "z_rmse": 0.8048703619847137
+        },
+        "nonphoto": {
+          "band_scheme": null,
+          "bands": null,
+          "frac_negative": 0.0029806259314456036,
+          "krocc": 0.7080737335154922,
+          "n": 6142,
+          "or": 0.02311950504721589,
+          "per_ref_mean": 0.931053733584053,
+          "per_ref_n": 671,
+          "plcc": 0.7997092509520128,
+          "pwrc": 0.9499230280631208,
+          "srocc": 0.8452899724007215,
+          "srocc_ci": [
+            0.8332053658855056,
+            0.856202597285887
+          ],
+          "srocc_signed": 0.8452899724007215,
+          "train_eq_val": false,
+          "z_rmse": 0.600387469965503
+        }
+      },
+      "scatter_assessment": {
+        "hfnlproxy": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.0001295840352468576,
+              "clampLo": 0.0001295840352468576,
+              "clump": 0.10975767785408838,
+              "cov": 0.95,
+              "mad": 0.01517712910000004,
+              "maxd": 1.0187434020627066,
+              "out4": 0.002202928599196579,
+              "p99d": 0.7565084340601368,
+              "span": 0.06826792680000004,
+              "target_clump": 0.10975767785408838,
+              "target_cov": 0.95
+            },
+            "n": 7717,
+            "raw": {
+              "clump": 0.5476221329532202,
+              "cov": 0.6,
+              "mad": 1.8658700457375874,
+              "max": 35.03257047701223,
+              "p99": 23.41738110009228,
+              "pred_max": 97.62608321835145,
+              "pred_min": 22.319167234690266,
+              "residual_max": 65.36622387824806,
+              "residual_p99": 43.693789944283694,
+              "slope": 56.05556877361181
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "imazen26": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00014382281029771322,
+              "clampLo": 0.00014382281029771322,
+              "clump": 0.1665468143247519,
+              "cov": 0.9,
+              "mad": 0.05060732044200011,
+              "maxd": 0.9682258002822952,
+              "out4": 0.12929670645764418,
+              "p99d": 0.5821138707025428,
+              "span": 1.423328814,
+              "target_clump": 0.1665468143247519,
+              "target_cov": 0.9
+            },
+            "n": 6953,
+            "raw": {
+              "clump": 0.17028620739249245,
+              "cov": 0.75,
+              "mad": 8.814698807986224,
+              "max": 14.467025564015646,
+              "p99": 8.29973404277494,
+              "pred_max": 96.58699853502759,
+              "pred_min": -89.46064320245468,
+              "residual_max": 127.52247299423495,
+              "residual_p99": 73.15965577345095,
+              "slope": 80.33644005574669
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "kadid": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.032,
+              "clampLo": 0.00128,
+              "clump": 0.08448,
+              "cov": 1.0,
+              "mad": 0.1334340000000001,
+              "maxd": 0.7583333333333335,
+              "out4": 0.00448,
+              "p99d": 0.5257777777777759,
+              "span": 0.8999999999999999,
+              "target_clump": 0.08448,
+              "target_cov": 1.0
+            },
+            "n": 3125,
+            "raw": {
+              "clump": 0.1216,
+              "cov": 0.75,
+              "mad": 30.064666903766966,
+              "max": 5.020719337835301,
+              "p99": 3.5291443727446494,
+              "pred_max": 100.0,
+              "pred_min": -213.14861297607422,
+              "residual_max": 150.94625450931977,
+              "residual_p99": 106.1025500218715,
+              "slope": 163.1409182594935
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konfig": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.009174311926605505,
+              "clampLo": 0.0022935779816513763,
+              "clump": 0.08256880733944955,
+              "cov": 1.0,
+              "mad": 0.13899375,
+              "maxd": 0.8620689655172413,
+              "out4": 0.020642201834862386,
+              "p99d": 0.6896551724137931,
+              "span": 0.90625,
+              "target_clump": 0.08256880733944955,
+              "target_cov": 1.0
+            },
+            "n": 436,
+            "raw": {
+              "clump": 0.1811926605504587,
+              "cov": 0.75,
+              "mad": 17.337824019849112,
+              "max": 10.21169225443429,
+              "p99": 9.998460541892875,
+              "pred_max": 100.0,
+              "pred_min": -212.57149539259214,
+              "residual_max": 177.04852325223797,
+              "residual_p99": 173.35154934474386,
+              "slope": 120.72458728388409
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "konjnd": {
+          "jnd": {
+            "geo": {
+              "clampHi": 0.0024752475247524753,
+              "clampLo": 0.0024752475247524753,
+              "clump": 0.17326732673267325,
+              "cov": 0.9,
+              "mad": 15.285606000000003,
+              "maxd": 1.1253678456234575,
+              "out4": 0.0,
+              "p99d": 0.9829642678673267,
+              "span": 39.62259999999999,
+              "target_clump": 0.17326732673267325,
+              "target_cov": 0.9
+            },
+            "n": 404,
+            "raw": {
+              "clump": 0.11138613861386139,
+              "cov": 1.0,
+              "mad": 4.9372499887961165,
+              "max": 4.205254252254418,
+              "p99": 2.8033178418852556,
+              "pred_max": 77.11017481374071,
+              "pred_min": 45.14544947490993,
+              "residual_max": 20.76239150982795,
+              "residual_p99": 13.840680983439931,
+              "slope": -0.4083407526499574
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        },
+        "nonphoto": {
+          "mos": {
+            "geo": {
+              "clampHi": 0.00016281341582546403,
+              "clampLo": 0.00016281341582546403,
+              "clump": 0.18495604037772712,
+              "cov": 0.85,
+              "mad": 0.04568262732599994,
+              "maxd": 1.0583331295952345,
+              "out4": 0.14018235102572452,
+              "p99d": 0.5742001815846984,
+              "span": 1.3441234997,
+              "target_clump": 0.18495604037772712,
+              "target_cov": 0.85
+            },
+            "n": 6142,
+            "raw": {
+              "clump": 0.176489742754803,
+              "cov": 0.75,
+              "mad": 7.730077837833154,
+              "max": 16.715782288090594,
+              "p99": 9.052171380702317,
+              "pred_max": 96.90494151573013,
+              "pred_min": -79.18873744921305,
+              "residual_max": 129.21429820721306,
+              "residual_p99": 69.97398937423452,
+              "slope": 81.36912353512709
+            },
+            "schema": "scatter-v2",
+            "status": "MEASURED"
+          }
+        }
+      },
+      "composite": null,
+      "composite_coverage": {
+        "missing": [
+          "cid22",
+          "aic3",
+          "aic4"
+        ],
+        "required": [
+          "cid22",
+          "imazen26",
+          "nonphoto",
+          "konjnd",
+          "aic3",
+          "aic4"
+        ],
+        "status": "INCOMPLETE"
+      },
+      "unique_new_scores_above100": 0,
+      "new_score_min": -89.46064320245468,
+      "new_score_max": 97.62608321835145
+    }
+  },
+  "source_uncertainty": {
+    "status": "MEASURED_UNQUALIFIED",
+    "corpora": {
+      "imazen26": {
+        "rows": 6953,
+        "sources": 87,
+        "models": {
+          "MT913_full944_h128_ens5": {
+            "srocc_signed": 0.6775941956409057,
+            "source_bootstrap_ci": [
+              0.6301283282437636,
+              0.7209452615821342
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.21337581156673086,
+              -0.14097522568085383
+            ]
+          },
+          "MT913_full944_h256_ens5": {
+            "srocc_signed": 0.7014477714686321,
+            "source_bootstrap_ci": [
+              0.6589579021371459,
+              0.7384280734122312
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.18635648511646882,
+              -0.11807958008773714
+            ]
+          },
+          "MT913_local120_h128_ens5": {
+            "srocc_signed": 0.7748995732940883,
+            "source_bootstrap_ci": [
+              0.7455362100200642,
+              0.8031010939467963
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.09913024926868294,
+              -0.059139715050742205
+            ]
+          },
+          "MT913_selected619_h128_ens5": {
+            "srocc_signed": 0.6553706711638355,
+            "source_bootstrap_ci": [
+              0.6059155270480517,
+              0.7009847715820997
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.24022504028657501,
+              -0.15862332775670743
+            ]
+          },
+          "MT913_y40_h32_ens5": {
+            "srocc_signed": 0.8262701623983373,
+            "source_bootstrap_ci": [
+              0.8037005463725813,
+              0.84677841814674
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.038742066642068626,
+              -0.018642001077120076
+            ]
+          },
+          "MT913_y40_h128_ens5": {
+            "srocc_signed": 0.811526844414526,
+            "source_bootstrap_ci": [
+              0.7863459979529153,
+              0.8332349867702548
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.05805050677129382,
+              -0.03054722729896119
+            ]
+          },
+          "MT913_y60_h32_ens5": {
+            "srocc_signed": 0.8173619891951821,
+            "source_bootstrap_ci": [
+              0.7946859790313969,
+              0.8368715150279002
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.048112648675111724,
+              -0.02662920179785064
+            ]
+          },
+          "MT913_y60_h128_ens5": {
+            "srocc_signed": 0.8127128104480138,
+            "source_bootstrap_ci": [
+              0.7886111648581099,
+              0.8332926882378167
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.05385249194633546,
+              -0.029831741457712332
+            ]
+          },
+          "MT913_linear60": {
+            "srocc_signed": 0.8533808147307239,
+            "source_bootstrap_ci": [
+              0.8389758253646925,
+              0.8677838882302191
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.008559160133385719,
+              0.006451482307494085
+            ]
+          },
+          "MT914_matched_B": {
+            "srocc_signed": 0.8602723203036933,
+            "source_bootstrap_ci": [
+              0.8427923749081838,
+              0.8756815222036167
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.002666119928770369,
+              0.013115098623514957
+            ]
+          },
+          "MT914_matched_D": {
+            "srocc_signed": 0.8545880996665977,
+            "source_bootstrap_ci": [
+              0.8376099459453321,
+              0.8701098059046846
+            ],
+            "paired_delta_vs_D_ci": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      },
+      "nonphoto": {
+        "rows": 6142,
+        "sources": 61,
+        "models": {
+          "MT913_full944_h128_ens5": {
+            "srocc_signed": 0.620228773641429,
+            "source_bootstrap_ci": [
+              0.5672488272218129,
+              0.6757425413876599
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.26716056887471434,
+              -0.17865705097814522
+            ]
+          },
+          "MT913_full944_h256_ens5": {
+            "srocc_signed": 0.6455091814563007,
+            "source_bootstrap_ci": [
+              0.5954652651811564,
+              0.6947170551578592
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.24097886327485687,
+              -0.1566935060366276
+            ]
+          },
+          "MT913_local120_h128_ens5": {
+            "srocc_signed": 0.7859822035028513,
+            "source_bootstrap_ci": [
+              0.7570253374414809,
+              0.8128705614123402
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.07702414255428951,
+              -0.040978541677201566
+            ]
+          },
+          "MT913_selected619_h128_ens5": {
+            "srocc_signed": 0.5955034394824161,
+            "source_bootstrap_ci": [
+              0.5353159392928993,
+              0.6570167146819431
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.30101259757065607,
+              -0.19758896961913713
+            ]
+          },
+          "MT913_y40_h32_ens5": {
+            "srocc_signed": 0.811453086845474,
+            "source_bootstrap_ci": [
+              0.7858336360978173,
+              0.8372750091040744
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.04592728962165361,
+              -0.022405251736676124
+            ]
+          },
+          "MT913_y40_h128_ens5": {
+            "srocc_signed": 0.794523150278072,
+            "source_bootstrap_ci": [
+              0.7666190576113382,
+              0.8238308391704773
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.06609765557137884,
+              -0.036518122212544836
+            ]
+          },
+          "MT913_y60_h32_ens5": {
+            "srocc_signed": 0.8085742312580485,
+            "source_bootstrap_ci": [
+              0.7854758127798672,
+              0.8326569006933389
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.04750870520939031,
+              -0.025129609012725738
+            ]
+          },
+          "MT913_y60_h128_ens5": {
+            "srocc_signed": 0.8049946231907936,
+            "source_bootstrap_ci": [
+              0.7811564436720779,
+              0.829414002747133
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.051655210138571106,
+              -0.028489800164921426
+            ]
+          },
+          "MT913_linear60": {
+            "srocc_signed": 0.8421440550282052,
+            "source_bootstrap_ci": [
+              0.8252429948292138,
+              0.8586443980194047
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.012581551947023461,
+              0.005251687298494744
+            ]
+          },
+          "MT914_matched_B": {
+            "srocc_signed": 0.8498075746795654,
+            "source_bootstrap_ci": [
+              0.8331928965027651,
+              0.8659022405024218
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.00375572138779269,
+              0.01262726483124603
+            ]
+          },
+          "MT914_matched_D": {
+            "srocc_signed": 0.8452899724007215,
+            "source_bootstrap_ci": [
+              0.8289555098075481,
+              0.8628138860019088
+            ],
+            "paired_delta_vs_D_ci": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      },
+      "hfnlproxy": {
+        "rows": 7717,
+        "sources": 87,
+        "models": {
+          "MT913_full944_h128_ens5": {
+            "srocc_signed": -0.060723719941172455,
+            "source_bootstrap_ci": [
+              -0.14269246749015704,
+              0.03957982275327652
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.4773480084032268,
+              -0.24105145594202804
+            ]
+          },
+          "MT913_full944_h256_ens5": {
+            "srocc_signed": -0.041419162039974984,
+            "source_bootstrap_ci": [
+              -0.12937415898880975,
+              0.057251426443700563
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.46452889792771695,
+              -0.2214346567167847
+            ]
+          },
+          "MT913_local120_h128_ens5": {
+            "srocc_signed": -0.05039635807799672,
+            "source_bootstrap_ci": [
+              -0.10741146875883033,
+              0.046833788303661174
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.4258595812518631,
+              -0.27474165336614137
+            ]
+          },
+          "MT913_selected619_h128_ens5": {
+            "srocc_signed": -0.07160967677506799,
+            "source_bootstrap_ci": [
+              -0.1402181340065966,
+              0.01854056767278394
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.48715186404133115,
+              -0.24784202573643394
+            ]
+          },
+          "MT913_y40_h32_ens5": {
+            "srocc_signed": 0.24745149642378272,
+            "source_bootstrap_ci": [
+              0.1586675482777063,
+              0.39575271358487146
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.07250029971166488,
+              -0.020870754775885344
+            ]
+          },
+          "MT913_y40_h128_ens5": {
+            "srocc_signed": 0.16644362675664026,
+            "source_bootstrap_ci": [
+              0.0866453896391951,
+              0.30026937459054054
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.17022260435801118,
+              -0.09031447991121694
+            ]
+          },
+          "MT913_y60_h32_ens5": {
+            "srocc_signed": 0.17074716145231225,
+            "source_bootstrap_ci": [
+              0.09543237044092455,
+              0.2925347615153797
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.1775659552708136,
+              -0.07941684675436167
+            ]
+          },
+          "MT913_y60_h128_ens5": {
+            "srocc_signed": 0.24956098276060418,
+            "source_bootstrap_ci": [
+              0.17222648948261227,
+              0.37248908814767534
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.08007529436969205,
+              -0.021002407009672312
+            ]
+          },
+          "MT913_linear60": {
+            "srocc_signed": 0.2107986506988662,
+            "source_bootstrap_ci": [
+              0.14263626823455836,
+              0.323678182299827
+            ],
+            "paired_delta_vs_D_ci": [
+              -0.13880077106001104,
+              -0.044417995019963886
+            ]
+          },
+          "MT914_matched_B": {
+            "srocc_signed": 0.34999434940390156,
+            "source_bootstrap_ci": [
+              0.2750763468365119,
+              0.4624345219223758
+            ],
+            "paired_delta_vs_D_ci": [
+              0.004674010808292411,
+              0.09613165442790039
+            ]
+          },
+          "MT914_matched_D": {
+            "srocc_signed": 0.29472693305802894,
+            "source_bootstrap_ci": [
+              0.20436576342001403,
+              0.4408586187979372
+            ],
+            "paired_delta_vs_D_ci": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      }
+    },
+    "admission_sha256": "f16fba009ea4e446c0d5b1808974c7c5ad2fbfcf4865f177c16eb7f28c673015",
+    "panel_sha256": "fb7ad4d8f964d6bf6e919e7065e4970e145703d245879ed2d9a27c3e943be3bb"
+  },
+  "teacher_drift": {
+    "admission_sha256": "f16fba009ea4e446c0d5b1808974c7c5ad2fbfcf4865f177c16eb7f28c673015",
+    "audit_sha256": "752e031c6ce7c48214b806c480bafb8c4dd9dd47855f1f59fb40693bb44845a2",
+    "interpretation": "Historical vs current same-buffer CPU fast-ssim2; diagnostic, not independent human superiority.",
+    "panels": {
+      "imazen26:ALL": {
+        "rows": 6953,
+        "sources": 87,
+        "absolute_delta_percentiles": {
+          "p50": 0.009345382180100614,
+          "p95": 0.28897443104450066,
+          "p99": 1.1949921290191707,
+          "max": 5.144554724592815
+        },
+        "signed_delta_mean": -0.013070711808308561,
+        "historical_min": -73.85595,
+        "current_min": -73.85584217194811,
+        "old_ge91_current_below91": 19,
+        "largest_drift_row_ids": [
+          1305,
+          966,
+          1578,
+          1411,
+          1409,
+          1808,
+          480,
+          1315,
+          5351,
+          5350
+        ],
+        "panel": {
+          "label": "imazen26:ALL",
+          "n": 6953,
+          "n_dropped": 0,
+          "srocc": 0.9999125964244009,
+          "srocc_signed": 0.9999125964244009,
+          "plcc": 0.9999614176121888,
+          "plcc_raw": 0.9999613464569628,
+          "krocc": 0.9964152677205984,
+          "or": 0.0,
+          "pwrc": 0.9999906995321649,
+          "z_rmse": 0.008784263602913255,
+          "mae": 0.0795370432058093
+        }
+      },
+      "imazen26:zenavif": {
+        "rows": 1968,
+        "sources": 87,
+        "absolute_delta_percentiles": {
+          "p50": 0.0076207169663558005,
+          "p95": 0.44508809416127115,
+          "p99": 2.143621512019203,
+          "max": 5.144554724592815
+        },
+        "signed_delta_mean": 0.003435589318998837,
+        "historical_min": -73.85595,
+        "current_min": -73.85584217194811,
+        "old_ge91_current_below91": 7,
+        "largest_drift_row_ids": [
+          1305,
+          966,
+          1578,
+          1411,
+          1409,
+          1808,
+          480,
+          1315,
+          414,
+          382
+        ],
+        "panel": {
+          "label": "imazen26:zenavif",
+          "n": 1968,
+          "n_dropped": 0,
+          "srocc": 0.9998670194870091,
+          "srocc_signed": 0.9998670194870091,
+          "plcc": 0.9999392857224185,
+          "plcc_raw": 0.9999392828669417,
+          "krocc": 0.9951723767364771,
+          "or": 0.0,
+          "pwrc": 0.9999862159894054,
+          "z_rmse": 0.011019295301355847,
+          "mae": 0.11556294493177031
+        }
+      },
+      "imazen26:zenjpeg": {
+        "rows": 1930,
+        "sources": 87,
+        "absolute_delta_percentiles": {
+          "p50": 0.00956835780362475,
+          "p95": 0.07602991314754202,
+          "p99": 0.1697393317258852,
+          "max": 0.6747812583723061
+        },
+        "signed_delta_mean": -0.0024163242609913185,
+        "historical_min": -64.071414,
+        "current_min": -64.07158682725552,
+        "old_ge91_current_below91": 2,
+        "largest_drift_row_ids": [
+          2749,
+          3296,
+          2752,
+          3392,
+          2569,
+          3209,
+          3724,
+          2102,
+          2172,
+          3170
+        ],
+        "panel": {
+          "label": "imazen26:zenjpeg",
+          "n": 1930,
+          "n_dropped": 0,
+          "srocc": 0.9999964228956697,
+          "srocc_signed": 0.9999964228956697,
+          "plcc": 0.9999988948700903,
+          "plcc_raw": 0.9999988935453852,
+          "krocc": 0.9990437736773456,
+          "or": 0.0,
+          "pwrc": 0.9999981176647191,
+          "z_rmse": 0.001486693848835338,
+          "mae": 0.021603284877795437
+        }
+      },
+      "imazen26:zenjxl": {
+        "rows": 1832,
+        "sources": 87,
+        "absolute_delta_percentiles": {
+          "p50": 0.048087845064166856,
+          "p95": 0.5274719007846257,
+          "p99": 1.337677806518257,
+          "max": 3.66145149513693
+        },
+        "signed_delta_mean": -0.050752400690157115,
+        "historical_min": -63.538504,
+        "current_min": -63.53412642710591,
+        "old_ge91_current_below91": 10,
+        "largest_drift_row_ids": [
+          5351,
+          5350,
+          5366,
+          5330,
+          4412,
+          5521,
+          5508,
+          5520,
+          5414,
+          4159
+        ],
+        "panel": {
+          "label": "imazen26:zenjxl",
+          "n": 1832,
+          "n_dropped": 0,
+          "srocc": 0.9998707139933014,
+          "srocc_signed": 0.9998707139933014,
+          "plcc": 0.9999356167959385,
+          "plcc_raw": 0.9999337785684107,
+          "krocc": 0.9935117396253123,
+          "or": 0.0,
+          "pwrc": 0.9999861514610017,
+          "z_rmse": 0.01134734610223907,
+          "mae": 0.1427146486990632
+        }
+      },
+      "imazen26:zenwebp": {
+        "rows": 1223,
+        "sources": 87,
+        "absolute_delta_percentiles": {
+          "p50": 2.4681166621576267e-07,
+          "p95": 4.723867029099437e-07,
+          "p99": 4.921388330103582e-07,
+          "max": 4.998757816565558e-07
+        },
+        "signed_delta_mean": 4.0107292972369e-09,
+        "historical_min": -64.248556,
+        "current_min": -64.24855605129984,
+        "old_ge91_current_below91": 0,
+        "largest_drift_row_ids": [
+          6393,
+          6111,
+          6426,
+          6219,
+          6440,
+          5829,
+          5921,
+          6388,
+          6860,
+          5974
+        ],
+        "panel": {
+          "label": "imazen26:zenwebp",
+          "n": 1223,
+          "n_dropped": 0,
+          "srocc": 1.0,
+          "srocc_signed": 1.0,
+          "plcc": 0.9999999999913727,
+          "plcc_raw": 0.9999999999999994,
+          "krocc": 1.0,
+          "or": 0.0,
+          "pwrc": 1.0,
+          "z_rmse": 4.153782615636457e-06,
+          "mae": 8.332394329941972e-05
+        }
+      },
+      "nonphoto:ALL": {
+        "rows": 6142,
+        "sources": 61,
+        "absolute_delta_percentiles": {
+          "p50": 0.011819032454774003,
+          "p95": 0.32779495881705173,
+          "p99": 1.0552518187829112,
+          "max": 15.112637236171121
+        },
+        "signed_delta_mean": -0.009936713938359052,
+        "historical_min": -64.236905,
+        "current_min": -64.23697781699893,
+        "old_ge91_current_below91": 10,
+        "largest_drift_row_ids": [
+          8054,
+          8561,
+          7925,
+          7239,
+          7736,
+          8173,
+          6982,
+          7338,
+          7604,
+          7450
+        ],
+        "panel": {
+          "label": "nonphoto:ALL",
+          "n": 6142,
+          "n_dropped": 0,
+          "srocc": 0.9998800458394578,
+          "srocc_signed": 0.9998800458394578,
+          "plcc": 0.9999320723610174,
+          "plcc_raw": 0.9999320101961932,
+          "krocc": 0.9956004018241693,
+          "or": 0.0,
+          "pwrc": 0.9999876350186031,
+          "z_rmse": 0.011655499310954229,
+          "mae": 0.0877965064447433
+        }
+      },
+      "nonphoto:zenavif": {
+        "rows": 1734,
+        "sources": 61,
+        "absolute_delta_percentiles": {
+          "p50": 0.012859519312076628,
+          "p95": 0.43917446716996805,
+          "p99": 1.8774240747499702,
+          "max": 15.112637236171121
+        },
+        "signed_delta_mean": 0.01938230598493726,
+        "historical_min": -64.223366,
+        "current_min": -64.22336886835825,
+        "old_ge91_current_below91": 5,
+        "largest_drift_row_ids": [
+          8054,
+          8561,
+          7925,
+          7239,
+          7736,
+          8173,
+          6982,
+          7338,
+          7604,
+          7450
+        ],
+        "panel": {
+          "label": "nonphoto:zenavif",
+          "n": 1734,
+          "n_dropped": 0,
+          "srocc": 0.9998273921156272,
+          "srocc_signed": 0.9998273921156272,
+          "plcc": 0.9998818718717158,
+          "plcc_raw": 0.9998818595468142,
+          "krocc": 0.9943254991144823,
+          "or": 0.0,
+          "pwrc": 0.9999792192072235,
+          "z_rmse": 0.015370175741109028,
+          "mae": 0.13447390727238984
+        }
+      },
+      "nonphoto:zenjpeg": {
+        "rows": 1698,
+        "sources": 61,
+        "absolute_delta_percentiles": {
+          "p50": 0.012018995161405144,
+          "p95": 0.08492871028583167,
+          "p99": 0.19729378233239303,
+          "max": 0.4482112493327275
+        },
+        "signed_delta_mean": -0.0022296677057972846,
+        "historical_min": -64.236905,
+        "current_min": -64.23697781699893,
+        "old_ge91_current_below91": 1,
+        "largest_drift_row_ids": [
+          10275,
+          9573,
+          9523,
+          9527,
+          8957,
+          8790,
+          10267,
+          9914,
+          10221,
+          9953
+        ],
+        "panel": {
+          "label": "nonphoto:zenjpeg",
+          "n": 1698,
+          "n_dropped": 0,
+          "srocc": 0.9999955291183577,
+          "srocc_signed": 0.9999955291183577,
+          "plcc": 0.9999986088810602,
+          "plcc_raw": 0.9999986088533399,
+          "krocc": 0.9988783642997794,
+          "or": 0.0,
+          "pwrc": 0.9999977920557083,
+          "z_rmse": 0.001668003579374209,
+          "mae": 0.024872550687245757
+        }
+      },
+      "nonphoto:zenjxl": {
+        "rows": 1619,
+        "sources": 61,
+        "absolute_delta_percentiles": {
+          "p50": 0.059294258263022925,
+          "p95": 0.5772631014204904,
+          "p99": 1.634826514467376,
+          "max": 2.6126293979669555
+        },
+        "signed_delta_mean": -0.056117513736793266,
+        "historical_min": -60.961587,
+        "current_min": -61.01582024256626,
+        "old_ge91_current_below91": 4,
+        "largest_drift_row_ids": [
+          11720,
+          11722,
+          11721,
+          11675,
+          11690,
+          11561,
+          10721,
+          11676,
+          11615,
+          11539
+        ],
+        "panel": {
+          "label": "nonphoto:zenjxl",
+          "n": 1619,
+          "n_dropped": 0,
+          "srocc": 0.9997802414774455,
+          "srocc_signed": 0.9997802414774455,
+          "plcc": 0.9999134582795783,
+          "plcc_raw": 0.9999112498852322,
+          "krocc": 0.9913403717944411,
+          "or": 0.0,
+          "pwrc": 0.9999814394814681,
+          "z_rmse": 0.01315583340173217,
+          "mae": 0.1564757407730877
+        }
+      },
+      "nonphoto:zenwebp": {
+        "rows": 1091,
+        "sources": 61,
+        "absolute_delta_percentiles": {
+          "p50": 2.5727928232299746e-07,
+          "p95": 4.7227239008407196e-07,
+          "p99": 4.945004388190455e-07,
+          "max": 4.997940834527981e-07
+        },
+        "signed_delta_mean": 1.367280437784925e-08,
+        "historical_min": -50.464162,
+        "current_min": -50.46416193450858,
+        "old_ge91_current_below91": 0,
+        "largest_drift_row_ids": [
+          12011,
+          12446,
+          12062,
+          12831,
+          12186,
+          12295,
+          12000,
+          12092,
+          12843,
+          12887
+        ],
+        "panel": {
+          "label": "nonphoto:zenwebp",
+          "n": 1091,
+          "n_dropped": 0,
+          "srocc": 1.0,
+          "srocc_signed": 1.0,
+          "plcc": 0.9999999999911846,
+          "plcc_raw": 0.9999999999999989,
+          "krocc": 1.0,
+          "or": 0.0,
+          "pwrc": 1.0,
+          "z_rmse": 4.1984168924187724e-06,
+          "mae": 7.077366301758516e-05
+        }
+      },
+      "hfnlproxy:ALL": {
+        "rows": 7717,
+        "sources": 87,
+        "absolute_delta_percentiles": {
+          "p50": 0.01850424609544632,
+          "p95": 1.2200872239445335,
+          "p99": 2.6577414852391255,
+          "max": 4.003815974611598
+        },
+        "signed_delta_mean": -0.11634596420679613,
+        "historical_min": 91.000108,
+        "current_min": 88.98857923696629,
+        "old_ge91_current_below91": 273,
+        "largest_drift_row_ids": [
+          19392,
+          19400,
+          19394,
+          19397,
+          19389,
+          19415,
+          19386,
+          19395,
+          19409,
+          19410
+        ],
+        "panel": {
+          "label": "hfnlproxy:ALL",
+          "n": 7717,
+          "n_dropped": 0,
+          "srocc": 0.9523345087700504,
+          "srocc_signed": 0.9523345087700504,
+          "plcc": 0.9578700250059601,
+          "plcc_raw": 0.9551788637114612,
+          "krocc": 0.886833874389004,
+          "or": 0.0019437605287028637,
+          "pwrc": 0.9914516475392072,
+          "z_rmse": 0.2872020459451562,
+          "mae": 0.22587177926820828
+        }
+      },
+      "hfnlproxy:zenavif": {
+        "rows": 4710,
+        "sources": 87,
+        "absolute_delta_percentiles": {
+          "p50": 0.018978566693128585,
+          "p95": 0.35323492311835814,
+          "p99": 1.0000909332887646,
+          "max": 2.1915770575123474
+        },
+        "signed_delta_mean": 0.0029483067964010106,
+        "historical_min": 91.003045,
+        "current_min": 89.67584494248766,
+        "old_ge91_current_below91": 70,
+        "largest_drift_row_ids": [
+          15433,
+          15536,
+          15409,
+          15957,
+          15540,
+          15953,
+          15343,
+          15397,
+          14955,
+          15344
+        ],
+        "panel": {
+          "label": "hfnlproxy:zenavif",
+          "n": 4710,
+          "n_dropped": 0,
+          "srocc": 0.9924334433228893,
+          "srocc_signed": 0.9924334433228893,
+          "plcc": 0.9930755305095803,
+          "plcc_raw": 0.992506583159887,
+          "krocc": 0.9473723080319212,
+          "or": 0.0,
+          "pwrc": 0.9990400297222257,
+          "z_rmse": 0.11747761788148342,
+          "mae": 0.10514075390928775
+        }
+      },
+      "hfnlproxy:zenjpeg": {
+        "rows": 1379,
+        "sources": 83,
+        "absolute_delta_percentiles": {
+          "p50": 0.01686240244595183,
+          "p95": 0.1410184005863385,
+          "p99": 0.22668842106164258,
+          "max": 0.38928201918783145
+        },
+        "signed_delta_mean": -0.0015141254892072351,
+        "historical_min": 91.002365,
+        "current_min": 90.80254276208079,
+        "old_ge91_current_below91": 11,
+        "largest_drift_row_ids": [
+          17775,
+          18964,
+          18756,
+          18086,
+          18989,
+          17779,
+          17789,
+          18923,
+          18947,
+          18417
+        ],
+        "panel": {
+          "label": "hfnlproxy:zenjpeg",
+          "n": 1379,
+          "n_dropped": 0,
+          "srocc": 0.9987503597387877,
+          "srocc_signed": 0.9987503597387877,
+          "plcc": 0.9994257646376427,
+          "plcc_raw": 0.9994222499732434,
+          "krocc": 0.9752309858977031,
+          "or": 0.0,
+          "pwrc": 0.9998838319209452,
+          "z_rmse": 0.03388422905222133,
+          "mae": 0.03668393434416224
+        }
+      },
+      "hfnlproxy:zenjxl": {
+        "rows": 854,
+        "sources": 24,
+        "absolute_delta_percentiles": {
+          "p50": 0.6888771821509749,
+          "p95": 2.924843727513841,
+          "p99": 3.544409284570338,
+          "max": 4.003815974611598
+        },
+        "signed_delta_mean": -1.0651526390694874,
+        "historical_min": 91.000108,
+        "current_min": 88.98857923696629,
+        "old_ge91_current_below91": 192,
+        "largest_drift_row_ids": [
+          19392,
+          19400,
+          19394,
+          19397,
+          19389,
+          19415,
+          19386,
+          19395,
+          19409,
+          19410
+        ],
+        "panel": {
+          "label": "hfnlproxy:zenjxl",
+          "n": 854,
+          "n_dropped": 0,
+          "srocc": 0.7237081624202025,
+          "srocc_signed": 0.7237081624202025,
+          "plcc": 0.7704262052859239,
+          "plcc_raw": 0.737348867786379,
+          "krocc": 0.5476148623409726,
+          "or": 0.00117096018735363,
+          "pwrc": 0.9444080804812437,
+          "z_rmse": 0.6375291853779976,
+          "mae": 0.8142697393396277
+        }
+      },
+      "hfnlproxy:zenwebp": {
+        "rows": 774,
+        "sources": 38,
+        "absolute_delta_percentiles": {
+          "p50": 2.5327596375746e-07,
+          "p95": 4.6519529917077307e-07,
+          "p99": 4.897751280452666e-07,
+          "max": 4.989518203046828e-07
+        },
+        "signed_delta_mean": 2.6099023809191553e-09,
+        "historical_min": 91.00066,
+        "current_min": 91.0006604822416,
+        "old_ge91_current_below91": 0,
+        "largest_drift_row_ids": [
+          20455,
+          20060,
+          20584,
+          20398,
+          19996,
+          20228,
+          19976,
+          20519,
+          20423,
+          20296
+        ],
+        "panel": {
+          "label": "hfnlproxy:zenwebp",
+          "n": 774,
+          "n_dropped": 0,
+          "srocc": 1.0,
+          "srocc_signed": 1.0,
+          "plcc": 0.9999999999957322,
+          "plcc_raw": 0.9999999999999836,
+          "krocc": 1.0,
+          "or": 0.0,
+          "pwrc": 1.0,
+          "z_rmse": 2.9212466996732592e-06,
+          "mae": 4.06219475174694e-06
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Three overlapping proxy views, not independent human studies",
+    "No independent SSIMULACRA2 advantage from teacher labels",
+    "Only three of six required composite axes admissible",
+    "No native target-loop, spatial RD, p95 or memory qualification",
+    "Selected619 prior spatial/scalar parity failure retained",
+    "Full944 complete refinement unsupported",
+    "New family model scores use public BakeScorer with native canonical features; complete per-candidate image/map audits on these added rows remain unmeasured",
+    "B/D legacy training-era metadata remains unqualified; current native predictions match exactly"
+  ]
+}
