@@ -485,6 +485,15 @@
       "report_url": "/zensim/reports/complete-feature-audit-2026-09-14/index.html",
       "bakes": [],
       "note": "214 native ensemble pairs now independently match all80 canonical consumed features; native/legacy base-tree audits match all228 IDs. Scores and spatial evidence unchanged. Replacement min-max planning fixed and cancellation negative control added. No fit, EVAL or model promotion."
+    },
+    {
+      "id": "2026-09-14-native-integrity-admission",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Native training admission: color identity and exact feature rows",
+      "report_url": "/zensim/reports/native-integrity-admission-2026-09-14/index.html",
+      "bakes": [],
+      "note": "All214 TRAIN rows bind native color interpretation and exact f32 features. Fixes root-era mismatch and CSV parsing drift; scores/maps unchanged. 181 nonidentities remain unresolved, and fitting that packet is refused. No new fit or EVAL."
     }
   ],
   "incumbent_notes": [

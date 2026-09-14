@@ -317,6 +317,26 @@ impl Config {
             record["input_contract"] = json!("sdr-native-clip-v1");
             record["reference_color"] = src.receipt.clone().unwrap();
             record["distorted_color"] = dst.receipt.clone().unwrap();
+            let canonical_f32: Vec<u8> = features
+                .iter()
+                .flat_map(|&v| (v as f32).to_le_bytes())
+                .collect();
+            record["canonical_feature_count"] = json!(features.len());
+            record["root_form_override"] = json!(std::env::var("ZENSIM_ROOT_FORM").ok());
+            record["canonical_features_f32_le_sha256"] = json!(sha(&canonical_f32));
+            record["formula_revision"] = json!(format!(
+                "{:?}",
+                zensim::feature_v2::active_formula_revision()
+            ));
+            record["candidate_formula_revisions"] = json!(
+                self.models
+                    .iter()
+                    .map(|model| format!(
+                        "{:?}",
+                        zensim::feature_v2::bake_formula_revision_public(model)
+                    ))
+                    .collect::<Vec<_>>()
+            );
         }
         if self.ssim2 {
             if contract != InputContract::LegacyRgb8 {

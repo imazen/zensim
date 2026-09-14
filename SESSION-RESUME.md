@@ -1,5 +1,19 @@
 # Start here — one target score, one development path
 
+## September 14, newest: native TRAIN input admission and exact CSV binding
+
+[Native integrity admission](benchmarks/native_integrity_admission_2026-09-14.md)
+adds strict trainer-v3 / diagnostic-admission-v2 for native Rev3 D228. Exact
+scoring interpretation, complete feature audit, root settings and per-row f32
+hashes are required before fitting. Native final scoring uses pairs-tsv/sqrt;
+round-trip CSV parsing fixes47 f32 mismatches on29 of214 real audit rows.
+All214 corrected rows match canonical hashes; prior features/scores/maps remain
+unchanged. Equal bytes with different primaries no longer deduplicate.
+The181 unresolved pairs remain unlabelled;33 identities are valid. A real
+attempt to admit that diagnostic packet for training refuses before payload
+reads. No model fit/EVAL/promotion. Next resolve P3/q85 and restore mobile
+coverage before a reviewed native TRAIN refit. HDR remains separate.
+
 ## September 14, newest: complete canonical-feature audit and min-max fix
 
 [Evidence](benchmarks/complete_feature_audit_2026-09-14.md) closes the prior

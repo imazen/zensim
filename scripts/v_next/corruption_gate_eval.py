@@ -18,12 +18,76 @@ TILE = "./target/release/score_tiles_with_bake"
 TILE_MIN = os.environ.get("TILE_MIN") == "1"  # task #33: tile-min pooling
 
 
+def audit_input_keys(a):
+    """Exact presented-input identities; never infer color from source tags."""
+    import json
+    schema = a.get("schema", "canonical-feature-audit-v1")
+    if schema == "canonical-feature-audit-v1":
+        if a.get("input_contract", "legacy-rgb8") != "legacy-rgb8" or any(
+                key in a for key in ("reference_color", "distorted_color")):
+            raise ValueError("native input requires explicit native audit schema")
+        return tuple((a[side + "_pixels_sha256"], "legacy-rgb8")
+                     for side in ("reference", "distorted"))
+    if schema != "canonical-feature-audit-v2" or a.get("input_contract") != "sdr-native-clip-v1":
+        raise ValueError("unsupported input audit contract")
+    keys = []
+    for side in ("reference", "distorted"):
+        color = a.get(side + "_color", {})
+        identity = color.get("scoring_identity", {})
+        if (color.get("contract") != "sdr-native-clip-v1"
+                or set(identity) != {"pixel_format", "primaries", "alpha", "gamut", "width", "height", "endianness"}
+                or identity["pixel_format"] not in ("Srgb16Rgba", "LinearF32Rgba")
+                or identity["primaries"] not in ("Srgb", "DisplayP3", "Bt2020")
+                or identity["alpha"] not in ("Unknown", "Straight") or identity["gamut"] != "Clip"
+                or identity["endianness"] not in ("little", "big")
+                or identity["endianness"] != color.get("endianness")
+                or any(type(identity[n]) is not int or identity[n] <= 0 or identity[n] != a.get(n)
+                       for n in ("width", "height"))):
+            raise ValueError("missing or unsupported native scoring identity")
+        digest = a[side + "_pixels_sha256"]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ValueError("invalid native presented-pixel hash")
+        keys.append((digest, json.dumps(identity, sort_keys=True, separators=(",", ":"))))
+    return tuple(keys)
+
+
+def bind_native_audit(a, meta):
+    """Require reviewed native bindings and an actual full-input audit."""
+    import math
+    if meta.get("input_contract") != "sdr-native-clip-v1" or a.get("input_contract") != meta["input_contract"]:
+        raise ValueError("native admission input contract mismatch")
+    keys = audit_input_keys(a)
+    for side in ("reference", "distorted"):
+        if (a[side + "_color"]["scoring_identity"] != meta.get("expected_" + side + "_scoring_identity")
+                or a[side + "_pixels_sha256"] != meta.get("expected_" + side + "_pixels_sha256")):
+            raise ValueError("native admission scoring identity mismatch")
+    ids = a.get("consumed_feature_ids", [])
+    delta = a.get("max_consumed_feature_abs_delta")
+    if (a.get("feature_audit_scope") != "complete-structural-read-set-v1"
+            or a.get("formula_revision") != "Rev3"
+            or "root_form_override" not in a
+            or a["root_form_override"] not in (None, "sqrt")
+            or not a.get("candidate_formula_revisions")
+            or any(revision != "Rev3" for revision in a["candidate_formula_revisions"])
+            or a.get("canonical_feature_count") != 372
+            or not isinstance(a.get("canonical_features_f32_le_sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", a["canonical_features_f32_le_sha256"]) is None
+            or not isinstance(ids, list) or any(type(i) is not int for i in ids)
+            or ids != sorted(set(ids)) or not set(range(228)).issubset(ids)
+            or any(i < 0 or i >= 372 for i in ids)
+            or not isinstance(delta, (int, float)) or not math.isfinite(delta) or delta < 0):
+        raise ValueError("native admission requires complete D228 feature audit")
+    return keys
+
+
 def integrity_summary(records, audits):
     """Severity-reviewed train/eval rows; exact Rust composition, no q20 proxy."""
     import math
     expected = {r["index"]: r for r in records}
     if len(expected) != len(records) or set(expected) != set(audits):
         raise ValueError("integrity audit coverage mismatch")
+    if len({a.get("input_contract", "legacy-rgb8") for a in audits.values()}) > 1:
+        raise ValueError("mixed integrity input eras")
     unique = {}
     for key, meta in expected.items():
         a = audits[key]
@@ -35,7 +99,10 @@ def integrity_summary(records, audits):
         if ("expected_reference_pixels_sha256" in meta
                 and a["reference_pixels_sha256"] != meta["expected_reference_pixels_sha256"]):
             raise ValueError("integrity reference pixel mismatch")
-        identical = a["reference_pixels_sha256"] == a["distorted_pixels_sha256"]
+        inputs = bind_native_audit(a, meta) if a.get("schema") == "canonical-feature-audit-v2" else audit_input_keys(a)
+        if meta.get("input_contract") == "sdr-native-clip-v1" and a.get("schema") != "canonical-feature-audit-v2":
+            raise ValueError("native admission cannot consume a legacy audit")
+        identical = inputs[0] == inputs[1]
         if a["pixels_identical"] != identical or ("pixels_identical" in meta and meta["pixels_identical"] != identical):
             raise ValueError("integrity pixel identity flag mismatch")
         for field in ("head_probability", "stored_f32_head_probability", "head_threshold", "base_score",
@@ -47,7 +114,7 @@ def integrity_summary(records, audits):
         active = not a["pixels_identical"] and a["head_probability"] > a["head_threshold"]
         if active != (not a["pixels_identical"] and a["stored_f32_head_probability"] > a["head_threshold"]):
             raise ValueError("integrity activation precision mismatch")
-        identity = (meta["origin"], a["reference_pixels_sha256"], a["distorted_pixels_sha256"])
+        identity = (meta["origin"], *inputs)
         value = dict(index=key, origin=meta["origin"], role=meta["fit_role"], disposition=meta["disposition"],
                      family=meta["family"], kind=meta["kind"], codec=meta.get("codec"), knob=meta.get("knob"),
                      content_class=meta["content_class"], active=active,
@@ -132,12 +199,15 @@ def integrity_report(argv):
         raise ValueError("fresh integrity report required")
     admission = json.loads(a.integrity_admission.read_text())
     schema = admission.get("schema")
-    if schema not in ("integrity-train-admission-v1", "integrity-eval-admission-v1", "integrity-train-diagnostic-v1"):
+    if schema not in ("integrity-train-admission-v1", "integrity-eval-admission-v1", "integrity-train-diagnostic-v1", "integrity-train-diagnostic-v2"):
         raise ValueError("explicit train/eval admission required")
-    source_role = "train" if schema in ("integrity-train-admission-v1", "integrity-train-diagnostic-v1") else "validate"
+    source_role = "train" if schema in ("integrity-train-admission-v1", "integrity-train-diagnostic-v1", "integrity-train-diagnostic-v2") else "validate"
     roles = {"fit", "calibrate"} if source_role == "train" else {"evaluate"}
-    if schema == "integrity-train-diagnostic-v1":
+    if schema in ("integrity-train-diagnostic-v1", "integrity-train-diagnostic-v2"):
         roles = {"fit", "development", "calibration"}
+    native = schema == "integrity-train-diagnostic-v2"
+    if native and admission.get("input_contract") != "sdr-native-clip-v1":
+        raise ValueError("native admission input contract required")
     if set(admission["origins"]) != roles:
         raise ValueError("invalid source-role map")
     records = admission["records"]
@@ -150,6 +220,8 @@ def integrity_report(argv):
     audits = {}
     for line in a.audit_jsonl.read_text().splitlines():
         record = json.loads(line); key = int(record["human_score"])
+        if (record.get("schema") == "canonical-feature-audit-v2") != native:
+            raise ValueError("integrity admission/audit input era mismatch")
         if key != record["human_score"] or key in audits:
             raise ValueError("duplicate/noninteger audit key")
         audits[key] = record
@@ -158,6 +230,8 @@ def integrity_report(argv):
     bound = 0
     for row in records:
         if "expected_distorted_pixels_sha256" not in row:
+            if native:
+                raise ValueError("native admission requires reviewed pixel bindings")
             row["expected_distorted_pixels_sha256"] = audits[row["index"]]["distorted_pixels_sha256"]
             bound += 1
     result = integrity_summary(records, audits)
@@ -168,6 +242,8 @@ def integrity_report(argv):
     result.update(schema="integrity-assessment-v1", model_qualified=False, model_inputs=inputs[0],
                   admission_sha256=sha(a.integrity_admission), audit_sha256=sha(a.audit_jsonl),
                   new_native_pixel_bindings=bound)
+    if native:
+        result["input_contract"] = "sdr-native-clip-v1"
     a.out_json.write_text(json.dumps(result, indent=2, allow_nan=False)+"\n")
     print(json.dumps(result["by_role"], indent=2))
 

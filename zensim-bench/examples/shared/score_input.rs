@@ -298,12 +298,26 @@ impl ScoreInput {
             "endianness":if cfg!(target_endian="little") {"little"} else {"big"},
             "display":"public SDR sRGB clipping; existing alpha compositing",
             "converter":"zenpixels-convert 0.2.16", "full_cms":profile.is_some(), "source_icc_used":profile.is_some()});
-        Ok(Self {
+        let mut result = Self {
             width,
             height,
             pixels,
             receipt: Some(receipt),
-        })
+        };
+        // Record what the public scorer actually receives, independently of
+        // source ICC/CICP and of a codec's original decoded descriptor.
+        use zensim::ImageSource;
+        let source = result.source();
+        let identity = json!({
+            "pixel_format":format!("{:?}",source.pixel_format()),
+            "primaries":format!("{:?}",source.color_primaries()),
+            "alpha":format!("{:?}",source.alpha_mode()),
+            "gamut":format!("{:?}",source.gamut_mapping()),
+            "width":source.width(), "height":source.height(),
+            "endianness":if cfg!(target_endian="little") {"little"} else {"big"}
+        });
+        result.receipt.as_mut().unwrap()["scoring_identity"] = identity;
+        Ok(result)
     }
 
     pub fn bytes(&self) -> &[u8] {
@@ -482,6 +496,11 @@ mod tests {
         assert_eq!(a.bytes(), b.bytes());
         assert!(a.is_identical_to(&a));
         assert!(!a.is_identical_to(&b));
+        let ai = &a.receipt.as_ref().unwrap()["scoring_identity"];
+        let bi = &b.receipt.as_ref().unwrap()["scoring_identity"];
+        assert_eq!(ai["primaries"], "Srgb");
+        assert_eq!(bi["primaries"], "DisplayP3");
+        assert_ne!(ai, bi);
         let metric = zensim::Zensim::new(zensim::ZensimProfile::B);
         assert!(metric.compute(&a.source(), &b.source()).unwrap().score() < 99.9);
     }

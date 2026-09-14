@@ -15,6 +15,61 @@ import corruption_gate_eval as evaluator
 
 class Admission(unittest.TestCase):
     @staticmethod
+    def native_pair(index=1):
+        import hashlib
+        import numpy as np
+        meta, audit = Admission.honest_pair(index, 5., False)
+        identity = dict(pixel_format='Srgb16Rgba', primaries='Srgb', alpha='Unknown',
+                        gamut='Clip', width=16, height=16, endianness='little')
+        audit.update(schema='canonical-feature-audit-v2', input_contract='sdr-native-clip-v1',
+                     width=16, height=16, feature_audit_scope='complete-structural-read-set-v1',
+                     consumed_feature_ids=list(range(228)), max_consumed_feature_abs_delta=0.,
+                     canonical_feature_count=372,
+                     formula_revision='Rev3', candidate_formula_revisions=['Rev3'],
+                     root_form_override='sqrt',
+                     canonical_features_f32_le_sha256=hashlib.sha256(np.zeros(372,dtype='<f4').tobytes()).hexdigest())
+        meta['input_contract'] = 'sdr-native-clip-v1'
+        for side, digest in [('reference','a'*64),('distorted','b'*64)]:
+            audit[side+'_pixels_sha256'] = digest
+            audit[side+'_color'] = dict(contract='sdr-native-clip-v1', endianness='little', scoring_identity=copy.deepcopy(identity))
+            meta['expected_'+side+'_pixels_sha256'] = digest
+            meta['expected_'+side+'_scoring_identity'] = copy.deepcopy(identity)
+        return meta,audit
+
+    def test_native_equal_codes_different_primaries_are_not_identity_or_duplicates(self):
+        meta,a = self.native_pair()
+        a['distorted_pixels_sha256'] = a['reference_pixels_sha256']
+        meta['expected_distorted_pixels_sha256'] = a['distorted_pixels_sha256']
+        a['distorted_color']['scoring_identity']['primaries'] = 'DisplayP3'
+        meta['expected_distorted_scoring_identity']['primaries'] = 'DisplayP3'
+        evaluator.integrity_summary([meta],{1:a})
+        other,b = copy.deepcopy(meta),copy.deepcopy(a)
+        other['index']=2;b['human_score']=2
+        b['distorted_color']['scoring_identity']['primaries']='Bt2020'
+        other['expected_distorted_scoring_identity']['primaries']='Bt2020'
+        self.assertEqual(evaluator.integrity_summary([meta,other],{1:a,2:b})['unique_rows'],2)
+        a['pixels_identical']=True
+        with self.assertRaisesRegex(ValueError,'identity flag mismatch'):
+            evaluator.integrity_summary([meta],{1:a})
+
+    def test_native_admission_refuses_retagged_or_incomplete_receipts(self):
+        meta,a = self.native_pair()
+        evaluator.integrity_summary([meta],{1:a})
+        for change in ('schema','primaries','scope','coverage','hash','format','geometry','revision','root'):
+            b=copy.deepcopy(a)
+            if change=='schema': b['schema']='canonical-feature-audit-v1'
+            if change=='primaries': b['distorted_color']['scoring_identity']['primaries']='DisplayP3'
+            if change=='scope': del b['feature_audit_scope']
+            if change=='coverage': b['consumed_feature_ids'].remove(227)
+            if change=='hash': del b['canonical_features_f32_le_sha256']
+            if change=='format': b['reference_color']['scoring_identity']['pixel_format']='Rgb8'
+            if change=='geometry': b['reference_color']['scoring_identity']['width']=8
+            if change=='revision': b['candidate_formula_revisions']=['Rev1']
+            if change=='root': b['root_form_override']='libm'
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                evaluator.integrity_summary([meta],{1:b})
+
+    @staticmethod
     def honest_pair(index, knob, active):
         meta = dict(index=index, origin='2010', source_family='origin:2010', role='train',
                     reference='ref', distorted=f'dist{index}', expected_distorted_file_sha256=f'dfile{index}',
@@ -148,6 +203,12 @@ class Admission(unittest.TestCase):
                 self.assertFalse((root/'output').exists())
 
     def test_rev3_development_is_not_probability_calibration(self):
+        self.training_masks(native_input=False)
+
+    def test_native_training_masks_and_feature_payload_binding(self):
+        self.training_masks(native_input=True)
+
+    def training_masks(self, native_input):
         import numpy as np
         import pandas as pd
         class ObservedMasks(Exception):
@@ -155,29 +216,51 @@ class Admission(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             roles = {'fit':['2010'], 'calibration':['1214'], 'development':['1054']}
-            records, features, audits = [], {}, {}
+            tool=root/'tool';tool.write_bytes(b'synthetic tool identity')
+            spec=dict(path=str(tool),sha256=trainer._sha256(tool))
+            records, features, audits, pairs = [], {}, {}, {}
+            native_rows = {}
             for pos, (role, origins) in enumerate(roles.items()):
                 ids = [pos*2, pos*2+1]
                 for i in ids:
-                    records.append(dict(index=i, role='train', fit_role=role, origin=origins[0],
-                                        source_family=origins[0], disposition='valid' if i%2==0 else 'catastrophic_proxy',
-                                        expected_distorted_file_sha256=str(i), expected_distorted_pixels_sha256=str(i)))
+                    if native_input:
+                        import hashlib
+                        row,a = self.native_pair(i)
+                        row.update(role='train',fit_role=role,origin=origins[0],source_family=origins[0],
+                                   disposition='valid' if i%2==0 else 'catastrophic_proxy')
+                        a['distorted_pixels_sha256'] = row['expected_distorted_pixels_sha256'] = hashlib.sha256(str(i).encode()).hexdigest()
+                        values=np.full(372,float(i),dtype='<f4')
+                        if i == 0:
+                            # Default pandas parsing rounds this across an f32
+                            # midpoint; the Rust audit must catch that change.
+                            values[227]=0.008768686559051275
+                        a['canonical_features_f32_le_sha256'] = hashlib.sha256(values.tobytes()).hexdigest()
+                        a['model_inputs'] = [[spec['path'],spec['sha256']]]
+                        native_rows[i]=a;records.append(row)
+                    else:
+                        records.append(dict(index=i, role='train', fit_role=role, origin=origins[0],
+                                            source_family=origins[0], disposition='valid' if i%2==0 else 'catastrophic_proxy',
+                                            expected_distorted_file_sha256=str(i), expected_distorted_pixels_sha256=str(i)))
                 frame = pd.DataFrame({f'f{k}':[float(i) for i in ids] for k in range(372)})
+                if native_input and ids[0] == 0:
+                    frame.loc[0,'f227']=0.008768686559051275
                 frame['human_score'] = ids
                 path=root/(role+'.csv');frame.to_csv(path,index=False)
                 features[role]=dict(path=str(path),sha256=trainer._sha256(path))
                 path=root/(role+'.jsonl')
-                path.write_text(''.join(json.dumps(dict(human_score=i,distorted_file_sha256=str(i),distorted_pixels_sha256=str(i),reference_pixels_sha256='ref'))+'\n' for i in ids))
+                path.write_text(''.join(json.dumps(native_rows[i] if native_input else dict(human_score=i,distorted_file_sha256=str(i),distorted_pixels_sha256=str(i),reference_pixels_sha256='ref'))+'\n' for i in ids))
                 audits[role]=dict(path=str(path),sha256=trainer._sha256(path))
+                if native_input:
+                    path=root/(role+'.tsv')
+                    path.write_text('ref_path\tdist_path\thuman_score\n'+''.join(f"ref\tdist{i}\t{i}\n" for i in ids))
+                    pairs[role]=dict(path=str(path),sha256=trainer._sha256(path))
             admission=root/'admission.json'
-            admission.write_text(json.dumps(dict(schema='integrity-train-diagnostic-v1',origins=roles,records=records)))
-            tool=root/'tool';tool.write_bytes(b'synthetic tool identity')
-            spec=dict(path=str(tool),sha256=trainer._sha256(tool))
+            admission.write_text(json.dumps(dict(schema='integrity-train-diagnostic-v2' if native_input else 'integrity-train-diagnostic-v1',input_contract='sdr-native-clip-v1' if native_input else 'legacy-rgb8',origins=roles,records=records)))
             manifest=root/'fit.json'
-            manifest.write_text(json.dumps(dict(schema='integrity-head-train-v2',formula_revision=3,
+            manifest.write_text(json.dumps(dict(schema='integrity-head-train-v3' if native_input else 'integrity-head-train-v2',root_form='sqrt',input_contract='sdr-native-clip-v1' if native_input else 'legacy-rgb8',formula_revision=3,
                 head_feature_ids=list(range(228)),seed=4101,deadband=.9,
                 admission=dict(path=str(admission),sha256=trainer._sha256(admission)),
-                features=features,audit=audits,base_bake=spec,extractor=spec,parity_binary=spec)))
+                features=features,audit=audits,pairs=pairs,base_bake=spec,extractor=spec,parity_binary=spec)))
             def observe(z, y, fit, cal, weights, seed, parameters):
                 np.testing.assert_array_equal(np.flatnonzero(fit),[0,1])
                 np.testing.assert_array_equal(np.flatnonzero(cal),[2,3])
@@ -187,6 +270,25 @@ class Admission(unittest.TestCase):
                 with self.assertRaises(ObservedMasks):
                     trainer.strict_train_main(['--strict-train-manifest',str(manifest),'--out-dir',str(root/'out')])
             self.assertFalse((root/'out').exists())
+            if native_input:
+                # A feature file can have an updated manifest hash and still
+                # disagree with the canonical extraction bound by its audit.
+                fpath=Path(features['fit']['path']);frame=pd.read_csv(fpath)
+                frame.loc[0,'f227'] += 1.0;frame.to_csv(fpath,index=False)
+                m=json.loads(manifest.read_text());m['features']['fit']['sha256']=trainer._sha256(fpath)
+                manifest.write_text(json.dumps(m))
+                with patch.object(trainer,'fit_canonical_hgb',side_effect=AssertionError('fit before binding')):
+                    with self.assertRaisesRegex(ValueError,'canonical feature payload mismatch'):
+                        trainer.strict_train_main(['--strict-train-manifest',str(manifest),'--out-dir',str(root/'out')])
+                # A legacy receipt cannot pass native admission, even before
+                # payload hashing. Make the feature path nonexistent to prove it.
+                apath=Path(audits['fit']['path']);entries=[json.loads(x) for x in apath.read_text().splitlines()]
+                entries[0]['schema']='canonical-feature-audit-v1'
+                apath.write_text(''.join(json.dumps(x)+'\n' for x in entries))
+                m['audit']['fit']['sha256']=trainer._sha256(apath)
+                m['features']['fit']['path']=str(root/'must-not-open.csv');manifest.write_text(json.dumps(m))
+                with self.assertRaisesRegex(ValueError,'audit input era mismatch'):
+                    trainer.strict_train_main(['--strict-train-manifest',str(manifest),'--out-dir',str(root/'out')])
 
 
 if __name__ == '__main__':

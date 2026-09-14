@@ -1,5 +1,15 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September14, native integrity admission:**
+[Evidence](../benchmarks/native_integrity_admission_2026-09-14.md) reuses the
+same214 TRAIN-fit pairs and215 files. The trainer's native scoring command
+verifies explicit color/precision identities and all214 canonical f32 row
+hashes. Its native input era uses Rev3/sqrt and round-trip CSV parsing.
+All earlier feature CSV bytes and score/spatial fields remain unchanged.
+Thirty-three identities are valid;181 nonidentities stay unresolved, with one
+head activation. This diagnostic packet is rejected for fitting before feature
+reads. No new fits, EVAL, protected data access or model promotion.
+
 **September 14, complete canonical-feature audit correction:**
 [Replay](../benchmarks/complete_feature_audit_2026-09-14.md) uses the same
 214 admitted TRAIN-fit pairs /215 files with fresh outputs. The earlier native
