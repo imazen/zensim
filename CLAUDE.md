@@ -20,7 +20,10 @@ A new model must execute and serve entirely in Rust through a zensim surface
 API. Evaluation must call that API, including every head, corruption gate,
 spline and ensemble/routing step. `BakeScorer` is the dynamic candidate surface;
 `Zensim` owns named profiles. Python is useful for invention and independent
-references. Canonical ownership is a maintenance decision, not proof of
+references. Model comparisons lead with the registered composite coverage,
+full rank/band/within-image panels, scatter geometry and tail/dial/spatial gates.
+Raw MAE is an auxiliary calibration diagnostic, never a replacement for that
+selection evidence. Canonical ownership is a maintenance decision, not proof of
 correctness. Keep independent numeric references with real parity gates.
 
 Before adding an implementation, find its existing owner in the playbook and

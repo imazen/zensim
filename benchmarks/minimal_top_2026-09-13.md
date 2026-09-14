@@ -3,6 +3,98 @@
 Registered September 13 after the strict train/eval ruling, before fitting.
 Source checkout starts at a9a2cea0. No named model or default is changed.
 
+## September 14 correction: use the full quality evidence
+
+The initial summary overemphasized raw MAE. MAE is an auxiliary served-dial
+calibration diagnostic; it is not the primary quality or selection criterion.
+The frozen fits and their original results remain unchanged. The full panel
+below supersedes the MAE-led interpretation, not the experiment protocol.
+
+Chronology and existing owners:
+
+- May 29: [mandatory full Mohammadi rank + dial panels](../docs/EVAL_PANEL_REQUIREMENT.md).
+  SROCC, PLCC, KROCC, PWRC, OR, Z-RMSE and DS-AUC expose different failures;
+  per-band and within-reference readings accompany aggregate correlation.
+- July 26: [statistical review](stats_correctness_review_2026-07-26.md) consolidated
+  panel ownership. Several panel statistics are highly correlated; OR with
+  corpus-level sigma was weakly discriminating. Do not count correlated wins
+  as independent evidence or interpret a small OR as proof of no severe misses.
+- August 3–6: `freeze_check` owns the registered balanced composite, profile
+  floors and spatial tie-break. `bake_verdict` owns the product-weighted
+  composite. These are named, distinct quantities; neither is raw MAE.
+- August 27–28: `outlier_gate.py` owns G-OUT v2 raw scatter residual tails;
+  `gauntlet.py` owns shape-normalized scatter geometry. The Claude transcript
+  `9d242656-d636-45a6-9468-565163baed2d` explicitly records the geometric plot
+  work on August 28, also documented in the
+  [balance campaign](balance_campaign_2026-08-28.md#board-shaping-aware-scatters-hfnl-scaling-knob-end-default-user-asks-all-live).
+- September 4–6: fair comparisons exclude teacher-self-target superiority
+  claims, aggregate replicated recipes, and require measured addressability
+  before selection. The September 13 train/eval/test ruling supersedes every
+  older split recipe or peer-bar calibration practice.
+
+The scatter geometry the user recalled is **not a geometric mean**. Predictions
+are mapped by rank onto the reference quantiles to reveal scatter independently
+of output shaping. Existing diagnostics describe the ±4 robust-sigma envelope,
+p99 and maximum displacement relative to the reference span, coverage/clumping,
+and floor/ceiling mass. The separate G-OUT raw chart-z uses the OLS residual of
+prediction against target, divided by `1.4826 * MAD(residual)`. Its p99 and maximum
+catch tail behavior that a pooled rank or logistic-remapped panel can hide.
+The report's `geomean3 = cbrt(SROCC * PLCC * PWRC)` is a third, distinct quantity.
+The historical code does not combine all these into one universal scalar;
+selection uses a composite alongside floors, tail gates and plot diagnostics.
+
+### Frozen-model panel, original admitted eval only
+
+All rows use the existing identity-aware Rust verdicts on the same 3,125 pairs.
+Neural rows are complete uniform five-member ensembles, not the best seed.
+Full stored statistics and hashes are in
+[minimal_top_2026-09-13.metric_review.json](minimal_top_2026-09-13.metric_review.json).
+Chart-z values call the existing `outlier_gate.axis_stats` on the complete raw
+per-pair predictions; no new scoring, fitting or statistic implementation.
+
+| Configuration | SROCC ↑ | PLCC ↑ | KROCC ↑ | PWRC ↑ | Z-RMSE ↓ | OR % ↓ | Raw chart-z p99 / max ↓ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| y40_h32 | 0.9091 | 0.9073 | 0.7415 | 0.9808 | 0.4204 | 0.096 | 3.345 / 5.806 |
+| y40_h128 | 0.9135 | 0.9129 | 0.7472 | 0.9820 | 0.4083 | 0.096 | 3.385 / 5.822 |
+| y60_h32 | 0.9290 | 0.9293 | 0.7678 | 0.9860 | 0.3693 | 0.032 | 3.101 / 5.803 |
+| y60_h128 | 0.9323 | 0.9330 | 0.7734 | 0.9868 | 0.3599 | 0.032 | 3.164 / 5.776 |
+| local120_h128 | 0.9328 | 0.9332 | 0.7747 | 0.9869 | 0.3594 | 0.032 | 3.425 / 5.628 |
+| selected619_h128 | 0.9399 | 0.9408 | 0.7853 | 0.9885 | 0.3390 | 0.032 | 3.001 / 6.080 |
+| full944_h128 | 0.9433 | 0.9443 | 0.7926 | 0.9892 | 0.3290 | 0.032 | 3.070 / 6.203 |
+| full944_h256 | 0.9430 | 0.9440 | 0.7916 | 0.9892 | 0.3300 | 0.032 | 3.087 / 6.331 |
+| linear60 | 0.8965 | 0.8962 | 0.7157 | 0.9783 | 0.4437 | 0.032 | 2.884 / 4.545 |
+
+No cross-corpus composite is available: the historical owners exclude KADID
+from that formula, and this study did not measure its required other axes.
+The generic `train_eq_val` flag is historical and conservative; the explicit
+admission here is source-disjoint KADID SELECT. Do not alter the composite to
+make this one-corpus study appear complete, or compare it with historical
+numbers on different populations. Matched peer bars are also absent, so the
+raw chart-z table does not award G-OUT passes. Future calibration uses train
+only; eval remains a gate. Existing all-rows board policy omits these legacy-
+tier rows' scatter embeddings; that omission is not evidence of clean geometry.
+
+The revised interpretation is a tradeoff, not a selected winner:
+
+- Full944/H128 leads the measured aggregate rank panel and both usable quality
+  bands, but has higher worst chart-z than the compact models and lacks complete
+  spatial support. H256 offers no demonstrated improvement in this panel.
+- Coarse60/H128 is a fast candidate. Against local120, SROCC is 0.9323 versus
+  0.9328 and within-reference SROCC 0.9436 versus 0.9437. Local120 improves the
+  high band (0.8587 versus 0.8471) but worsens the low band (0.7331 versus
+  0.7476) and p99 chart-z (3.425 versus 3.164), at almost twice the scalar cost.
+  These point estimates do not establish statistically significant superiority.
+- Linear60 has weaker ordering but the smallest p99/max raw chart-z, illustrating
+  why rank, residual tails and served calibration must all remain visible.
+- Selected619's scalar panel cannot excuse invalid spatial maps. Four compact
+  photo/JPEG repair passes do not replace broad corruption or native spatial RD.
+
+Next comparisons must lead with the registered full panel/composite coverage,
+quality bands, within-image ordering, raw and normalized scatter tails, and
+corruption/dial/spatial gates, alongside measured runtime. Missing axes remain
+incomplete. Raw MAE stays available for dial calibration diagnosis. No frozen
+model is retuned or selected using this retrospective eval reading.
+
 ## Fixed comparison
 
 Eight configurations, five paired initialization seeds 6101/6103/6107/6113/6119

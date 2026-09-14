@@ -1,5 +1,17 @@
 # Start here — one target score, one development path
 
+## September 14, latest: restore the composite/panel/scatter interpretation
+
+The user corrected the MAE-led summary. Read the
+[metric correction and frozen-model panel](benchmarks/minimal_top_2026-09-13.md#september-14-correction-use-the-full-quality-evidence)
+first. MAE is auxiliary calibration evidence. Historical selection combines
+named composites with floors, Mohammadi/per-band/per-reference panels,
+raw G-OUT residual tails and shape-normalized scatter diagnostics. Geometric
+scatter shape is distinct from `geomean3`. Existing owner statistics are
+retained with hashes in `benchmarks/minimal_top_2026-09-13.metric_review.json`.
+The KADID-only study has no cross-corpus composite or matched peer tail bars;
+no winner or product qualification follows. No retraining or test reads.
+
 ## September 14, latest: strict minimal/wide comparison and identity correction
 
 [The completed comparison](benchmarks/minimal_top_2026-09-13.md) fits 40 MLPs
