@@ -2,7 +2,8 @@
 
 This module assembles admitted rows and orchestrates experiments. It implements
 no feature extraction, scorer, optimizer, calibration, or correlation statistic.
-The small T2 screen retains its separate, strict 300-second deadline.
+Only explicitly admitted train/eval segments are accepted. Historical mixed
+preparations are retired; no test/terminal segment may be read.
 """
 import collections
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +13,6 @@ import hashlib
 import json
 import math
 import os
-import shutil
 from pathlib import Path
 import struct
 import subprocess
@@ -30,127 +30,144 @@ def read_tsv(path):
         return list(csv.DictReader(f, delimiter="\t"))
 
 
-def inputs():
-    """Frozen September 13 corpus policy; never opens protected feature values."""
-    import pyarrow.parquet as pq
+SPLIT_POLICY = "train-eval-only-v1"
+RECIPE_SCHEMA = "zensim-feature-ceiling-recipe-v2"
+
+
+def allowed_path(value):
+    """Reject explicit protected segments before opening or hashing their bytes."""
+    import re
+    path = Path(value).expanduser()
+    for candidate in (path, path.resolve()):
+        if re.search(r"(?:^|[/_.-])(test|terminal)(?:$|[/_.-])", str(candidate), re.I):
+            raise ValueError("test/terminal paths are forbidden")
+    return path
+
+
+def validate_recipe(recipe):
+    if recipe.get("schema") != RECIPE_SCHEMA or recipe.get("split_policy") != SPLIT_POLICY:
+        raise ValueError("requires v2 train/eval-only recipe; historical v1/test recipes are retired")
+    if recipe.get("reuse_prepared"):
+        raise ValueError("mixed preparation reuse is retired; supply separate admitted train/eval segments")
+    segments = recipe.get("input_segments", [])
+    if not segments or {s.get("role") for s in segments} != {"train", "eval"}:
+        raise ValueError("input segments must contain only train and eval")
+    for segment in segments:
+        allowed_path(segment["path"])
+        allowed_path(segment["admission"]["path"])
+    if recipe.get("spatial_manifest"):
+        allowed_path(recipe["spatial_manifest"])
+        digest = recipe.get("spatial_manifest_sha256", "")
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ValueError("spatial eval manifest needs a pinned SHA256")
+
+
+def admitted_segment(segment):
+    """Read source-only admission before the separate pixel/label manifest."""
+    from importlib.util import module_from_spec, spec_from_file_location
+    owner = Path(__file__).resolve().parents[1] / "canonical_corpus/check_split_compliance.py"
+    spec = spec_from_file_location("split_compliance", owner)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if segment.get("role") not in {"train", "eval"}:
+        raise ValueError("test/terminal segment forbidden before opening admission")
+    admission = segment["admission"]
+    path = allowed_path(admission["path"])
+    if sha(path) != admission["sha256"]:
+        raise ValueError("split admission identity changed")
+    declared = json.loads(path.read_text())
+    module.validate_source_admission(declared, segment["role"])
+    authority = {(r["corpus"], r["origin"]): r for r in declared["sources"]}
+    payload = allowed_path(segment["path"])
+    if sha(payload) != segment["sha256"]:
+        raise ValueError("segment identity changed")
+    data = json.loads(payload.read_text())
+    if data.get("schema") != "zensim-feature-segment-v1" or data.get("role") != segment["role"]:
+        raise ValueError("segment role/schema mismatch")
+    rows = data.get("rows", [])
+    if not rows:
+        raise ValueError("empty admitted segment")
+    for row in rows:
+        source = authority.get((row["corpus"], row["origin"]))
+        if source is None or row.get("source_family") != source["source_family"]:
+            raise ValueError("row lacks matching source admission")
+        if row.get("role", segment["role"]) != segment["role"]:
+            raise ValueError("row role disagrees with segment")
+        if row.get("source_split", segment["role"]) != segment["role"]:
+            raise ValueError("row source split cannot be relabeled")
+        for key in ("reference", "distorted"):
+            allowed_path(row[key])
+        if row.get("task") not in {"human", "codec", "corruption"} or not math.isfinite(float(row["target"])):
+            raise ValueError("invalid admitted task/target")
+        row["role"] = segment["role"]
+        row["source_split"] = source["split"]
+    return rows, [path, payload]
+
+
+def validate_rows(rows):
+    families = {}
+    origins = {}
+    references = {}
+    for row in rows:
+        role = row.get("role")
+        if role not in {"train", "eval"} or row.get("source_split") != role:
+            raise ValueError("only canonically admitted train/eval rows are permitted")
+        family = row["source_family"]
+        if family in families and families[family] != role:
+            raise ValueError("source family crosses train/eval boundary")
+        families[family] = role
+        # A changed family label must not hide the same source in both roles.
+        for mapping, key in ((origins, (row.get("corpus"), row.get("origin"))),
+                             (references, str(allowed_path(row["reference"]).resolve()))):
+            if key in mapping and mapping[key] != role:
+                raise ValueError("source/reference crosses train/eval boundary")
+            mapping[key] = role
+        for key in ("reference", "distorted"):
+            allowed_path(row[key])
+
+
+def inputs(recipe):
+    """No mixed-corpus discovery, automatic resplitting, or terminal reads."""
+    validate_recipe(recipe)
     rows, sources = [], []
-
-    def add(task, role, ref, dist, target, family, origin, **extra):
-        rows.append(dict(row_id=len(rows), task=task, role=role, reference=str(ref),
-                         distorted=str(dist), target=float(target), family=family,
-                         origin=str(origin), **extra))
-
-    root = Path("/mnt/v/zen/zensim-training/ext944-canonical-2026-08-01")
-    refs = {}
-    for role in ("train", "select"):
-        p = root / f"ext_kadid_{role}_2026-08-29.parquet"
-        sources.append(p)
-        refs[role] = set(pq.read_table(p, columns=["ref_basename"]).column(0).to_pylist())
-    assert len(refs["train"]) == 40 and len(refs["select"]) == 25
-    assert not refs["train"] & refs["select"]
-    dev = set(ordered(refs["train"])[:8])
-    kadid = Path("/mnt/v/dataset/kadid10k")
-    sources.append(kadid / "dmos.csv")
-    with sources[-1].open() as f:
-        for r in csv.DictReader(f):
-            origin = Path(r["ref_img"]).stem
-            if origin not in refs["train"] | refs["select"]:
-                continue
-            role = "dev" if origin in dev else "fit" if origin in refs["train"] else "test"
-            add("human", role, kadid / "images" / r["ref_img"],
-                kadid / "images" / r["dist_img"], (float(r["dmos"])-1)*25,
-                "kadid_" + r["dist_img"].split("_")[1], "kadid:" + origin,
-                corpus="kadid")
-    tid = Path("/mnt/v/dataset/tid2013")
-    tid_refs = {p.name.lower(): p for p in (tid / "reference_images_png").glob("*.png")}
-    sources.append(tid / "mos_with_names.txt")
-    for line in sources[-1].read_text().splitlines():
-        mos, name = line.split()
-        origin = name[:3].upper()
-        add("human", "fit", tid_refs[origin.lower() + ".png"],
-            tid / "distorted_images_png" / (Path(name).stem + ".png"),
-            float(mos)*100/9, "tid_" + name.split("_")[1], "tid:" + origin, corpus="tid")
-
-    anchor = Path("/mnt/v/output/zensim/ladder-2026-09-05/anchor")
-    sources.append(anchor / "out/_MANIFEST_anchor.json")
-    sources.extend((anchor.parent / "_MANIFEST.json", anchor.parent / "bin/zenmetrics_svtnew"))
-    family_path = Path.home() / "work/zensim-validation-2026-09-08/canonical-corruption/split_map_family.tsv"
-    assert sha(family_path) == "9d07a0f63ef5fa167c5333535010f44b4ab9a087f04e560521b6d1aa1961820c"
-    sources.append(family_path)
-    families = {r["id"]: r for r in read_tsv(family_path)}
-    codec_rows = []
-    for codec in ("jpeg", "webp", "avif_svt", "jxl"):
-        pairs_file, labels_file = (anchor / "grid" / sub / (codec + ".tsv")
-                                   for sub in ("pairs", "tsv"))
-        sources.extend((pairs_file, labels_file))
-        key = lambda r: (r["image_path"], r["codec"], r["q"], r["knob_tuple_json"])
-        labels = {key(r): r for r in read_tsv(labels_file)}
-        grouped = collections.defaultdict(dict)
-        for r in read_tsv(pairs_file):
-            r = dict(r, target=float(labels[key(r)]["score_ssim2"]))
-            grouped[r["image_path"]][(r["q"], r["knob_tuple_json"])] = r
-        assert len(grouped) == (30 if codec == "jxl" else 32)
-        for ref, values in sorted(grouped.items()):
-            origin = Path(ref).stem.split(".")[0]
-            if families[origin]["split"] != "train":
-                # Later family admission supersedes the older even-digit anchor.
-                continue
-            # Numeric knob order, not target rank: both endpoints remain visible.
-            grid = sorted(values.values(), key=lambda r: (float(r["q"]), tuple(sorted(json.loads(r["knob_tuple_json"]).items()))))
-            for i in sorted({round(j*(len(grid)-1)/4) for j in range(5)}):
-                codec_rows.append((codec, grid[i]))
-    origins = ordered(Path(r["ref_path"]).stem.split(".")[0] for _, r in codec_rows)
-    assert len(origins) == 30
-    source_families = {x: families[x]["family"] or "origin:" + x for x in origins}
-    family_order = ordered(source_families.values())
-    assert len(family_order) == 29
-    family_roles = {x: "fit" if i < 18 else "dev" if i < 24 else "test" for i, x in enumerate(family_order)}
-    roles = {x: family_roles[source_families[x]] for x in origins}
-    identities = {}
-    for codec, r in codec_rows:
-        origin = Path(r["ref_path"]).stem.split(".")[0]
-        add("codec", roles[origin], r["ref_path"], r["dist_path"], r["target"], codec, origin,
-            corpus="imazen_anchor", knob=r["knob_tuple_json"], source_family=source_families[origin])
-        identities[origin] = r["ref_path"]
-    for origin, ref in sorted(identities.items()):
-        add("codec", roles[origin], ref, ref, 100, "identity", origin, corpus="imazen_anchor",
-            source_family=source_families[origin])
-    assert len(codec_rows) == 590 and len(identities) == 30
-
-    p = Path("/mnt/v/output/zensim/canonical-corruption-serving-2026-09-08/INPUTS.json")
-    fit = Path("/mnt/v/output/zensim/canonical-corruption-refit-final-2026-09-08/FIT_MANIFEST.json")
-    sources.extend((p, fit))
-    protocol = json.loads(fit.read_text())
-    admission = Path(protocol["admission"]["path"])
-    assert sha(admission) == protocol["admission"]["sha256"]
-    sources.append(admission)
-    fit_origins = set(protocol["origins"]["fit"])
-    cal_origins = set(protocol["origins"]["calibrate"])
-    dev_origins = set(ordered(cal_origins)[:2])
-    seen = {}
-    for r in json.loads(p.read_text())["records"]:
-        if r["role"] != "train":
-            continue
-        origin = r["origin"]
-        assert origin in fit_origins | cal_origins
-        digest = r.get("expected_distorted_pixels_sha256") or r["expected_distorted_file_sha256"]
-        k = (origin, digest)
-        if k in seen:
-            assert seen[k] == r["label"], "conflicting duplicate labels"
-            continue
-        seen[k] = r["label"]
-        role = "fit" if origin in fit_origins else "dev" if origin in dev_origins else "test"
-        add("corruption", role, r["reference"], r["distorted"], 100*(1-r["label"]),
-            r["family"], origin, corpus="imazen_corruption", inert=r["inert"], source_family=r["source_family"],
-            expected_sha256=r.get("expected_distorted_file_sha256"))
-    for task in ("human", "codec", "corruption"):
-        roles = {role: {r.get("source_family", r["origin"]) for r in rows
-                        if r["task"] == task and r["role"] == role} for role in ("fit", "dev", "test")}
-        assert not (roles["fit"] & roles["dev"] or roles["fit"] & roles["test"] or roles["dev"] & roles["test"])
+    for segment in recipe["input_segments"]:
+        part, paths = admitted_segment(segment)
+        rows.extend(part)
+        sources.extend(paths)
+    validate_rows(rows)
+    for i, row in enumerate(rows):
+        row["row_id"] = i
+    if {r["task"] for r in rows} != set(recipe.get("tasks", ["human", "codec", "corruption"])):
+        raise ValueError("segment tasks differ from the requested tasks")
+    for task in recipe.get("tasks", ["human", "codec", "corruption"]):
+        if {r["role"] for r in rows if r["task"] == task} != {"train", "eval"}:
+            raise ValueError("each requested task needs separate train and eval rows")
     return rows, sources
 
 
+def training_command(trainer, out, recipe, task, hidden, fraction, seed, ids, bake):
+    fit = out / f"{task}_{'train' if fraction == 'full' else 'half'}.parquet"
+    command = [trainer]
+    if task == "corruption":
+        for label in (0, 100):
+            command += ["--group", f"class{label}:{out}/{task}_{fraction}_class{label}.parquet:1:0:mse"]
+    else:
+        command += ["--group", f"fit:{fit}:1:0:withinref,both"]
+    command += ["--target-column", "human_score", "--target-scale", "1", "--hidden", str(hidden),
+        "--epochs", str(recipe["epochs"]), "--pairs-per-epoch", str(recipe["pairs_per_epoch"]),
+        "--seed", str(seed), "--init-seed", str(seed), "--sample-seed", str(seed+10000),
+        "--pair-sampling", "stratified", "--max-features", "944", "--keep-features", ",".join(map(str, ids)),
+        "--mse-weight", "1", "--early-stop-patience", "0", "--out-dtype", "f32", "--log-every", str(recipe.get("log_every", 1)),
+        "--no-auto-eval", "--out", bake]
+    if recipe.get("nonneg_distance", False):
+        command += ["--nonneg-distance"]
+    return command
+
+
 def execute(args, recipe):
+    validate_recipe(recipe)
+    if args.cache or args.ceiling_stage == "checkpoints":
+        raise ValueError("legacy caches/checkpoint follow-ups are retired")
     if args.ceiling_stage == "report":
         return report(args, recipe)
     if args.ceiling_stage == "audit":
@@ -162,8 +179,8 @@ def execute(args, recipe):
     out = args.out.resolve()
     env = dict(os.environ, ZENSIM_FORMULA_REV=str(recipe["formula_revision"]),
                RAYON_NUM_THREADS="8", OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
-    if recipe["formula_revision"] != 3 or args.cache:
-        raise ValueError("ceiling study requires fresh Rev3 preparation; --cache is the small-screen option")
+    if recipe["formula_revision"] != 3:
+        raise ValueError("screen requires explicit fresh Rev3 preparation")
     for k in env:
         if k.startswith("ZENSIM_") and (k.endswith("_FORM") or k.endswith("_ARM") or
                 k in {"ZENSIM_SSIM_LUMA", "ZENSIM_CROSS_REVISION_DIAGNOSTIC"}):
@@ -177,10 +194,10 @@ def execute(args, recipe):
     bins = {"extractor": repo / "zensim-bench/target/release/examples/extract_features_372col",
             "trainer": repo / "target/release/zensim_mlp_train",
             "predict": repo / "target/release/predict_features_with_bake", "panel": repo / "target/release/panel"}
-    identity = {"recipe_sha256": sha(args.recipe), "binaries": {k: sha(v) for k, v in bins.items()}}
+    identity = {"split_policy": SPLIT_POLICY, "recipe_sha256": sha(args.recipe), "binaries": {k: sha(v) for k, v in bins.items()}}
     if args.ceiling_stage in ("all", "prepare"):
         out.mkdir(parents=True, exist_ok=False)
-        result = {"schema": "zensim-feature-ceiling-result-v1", "status": "PREPARING",
+        result = {"schema": "zensim-feature-ceiling-result-v2", "status": "PREPARING",
                   "model_qualified": False, "identity": identity, "stages": [], "arms": {},
                   "source_diff_sha256": hashlib.sha256(subprocess.check_output(["git", "diff", "HEAD"], cwd=repo)).hexdigest()}
     else:
@@ -216,32 +233,8 @@ def execute(args, recipe):
             stage["seconds"] = time.monotonic()-t
             save_result()
 
-    reuse = recipe.get("reuse_prepared")
-    if reuse and args.ceiling_stage in ("all", "prepare"):
-        src = Path(reuse["path"]).expanduser().resolve()
-        if sha(src / "RESULT.json") != reuse["result_sha256"]:
-            raise ValueError("source preparation result changed")
-        old = json.loads((src / "RESULT.json").read_text())
-        if sha(src / "INPUTS.json") != old["input_sha256"] or sha(src / "_MANIFEST.json") != old["manifest_sha256"]:
-            raise ValueError("source preparation declarations changed")
-        manifest = json.loads((src / "_MANIFEST.json").read_text())
-        if int(manifest["formula_revision"]) != recipe["formula_revision"] or manifest.get("sampling") != recipe.get("sampling"):
-            raise ValueError("reused preparation arithmetic/sampling mismatch")
-        for name, entry in manifest["files"].items():
-            if Path(name).name != name or sha(src / name) != entry["sha256"]:
-                raise ValueError("invalid or changed prepared table")
-            shutil.copy2(src / name, out / name)
-        for name in ("INPUTS.json", "_MANIFEST.json"):
-            shutil.copy2(src / name, out / name)
-        result.update(input_sha256=old["input_sha256"], manifest_sha256=old["manifest_sha256"],
-                      tables=old["tables"], status="PREPARED",
-                      reused_preparation=dict(reuse, extraction_identity=old["identity"]))
-        save_result()
-        if args.ceiling_stage == "prepare":
-            return
-
-    if args.ceiling_stage in ("all", "prepare") and not reuse:
-        rows, sources = inputs()
+    if args.ceiling_stage in ("all", "prepare"):
+        rows, sources = inputs(recipe)
         hashes = {str(p): sha(p) for p in sources}
         for r in rows:
             for k in ("reference", "distorted"):
@@ -249,6 +242,12 @@ def execute(args, recipe):
                     hashes[r[k]] = sha(r[k])
             if r.get("expected_sha256") and hashes[r["distorted"]] != r["expected_sha256"]:
                 raise ValueError("corruption input bytes changed")
+        reference_roles = {}
+        for row in rows:
+            digest = hashes[row["reference"]]
+            if digest in reference_roles and reference_roles[digest] != row["role"]:
+                raise ValueError("identical reference bytes cross train/eval boundary")
+            reference_roles[digest] = row["role"]
         write_json(out / "INPUTS.json", {"rows": rows, "files_sha256": hashes})
         result["input_sha256"] = sha(out / "INPUTS.json")
         raw = out / "features.csv"
@@ -261,6 +260,10 @@ def execute(args, recipe):
         run("extract", [bins["extractor"], "--full-944", *sampling_args, "--corpus", "pairs-tsv", "--path", pairs, "--out", raw])
         import pyarrow.csv as pc
         table = pc.read_csv(raw)
+        # Integral labels (including corruption's 0/100) are still regression
+        # targets; CSV inference must not turn the trainer's column into Int64.
+        target_index = table.schema.get_field_index("human_score")
+        table = table.set_column(target_index, "human_score", table["human_score"].cast(pa.float64()))
         row_ids = table["row_id"].to_pylist()
         if sorted(row_ids) != list(range(len(rows))):
             raise ValueError("lost/duplicated extraction row IDs")
@@ -274,10 +277,11 @@ def execute(args, recipe):
         manifest["formula_revision"] = int(manifest["formula_revision"])
         manifest["decoder_era"] = "canonical native decode; extractor binary and original input bytes pinned"
         manifest["files"] = {}
+        manifest["split_policy"] = SPLIT_POLICY
         result["tables"] = {}
-        for task in ("human", "codec", "corruption"):
+        for task in tasks:
             result["tables"][task] = {}
-            for role in ("fit", "dev", "test"):
+            for role in ("train", "eval"):
                 selected = [r["row_id"] for r in rows if r["task"] == task and r["role"] == role]
                 # Reference IDs keep corpus prefixes; no cross-corpus reference collisions.
                 part = table.take(pa.array(selected)).set_column(0, "ref_basename", pa.array([rows[i]["origin"] for i in selected]))
@@ -286,12 +290,16 @@ def execute(args, recipe):
                 manifest["files"][path.name] = {"sha256": sha(path)}
                 result["tables"][task][role] = {"path": str(path), "rows": len(selected),
                     "origins": sorted({rows[i]["origin"] for i in selected}), "row_ids": selected}
-                if role == "fit":
+                if role == "train":
                     family_of = lambda i: rows[i].get("source_family", rows[i]["origin"])
                     half_origins = set(ordered(family_of(i) for i in selected)[::2])
-                    subsets = {"half": [i for i in selected if family_of(i) in half_origins]}
+                    subsets = ({"half": [i for i in selected if family_of(i) in half_origins]}
+                               if recipe.get("half_data_controls", True) and recipe["control_arms"] else {})
                     if task == "corruption":
-                        for fraction, ids in (("full", selected), ("half", subsets["half"])):
+                        fractions = [("full", selected)]
+                        if "half" in subsets:
+                            fractions.append(("half", subsets["half"]))
+                        for fraction, ids in fractions:
                             for label in (0, 100):
                                 subsets[f"{fraction}_class{label}"] = [i for i in ids if rows[i]["target"] == label]
                     for sub, ids in subsets.items():
@@ -299,19 +307,12 @@ def execute(args, recipe):
                         part = table.take(pa.array(ids)).set_column(0, "ref_basename", pa.array([rows[i]["origin"] for i in ids]))
                         pq.write_table(part, path, compression=None)
                         manifest["files"][path.name] = {"sha256": sha(path)}
-            all_ids = [r["row_id"] for r in rows if r["task"] == task]
+            all_ids = [r["row_id"] for r in rows if r["task"] == task and r["role"] == "eval"]
             features = np.column_stack([table[f"f{i}"].to_numpy()[all_ids] for i in range(944)]).astype("<f4")
             with (out / (task + ".features.bin")).open("wb") as f:
                 f.write(struct.pack("<II", 944, len(all_ids)))
                 f.write(features.tobytes())
             manifest["files"][task + ".features.bin"] = {"sha256": sha(out / (task + ".features.bin"))}
-        # Compliance owner expects family-recognisable filenames and native ref IDs.
-        for corpus in ("kadid", "tid", "imazen_anchor", "imazen_corruption"):
-            ids = [r["row_id"] for r in rows if r["role"] == "fit" and r["corpus"] == corpus]
-            native = [rows[i]["origin"].split(":")[-1] for i in ids]
-            path = out / (corpus + "_split_guard.parquet")
-            pq.write_table(pa.table({"ref_basename": native}), path)
-            run(corpus + "-split", ["python3", repo / "scripts/canonical_corpus/check_split_compliance.py", "--group", path])
         write_json(out / "_MANIFEST.json", manifest)
         result["manifest_sha256"] = sha(out / "_MANIFEST.json")
         result["status"] = "PREPARED"
@@ -322,7 +323,14 @@ def execute(args, recipe):
     if sha(out / "INPUTS.json") != result["input_sha256"] or sha(out / "_MANIFEST.json") != result["manifest_sha256"]:
         raise ValueError("input/table declaration changed")
     rows = json.loads((out / "INPUTS.json").read_text())["rows"]
+    validate_rows(rows)
     manifest = json.loads((out / "_MANIFEST.json").read_text())
+    if manifest.get("split_policy") != SPLIT_POLICY:
+        raise ValueError("legacy/mixed cache manifest is forbidden")
+    for name in manifest["files"]:
+        if Path(name).name != name:
+            raise ValueError("invalid cache filename")
+        allowed_path(out / name)
     for name, entry in manifest["files"].items():
         if sha(out / name) != entry["sha256"]:
             raise ValueError(f"cached table changed: {name}")
@@ -338,80 +346,25 @@ def execute(args, recipe):
     specs += [(arm, h, "full") for arm in recipe["control_arms"] for h in recipe["capacity_hidden"]]
     if recipe.get("half_data_controls", True):
         specs += [(arm, recipe["hidden"], "half") for arm in recipe["control_arms"]]
-    dense_checkpoints = args.ceiling_stage == "checkpoints"
-    layouts = dict(recipe["arms"], **result.get("extra_layouts", {}))
-    if dense_checkpoints:
-        if result["status"] != "FITS_COMPLETE_UNQUALIFIED":
-            raise ValueError("checkpoint follow-up requires completed main fits")
-        specs = [(arm, recipe["hidden"], "full") for arm in recipe["control_arms"]]
-        # This exact layout was fixed in the earlier coarse-pool study. Recheck
-        # its small measured extraction premium on representative data too.
-        coarse = sorted(set(recipe["arms"]["fine_y190"]) | set(range(264, 300)) | set(range(336, 372)))
-        layouts["coarse262"] = coarse
-        result["extra_layouts"] = {"coarse262": coarse}
-        specs.append(("coarse262", recipe["hidden"], "full"))
-        result["checkpoint_followup"] = {"epochs": 32, "log_every": 1,
-            "reason": "The trainer selects checkpoints only at log_every. Check early optima missed by the 40-epoch campaign cadence.",
-            "source_sha256": sha(Path(__file__))}
+    layouts = dict(recipe["arms"])
     result["status"] = "FITTING"
     env["RAYON_NUM_THREADS"] = "1"
     result["fit_workers"] = 8
 
     def fit_one(spec):
         task, arm, hidden, fraction, seed = spec
-        task_rows = [r for r in rows if r["task"] == task]
         name = f"{task}-{arm}-h{hidden}-{fraction}-s{seed}"
-        early_control = dense_checkpoints and arm in recipe["control_arms"]
-        if early_control:
-            name += "-densechecks"
         if name in result["arms"]:
             if sha(out / (name + ".bin")) != result["arms"][name]["bake_sha256"]:
                 raise ValueError("completed bake changed")
             return
         ids = layouts[arm]
         bake = out / (name + ".bin")
-        fit = out / f"{task}_{'fit' if fraction == 'full' else 'half'}.parquet"
-        command = [bins["trainer"]]
-        if task == "corruption":
-            for label in (0, 100):
-                command += ["--group", f"class{label}:{out}/{task}_{fraction}_class{label}.parquet:1:0:mse"]
-        else:
-            command += ["--group", f"fit:{fit}:1:0:withinref,both"]
-        command += ["--group", f"dev:{out}/{task}_dev.parquet:0:1:withinref,both",
-            "--target-column", "human_score", "--target-scale", "1", "--hidden", str(hidden),
-            "--epochs", str(32 if early_control else recipe["epochs"]), "--pairs-per-epoch", str(recipe["pairs_per_epoch"]),
-            "--seed", str(seed), "--init-seed", str(seed), "--sample-seed", str(seed+10000),
-            "--pair-sampling", "stratified", "--max-features", "944", "--keep-features", ",".join(map(str, ids)),
-            "--mse-weight", "1", "--early-stop-patience", "0", "--out-dtype", "f32", "--log-every", "1" if early_control else str(recipe.get("log_every", 40)),
-            "--no-auto-eval", "--out", bake]
-        if recipe.get("nonneg_distance", False):
-            command += ["--nonneg-distance"]
+        command = training_command(bins["trainer"], out, recipe, task, hidden, fraction, seed, ids, bake)
         run(name + "-train", command)
-        predictions = out / (name + ".scores")
-        run(name + "-serve", [bins["predict"], "--bake", bake, "--bake-post", "raw",
-            "--features-file", out / (task + ".features.bin")], predictions)
-        values = [float(x) for x in predictions.read_text().splitlines()]
-        if len(values) != len(task_rows) or not all(np.isfinite(values)):
-            raise ValueError("incomplete/nonfinite surface predictions")
-        groups = collections.defaultdict(list)
-        for r, score in zip(task_rows, values):
-            groups[r["role"]].append((score, r["target"]))
-            groups[r["role"] + "_" + r["family"]].append((score, r["target"]))
-            if r["role"] == "test":
-                groups["test_origin_" + r["origin"]].append((score, r["target"]))
-            if task == "corruption":
-                groups[r["role"] + "_class" + str(int(r["target"]))].append((score, r["target"]))
-        jobs = out / (name + ".jobs.tsv")
-        with jobs.open("w") as jf:
-            for group, pairs in sorted(groups.items()):
-                jf.write(group + "\t" + ",".join(str(p) for p, _ in pairs) +
-                         "\t" + ",".join(str(t) for _, t in pairs) + "\n")
-        panel = out / (name + ".panel.tsv")
-        run(name + "-panel", [bins["panel"], "--batch", jobs, "--stats", "full"], panel)
         measured = {"task": task, "layout": arm, "hidden": hidden,
-            "fraction": fraction, "seed": seed, "bake_sha256": sha(bake),
-            "protocol": "dense_checkpoints" if early_control else "main",
-            "scores_sha256": sha(predictions), "panels": read_tsv(panel)}
+                    "fraction": fraction, "seed": seed, "bake_sha256": sha(bake),
+                    "protocol": SPLIT_POLICY}
         with result_lock:
             result["arms"][name] = measured
             save_result()
@@ -430,16 +383,21 @@ def execute(args, recipe):
 
 
 def audit(args, recipe):
-    """Bind final bakes to native pixels; retain unsupported spatial coverage."""
+    """Evaluate frozen bakes on eval only; retain unsupported spatial coverage."""
+    validate_recipe(recipe)
     repo = Path(__file__).resolve().parents[2]
     root = args.out.resolve()
     fits = json.loads((root / "RESULT.json").read_text())
+    if fits.get("identity", {}).get("split_policy") != SPLIT_POLICY:
+        raise ValueError("legacy mixed fits are forbidden")
     if fits["status"] != "FITS_COMPLETE_UNQUALIFIED" or fits["identity"]["recipe_sha256"] != sha(args.recipe):
         raise ValueError("audit requires completed matching fits")
     if sha(root / "INPUTS.json") != fits["input_sha256"]:
         raise ValueError("input declaration changed")
     declared = json.loads((root / "INPUTS.json").read_text())
     rows = declared["rows"]
+    validate_rows(rows)
+    tasks = recipe.get("tasks", ["human", "codec", "corruption"])
     dst = root / "audits"
     dst.mkdir(exist_ok=False)
     extractor = repo / "zensim-bench/target/release/examples/extract_features_372col"
@@ -447,13 +405,25 @@ def audit(args, recipe):
     raw_panel = args.ceiling_panel or repo / "target/release/panel"
     if sha(extractor) != fits["identity"]["binaries"]["extractor"]:
         raise ValueError("extractor changed")
+    predict = repo / "target/release/predict_features_with_bake"
+    if sha(predict) != fits["identity"]["binaries"]["predict"]:
+        raise ValueError("prediction binary changed")
+    if sha(root / "_MANIFEST.json") != fits["manifest_sha256"]:
+        raise ValueError("evaluation manifest changed")
+    tables = json.loads((root / "_MANIFEST.json").read_text())
+    if tables.get("split_policy") != SPLIT_POLICY:
+        raise ValueError("legacy mixed evaluation is forbidden")
+    for name in tables["files"]:
+        if Path(name).name != name:
+            raise ValueError("invalid table path")
+        allowed_path(root / name)
     env = dict(os.environ, ZENSIM_FORMULA_REV="3", RAYON_NUM_THREADS="1")
     pairs_files = {}
-    for task in ("human", "codec", "corruption"):
+    for task in tasks:
         chosen = []
-        families = sorted({r["family"] for r in rows if r["task"] == task and r["role"] == "test"})
+        families = sorted({r["family"] for r in rows if r["task"] == task and r["role"] == "eval"})
         for family in families:
-            candidates = [r for r in rows if r["task"] == task and r["role"] == "test" and r["family"] == family]
+            candidates = [r for r in rows if r["task"] == task and r["role"] == "eval" and r["family"] == family]
             chosen.append(sorted(candidates, key=lambda r: sha_string(r["distorted"]))[0])
         for r in chosen:
             for key in ("reference", "distorted"):
@@ -465,8 +435,17 @@ def audit(args, recipe):
             w.writerow(["ref_path", "dist_path", "human_score", "row_id"])
             w.writerows((r["reference"], r["distorted"], r["target"], r["row_id"]) for r in chosen)
         pairs_files[task] = (pairs, len(chosen))
-    manifest = Path(recipe["spatial_manifest"]).expanduser()
-    cases = json.loads(manifest.read_text())["cases"]
+    manifest = allowed_path(recipe["spatial_manifest"])
+    if sha(manifest) != recipe["spatial_manifest_sha256"]:
+        raise ValueError("spatial eval manifest changed")
+    spatial_data = json.loads(manifest.read_text())
+    if spatial_data.get("split_policy") != SPLIT_POLICY:
+        raise ValueError("spatial manifest needs explicit train/eval admission")
+    cases = spatial_data["cases"]
+    validate_rows(cases)
+    admitted_eval = {(r["source_family"], r["reference"]) for r in rows if r["role"] == "eval"}
+    if any(c["role"] != "eval" or (c["source_family"], c["reference"]) not in admitted_eval for c in cases):
+        raise ValueError("spatial gates require admitted eval sources")
     for case in cases:
         for key in ("reference", "distorted"):
             if sha(case[key]) != case[key + "_sha256"]:
@@ -498,9 +477,33 @@ def audit(args, recipe):
         measured = {"pairs": n, "sha256": sha(records_path), "bake_sha256": sha(bake),
                     "identical_pairs": sum(r["pixels_identical"] for r in records),
                     "max_consumed_feature_abs_delta": max(r["max_consumed_feature_abs_delta"] for r in records)}
+        task = fit["task"]
+        task_rows = [r for r in rows if r["task"] == task and r["role"] == "eval"]
+        features = root / (task + ".features.bin")
+        if sha(features) != tables["files"][features.name]["sha256"]:
+            raise ValueError("evaluation feature bytes changed")
+        predictions = dst / (name + ".scores")
+        with predictions.open("w") as output, (dst / (name + ".serve.log")).open("w") as log:
+            subprocess.run([predict, "--bake", bake, "--bake-post", "raw", "--features-file", features],
+                           env=env, check=True, stdout=output, stderr=log)
+        values = [float(x) for x in predictions.read_text().splitlines()]
+        if len(values) != len(task_rows) or not all(math.isfinite(x) for x in values):
+            raise ValueError("incomplete/nonfinite eval predictions")
+        groups = collections.defaultdict(list)
+        for row, score in zip(task_rows, values, strict=True):
+            for group in ("eval", "eval_" + row["family"], "eval_origin_" + row["origin"]):
+                groups[group].append((score, row["target"]))
+            if task == "corruption":
+                groups["eval_class" + str(int(row["target"]))].append((score, row["target"]))
+        jobs = dst / (name + ".jobs.tsv")
+        with jobs.open("w") as jf:
+            for group, pairs in sorted(groups.items()):
+                jf.write(group + "\t" + ",".join(str(p) for p, _ in pairs) +
+                         "\t" + ",".join(str(t) for _, t in pairs) + "\n")
+        measured["scores_sha256"] = sha(predictions)
         raw_path = dst / (name + ".raw.tsv")
         with raw_path.open("w") as f, (dst / (name + ".raw.log")).open("w") as log:
-            subprocess.run([raw_panel, "--batch", root / (name + ".jobs.tsv"),
+            subprocess.run([raw_panel, "--batch", jobs,
                             "--stats", "srocc", "--raw-errors"], env=env, check=True, stdout=f, stderr=log)
         raw_rows = read_tsv(raw_path)
         spatial_results = []
@@ -548,10 +551,13 @@ def sha_string(value):
 
 def report(args, recipe):
     """Aggregate stored Rust measurements; seed spans are not confidence intervals."""
+    validate_recipe(recipe)
     import statistics
     root = args.out.resolve()
     fits = json.loads((root / "RESULT.json").read_text())
     audits = json.loads((root / "audits/RESULT.json").read_text())
+    if fits.get("identity", {}).get("split_policy") != SPLIT_POLICY:
+        raise ValueError("legacy mixed report inputs are forbidden")
     if fits["status"] != "FITS_COMPLETE_UNQUALIFIED" or audits["status"] != "COMPLETE_UNQUALIFIED":
         raise ValueError("report requires completed fits and audits")
     if (fits["identity"]["recipe_sha256"] != sha(args.recipe)
@@ -561,74 +567,50 @@ def report(args, recipe):
     n_tasks = len(recipe.get("tasks", ["human", "codec", "corruption"]))
     expected = (len(recipe["arms"]) + len(recipe["control_arms"])*
                 (int(recipe.get("half_data_controls", True))+len(recipe["capacity_hidden"]))) * len(recipe["seeds"]) * n_tasks
-    if fits.get("checkpoint_followup"):
-        expected += len(recipe["control_arms"]) * len(recipe["seeds"]) * n_tasks
-    expected += len(fits.get("extra_layouts", {})) * len(recipe["seeds"]) * n_tasks
-    layouts = dict(recipe["arms"], **fits.get("extra_layouts", {}))
+    layouts = recipe["arms"]
     if len(fits["arms"]) != expected or set(fits["arms"]) != set(audits["pixel"]):
         raise ValueError("incomplete campaign")
     grouped = collections.defaultdict(list)
     for name, arm in fits["arms"].items():
-        if arm.get("protocol") == "dense_checkpoints":
-            continue
         raw = {r["label"]: r for r in audits["raw_panels"][name]["rows"]}
         if any(int(r["n_dropped"]) for r in raw.values()):
             raise ValueError("panel dropped rows")
         grouped[(arm["task"], arm["layout"], arm["hidden"], arm["fraction"])].append((name, arm, raw))
-    summary = {"schema": "zensim-feature-ceiling-summary-v1", "status": "COMPLETE_UNQUALIFIED",
+    summary = {"schema": "zensim-feature-ceiling-summary-v2", "status": "COMPLETE_UNQUALIFIED",
                "model_qualified": False, "fits": len(fits["arms"]), "groups": [],
                "artifact_hashes": {str(p.relative_to(root)): sha(p) for p in
                    (root / "RESULT.json", root / "INPUTS.json", root / "_MANIFEST.json", root / "audits/RESULT.json")},
                "capacity_and_data": [], "pixel_pairs": sum(v["pairs"] for v in audits["pixel"].values())}
-    summary["checkpoint_controls"] = {name: audits["raw_panels"][name]["rows"]
-        for name, arm in fits["arms"].items() if arm.get("protocol") == "dense_checkpoints"}
     for (task, layout, hidden, fraction), runs in grouped.items():
         entry = dict(task=task, layout=layout, hidden=hidden, fraction=fraction,
                      features=len(layouts[layout]), seeds=[a["seed"] for _, a, _ in runs], panels={})
-        common = set.intersection(*(set(raw) for _, _, raw in runs))
+        common = set(runs[0][2])
+        if any(set(raw) != common for _, _, raw in runs):
+            raise ValueError("seed panels differ; refusing partial aggregate")
         for label in sorted(common):
             p = {}
             for field in ("mae_raw", "srocc_signed"):
                 vals = [float(raw[label][field]) for _, _, raw in runs]
                 if all(math.isfinite(x) for x in vals):
-                    p[field] = {"median": statistics.median(vals), "min": min(vals), "max": max(vals)}
+                    p[field] = {"mean": statistics.mean(vals), "values": vals, "median": statistics.median(vals), "min": min(vals), "max": max(vals)}
             p["n"] = int(runs[0][2][label]["n"])
             entry["panels"][label] = p
         entry["spatial"] = [dict(run=name, **s) for name, _, _ in runs for s in audits["spatial"][name]]
         summary["groups"].append(entry)
-    lookup = {(g["task"], g["layout"], g["hidden"], g["fraction"]): g for g in summary["groups"]}
-    for task in recipe.get("tasks", ["human", "codec", "corruption"]):
-        for layout in recipe["control_arms"]:
-            base = lookup[task, layout, recipe["hidden"], "full"]["panels"]["dev"]
-            mae = lambda p: p["mae_raw"]["median"]
-            rho = lambda p: p["srocc_signed"]["median"]
-            for high_h in recipe["capacity_hidden"]:
-                high = lookup[task, layout, high_h, "full"]["panels"]["dev"]
-                summary["capacity_and_data"].append(dict(task=task, layout=layout,
-                    panel="dev", base_hidden=recipe["hidden"], comparison_hidden=high_h,
-                    mae_change_fraction=mae(high)/mae(base)-1,
-                    capacity_unresolved=mae(high)<0.95*mae(base) or rho(high)>rho(base)+0.01))
-            if recipe.get("half_data_controls", True):
-                half = lookup[task, layout, recipe["hidden"], "half"]["panels"]["dev"]
-                summary["capacity_and_data"].append(dict(task=task, layout=layout,
-                    panel="dev", base_hidden=recipe["hidden"],
-                    full_data_mae_change_fraction=mae(base)/mae(half)-1,
-                    data_unresolved=mae(base)<0.95*mae(half) or rho(base)>rho(half)+0.01))
-    # Thresholding already served diagnostic class scores is a row-count report,
-    # not probability calibration. A score of 50 is the frozen class midpoint.
     declared = json.loads((root / "INPUTS.json").read_text())
-    corruption = [r for r in declared["rows"] if r["task"] == "corruption"]
+    validate_rows(declared["rows"])
+    corruption = [r for r in declared["rows"] if r["task"] == "corruption" and r["role"] == "eval"]
     summary["corruption_counts_at_50"] = {}
     for name, arm in fits["arms"].items():
         if arm["task"] != "corruption":
             continue
-        path = root / (name + ".scores")
-        if sha(path) != arm["scores_sha256"]:
+        path = root / "audits" / (name + ".scores")
+        if sha(path) != audits["pixel"][name]["scores_sha256"]:
             raise ValueError("served score bytes changed")
         values = [float(x) for x in path.read_text().splitlines()]
         counts = collections.defaultdict(lambda: dict(honest=0, corrupt=0, false_alarms=0, misses=0))
         for row, score in zip(corruption, values, strict=True):
-            if row["role"] != "test":
+            if row["role"] != "eval":
                 continue
             for key in ("all", row["family"]):
                 if row["target"] == 100:
@@ -642,10 +624,10 @@ def report(args, recipe):
     write_json(root / "SUMMARY.json", summary)
     lines = ["# Feature/scale capability study", "", "Development evidence; no model is qualified.", "",
              "Raw errors come from Rust panel --raw-errors. No evaluation-set score remapping.", "",
-             "| Task | Layout | Hidden | Features | Test signed SROCC | Raw MAE |", "|---|---|---:|---:|---:|---:|"]
+             "| Task | Layout | Hidden | Features | Eval signed SROCC | Raw MAE |", "|---|---|---:|---:|---:|---:|"]
     for g in summary["groups"]:
         if g["fraction"] == "full":
-            p = g["panels"]["test"]
+            p = g["panels"]["eval"]
             lines.append(f"| {g['task']} | {g['layout']} | {g['hidden']} | {g['features']} | {p['srocc_signed']['median']:.4f} | {p['mae_raw']['median']:.3f} |")
     lines += ["", "Values are medians of the registered paired seeds. Corruption scores are 0/100 class targets, not quality grades.",
               "Codec targets are SSIMULACRA2 proxies. KADID selection is human-rated; TID is train-only.",

@@ -58,6 +58,13 @@ and a matching pushed tag; this cleanup does not authorize a release.
 
 ## Scientific data and reproducibility
 
+**September 13 user ruling:** train-only for training, transforms, calibration
+and checkpoint selection; eval only for gates/evaluation. **Never touch test
+segments**, including terminal/frozen-finalist reads. Do not rename historical
+test segments to eval. This overrides older touch-once rules in docs/memories.
+Use explicit split admission; the legacy checker scans terminal tables and is
+not an allowed default for this work. See the current DATA_SPLITS override.
+
 Before training, baking, feature extraction or picker work, read
 [`../DATA_PROVENANCE.md`](../DATA_PROVENANCE.md),
 [DATA_SPLITS](docs/DATA_SPLITS.md), the relevant later entries in

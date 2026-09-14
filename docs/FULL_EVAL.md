@@ -1,5 +1,92 @@
 # Full-eval — one comprehensive Rust eval per bake → machine-readable JSON
 
+## Strict train/eval feature screens (September 13)
+
+The later [user split instruction](DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)
+forbids any test/terminal read, even for final qualification. The historical
+v1 screen recipes and their fit/dev/test caches are no longer executable via
+`feature_screen.py`. Preserve them as evidence; do not rename their segments.
+Other historical commands below are not permission to scan terminal datasets.
+
+Use `schema: zensim-feature-ceiling-recipe-v2` and
+`split_policy: train-eval-only-v1`. Keep the registered feature IDs, seeds,
+training budget and spatial thresholds explicit. Replace automatic corpus
+discovery and `reuse_prepared` with `input_segments`, each containing:
+
+```json
+{
+  "role": "train",
+  "path": "/absolute/path/train-segment.json",
+  "sha256": "<segment SHA256>",
+  "admission": {
+    "path": "/absolute/path/train-admission.json",
+    "sha256": "<admission SHA256>"
+  }
+}
+```
+
+Supply train and eval segments for every requested task. An admission file has
+`schema: zensim-source-admission-v1`, a named `authority` identifying the
+canonical split manifest/rule and its revision/hash, and a `sources` array.
+Each source records `corpus`, `origin`, globally consistent `source_family`,
+and `split` (`train` or `eval`). Source-only sidecars must be reviewed against
+the canonical authority before use. Hash/schema validation is not an independent
+proof that a caller's source assignment is correct. Do not create admissions
+by relabeling old screen/test segments.
+
+Each segment file has `schema: zensim-feature-segment-v1`, `role`, and `rows`.
+Each row contains `corpus`, `origin`, `source_family`, `task` (human/codec/
+corruption), distortion `family`, `target`, and absolute `reference`/`distorted`
+paths. Every row must match its source admission. Families cannot cross roles,
+including across tasks. Protected path components and symlink targets are
+rejected before hashing pixels. Unexpected roles or changed bytes fail.
+
+Pin the `spatial_manifest` bytes with recipe field `spatial_manifest_sha256`.
+The manifest must carry the same `split_policy`; its cases retain
+their existing names/paths/hashes plus `role: eval`, `source_split: eval`, and
+`source_family`. Every case must belong to an admitted eval reference. Old
+training-origin spatial panels may remain historical diagnostics but cannot
+become eval gates by changing their role field.
+
+Stages use the existing Rust owners:
+
+- `--ceiling-stage prepare`: admit explicit segments, extract fresh canonical
+  features, write separate train/eval Parquets and an **eval-only** prediction
+  buffer. No mixed historical cache is opened.
+- `--ceiling-stage fit`: the trainer receives only train tables (or their
+  train-only half/class views), with `--no-auto-eval`, no eval group and no
+  early stopping. Its checkpoint monitoring falls back to training scores.
+  No prediction/evaluation command runs in this stage.
+- `--ceiling-stage audit`: freeze/check final bake identities, then run Rust
+  prediction, raw-error panels, pixel parity and spatial checks on eval only.
+- `--ceiling-stage report`: aggregate the stored eval results, retaining seed
+  values, mean, median and spread. No eval-driven checkpoint/capacity refit is
+  launched. `all` runs prepare, fit and audit; report remains explicit.
+
+Resume uses the same v2 recipe, input and tool identities. Old cache reuse and
+the historical `checkpoints` follow-up are refused. Scalar serving, model
+defaults and feature arithmetic are unchanged.
+
+Validation: `python3 scripts/tests/test_feature_screen_splits.py` exercises
+thirteen synthetic admission/routing boundaries, including refusal before file
+opening. A native Rust smoke with 16 train and 8 eval fixture pairs completed
+prepare, train, audit and report; the trainer's only group was `human_train`,
+all external panel labels were eval, and consumed-feature pixel parity was
+exact. Two eval-source spatial cases ran. The first smoke exposed integer CSV
+target inference; targets are now explicitly cast to floating point before
+training. Failed and corrected runs remain under
+`~/work/zensim-validation-2026-09-13/split-boundary-smoke/`.
+These generated software fixtures are not scientific corpus or model-quality
+evidence. No corpus test segment was opened for this change.
+
+The additional `run-alltasks-full` smoke covers all three training objectives
+and their eval-only audits. The tiny optional half/class fixture failed C6
+because some features were constant in that four-row subgroup; those refusals
+are retained, and the gate was not relaxed. Preparation now constructs half
+tables only for requested half-data controls. Synthetic 0/100 fixture labels
+test routing only; they are not corruption severity labels or a fitted product
+catcher. The `recipe-alltasks-full.json` file pins the final multi-task smoke.
+
 **September 7 scoring update:** all candidate scores are returned by
 `zensim::BakeScorer`. The verdict's `scoring` block records the surface version,
 member hashes, blend weights and corruption-head hash/deadband. A supplied

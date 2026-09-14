@@ -4,6 +4,10 @@
 
 ### Added
 
+- Feature-screen v2 requires separate admitted train/eval segments, rejects
+  legacy mixed caches and test/terminal paths, and evaluates frozen Rust bakes
+  only after training. Eval groups no longer enter checkpoint selection.
+
 - `BakeScorer::prepare_steering` creates a source-bound reusable SDR worker
   returning the complete score and refinement gains. It rejects unsupported
   feature contracts before use. `BakeScorer::with_parallel` lets codec workers

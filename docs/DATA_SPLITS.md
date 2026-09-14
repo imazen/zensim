@@ -1,5 +1,28 @@
 # DATA_SPLITS.md — canonical train/val/test conventions (locked 2026-07-02)
 
+## September 13 user ruling: train / eval only; never touch test
+
+This later explicit instruction supersedes every historical permission below
+to read a test/terminal segment, including "touch once" or frozen-finalist reads.
+Training, transforms, calibration and checkpoint selection use train data only.
+Eval data are for gates/evaluation after the candidate is frozen, not fitting or
+checkpoint selection. Test segments are never opened, extracted, scored, used
+for audits, or silently renamed to eval. Preserve canonical source/family
+assignments and immutable historical evidence.
+
+The feature-screen owner now accepts only the explicit v2 train/eval protocol
+in [FULL_EVAL](FULL_EVAL.md#strict-train-eval-feature-screens-september-13).
+Legacy fit/dev/test recipes and mixed preparation caches are refused before
+dataset access. Its strict admission route uses source-only sidecars, not the
+historical split checker's terminal-table scans. Sidecars must be reviewed
+against their named canonical split authority; schema/hash validation alone
+does not prove that an arbitrary assignment is canonical.
+
+Earlier September 13 studies used an internal role named `test` for KADID
+SELECT and inner splits of training-origin codec/corruption data. Those labels
+are historical, not authorization to reuse the segments under this ruling.
+No existing `test` segment is migrated or retagged by this change.
+
 **This is the ONE registry of how every dataset in the zensim/picker/metric
 stack is split, what the rest of the field does with the same data, and which
 rules are load-bearing for replicable science.** Locked per user directive

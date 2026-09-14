@@ -7,6 +7,13 @@ useful quality across codecs/content and affordable encoding loops. Read
 [MODEL_SELECTION_SCORECARD](MODEL_SELECTION_SCORECARD.md) before selecting
 objectives. B/C/D can be replaced; good rank alone is not product readiness.
 
+**September 13 split override:** [train only / eval only / never test](DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)
+supersedes older terminal-read and checkpoint-dev instructions below. The
+feature-screen v1 recipes are historical and now refused. Use the explicit
+[v2 segment contract](FULL_EVAL.md#strict-train-eval-feature-screens-september-13),
+with training-only checkpoint monitoring and post-fit eval gates. Do not invoke
+legacy default corpus/terminal scans to fill missing evidence.
+
 ## One owner per task
 
 | Task | Owner | Required evidence |

@@ -1,5 +1,15 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 13, later user split ruling:** new work uses train only for all
+fitting/calibration/checkpoint decisions, eval only for gates/evaluation, and
+never opens test/terminal segments. This overrides prior touch-once plans and
+the internal test-role usage described in the dated studies below. Their
+artifacts remain immutable; no test-to-eval relabeling is performed. The active
+feature-screen v2 requires separate admitted manifests, refuses mixed caches,
+and moves prediction/eval out of the training stage. Thirteen synthetic boundary
+checks and a real Rust fixture smoke verify the new path; no scientific corpus
+was read or a competitive model trained by this implementation.
+
 **Purpose.** An honest ledger of *what training data and experiments were tried, what
 actually helped, and — where it differs — the **real** reason a thing failed vs the
 reason we thought at the time.* Several "verdicts" in this project were later found to

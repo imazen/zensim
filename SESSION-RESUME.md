@@ -1,5 +1,19 @@
 # Start here — one target score, one development path
 
+## September 13, latest: explicit train/eval isolation
+
+The user's later [split ruling](docs/DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)
+forbids every test/terminal read, even for final qualification. Train alone
+owns fitting/calibration/checkpoints; eval owns post-fit gates. The existing
+feature-screen owner now requires v2 recipes with separate admitted train/eval
+segments and rejects legacy recipes/caches. Predictions and pixel/spatial
+audits run only on admitted eval rows after fitting. Historical results remain
+unchanged; do not rename their test segments or reuse their mixed caches.
+Boundary regression checks and a synthetic Rust prepare/train/eval/report
+smoke pass. No real corpus/test segment or new competitive model was used in
+this policy implementation. Next admit fresh train/eval manifests against
+canonical source/family rules before continuing the feature comparison.
+
 ## September 13, latest: rigor review before extending the feature set
 
 The [runtime study's Claude-era gate review](benchmarks/runtime_profiles_2026-09-13.md#claude-era-gate-review-after-the-runtime-study)

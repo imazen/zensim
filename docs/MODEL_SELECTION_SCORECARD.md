@@ -1,5 +1,13 @@
 # Production release scorecard
 
+## September 13 split override
+
+The later [user split ruling](DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)
+prohibits all test/terminal access, including the frozen-finalist reads proposed
+below. Run gates only on explicitly admitted eval segments. An unavailable
+permitted eval population leaves that gate incomplete; it never authorizes a
+test read. Fitting, calibration and checkpoint selection use train only.
+
 ## September 13 corruption clarification
 
 The later [activation and severity contract](CORRUPTION_ACTIVATION_2026-09-13.md)
