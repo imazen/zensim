@@ -1,5 +1,28 @@
 # Start here — one target score, one development path
 
+## September 14, newest: complete local120 derivative control fails; diagnosis retained
+
+[Complete-gradient study](benchmarks/complete_gradient_2026-09-14.md) combines
+the tested SSIM/edge/MSE derivatives, all scales and RGB pullback. The known
+signed linear model passes only1/24 public pixel-direction comparisons; base
+feature reconstruction max8.67e-19. The planned frozen local120 ensemble was
+NOT RUN, nor any corpus, finite-repair, runtime or native-RD stage. No fitting,
+EVAL or TEST. New prototype is archived and removed; parent tests remain.
+
+First17x9 whole-field case has predicted+.00159854 versus public-.00650901
+at epsilon.001 and-.000284985 at.0005. At.0005, an existing centered-f64 SSIM
+reference cuts summed36-coordinate derivative discrepancy .034939→.000998,
+while167 edge activations and8 residual signs differ across perturbation endpoints.
+These show numerical sensitivity and nonsmooth finite steps, not complete
+correctness or proof of a scalar SSIM bug. No tolerance or gate was changed.
+
+Evidence/binary/source: `~/work/zensim-validation-2026-09-14/complete-gradient/`.
+Next compare independent forward/reverse mathematical directional propagation,
+measure branch margins and f32 observability, and keep actual public finite
+repairs as a separate criterion. Do not fit/ablate around this failed diagnostic.
+All jobs finished. No candidate qualifies; the complete goal stays active.
+
+
 ## September 14, newest: SSIM and public color/scale prerequisites pass
 
 [SSIM-adjoint study](benchmarks/ssim_adjoint_2026-09-14.md) adds test-only Rev3

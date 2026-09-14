@@ -1,0 +1,97 @@
+{
+  "date": "2026-09-14",
+  "scope": "synthetic_complete_local120_gradient",
+  "qualified": false,
+  "verdict": "REGISTERED_LINEAR_DERIVATIVE_GATE_FAIL",
+  "production_arithmetic_changed": false,
+  "prototype_removed": true,
+  "corpus_accessed": false,
+  "training_performed": false,
+  "trained_ensemble_run": false,
+  "comparisons": 24,
+  "passes": 1,
+  "base_feature_max_error": 8.673617379884035e-19,
+  "max_derivative_error": 0.008107548684302465,
+  "max_public_vs_feature_secant_error": 1.503147192172781e-05,
+  "first_case": {
+    "base_score": 0.029608143493533134,
+    "epsilon": 0.0010000000474974513,
+    "error": 0.008107548684302465,
+    "feature_error": 8.673617379884035e-19,
+    "feature_secant": -0.006506231889697122,
+    "gradient_seconds": 0.000554243,
+    "height": 9,
+    "observed": -0.0065090131648260436,
+    "pass": false,
+    "predicted": 0.0015985355194764218,
+    "rect": [
+      0,
+      0,
+      17,
+      9
+    ],
+    "tolerance": 6.509013164826044e-05,
+    "width": 17
+  },
+  "basis_prediction": 0.0015982679733017346,
+  "diagnosis": [
+    {
+      "epsilon": 0.009999999776482582,
+      "ssim_max_canonical_derivative_error": 0.002740093152939334,
+      "ssim_max_reference_derivative_error": 0.0027390399873499297,
+      "ssim_sum_abs_canonical_error": 0.023984990074160283,
+      "ssim_sum_abs_reference_error": 0.024069482435666624,
+      "edge_branch_switches": 4825,
+      "residual_sign_switches": 598
+    },
+    {
+      "epsilon": 0.004999999888241291,
+      "ssim_max_canonical_derivative_error": 0.0009394169688561188,
+      "ssim_max_reference_derivative_error": 0.0009753514062353155,
+      "ssim_sum_abs_canonical_error": 0.00787834398854089,
+      "ssim_sum_abs_reference_error": 0.006609526205188617,
+      "edge_branch_switches": 2501,
+      "residual_sign_switches": 416
+    },
+    {
+      "epsilon": 0.0010000000474974513,
+      "ssim_max_canonical_derivative_error": 0.0009940047088419033,
+      "ssim_max_reference_derivative_error": 6.624783540864349e-05,
+      "ssim_sum_abs_canonical_error": 0.011605801118112958,
+      "ssim_sum_abs_reference_error": 0.0005796665507777776,
+      "edge_branch_switches": 357,
+      "residual_sign_switches": 19
+    },
+    {
+      "epsilon": 0.0005000000237487257,
+      "ssim_max_canonical_derivative_error": 0.004607303111507798,
+      "ssim_max_reference_derivative_error": 8.360976336351661e-05,
+      "ssim_sum_abs_canonical_error": 0.034939004406844595,
+      "ssim_sum_abs_reference_error": 0.000998000252964907,
+      "edge_branch_switches": 167,
+      "residual_sign_switches": 8
+    },
+    {
+      "epsilon": 9.999999747378752e-05,
+      "ssim_max_canonical_derivative_error": 0.006939019477931012,
+      "ssim_max_reference_derivative_error": 0.00022920111663559534,
+      "ssim_sum_abs_canonical_error": 0.09166692203828261,
+      "ssim_sum_abs_reference_error": 0.0026259482477031366,
+      "edge_branch_switches": 35,
+      "residual_sign_switches": 1
+    }
+  ],
+  "finite_repair_accuracy": "NOT_RUN",
+  "runtime_qualification": "NOT_RUN",
+  "native_rd": "NOT_RUN",
+  "evidence_sha256": {
+    "REGISTRATION.json": "c1cba749a682931bed4dfceb52fbec5c0cf779c35eaacd432da687d543c3fb65",
+    "PROTOCOL.md": "a51c52c728d552fa57d7b1daf998fa55fcf2600acb69d6fe10e6f8acd1992d7b",
+    "TOOLS.json": "74d6de7dbc6a436a2f380d23b8818e6725bd1c3e65778d21801ec3a10238d81f",
+    "LINEAR_RESULT.json": "555562cdaa00aa192caf20123685065841dd3d4d9d245cebfa1c39f53091978e",
+    "FEATURE_DIAGNOSIS.json": "fc0b1df4dd7d57d3d27e8799a72d5e1b608b05070a7e980ee64671677de74ad9",
+    "STABLE_DIAGNOSIS.json": "b52e371f6bcb162aaaf843f85879e4bab8a4f6ccd62401828bc232fe714ed66d",
+    "DIAGNOSIS_SUMMARY.json": "f865311b151a9dd82e6b86d485dbf71933af62ea44a2c3eaaf8c948d7a957c61",
+    "prototype.patch": "d158b9981d6f67398a1ef6322396b362602b15a8773d5770b841ac1398859908"
+  }
+}
