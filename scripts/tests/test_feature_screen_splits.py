@@ -146,6 +146,16 @@ class SplitBoundaries(unittest.TestCase):
             with self.assertRaises(ValueError):
                 screen.fit_specs(dict(recipe, capacity_arms=capacity))
 
+    def test_finite_correlation_cannot_hide_invalid_spatial_predictions(self):
+        data = dict(refinement_available=True, refinement_unsupported_ids=[], m2=1., m3f=1.,
+                    blocks=[dict(score_delta=1., refinement_gain=1., linearized_gain=1., density_gain=1.)])
+        self.assertEqual(screen.spatial_status(data, .99, .70), ("PASS", 0))
+        for missing in (None, float("nan"), float("inf")):
+            data["blocks"][0]["refinement_gain"] = missing
+            self.assertEqual(screen.spatial_status(data, .99, .70), ("INVALID", 1))
+        data["refinement_unsupported_ids"] = [228]
+        self.assertEqual(screen.spatial_status(data, .99, .70)[0], "UNSUPPORTED")
+
 
 if __name__ == "__main__":
     unittest.main()

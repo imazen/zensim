@@ -1,5 +1,30 @@
 # Start here — one target score, one development path
 
+## September 14, latest: strict minimal/wide comparison and identity correction
+
+[The completed comparison](benchmarks/minimal_top_2026-09-13.md) fits 40 MLPs
+(five paired seeds across eight layouts/head sizes) plus a train-only linear
+control. Train is 8,000 canonical KADID/TID pairs; eval is 3,125 source-disjoint
+canonical KADID SELECT pairs. No test/terminal segment is opened or retagged.
+Final Rust evaluation carries native-decoded identity evidence for 100 pairs;
+feature-only panels before that correction are superseded for served-score claims.
+
+Coarse60/H128 ensemble: raw MAE 8.142, 8.18 ms scalar / 26.87 ms prepared bin-8
+map at 1024² ST, four of four limited photo/JPEG repair cases pass. Full944/H128:
+MAE 7.029 at 53.97 ms scalar, unsupported complete refinement. H256 does not
+improve it. Selected619 has invalid/nonfinite maps and fails spatial/scalar
+parity. The screen now refuses to treat finite summary correlations over invalid
+block predictions as a pass. No model is qualified or installed as a default.
+
+49 actual final Rust verdicts are on the all-rows gauntlet, behind its minimal /
+wide review button; the fair view correctly excludes them for missing CID22.
+Both board gate suites pass. Source/control/identity tests, Clippy, script lint
+and API-doc checks pass. All seeds, final bakes and timings are retained under
+`~/work/zensim-validation-2026-09-13/minimal-top/`; use `final-eval/` and
+`FINAL_RESULTS.json`. Next: improve/validate maps and corruption, broaden legal
+eval content, then native targeting/RD and p95/worker cost. Four photo sources
+are diagnostic coverage, not a native codec or screen-content qualification.
+
 ## September 13, latest: explicit train/eval isolation
 
 The user's later [split ruling](docs/DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)

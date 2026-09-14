@@ -2594,6 +2594,29 @@
    "evidence": "benchmarks/minimal_top_2026-09-13.md; registered recipe and ROW_MAPPING_GATE.json",
    "date": "2026-09-13",
    "fix_path": "Complete the registered product gates on explicitly admitted eval sources; never open test/terminal segments."
+  },
+  {
+   "id": "minimal-wide-spatial-invalid-2026-09-14",
+   "kind": "annotated",
+   "fields": [
+    "m3_coherence",
+    "m3a_coherence",
+    "gates"
+   ],
+   "scope": {
+    "names": [
+     "MT913_selected619_h128_ens5",
+     "MT913_selected619_h128_s6101",
+     "MT913_selected619_h128_s6103",
+     "MT913_selected619_h128_s6107",
+     "MT913_selected619_h128_s6113",
+     "MT913_selected619_h128_s6119"
+    ]
+   },
+   "reason": "Selected619 does not have usable steering evidence: its complete ensemble fails all 25 scalar/spatial parity audits and every registered repair case contains nonfinite map gains. Finite correlation summaries from those invalid blocks cannot establish coherence. The prepared steering API also refuses this feature set.",
+   "evidence": "benchmarks/minimal_top_2026-09-13.md; served-audit and gallery-render refusal",
+   "date": "2026-09-14",
+   "fix_path": "Repair nonfinite attribution and establish full scalar/map parity before using this model for steering."
   }
  ]
 }

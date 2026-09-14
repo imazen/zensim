@@ -180,6 +180,21 @@ def fit_specs(recipe):
     return specs
 
 
+def spatial_status(data, min_m2, min_m3f):
+    """A finite summary cannot rescue missing/nonfinite block predictions."""
+    valid = lambda v: isinstance(v, (int, float)) and math.isfinite(v)
+    bad_blocks = sum(not all(valid(b.get(k)) for k in
+                            ("score_delta", "refinement_gain", "linearized_gain", "density_gain"))
+                     for b in data["blocks"])
+    if not data["refinement_available"] or data["refinement_unsupported_ids"]:
+        status = "UNSUPPORTED"
+    elif bad_blocks or not all(valid(data.get(k)) for k in ("m2", "m3f")):
+        status = "INVALID"
+    else:
+        status = "PASS" if data["m2"] >= min_m2 and data["m3f"] >= min_m3f else "FAIL"
+    return status, bad_blocks
+
+
 def execute(args, recipe):
     validate_recipe(recipe)
     if args.cache or args.ceiling_stage == "checkpoints":
@@ -530,11 +545,10 @@ def audit(args, recipe):
                     raise ValueError("spatial result identity drift")
                 if d["block_size"] != 32 or len(d["blocks"]) != d["pixel_interventions"]:
                     raise ValueError("spatial intervention coverage drift")
-                supported = d["refinement_available"] and not d["refinement_unsupported_ids"]
-                passed = supported and all(isinstance(d[k], (int, float)) and math.isfinite(d[k])
-                                           for k in ("m2", "m3f")) and d["m2"] >= recipe.get("spatial_min_m2", 0.8) and d["m3f"] >= recipe.get("spatial_min_m3f", 0.9)
+                status, bad_blocks = spatial_status(d, recipe.get("spatial_min_m2", 0.8),
+                                                    recipe.get("spatial_min_m3f", 0.9))
                 spatial_results.append({"case": case["name"], "sha256": sha(path),
-                    "status": "UNSUPPORTED" if not supported else "PASS" if passed else "FAIL",
+                    "status": status, "nonfinite_blocks": bad_blocks,
                     "diagnostic_only": case["name"].startswith("swap_rb"),
                     "unsupported_ids": d["refinement_unsupported_ids"], "m2": d["m2"], "m3f": d["m3f"],
                     "base_score": d["base_score"], "pixel_interventions": d["pixel_interventions"]})

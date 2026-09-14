@@ -3969,3 +3969,23 @@ attempts fail before training and remain preserved. A subsequent preliminary
 fit exposed the trainer's historical automatic full-verdict launch: it refused
 Rev3 before corpus scoring. The final recipe passes the new `--no-auto-eval`
 flag; neither final run launches that evaluator. [Recipe and results](../benchmarks/fullres_y_subset_2026-09-12.md).
+
+
+## September 14: strict train/eval minimal-wide study
+
+See [registration, methods and results](../benchmarks/minimal_top_2026-09-13.md)
+and its adjacent recipe/results JSON. Original canonical KADID TRAIN (5,000/40
+refs) plus approved train-only TID (3,000/25 refs) train the frozen models.
+Original canonical KADID SELECT (3,125/25 refs), admitted as eval, is re-extracted
+with Rev3; no retired screen/test cache is read or relabeled. Source admissions,
+canonical-view hashes, pixel hashes and row order live under
+`~/work/zensim-validation-2026-09-13/minimal-top/`. All 8,125 KADID rows align
+exactly on 12 unchanged MSE coordinates; a within-reference shifted-row negative
+control rejects every row. Repeated signatures have identical decoded pixels.
+
+The native Rust audit verifies 100 identity pairs in the 3,125-row eval. The
+final identity-bearing view copies the same features/labels and adds verified
+0/1 `pixels_identical` evidence. `ensemble_score_rows` and `bake_verdict` now
+consume it through `BakeScorer::score_features_with_identity`. Earlier raw
+feature-only eval artifacts are retained but superseded by `final-eval/`.
+This correction changes no training input, checkpoint, calibration or model.
