@@ -1,5 +1,18 @@
 # Start here — one target score, one development path
 
+## September 14, newest: complete canonical-feature audit and min-max fix
+
+[Evidence](benchmarks/complete_feature_audit_2026-09-14.md) closes the prior
+ensemble gap: 214 native944 pairs match all 80 consumed canonical features
+exactly. Native372 and legacy372 base/tree audits match all 228 IDs on 214
+pairs each. All prior audit fields and CSVs remain unchanged. New records add
+an explicit complete-read-set scope and IDs; old receipts are not upgraded.
+The same work fixes replacement min-max planning that previously inspected
+only placeholder network weights. A sparse masked-feature regression and a
+score-cancellation negative control exercise the actual failure mechanisms.
+No fit/EVAL/model promotion. Next admit native audit-v2 downstream and resolve
+P3/q85/mobile TRAIN coverage before matching refits; HDR contract remains open.
+
 ## September 14, current: color/HBD/HDR status after native scoring
 
 [Current assessment](benchmarks/color_hbd_hdr_current_2026-09-14.md) supersedes

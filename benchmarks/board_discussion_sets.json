@@ -476,6 +476,15 @@
       ],
       "preferred_corpus": "imazen26",
       "note": "Updated through c1819e29: native SDR color/depth extraction and public scoring now audited on 214 TRAIN pairs. Nine revised models have six SDR EVAL panels and remain NO-SHIP. Native HBD/HDR quality, complete ensemble canonical-feature auditing and spatial RD qualification remain incomplete. Includes all recent TRAIN studies, chronology and exact matched EVAL comparison."
+    },
+    {
+      "id": "2026-09-14-complete-feature-audit",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Complete ensemble feature audit and min-max planning fix",
+      "report_url": "/zensim/reports/complete-feature-audit-2026-09-14/index.html",
+      "bakes": [],
+      "note": "214 native ensemble pairs now independently match all80 canonical consumed features; native/legacy base-tree audits match all228 IDs. Scores and spatial evidence unchanged. Replacement min-max planning fixed and cancellation negative control added. No fit, EVAL or model promotion."
     }
   ],
   "incumbent_notes": [

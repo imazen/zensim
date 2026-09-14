@@ -193,6 +193,28 @@ impl<'a> BakeScorer<'a> {
         &self.metadata
     }
 
+    /// Canonical feature IDs structurally consumed by this complete candidate.
+    ///
+    /// Uses the serving planner and its read-set owner, including active
+    /// ensemble members and corruption companions. Zero local sensitivity is
+    /// not evidence of an unread input. IDs are sorted and unique; this is an
+    /// audit surface, not a model-quality or spatial-coverage certification.
+    ///
+    /// # Errors
+    /// Refuses an unreadable or unservable extraction/composition contract.
+    #[doc(hidden)]
+    #[cfg(feature = "feature-regime-v2")]
+    pub fn consumed_feature_ids(&self) -> Result<Vec<u16>, ZensimError> {
+        let plan = self.plan()?;
+        let mut reads = vec![false; plan.walk_width()];
+        self.mark_feature_reads(&mut reads);
+        Ok(reads
+            .into_iter()
+            .enumerate()
+            .filter_map(|(id, read)| read.then_some(id as u16))
+            .collect())
+    }
+
     /// Remove the output spline and codec affine for calibration fitting.
     /// The fitted artifact must be evaluated again with its complete metadata.
     #[doc(hidden)]
@@ -1220,6 +1242,90 @@ mod revision_contract_tests {
     use crate::{RgbSlice, ZensimError};
 
     #[test]
+    #[cfg(all(feature = "feature-regime-v2", feature = "corruption-head"))]
+    fn consumed_ids_include_inactive_linear_companion() {
+        let base = zenpredict::Model::from_bytes(&bake_declaring(None, 13)).unwrap();
+        let head = zenpredict::Model::from_bytes(&bake_declaring(None, 91)).unwrap();
+        let mut scorer = crate::BakeScorer::new(&base)
+            .unwrap()
+            .with_linear_corruption_head(&head, 10.0)
+            .unwrap();
+        let mut row = vec![0.0; 372];
+        row[13] = 40.0;
+        row[91] = 80.0;
+        assert_eq!(scorer.score_features(&row, 96, 96, None).unwrap(), 40.0);
+        assert_eq!(scorer.consumed_feature_ids().unwrap(), [13, 91]);
+        // Even an inactive gate must have accurate inputs: a feature error
+        // can change its activation state on the next image.
+        row[91] = 5.0;
+        assert_eq!(scorer.score_features(&row, 96, 96, None).unwrap(), 5.0);
+        assert_eq!(scorer.consumed_feature_ids().unwrap(), [13, 91]);
+    }
+
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn consumed_ids_include_replacement_minmax_inputs() {
+        // Placeholder network reads dense position zero (f13); replacement
+        // min-max reads position one (f300). Its pixel result must agree with
+        // canonical extraction, not a structural zero left by the network.
+        let mut payload = Vec::new();
+        for n in [1u32, 1, 2] {
+            payload.extend(n.to_le_bytes());
+        }
+        for value in [0.0f32, -2.0, 80.0] {
+            payload.extend(value.to_le_bytes());
+        }
+        let hex: String = payload.iter().map(|b| format!("{b:02x}")).collect();
+        let recipe = serde_json::json!({
+            "schema_hash":1,"scaler_mean":[0.0,0.0],"scaler_scale":[1.0,1.0],
+            "metadata":[
+                {"key":"zentrain.feature_ids","type":"utf8","text":"13\n300"},
+                {"key":"zentrain.minmax_monotone_head","type":"bytes","hex":hex}],
+            "layers":[{"in_dim":2,"out_dim":1,"activation":"identity","dtype":"f32",
+                "weights":[1.0,0.0],"biases":[0.0]}]
+        });
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+        let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        assert_eq!(scorer.consumed_feature_ids().unwrap(), [300]);
+        let mut row = vec![0.0; 372];
+        row[13] = 7.0;
+        row[300] = 3.0;
+        assert_eq!(scorer.score_features(&row, 96, 96, None).unwrap(), 74.0);
+        assert_eq!(
+            scorer
+                .score_features_fd_gradient(&row, 96, 96, None)
+                .unwrap()[13],
+            0.0
+        );
+        assert!(
+            scorer
+                .score_features_fd_gradient(&row, 96, 96, None)
+                .unwrap()[300]
+                < -1.9
+        );
+        let src: Vec<_> = (0..96 * 96).map(|i| [(i % 251) as u8; 3]).collect();
+        let mut dst = src.clone();
+        dst[100..160].fill([255, 0, 255]);
+        let rs = RgbSlice::new(&src, 96, 96);
+        let ds = RgbSlice::new(&dst, 96, 96);
+        let reference = zenpredict::Model::from_bytes(&bake_declaring(None, 300)).unwrap();
+        let canonical = crate::BakeScorer::new(&reference)
+            .unwrap()
+            .compute(&rs, &ds, None)
+            .unwrap();
+        let actual = scorer.compute(&rs, &ds, None).unwrap();
+        assert_ne!(canonical.features()[300], 0.0);
+        assert_eq!(actual.features()[300], canonical.features()[300]);
+        assert_eq!(
+            actual.score(),
+            scorer
+                .score_features(canonical.features(), 96, 96, None)
+                .unwrap()
+        );
+    }
+
+    #[test]
     #[cfg(feature = "feature-regime-v2")]
     fn structurally_skipped_gradient_matches_exhaustive_probes() {
         let mut weights = vec![0.0; 944];
@@ -1242,6 +1348,14 @@ mod revision_contract_tests {
                     .unwrap();
             let mut reads = vec![false; 944];
             scorer.mark_feature_reads(&mut reads);
+            assert_eq!(
+                scorer.consumed_feature_ids().unwrap(),
+                if weights == Some([0.0, 1.0]) {
+                    vec![91]
+                } else {
+                    vec![13, 52, 91]
+                }
+            );
             assert_eq!(
                 reads.iter().filter(|v| **v).count(),
                 if weights == Some([0.0, 1.0]) { 1 } else { 3 }

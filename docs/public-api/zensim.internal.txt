@@ -13,14 +13,14 @@
 #   pub types (struct/enum/trait/alias)        19
 #   pub consts/statics                          7
 #   free functions                             35
-#   inherent methods                          127
+#   inherent methods                          128
 #   struct fields                              92
 #   enum variants                              26
 #   trait roster entries (type × trait)        98
 #   auto-trait-complete types                  17
 #
 # per-module pub lines:
-#   (root)                           33
+#   (root)                           34
 #   __bench_stages                    9
 #   bake_metadata                    43
 #   corruption_head                  70
@@ -34,7 +34,7 @@
 #   score_math                       26
 #   source                            4
 
-## items (313 lines)
+## items (314 lines)
 
 pub const fn det_math::PowForm::for_revision(feature_v2::FormulaRevision) -> Self
 pub const ZENTRAIN_FEATURE_IDS_KEY: &str
@@ -52,6 +52,7 @@ pub enum research::RevisionRef
 pub fn f64::det_exp(self, det_math::PowForm) -> Self
 pub fn f64::det_log2(self, det_math::PowForm) -> Self
 pub fn f64::det_powf(self, Self, det_math::PowForm) -> Self
+pub fn BakeScorer<'a>::consumed_feature_ids(&self) -> core::result::Result<alloc::vec::Vec<u16>, ZensimError>
 pub fn BakeScorer<'a>::metadata(&self) -> &bake_metadata::ScoreMetadata
 pub fn BakeScorer<'a>::score_network_output(&self, &[f32], core::option::Option<&str>) -> core::result::Result<f64, ZensimError>
 pub fn BakeScorer<'a>::with_corruption_head(self, &'a corruption_head::CorruptionHead, core::option::Option<f64>) -> core::result::Result<Self, ZensimError>

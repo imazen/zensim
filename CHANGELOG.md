@@ -4,6 +4,11 @@
 
 ### Added
 
+- Complete-candidate canonical-feature auditing covers active ensemble members
+  and corruption companions through the hidden `BakeScorer::consumed_feature_ids`
+  diagnostic. Structural planning now includes replacement min-max head inputs
+  even when the placeholder network does not read them.
+
 - Opt-in `BakeScorer::with_finite_moment_refinement` retains binned base-image
   L2/L4/L8 moments for finite rectangle corrections. Disabled by default;
   scalar scores and existing additive density are preserved. This experimental

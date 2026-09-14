@@ -40,6 +40,68 @@ fn file_sha(path: &Path) -> Result<String, String> {
         .map(|v| sha(&v))
         .map_err(|e| format!("{}: {e}", path.display()))
 }
+
+fn compare_consumed_features(
+    ids: &[u16],
+    canonical: &[f64],
+    served: &[f64],
+) -> Result<f64, String> {
+    let mut maximum: f64 = 0.0;
+    for &id in ids {
+        let index = usize::from(id);
+        let expected = *canonical.get(index).ok_or("missing canonical feature")?;
+        let actual = *served.get(index).ok_or("missing served feature")?;
+        let diff = (actual - expected).abs();
+        if !expected.is_finite() || !actual.is_finite() || diff > 1e-6 + 1e-5 * expected.abs() {
+            return Err(format!(
+                "consumed feature f{id}: canonical {expected} versus served {actual}"
+            ));
+        }
+        maximum = maximum.max(diff);
+    }
+    Ok(maximum)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn feature_audit_rejects_errors_hidden_by_score_cancellation() {
+        let recipe = json!({
+            "schema_hash":1,"scaler_mean":[0.0,0.0],"scaler_scale":[1.0,1.0],
+            "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":"13\n91"}],
+            "layers":[{"in_dim":2,"out_dim":1,"activation":"identity","dtype":"f32",
+                "weights":[-1.0,1.0],"biases":[80.0]}]
+        });
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        let model = Model::from_bytes(&bytes).unwrap();
+        let mut scorer = BakeScorer::new(&model).unwrap();
+        let ids = scorer.consumed_feature_ids().unwrap();
+        let original = vec![0.0; 372];
+        let mut wrong = original.clone();
+        wrong[13] = 1.0;
+        wrong[91] = 1.0;
+        assert_eq!(
+            scorer.score_features(&original, 96, 96, None).unwrap(),
+            scorer.score_features(&wrong, 96, 96, None).unwrap()
+        );
+        assert!(compare_consumed_features(&ids, &original, &wrong).is_err());
+        assert_eq!(
+            compare_consumed_features(&ids, &original, &original).unwrap(),
+            0.0
+        );
+        wrong = original.clone();
+        wrong[90] = 100.0;
+        assert_eq!(
+            compare_consumed_features(&ids, &original, &wrong).unwrap(),
+            0.0
+        );
+        wrong[91] = f64::NAN;
+        assert!(compare_consumed_features(&ids, &original, &wrong).is_err());
+        assert!(compare_consumed_features(&ids, &original[..91], &original).is_err());
+    }
+}
 pub(super) fn file_hashes(pair: &Pair) -> Result<(String, String), String> {
     Ok((file_sha(&pair.reference)?, file_sha(&pair.distorted)?))
 }
@@ -393,7 +455,10 @@ impl Config {
                 record["spatial_refinement_grids"] = json!(grids);
                 record["spatial_refinement_queries"] = json!(queries);
             }
-            let mut max_abs: f64 = 0.0;
+            let consumed = scorer.consumed_feature_ids().map_err(|e| e.to_string())?;
+            let max_abs = compare_consumed_features(&consumed, features, computed.features())?;
+            record["feature_audit_scope"] = json!("complete-structural-read-set-v1");
+            record["consumed_feature_ids"] = json!(consumed);
             if let Some(head) = &self.head {
                 let mut pixel_features = vec![0.0; head.caller_input_width()];
                 for &id in head.declared_feature_ids() {
@@ -402,15 +467,7 @@ impl Config {
                         .features()
                         .get(id)
                         .ok_or("missing served feature")?;
-                    let expected = features[id];
                     pixel_features[id] = actual;
-                    let diff = (actual - expected).abs();
-                    max_abs = max_abs.max(diff);
-                    if !actual.is_finite() || diff > 1e-6 + 1e-5 * expected.abs() {
-                        return Err(format!(
-                            "consumed feature f{id}: canonical {expected} versus served {actual}"
-                        ));
-                    }
                 }
                 record["head_probability"] =
                     json!(head.probability_f64(features).map_err(|e| e.to_string())?);

@@ -1,5 +1,14 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, complete canonical-feature audit correction:**
+[Replay](../benchmarks/complete_feature_audit_2026-09-14.md) uses the same
+214 admitted TRAIN-fit pairs /215 files with fresh outputs. The earlier native
+ensemble's zero consumed-feature maximum was not measured; its score and
+scalar/spatial parity were valid. The new complete-read-set audit actually
+checks all80 ensemble IDs, and all228 base/tree IDs, with zero feature deltas.
+All prior audit fields and feature CSVs remain unchanged. New scope/ID fields
+distinguish these receipts. No fitting, EVAL, source relabelling or qualification.
+
 **September 14, native SDR extraction/serving contract:**
 [Results](../benchmarks/native_sdr_contract_2026-09-14.md) retain the preceding
 native-color admission's214 TRAIN-fit pairs /215 files. Native372 base/head and
