@@ -1,5 +1,30 @@
 # Start here — one target score, one development path
 
+## September 14, latest: frozen Rev3 models now have broader matched eval
+
+[Qualification expansion](benchmarks/rev3_qualification_2026-09-14.md) adds
+404 KonJND JPEG SELECT and 436 KonFiG origin-validation pairs to the existing
+3,125 KADID SELECT pairs. All nine frozen candidates, native matched B/D, and
+CPU SSIMULACRA2 have measured panels. No fitting, calibration or test access.
+New models improve KADID but trail B/D on KonJND: best new y60/H32 .4566 versus
+D .5883; source-bootstrap paired delta [-.184, -.080]. Full944/H128 is .1776.
+All nine fail measured G-OUT clauses. Wide models exceed 100 on distorted
+pairs. Selected619 fails spatial/scalar parity on 836/840 added pairs; the
+other eight complete native audits, but full944 still lacks full refinement.
+
+The canonical report now marks incomplete composite coverage explicitly,
+retaining partial arithmetic only as a diagnostic. The new matched-eval
+discussion is on the all-rows gauntlet. CID22/T0 terminal populations remain
+excluded; KonFiG is a four-source instrument and was used to tune SSIMULACRA2.
+B/D's absent historical era metadata remains unqualified, with every reported
+prediction checked against their current native Rust surface.
+
+Artifacts: `~/work/zensim-validation-2026-09-14/rev3-qualification/`, especially
+`verdicts-coverage/`, `pixel-audits-v2/RESULT.json`, `UNCERTAINTY.json`, and the
+retained failure logs. The assigned full production/science goal remains active.
+Next broaden admissible imazen-26/dial/corruption coverage, reproduce serving
+defects on train, and complete native targeting/RD and controlled p95/memory.
+
 ## September 14, latest: canonical assessment and an integrity-head prototype
 
 Gauntlet display correction: the main table previously omitted KADID and the

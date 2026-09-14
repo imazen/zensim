@@ -295,6 +295,7 @@ fn slot_720(name: &str) -> Option<&'static str> {
         "csiq" => "ext_csiq.parquet",
         "live" => "ext_live.parquet",
         "konjnd" => "ext_konjnd_jpeg_val.parquet",
+        "konfig" => "ext_konfig.parquet",
         "aic3" => "ext_aic3.parquet",
         "aic4" => "ext_aic4.parquet",
         "nonphoto" => "ext_nonphoto_720_nn_full.parquet",
@@ -538,6 +539,17 @@ const CORPORA: &[Corpus] = &[
         // appears to be a per-pair JND threshold in [22, 70]).
         // 10-band-on-[0,1] partitioning doesn't apply; skip.
         enable_per_band: false,
+    },
+    Corpus {
+        name: "konfig",
+        display: "KonFiG-IQA (admitted origins)",
+        // Explicit opt-in instrument, never part of the default corpora. The
+        // caller must supply an admitted origin view. Quality-oriented
+        // human_score = 1 - q_jnd / 3.2; q_jnd remains a separate native axis.
+        // SSIMULACRA2 tuned on this corpus: not a fair-superiority panel.
+        filename: "ext_konfig.parquet",
+        preferred_slots: &[],
+        enable_per_band: true,
     },
     Corpus {
         name: "aic3",
@@ -1512,7 +1524,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             corruption_grid = PathBuf::from(DEFAULT_CORRUPTION_GRID_720);
         }
     }
-    let mut corpora = corpora.unwrap_or_else(|| CORPORA.iter().collect());
+    let mut corpora =
+        corpora.unwrap_or_else(|| CORPORA.iter().filter(|c| c.name != "konfig").collect());
     if regime_720 {
         let before = corpora.len();
         corpora.retain(|c| slot_720(c.name).is_some());
@@ -2086,10 +2099,11 @@ fn bootstrap_srocc_ci(scores: &[f64], humans: &[f64]) -> (f64, f64) {
 /// (the 2026-07-26 review found two composites that could disagree). Weights
 /// center the product axes (CID22 gold MOS + imazen26 real-codec ssim2 +
 /// non-photo) over held-out human JND; **KADID/TID are excluded** (train==val
-/// memorization). |SROCC| per corpus; a corpus absent from the run drops from
-/// both numerator and denominator. Matched byte-for-byte in `gauntlet.py`'s
-/// fallback only — the primary path reads this value from the JSON.
-fn product_composite(results: &[CorpusResult]) -> f64 {
+/// memorization). Historical partial arithmetic: a corpus absent from the run
+/// drops from both numerator and denominator. This is a diagnostic only;
+/// `product_composite` below requires complete coverage. The board reads the
+/// emitted values and does not reconstruct missing composites.
+fn partial_product_composite(results: &[CorpusResult]) -> f64 {
     let term = |sub: &str, w: f64| -> Option<(f64, f64)> {
         results
             .iter()
@@ -2109,6 +2123,27 @@ fn product_composite(results: &[CorpusResult]) -> f64 {
         .flatten()
         .fold((0.0f64, 0.0f64), |(n, d), (x, y)| (n + x, d + y));
     if den > 0.0 { num / den } else { f64::NAN }
+}
+
+const PRODUCT_COMPOSITE_AXES: &[&str] =
+    &["cid22", "imazen26", "nonphoto", "konjnd", "aic3", "aic4"];
+
+fn missing_composite_axes(results: &[CorpusResult]) -> Vec<&'static str> {
+    PRODUCT_COMPOSITE_AXES
+        .iter()
+        .copied()
+        .filter(|name| !results.iter().any(|r| r.name == *name))
+        .collect()
+}
+
+/// Missing axes cannot turn a six-axis product composite into a single-panel
+/// ranking. Preserve the historical partial arithmetic as a diagnostic only.
+fn product_composite(results: &[CorpusResult]) -> f64 {
+    if missing_composite_axes(results).is_empty() {
+        partial_product_composite(results)
+    } else {
+        f64::NAN
+    }
 }
 
 fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, f64, f64) {
@@ -6550,6 +6585,12 @@ Run the dedicated q-sweep harness for those._\n",
             // Canonical product-weighted ranking composite (single Rust source;
             // the dashboard READS this, never re-derives it). KADID/TID excluded.
             "composite": product_composite(&results),
+            "composite_partial": partial_product_composite(&results),
+            "composite_coverage": {
+                "required": PRODUCT_COMPOSITE_AXES,
+                "missing": missing_composite_axes(&results),
+                "status": if missing_composite_axes(&results).is_empty() { "COMPLETE" } else { "INCOMPLETE" },
+            },
             "scatter_assessment":scatter_assessment,
             // CODEC_TARGET_GOALS scorecard values (same numbers as the report's
             // scorecard table; null when the run computed no gates).
@@ -7626,6 +7667,29 @@ mod tests {
         assert!(era_of(&a.features_root).contains("STORED-ERA 372"));
     }
 
+    #[test]
+    fn konfig_requires_explicit_admitted_corpus_selection() {
+        for regime in ["372", "720", "944"] {
+            let default = parse(&["--bake", "/x/b.bin", "--regime", regime]);
+            assert!(!default.corpora.iter().any(|c| c.name == "konfig"));
+            let explicit = parse(&[
+                "--bake",
+                "/x/b.bin",
+                "--regime",
+                regime,
+                "--features-root",
+                "/explicit/admitted/eval",
+                "--corpora",
+                "konfig",
+            ]);
+            assert_eq!(explicit.corpora.len(), 1);
+            assert_eq!(explicit.corpora[0].name, "konfig");
+            assert!(explicit.corpora[0].enable_per_band);
+        }
+        assert_eq!(slot_720("konfig"), Some("ext_konfig.parquet"));
+        assert!(sign_is_meaningful("konfig"));
+    }
+
     /// `--regime 720` behavior is unchanged by the 944 addition: 720 defaults,
     /// no 944 label, filtered all-corpora default.
     #[test]
@@ -7645,7 +7709,7 @@ mod tests {
         let names: Vec<&str> = a.corpora.iter().map(|c| c.name).collect();
         let expected: Vec<&str> = CORPORA
             .iter()
-            .filter(|c| slot_720(c.name).is_some())
+            .filter(|c| c.name != "konfig" && slot_720(c.name).is_some())
             .map(|c| c.name)
             .collect();
         assert_eq!(names, expected);

@@ -14,10 +14,66 @@ hfnlproxy are deliberately omitted for ssim2 (the slice target IS
 ssim2-derived — a trivially perfect self-row would mislead) and for the
 others until the encode-key sidecar join lands (registered follow-up).
 """
-import json, os, sys, csv
+import argparse, hashlib, json, math, os, sys, csv
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 from zen_stats import panel  # noqa: E402
+
+
+def build_admitted(manifest_path, out_dir):
+    """Explicit, hash-bound eval inputs; never resolve legacy corpus defaults."""
+    from zen_stats import panel_batch, scatter
+
+    manifest_path = Path(manifest_path)
+    spec = json.loads(manifest_path.read_text())
+    if spec.get("schema") != "zensim-peer-eval-v1" or spec.get("role") != "eval":
+        raise ValueError("peer manifest requires explicit zensim-peer-eval-v1 eval role")
+    name = spec["name"]
+    if not name.startswith("peer_") or Path(name).name != name:
+        raise ValueError("peer name must be a single peer_ filename component")
+    out = Path(out_dir) / (name + ".fulleval.json")
+    if out.exists():
+        raise ValueError("admitted peer evaluation requires a fresh output")
+    doc = dict(name=name, peer=True, regime="reference-metric", n_inputs=None,
+               bake=None, model=dict(kind="reference-metric", note=spec["note"]),
+               rank={}, per_pair={}, scatter_assessment={}, peer_provenance={},
+               m3_coherence=None, m3a_coherence=None)
+    for corpus, entry in spec["corpora"].items():
+        if entry.get("role") != "eval":
+            raise ValueError(f"{corpus}: non-eval peer input refused")
+        path = Path(entry["path"])
+        with path.open("rb") as f:
+            digest = hashlib.file_digest(f, "sha256").hexdigest()
+        if digest != entry["sha256"]:
+            raise ValueError(f"{corpus}: peer input hash mismatch")
+        with path.open() as f:
+            rows = list(csv.DictReader(f, delimiter="\t"))
+        if len(rows) != entry["rows"] or not rows:
+            raise ValueError(f"{corpus}: peer row coverage mismatch")
+        pred = [float(r[entry["metric_column"]]) for r in rows]
+        target = [float(r[entry["target_column"]]) for r in rows]
+        if any(not math.isfinite(v) for v in pred + target):
+            raise ValueError(f"{corpus}: nonfinite peer pair; no silent dropping")
+        st = panel_batch([(corpus, pred, target)])[0]
+        if st["n_dropped"] != 0:
+            raise ValueError(f"{corpus}: canonical panel dropped rows")
+        doc["rank"][corpus] = {k: st[k] for k in
+            ("srocc", "srocc_signed", "plcc", "krocc", "or", "pwrc", "z_rmse", "n")}
+        assessment = scatter(pred, target)
+        normalized = assessment.pop("normalized_pred", None)
+        axis = entry["axis"]
+        if axis not in ("mos", "jnd"):
+            raise ValueError("unknown peer target axis")
+        doc["per_pair"][corpus] = dict(pred=pred, **{axis: target}, normalized_pred=normalized)
+        doc["scatter_assessment"][corpus] = {axis: assessment}
+        doc["peer_provenance"][corpus] = entry
+    doc["eval_admission"] = spec["admission"]
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    with out.open("x") as f:
+        json.dump(doc, f, indent=1, allow_nan=False)
+        f.write("\n")
+    print(f"{name}: {len(doc['rank'])} admitted corpora -> {out}")
 
 RM = "/mnt/v/output/zensim/reports/refmetrics"
 OUT = "/mnt/v/output/zensim/reports/fulleval"
@@ -254,4 +310,13 @@ def main():
             print(f"   carried through unchanged ({len(carried)}): {', '.join(sorted(carried))}")
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--admitted-manifest", type=Path,
+                    help="explicit hash-bound eval peer TSVs; bypass all legacy corpus reads")
+    ap.add_argument("--out-dir", type=Path, default=Path(OUT))
+    args = ap.parse_args()
+    if args.admitted_manifest:
+        build_admitted(args.admitted_manifest, args.out_dir)
+    else:
+        OUT = str(args.out_dir)
+        main()

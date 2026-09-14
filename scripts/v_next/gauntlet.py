@@ -122,7 +122,7 @@ REFERENCES = ["mos", "jnd", "ssim2", "butter", "cvvdp"]
 REF_LABELS = {"mos": "MOS (human)", "jnd": "JND (human)", "ssim2": "SSIMULACRA2",
               "butter": "butteraugli (↑=better)", "cvvdp": "ColorVideoVDP"}
 # scoreboard columns beyond CID22: (key, header, higher_is_better, fmt)
-CORP_ORDER = ["cid22", "nonphoto", "konjnd", "aic3", "aic4", "live", "csiq", "kadid", "tid"]
+CORP_ORDER = ["cid22", "nonphoto", "konjnd", "konfig", "aic3", "aic4", "live", "csiq", "kadid", "tid"]
 SCATTER_MAX = 500  # subsample dense per_pair for embedding — keeps the offline file responsive
 MODEL_TRANSFORMS_EMBED = 48  # Model-details shows at most 48 transform chips (+ "+N more");
                              # embedding more per bake (944 on the A-arm lasso cells) is payload
@@ -299,6 +299,7 @@ SPRINT_BEST = [
 ]
 
 # September 14: fixed nine-composition diagnostic review, with LEGACY badges intact.
+CURATED_BOARD.extend(["MT914_matched_B", "MT914_matched_D", "peer_ssim2_mt914"])
 CURATED_BOARD.extend(["MT913_" + name for name in (
     "y40_h32_ens5", "y40_h128_ens5", "y60_h32_ens5", "y60_h128_ens5",
     "local120_h128_ens5", "selected619_h128_ens5", "full944_h128_ens5",
@@ -868,7 +869,8 @@ def fairness_of(o, ann_entries, seed_groups, name_to_group):
     # every cell whose composite is the Rust product_composite. A cell whose composite
     # came from gauntlet's legacy fallback is flagged instead of trusted.
     if o.get("composite") is None and not o.get("peer"):
-        notes.append("composite absent (legacy fallback would be used)")
+        notes.append("composite incomplete: " + ", ".join(o["composite_coverage"]["missing"])
+                     if o.get("composite_coverage") else "composite not measured")
     for c in TRAIN_EQ_VAL_AXES:
         if (o.get("rank", {}).get(c) or {}).get("train_eq_val") is False:
             fails.append("c_no_train_eq_val")   # a cell claiming KADID/TID are held out
@@ -1359,6 +1361,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "zoneSkip": zone_skip.get(name),
             "m3a": o.get("m3a_coherence"),
             "corruption": o.get("corruption", {}), "composite": comp, "reject": reject,
+            "composite_coverage": o.get("composite_coverage"),
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
             "gates": o.get("gates") or {},
             "model": model,
@@ -2522,6 +2525,8 @@ const COLS=[
   ['trained','trained',true,b=>b.train_date?b.train_date.d+(b.train_date.src==='file'?'*':''):null],
   ['gates','gates',true,b=>gateGlyphs(b)],
   ['composite','composite',false,b=>b.composite],
+  ['composite_coverage','composite coverage',true,b=>{const c=b.composite_coverage;
+    return c?c.status+' '+(c.required.length-c.missing.length)+'/'+c.required.length:'not recorded';}],
   ['cid22','CID22',false,b=>rs(b,'cid22')],
   ['nonphoto','nonphoto',false,b=>rs(b,'nonphoto')],
   ['konjnd','KonJND',false,b=>rs(b,'konjnd')],

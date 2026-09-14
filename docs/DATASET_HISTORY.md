@@ -1,5 +1,21 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, frozen Rev3 matched evaluation:**
+[Protocol/results](../benchmarks/rev3_qualification_2026-09-14.md) add native
+Rev3 full944 KonJND JPEG SELECT (404 references/pairs) and KonFiG validation
+(436 pairs, four origins) to the existing 3,125-pair KADID SELECT evidence.
+Original admitted view hashes, round-half-up JPEG pairing, KonFiG content
+deduplication, source/file/pixel identities, formula revision, and frozen model
+bytes are retained. No terminal payload or model fit. B/D are re-extracted at
+Rev1 and compared on the same pixels; their absent historical era metadata is
+explicitly unqualified, with complete current native prediction parity.
+All nine candidates trail B/D on KonJND despite higher KADID rank, fail measured
+outlier clauses, and remain unshippable. Selected619 fails 836/840 new spatial
+parity cases. Some wide models exceed identity. Source-cluster intervals,
+complete scatter diagnostics and keyed CPU SSIMULACRA2 comparisons are retained;
+KonFiG's four origins and SSIMULACRA2 tuning exposure limit interpretation.
+Native artifacts: `~/work/zensim-validation-2026-09-14/rev3-qualification/`.
+
 **September 13, later user split ruling:** new work uses train only for all
 fitting/calibration/checkpoint decisions, eval only for gates/evaluation, and
 never opens test/terminal segments. This overrides prior touch-once plans and

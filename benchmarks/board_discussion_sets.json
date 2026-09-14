@@ -282,6 +282,27 @@
       ],
       "note": "Recent feature-regime rewrite/revision: luma-focused and coarse-scale subsets, local120, selected619 and full944; H32/H128/H256 capacity controls and a linear60 baseline. Eight frozen five-seed ensembles plus one linear model. Train-only fitting/calibration; 3,125 source-disjoint KADID eval pairs; no test segments opened. Read full Mohammadi panels, raw/shape envelopes, clumping, saturation, complete scalar/prepared cost and spatial coverage together. No cross-corpus composite or product qualification is available; selected619 has invalid maps and full944 lacks complete refinement. Current B/D and inherited incumbents/peers are historical context, not matched-population superiority evidence. These candidates are present on the all-rows board; the fair-only board excludes them for missing CID22. The separate D/Rev1 corruption-head prototype is not a Rev3 candidate. Records: benchmarks/minimal_top_2026-09-13.md and benchmarks/minimal_top_2026-09-13.scatter_review.json.",
       "preferred_corpus": "kadid"
+    },
+    {
+      "id": "2026-09-14-rev3-admitted-eval",
+      "date": "2026-09-14",
+      "label": "2026-09-14 · Rev3: actual matched eval, KADID + KonJND + KonFiG",
+      "bakes": [
+        "MT913_y40_h32_ens5",
+        "MT913_y40_h128_ens5",
+        "MT913_y60_h32_ens5",
+        "MT913_y60_h128_ens5",
+        "MT913_local120_h128_ens5",
+        "MT913_selected619_h128_ens5",
+        "MT913_full944_h128_ens5",
+        "MT913_full944_h256_ens5",
+        "MT913_linear60",
+        "MT914_matched_B",
+        "MT914_matched_D",
+        "peer_ssim2_mt914"
+      ],
+      "preferred_corpus": "konjnd",
+      "note": "Frozen candidates evaluated through Rust on 3,125 KADID SELECT, 404 KonJND JPEG SELECT and 436 KonFiG origin-validation pairs. Matched B/D use native Rev1 extraction and complete pixel/cache audits; their legacy bake-era metadata is unknown and does not pass provenance qualification. All other inherited incumbents/peers are historical context, not matched comparisons. New models improve KADID but trail matched B/D on KonJND; no composite or product qualification. Selected619 fails spatial/scalar parity on 836/840 additional pairs; full944 lacks complete refinement. KonFiG has only four sources and was used to tune SSIMULACRA2: no independent superiority claim there. Existing rank CIs resample rows; source-cluster uncertainty is retained in the qualification report. T0/CID22 terminal populations remain untouched under the current split ruling. Record: benchmarks/rev3_qualification_2026-09-14.md."
     }
   ],
   "incumbent_notes": [
