@@ -1,5 +1,15 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, newest aligned-bin optimization:**
+[Protocol/results](../benchmarks/aligned_bins_2026-09-14.md) replay the same
+forty admitted TRAIN finite-moment cases exactly (1,176 repairs). No source
+admission, training/calibration, EVAL/test read or feature arithmetic change.
+Complete prepared timing accepts the private aligned-fold optimization;
+quality/steering verdicts are unchanged. An admission-metadata-only dimension
+census identifies existing larger renditions for the next registered spatial
+screen, not new held-out evidence. No model qualifies from this change.
+
+
 **September 14, newest row-fusion replay:**
 [Experiment and profile](../benchmarks/moment_rows_2026-09-14.md) reuse the same
 forty admitted TRAIN finite-moment cases without new training/calibration,

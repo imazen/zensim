@@ -701,6 +701,37 @@ impl BinAccum {
             return;
         }
         let inv_area = 1.0 / ((factor * factor) as f64);
+        if self.bin.is_multiple_of(factor) {
+            // Every coarse footprint lies in one bin. Keep each bin's
+            // source-row/source-column addition chain and the original
+            // multiply order, including underflow and signed zero handling.
+            let coarse_bin = self.bin / factor;
+            let full_cols = (self.width / factor).min(sw);
+            for sy in 0..sh.min(self.height.div_ceil(factor)) {
+                let oy = (self.height - sy * factor).min(factor) as f64;
+                let area = oy * factor as f64;
+                let row_bins =
+                    &mut self.bins[(sy / coarse_bin) * self.gw..(sy / coarse_bin + 1) * self.gw];
+                for (bx, cell) in row_bins.iter_mut().enumerate() {
+                    let first = bx * coarse_bin;
+                    let end = (first + coarse_bin).min(full_cols);
+                    for sx in first..end {
+                        let v = plane.get(sy * sw + sx) * inv_area;
+                        if v != 0.0 {
+                            *cell += v * area;
+                        }
+                    }
+                }
+                let right = self.width % factor;
+                if right != 0 && full_cols < sw {
+                    let v = plane.get(sy * sw + full_cols) * inv_area;
+                    if v != 0.0 {
+                        row_bins[full_cols / coarse_bin] += v * (oy * right as f64);
+                    }
+                }
+            }
+            return;
+        }
         for sy in 0..sh {
             let y0 = sy * factor;
             if y0 >= self.height {
@@ -1853,6 +1884,82 @@ mod tests {
                 let derivative =
                     256.0 * root * (1.0 - (1.0 - epsilon * fraction).powf(0.125)) / epsilon;
                 assert!((derivative - predicted).abs() <= 2e-5 * (256.0 * root).max(1e-12));
+            }
+        }
+    }
+
+    #[test]
+    fn aligned_bin_fold_matches_independent_footprint_intersections() {
+        for (width, height) in [(1, 1), (13, 19), (32, 24), (17, 8)] {
+            for factor in [2, 3, 4, 8] {
+                for bin in [1, 2, 3, 4, 6, 8, 16] {
+                    let (sw, sh) = (width / factor + 3, height / factor + 3);
+                    let values64 = [
+                        0.0,
+                        -0.0,
+                        f64::from_bits(1),
+                        1e100,
+                        -7.0,
+                        -1e100,
+                        9.125,
+                        1e-100,
+                    ];
+                    let values32 = [
+                        0.0,
+                        -0.0,
+                        f32::from_bits(1),
+                        1e20,
+                        -7.0,
+                        -1e20,
+                        9.125,
+                        1e-20,
+                    ];
+                    let p64: Vec<f64> = (0..sw * sh).map(|i| values64[i % 8]).collect();
+                    let p32: Vec<f32> = (0..sw * sh).map(|i| values32[i % 8]).collect();
+                    for plane in [PlaneRef::F64(&p64), PlaneRef::F32(&p32)] {
+                        let mut actual = BinAccum::new(width, height, bin);
+                        for (i, x) in actual.bins.iter_mut().enumerate() {
+                            *x = i as f64 * 0.125 - 2.0;
+                        }
+                        let mut expected = actual.bins.clone();
+                        // Independent geometry reference: visit every source
+                        // footprint and intersect it with every output bin.
+                        // Unlike the fast path, no alignment is assumed.
+                        for _ in 0..2 {
+                            for sy in 0..sh {
+                                for sx in 0..sw {
+                                    let v =
+                                        plane.get(sy * sw + sx) * (1.0 / (factor * factor) as f64);
+                                    if v == 0.0 {
+                                        continue;
+                                    }
+                                    for (i, cell) in expected.iter_mut().enumerate() {
+                                        let (bx, by) = (i % actual.gw, i / actual.gw);
+                                        let ox = ((sx + 1) * factor)
+                                            .min((bx + 1) * bin)
+                                            .min(width)
+                                            .saturating_sub((sx * factor).max(bx * bin));
+                                        let oy = ((sy + 1) * factor)
+                                            .min((by + 1) * bin)
+                                            .min(height)
+                                            .saturating_sub((sy * factor).max(by * bin));
+                                        if ox != 0 && oy != 0 {
+                                            *cell += v * (oy as f64 * ox as f64);
+                                        }
+                                    }
+                                }
+                            }
+                            actual.add_scale_plane(plane, sw, sh, factor);
+                            for (i, (a, b)) in actual.bins.iter().zip(&expected).enumerate() {
+                                assert_eq!(
+                                    a.to_bits(),
+                                    b.to_bits(),
+                                    "{width}x{height} factor={factor} bin={bin} cell={i}"
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
     }

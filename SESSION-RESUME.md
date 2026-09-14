@@ -1,5 +1,42 @@
 # Start here — one target score, one development path
 
+## September 14, newest: aligned bins improve complete finite-map cost
+
+[Aligned bin folding](benchmarks/aligned_bins_2026-09-14.md) adds a private
+fast path for coarse footprints contained in aligned bins. It preserves the
+original per-bin addition chains, multiply order, partial edges and fallback
+paths. An independent footprint-intersection reference passes 448 folds; all
+forty previous TRAIN JSON reports remain exact (1,176 repairs). No feature,
+model, score, gradient, density or rectangle-prediction changes occur.
+
+Three bracketed complete-call timing processes pass the registered acceptance
+rule. Basic228/H32 enabled medians improve from 132.09/544.36 ms to
+117.76/485.68 ms at 1024²/2048²; the second old control confirms the gain.
+Across all four profiles, enabled medians improve 7.7–13.1%; disabled controls
+range from 1.9% faster to 0.6% slower. All arms have thirty accepted one-call
+rounds with clear owner reliability flags; a 1MP drift flag is retained and
+the gain holds against both controls. The option remains off by default.
+RSS bounds fit the worker cap on these synthetic bin8 inputs. p95 and isolated
+query latency remain unmeasured, and the complete-map cost gap remains open.
+
+Broad attribution checks (38 library passes, two existing ignored, ten SIMD
+permutations and the revision driver), finite-moment/session, HDR retention,
+minimal feature build and Clippy pass. The cookbook now marks its historical
+M2=1 and basic-156 map limits as dated findings. No model is qualified.
+
+Metadata census of the existing admitted TRAIN packet finds renditions through
+1024 pixels; four of the five spatial-screen sources have that size, while
+the screenshot source stops at 384. Next register broader TRAIN spatial checks
+across content, size and codec quality, including basic228/H128 (stronger human
+rank) against H32. Use existing native decodes and public scoring; no new fit
+is yet justified. Max retention and repeated map/extraction work remain measured
+cost targets; export samples/quantiles at the benchmark owner for p95. All
+larger human/corruption/targeting/native-RD/HDR/frozen-EVAL requirements remain.
+The full production goal stays active.
+
+Artifacts: `~/work/zensim-validation-2026-09-14/aligned-bins/`. All build, test,
+replay, timing and RSS processes have finished.
+
 ## September 14, newest: reject row fusion; profile the larger map costs
 
 [Row experiment](benchmarks/moment_rows_2026-09-14.md) reproduces all forty

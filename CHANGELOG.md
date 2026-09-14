@@ -65,6 +65,11 @@
 
 ### Changed
 
+- Spatial bin folding skips repeated footprint intersections when scale cells
+  align with bins, preserving accumulation order and clipped edge behavior.
+  Complete finite-moment maps measure 8–13% faster on the registered 1MP/4MP
+  controls; no model or default changes. See the September 14 aligned-bin report.
+
 - Local basic-feature plans can omit X/B moment computation at selected coarse
   scales as well as full resolution. Y and the shared XYB pyramid remain intact;
   retained features match canonical extraction. Wider families keep conservative

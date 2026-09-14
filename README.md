@@ -557,7 +557,8 @@ and scratch across reconstructions. The optional
 `with_finite_moment_refinement(true)` improves finite L2/L4/L8 removal estimates
 using binned base-image moments; it preserves scalar scores and additive density.
 It is disabled by default and currently adds substantial preparation cost.
-See the [measured accuracy and cost](benchmarks/finite_moments_2026-09-14.md)
+See the [accuracy evidence](benchmarks/finite_moments_2026-09-14.md) and
+[updated preparation cost](benchmarks/aligned_bins_2026-09-14.md)
 before enabling it. Map coverage and small TRAIN checks do not qualify native
 encoder improvements.
 
