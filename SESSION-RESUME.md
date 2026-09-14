@@ -1,5 +1,23 @@
 # Start here — one target score, one development path
 
+## September 14, newest: derivative duality passes; finite repairs fail
+
+[Independent duality diagnostic](benchmarks/gradient_duality_2026-09-14.md)
+passes 12 combined and 120 feature-basis controls. The frozen local120/H128
+ensemble passes the independent forward/reverse comparison too, but only 5/24
+public secants meet the earlier diagnostic tolerance, and 6/8 partial repairs
+have wrong-sign gradient predictions (maximum error 52.648 score points).
+All eight partial repairs lower this synthetic model score; no independent
+quality judgment was made. Four full identity repairs are separate.
+
+The earlier 1/24 public gate remains FAILED. No fitting, corpus, EVAL or TEST.
+Prototype and binary are archived under `~/work/zensim-validation-2026-09-14/gradient-duality/`;
+production source is restored. A fixed local gradient is not a qualified finite
+repair estimator. Preserve exact/shared-moment references and these witnesses;
+stop repeating local algebra as advancement toward native steering. No model
+qualifies, and runtime/targeting/corruption/full evaluation gates remain open.
+
+
 ## September 14, newest: complete local120 derivative control fails; diagnosis retained
 
 [Complete-gradient study](benchmarks/complete_gradient_2026-09-14.md) combines
