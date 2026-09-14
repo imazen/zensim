@@ -1,5 +1,16 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, native signed contribution diagnosis:**
+[Results](../benchmarks/native_contributions_2026-09-14.md) reuse exactly the
+preceding eight TRAIN development cells and frozen six-model/D compositions.
+No new admission, fit, calibration, encode, extraction regime, EVAL or TEST.
+The existing native public replay retains baseline sensitivities under its
+diagnostic flag; ordinary results remain byte-identical. All 22 peer conflicts
+are present in local feature linearization. Positive sensitivities dominate
+local120 conflict contributions; a separate y60 failure follows coarse B
+feature changes. Neither observation proves a feature arithmetic bug or a
+retraining/ablation improvement. Existing model verdicts remain unchanged.
+
 **September 14, frozen constrained-model native replay:**
 [Comparison](../benchmarks/native_constraints_2026-09-14.md) reuses six existing
 product TRAIN ensembles, all 812 native-local outputs and 408 earlier diagnostic

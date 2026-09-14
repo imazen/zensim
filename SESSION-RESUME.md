@@ -1,5 +1,29 @@
 # Start here — one target score, one development path
 
+## September 14, newest: native conflicts traced through signed features
+
+[Contribution diagnosis](benchmarks/native_contributions_2026-09-14.md) reuses
+the exact eight development cells, six frozen ensembles and frozen D. The
+native replay's existing diagnostic flag now retains computed sensitivities.
+Ordinary output is byte-identical; diagnostic output differs only by that field.
+All 1,792 responses reconstruct within 8.89e-16; 97,886 common active feature
+comparisons between heads are exact. No fit, calibration, EVAL or TEST.
+
+All 22 peer conflicts are also wrong in feature-level linearization. Positive
+sensitivities to dissimilarities account for 90–93% of opposing component mass
+in local120 conflicts, chiefly X SSIM/edge terms. The y60/H32 conflict instead
+follows coarse B feature changes; it does not prove sampling aliasing. No
+arithmetic defect or benefit from feature removal is established.
+
+Before fitting, verify the existing TV pair-margin path against clean admitted
+native training pairs (indices, group order, polarity, actual loss reachability
+and sampling effects). Diagnose the separate coarse-B phase/filter response
+on exact saved pixels before changing kernels. Do not globally remove chroma
+or repeat capacity/map-algebra sweeps. Signed plots and exact A/B gallery:
+`/zensim/reports/native-contributions-2026-09-14/index.html`.
+The explicit cumulative memory audit is 26/99 files; the full audit and all
+remaining product qualification work stay open. No model qualifies.
+
 ## September 14, newest: existing constrained heads fail native advancement
 
 [Native constraint comparison](benchmarks/native_constraints_2026-09-14.md)

@@ -59,6 +59,7 @@ pub(super) fn run(manifest: &str, hash: &str, output: &str) {
     let bytes = std::fs::read(manifest).expect("manifest");
     assert_eq!(super::sha(&bytes), hash, "manifest hash mismatch");
     let input: Value = serde_json::from_slice(&bytes).expect("manifest JSON");
+    let diagnostics = std::env::var("ZENSIM_ATTR_DIAG").as_deref() == Ok("1");
     assert_eq!(input["schema"], "zensim-native-map-replay-v1");
     assert_eq!(input["role"], "train", "TRAIN replay only");
     let revision = number(&input["formula_revision"]);
@@ -195,8 +196,12 @@ pub(super) fn run(manifest: &str, hash: &str, output: &str) {
                     json!({"region":g["id"],"mass":mass,"density":mass/number(&g["area"]) as f64})
                 })
                 .collect();
-            predictions.push(json!({"model":recipes[mi]["name"],"score":map.result().score(),
-                "density_missing":map.unsupported_feature_ids(),"refinement_missing":map.unsupported_refinement_feature_ids(),"regions":groups}));
+            let mut prediction = json!({"model":recipes[mi]["name"],"score":map.result().score(),
+                "density_missing":map.unsupported_feature_ids(),"refinement_missing":map.unsupported_refinement_feature_ids(),"regions":groups});
+            if diagnostics {
+                prediction["baseline_sensitivities"] = json!(map.sensitivities());
+            }
+            predictions.push(prediction);
             base_features.push(map.result().features().to_vec());
             sensitivities.push(map.sensitivities().to_vec());
             base_scores.push(map.result().score());

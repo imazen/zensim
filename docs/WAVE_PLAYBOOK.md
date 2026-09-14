@@ -75,6 +75,13 @@ demonstrates that improving own-score consistency can coexist with worse
 quality ordering. The architecture was already trained; its native failures
 do not justify repeating the same capacity/constraint sweep.
 
+`ZENSIM_ATTR_DIAG=1` on native replay retains the baseline sensitivities already
+used for complete-model linearization. Their signed products with saved feature
+deltas expose signal/scale/channel tradeoffs without another scoring owner;
+retain the finite-head residual and do not present this as a feature ablation.
+The [native contribution diagnosis](../benchmarks/native_contributions_2026-09-14.md)
+checks unchanged ordinary output and exact decomposition on frozen TRAIN cases.
+
 ## A complete experiment
 
 1. Register the hypothesis, baseline, exact intervention, sources, seeds,

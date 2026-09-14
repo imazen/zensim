@@ -61,6 +61,8 @@
 //! coverage explicitly, and measures complete ensembles plus same-buffer peers.
 //! This separate native mechanism diagnostic does not fabricate reference
 //! repairs or claim that union density includes non-additive maximum terms.
+//! With `ZENSIM_ATTR_DIAG=1`, native predictions also retain the already
+//! computed baseline feature sensitivities for signed contribution diagnosis.
 
 use zensim::{DiffmapWeighting, RgbSlice, Zensim, ZensimProfile};
 
