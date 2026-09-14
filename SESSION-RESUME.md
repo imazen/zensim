@@ -1,5 +1,24 @@
 # Start here — one target score, one development path
 
+
+## September 14, newest: maximum projection parity passes; timings remain unqualified
+
+[Exact max projection](benchmarks/max_projection_2026-09-14.md) reduces redundant
+source-footprint scatters using row/column maxima with unchanged f32 signals.
+The old per-pixel implementation is test-only. All3,584 sampling/mask projection
+cases and14,268 independent reflected-footprint queries pass. Both frozen
+basic228 ensembles pass15,540 public rectangle comparisons each, including
+scores/features/sensitivities, worker reuse, finite moments and parallel toggles.
+
+The fixed four-block synthetic1MP/4MP ABBA study records240 one-call observations,
+with3/8/4/3 flagged checks. Zero runs meet the registered quiet criterion; no
+qualified speedup or runtime gate is claimed. Old/new1MP p95 ranges77.97–84.74 /
+72.60–72.69ms;4MP338.22–338.50 /290.32–292.16ms, descriptive only.
+No training, corpus, EVAL/TEST or model promotion. Existing finite-repair and
+native steering failures remain; closing that product accuracy gap is still
+required. Keep the full goal active. Evidence and binary sources are retained.
+
+
 ## September 14, newest: native latency measured; quiet admission rejected
 
 [Native TRAIN latency screen](benchmarks/native_latency_2026-09-14.md) measures

@@ -1521,6 +1521,205 @@ mod tests {
     use crate::{RgbSlice, Zensim, ZensimProfile};
     use std::sync::OnceLock;
 
+    std::thread_local! {
+        pub(super) static MAX_REFERENCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        pub(super) static MAX_REFERENCE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn prepared_max_projection_preserves_public_outputs() {
+        let bits = |values: &[f64]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        let models: Vec<_> = if let Ok(paths) = std::env::var("ZENSIM_MAX_PROJECTION_MODELS") {
+            paths
+                .split(',')
+                .map(|path| crate::mlp::Model::from_bytes(&std::fs::read(path).unwrap()).unwrap())
+                .collect()
+        } else {
+            let recipe = serde_json::json!({
+                "schema_hash":1,"scaler_mean":vec![0.0;228],"scaler_scale":vec![1.0;228],
+                "layers":[{"in_dim":228,"out_dim":1,"activation":"identity","dtype":"f32",
+                    "weights":(0..228).map(|i| -0.001 * (1 + i % 7) as f64).collect::<Vec<_>>(),
+                    "biases":[100.0]}]
+            });
+            let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+            vec![crate::mlp::Model::from_bytes(&bytes).unwrap()]
+        };
+        let weights = vec![1.0 / models.len() as f64; models.len()];
+        let mut comparisons = 0;
+        for (w, h) in [(17, 9), (97, 131), (256, 257)] {
+            let src: Vec<_> = (0..w * h)
+                .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 13 % 233) as u8])
+                .collect();
+            let mut dst = src.clone();
+            for i in (0..dst.len()).step_by(11) {
+                dst[i] = [0, 255, 0];
+            }
+            let rs = RgbSlice::new(&src, w, h);
+            let ds = RgbSlice::new(&dst, w, h);
+            for parallel in [false, true] {
+                for finite in [false, true] {
+                    let scorer = || {
+                        crate::BakeScorer::ensemble(&models, Some(&weights))
+                            .unwrap()
+                            .with_parallel(parallel)
+                            .with_finite_moment_refinement(finite)
+                    };
+                    let mut old = scorer();
+                    let mut new = scorer();
+                    let scalar = new.compute(&rs, &ds, None).unwrap();
+                    let mut old = old.prepare_steering(&rs, 8).unwrap();
+                    let mut new = new.prepare_steering(&rs, 8).unwrap();
+                    for image in [&ds, &rs, &ds] {
+                        let before = MAX_REFERENCE_CALLS.with(std::cell::Cell::get);
+                        MAX_REFERENCE.with(|flag| flag.set(true));
+                        let a = old.compute(image, None);
+                        MAX_REFERENCE.with(|flag| flag.set(false));
+                        let a = a.unwrap();
+                        let b = new.compute(image, None).unwrap();
+                        if !b.result().is_identical() {
+                            assert!(MAX_REFERENCE_CALLS.with(std::cell::Cell::get) > before);
+                        }
+                        assert_eq!(a.result().score().to_bits(), b.result().score().to_bits());
+                        assert_eq!(bits(a.result().features()), bits(b.result().features()));
+                        assert_eq!(bits(a.sensitivities()), bits(b.sensitivities()));
+                        assert_eq!(a.unsupported_feature_ids(), b.unsupported_feature_ids());
+                        assert_eq!(
+                            a.unsupported_refinement_feature_ids(),
+                            b.unsupported_refinement_feature_ids()
+                        );
+                        if !b.result().is_identical() {
+                            assert_eq!(bits(scalar.features()), bits(b.result().features()));
+                            assert_eq!(scalar.score().to_bits(), b.result().score().to_bits());
+                        }
+                        for (x0, y0, x1, y1) in (0..h)
+                            .step_by(8)
+                            .flat_map(|y| {
+                                (0..w)
+                                    .step_by(8)
+                                    .map(move |x| (x, y, (x + 8).min(w), (y + 8).min(h)))
+                            })
+                            .chain([
+                                (0, 0, w, h),
+                                (1, 1, w - 1, h - 1),
+                                (0, 0, 1, 1),
+                                (w, h, w, h),
+                            ])
+                        {
+                            assert_eq!(
+                                a.attribution().query_rect(x0, y0, x1, y1).to_bits(),
+                                b.attribution().query_rect(x0, y0, x1, y1).to_bits()
+                            );
+                            assert_eq!(
+                                a.refinement_gain(x0, y0, x1, y1).to_bits(),
+                                b.refinement_gain(x0, y0, x1, y1).to_bits()
+                            );
+                            comparisons += 1;
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "public max projection parity: {} model members, {comparisons} rectangle comparisons",
+            models.len()
+        );
+    }
+
+    #[test]
+    fn max_projection_matches_pixel_reference_across_sampling_and_masks() {
+        let mut contracts = vec![None];
+        for kernel in ["triangle", "mitchell", "robidouxsharp"] {
+            for (version, channels, ratio) in [
+                ("v1", "xyb", "3/2"),
+                ("v1", "xyb", "2"),
+                ("v1", "xyb", "3"),
+                ("v1", "y", "3/2"),
+                ("v1", "y", "2"),
+                ("v1", "y", "3"),
+                ("v2", "xyb", "1,2,4,8"),
+                ("v2", "xyb", "1,3,5,7"),
+                ("v2", "xyb", "1,2,3,5"),
+            ] {
+                contracts.push(Some(format!("{version}:{channels}:{kernel}:{ratio}")));
+            }
+        }
+        let mut cases = 0;
+        for contract in contracts {
+            let sampling = contract.as_ref().map(|contract| {
+                let recipe = serde_json::json!({
+                    "schema_hash":1,"scaler_mean":[0.0],"scaler_scale":[1.0],
+                    "metadata":[{"key":crate::sampling::KEY,"type":"utf8","text":contract}],
+                    "layers":[{"in_dim":1,"out_dim":1,"activation":"identity",
+                        "dtype":"f32","weights":[1.0],"biases":[0.0]}]
+                });
+                let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+                let model = crate::mlp::Model::from_bytes(&bytes).unwrap();
+                crate::sampling::Sampling::from_model(&model)
+                    .unwrap()
+                    .unwrap()
+            });
+            for (w, h) in [(1, 1), (17, 9), (97, 83), (129, 131)] {
+                let pixels = vec![[0u8; 3]; w * h];
+                let source = RgbSlice::new(&pixels, w, h);
+                let pre = sampling.map_or_else(
+                    || test_zensim().precompute_reference(&source).unwrap(),
+                    |s| s.reference(&source, false),
+                );
+                for scale in 0..4 {
+                    let (_, sw, sh) = pre.scale(scale);
+                    let mut ret = crate::streaming::AttrScaleRetention::new(sw * sh);
+                    let mut src: [Vec<f32>; 3] = core::array::from_fn(|_| vec![0.0; sw * sh]);
+                    let mut dst = src.clone();
+                    for c in 0..3 {
+                        for i in 0..sw * sh {
+                            // Zeros, repeated maxima, both edge branches, and
+                            // non-binary fractions expose SIMD/reduction drift.
+                            src[c][i] = ((i * 17 + c * 3) % 29) as f32 / 31.0;
+                            dst[c][i] = ((i * 7 + c * 13) % 31) as f32 / 29.0;
+                            ret.mu1[c][i] = ((i * 11 + c) % 23) as f32 / 27.0;
+                            ret.mu2[c][i] = ((i * 3 + c) % 19) as f32 / 23.0;
+                            ret.sd[c][i] = if c == 0 { 0.0 } else { (i % 11) as f32 / 13.0 };
+                        }
+                    }
+                    for mask in 0..8 {
+                        let mut sensitivities = [0.0; 72];
+                        let mut expected = 0;
+                        for c in 0..3 {
+                            for slot in 0..3 {
+                                if mask & (1 << ((slot + c) % 3)) != 0 {
+                                    sensitivities[(scale * 3 + c) * 6 + slot] =
+                                        (c as f64 - 0.5) * 0.7;
+                                    expected += 1;
+                                }
+                            }
+                        }
+                        let mut maps = Vec::new();
+                        // The callee compares every output bit with the old
+                        // per-pixel path under cfg(test), including public tests.
+                        retain_max_removals(
+                            &mut maps,
+                            &sensitivities,
+                            scale,
+                            w,
+                            h,
+                            sw,
+                            sh,
+                            src.each_ref().map(Vec::as_slice),
+                            dst.each_ref().map(Vec::as_slice),
+                            &ret,
+                            pre.sampling_geometry.as_ref(),
+                        );
+                        assert_eq!(maps.len(), expected);
+                        cases += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 3584);
+        eprintln!("max projection exact reference cases: {cases}");
+    }
+
     #[test]
     fn max_rectangles_match_explicit_reflected_source_footprints() {
         let mut queries = 0;
@@ -3813,6 +4012,7 @@ impl MaxRemoval {
 
     // Bounds are inclusive source-coordinate extrema, not half-open ranges.
     // A single physical sample owns (x, x), (y, y).
+    #[cfg(test)]
     fn add(&mut self, value: f32, x: (usize, usize), y: (usize, usize)) {
         self.left[x.0 + 1] = self.left[x.0 + 1].max(value);
         self.right[x.1] = self.right[x.1].max(value);
@@ -3851,7 +4051,189 @@ impl MaxRemoval {
     }
 }
 
+/// Row/column maxima of the unchanged canonical peak signals. Contiguous
+/// columns permit SIMD updates; only the final projections scatter through
+/// possibly reflected or fractional source-coordinate footprints.
+#[autoversion]
+#[allow(clippy::too_many_arguments)]
+fn project_max_row(
+    sd: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    active: [bool; 3],
+    cs: &mut [f32],
+    ca: &mut [f32],
+    cd: &mut [f32],
+) -> [f32; 3] {
+    let mut row = [0.0f32; 3];
+    if active[0] {
+        for i in 0..sd.len() {
+            cs[i] = cs[i].max(sd[i]);
+            row[0] = row[0].max(sd[i]);
+        }
+    }
+    if active[1] || active[2] {
+        for i in 0..sd.len() {
+            let ed = (1.0 + (dst[i] - mu2[i]).abs()) / (1.0 + (src[i] - mu1[i]).abs()) - 1.0;
+            if active[1] {
+                let value = ed.max(0.0);
+                ca[i] = ca[i].max(value);
+                row[1] = row[1].max(value);
+            }
+            if active[2] {
+                let value = (-ed).max(0.0);
+                cd[i] = cd[i].max(value);
+                row[2] = row[2].max(value);
+            }
+        }
+    }
+    row
+}
+
 fn retain_max_removals(
+    output: &mut Vec<MaxRemoval>,
+    s_peaks: &[f64],
+    scale: usize,
+    logical_width: usize,
+    logical_height: usize,
+    sw: usize,
+    sh: usize,
+    src: [&[f32]; 3],
+    dst: [&[f32]; 3],
+    ret: &crate::streaming::AttrScaleRetention,
+    sampling: Option<&crate::sampling::Geometry>,
+) {
+    #[cfg(test)]
+    if tests::MAX_REFERENCE.with(std::cell::Cell::get) {
+        tests::MAX_REFERENCE_CALLS.with(|count| count.set(count.get() + 1));
+        retain_max_removals_reference(
+            output,
+            s_peaks,
+            scale,
+            logical_width,
+            logical_height,
+            sw,
+            sh,
+            src,
+            dst,
+            ret,
+            sampling,
+        );
+        return;
+    }
+    #[cfg(test)]
+    let first_map = output.len();
+    if !(0..3).any(|c| {
+        (0..3).any(|slot| {
+            s_peaks
+                .get((scale * 3 + c) * 6 + slot)
+                .is_some_and(|s| *s != 0.0)
+        })
+    }) {
+        return;
+    }
+    let xs = sampling.map_or_else(
+        || max_axis_footprints(logical_width, sw, scale),
+        |s| s.footprints(0, scale),
+    );
+    let ys = sampling.map_or_else(
+        || max_axis_footprints(logical_height, sh, scale),
+        |s| s.footprints(1, scale),
+    );
+    for c in 0..3 {
+        let base = (scale * 3 + c) * 6;
+        let mut maps: [Option<MaxRemoval>; 3] = core::array::from_fn(|slot| {
+            let s = s_peaks.get(base + slot).copied().unwrap_or(0.0);
+            (s != 0.0).then(|| MaxRemoval::new(156 + base + slot, s, logical_width, logical_height))
+        });
+        if maps.iter().all(Option::is_none) {
+            continue;
+        }
+        // A column owns the same x footprint at every row, and a row
+        // owns the same y footprint at every column. Max is separable:
+        // reduce first, scatter O(sw + sh) times instead of O(sw * sh).
+        let mut columns: [Vec<f32>; 3] = core::array::from_fn(|_| vec![0.0; sw]);
+        let active = maps.each_ref().map(Option::is_some);
+        for (y, &yf) in ys.iter().enumerate() {
+            let range = y * sw..(y + 1) * sw;
+            let [cs, ca, cd] = &mut columns;
+            let row_max = project_max_row(
+                &ret.sd[c][range.clone()],
+                &src[c][range.clone()],
+                &dst[c][range.clone()],
+                &ret.mu1[c][range.clone()],
+                &ret.mu2[c][range],
+                active,
+                cs,
+                ca,
+                cd,
+            );
+            for (map, value) in maps.iter_mut().zip(row_max) {
+                if let Some(map) = map {
+                    map.top[yf.0 + 1] = map.top[yf.0 + 1].max(value);
+                    map.bottom[yf.1] = map.bottom[yf.1].max(value);
+                }
+            }
+        }
+        for (map, column) in maps.iter_mut().zip(&columns) {
+            if let Some(map) = map {
+                for (&xf, &value) in xs.iter().zip(column) {
+                    map.left[xf.0 + 1] = map.left[xf.0 + 1].max(value);
+                    map.right[xf.1] = map.right[xf.1].max(value);
+                }
+            }
+        }
+        for mut map in maps.into_iter().flatten() {
+            map.finish();
+            output.push(map);
+        }
+    }
+    // Exercise the historical per-pixel implementation on the actual retained
+    // planes in every serving test too, not only hand-made signal fixtures.
+    #[cfg(test)]
+    {
+        let mut reference = Vec::new();
+        retain_max_removals_reference(
+            &mut reference,
+            s_peaks,
+            scale,
+            logical_width,
+            logical_height,
+            sw,
+            sh,
+            src,
+            dst,
+            ret,
+            sampling,
+        );
+        assert_eq!(output.len() - first_map, reference.len());
+        for (actual, expected) in output[first_map..].iter().zip(&reference) {
+            assert_eq!(actual.feature_id, expected.feature_id);
+            assert_eq!(actual.sensitivity.to_bits(), expected.sensitivity.to_bits());
+            for (a, b) in [
+                (&actual.left, &expected.left),
+                (&actual.right, &expected.right),
+                (&actual.top, &expected.top),
+                (&actual.bottom, &expected.bottom),
+            ] {
+                assert_eq!(a.len(), b.len());
+                for (a, b) in a.iter().zip(b) {
+                    assert_eq!(
+                        a.to_bits(),
+                        b.to_bits(),
+                        "peak {} scale {scale}",
+                        actual.feature_id
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+fn retain_max_removals_reference(
     output: &mut Vec<MaxRemoval>,
     s_peaks: &[f64],
     scale: usize,
