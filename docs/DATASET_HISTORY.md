@@ -1,5 +1,16 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, newest spatial family diagnosis:**
+[Protocol/results](../benchmarks/spatial_diagnosis_2026-09-14.md) retain the
+existing five TRAIN development origins and all frozen model bytes. Sixty-nine
+saved analyses plus six matched family diagnostics separate max response from
+other approximation failures. Three already-trained family subsets then add
+69 wider spatial calls on the same 23 pairs, with no new admission, fitting,
+calibration, EVAL/test access or scalar formula. All pixel/cache witnesses pass;
+these controls still have twelve failed cases. Oracles are not deployable
+models. No shipping or qualification status changes.
+
+
 **September 14, newest spatial coverage:**
 [Protocol/results](../benchmarks/spatial_coverage_2026-09-14.md) reuse existing
 admitted TRAIN development origins and frozen models; no new source admission,

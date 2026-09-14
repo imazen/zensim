@@ -1,5 +1,29 @@
 # Start here — one target score, one development path
 
+## September 14, newest: diagnose failures and compare existing family subsets
+
+[Spatial diagnosis](benchmarks/spatial_diagnosis_2026-09-14.md) uses 69 saved
+Rust analyses and six matched family-diagnostic calls. On the tiny report,
+basic228/H32 M3f rises .584→.984 only when observed max response is substituted
+(oracle, unavailable to runtime). On the screenshot, edge/L8/max contributions
+cancel strongly and correcting max alone does not fix rank. No kernel bug is
+proven; frozen signal removal differs from actual finite neighborhood edits.
+
+A separately registered wider screen adds three existing frozen controls on
+the same 23 TRAIN JXL pairs: local120/H128 passes 18, basic156/H128 passes 19,
+basic192l8/H128 passes 20. All still fail the tiny screenshot. The combined
+six-model gallery has 138 checks and 24 failures. Y60/H32 remains the only
+23/23 spatial pass, with weaker human rank; it retains coarse chroma, not pure
+luma. Every new native pixel/cache score witness passes. No fit or inference
+change, EVAL, TEST or calibration access; no candidate qualifies.
+
+Next isolate chroma/luma and scale-specific finite neighborhood response with
+the existing retained feature/kernel diagnostics. Removing hard maxima alone,
+finer storage, or another capacity sweep is not supported by these results.
+The full scalar, corruption, native targeting/RD, HDR, p95 and qualification
+requirements remain. Artifacts: `~/work/zensim-validation-2026-09-14/spatial-diagnosis/`.
+All 75 new candidate cases / 5,088 repairs and saved analyses finished.
+
 ## September 14, newest: wider spatial screen rejects the five-case shortcut
 
 [Registered coverage/results](benchmarks/spatial_coverage_2026-09-14.md) test
