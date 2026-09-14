@@ -1,5 +1,15 @@
 # Start here — one target score, one development path
 
+## September 14, latest status: integrated two-day gauntlet discussion
+
+[Updated review](benchmarks/color_hbd_hdr_update_2026-09-14.md) incorporates
+native decoder admission into the September 13–14 discussion. The current
+extractor still uses RGB8: retained native precision/metadata has not yet become
+color-correct model evaluation. Nine candidates have six SDR EVAL panels;
+all remain NO-SHIP, with no current Rev3 native HBD/HDR qualification. The
+full and fair gauntlets link the updated discussion and existing TRAIN reports.
+This is a documentation/publication update; no model or evaluation changes.
+
 ## September 14, newest: native decoder retains color metadata and precision
 
 [Native admission](benchmarks/native_color_admission_2026-09-14.md) adds a

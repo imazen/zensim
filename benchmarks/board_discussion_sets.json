@@ -419,7 +419,7 @@
       "id": "2026-09-14-two-day-color-hbd-hdr",
       "date": "2026-09-14",
       "label": "2026-09-13–14 · Feature overhaul + color / HBD / HDR status",
-      "report_url": "/zensim/reports/color-hbd-hdr-status-2026-09-14/index.html",
+      "report_url": "/zensim/reports/color-hbd-hdr-update-2026-09-14/index.html",
       "bakes": [
         "MT913_y40_h32_ens5",
         "MT913_y40_h128_ens5",
@@ -435,7 +435,7 @@
         "peer_ssim2_mt914"
       ],
       "preferred_corpus": "imazen26",
-      "note": "Nine frozen Rev3 models have six SDR panels and remain NO-SHIP. Read the linked two-day review for TRAIN feature/spatial/corruption studies, 65 fresh correctness checks, ICC loss, RGB8 precision reduction, HDR primaries and sampling limitations. No new HBD/HDR qualification is implied."
+      "note": "Updated after native decoder admission: 215/215 legacy pixel hashes match and native depth/metadata are retained, but extraction still uses RGB8. Nine frozen Rev3 models have six SDR panels and remain NO-SHIP. Linked September 13–14 review covers feature/scale, spatial, corruption, color correctness and missing native HBD/HDR qualification; TRAIN studies remain separate."
     },
     {
       "id": "2026-09-14-native-color-admission",
