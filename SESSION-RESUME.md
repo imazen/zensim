@@ -1,5 +1,28 @@
 # Start here — one target score, one development path
 
+## September 14, newest: exact finite response works; full-width bands cost too much
+
+[Band-response feasibility](benchmarks/band_response_2026-09-14.md) reuses the
+canonical band/kernel/finalizer owners and complete public ensemble inference.
+On the same 23 TRAIN pairs and six frozen models, all 9,756 repair gains equal
+prior public-pixel rescoring exactly; all 138 signed ranks are 1.0. Synthetic
+public-feature/identity and negative admission controls pass. No fit or EVAL/test.
+
+Reject this prototype for dense steering: basic228 sweeps cost 7–57 scalar calls
+in initial feasibility timing, with band work alone 5–36 calls. These are not
+p95 qualification measurements. Full RGB/pyramid work is included, and narrow
+models still extract 228 features. No sparse speedup or public API is claimed.
+Prototype source/patch/binary and evidence are archived under
+`~/work/zensim-validation-2026-09-14/band-response/`; production source is restored
+exactly to `fcc86e39`. Existing maps and failed gates remain unchanged.
+
+Next bound the cost and math of interior signal removal plus changed-boundary
+recomputation through existing owners, including new extrema and whole-model
+inference. Preserve geometry/normalization and measure approximation error against
+these exact responses. Do not repeat the same capacity/ablation/spread studies.
+All scalar/corruption/targeting/native-RD/HDR/p95/frozen qualification requirements
+remain; no model qualifies and the full goal stays active. All jobs finished.
+
 ## September 14, newest: precision is too small to explain the large map errors
 
 [Rev3 precision probes](benchmarks/precision_rev3_2026-09-14.md) extend the
