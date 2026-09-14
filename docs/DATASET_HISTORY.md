@@ -1,5 +1,16 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, newest real TRAIN precision checks:**
+[Protocol/results](../benchmarks/precision_rev3_2026-09-14.md) reuse report,
+screenshot and photo pairs from the existing admitted TRAIN development packet.
+Five selected block probes compare native Rev3 SSIM/basic-edge features with
+independent f64 arithmetic on unchanged XYB pyramids. No fitting, new source
+admission, calibration, EVAL/test access or production arithmetic change.
+Reference contribution changes are small relative to the failed maps, while
+all five real probes exceed the existing synthetic locality tolerance.
+No model qualification changes; original reports remain immutable.
+
+
 **September 14, newest spatial family diagnosis:**
 [Protocol/results](../benchmarks/spatial_diagnosis_2026-09-14.md) retain the
 existing five TRAIN development origins and all frozen model bytes. Sixty-nine

@@ -1,5 +1,30 @@
 # Start here — one target score, one development path
 
+## September 14, newest: precision is too small to explain the large map errors
+
+[Rev3 precision probes](benchmarks/precision_rev3_2026-09-14.md) extend the
+existing test-only instrument to explicit revision/form admission and direct
+f64 basic-edge reference using already computed centered means. Five selected
+blocks on three admitted TRAIN pairs reconstruct all served SSIM/basic-edge
+features and weighted contributions against the public-API reports. Maximum
+reference differences are .000234 SSIM and .000090 edge score points, far below
+the large map errors. No new kernel, inference arithmetic, model or API.
+
+All base signals meet the prior synthetic 1e-3 accuracy bound, but all five
+real probes exceed its 2e-5 locality tolerance (peak 1.16e-4). Existing synthetic
+controls still pass; they do not establish a universal bound. The exact direct
+reference remains local. Preserve this limitation without confusing it with
+the much larger finite-repair approximation failure.
+
+Next inspect existing local recomputation/cache work and prototype finite
+neighborhood response using existing extraction owners; evaluate the complete
+model on predicted features rather than relying solely on frozen gradients.
+Register accuracy/runtime limits and keep the same six-model/23-pair controls.
+No more capacity or family-removal sweep is justified by these results.
+Artifacts: `~/work/zensim-validation-2026-09-14/precision-rev3/`.
+All diagnostic jobs finished. No EVAL, TEST, calibration or fitting. The full
+production goal remains active; no model qualifies.
+
 ## September 14, newest: diagnose failures and compare existing family subsets
 
 [Spatial diagnosis](benchmarks/spatial_diagnosis_2026-09-14.md) uses 69 saved

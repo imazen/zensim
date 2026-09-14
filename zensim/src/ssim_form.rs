@@ -792,6 +792,8 @@ fn finalize(m: &[f64; 4], inv_n: f64, form: SsimLumaForm) -> f32 {
 /// Independent direct-window f64 reference, shared by the numerical
 /// instrument and kernel tests. Centered moments deliberately avoid the
 /// candidate's running-sum algorithm; raw algebra is a separate control.
+/// Returns dissimilarities, maximum algebra disagreement, and direct local
+/// means for the same instrument's edge-precision checks.
 #[cfg(test)]
 pub(crate) fn precision_reference(
     src: &[f32],
@@ -800,9 +802,10 @@ pub(crate) fn precision_reference(
     h: usize,
     radius: usize,
     form: SsimLumaForm,
-) -> (Vec<f64>, f64) {
+) -> (Vec<f64>, f64, Vec<[f64; 2]>) {
     let mut result = Vec::with_capacity(w * h);
     let mut agreement = 0.0f64;
+    let mut means = Vec::with_capacity(w * h);
     let mut samples = Vec::new();
     let radius = radius as isize;
     for y in 0..h {
@@ -818,6 +821,7 @@ pub(crate) fn precision_reference(
             let count = samples.len() as f64;
             let m1 = samples.iter().map(|p| p.0).sum::<f64>() / count;
             let m2 = samples.iter().map(|p| p.1).sum::<f64>() / count;
+            means.push([m1, m2]);
             let md = samples.iter().map(|p| p.0 - p.1).sum::<f64>() / count;
             let v1 = samples.iter().map(|p| (p.0 - m1).powi(2)).sum::<f64>() / count;
             let v2 = samples.iter().map(|p| (p.1 - m2).powi(2)).sum::<f64>() / count;
@@ -842,7 +846,7 @@ pub(crate) fn precision_reference(
             result.push(sd.max(0.0));
         }
     }
-    (result, agreement)
+    (result, agreement, means)
 }
 
 /// SSIM structure/contrast stabiliser — ssimulacra2's value, and the ONE
@@ -1810,7 +1814,7 @@ mod tests {
                         &mut out,
                         &mut scratch,
                     );
-                    let (reference, _) =
+                    let (reference, _, _) =
                         precision_reference(&source, &distorted, w, h, radius, form);
                     for (&a, &b) in out.iter().zip(&reference) {
                         assert!(

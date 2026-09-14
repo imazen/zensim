@@ -6906,6 +6906,7 @@ mod tests {
     ///
     /// Precision mode: set `ZENSIM_SSIM_PRECISION_PROBE` to a registered
     /// coherence-case JSON; see `benchmarks/nonmax_diagnosis_2026-09-08.md`.
+    /// New specs pin `formula_revision`; legacy specs require revision 1.
     ///
     /// `ZENSIM_DUMP_IMG=<png> [ZENSIM_DUMP_IMG2=<png> …] cargo test -p zensim --release dump_ssim_moment_explosion -- --ignored --nocapture`
     #[test]
@@ -7622,7 +7623,7 @@ mod tests {
                     );
                 }
                 let _ = bs;
-                let (reference, _) =
+                let (reference, _, _) =
                     crate::ssim_form::precision_reference(r, bd, *sw, *sh, radius, form);
                 for (j, m) in masks[i].iter().enumerate() {
                     worst_err = worst_err.max((pb[j] as f64 - reference[j]).abs());
@@ -8050,13 +8051,27 @@ mod tests {
     }
 
     fn dump_ssim_precision_from_coherence(path: &str) {
-        assert_eq!(
-            crate::ssim_form::active_luma_form(),
-            crate::ssim_form::SsimLumaForm::Ssim2Legacy,
-            "precision reference requires legacy SSIM arithmetic"
-        );
         let spec: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let revision = crate::ssim_form::active_revision();
+        let revision_number = match revision {
+            crate::feature_defs::FormulaRevision::Rev1 => 1_u64,
+            crate::feature_defs::FormulaRevision::Rev2 => 2,
+            crate::feature_defs::FormulaRevision::Rev3 => 3,
+        };
+        let expected = spec
+            .get("formula_revision")
+            .map_or(1, |v| v.as_u64().expect("integer formula revision"));
+        assert_eq!(
+            revision_number, expected,
+            "precision formula revision mismatch"
+        );
+        let form = crate::ssim_form::active_luma_form();
+        assert_eq!(
+            form,
+            crate::ssim_form::SsimLumaForm::for_revision(revision),
+            "precision luminance form mismatch"
+        );
         let output = spec["output"].as_str().unwrap();
         assert!(!std::path::Path::new(output).exists(), "immutable output");
         let mut reports = Vec::new();
@@ -8108,14 +8123,15 @@ mod tests {
                     |scale, stats, r, d, ret, sw, sh| {
                         for c in 0..3 {
                             let n = sw * sh;
-                            let (stable, raw_agreement) = crate::ssim_form::precision_reference(
-                                r[c],
-                                d[c],
-                                sw,
-                                sh,
-                                config.blur_radius,
-                                crate::ssim_form::SsimLumaForm::Ssim2Legacy,
-                            );
+                            let (stable, raw_agreement, means) =
+                                crate::ssim_form::precision_reference(
+                                    r[c],
+                                    d[c],
+                                    sw,
+                                    sh,
+                                    config.blur_radius,
+                                    form,
+                                );
                             let mut kernel = vec![0.0f32; n];
                             let mut kernel_scratch = crate::ssim_form::StableSsimScratch::default();
                             crate::ssim_form::stable_ssim_plane(
@@ -8124,7 +8140,7 @@ mod tests {
                                 sw,
                                 sh,
                                 config.blur_radius,
-                                crate::ssim_form::SsimLumaForm::Ssim2Legacy,
+                                form,
                                 &mut kernel,
                                 &mut kernel_scratch,
                             );
@@ -8137,6 +8153,34 @@ mod tests {
                             assert!(raw_agreement < 1e-9, "independent f64 algebra mismatch");
                             let pooled =
                                 [stats.ssim[c * 2], stats.ssim[c * 2 + 1], stats.ssim_2nd[c]];
+                            // Independent edge arithmetic on the same f32 inputs,
+                            // reusing the direct reference's already computed means.
+                            let mut edge_reference = [0.0_f64; 6];
+                            for (i, [mu1, mu2]) in means.iter().copied().enumerate() {
+                                let ed = (1.0 + (f64::from(d[c][i]) - mu2).abs())
+                                    / (1.0 + (f64::from(r[c][i]) - mu1).abs())
+                                    - 1.0;
+                                for (offset, v) in [(0, ed.max(0.0)), (3, (-ed).max(0.0))] {
+                                    edge_reference[offset] += v;
+                                    edge_reference[offset + 1] += v.powi(4);
+                                    edge_reference[offset + 2] += v * v;
+                                }
+                            }
+                            for offset in [0, 3] {
+                                edge_reference[offset] /= n as f64;
+                                edge_reference[offset + 1] =
+                                    (edge_reference[offset + 1] / n as f64).sqrt().sqrt();
+                                edge_reference[offset + 2] =
+                                    (edge_reference[offset + 2] / n as f64).sqrt();
+                            }
+                            let edge_pooled = [
+                                stats.edge[c * 4],
+                                stats.edge[c * 4 + 1],
+                                stats.edge_2nd[c * 2],
+                                stats.edge[c * 4 + 2],
+                                stats.edge[c * 4 + 3],
+                                stats.edge_2nd[c * 2 + 1],
+                            ];
                             planes.push((
                                 scale,
                                 c,
@@ -8148,6 +8192,8 @@ mod tests {
                                 pooled,
                                 raw_agreement,
                                 kernel,
+                                edge_pooled,
+                                edge_reference,
                             ));
                         }
                     },
@@ -8157,9 +8203,10 @@ mod tests {
             let mut rows = Vec::new();
             let mut canonical_gain = 0.0;
             let mut stable_gain = 0.0;
+            let mut edge_gains = [0.0_f64; 2];
             for (base, changed) in phases[0].iter().zip(&phases[1]) {
-                let (scale, c, sw, sh, bd, bs, bf, bpool, agreement, bk) = base;
-                let (_, _, _, _, cd, cs, cf, cpool, _, ck) = changed;
+                let (scale, c, sw, sh, bd, bs, bf, bpool, agreement, bk, be, ber) = base;
+                let (_, _, _, _, cd, cs, cf, cpool, _, ck, ce, cer) = changed;
                 let mut outside_changed = 0usize;
                 let mut outside_max = 0.0f64;
                 let mut outside_stable_max = 0.0f64;
@@ -8236,6 +8283,30 @@ mod tests {
                     canonical_gain += observed;
                     stable_gain += sensitivity * (stable_after[j] - stable_before[j]);
                 }
+                let mut edge_plane_gains = [0.0_f64; 2];
+                if revision_number == 3 {
+                    for j in 0..6 {
+                        let k = scale * 39 + c * 13 + 3 + j;
+                        let expected = saved["base_features"][k].as_f64().unwrap();
+                        assert!(
+                            (be[j] - expected).abs() < 1e-12,
+                            "canonical base edge mismatch f{k}"
+                        );
+                        let sensitivity = saved["base_sensitivities"][k].as_f64().unwrap();
+                        let observed = sensitivity * (ce[j] - be[j]);
+                        assert!(
+                            (observed - saved_block["feature_linear_deltas"][k].as_f64().unwrap())
+                                .abs()
+                                < 1e-12,
+                            "canonical intervention edge mismatch f{k}"
+                        );
+                        edge_plane_gains[0] += observed;
+                        edge_plane_gains[1] += sensitivity * (cer[j] - ber[j]);
+                    }
+                    for j in 0..2 {
+                        edge_gains[j] += edge_plane_gains[j];
+                    }
+                }
                 assert_eq!(outside_stable_max, 0.0, "direct reference locality");
                 rows.push(serde_json::json!({"scale":scale,"channel":c,"width":sw,"height":sh,
                     "canonical_base":bpool,"canonical_refined":cpool,"stable_base":stable_before,"stable_refined":stable_after,
@@ -8245,10 +8316,23 @@ mod tests {
                     "kernel_base":kernel_before,"kernel_refined":kernel_after,
                     "kernel_base_signal_max_abs_error":bk.iter().zip(bf).map(|(&a,&b)| (a as f64-b).abs()).fold(0.0f64,f64::max),
                     "kernel_outside_support_max_abs":outside_kernel_max}));
+                if revision_number == 3 {
+                    let row = rows.last_mut().unwrap();
+                    row["canonical_edge_base"] = serde_json::json!(be);
+                    row["canonical_edge_refined"] = serde_json::json!(ce);
+                    row["reference_edge_base"] = serde_json::json!(ber);
+                    row["reference_edge_refined"] = serde_json::json!(cer);
+                    row["edge_linear_gains"] = serde_json::json!(edge_plane_gains);
+                }
             }
             reports.push(serde_json::json!({"case":case,"canonical_ssim_linear_gain":canonical_gain,"stable_ssim_linear_gain":stable_gain,"planes":rows}));
+            if revision_number == 3 {
+                reports.last_mut().unwrap()["edge_linear_gains"] = serde_json::json!(edge_gains);
+            }
         }
-        let report = serde_json::json!({"schema":"zensim-ssim-precision-diagnostic-v1","deployable":false,"cases":reports});
+        let report = serde_json::json!({"schema":"zensim-ssim-precision-diagnostic-v1",
+            "formula_revision":revision_number,"luminance_form":format!("{form:?}"),
+            "deployable":false,"cases":reports});
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
