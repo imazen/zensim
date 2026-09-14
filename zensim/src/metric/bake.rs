@@ -1474,6 +1474,60 @@ mod revision_contract_tests {
         println!("REV3-BAKE-ATTR-RAN score {}", scalar.score());
     }
 
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn coarse_v2_attribution_skips_unrequested_scales() {
+        if !run_at_revision(
+            "3",
+            "metric::bake::revision_contract_tests::coarse_v2_attribution_skips_unrequested_scales",
+            "COARSE-V2-ATTR-RAN",
+        ) {
+            return;
+        }
+        for (w, h) in [(128, 128), (97, 131), (17, 9)] {
+            let (src, dst) = pair(w, h);
+            let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+            for scale in 0..4 {
+                let id = 372 + scale * 87 + 29 + crate::feature_v2::idx::IW_MSE;
+                let bytes = bake_declaring(Some("3"), id);
+                let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+                for parallel in [false, true] {
+                    let mut scorer = crate::BakeScorer::new(&model)
+                        .unwrap()
+                        .with_parallel(parallel);
+                    let pre = scorer.precompute_reference(&rs).unwrap();
+                    let mut session = crate::Fused944Session::new();
+                    let scalar = scorer.compute(&rs, &ds, None).unwrap();
+                    for _ in 0..2 {
+                        let scored = scorer
+                            .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
+                            .unwrap();
+                        assert_eq!(scalar.features(), scored.result().features());
+                        assert_eq!(scalar.score().to_bits(), scored.result().score().to_bits());
+                        assert!(
+                            scored.unsupported_refinement_feature_ids().is_empty(),
+                            "id {id}: {:?}",
+                            scored.unsupported_refinement_feature_ids()
+                        );
+                        let gain = scored.refinement_gain(0, 0, w, h);
+                        assert!(gain.is_finite(), "{w}x{h} scale {scale}: {gain}");
+                        // A one-input positive weighted-MSE model has negative repair gain.
+                        // On unpadded geometry, its weighted-pool density integrates
+                        // to minus that feature (up to f32 map combination).
+                        assert!(gain < 0.0, "active MSE must not be zeroed");
+                        if (w, h) == (128, 128) {
+                            assert!(
+                                (gain + scalar.features()[id]).abs()
+                                    <= 2e-5 * scalar.features()[id].abs().max(1e-12)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        println!("COARSE-V2-ATTR-RAN");
+    }
+
     /// The same contract from the other side: the SHIPPED process refuses a
     /// revision-3 bake. An old bake relabelled `3` therefore cannot be served
     /// as if it had been refit, and a genuine revision-3 bake cannot be

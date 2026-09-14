@@ -1,5 +1,24 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, later product scale frontier:**
+[Protocol/results](../benchmarks/product_scales_2026-09-14.md) reuse the exact
+preceding product-TRAIN tables and source-family roles. No new source admission,
+feature extraction formula, calibration, EVAL or TEST read. Eighteen fits over
+six declared subsets, three paired seeds and the corrected mixture yield six
+complete served ensembles. All 47,322 raw/packed development predictions match
+bitwise; canonical panels retain every seed and complete composition.
+
+A synthetic supported coarse-IW-MSE model reproduces NaN attribution from
+unrequested zero-count cells. The retained pass now skips zero-sensitivity
+cells before normalization. Ten real TRAIN y346 map calls become finite;
+20 other calls' complete block records remain exactly unchanged. All six
+ensembles have exact consumed-feature/native-score audits on five original
+JXL pairs. All still fail some registered spatial cases. Basic228 gives a
+useful inexpensive scalar control, but its prepared map cost and coherence
+remain inadequate evidence for shipping. Timings and memory receipts cover
+1MP/4MP synthetic inputs; p95 and native encoder RD remain unmeasured.
+Artifacts: `~/work/zensim-validation-2026-09-14/product-scales/`.
+
 **September 14, newest TRAIN product packet and sampler correction:**
 [Protocol/results](../benchmarks/product_train_2026-09-14.md) and
 [hashed summary](../benchmarks/product_train_2026-09-14.results.json).

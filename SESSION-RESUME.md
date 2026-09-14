@@ -1,5 +1,40 @@
 # Start here — one target score, one development path
 
+## September 14, newest: coarse-feature frontier and a real attribution fix
+
+[Scale frontier](benchmarks/product_scales_2026-09-14.md) completes 18 paired
+TRAIN fits and six uniform ensembles on the preceding admitted packet. Basic228
+has distorted-codec SROCC .9532 / human .9048, versus full944 .9605 / .9193.
+It costs 17.01 / 79.87 ms scalar at 1024² / 2048², versus full944 53.30 /
+240.65 ms in the same interleaved run. Basic228 prepared maps cost 79.55 /
+339.27 ms and pass only 2/5 registered JXL repair cases. All five richer new
+profiles pass only 1/5. None is qualified. Rich-v2 prepared sessions remain
+explicitly unsupported by the existing basic/peak-only session contract.
+
+Reproduced a coarse v2 weighted-MSE NaN through the public API on synthetic
+data, then fixed the retained attribution loop: cells with zero sensitivity
+are skipped before normalization by their possibly zero sample counts. No
+feature formula, scalar score, training label or gate changed. Both y346
+ensembles now have finite blocks on all five TRAIN JXL cases, but still fail
+four. Other four ensembles' 20 complete block records are exactly unchanged.
+All six pass native consumed-feature and pixel/cached score audits (30 pairs).
+Historical selected619 EVAL map failures predate this fix; their immutable
+verdicts have not been requalified on the corrected build.
+
+36 attribution tests pass (two existing ignored diagnostics), two HDR parity
+tests pass, and the feature-only build, Clippy, formatting and hygiene checks
+pass. Fourteen isolated process RSS upper bounds fit the declared memory cap
+on synthetic benchmark inputs. Timings have 30 accepted one-call rounds but
+the benchmark exports summaries, not p95: latency qualification stays missing.
+No EVAL, TEST or calibration rows were read in this campaign.
+
+Artifacts: `~/work/zensim-validation-2026-09-14/product-scales/`, especially
+`fits/`, `assessment-panels/`, `spatial-before/`, `spatial-after/`,
+`native-audit/`, `timing/`, and `rss/`. Next separate basic228's HF/peak signal
+benefit from expensive max-map work and head nonlinearity, retaining y60/H32
+as the spatial control. Broader corruption/high-quality data, frozen evaluation,
+native bounded targeting/RD and p95 still require work. Full goal remains active.
+
 ## September 14, newest: representative TRAIN mix and complete served development
 
 [Product training results](benchmarks/product_train_2026-09-14.md) recover

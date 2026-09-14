@@ -8529,6 +8529,28 @@ pub(crate) fn compute_v2_append_attribution_from_retention_into_bins(
     );
 }
 
+/// Whether this cell has any contribution to the requested attribution.
+#[cfg(feature = "custom-profiles")]
+fn attribution_cell_active(
+    s_v2: &[f64],
+    s_append: Option<&[f64]>,
+    s_append2: Option<&[f64]>,
+    scale: usize,
+    ch: usize,
+) -> bool {
+    let active = |values: &[f64], cell: usize, width: usize| {
+        values
+            .iter()
+            .skip(cell * width)
+            .take(width)
+            .any(|&v| v != 0.0)
+    };
+    let cell = scale * 3 + ch;
+    active(s_v2, cell, FEATURES_PER_CHANNEL_V2_TOTAL)
+        || s_append.is_some_and(|s| active(s, cell, FEATURES_PER_CHANNEL_APPEND))
+        || (ch == APPEND2_CHANNEL && s_append2.is_some_and(|s| active(s, scale, APPEND2_PER_SCALE)))
+}
+
 /// Shared per-scale pass-B loop over the retention for both sinks.
 #[cfg(feature = "custom-profiles")]
 fn retention_pass_b_all_scales(
@@ -8548,6 +8570,13 @@ fn retention_pass_b_all_scales(
     scratch.scale_density.resize(n0, 0.0);
     scratch.win_plane.resize(n0, 0.0);
     for scale in 0..n_scales {
+        // A selectively omitted cell can have no retained samples. Deriving
+        // its coefficients would evaluate 0 * (1 / 0), poisoning an otherwise
+        // valid coarse map. Zero sensitivity makes its contribution exactly
+        // zero; skip its work before any normalization or plane access.
+        if !(0..3).any(|ch| attribution_cell_active(s_v2, s_append, s_append2, scale, ch)) {
+            continue;
+        }
         attr_pass_b_for_scale_f32(
             scale,
             [
@@ -11915,6 +11944,9 @@ fn attr_pass_b_for_scale_f32(
     scale_density[..n].fill(0.0);
     win_plane[..n].fill(0.0);
     for ch in 0..3 {
+        if !attribution_cell_active(s_v2, s_append, s_append2, scale, ch) {
+            continue;
+        }
         let append_active = append_cell_active(want_append, ch, scale);
         let cross: Option<(&[f32], &[f32])> = if ch == 1 {
             Some((&planes[0].act, &planes[2].act))

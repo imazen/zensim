@@ -44,6 +44,11 @@
 
 ### Fixed
 
+- Selective v2 attribution skips cells with no active sensitivity before
+  normalizing retained samples. Omitted fine-scale/chroma cells could otherwise
+  inject NaNs into valid coarse-feature maps. Active contributions and scalar
+  extraction are preserved; finite maps still require spatial quality gates.
+
 - Cached spatial HF-gain coefficients now differentiate the model's actual
   gain formula. Saturating revision-3 gains previously used the revision-1
   ratio derivative. Independent finite differences cover all four gain forms;
