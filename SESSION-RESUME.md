@@ -1,5 +1,28 @@
 # Start here — one target score, one development path
 
+## September 14, newest: SSIM and public color/scale prerequisites pass
+
+[SSIM-adjoint study](benchmarks/ssim_adjoint_2026-09-14.md) adds test-only Rev3
+moment partials in the existing SSIM owner, checked against its scalar function
+and actual fused H/V signal/pooling kernels. All24 partial and216 plane-direction
+checks pass; max plane derivative error5.778e-6. Saturated-luma and identity
+controls pass. Initial failures were a missing revision-wrapper completion
+marker, now fixed with original failed logs preserved; no tolerance change.
+
+Independent synthetic Rust MSE bake through public BakeScorer verifies the
+in-gamut linear RGB color derivative, reflect/stride padding and four-scale
+2x chain, including odd tails. All48 consumed features reconstruct (max6.855e-12),
+and24 full pixel-score directions pass (max6.050e-7). This is separate from a
+complete SSIM-model gradient, not qualification of either finite repair or RD.
+
+No corpus, fitting, calibration, EVAL or TEST. New implementation is test-only;
+production arithmetic and APIs remain unchanged. Evidence and binary are under
+`~/work/zensim-validation-2026-09-14/ssim-adjoint/`. Next assemble complete-model
+response from these verified components; handle remaining HF/peak behavior and
+head sensitivity, then measure local directions, finite repairs and full cost
+before native JXL interventions. All jobs finished; full goal remains active.
+
+
 ## September 14, newest: pixel-adjoint prerequisite passes; historical premise corrected
 
 [Pixel-adjoint study](benchmarks/pixel_adjoint_2026-09-14.md) adds three synthetic

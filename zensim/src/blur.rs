@@ -5911,6 +5911,423 @@ mod tests {
         eprintln!("EDGE_ADJOINT checks={checks} max_abs_directional_error={max_error:.9e}");
     }
 
+    fn adjoint_probe_ssim_state(
+        a: &[f32],
+        d: &[f32],
+        w: usize,
+        h: usize,
+    ) -> ([Vec<f32>; 5], crate::fused::StripChannelAccum) {
+        let n = w * h;
+        let mut horizontal: [Vec<f32>; 4] = std::array::from_fn(|_| vec![0.0; n]);
+        let [h0, h1, h2, h3] = &mut horizontal;
+        fused_blur_h_ssim_at_revision(
+            a,
+            d,
+            h0,
+            h1,
+            h2,
+            h3,
+            w,
+            h,
+            5,
+            crate::feature_defs::FormulaRevision::Rev3,
+        );
+        let mut state: [Vec<f32>; 5] = std::array::from_fn(|_| vec![0.0; n]);
+        let [m1, m2, ssq, err, sd] = &mut state;
+        let acc = crate::fused::fused_vblur_features_ssim(
+            h0,
+            h1,
+            h2,
+            h3,
+            a,
+            d,
+            w,
+            h,
+            0,
+            h,
+            5,
+            m1,
+            m2,
+            true,
+            sd,
+            true,
+            ssq,
+            err,
+            true,
+            crate::fused::FreeExtrasWork {
+                revision: Some(crate::feature_defs::FormulaRevision::Rev3),
+                ..Default::default()
+            },
+            crate::fused::ExtPoolsWork::default(),
+            &[],
+        );
+        (state, acc)
+    }
+
+    #[test]
+    fn rev3_ssim_pixel_adjoint_matches_fused_directional_differences() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "blur::tests::rev3_ssim_pixel_adjoint_matches_fused_directional_differences",
+            "SSIM-ADJOINT-RAN",
+        ) {
+            return;
+        }
+        assert_eq!(
+            crate::ssim_form::active_luma_form(),
+            crate::ssim_form::SsimLumaForm::Clamp
+        );
+        let mut checks = 0;
+        let mut max_error = 0.0_f64;
+        let mut max_normalized = 0.0_f64;
+        for (w, h) in [(8, 8), (17, 9), (65, 97)] {
+            let n = w * h;
+            let a: Vec<_> = (0..n)
+                .map(|i| {
+                    let sign = if (i % w + i / w) % 2 == 0 { 1.0 } else { -1.0 };
+                    sign * (0.3 + 0.03 * (i % 7) as f32)
+                })
+                .collect();
+            let (identity, _) = adjoint_probe_ssim_state(&a, &a, w, h);
+            assert!(identity[4].iter().all(|v| *v == 0.0));
+            for i in 0..n {
+                assert_eq!(
+                    crate::ssim_form::probe_rev3_ssim_partials(
+                        identity[0][i],
+                        identity[1][i],
+                        identity[2][i],
+                        identity[3][i]
+                    ),
+                    [0.0; 3]
+                );
+            }
+            for (factor, offset) in [(0.75, 0.05), (1.2, -0.1), (0.9, 1.5)] {
+                let d: Vec<_> = a
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| factor * v + offset + 0.015 * ((i * 11) % 7) as f32)
+                    .collect();
+                let (state, acc) = adjoint_probe_ssim_state(&a, &d, w, h);
+                let partials: Vec<_> = (0..n)
+                    .map(|i| {
+                        crate::ssim_form::probe_rev3_ssim_partials(
+                            state[0][i],
+                            state[1][i],
+                            state[2][i],
+                            state[3][i],
+                        )
+                    })
+                    .collect();
+                for p in [1, 2, 4, 8] {
+                    let pool = |acc: &crate::fused::StripChannelAccum| {
+                        let sum = match p {
+                            1 => acc.ssim_d,
+                            2 => acc.ssim_d2,
+                            4 => acc.ssim_d4,
+                            8 => acc.ssim_d8,
+                            _ => unreachable!(),
+                        };
+                        (sum / n as f64).powf(1.0 / f64::from(p))
+                    };
+                    let root = pool(&acc);
+                    let fields: [Vec<f32>; 3] = std::array::from_fn(|k| {
+                        (0..n)
+                            .map(|i| {
+                                (root.powi(1 - p) * f64::from(state[4][i]).powi(p - 1) / n as f64
+                                    * partials[i][k]) as f32
+                            })
+                            .collect()
+                    });
+                    let transposes = fields.map(|f| adjoint_probe_transpose(&f, w, h));
+                    let gradient: Vec<_> = (0..n)
+                        .map(|i| {
+                            f64::from(transposes[0][i])
+                                + 2.0 * f64::from(d[i]) * f64::from(transposes[1][i])
+                                + 2.0 * f64::from(d[i] - a[i]) * f64::from(transposes[2][i])
+                        })
+                        .collect();
+                    for rect in [
+                        [0, 0, w, h],
+                        [0, 0, 4, 4],
+                        [w / 3, h / 3, 2 * w / 3, 2 * h / 3],
+                    ] {
+                        let direction: Vec<_> = (0..n)
+                            .map(|i| {
+                                if i % w >= rect[0]
+                                    && i % w < rect[2]
+                                    && i / w >= rect[1]
+                                    && i / w < rect[3]
+                                {
+                                    ((i * 11 + i / w * 29) % 31) as f32 / 15.0 - 1.0
+                                } else {
+                                    0.0
+                                }
+                            })
+                            .collect();
+                        let predicted: f64 = gradient
+                            .iter()
+                            .zip(&direction)
+                            .map(|(g, v)| g * f64::from(*v))
+                            .sum();
+                        for epsilon in [0.001, 0.0005] {
+                            let plus: Vec<_> = d
+                                .iter()
+                                .zip(&direction)
+                                .map(|(d, v)| d + epsilon * v)
+                                .collect();
+                            let minus: Vec<_> = d
+                                .iter()
+                                .zip(&direction)
+                                .map(|(d, v)| d - epsilon * v)
+                                .collect();
+                            let observed = (pool(&adjoint_probe_ssim_state(&a, &plus, w, h).1)
+                                - pool(&adjoint_probe_ssim_state(&a, &minus, w, h).1))
+                                / (2.0 * f64::from(epsilon));
+                            let error = (observed - predicted).abs();
+                            let tolerance =
+                                2e-5_f64.max(0.01 * observed.abs().max(predicted.abs()));
+                            max_error = max_error.max(error);
+                            max_normalized = max_normalized.max(error / tolerance);
+                            assert!(
+                                error <= tolerance,
+                                "SSIM {w}x{h} factor={factor} offset={offset} p={p} rect={rect:?} eps={epsilon}: predicted={predicted} observed={observed}"
+                            );
+                            checks += 1;
+                        }
+                    }
+                }
+            }
+        }
+        println!(
+            "SSIM-ADJOINT-RAN checks={checks} max_abs_error={max_error:.9e} max_fraction_of_tolerance={max_normalized:.9e}"
+        );
+    }
+
+    #[cfg(feature = "custom-profiles")]
+    fn adjoint_probe_linear_image(
+        pixels: &[[f32; 4]],
+        w: usize,
+        h: usize,
+    ) -> crate::source::StridedBytes<'_> {
+        crate::source::StridedBytes::with_alpha_mode(
+            bytemuck::cast_slice(pixels),
+            w,
+            h,
+            w * 16,
+            crate::source::PixelFormat::LinearF32Rgba,
+            crate::source::AlphaMode::Opaque,
+        )
+    }
+
+    #[cfg(feature = "custom-profiles")]
+    #[test]
+    fn rev3_ssim_color_scale_prerequisite_matches_public_mse_model() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "blur::tests::rev3_ssim_color_scale_prerequisite_matches_public_mse_model",
+            "COLOR-SCALE-RAN",
+        ) {
+            return;
+        }
+        use crate::color::*;
+        let matrix = [
+            [K_M00, K_M01, K_M02],
+            [K_M10, K_M11, K_M12],
+            [K_M20, K_M21, K_M22],
+        ];
+        let weights: Vec<f64> = (0..156)
+            .map(|i| {
+                if i % 13 == 9 {
+                    if (i / 13) % 2 == 0 { 0.7 } else { -0.4 }
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let recipe = serde_json::json!({
+            "schema_hash":1,"scaler_mean":vec![0.0;156],"scaler_scale":vec![1.0;156],
+            "metadata":[
+                {"key":"zentrain.feature_ids","type":"utf8","text":(0..156).map(|i|i.to_string()).collect::<Vec<_>>().join(" ")},
+                {"key":"zentrain.formula_revision","type":"utf8","text":"3"}
+            ],
+            "layers":[{"in_dim":156,"out_dim":1,"activation":"identity","dtype":"f32","weights":weights,"biases":[0.0]}]
+        });
+        let model = crate::mlp::Model::from_bytes(
+            &zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap(),
+        )
+        .unwrap();
+        let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+        let mut checks = 0;
+        let mut max_error = 0.0_f64;
+        let mut max_feature_error = 0.0_f64;
+        for (w, h) in [(17, 9), (65, 97), (128, 96), (97, 65)] {
+            let a: Vec<[f32; 4]> = (0..w * h)
+                .map(|i| {
+                    [
+                        0.2 + 0.005 * ((i * 11) % 79) as f32,
+                        0.2 + 0.005 * ((i * 23) % 83) as f32,
+                        0.2 + 0.005 * ((i * 31) % 89) as f32,
+                        1.0,
+                    ]
+                })
+                .collect();
+            let d: Vec<[f32; 4]> = a
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    [
+                        p[0] + 0.02 * ((i % 3) as f32 - 1.0),
+                        p[1] * 0.85 + 0.02,
+                        p[2] * 0.93 + 0.05,
+                        1.0,
+                    ]
+                })
+                .collect();
+            let source = adjoint_probe_linear_image(&a, w, h);
+            let distorted = adjoint_probe_linear_image(&d, w, h);
+            let reference = crate::streaming::PrecomputedReference::new(&source, 4, false);
+            let base = crate::streaming::PrecomputedReference::new(&distorted, 4, false);
+            let served = scorer.compute(&source, &distorted, None).unwrap();
+            for (s, ((r, sw, sh), (d, _, _))) in
+                reference.scales.iter().zip(&base.scales).enumerate()
+            {
+                for ch in 0..3 {
+                    let mse = r[ch]
+                        .iter()
+                        .zip(&d[ch])
+                        .map(|(a, b)| f64::from(a - b).powi(2))
+                        .sum::<f64>()
+                        / (sw * sh) as f64;
+                    let error = (mse - served.features()[(s * 3 + ch) * 13 + 9]).abs();
+                    max_feature_error = max_feature_error.max(error);
+                    assert!(
+                        error <= 2e-6,
+                        "public MSE feature {w}x{h} scale{s} channel{ch}"
+                    );
+                }
+            }
+            for rect in [
+                [0, 0, w, h],
+                [0, 0, 4, 4],
+                [w / 3, h / 3, 2 * w / 3, 2 * h / 3],
+            ] {
+                let direction: Vec<[f32; 3]> = (0..w * h)
+                    .map(|i| {
+                        std::array::from_fn(|ch| {
+                            if i % w >= rect[0]
+                                && i % w < rect[2]
+                                && i / w >= rect[1]
+                                && i / w < rect[3]
+                            {
+                                ((i * 11 + i / w * 29 + ch * 7) % 31) as f32 / 15.0 - 1.0
+                            } else {
+                                0.0
+                            }
+                        })
+                    })
+                    .collect();
+                let original_tangent: Vec<[f32; 3]> = d
+                    .iter()
+                    .zip(&direction)
+                    .map(|(pixel, delta)| {
+                        assert!(pixel[..3].iter().all(|v| *v > 0.0 && *v < 1.0));
+                        let dt: [f64; 3] = matrix.map(|row| {
+                            let mixed = f64::from(K_B0)
+                                + (0..3)
+                                    .map(|ch| f64::from(row[ch]) * f64::from(pixel[ch]))
+                                    .sum::<f64>();
+                            let change = (0..3)
+                                .map(|ch| f64::from(row[ch]) * f64::from(delta[ch]))
+                                .sum::<f64>();
+                            change / (3.0 * mixed.cbrt().powi(2))
+                        });
+                        [
+                            (7.0 * (dt[0] - dt[1])) as f32,
+                            (0.5 * (dt[0] + dt[1])) as f32,
+                            (dt[2] - 0.5 * (dt[0] + dt[1])) as f32,
+                        ]
+                    })
+                    .collect();
+                let mut tw = base.scales[0].1;
+                let mut th = base.scales[0].2;
+                let mut tangent: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; tw * th]);
+                for y in 0..h.max(64) {
+                    for x in 0..w.max(64) {
+                        let j = crate::metric::reflect_index(y, h) * w
+                            + crate::metric::reflect_index(x, w);
+                        for ch in 0..3 {
+                            tangent[ch][y * tw + x] = original_tangent[j][ch];
+                        }
+                    }
+                }
+                let mut predicted = 0.0;
+                for (s, ((r, sw, sh), (d, _, _))) in
+                    reference.scales.iter().zip(&base.scales).enumerate()
+                {
+                    assert_eq!((tw, th), (*sw, *sh));
+                    for ch in 0..3 {
+                        let coefficient = f64::from(weights[(s * 3 + ch) * 13 + 9] as f32);
+                        predicted += coefficient
+                            * 2.0
+                            * r[ch]
+                                .iter()
+                                .zip(&d[ch])
+                                .zip(&tangent[ch])
+                                .map(|((a, b), delta)| f64::from(b - a) * f64::from(*delta))
+                                .sum::<f64>()
+                            / (sw * sh) as f64;
+                    }
+                    if s < 3 {
+                        let (nw, nh) = (tw / 2, th / 2);
+                        tangent = tangent.map(|v| {
+                            let mut out = vec![0.0; nw * nh];
+                            downscale_2x_into(&v, tw, &mut out, nw, nh);
+                            out
+                        });
+                        tw = nw;
+                        th = nh;
+                    }
+                }
+                for epsilon in [0.001, 0.0005] {
+                    let perturb = |sign: f32| {
+                        d.iter()
+                            .zip(&direction)
+                            .map(|(p, v)| {
+                                [
+                                    p[0] + sign * epsilon * v[0],
+                                    p[1] + sign * epsilon * v[1],
+                                    p[2] + sign * epsilon * v[2],
+                                    1.0,
+                                ]
+                            })
+                            .collect::<Vec<_>>()
+                    };
+                    let plus = perturb(1.0);
+                    let minus = perturb(-1.0);
+                    let high = scorer
+                        .compute(&source, &adjoint_probe_linear_image(&plus, w, h), None)
+                        .unwrap()
+                        .score();
+                    let low = scorer
+                        .compute(&source, &adjoint_probe_linear_image(&minus, w, h), None)
+                        .unwrap()
+                        .score();
+                    let observed = (high - low) / (2.0 * f64::from(epsilon));
+                    let error = (observed - predicted).abs();
+                    max_error = max_error.max(error);
+                    assert!(
+                        error <= 2e-5_f64.max(0.01 * observed.abs().max(predicted.abs())),
+                        "public color/scale {w}x{h} rect={rect:?} eps={epsilon}: predicted={predicted} observed={observed}"
+                    );
+                    checks += 1;
+                }
+            }
+        }
+        println!(
+            "COLOR-SCALE-RAN checks={checks} max_abs_error={max_error:.9e} max_feature_error={max_feature_error:.9e}"
+        );
+    }
+
     /// `box_spread_sum_preserving` must conserve total mass EXACTLY (to f64
     /// rounding) on arbitrary signed planes including edge-heavy mass, and
     /// match a normalized box blur in the deep interior.

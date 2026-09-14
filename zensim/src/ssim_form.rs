@@ -1532,8 +1532,100 @@ pub(crate) fn ssim_direct8<T: F32x8Backend + Copy>(
     SsimSplats8::new(token, form).direct(m1, m2, ssq, err)
 }
 
+/// Synthetic derivative prerequisite for the actual Rev3 Clamp expression.
+/// Partial order: distorted mean, mean square sum, mean squared error.
+/// Reference mean is held fixed. Kinks select zero for the inactive branch;
+/// these are mathematical partials, not derivatives of f32 rounding steps.
+#[cfg(test)]
+pub(crate) fn probe_rev3_ssim_partials(m1: f32, m2: f32, ssq: f32, err: f32) -> [f64; 3] {
+    let form = SsimLumaForm::for_revision(crate::feature_defs::FormulaRevision::Rev3);
+    assert_eq!(form, SsimLumaForm::Clamp);
+    if ssim_direct_raw_scalar(form, m1, m2, ssq, err) <= 0.0 {
+        return [0.0; 3];
+    }
+    let difference = m2 - m1;
+    let q = difference * difference;
+    let variance = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq));
+    let error_variance = err - q;
+    let denominator = f64::from(variance.max(0.0)) + f64::from(C2);
+    let error = f64::from(error_variance.max(0.0));
+    let luma = f64::from(q.min(1.0));
+    let dl = if q < 1.0 {
+        2.0 * f64::from(difference)
+    } else {
+        0.0
+    };
+    let de = if error_variance > 0.0 {
+        -2.0 * f64::from(difference)
+    } else {
+        0.0
+    };
+    let dv = if variance > 0.0 {
+        -2.0 * f64::from(m2)
+    } else {
+        0.0
+    };
+    let square = if variance > 0.0 {
+        -(1.0 - luma) * error / denominator.powi(2)
+    } else {
+        0.0
+    };
+    let direct_error = if error_variance > 0.0 {
+        (1.0 - luma) / denominator
+    } else {
+        0.0
+    };
+    [
+        (1.0 - error / denominator) * dl
+            + (1.0 - luma) * (de / denominator - error * dv / denominator.powi(2)),
+        square,
+        direct_error,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rev3_ssim_partials_match_existing_scalar_function() {
+        use super::*;
+        let mut checks = 0;
+        let mut max_normalized = 0.0_f64;
+        for values in [
+            [0.25, 0.35, 0.5, 0.06],
+            [0.2, 1.7, 4.0, 3.0],
+            [0.25, 0.35, 0.5, 0.005],
+            [0.25, 0.35, 0.1, 0.06],
+        ] {
+            let partials = probe_rev3_ssim_partials(values[0], values[1], values[2], values[3]);
+            for coordinate in 1..4 {
+                for epsilon in [0.001, 0.0005] {
+                    let mut plus = values;
+                    let mut minus = values;
+                    plus[coordinate] += epsilon;
+                    minus[coordinate] -= epsilon;
+                    let score = |v: [f32; 4]| {
+                        f64::from(
+                            ssim_direct_raw_scalar(SsimLumaForm::Clamp, v[0], v[1], v[2], v[3])
+                                .max(0.0),
+                        )
+                    };
+                    let actual = (score(plus) - score(minus)) / (2.0 * f64::from(epsilon));
+                    let predicted = partials[coordinate - 1];
+                    let error = (actual - predicted).abs();
+                    let tolerance = 2e-5_f64.max(0.01 * actual.abs().max(predicted.abs()));
+                    max_normalized = max_normalized.max(error / tolerance);
+                    assert!(
+                        error <= tolerance,
+                        "moments={values:?} coordinate={coordinate} eps={epsilon}: predicted={predicted} actual={actual}"
+                    );
+                    checks += 1;
+                }
+            }
+        }
+        assert_eq!(probe_rev3_ssim_partials(0.25, 0.25, 0.5, 0.0), [0.0; 3]);
+        eprintln!("SSIM_PARTIALS checks={checks} max_fraction_of_tolerance={max_normalized:.9e}");
+    }
+
     #[test]
     fn stable_moments_match_direct_windows_and_analytic_controls() {
         let _ = stable_kernel_cases();

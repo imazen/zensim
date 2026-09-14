@@ -1,0 +1,60 @@
+{
+  "date": "2026-09-14",
+  "scope": "synthetic_derivatives_and_public_MSE_color_scale_control",
+  "qualified": false,
+  "production_arithmetic_changed": false,
+  "public_api_added": false,
+  "corpus_accessed": false,
+  "training_performed": false,
+  "new_tests": 3,
+  "ssim_partials": {
+    "checks": 24,
+    "max_fraction_of_tolerance": 0.00492511176
+  },
+  "ssim_plane_derivatives": {
+    "checks": 216,
+    "max_abs_derivative_error": 5.778381158e-06,
+    "max_fraction_of_tolerance": 0.1712191374
+  },
+  "public_mse_model": {
+    "checks": 24,
+    "consumed_feature_checks": 48,
+    "max_abs_derivative_error": 6.049766731e-07,
+    "max_feature_error": 6.854516954e-12,
+    "input": "opaque linear-f32 sRGB, in gamut, SDR",
+    "geometry": [
+      [
+        17,
+        9
+      ],
+      [
+        65,
+        97
+      ],
+      [
+        128,
+        96
+      ],
+      [
+        97,
+        65
+      ]
+    ],
+    "learned": false
+  },
+  "initial_failure": "Missing stdout execution sentinel in the new revision-isolated test; fixed without changing arithmetic or tolerances. Failed first edit/repeat logs preserved.",
+  "complete_ssim_model_gradient": "NOT_YET_TESTED",
+  "finite_repair_accuracy": "UNMEASURED",
+  "native_rd": "UNMEASURED",
+  "performance": "UNMEASURED",
+  "evidence_sha256": {
+    "PROTOCOL.md": "74fbd09ce492b1df09c525d97c52a94da1ebddc4beb2af76faee26e172f6a474",
+    "TOOLS.json": "5ebdd32ac3233c20560445f5a02883201ac5f3baab5ea6b5836e6c70a470a5ee",
+    "tests.log": "d61d4c3988468beb52ea74fd34a1a192fcde02be3427a7fc8d8fae5f58458af2",
+    "HARNESS_FAILURE.md": "6452ae0ab5065b856b8d8f7f918efef7e55841dda3d9aa4be661032aaee0ae81",
+    "harness-corrected.log": "f17b0d8dbef6f5a8362b969ad4a1a625ed450f1a612c3992f769e4ed54295fa8",
+    "public-chain-harness.log": "593ce04ca607c20f64611285ae3266b5f3ce4e44400a07542e046af10fdee9db",
+    "complete.log": "1a6a6845c88d3fa65fdeacd28eb88bf61d0a944f3349ce6d65cb3358877c4ab9",
+    "measured.patch": "3d74d1727b3422cc30bf3459a3ebb9d3b628ae1194edbff1d724decb71562fa2"
+  }
+}
