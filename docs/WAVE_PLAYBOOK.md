@@ -107,6 +107,13 @@ precision effects must not be conflated. Reduced phase span alone does not
 select a sampling contract: the focal L4 span falls while mean span rises.
 Refit against matching TRAIN extraction before assessing model quality.
 
+The [quarter-chroma TRAIN refit](../benchmarks/chroma_scale_train_2026-09-14.md)
+tests actual nested y60/y70/y80 read sets with matched H32 recipes and complete
+panels. Added B improves rank and own-map consistency but fails the tail gate
+and worsens Butteraugli map association. Preserve that distinction and the
+failed timing admission. For exact historical control reproduction use the
+later full-precision exports; the initial product fit TSVs round to six decimals.
+
 ## A complete experiment
 
 1. Register the hypothesis, baseline, exact intervention, sources, seeds,

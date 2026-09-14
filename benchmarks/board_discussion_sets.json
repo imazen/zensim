@@ -387,6 +387,15 @@
       "report_url": "/zensim/reports/native-filter-2026-09-14/index.html",
       "bakes": [],
       "note": "Neutral Rust feature instruments, not trained candidates. Direct filters reduce focal B ART L4 span 68–71% but increase mean span 15–24%; no quality-conflict fix or model advancement. Same period-control failures retained."
+    },
+    {
+      "id": "2026-09-14-chroma-scale-train",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Quarter-resolution B/XB: paired H32 training",
+      "report_url": "/zensim/reports/chroma-scale-train-2026-09-14/index.html",
+      "bakes": [],
+      "note": "Nine fits, complete TRAIN panels and native checks. Added B improves rank but fails codec outliers; XB also fails frozen-control human rank. Own-map gains do not improve Butteraugli association. Noisy timing cannot qualify performance."
     }
   ],
   "incumbent_notes": [

@@ -1,5 +1,23 @@
 # Start here — one target score, one development path
 
+## September 14, newest: trained quarter-chroma variants fail tail/quality gates
+
+[Paired y60/y70/y80 study](benchmarks/chroma_scale_train_2026-09-14.md) completes
+nine H32 fits and one exact repeat on the admitted human/codec TRAIN packet.
+Adding quarter-resolution B improves fresh-control human rank .83150→.83582
+and codec rank .92442→.93274, with zero native consensus conflicts. It adds one
+codec outlier, worsens human clumping/max residual and lowers Butteraugli map
+association. Adding X as well also fails frozen-control human noninferiority.
+Neither arm passes the registered quality screen; no immediate recipe sweep.
+
+All 17,537 panels, 3,536 native pixel/cache score checks and 244,800 exact
+consumed-feature comparisons are retained. Packed IDs/revisions/live inputs
+are verified. The original control reproduces its later full-precision exports;
+the earliest six-decimal exports are not the exact-comparison authority.
+Four timing suites retain 1,260 calls and 12/18/6/4 flagged rounds: descriptive
+only, no performance gate passes. Full model artifacts, raw scatter and native
+A/Bs are linked from the gauntlet. All product qualification remains open.
+
 ## September 14, newest: direct filters reduce L4 phase span, not the conflict
 
 [Four-contract comparison](benchmarks/native_filter_2026-09-14.md) measures the

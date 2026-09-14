@@ -1,5 +1,15 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, quarter-resolution chroma TRAIN fit:**
+[Results](../benchmarks/chroma_scale_train_2026-09-14.md) reuse the admitted
+product human/codec fitting and development tables, plus native development
+only. Nine H32 fits compare y60, additional quarter B, and additional quarter
+XB. Explicit fitting-group checkpoint weights and disjoint sampler windows
+preserve separation; one repeat is exact. No native fitting supervision, new
+extraction, sources, encodes, calibration, EVAL or TEST. Both treatments fail
+registered quality continuation despite rank/own-map improvements. Full native
+feature/cache parity passes. All four timing suites retain noisy-round failures.
+
 **September 14, native filter feature comparison:**
 [Results](../benchmarks/native_filter_2026-09-14.md) reuse the native phase
 packet's eight TRAIN-development cells and130 translations with four neutral
