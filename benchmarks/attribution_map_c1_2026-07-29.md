@@ -248,6 +248,17 @@ residual-split variant), `gate_matrix_c2b_final.log` (final state). Tests:
 
 ## Part 1 — the adjoint/spread hypothesis, measured honestly
 
+**September 14 mathematical correction:** the zero-mass argument and universal
+floor interpretation below are historical conclusions, not a proof excluding
+repair-direction pixel derivatives. Reflect-101 is not symmetric at boundaries;
+the correct residual gradient is `(I-K)^T z`. Its unweighted sum can be zero
+while its contraction with the actual pixel change is nonzero. New direct
+scatter and production-kernel directional tests establish this distinction in
+[the pixel-adjoint record](pixel_adjoint_2026-09-14.md). They do not overturn the
+eight measured spread results below, establish finite-removal accuracy, or
+qualify native steering. The new evidence supersedes only the broader
+mathematical dismissal repeated in the August 5 Claude memory.
+
 The proposed exact fix (blur the plane-integrand with the pipeline kernel,
 `∂f/∂x = K∗(∂f/∂g)`) is exact only for signals LINEAR in a blurred plane.
 Two structural findings, then the A/B:

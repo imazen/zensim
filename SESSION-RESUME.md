@@ -1,5 +1,27 @@
 # Start here — one target score, one development path
 
+## September 14, newest: pixel-adjoint prerequisite passes; historical premise corrected
+
+[Pixel-adjoint study](benchmarks/pixel_adjoint_2026-09-14.md) adds three synthetic
+Rust tests using the existing SIMD blur and production edge pooling owner.
+Reflect-101 needs K^T = D K D^-1, with edge/corner weights 1/2 and 1/4; plain K
+is not its transpose at boundaries. Direct gather/scatter error max2.084e-7;
+144 smooth artifact/detail p1/2/4/8 directional checks pass, maxerror1.367e-5.
+
+The historical C2b zero-mass argument does not exclude actual repair-direction
+pixel derivatives: gradient sum zero means constant-shift invariance, whereas
+its contraction with nonuniform repair can be nonzero. Exact full erasure and
+its local derivative differ by factor2 for residual energy. Historical eight-cell
+spread failures remain valid; no finite-response/native-RD gate is relaxed.
+
+All changes are tests/documentation. No model, production math, public API,
+corpus, fitting, EVAL or TEST access. Evidence and binary are retained under
+`~/work/zensim-validation-2026-09-14/adjoint-response/`. Next connect needed
+feature derivatives and the color/scale chain to complete model inference;
+measure local directions, finite repairs and runtime separately before native
+steering. The full goal remains active and no model qualifies. All jobs finished.
+
+
 ## September 14, newest: shared window moments pass accuracy, fail dense cost
 
 [Shared-moment response](benchmarks/shared_moment_response_2026-09-14.md) retains

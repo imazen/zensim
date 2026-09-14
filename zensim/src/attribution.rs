@@ -106,10 +106,13 @@
 //!    clipped-window per-source-normalized convention) — measured NEUTRAL on
 //!    the 8-cell gate (±0.003). Residual-form signals (art/det/hf/mscn) stay
 //!    pixel-allocated: the 50/50 pixel/window split was measured and
-//!    REGRESSED all 8 cells (−0.01..−0.08), and the pure `I − K` adjoint
-//!    allocates zero net mass (wrong for removal semantics). The remaining
-//!    fine-block residual is the finite-removal floor, not an allocation
-//!    fix — see `benchmarks/attribution_map_c1_2026-07-29.md` §C2b.
+//!    REGRESSED all 8 cells (−0.01..−0.08). That result does not reject a
+//!    pixel derivative contracted with the actual repair direction. An
+//!    unweighted residual gradient sums to zero, but its repair contraction
+//!    generally does not. Reflect-101 also requires the transpose `K^T`,
+//!    not plain `K`, at boundaries. Synthetic tests establish this distinction;
+//!    finite repair fidelity and native utility remain unproven. See
+//!    `benchmarks/pixel_adjoint_2026-09-14.md` and the historical C2b results.
 //! 3. **SIMD-padding columns** (padded width − width) carry feature mass that
 //!    the trimmed map cannot attribute (≤ ~3 % of columns; near-zero signal
 //!    since both planes zero-pad identically).

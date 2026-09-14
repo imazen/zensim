@@ -1,0 +1,50 @@
+{
+  "date": "2026-09-14",
+  "scope": "synthetic_math_and_production_kernel_tests",
+  "qualified": false,
+  "corpus_accessed": false,
+  "model_evaluation": false,
+  "production_arithmetic_changed": false,
+  "public_api_added": false,
+  "tests_passed": 4,
+  "new_tests": 3,
+  "edge_directional_checks": 144,
+  "edge_max_abs_directional_error": 1.366947699e-05,
+  "direct_vector_max_abs_error": 2.083699565e-07,
+  "normalized_adjoint_pairing_max_error": 2.324937588e-07,
+  "plain_K_boundary_rejections": 3,
+  "residual_energy_checks": [
+    {
+      "width": 8,
+      "height": 8,
+      "energy": 11.512299035,
+      "gradient_sum": -5.466863513e-07,
+      "repair_derivative": -23.024598521
+    },
+    {
+      "width": 17,
+      "height": 9,
+      "energy": 51.987882665,
+      "gradient_sum": 4.842877388e-08,
+      "repair_derivative": -103.97576498
+    },
+    {
+      "width": 65,
+      "height": 97,
+      "energy": 2056.909347874,
+      "gradient_sum": 2.381717257e-05,
+      "repair_derivative": -4113.818696482
+    }
+  ],
+  "finite_repair_accuracy": "UNMEASURED",
+  "native_rd": "UNMEASURED",
+  "performance": "UNMEASURED",
+  "historical_spread_failures": "UNCHANGED",
+  "evidence_sha256": {
+    "PROTOCOL.md": "57c93fe621bbc1fec40b70b3e85bb6665772bca184fdb27cff8e3e595ae62bea",
+    "TOOLS.json": "fa0a1e1cbee4db1885caec6c06301809707369ed3ca753b2fa7b476545ad61d8",
+    "reference-pooling.log": "20b9d0990a71e0733b6a9b5a9f39595725df3cea62492a44410052bbd21ccb09",
+    "canonical-pooling.log": "ebd9efed53a46407cc356d10f09e0e592ddae1804fac3d9c7448d6bc87a24dec",
+    "measured.patch": "cddf48fbb43f2882b9ee9aa3ab35f0800c085cb0f245de053655a56e77bde2bb"
+  }
+}

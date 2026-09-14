@@ -5616,6 +5616,301 @@ mod tests {
     }
     use super::*;
 
+    // Synthetic references for the pixel-response prerequisite. These are not
+    // production attribution or finite-removal implementations.
+    fn adjoint_probe_blur(input: &[f32], w: usize, h: usize) -> Vec<f32> {
+        let mut out = vec![0.0; input.len()];
+        box_blur_1pass_into(input, &mut out, &mut vec![0.0; input.len()], w, h, 5);
+        out
+    }
+
+    fn adjoint_probe_weight(x: usize, y: usize, w: usize, h: usize) -> f32 {
+        let wx = if x == 0 || x + 1 == w { 0.5 } else { 1.0 };
+        let wy = if y == 0 || y + 1 == h { 0.5 } else { 1.0 };
+        wx * wy
+    }
+
+    fn adjoint_probe_transpose(input: &[f32], w: usize, h: usize) -> Vec<f32> {
+        // Detailed balance for reflect-101: D K = K^T D. In two dimensions
+        // D has edge weights 1/2 and corner weights 1/4. Reuse the SIMD K.
+        let scaled: Vec<_> = input
+            .iter()
+            .enumerate()
+            .map(|(i, v)| v / adjoint_probe_weight(i % w, i / w, w, h))
+            .collect();
+        adjoint_probe_blur(&scaled, w, h)
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| v * adjoint_probe_weight(i % w, i / w, w, h))
+            .collect()
+    }
+
+    fn adjoint_probe_direct(input: &[f32], w: usize, h: usize, transpose: bool) -> Vec<f64> {
+        let reflect = |i: isize, len: usize| {
+            let period = 2 * (len - 1);
+            let k = i.unsigned_abs() % period;
+            if k < len { k } else { period - k }
+        };
+        let mut out = vec![0.0; input.len()];
+        for y in 0..h {
+            for x in 0..w {
+                for dy in -5..=5 {
+                    for dx in -5..=5 {
+                        let source = reflect(y as isize + dy, h) * w + reflect(x as isize + dx, w);
+                        let center = y * w + x;
+                        let (dest, src) = if transpose {
+                            (source, center)
+                        } else {
+                            (center, source)
+                        };
+                        out[dest] += f64::from(input[src]) / 121.0;
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn reflected_box_pixel_adjoint_matches_direct_scatter() {
+        let mut max_error = 0.0_f64;
+        let mut max_dot_error = 0.0_f64;
+        for (w, h) in [(8, 8), (17, 9), (65, 97)] {
+            let a: Vec<_> = (0..w * h)
+                .map(|i| ((i * 31 + i / w * 13) % 257) as f32 / 128.0 - 1.0)
+                .collect();
+            let mut b: Vec<_> = (0..w * h)
+                .map(|i| ((i * 11 + i / w * 29) % 251) as f32 / 125.0 - 1.0)
+                .collect();
+            for impulse in [false, true] {
+                if impulse {
+                    b.fill(0.0);
+                    b[0] = 1.0;
+                }
+                let ka = adjoint_probe_blur(&a, w, h);
+                let ktb = adjoint_probe_transpose(&b, w, h);
+                for (got, expected) in ka
+                    .iter()
+                    .zip(adjoint_probe_direct(&a, w, h, false))
+                    .chain(ktb.iter().zip(adjoint_probe_direct(&b, w, h, true)))
+                {
+                    let error = (f64::from(*got) - expected).abs();
+                    max_error = max_error.max(error);
+                    assert!(error <= 2e-5, "{w}x{h}: {got} vs {expected}");
+                }
+                let lhs: f64 = ka
+                    .iter()
+                    .zip(&b)
+                    .map(|(x, y)| f64::from(*x) * f64::from(*y))
+                    .sum();
+                let rhs: f64 = a
+                    .iter()
+                    .zip(&ktb)
+                    .map(|(x, y)| f64::from(*x) * f64::from(*y))
+                    .sum();
+                let error = (lhs - rhs).abs() / lhs.abs().max(rhs.abs()).max(1.0);
+                max_dot_error = max_dot_error.max(error);
+                assert!(error <= 2e-5, "adjoint pairing {w}x{h}: {lhs} vs {rhs}");
+                if impulse {
+                    let wrong = adjoint_probe_blur(&b, w, h);
+                    assert!(
+                        wrong.iter().zip(&ktb).any(|(x, y)| (x - y).abs() > 0.005),
+                        "plain reflected K must be rejected as K^T at boundaries"
+                    );
+                }
+            }
+        }
+        eprintln!("ADJOINT vector_max={max_error:.9e} normalized_dot_max={max_dot_error:.9e}");
+    }
+
+    #[test]
+    fn residual_pixel_gradient_has_nonzero_repair_contraction() {
+        for (w, h) in [(8, 8), (17, 9), (65, 97)] {
+            let d: Vec<_> = (0..w * h)
+                .map(|i| ((i * 31 + i / w * 13) % 257) as f32 / 128.0 - 1.0)
+                .collect();
+            let kd = adjoint_probe_blur(&d, w, h);
+            let residual: Vec<_> = d.iter().zip(&kd).map(|(x, y)| x - y).collect();
+            let ktr = adjoint_probe_transpose(&residual, w, h);
+            let gradient: Vec<_> = residual
+                .iter()
+                .zip(&ktr)
+                .map(|(x, y)| 2.0 * f64::from(x - y))
+                .collect();
+            let energy: f64 = residual.iter().map(|v| f64::from(*v).powi(2)).sum();
+            let sum: f64 = gradient.iter().sum();
+            let contraction: f64 = gradient
+                .iter()
+                .zip(&d)
+                .map(|(g, d)| -g * f64::from(*d))
+                .sum();
+            assert!(sum.abs() <= 2e-5 * energy.max(1.0));
+            assert!((contraction + 2.0 * energy).abs() <= 2e-5 * energy.max(1.0));
+            assert!(
+                energy > 1.0 && (contraction + energy).abs() > 0.9 * energy,
+                "a correct local derivative does not equal finite full erasure"
+            );
+            eprintln!(
+                "RESIDUAL {w}x{h} energy={energy:.9} gradient_sum={sum:.9e} repair_derivative={contraction:.9}"
+            );
+        }
+    }
+
+    fn adjoint_probe_edge_pool(
+        source: &[f32],
+        distorted: &[f32],
+        source_mean: &[f32],
+        w: usize,
+        h: usize,
+        branch: f64,
+        p: i32,
+    ) -> f64 {
+        let means = adjoint_probe_blur(distorted, w, h);
+        let unused = vec![0.0; w * h];
+        // Radius zero consumes the already blurred means. The existing fused
+        // owner computes and pools the actual f32 edge signals; SSIM output is
+        // ignored. This is a synthetic kernel test, not full pixel scoring.
+        let acc = crate::fused::fused_vblur_features_ssim(
+            source_mean,
+            &means,
+            &unused,
+            &unused,
+            source,
+            distorted,
+            w * h,
+            1,
+            0,
+            1,
+            0,
+            &mut [],
+            &mut [],
+            false,
+            &mut [],
+            false,
+            &mut [],
+            &mut [],
+            false,
+            crate::fused::FreeExtrasWork::default(),
+            crate::fused::ExtPoolsWork::default(),
+            &[],
+        );
+        let sum = match (branch > 0.0, p) {
+            (true, 1) => acc.edge_art,
+            (true, 2) => acc.edge_art2,
+            (true, 4) => acc.edge_art4,
+            (true, 8) => acc.edge_art8,
+            (false, 1) => acc.edge_det,
+            (false, 2) => acc.edge_det2,
+            (false, 4) => acc.edge_det4,
+            (false, 8) => acc.edge_det8,
+            _ => unreachable!(),
+        };
+        (sum / (w * h) as f64).powf(1.0 / f64::from(p))
+    }
+
+    #[test]
+    fn edge_pixel_adjoint_matches_smooth_directional_differences() {
+        let mut checks = 0;
+        let mut max_error = 0.0_f64;
+        for (w, h) in [(8, 8), (17, 9), (65, 97)] {
+            let n = w * h;
+            let a: Vec<_> = (0..n)
+                .map(|i| {
+                    let sign = if (i % w + i / w) % 2 == 0 { 1.0 } else { -1.0 };
+                    sign * (0.3 + 0.03 * (i % 7) as f32)
+                })
+                .collect();
+            let ka = adjoint_probe_blur(&a, w, h);
+            for (factor, branch) in [(1.3, 1.0_f64), (0.7, -1.0)] {
+                let d: Vec<_> = a.iter().map(|v| factor * v + 0.02).collect();
+                let kd = adjoint_probe_blur(&d, w, h);
+                let signals = |pixels: &[f32]| {
+                    let means = adjoint_probe_blur(pixels, w, h);
+                    (0..n)
+                        .map(|i| {
+                            let ed = (1.0 + (pixels[i] - means[i]).abs())
+                                / (1.0 + (a[i] - ka[i]).abs())
+                                - 1.0;
+                            (branch * f64::from(ed)).max(0.0)
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let signal = signals(&d);
+                assert!(signal.iter().all(|v| *v > 0.02), "smooth active branch");
+                for p in [1, 2, 4, 8] {
+                    let pool = |values: &[f64]| {
+                        (values.iter().map(|v| v.powi(p)).sum::<f64>() / n as f64)
+                            .powf(1.0 / f64::from(p))
+                    };
+                    let root = pool(&signal);
+                    let canonical_pool =
+                        |pixels: &[f32]| adjoint_probe_edge_pool(&a, pixels, &ka, w, h, branch, p);
+                    assert!(
+                        (canonical_pool(&d) - root).abs() <= 2e-6,
+                        "independent root versus canonical edge pool"
+                    );
+                    let z: Vec<_> = (0..n)
+                        .map(|i| {
+                            (root.powi(1 - p) * signal[i].powi(p - 1) / n as f64
+                                * branch
+                                * f64::from((d[i] - kd[i]).signum())
+                                / f64::from(1.0 + (a[i] - ka[i]).abs()))
+                                as f32
+                        })
+                        .collect();
+                    let ktz = adjoint_probe_transpose(&z, w, h);
+                    let g: Vec<_> = z.iter().zip(&ktz).map(|(x, y)| f64::from(x - y)).collect();
+                    for rect in [
+                        [0, 0, w, h],
+                        [0, 0, 4, 4],
+                        [w / 3, h / 3, 2 * w / 3, 2 * h / 3],
+                    ] {
+                        let direction: Vec<_> = (0..n)
+                            .map(|i| {
+                                if i % w >= rect[0]
+                                    && i % w < rect[2]
+                                    && i / w >= rect[1]
+                                    && i / w < rect[3]
+                                {
+                                    ((i * 11 + i / w * 29) % 31) as f32 / 15.0 - 1.0
+                                } else {
+                                    0.0
+                                }
+                            })
+                            .collect();
+                        let predicted: f64 = g
+                            .iter()
+                            .zip(&direction)
+                            .map(|(g, v)| g * f64::from(*v))
+                            .sum();
+                        for epsilon in [0.001, 0.0005] {
+                            let plus: Vec<_> = d
+                                .iter()
+                                .zip(&direction)
+                                .map(|(d, v)| d + epsilon * v)
+                                .collect();
+                            let minus: Vec<_> = d
+                                .iter()
+                                .zip(&direction)
+                                .map(|(d, v)| d - epsilon * v)
+                                .collect();
+                            let observed = (canonical_pool(&plus) - canonical_pool(&minus))
+                                / (2.0 * f64::from(epsilon));
+                            let error = (observed - predicted).abs();
+                            max_error = max_error.max(error);
+                            assert!(
+                                error <= 2e-5_f64.max(0.01 * observed.abs().max(predicted.abs())),
+                                "edge {w}x{h} factor={factor} p={p} rect={rect:?} eps={epsilon}: predicted={predicted} observed={observed}"
+                            );
+                            checks += 1;
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("EDGE_ADJOINT checks={checks} max_abs_directional_error={max_error:.9e}");
+    }
+
     /// `box_spread_sum_preserving` must conserve total mass EXACTLY (to f64
     /// rounding) on arbitrary signed planes including edge-heavy mass, and
     /// match a normalized box blur in the deep interior.
