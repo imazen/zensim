@@ -1,5 +1,19 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, native sampling-phase diagnostic:**
+[Results](../benchmarks/native_phase_2026-09-14.md) reuse the same four TRAIN
+development families and eight native cells, with frozen plain/constrained
+y60/H32 ensembles. Both sides receive a joint RGB translation in a fixed black
+canvas; all original pixels are retained. These are diagnostic transforms,
+not new codec encodes, fitting data or EVAL. Full64-phase coverage is restricted
+to the predeclared screen failure; other cells use six residues plus period
+controls. Original native outputs reproduce exactly. Twelve of48 whole-cell
+period controls fail narrowly at full-resolution Y SSIM-L4, while all focal-pair
+controls pass. Scalar preference and coarse-B contributions vary substantially
+with phase. No new model, calibration, sampling contract, protected population,
+or native RD qualification. The gallery retains original A/Bs and adds bound
+phase figures without replacing their unpadded native evidence.
+
 **September 14, native signed contribution diagnosis:**
 [Results](../benchmarks/native_contributions_2026-09-14.md) reuse exactly the
 preceding eight TRAIN development cells and frozen six-model/D compositions.

@@ -183,6 +183,21 @@ def build_native_gallery(root, out):
                         + f" · Zensim Δ {example['score_delta']:+.4f}; SSIM2 Δ {example['ssim2_delta']:+.4f}; "
                         + f"Butteraugli Δ {-example['ba_quality_delta']:+.6f}.</p>"
                         + '<div class="views">' + "".join(views) + "</div></section>")
+    diagnostic_figures = []
+    for figure in context.get("diagnostic_figures", []):
+        name = figure["file"]
+        if (not isinstance(name, str) or Path(name).name != name
+                or Path(name).suffix not in (".svg", ".png")):
+            raise ValueError("diagnostic figure must be a local SVG/PNG filename")
+        path = root / name
+        if digest(path) != figure["sha256"]:
+            raise ValueError("diagnostic figure hash mismatch")
+        assets[name] = path
+        diagnostic_figures.append(
+            '<section><h2>' + escape(figure["title"]) + '</h2><p>'
+            + escape(figure["caption"]) + '</p><a href="' + escape(name)
+            + '"><img class="plot" src="' + escape(name) + '" alt="'
+            + escape(figure["title"]) + '"></a></section>')
     page = """<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Zensim native JXL comparison — TRAIN, no qualified model</title>
@@ -193,13 +208,14 @@ section{background:white;padding:1rem;margin:1.5rem 0}.views{display:flex;gap:1r
 <h1>Native JXL steering comparison · September 14, 2026</h1>
 <p class="notice"><strong>TRAIN development only. No model qualifies.</strong> NATIVE_POPULATION These are actual encoder interventions, not reference-pixel replacements.</p>
 <p>Complete Rust models score every output. Maps are predicted from baseline pixels before probe scoring. Hard-max additive maps are explicitly partial. Native correlations are mechanism diagnostics, not the original repair gates or a matched-rate–distortion win.</p>
-<div class="table"><table><thead><tr><th>Model</th><th>Additive map coverage</th><th>Native M2 minimum</th><th>Own-score mass/response rank median / min</th><th>Own-score density/gain-per-byte rank median</th><th>SSIM2 mass/response rank median</th><th>Butteraugli quality mass/response rank median</th><th>Robust peer conflicts</th></tr></thead><tbody>"""
+DIAGNOSTIC_FIGURES<div class="table"><table><thead><tr><th>Model</th><th>Additive map coverage</th><th>Native M2 minimum</th><th>Own-score mass/response rank median / min</th><th>Own-score density/gain-per-byte rank median</th><th>SSIM2 mass/response rank median</th><th>Butteraugli quality mass/response rank median</th><th>Robust peer conflicts</th></tr></thead><tbody>"""
     page += "".join(rows) + """</tbody></table></div>
 <p>Own-score columns measure internal consistency. The SSIM2 and Butteraugli columns compare map mass with those peers' measured quality responses; each column is the median of the recorded cell correlations. High internal consistency does not establish perceptual quality or encoding benefit. Peer conflicts require both SSIM2 and Butteraugli to agree beyond the registered margins and Zensim to move oppositely by more than .1. These peers are not human truth; consult the report for their use in training. D uses its frozen revision1; candidate ensembles use revision3.</p>
 <p><a href="native_map_replay_2026-09-14.md">Full report and limitations</a> · <a href="native_map_replay_2026-09-14.results.json">Results and evidence hashes</a> · <a href="FILES.json">Evidence index</a></p>
 <h2>Raw native response scatter</h2><a href="native_scatter.svg"><img class="plot" src="native_scatter.svg" alt="Per-model and per-image raw attribution mass versus actual native quantizer response"></a>
 <h2>Exact A/B failure examples</h2><p>Largest signed peer-consensus conflict for each affected model. Selected illustrations, not a representative population. Click an image for original-size PNG bytes. No synthetic repair or image resizing is stored.</p>"""
     page = page.replace("NATIVE_POPULATION", escape(population))
+    page = page.replace("DIAGNOSTIC_FIGURES", "".join(diagnostic_figures))
     page = page.replace("native_map_replay_2026-09-14.md", report_stem + ".md")
     page = page.replace("native_map_replay_2026-09-14.results.json", report_stem + ".results.json")
     page += "".join(examples) + "</html>\n"

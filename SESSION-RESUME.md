@@ -1,5 +1,27 @@
 # Start here — one target score, one development path
 
+## September 14, newest: coarse-B native preference is phase-sensitive
+
+[Phase diagnostic](benchmarks/native_phase_2026-09-14.md) translates the exact
+TRAIN reference/decoded pixels together in a fixed canvas, using public Rust
+scores and prepared bin8 maps. Two frozen y60/H32 ensembles, eight cells,
+130 alignments, 8,580 candidate scores and 260 maps; no fitting or encoding.
+The ordinary six-model replay is byte-identical, and the two-model original
+slice reproduces 544 scores and feature vectors, plus 16 maps.
+
+Focal screen r1-up constrained score delta spans −.08581..+.22750 across 64
+phases. Coarse-B contributions vary while full-resolution contributions remain
+nearly fixed; all three B artifact sensitivities remain negative. SSIM2 also
+changes preference across phases; Butteraugli retains its improvement direction.
+Neither is human truth. Whole-cell period controls fail 12/48 narrowly at f14
+(full-resolution Y SSIM-L4); all focal baseline/r1-up controls pass. Keep both
+findings, the original failed bars and the padding/binning limitations visible.
+
+This justifies a bounded existing-sampling-contract feature comparison before
+refitting, not a global chroma deletion or a claim that a filter fixes quality.
+No model advances. Memory audit remains 97/99 exact-project files; broader
+memory/transcript scope and all product qualification remain open.
+
 ## September 14, newest: chronological memory recovery and TRAIN report discovery
 
 [Recovery record](benchmarks/claude_memory_chronology_2026-09-14.md) reconciles

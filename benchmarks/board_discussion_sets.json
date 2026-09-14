@@ -369,6 +369,15 @@
       "report_url": "/zensim/reports/native-tv-train-2026-09-14/index.html",
       "bakes": [],
       "note": "Six scientific fits plus two integrity controls. Native conflicts increase from 9 to 10 of 79 despite improved human rank. Fitting margins also remain unsatisfied; this recipe fails, not a proven feature ceiling."
+    },
+    {
+      "id": "2026-09-14-native-phase",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Sampling phase: coarse-B response in y60/H32",
+      "report_url": "/zensim/reports/native-phase-2026-09-14/index.html",
+      "bakes": [],
+      "note": "Two frozen models, 130 translated cells and all original native interventions. The focal preference changes with sampling alignment. Twelve of 48 whole-cell period controls fail narrowly in Y SSIM-L4; the focal pair passes. No refit or model promotion."
     }
   ],
   "incumbent_notes": [

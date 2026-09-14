@@ -51,6 +51,141 @@ fn rect(v: &Value, w: usize, h: usize) -> (usize, usize, usize, usize) {
     (x0, y0, x1, y1)
 }
 
+/// A diagnostic translation only: retain every original RGB pixel, translate
+/// both sides together, and keep canvas dimensions/background fixed. The64px
+/// minimum margin separates basic four-scale neighborhoods from canvas edges.
+/// Period-eight control results must establish invariance before interpreting
+/// smaller shifts. Padding changes context; this is not a new native encode.
+fn phase_canvas(
+    source: &[[u8; 3]],
+    w: usize,
+    h: usize,
+    dx: usize,
+    dy: usize,
+) -> (Vec<[u8; 3]>, usize, usize) {
+    assert!(dx <= 8 && dy <= 8);
+    assert_eq!(source.len(), w * h);
+    let (cw, ch) = ((w + 144).next_multiple_of(8), (h + 144).next_multiple_of(8));
+    let mut canvas = vec![[0; 3]; cw * ch];
+    for y in 0..h {
+        let start = (y + 64 + dy) * cw + 64 + dx;
+        canvas[start..start + w].copy_from_slice(&source[y * w..(y + 1) * w]);
+    }
+    (canvas, cw, ch)
+}
+
+fn sampling_phase_probe(
+    c: &Value,
+    reference: &[[u8; 3]],
+    recipes: &[Value],
+    scorers: &mut [BakeScorer<'_>],
+) -> Value {
+    let (w, h) = (number(&c["width"]), number(&c["height"]));
+    let probes = array(&c["probes"]);
+    // The ordinary replay already checks neutral equivalence. Decode once per
+    // retained intervention, then reuse those exact buffers across every phase.
+    let inputs: Vec<_> = probes
+        .iter()
+        .filter(|p| p["name"] != "neutral")
+        .map(|p| (p, pixels(p, w, h).0))
+        .collect();
+    let mut phases = Vec::new();
+    for offset in array(&c["sampling_phase_offsets"]) {
+        let (dx, dy) = (number(&offset[0]), number(&offset[1]));
+        let (reference, cw, ch) = phase_canvas(reference, w, h, dx, dy);
+        let rs = RgbSlice::new(&reference, cw, ch);
+        let (baseline, _, _) = phase_canvas(&inputs[0].1, w, h, dx, dy);
+        let bs = RgbSlice::new(&baseline, cw, ch);
+        let mut predictions = Vec::new();
+        let mut base_features = Vec::new();
+        let mut sensitivities = Vec::new();
+        let mut base_scores = Vec::new();
+        for (mi, scorer) in scorers.iter_mut().enumerate() {
+            let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
+            let map = worker.compute(&bs, None).unwrap();
+            let groups: Vec<_> = array(&c["regions"])
+                .iter()
+                .map(|g| {
+                    let mass: f64 = array(&g["rects"])
+                        .iter()
+                        .map(|v| {
+                            let (x0, y0, x1, y1) = rect(v, w, h);
+                            map.attribution().query_rect(
+                                x0 + 64 + dx,
+                                y0 + 64 + dy,
+                                x1 + 64 + dx,
+                                y1 + 64 + dy,
+                            )
+                        })
+                        .sum();
+                    assert!(mass.is_finite());
+                    json!({"region":g["id"],"mass":mass,"density":mass/number(&g["area"]) as f64})
+                })
+                .collect();
+            predictions.push(json!({"model":recipes[mi]["name"],"score":map.result().score(),
+                "baseline_sensitivities":map.sensitivities(),"regions":groups,
+                "density_missing":map.unsupported_feature_ids(),"refinement_missing":map.unsupported_refinement_feature_ids()}));
+            base_scores.push(map.result().score());
+            base_features.push(map.result().features().to_vec());
+            sensitivities.push(map.sensitivities().to_vec());
+        }
+        let bsrc: Vec<_> = reference
+            .iter()
+            .map(|p| butteraugli::RGB8::new(p[0], p[1], p[2]))
+            .collect();
+        let mut outputs = Vec::new();
+        for (p, image) in &inputs {
+            let (image, _, _) = phase_canvas(image, w, h, dx, dy);
+            let ds = RgbSlice::new(&image, cw, ch);
+            let ssim2 = fast_ssim2::compute_ssimulacra2(
+                imgref::Img::new(reference.as_slice(), cw, ch),
+                imgref::Img::new(image.as_slice(), cw, ch),
+            )
+            .unwrap();
+            let bdst: Vec<_> = image
+                .iter()
+                .map(|p| butteraugli::RGB8::new(p[0], p[1], p[2]))
+                .collect();
+            let ba = butteraugli::butteraugli(
+                imgref::Img::new(bsrc.as_slice(), cw, ch),
+                imgref::Img::new(bdst.as_slice(), cw, ch),
+                &butteraugli::ButteraugliParams::default(),
+            )
+            .unwrap()
+            .pnorm_3;
+            assert!(ssim2.is_finite() && ba.is_finite());
+            let mut scores = Vec::new();
+            for (mi, scorer) in scorers.iter_mut().enumerate() {
+                let value = scorer.compute(&rs, &ds, None).unwrap();
+                assert!(value.score().is_finite());
+                if p["name"] == "baseline" {
+                    assert_eq!(value.score().to_bits(), base_scores[mi].to_bits());
+                    assert_eq!(value.features(), base_features[mi]);
+                }
+                let linearized: f64 = value
+                    .features()
+                    .iter()
+                    .zip(&base_features[mi])
+                    .zip(&sensitivities[mi])
+                    .map(|((after, before), s)| s * (after - before))
+                    .sum();
+                assert!(linearized.is_finite());
+                scores.push(json!({"model":recipes[mi]["name"],"score":value.score(),
+                    "delta":value.score()-base_scores[mi],"linearized_delta":linearized,"features":value.features()}));
+            }
+            outputs.push(
+                json!({"name":p["name"],"pixels_sha256":super::sha(image.as_flattened()),
+                "ssim2":ssim2,"butteraugli_pnorm3":ba,"models":scores}),
+            );
+        }
+        phases.push(json!({"offset":offset,"width":cw,"height":ch,
+            "reference_pixels_sha256":super::sha(reference.as_flattened()),
+            "predictions":predictions,"probes":outputs}));
+        eprintln!("native sampling phase: {} {dx},{dy}", text(&c["id"]));
+    }
+    json!({"kind":"joint-rgb-translation-fixed-black-canvas","padding":64,"phases":phases})
+}
+
 pub(super) fn run(manifest: &str, hash: &str, output: &str) {
     assert!(
         !Path::new(output).exists(),
@@ -93,6 +228,25 @@ pub(super) fn run(manifest: &str, hash: &str, output: &str) {
             "unadmitted source"
         );
         let (w, h) = (number(&c["width"]), number(&c["height"]));
+        if let Some(offsets) = c.get("sampling_phase_offsets") {
+            assert_eq!(revision, 3, "phase diagnostic requires revision3");
+            let offsets = array(offsets);
+            assert!(!offsets.is_empty() && offsets.len() <= 81);
+            let mut seen = std::collections::BTreeSet::new();
+            for offset in offsets {
+                assert_eq!(array(offset).len(), 2, "phase offset arity");
+                let xy = (number(&offset[0]), number(&offset[1]));
+                assert!(
+                    xy.0 <= 8 && xy.1 <= 8 && seen.insert(xy),
+                    "phase offset bounds/duplicate"
+                );
+            }
+            assert!(seen.contains(&(0, 0)), "phase origin control required");
+            assert!(
+                seen.contains(&(8, 0)) && seen.contains(&(0, 8)) && seen.contains(&(8, 8)),
+                "period-eight controls required"
+            );
+        }
         assert!(
             w >= 8 && h >= 8 && w <= 16384 && h <= 16384,
             "supported geometry"
@@ -264,16 +418,60 @@ pub(super) fn run(manifest: &str, hash: &str, output: &str) {
             }
             outputs.push(json!({"name":p["name"],"pixels_sha256":phash,"ssim2":ssim2,"butteraugli_pnorm3":ba,"models":scores}));
         }
-        results.push(json!({"id":c["id"],"reference_pixels_sha256":rhash,"baseline_pixels_sha256":bhash,"predictions":predictions,"probes":outputs}));
+        let mut result = json!({"id":c["id"],"reference_pixels_sha256":rhash,"baseline_pixels_sha256":bhash,"predictions":predictions,"probes":outputs});
+        if c.get("sampling_phase_offsets").is_some() {
+            result["sampling_phase_diagnostic"] =
+                sampling_phase_probe(c, &reference, recipes, &mut scorers);
+        }
+        results.push(result);
         eprintln!("native replay complete: {}", text(&c["id"]));
     }
     let comparisons: usize = cells.iter().map(|c| array(&c["probes"]).len()).sum();
-    let result = json!({"schema":"zensim-native-map-replay-result-v1","manifest_sha256":hash,"formula_revision":revision,"role":"train","qualified":false,
+    let mut result = json!({"schema":"zensim-native-map-replay-result-v1","manifest_sha256":hash,"formula_revision":revision,"role":"train","qualified":false,
         "work":{"candidate_maps":cells.len()*models.len(),"candidate_pixel_scores":comparisons*models.len(),"peer_comparisons":comparisons*2},"cases":results});
+    let phase_cells: usize = cells
+        .iter()
+        .filter_map(|c| c.get("sampling_phase_offsets").map(|v| array(v).len()))
+        .sum();
+    if phase_cells != 0 {
+        let phase_pairs: usize = cells
+            .iter()
+            .filter_map(|c| {
+                c.get("sampling_phase_offsets")
+                    .map(|v| array(v).len() * (array(&c["probes"]).len() - 1))
+            })
+            .sum();
+        result["work"]["sampling_phase_candidate_maps"] = json!(phase_cells * models.len());
+        result["work"]["sampling_phase_candidate_pixel_scores"] = json!(phase_pairs * models.len());
+        result["work"]["sampling_phase_peer_comparisons"] = json!(phase_pairs * 2);
+    }
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(output)
         .expect("new evidence file");
     serde_json::to_writer_pretty(file, &result).unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn phase_canvas_preserves_every_pixel_with_identical_background() {
+        let (w, h) = (13, 9);
+        let pixels: Vec<_> = (0..w * h).map(|i| [(i + 1) as u8, 23, 71]).collect();
+        for dy in 0..=8 {
+            for dx in 0..=8 {
+                let (canvas, cw, ch) = super::phase_canvas(&pixels, w, h, dx, dy);
+                assert_eq!((cw % 8, ch % 8), (0, 0));
+                assert_eq!(canvas.iter().filter(|p| **p != [0; 3]).count(), w * h);
+                let restored: Vec<_> = (0..h)
+                    .flat_map(|y| {
+                        let start = (y + 64 + dy) * cw + 64 + dx;
+                        canvas[start..start + w].iter().copied()
+                    })
+                    .collect();
+                assert_eq!(restored, pixels);
+            }
+        }
+    }
 }

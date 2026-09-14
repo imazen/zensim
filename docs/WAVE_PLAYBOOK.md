@@ -89,6 +89,16 @@ retain the finite-head residual and do not present this as a feature ablation.
 The [native contribution diagnosis](../benchmarks/native_contributions_2026-09-14.md)
 checks unchanged ordinary output and exact decomposition on frozen TRAIN cases.
 
+Native replay accepts optional per-case `sampling_phase_offsets` for the
+[joint-translation diagnostic](../benchmarks/native_phase_2026-09-14.md).
+It preserves all RGB pixels in a fixed black canvas and requires origin and
+period-eight controls before pixel reads. Public scalar/feature/sensitivity
+and bin8 map paths remain the owners. Padding changes context; sub-eight map
+queries change bin alignment. Retain failed controls and separate these effects
+from actual codec RD. A local phase response is not a replacement-model verdict.
+Native galleries may attach `diagnostic_figures` with a local SVG/PNG filename,
+title, caption and SHA-256; bad identities fail before publication.
+
 ## A complete experiment
 
 1. Register the hypothesis, baseline, exact intervention, sources, seeds,
