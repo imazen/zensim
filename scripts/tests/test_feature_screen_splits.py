@@ -135,6 +135,17 @@ class SplitBoundaries(unittest.TestCase):
                 self.assertIn("--no-auto-eval", command)
                 self.assertEqual(command[command.index("--early-stop-patience")+1], "0")
 
+    def test_targeted_capacity_controls_do_not_expand_other_layouts(self):
+        recipe = dict(arms={"cheap": [0], "wide": [0, 1]}, hidden=128,
+                      capacity_arms={"cheap": [32], "wide": [256]},
+                      control_arms=[], half_data_controls=False)
+        self.assertEqual(screen.fit_specs(recipe), [
+            ("cheap", 128, "full"), ("wide", 128, "full"),
+            ("cheap", 32, "full"), ("wide", 256, "full")])
+        for capacity in ({"cheap": [128]}, {"absent": [32]}, {"wide": [0]}):
+            with self.assertRaises(ValueError):
+                screen.fit_specs(dict(recipe, capacity_arms=capacity))
+
 
 if __name__ == "__main__":
     unittest.main()

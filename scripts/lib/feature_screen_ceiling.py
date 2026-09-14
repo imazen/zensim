@@ -164,6 +164,22 @@ def training_command(trainer, out, recipe, task, hidden, fraction, seed, ids, ba
     return command
 
 
+def fit_specs(recipe):
+    specs = [(arm, recipe["hidden"], "full") for arm in recipe["arms"]]
+    capacity = recipe.get("capacity_arms")
+    if capacity is None:
+        capacity = {arm: recipe["capacity_hidden"] for arm in recipe["control_arms"]}
+    for arm, widths in capacity.items():
+        if arm not in recipe["arms"] or any(not isinstance(h, int) or h <= 0 for h in widths):
+            raise ValueError("invalid capacity arm")
+        specs.extend((arm, h, "full") for h in widths)
+    if recipe.get("half_data_controls", True):
+        specs.extend((arm, recipe["hidden"], "half") for arm in recipe["control_arms"])
+    if len(set(specs)) != len(specs):
+        raise ValueError("duplicate fit specification")
+    return specs
+
+
 def execute(args, recipe):
     validate_recipe(recipe)
     if args.cache or args.ceiling_stage == "checkpoints":
@@ -342,10 +358,7 @@ def execute(args, recipe):
             *[out / name for name in contracts], "--target-range=-1000,200",
             "--contracts", out / "TABLE_CONTRACTS.json"])
         result["tables_validated"] = True
-    specs = [(arm, recipe["hidden"], "full") for arm in recipe["arms"]]
-    specs += [(arm, h, "full") for arm in recipe["control_arms"] for h in recipe["capacity_hidden"]]
-    if recipe.get("half_data_controls", True):
-        specs += [(arm, recipe["hidden"], "half") for arm in recipe["control_arms"]]
+    specs = fit_specs(recipe)
     layouts = dict(recipe["arms"])
     result["status"] = "FITTING"
     env["RAYON_NUM_THREADS"] = "1"
@@ -565,8 +578,7 @@ def report(args, recipe):
             or fits["input_sha256"] != sha(root / "INPUTS.json")):
         raise ValueError("report inputs changed since fitting/audit")
     n_tasks = len(recipe.get("tasks", ["human", "codec", "corruption"]))
-    expected = (len(recipe["arms"]) + len(recipe["control_arms"])*
-                (int(recipe.get("half_data_controls", True))+len(recipe["capacity_hidden"]))) * len(recipe["seeds"]) * n_tasks
+    expected = len(fit_specs(recipe)) * len(recipe["seeds"]) * n_tasks
     layouts = recipe["arms"]
     if len(fits["arms"]) != expected or set(fits["arms"]) != set(audits["pixel"]):
         raise ValueError("incomplete campaign")

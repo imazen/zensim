@@ -303,6 +303,8 @@ CURATED = set(CURATED_BOARD)
 
 def family_of(name: str) -> str:
     """Control-bar family grouping (group toggles). Input = the board name."""
+    if name.startswith("MT913_"):
+        return "minimal / wide train-eval study"
     if name.endswith(ERA372_CUR_SUFFIX):
         # Era-suffixed rows read the SAME bake on the 2026-08-30 current-extractor 372
         # root; checked FIRST so a pair's two halves never land in different families
@@ -2276,6 +2278,8 @@ function renderBar(){
   const bar=$('#bar');bar.innerHTML='';
   const mk=(t,fn,title)=>{const x=el('button',{class:'btn',text:t});if(title)x.setAttribute('title',title);x.onclick=fn;return x;};
   bar.append(
+    mk('minimal / wide',()=>{state.visible=new Set(DATA.bakes.filter(b=>b.name.startsWith('MT913_')&&(b.name.endsWith('_ens5')||b.name==='MT913_linear60')).map(b=>b.name));rerender();renderBar();},
+      'Registered train-only comparison: eight complete five-seed ensembles and a linear control. KADID eval only; product gates remain incomplete. Available on the all-rows board.'),
     mk('target models',()=>{state.visible=new Set(PRODUCT_SET);rerender();renderBar();},
       'B, D and the constrained three-seed challenger where present. Read product qualification before composite.'),
     mk('VERIFIED-FAIR',()=>{state.visible=new Set(VFAIRSET);rerender();renderBar();},
