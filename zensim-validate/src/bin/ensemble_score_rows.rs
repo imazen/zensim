@@ -10,6 +10,8 @@
 //!     idx<TAB>human<TAB>score
 //!
 //! One header line + one row per parquet pair, ordered as in the input.
+//! Floating-point values use round-trip decimal formatting: fixed six-place
+//! rounding can hide score differences and introduce ties in rank assessments.
 //!
 //! Repeating `--bake` serves a uniform ensemble through the public BakeScorer.
 //! Dispatch matches `bake_verdict::score_row` bit-for-bit (per-sample-α
@@ -94,7 +96,7 @@ fn main() -> Result<(), String> {
                 identities.as_ref().is_some_and(|v| v[i]),
             )
             .map_err(|e| e.to_string())?;
-        writeln!(writer, "{}\t{:.6}\t{:.6}", i, humans[i], score)
+        writeln!(writer, "{}\t{}\t{}", i, humans[i], score)
             .map_err(|e| format!("write row {i}: {e}"))?;
     }
     Ok(())

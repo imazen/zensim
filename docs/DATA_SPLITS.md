@@ -35,6 +35,21 @@ Companion docs: `~/work/zen/DATA_PROVENANCE.md` (where data lives),
 `docs/EVAL_PANEL_REQUIREMENT.md` (two-panel eval), CLAUDE.md ("CID22 is
 VALIDATION-ONLY", contamination rules).
 
+September 14 derived TRAIN entry: the [product packet](../benchmarks/product_train_2026-09-14.md)
+inherits W-LIN7's original TRAIN key authority and the September 8 family map.
+It excludes all canonical validation/test families, historical codec-screen
+reservations 1220/1634/7004/7050/7058/8134 and their relatives, historical
+corruption-screen reservations 8462/9066 and relatives, and every suffix-8
+origin/family to preserve the earlier AVIF eval8 reservation. Metadata admission
+precedes any pixel read. Its 10,499 pairs are split by source-family SHA-256
+modulo ten into internal development (0/1), calibration (2), and fit (3–9).
+All three roles remain TRAIN; they cannot qualify a frozen model. Counts are
+7,947 fit, 1,629 development and 923 unused calibration. The reused 8,000-row
+human TRAIN packet contributes 7,000 fit rows and 1,000 internal-development
+rows from eight KADID TRAIN sources selected by source hash order. No previous
+test segment is renamed or admitted. Original authorities, row assignments,
+source/pixel hashes and model results are pinned in the linked record.
+
 September 8 derived-input entry: the [canonical corruption packet](CANONICAL_CORRUPTION_2026-09-08.md)
 inherits the existing native-targeting 12 training / 8 validation origin and
 family assignments, including all corruption attempts, anchors and honest

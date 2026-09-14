@@ -1404,6 +1404,38 @@ mod tests {
         }]
     }
 
+    #[test]
+    fn stratified_group_shares_ignore_weights_uniform_respects_them() {
+        // Same four rows per reference, but one group has eight references.
+        // Global stratum cycling is not a weighted mixture.
+        let make = |weight| {
+            vec![
+                g("small", weight, vec![30.0; 4], Some(vec![0; 4]), true),
+                g(
+                    "large",
+                    1.0,
+                    vec![30.0; 32],
+                    Some((0..32).map(|i| i / 4).collect()),
+                    true,
+                ),
+            ]
+        };
+        let mut p = strat_params(7101);
+        p.pairs_per_epoch = 18_000;
+        let equal = simulate(&make(1.0), &p);
+        let weighted = simulate(&make(9.0), &p);
+        assert_eq!(equal.digest.hex(), weighted.digest.hex());
+        assert_eq!(
+            weighted.full.per_group[0].n_pairs * 8,
+            weighted.full.per_group[1].n_pairs
+        );
+        p.stratified_pairs = false;
+        let uniform = simulate(&make(9.0), &p);
+        let share = uniform.full.per_group[0].n_pairs as f64 / uniform.full.n_pairs as f64;
+        assert!((share - 0.9).abs() < 0.01, "weighted group share {share}");
+        assert_ne!(uniform.digest.hex(), weighted.digest.hex());
+    }
+
     fn strat_params(seed: u64) -> SimParams {
         SimParams {
             seed,

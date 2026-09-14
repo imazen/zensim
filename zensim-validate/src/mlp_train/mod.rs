@@ -22,7 +22,8 @@
 //!
 //! This trainer takes [`TrainingGroup`]s with explicit `train_weight`.
 //! Groups with `train_weight > 0` contribute to RankNet pair sampling
-//! in proportion to their weight; groups with `train_weight == 0` are
+//! in proportion to their weight under uniform sampling; stratified sampling
+//! instead visits eligible strata equally. Groups with `train_weight == 0` are
 //! validation-only — their per-epoch SROCC is logged and the best
 //! model is the one with the highest validation mean.
 
@@ -1394,8 +1395,9 @@ impl<'a> FeatureRows<'a> {
 /// One named slice of training/validation data.
 ///
 /// Multi-group training resolves V0_2's "synthetic dominates by 15×"
-/// imbalance: per-step sampling picks a group in proportion to
-/// `train_weight`, then samples a pair within.
+/// imbalance: uniform sampling picks a group in proportion to `train_weight`,
+/// then samples a pair within. Stratified sampling instead weights each
+/// eligible reference/band stratum equally; see [`PairSampling::Stratified`].
 ///
 /// `train_weight` and `validation_weight` are independent: a group
 /// can be in both pools (trained on AND gated against), in only one,
@@ -1412,9 +1414,10 @@ pub struct TrainingGroup<'a> {
     /// the MSE loss divides by max(σ, ε) per pair — errors on
     /// high-consensus stimuli (low σ) are penalized more.
     pub metric_sigmas: Option<&'a [f64]>,
-    /// Weight in the per-step group selection distribution. The
-    /// per-pair sampling probability is `train_weight / total_weight`,
-    /// so doubling `train_weight` doubles the sampling rate.
+    /// Weight in uniform sampling's group selection distribution. Its draw
+    /// probability is `train_weight / total_weight`; same-row collisions may
+    /// change the shares of usable pairs. Relative weights are ignored by
+    /// stratified sampling, whose shares follow eligible stratum counts.
     /// Set to `0.0` to exclude this group from training.
     pub train_weight: f64,
     /// Weight in the per-epoch validation aggregation. `0.0` excludes
@@ -1521,6 +1524,9 @@ pub enum PairSampling {
     /// the sample seed: two sample seeds touch the same rows, refs and
     /// cells, and differ only in pair order. See
     /// [`sampling::StratifiedPlan`].
+    /// Group weights only determine eligibility in this mode: relative draw
+    /// shares follow each group's number of non-singleton strata. Use
+    /// [`Self::Uniform`] for weighted group draws and singleton-band coverage.
     Stratified,
 }
 
@@ -1549,6 +1555,26 @@ fn build_pair_plan(
         hyperparams.pairs_per_epoch,
         hyperparams.sample_seed.unwrap_or(hyperparams.seed),
     );
+    if train_indices.len() > 1 {
+        let total_weight: f64 = train_indices.iter().map(|&i| groups[i].train_weight).sum();
+        let mut counts = vec![0usize; train_indices.len()];
+        for stratum in &plan.strata {
+            counts[stratum.train_pos] += 1;
+        }
+        eprintln!(
+            "WARNING: stratified sampling ignores relative group weights; \
+             each eligible stratum gets equal draws. Use --pair-sampling uniform \
+             for weighted group draws. Singleton reference/band cells are excluded."
+        );
+        for (position, &index) in train_indices.iter().enumerate() {
+            eprintln!(
+                "  group {}: requested weight share {:.6}, stratum-cycle share {:.6}",
+                groups[index].name,
+                groups[index].train_weight / total_weight,
+                counts[position] as f64 / plan.strata.len().max(1) as f64,
+            );
+        }
+    }
     println!(
         "  pair-sampling: STRATIFIED — {} strata over {} train groups ({} singleton strata \
          excluded: a 1-row cell cannot yield an in-stratum pair){}",

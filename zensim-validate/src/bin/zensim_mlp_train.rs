@@ -232,6 +232,10 @@ struct Args {
     /// separates "this seed saw a better subset" from "this seed landed in a
     /// better basin" — hold coverage fixed, vary the seed, and any remaining
     /// spread is not subset quality.
+    /// Relative group weights are ignored: group draw shares follow the number
+    /// of eligible strata, and singleton reference/band cells are excluded.
+    /// Use `uniform` when group weights must control the mixture. Its within-ref
+    /// draws can reach singleton-band rows when the reference has other rows.
     ///
     /// It is NOT `--stratified-bands`, which picks a band uniformly and then
     /// a row uniformly inside it: that equalises band representation in

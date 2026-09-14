@@ -1,5 +1,30 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, newest TRAIN product packet and sampler correction:**
+[Protocol/results](../benchmarks/product_train_2026-09-14.md) and
+[hashed summary](../benchmarks/product_train_2026-09-14.results.json).
+Original W-LIN7 TRAIN key/URI metadata admits 10,499 original-bitstream pairs
+across 148 sources and 141 families, after canonical validation/test, historical
+test families, and eval8 reservations are excluded. Original file/pixel hashes,
+Rev3 formula/schema, fresh same-pixel SSIMULACRA2 targets (575 negative), and
+family-separated internal fit/development/calibration are preserved. No decoded
+duplicates or identical reference pixels cross the internal partitions. Native
+human TRAIN development re-extraction matches all 944,000 reused feature cells.
+
+Legacy stratified sampling ignores relative group weights and excludes singleton
+band cells: 194 human / 2,002 codec strata yield only 8.88% human pairs and 86.90%
+row coverage. Eight initial fits are retained as a stopped, mis-specified mix.
+Analytically collision-corrected uniform weights yield 49.881–50.198% usable
+human pairs and full coverage; all three actual training digests match replay.
+All 24 replacement fits and eight complete ensembles have Rust API predictions
+and canonical TRAIN panels. Round-trip output proves 63,096 raw/packed predictions
+bit-exact. Matched B/D are freshly extracted at Rev1 on identical development
+pixels; their unknown historical training exposure remains a limitation.
+Five small TRAIN JXL cases per ensemble expose the scalar/spatial tradeoff;
+full944 has stronger proxy rank but incomplete refinement support. No new EVAL,
+TEST, calibration use, native RD, or shipping qualification. Artifacts are under
+`~/work/zensim-validation-2026-09-14/product-train/`.
+
 **September 14, frozen Rev3 matched evaluation:**
 [Protocol/results](../benchmarks/rev3_qualification_2026-09-14.md) add native
 Rev3 full944 KonJND JPEG SELECT (404 references/pairs) and KonFiG validation

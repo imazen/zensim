@@ -1,5 +1,40 @@
 # Start here — one target score, one development path
 
+## September 14, newest: representative TRAIN mix and complete served development
+
+[Product training results](benchmarks/product_train_2026-09-14.md) recover
+10,499 native four-codec/identity TRAIN pairs across 148 sources and 141 families,
+with historical reserved families and eval8 excluded. Fit/development/calibration
+are family-separated inside TRAIN; 923 calibration rows remain unused. Human
+supervision uses 7,000 TRAIN fit and 1,000 source-separated internal-development
+rows. No new EVAL or TEST access; the frozen six-panel comparison below is unchanged.
+
+Stopped eight initial fits when Rust sampler replay showed the declared 1:1 mix
+was actually 8.88% human under global stratified sampling. Corrected uniform
+sampling reaches all rows and gives 49.881–50.198% usable human pairs. All 24
+replacement fits and eight uniform ensembles finish, with actual sample digests
+matched to replay. The trainer now explains this legacy weight behavior without
+changing its sequences. Round-trip score export replaces six-place rounding;
+63,096 real raw/packed predictions are bit-identical. Canonical Rust panels and
+scatter cover every seed/ensemble; undefined small-group statistics remain null.
+
+On distorted TRAIN codec development, full944 plain ensemble SROCC is .9605,
+versus matched native B .8488 / D .8494. Human TRAIN development is .9193.
+This supports further development, not independent superiority or qualification.
+Only 57 high-quality distorted pairs are present. Both y60/H32 ensembles pass
+all five small JXL spatial cases; some larger heads fail M2, full944 remains
+unsupported. Complete spatial scalars match cached predictions within 7.11e-15.
+No native encoder RD, targeting or controlled runtime evidence is added.
+
+Artifacts: `~/work/zensim-validation-2026-09-14/product-train/`: `fits-uniform/`,
+`assessment-exact/` (verified score TSVs; its first JSON harvest failed),
+`assessment-panels/RESULT.json` (completed panels), `spatial-train-v2/`, and
+`incumbents-v2/`. Failed initial sampler/spatial/serialization/tool invocations
+are preserved. All new models are TRAIN development only. Next use this packet
+to test inexpensive per-scale features that recover scalar accuracy with full
+spatial support, then frozen qualification and native product gates. The full
+assigned production goal remains active.
+
 ## September 14, latest: six measured panels for the frozen Rev3 comparison
 
 [Codec-family assessment](benchmarks/rev3_codec_eval_2026-09-14.md) adds all
