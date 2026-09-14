@@ -445,6 +445,15 @@
       "report_url": "/zensim/reports/native-color-admission-2026-09-14/index.html",
       "bakes": [],
       "note": "215/215 TRAIN-file legacy pixels reproduce while native depth and source/decoded metadata are retained. No P3-derived reconstruction retains the source ICC; original conversion remains unproven. 17 codec tests and five CLI refusal checks pass. No model scoring or qualification."
+    },
+    {
+      "id": "2026-09-14-native-sdr-contract",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Native SDR color/depth scoring and spatial audit",
+      "report_url": "/zensim/reports/native-sdr-contract-2026-09-14/index.html",
+      "bakes": [],
+      "note": "214/214 TRAIN-fit pairs now pass native372 base/head and native944 ensemble serving audits, including 626,249 refinement queries. Legacy CSV/audit bytes remain exact. P3 provenance, q85 and matching refit remain open; no model or HDR qualification."
     }
   ],
   "incumbent_notes": [

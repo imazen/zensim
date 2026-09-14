@@ -23,6 +23,9 @@ use std::path::Path;
 #[path = "../examples/shared/zen_decode.rs"]
 mod zen_decode;
 
+#[path = "../examples/shared/score_input.rs"]
+mod score_input;
+
 /// A deterministic 96×64 RGB8 test image with structure at several scales:
 /// a smooth gradient, a hard vertical edge, and a high-frequency checker.
 /// Enough signal that a colour-space mistake cannot hide in it.
@@ -399,6 +402,16 @@ fn native_jpeg_retains_source_info_and_legacy_pixels() {
         };
         assert_eq!(info.format, zencodec::ImageFormat::Jpeg);
         assert_eq!((info.width, info.height), (W as u32, H as u32));
+        assert_eq!(
+            native.pixels.descriptor(),
+            zenpixels::PixelDescriptor::RGB8_SRGB
+        );
+        if xyb {
+            assert!(
+                info.source_color.icc_profile.is_some(),
+                "retain encoded XYB profile"
+            );
+        }
         let legacy = zen_decode::decode_rgb8_bytes(&bytes, "codec.jpg").unwrap();
         assert_eq!(native.to_rgb8("codec.jpg").unwrap().pixels, legacy.pixels);
     }

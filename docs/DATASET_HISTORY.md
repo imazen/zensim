@@ -1,5 +1,17 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, native SDR extraction/serving contract:**
+[Results](../benchmarks/native_sdr_contract_2026-09-14.md) retain the preceding
+native-color admission's214 TRAIN-fit pairs /215 files. Native372 base/head and
+native944 ensemble audits complete with exact consumed-feature, cached/f32 and
+spatial parity; legacy before/after CSV/audit bytes are unchanged. Source color
+and native depth now reach the public score surface under opt-in audit-v2.
+The TSV's historical human_score column is a row-ID join key in this diagnostic,
+not a training target. No new fit, EVAL or clean-negative labels are admitted.
+Original P3 encoding semantics and q85 remain unresolved; downstream manifests
+must explicitly bind the new input era. No protected population is accessed.
+
+
 **September 14, native color/depth inspection:**
 [Native admission](../benchmarks/native_color_admission_2026-09-14.md) retains
 the existing product/honest-control TRAIN-fit assignments for214 pairs and215

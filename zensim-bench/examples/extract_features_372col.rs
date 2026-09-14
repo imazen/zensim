@@ -33,6 +33,12 @@
 //! Pixel hashes bind both metrics to the same inputs. This flag does not alter
 //! feature extraction or permit dropped pairs.
 //!
+//! `--input-contract sdr-native-clip-v1` retains native u16/linear-f32
+//! samples for declared SDR primaries and converts arbitrary ICC through the
+//! existing CMS. It requires explicit pairs-tsv and a fresh audit, refuses HDR
+//! and unsupported/conflicting color interpretations, and records a separate
+//! input era. The RGB8-only peer audit is refused for this contract.
+//!
 //! Usage:
 //!   cargo run --release -p zensim-bench --example extract_features_372col -- \
 //!     --corpus konjnd \
@@ -55,6 +61,10 @@ use zensim::{ZensimConfig, compute_zensim_with_config};
 // `verify_bitstream_decode`; never re-implement decoding here.
 #[path = "shared/zen_decode.rs"]
 mod zen_decode;
+
+#[path = "shared/score_input.rs"]
+mod score_input;
+use score_input::{InputContract, ScoreInput};
 
 #[path = "extract_features_372col/audit.rs"]
 mod audit;
@@ -90,8 +100,10 @@ fn main() {
     let mut audit_ssim2 = false;
     let mut sampling = None;
     let mut full_944 = false;
+    let mut input_contract = None;
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--input-contract" => audit::take_value(&mut input_contract, args.next()),
             "--sampling" => sampling = Some(args.next().expect("--sampling value")),
             "--full-944" => full_944 = true,
             "--corpus" => corpus = Some(args.next().unwrap()),
@@ -124,12 +136,38 @@ fn main() {
         full_944 || sampling.as_deref().is_none_or(|s| !s.starts_with("v2:")),
         "direct v2 sampling requires --full-944"
     );
+    let input_contract = InputContract::parse(input_contract.as_deref().unwrap_or("legacy-rgb8"))
+        .expect("input contract");
+    if input_contract != InputContract::LegacyRgb8 {
+        assert!(
+            audit_out.is_some() && allow_failures == 0 && !audit_ssim2,
+            "native input requires --audit-jsonl, zero failures and no RGB8-only --audit-ssim2"
+        );
+        assert!(
+            matches!(corpus.as_str(), "pairs-tsv"),
+            "native input requires explicit pairs-tsv"
+        );
+        assert!(
+            !out.exists() && !audit_out.as_ref().unwrap().exists(),
+            "native extraction requires fresh outputs"
+        );
+        for suffix in [".manifest.json", ".producer.bin"] {
+            assert!(
+                !PathBuf::from(format!("{}{suffix}", out.display())).exists(),
+                "native extraction sidecar already exists"
+            );
+        }
+    }
     let producer = if full_944 {
-        Some(diagnostic_producer(sampling.as_deref(), &out))
+        Some(diagnostic_producer(
+            sampling.as_deref(),
+            &out,
+            input_contract,
+        ))
     } else {
         sampling
             .as_deref()
-            .map(|tag| diagnostic_producer(Some(tag), &out))
+            .map(|tag| diagnostic_producer(Some(tag), &out, input_contract))
     };
     let mut audit = audit::Config::load(
         audit_out,
@@ -154,6 +192,12 @@ fn main() {
         audit.is_none() || matches!(corpus.as_str(), "pairs" | "pairs-tsv"),
         "audit requires explicit pairs or pairs-tsv input"
     );
+
+    if let Some(audit) = &audit {
+        audit
+            .validate_feature_width(if full_944 { 944 } else { 372 })
+            .expect("audit feature width");
+    }
 
     let pairs: Vec<Pair> = match corpus.as_str() {
         "konjnd" => load_konjnd(&path, max_pairs),
@@ -201,10 +245,10 @@ fn main() {
                 eprintln!("  {corpus} {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
             }
             let hashes = audit.as_ref().map(|_| audit::file_hashes(kp)).transpose()?;
-            let row = extract_features(kp, producer.as_deref())?;
+            let row = extract_features(kp, producer.as_deref(), input_contract)?;
             let record = audit
                 .as_ref()
-                .map(|a| a.score(kp, &row.3, hashes.as_ref().unwrap()))
+                .map(|a| a.score(kp, &row.3, hashes.as_ref().unwrap(), input_contract))
                 .transpose()?;
             Ok::<_, String>((row, record))
         })
@@ -325,9 +369,13 @@ fn main() {
 /// corpus was dropped without a word, and (b) decodes an XYB JPEG as an
 /// ordinary JPEG, producing wrong pixels that still parse. See the module doc
 /// of `shared/zen_decode.rs`.
-fn extract_features(kp: &Pair, producer: Option<&[u8]>) -> Result<FeatureRow, String> {
-    let src = zen_decode::decode_rgb8_path(&kp.reference).map_err(|e| format!("reference: {e}"))?;
-    let dst = zen_decode::decode_rgb8_path(&kp.distorted).map_err(|e| format!("distorted: {e}"))?;
+fn extract_features(
+    kp: &Pair,
+    producer: Option<&[u8]>,
+    contract: InputContract,
+) -> Result<FeatureRow, String> {
+    let src = ScoreInput::decode(&kp.reference, contract).map_err(|e| format!("reference: {e}"))?;
+    let dst = ScoreInput::decode(&kp.distorted, contract).map_err(|e| format!("distorted: {e}"))?;
     if src.width != dst.width || src.height != dst.height {
         return Err(format!(
             "dimension mismatch: reference {}x{} ({}) vs distorted {}x{} ({})",
@@ -347,29 +395,11 @@ fn extract_features(kp: &Pair, producer: Option<&[u8]>) -> Result<FeatureRow, St
             kp.reference.display()
         ));
     }
-    let src_pixels: Vec<[u8; 3]> = src
-        .pixels
-        .as_chunks::<3>()
-        .0
-        .iter()
-        .map(|c| [c[0], c[1], c[2]])
-        .collect();
-    let dst_pixels: Vec<[u8; 3]> = dst
-        .pixels
-        .as_chunks::<3>()
-        .0
-        .iter()
-        .map(|c| [c[0], c[1], c[2]])
-        .collect();
     if let Some(bytes) = producer {
         let model = zenpredict::Model::from_bytes(bytes).map_err(|e| e.to_string())?;
         let mut scorer = zensim::BakeScorer::new(&model).map_err(|e| e.to_string())?;
         let result = scorer
-            .compute(
-                &zensim::RgbSlice::new(&src_pixels, w_us, h_us),
-                &zensim::RgbSlice::new(&dst_pixels, w_us, h_us),
-                None,
-            )
+            .compute(&src.source(), &dst.source(), None)
             .map_err(|e| e.to_string())?;
         return Ok((
             kp.ref_basename.clone(),
@@ -381,8 +411,29 @@ fn extract_features(kp: &Pair, producer: Option<&[u8]>) -> Result<FeatureRow, St
     let mut config = ZensimConfig::default();
     config.extended_features = true;
     config.compute_iw_features = true;
-    let result = compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, config)
-        .map_err(|e| format!("compute_zensim ({}): {e:?}", kp.distorted.display()))?;
+    let result = if contract == InputContract::LegacyRgb8 {
+        compute_zensim_with_config(
+            src.bytes().as_chunks::<3>().0,
+            dst.bytes().as_chunks::<3>().0,
+            w_us,
+            h_us,
+            config,
+        )
+    } else {
+        static PARAMS: std::sync::LazyLock<zensim::profile::ProfileParams> =
+            std::sync::LazyLock::new(|| {
+                zensim::profile::ProfileParams::builder()
+                    .extended_features(true)
+                    .compute_iw_features(true)
+                    .build()
+            });
+        zensim::Zensim::new(zensim::ZensimProfile::Custom {
+            params: &PARAMS,
+            name: "native-full372-extractor",
+        })
+        .compute_all_features(&src.source(), &dst.source())
+    }
+    .map_err(|e| format!("compute_zensim ({}): {e:?}", kp.distorted.display()))?;
     let features: Vec<f64> = result.features().to_vec();
     Ok((
         kp.ref_basename.clone(),
@@ -1092,7 +1143,7 @@ fn load_qsweep_tsv(path: &Path, max: usize) -> Vec<Pair> {
 
 /// A diagnostic all-live read-set bake makes this producer execute exactly the
 /// same public pixel API as a fitted model. It is not a quality predictor.
-fn diagnostic_producer(sampling: Option<&str>, out: &Path) -> Vec<u8> {
+fn diagnostic_producer(sampling: Option<&str>, out: &Path, contract: InputContract) -> Vec<u8> {
     let wide = sampling.is_none_or(|tag| tag.starts_with("v2:"));
     let keep_y = sampling.is_some_and(|tag| tag.starts_with("v1:y:"));
     let ids: Vec<usize> = (0..if wide { 944 } else { 228 })
@@ -1134,8 +1185,12 @@ fn diagnostic_producer(sampling: Option<&str>, out: &Path) -> Vec<u8> {
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
-    let manifest = serde_json::json!({"sampling":sampling,"formula_revision":revision,"feature_set_id":identity,
+    let mut manifest = serde_json::json!({"sampling":sampling,"formula_revision":revision,"feature_set_id":identity,
         "populated_feature_ids":ids,"era":era,"producer_surface":"zensim::BakeScorer::compute"});
+    if contract == InputContract::SdrNativeClipV1 {
+        manifest["input_contract"] = serde_json::json!("sdr-native-clip-v1");
+        manifest["input_era"] = serde_json::json!("native_sdr_clip_v1");
+    }
     std::fs::write(
         format!("{}.manifest.json", out.display()),
         serde_json::to_vec_pretty(&manifest).unwrap(),

@@ -1,13 +1,16 @@
 //! Optional native pixel identity and complete-candidate serving audit.
-use super::{Pair, zen_decode};
+use super::{
+    Pair,
+    score_input::{InputContract, ScoreInput},
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use zenpredict::Model;
+use zensim::BakeScorer;
 use zensim::corruption_head::CorruptionHead;
-use zensim::{BakeScorer, RgbSlice};
 
 pub(super) fn take_path(slot: &mut Option<PathBuf>, value: Option<String>) {
     assert!(slot.is_none(), "duplicate audit option");
@@ -210,40 +213,62 @@ impl Config {
         self.ssim2 = true;
     }
 
+    pub(super) fn validate_feature_width(&self, width: usize) -> Result<(), String> {
+        if let Some(head) = &self.head
+            && head.caller_input_width() != width
+        {
+            return Err(format!(
+                "corruption audit expects {} canonical columns, requested {width}",
+                head.caller_input_width()
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn score(
         &self,
         pair: &Pair,
         features: &[f64],
         hashes: &(String, String),
+        contract: InputContract,
     ) -> Result<Value, String> {
         if !matches!(features.len(), 372 | 944) || !features.iter().all(|v| v.is_finite()) {
             return Err("audit requires 372 or 944 finite canonical features".into());
         }
         // Reuse the native decoder owner; a changed file across either extraction
         // or this independent pixel-surface check invalidates the audit.
-        let src = zen_decode::decode_rgb8_path(&pair.reference).map_err(|e| e.to_string())?;
-        let dst = zen_decode::decode_rgb8_path(&pair.distorted).map_err(|e| e.to_string())?;
+        let src = ScoreInput::decode(&pair.reference, contract).map_err(|e| e.to_string())?;
+        let dst = ScoreInput::decode(&pair.distorted, contract).map_err(|e| e.to_string())?;
         if file_hashes(pair)? != *hashes || (src.width, src.height) != (dst.width, dst.height) {
             return Err("audit input bytes/dimensions changed".into());
         }
-        let identical = src.pixels == dst.pixels;
+        let identical = src.is_identical_to(&dst);
         let mut record = json!({"schema":"canonical-feature-audit-v1", "reference":pair.reference,
             "distorted":pair.distorted,"ref_basename":pair.ref_basename,"human_score":pair.human_score,
             "extra_targets":pair.extra_targets,"width":src.width,"height":src.height,
             "reference_file_sha256":hashes.0,"distorted_file_sha256":hashes.1,
-            "reference_pixels_sha256":sha(&src.pixels),"distorted_pixels_sha256":sha(&dst.pixels),
+            "reference_pixels_sha256":sha(src.bytes()),"distorted_pixels_sha256":sha(dst.bytes()),
             "pixels_identical":identical,
             "canonical_extractions":1,"audit_decodes":2,"model_inputs":self.inputs});
+        if contract != InputContract::LegacyRgb8 {
+            record["schema"] = json!("canonical-feature-audit-v2");
+            record["input_contract"] = json!("sdr-native-clip-v1");
+            record["reference_color"] = src.receipt.clone().unwrap();
+            record["distorted_color"] = dst.receipt.clone().unwrap();
+        }
         if self.ssim2 {
+            if contract != InputContract::LegacyRgb8 {
+                return Err("RGB8 peer audit cannot consume native input".into());
+            }
             // Same decoded RGB8 buffers and geometry as the candidate audit.
             // Reuse the existing fast-ssim2 crate; no peer decoding or kernel here.
             let reference = imgref::Img::new(
-                bytemuck::cast_slice::<u8, [u8; 3]>(&src.pixels),
+                bytemuck::cast_slice::<u8, [u8; 3]>(src.bytes()),
                 src.width as usize,
                 src.height as usize,
             );
             let distorted = imgref::Img::new(
-                bytemuck::cast_slice::<u8, [u8; 3]>(&dst.pixels),
+                bytemuck::cast_slice::<u8, [u8; 3]>(dst.bytes()),
                 dst.width as usize,
                 dst.height as usize,
             );
@@ -273,19 +298,7 @@ impl Config {
                     .map_err(|e| e.to_string())?;
             }
             let computed = scorer
-                .compute(
-                    &RgbSlice::new(
-                        src.pixels.as_chunks::<3>().0,
-                        src.width as usize,
-                        src.height as usize,
-                    ),
-                    &RgbSlice::new(
-                        dst.pixels.as_chunks::<3>().0,
-                        dst.width as usize,
-                        dst.height as usize,
-                    ),
-                    None,
-                )
+                .compute(&src.source(), &dst.source(), None)
                 .map_err(|e| e.to_string())?;
             let score = computed.score();
             let literal_cached = scorer
@@ -299,16 +312,8 @@ impl Config {
                 .score_features_with_identity(&stored, src.width, src.height, None, identical)
                 .map_err(|e| e.to_string())?;
             if self.weights.is_some() {
-                let rs = RgbSlice::new(
-                    src.pixels.as_chunks::<3>().0,
-                    src.width as usize,
-                    src.height as usize,
-                );
-                let ds = RgbSlice::new(
-                    dst.pixels.as_chunks::<3>().0,
-                    dst.width as usize,
-                    dst.height as usize,
-                );
+                let rs = src.source();
+                let ds = dst.source();
                 let pre = scorer
                     .precompute_reference(&rs)
                     .map_err(|e| e.to_string())?;
@@ -441,16 +446,8 @@ impl Config {
                     .head
                     .as_ref()
                     .ok_or("prepared integrity audit requires a head")?;
-                let rs = RgbSlice::new(
-                    src.pixels.as_chunks::<3>().0,
-                    src.width as usize,
-                    src.height as usize,
-                );
-                let ds = RgbSlice::new(
-                    dst.pixels.as_chunks::<3>().0,
-                    dst.width as usize,
-                    dst.height as usize,
-                );
+                let rs = src.source();
+                let ds = dst.source();
                 let expected_active = !identical
                     && head.probability_f64(features).map_err(|e| e.to_string())? > head.deadband();
                 let actual = scorer

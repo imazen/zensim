@@ -1,5 +1,26 @@
 # Start here — one target score, one development path
 
+## September 14, newest: native SDR scoring and complete serving audit
+
+[Contract and results](benchmarks/native_sdr_contract_2026-09-14.md) add
+`--input-contract sdr-native-clip-v1` to the existing extractor/audit. Known
+SDR samples retain u16/linear-f32 precision with declared primaries; arbitrary
+ICC goes through the existing full CMS. JPEG XYB output metadata is corrected
+at the codec owner. Legacy RGB8 remains byte-identical on all214 admitted pairs.
+
+All214 TRAIN-fit pairs pass native372 base/head audits and native944 ensemble
+scalar/spatial audits.30,136 accepted-head queries and626,249 ensemble refinement
+queries pass; q85 remains the sole integrity rejection. No new fit, EVAL,
+clean-negative admission, native RD or HDR qualification. New audit-v2 and
+native input-era metadata must be admitted explicitly downstream. Next trace
+P3 encoder conversion/q85 and restore mobile corruption generation with correct
+color before matching TRAIN extraction/refit. Failed generic conversion routes
+and the initial incompatible944/head request are retained in the replay record.
+The existing audit's per-feature maximum measures companion-declared IDs;
+no-head ensembles currently prove cached-score and scalar/spatial feature-path
+parity, not an independent canonical comparison of every member's read set.
+Add that complete-read-set audit before using this as qualification evidence.
+
 ## September 14, latest status: integrated two-day gauntlet discussion
 
 [Updated review](benchmarks/color_hbd_hdr_update_2026-09-14.md) incorporates
