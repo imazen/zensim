@@ -488,3 +488,35 @@ behavior; zero features never prove identity. Do not compare that diagnostic
 as pixel-equivalent when the admitted corpus contains identities. Native audit
 JSONL from `extract_features_372col` supplies the evidence. The September 13
 minimal/wide study's final eval corrects this distinction without retraining.
+
+### Complete scatter and integrity assessment (September 14)
+
+`bake_verdict` now stores `scatter_assessment.<corpus>.<reference>` over the
+complete scored population before capping plot rows. `panel --input pairs.tsv
+--json --scatter` uses the same `zenstats::scatter` owner. The Python statistics
+shim delegates to it; gauntlet consumes stored results and matching normalized
+plot coordinates. Missing historical measurements remain missing.
+
+Read robust envelope outlier share, p99/max relative to reference span, raw
+absolute and robust-scaled residual tails, raw density, exact extrema mass,
+range and slope together with the existing full Mohammadi panels and named
+composite floors. Rank normalization preserves geometry but can hide smooth
+score compression; raw density is a separate diagnostic. Zero scales are
+unmeasured, not epsilon-derived passes. `outlier_gate.py` returns INCOMPLETE
+(exit 2) when required statistics, peer bars or declared range are missing.
+
+The new strict corruption fit is `train_corruption_head.py
+--strict-train-manifest FIT.json --out-dir NEW`. Its manifest admits only train
+fit/calibration, pins inputs/tools, exports ZCTH and checks Rust surface parity
+before the calibration advancement gate. Legacy/canonical mixed-table modes
+are historical, not approved defaults under the September 13 ruling.
+`corruption_gate_eval.py --integrity-admission ADMISSION.json --audit-jsonl
+AUDIT.jsonl --out-json NEW.json` reports the actual complete Rust composition.
+Unlabelled operations are not negatives; duplicate pixel identities retain all
+catalog provenance and conflicting binary labels fail. Prepared steering audits
+use `ZENSIM_AUDIT_PREPARED_STEERING=1` in the existing native extractor.
+
+The [registered prototype and results](../benchmarks/steering_integrity_2026-09-14.md)
+retain all severe misses, ambiguous activations and missing product gates.
+No new head, scatter instrumentation or pipeline-parity result alone qualifies
+an all-purpose target dial or native spatial allocator.

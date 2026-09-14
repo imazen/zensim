@@ -4,6 +4,15 @@
 
 ### Added
 
+- Prepared `BakeScorer` steering accepts servable corruption companions. It
+  returns the perceptual map when the head is inactive and the typed
+  `ZensimError::CorruptionDetected` when active, including activations that
+  would not lower an already-negative score. Failed calls preserve protection.
+- Evaluation emits Rust-owned, complete-population scatter geometry and raw
+  residual tails. Tied predictions no longer acquire artificial rank order;
+  model clumping is separated from reference clumping. Degenerate evidence
+  remains unmeasured. No model is qualified by these instrument changes.
+
 - Feature-screen v2 requires separate admitted train/eval segments, rejects
   legacy mixed caches and test/terminal paths, and evaluates frozen Rust bakes
   only after training. Eval groups no longer enter checkpoint selection.

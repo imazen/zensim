@@ -81,7 +81,7 @@ from pathlib import Path
 DEFAULT_OUT = Path("/mnt/v/output/zensim/reports/fulleval")
 
 # Blocks that must survive promotion untouched — every statistic on the board.
-CARRIED = ("rank", "dial", "corruption", "corruption_head", "gates", "composite",
+CARRIED = ("scatter_assessment", "rank", "dial", "corruption", "corruption_head", "gates", "composite",
            "per_pair", "n_inputs", "regime", "bake", "bake_sha256", "repro")
 
 # Coherence-instrument fields that may be carried from an existing measured fulleval

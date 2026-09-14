@@ -1,0 +1,603 @@
+{
+  "schema": "steering-integrity-study-v1",
+  "status": "COMPLETE_UNQUALIFIED",
+  "model_qualified": false,
+  "head": {
+    "sha256": "a8bef39a2def847a083fad733c547d52afe7cf945fe5896d9ff2e831e6ed8fba",
+    "bytes": 182532,
+    "formula_revision": 1,
+    "feature_regime": "D228",
+    "caller_width": 372,
+    "tree_count": 100,
+    "node_count": 5548,
+    "seed": 4101,
+    "probability_threshold": 0.9
+  },
+  "base": {
+    "sha256": "cd1098b450ef6941b6925b24bcbd129715b6f07c4fe84838a92e13ab364ddea6",
+    "name": "d_sdr_add156_id100_negrich_dial_byid_2026-09-06"
+  },
+  "origins": {
+    "train": {
+      "fit": [
+        "2010",
+        "1054",
+        "6068",
+        "6610",
+        "7066",
+        "9380",
+        "8206",
+        "8384"
+      ],
+      "calibrate": [
+        "1214",
+        "6064"
+      ]
+    },
+    "eval": {
+      "evaluate": [
+        "3311",
+        "2403",
+        "5315",
+        "6823",
+        "9113",
+        "9413",
+        "8113",
+        "8183"
+      ]
+    }
+  },
+  "training": {
+    "calibrate": {
+      "n": 124,
+      "honest_activation": {
+        "n": 80,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 76,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 44,
+        "count": 44,
+        "rate": 1.0
+      },
+      "real_bug_detection": {
+        "n": 27,
+        "count": 27,
+        "rate": 1.0
+      },
+      "honest_lowered": 0
+    },
+    "fit": {
+      "n": 900,
+      "honest_activation": {
+        "n": 722,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 706,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 178,
+        "count": 178,
+        "rate": 1.0
+      },
+      "real_bug_detection": {
+        "n": 113,
+        "count": 113,
+        "rate": 1.0
+      },
+      "honest_lowered": 0
+    }
+  },
+  "evaluation": {
+    "raw_rows": 6024,
+    "unique_rows": 5679,
+    "by_role": {
+      "evaluate": {
+        "n": 5679,
+        "honest_activation": {
+          "n": 320,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 304,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 180,
+          "count": 175,
+          "rate": 0.9722222222222222
+        },
+        "real_bug_detection": {
+          "n": 113,
+          "count": 109,
+          "rate": 0.9646017699115044
+        },
+        "honest_lowered": 0
+      }
+    },
+    "by_codec": {
+      "avif": {
+        "n": 136,
+        "honest_activation": {
+          "n": 136,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 136,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 0,
+          "count": 0,
+          "rate": null
+        },
+        "real_bug_detection": {
+          "n": 0,
+          "count": 0,
+          "rate": null
+        },
+        "honest_lowered": 0
+      },
+      "jxl": {
+        "n": 168,
+        "honest_activation": {
+          "n": 168,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 168,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 0,
+          "count": 0,
+          "rate": null
+        },
+        "real_bug_detection": {
+          "n": 0,
+          "count": 0,
+          "rate": null
+        },
+        "honest_lowered": 0
+      }
+    },
+    "by_origin": {
+      "2403": {
+        "n": 742,
+        "honest_activation": {
+          "n": 40,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 38,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 25,
+          "count": 24,
+          "rate": 0.96
+        },
+        "real_bug_detection": {
+          "n": 17,
+          "count": 16,
+          "rate": 0.9411764705882353
+        },
+        "honest_lowered": 0
+      },
+      "3311": {
+        "n": 663,
+        "honest_activation": {
+          "n": 40,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 38,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 22,
+          "count": 22,
+          "rate": 1.0
+        },
+        "real_bug_detection": {
+          "n": 14,
+          "count": 14,
+          "rate": 1.0
+        },
+        "honest_lowered": 0
+      },
+      "5315": {
+        "n": 679,
+        "honest_activation": {
+          "n": 40,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 38,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 17,
+          "count": 17,
+          "rate": 1.0
+        },
+        "real_bug_detection": {
+          "n": 10,
+          "count": 10,
+          "rate": 1.0
+        },
+        "honest_lowered": 0
+      },
+      "6823": {
+        "n": 740,
+        "honest_activation": {
+          "n": 40,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 38,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 18,
+          "count": 17,
+          "rate": 0.9444444444444444
+        },
+        "real_bug_detection": {
+          "n": 11,
+          "count": 10,
+          "rate": 0.9090909090909091
+        },
+        "honest_lowered": 0
+      },
+      "8113": {
+        "n": 740,
+        "honest_activation": {
+          "n": 40,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 38,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 20,
+          "count": 19,
+          "rate": 0.95
+        },
+        "real_bug_detection": {
+          "n": 12,
+          "count": 11,
+          "rate": 0.9166666666666666
+        },
+        "honest_lowered": 0
+      },
+      "8183": {
+        "n": 740,
+        "honest_activation": {
+          "n": 40,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 38,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 31,
+          "count": 30,
+          "rate": 0.967741935483871
+        },
+        "real_bug_detection": {
+          "n": 21,
+          "count": 20,
+          "rate": 0.9523809523809523
+        },
+        "honest_lowered": 0
+      },
+      "9113": {
+        "n": 742,
+        "honest_activation": {
+          "n": 40,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 38,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 29,
+          "count": 28,
+          "rate": 0.9655172413793104
+        },
+        "real_bug_detection": {
+          "n": 18,
+          "count": 18,
+          "rate": 1.0
+        },
+        "honest_lowered": 0
+      },
+      "9413": {
+        "n": 633,
+        "honest_activation": {
+          "n": 40,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 38,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 18,
+          "count": 18,
+          "rate": 1.0
+        },
+        "real_bug_detection": {
+          "n": 10,
+          "count": 10,
+          "rate": 1.0
+        },
+        "honest_lowered": 0
+      }
+    },
+    "by_content": {
+      "document": {
+        "n": 1419,
+        "honest_activation": {
+          "n": 80,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 76,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 35,
+          "count": 34,
+          "rate": 0.9714285714285714
+        },
+        "real_bug_detection": {
+          "n": 21,
+          "count": 20,
+          "rate": 0.9523809523809523
+        },
+        "honest_lowered": 0
+      },
+      "graphic": {
+        "n": 1375,
+        "honest_activation": {
+          "n": 80,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 76,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 47,
+          "count": 46,
+          "rate": 0.9787234042553191
+        },
+        "real_bug_detection": {
+          "n": 28,
+          "count": 28,
+          "rate": 1.0
+        },
+        "honest_lowered": 0
+      },
+      "photo": {
+        "n": 1405,
+        "honest_activation": {
+          "n": 80,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 76,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 47,
+          "count": 46,
+          "rate": 0.9787234042553191
+        },
+        "real_bug_detection": {
+          "n": 31,
+          "count": 30,
+          "rate": 0.967741935483871
+        },
+        "honest_lowered": 0
+      },
+      "screen": {
+        "n": 1480,
+        "honest_activation": {
+          "n": 80,
+          "count": 0,
+          "rate": 0.0
+        },
+        "native_activation": {
+          "n": 76,
+          "count": 0,
+          "rate": 0.0
+        },
+        "catastrophic_detection": {
+          "n": 51,
+          "count": 49,
+          "rate": 0.9607843137254902
+        },
+        "real_bug_detection": {
+          "n": 33,
+          "count": 31,
+          "rate": 0.9393939393939394
+        },
+        "honest_lowered": 0
+      }
+    },
+    "worst_stored_native": {
+      "n": 16,
+      "honest_activation": {
+        "n": 16,
+        "count": 0,
+        "rate": 0.0
+      },
+      "native_activation": {
+        "n": 16,
+        "count": 0,
+        "rate": 0.0
+      },
+      "catastrophic_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "real_bug_detection": {
+        "n": 0,
+        "count": 0,
+        "rate": null
+      },
+      "honest_lowered": 0
+    },
+    "disposition_inventory": {
+      "ambiguous_or_recoverable": {
+        "n": 5173,
+        "active": 1086
+      },
+      "catastrophic_proxy": {
+        "n": 180,
+        "active": 175
+      },
+      "inert": {
+        "n": 6,
+        "active": 0
+      },
+      "valid": {
+        "n": 320,
+        "active": 0
+      }
+    }
+  },
+  "prepared": {
+    "n": 500,
+    "statuses": {
+      "ACCEPTED": 325,
+      "REJECTED_INTEGRITY": 175
+    },
+    "exact_finite_map_queries": 16224,
+    "native_RD_qualified": false
+  },
+  "cost": {
+    "geometry": [
+      1024,
+      1024
+    ],
+    "threads": 1,
+    "reference_preparation_timed": false,
+    "synthetic_SDR_fixture": true,
+    "arms": {
+      "bake_surface": {
+        "n": 30,
+        "min": 26222875.0,
+        "max": 28163824.0,
+        "mean": 26902744.833333332,
+        "variance": 240606703521.5229,
+        "median": 26742490.5,
+        "mad": 386851.1115
+      },
+      "bake_surface_corruption": {
+        "n": 30,
+        "min": 26215625.0,
+        "max": 28328406.0,
+        "mean": 26911404.266666666,
+        "variance": 281574593557.7887,
+        "median": 26849506.0,
+        "mad": 679615.6856999999
+      },
+      "bake_prepared": {
+        "n": 30,
+        "min": 58458549.0,
+        "max": 60647891.0,
+        "mean": 59355091.86666667,
+        "variance": 324275684045.84296,
+        "median": 59402418.5,
+        "mad": 589406.1474
+      },
+      "bake_prepared_corruption": {
+        "n": 30,
+        "min": 58203537.0,
+        "max": 60963714.0,
+        "mean": 59184570.53333333,
+        "variance": 335585164236.671,
+        "median": 59299478.0,
+        "mad": 297412.5252
+      }
+    },
+    "p95": null,
+    "incremental_worker_memory": null
+  },
+  "replay": {
+    "status": "PASS",
+    "predictive_bytes_identical": true,
+    "predictive_bytes_sha256": "1521593077639beb0a17f2fbb82bae08acce04d6e32738413ce208f20975abd2",
+    "original_head_sha256": "a8bef39a2def847a083fad733c547d52afe7cf945fe5896d9ff2e831e6ed8fba",
+    "replay_head_sha256": "c2980b2c42e1af0df5806c22b465c5978b7b4cf37e071122171c7c7fd9c25e9c",
+    "all_train_predictions_identical": true,
+    "rows": 1024,
+    "reason": "Only provenance JSON changed; no eval reads or parameter changes"
+  },
+  "input_sha256": {
+    "FIT_NATIVE.json": "ac05be1c7f43440140cb2c5cb3f97f8e42068e7542cbcc7e1e57e976c6702119",
+    "TRAIN_ADMISSION_NATIVE.json": "d61262d19865a2abc6464317eb1090a9c6729aca073f189e58f342174b270eae",
+    "LABEL_REVIEW.json": "6d206e40b40b0fb7d437416ae912edb1c3a3a69642462cd6d265b0ad5d11cfa1",
+    "eval/FULL_EVAL_ADMISSION.json": "a5a0099ee8b0839e23b0e38b36cbb796cfc3f318294d98baf77850c5b551ba7d",
+    "eval/all-audit.jsonl": "0b20b7546d7523ab1568aaea511775cbf905ae88717dff57f912827ba6b2c3f1",
+    "eval/ALL_ASSESSMENT_FINAL.json": "43d81072dc45c3058a7d5c110abc4810ef7f73cb750e01499370ec30a04d4422",
+    "eval/prepared-audit.jsonl": "82b0b74adfe3df0d24b4142f6a99b0481989d2a1f643c10ce644fbd567a01a8d",
+    "timing.json": "8439c3e1cca32f773875a564c160c671c74b1d645532d2dda3a6c055934c0291",
+    "REPLAY_FIT.json": "c3e809db7e4de16020908b242c3ae0bec193feb12ee923371a56bf95761f558b"
+  },
+  "missing_product_evidence": [
+    "settled operational specificity for weak/ambiguous cases",
+    "broader honest JPEG/WebP/native allocation coverage",
+    "perceptual base full human/panel/composite gates",
+    "HFNL/dial/peer raw-tail bars",
+    "per-image codec bounds and frozen 1/2/3-shot target loops",
+    "native spatial RD",
+    "HDR composition",
+    "p95 and worker memory"
+  ]
+}

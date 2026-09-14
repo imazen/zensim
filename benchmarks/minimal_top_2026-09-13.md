@@ -219,3 +219,14 @@ Remaining before product qualification: broader admitted eval content (including
 15 split/control/spatial regression checks pass. Rust fixtures verify strict identity evidence, null/invalid rejection, unknown zero-feature handling, negative-score preservation and sequential/parallel identity row alignment. CI-exact Clippy, script lint and the API documentation check pass. Full native eval audit establishes the 100 identities and verifies the narrow scorer against all 3,125 original pairs. Packed model parity is preserved; no fitting used eval.
 
 The recipe, source admissions, row-mapping negative control, tools, complete commands, original refusals and final evaluations are under the artifact root above. `final-eval/` is authoritative for score panels and verdicts; earlier `screen/audits`, `packed` score panels and `verdicts/` are retained feature-only diagnostics, superseded for served-score claims. The `served-audit/` parity failure and gallery refusal are retained. Scientific summary: `FINAL_RESULTS.json`. Download bundle: `/zensim/reports/minimal-top-2026-09-13/models-and-evidence.tar.gz` on the local gallery server.
+
+### September 14: complete Rust scatter reassessment
+
+[Stored owner results](minimal_top_2026-09-13.scatter_review.json) cover all
+49 frozen models on the same 3,125 admitted KADID eval pairs. Every raw
+prediction and rank block matches `final-eval/`; no model was refitted or
+selected. Latest artifacts are `assessment-eval-final/` (earlier scatter-only
+passes are superseded). Geometry is computed before plot sampling, with
+correct tied quantiles, raw density, exact extrema mass and robust/absolute
+tails. Both gauntlet render/gate suites pass; these rows remain excluded from
+the fair board for missing CID22. No cross-corpus or product gate is relaxed.

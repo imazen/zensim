@@ -18,6 +18,130 @@ TILE = "./target/release/score_tiles_with_bake"
 TILE_MIN = os.environ.get("TILE_MIN") == "1"  # task #33: tile-min pooling
 
 
+def integrity_summary(records, audits):
+    """Severity-reviewed train/eval rows; exact Rust composition, no q20 proxy."""
+    import math
+    expected = {r["index"]: r for r in records}
+    if len(expected) != len(records) or set(expected) != set(audits):
+        raise ValueError("integrity audit coverage mismatch")
+    unique = {}
+    for key, meta in expected.items():
+        a = audits[key]
+        if (a["reference"] != meta["reference"] or a["distorted"] != meta["distorted"]
+                or a["distorted_file_sha256"] != meta["expected_distorted_file_sha256"]
+                or a["reference_file_sha256"] != meta["reference_sha256"]
+                or a["distorted_pixels_sha256"] != meta["expected_distorted_pixels_sha256"]):
+            raise ValueError("integrity audit identity mismatch")
+        for field in ("head_probability", "stored_f32_head_probability", "head_threshold", "base_score",
+                      "pixel_composed_score", "cached_composed_score", "stored_f32_composed_score"):
+            if not math.isfinite(a[field]):
+                raise ValueError("nonfinite integrity audit")
+        if abs(a["pixel_composed_score"] - a["cached_composed_score"]) > 1e-4 or abs(a["pixel_composed_score"] - a["stored_f32_composed_score"]) > 1e-4:
+            raise ValueError("integrity surface score mismatch")
+        active = not a["pixels_identical"] and a["head_probability"] > a["head_threshold"]
+        if active != (not a["pixels_identical"] and a["stored_f32_head_probability"] > a["head_threshold"]):
+            raise ValueError("integrity activation precision mismatch")
+        identity = (meta["origin"], a["reference_pixels_sha256"], a["distorted_pixels_sha256"])
+        value = dict(index=key, origin=meta["origin"], role=meta["fit_role"], disposition=meta["disposition"],
+                     family=meta["family"], kind=meta["kind"], codec=meta.get("codec"), knob=meta.get("knob"),
+                     content_class=meta["content_class"], active=active,
+                     lowered=a["pixel_composed_score"] < a["base_score"], probability=a["head_probability"])
+        value["catalog_dispositions"] = [value["disposition"]]
+        value["catalog_families"] = [value["family"]]
+        if identity in unique:
+            old = unique[identity]
+            if any(old[k] != value[k] for k in ("active", "probability")):
+                raise ValueError("identical pixels have different integrity scores")
+            dispositions = sorted(set(old["catalog_dispositions"] + value["catalog_dispositions"]))
+            families = sorted(set(old["catalog_families"] + value["catalog_families"]))
+            if "valid" in dispositions and "catastrophic_proxy" in dispositions:
+                raise ValueError("conflicting positive/negative integrity labels")
+            # An excluded/unlabelled operation is not a negative label. Preserve
+            # its provenance, but count the exact same pixel pair only once.
+            if old["disposition"] not in ("valid", "catastrophic_proxy") and value["disposition"] in ("valid", "catastrophic_proxy"):
+                unique[identity] = value
+            unique[identity]["catalog_dispositions"] = dispositions
+            unique[identity]["catalog_families"] = families
+        else:
+            unique[identity] = value
+    def rates(rs):
+        honest = [x for x in rs if x["disposition"] == "valid"]
+        native = [x for x in honest if x["kind"] == "honest_codec"]
+        positives = [x for x in rs if x["disposition"] == "catastrophic_proxy"]
+        real = [x for x in positives if x["family"] == "real_bug"]
+        def rate(xs):
+            count = sum(x["active"] for x in xs)
+            return dict(n=len(xs), count=count, rate=count/len(xs) if xs else None)
+        return dict(n=len(rs), honest_activation=rate(honest), native_activation=rate(native),
+                    catastrophic_detection=rate(positives), real_bug_detection=rate(real),
+                    honest_lowered=sum(x["lowered"] for x in honest))
+    rows = list(unique.values())
+    native = [x for x in rows if x["kind"] == "honest_codec"]
+    worst = {}
+    for x in native:
+        key = (x["origin"], x["codec"])
+        if x["codec"] not in ("jxl", "avif"):
+            raise ValueError("declare knob orientation before native lower-quality stratification")
+        if key not in worst or x["knob"] > worst[key]["knob"]:
+            worst[key] = x
+    return dict(raw_rows=len(records), unique_rows=len(rows), rows=rows,
+                by_codec={codec:rates([x for x in native if x["codec"]==codec]) for codec in sorted({x["codec"] for x in native})},
+                worst_stored_native= rates(list(worst.values())),
+                by_content={content:rates([x for x in rows if x["content_class"]==content]) for content in sorted({x["content_class"] for x in rows})},
+                disposition_inventory={d:{"n":len([x for x in rows if x["disposition"]==d]),
+                    "active":sum(x["active"] for x in rows if x["disposition"]==d)} for d in sorted({x["disposition"] for x in rows})},
+                by_role={role:rates([x for x in rows if x["role"]==role]) for role in sorted({x["role"] for x in rows})},
+                by_origin={origin:rates([x for x in rows if x["origin"]==origin]) for origin in sorted({x["origin"] for x in rows})})
+
+
+def integrity_report(argv):
+    """Report admitted integrity evidence; labels are never fitted here."""
+    import argparse, hashlib, json
+    from pathlib import Path
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--integrity-admission", type=Path, required=True)
+    ap.add_argument("--audit-jsonl", type=Path, required=True)
+    ap.add_argument("--out-json", type=Path, required=True)
+    a = ap.parse_args(argv)
+    if a.out_json.exists():
+        raise ValueError("fresh integrity report required")
+    admission = json.loads(a.integrity_admission.read_text())
+    schema = admission.get("schema")
+    if schema not in ("integrity-train-admission-v1", "integrity-eval-admission-v1"):
+        raise ValueError("explicit train/eval admission required")
+    source_role = "train" if schema == "integrity-train-admission-v1" else "validate"
+    roles = {"fit", "calibrate"} if source_role == "train" else {"evaluate"}
+    if set(admission["origins"]) != roles:
+        raise ValueError("invalid source-role map")
+    records = admission["records"]
+    for row in records:
+        if row["role"] != source_role or row["fit_role"] not in roles or row["origin"] not in admission["origins"][row["fit_role"]] or row["origin"] in ("8462", "9066"):
+            raise ValueError("forbidden integrity source role")
+    audits = {}
+    for line in a.audit_jsonl.read_text().splitlines():
+        record = json.loads(line); key = int(record["human_score"])
+        if key != record["human_score"] or key in audits:
+            raise ValueError("duplicate/noninteger audit key")
+        audits[key] = record
+    # Some original native manifests bound bitstreams but no decoded hash.
+    # Record that new binding from the pinned decoder audit, never replace one.
+    bound = 0
+    for row in records:
+        if "expected_distorted_pixels_sha256" not in row:
+            row["expected_distorted_pixels_sha256"] = audits[row["index"]]["distorted_pixels_sha256"]
+            bound += 1
+    result = integrity_summary(records, audits)
+    inputs = [r["model_inputs"] for r in audits.values()]
+    if not inputs or any(v != inputs[0] for v in inputs):
+        raise ValueError("mixed model identities in integrity audit")
+    sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+    result.update(schema="integrity-assessment-v1", model_qualified=False, model_inputs=inputs[0],
+                  admission_sha256=sha(a.integrity_admission), audit_sha256=sha(a.audit_jsonl),
+                  new_native_pixel_bindings=bound)
+    a.out_json.write_text(json.dumps(result, indent=2, allow_nan=False)+"\n")
+    print(json.dumps(result["by_role"], indent=2))
+
+
 def audit_report(argv):
     """Analyze complete Rust-surface audit records, without another scorer."""
     import argparse, hashlib, json, math
@@ -213,6 +337,8 @@ def score(bake, ref, dist):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--integrity-admission":
+        return integrity_report(sys.argv[1:])
     if len(sys.argv) > 1 and sys.argv[1] == "--audit-jsonl":
         audit_report(sys.argv[1:])
         return

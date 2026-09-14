@@ -23,7 +23,10 @@ spline and ensemble/routing step. `BakeScorer` is the dynamic candidate surface;
 references. Model comparisons lead with the registered composite coverage,
 full rank/band/within-image panels, scatter geometry and tail/dial/spatial gates.
 Raw MAE is an auxiliary calibration diagnostic, never a replacement for that
-selection evidence. Canonical ownership is a maintenance decision, not proof of
+selection evidence. Full-population scatter diagnostics come from
+`zenstats::scatter` through `bake_verdict`/`panel`; plot sampling and rank
+normalization must not hide raw density, tails or saturation. Missing evidence
+is INCOMPLETE, not a pass. Canonical ownership is a maintenance decision, not proof of
 correctness. Keep independent numeric references with real parity gates.
 
 Before adding an implementation, find its existing owner in the playbook and

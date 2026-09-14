@@ -1,5 +1,38 @@
 # Start here — one target score, one development path
 
+## September 14, latest: canonical assessment and an integrity-head prototype
+
+[Protocol and results](benchmarks/steering_integrity_2026-09-14.md) now own the
+latest work. `zenstats::scatter` computes full-population geometry, robust
+outlier envelopes, raw tails, density and saturation; `bake_verdict` stores it,
+`panel --scatter` exposes the same owner, and gauntlet renders it. Missing peer
+bars/range/axes produce INCOMPLETE, never PASS. Read raw density alongside rank
+normalization: the latter can erase smooth output compression. The frozen
+49-model KADID study is reassessed without fitting or changing raw predictions;
+it still lacks cross-corpus/product qualification.
+
+One train-only D228/Rev1 HGB corruption head, with a fixed train-calibrated
+probability threshold 0.9, detects 175/180 admitted severe eval cases and 109/113
+bug reproductions, with zero activations on 320 honest controls. Five misses
+remain. Another 1,086/5,173 unlabelled weak/ambiguous pixel pairs activate; that
+is unresolved operational specificity, not successful detection. Full catalog:
+6,024 attempts / 5,679 distinct pairs. No test segment was opened.
+
+Prepared steering returns `CorruptionDetected` on activation and preserves the
+perceptual map on acceptance. Real-model audit: 175 rejected, 325 accepted,
+16,224 exact finite spatial queries. This proves pipeline parity, not native
+allocation quality. D+head is about 26.91 ms scalar / 59.18 ms prepared at
+1024² ST; no detectable head overhead in 30 rounds, no p95/memory qualification.
+Artifacts are in `~/work/zensim-validation-2026-09-14/steering-integrity/`.
+One deterministic replay has identical predictive bytes; original head and eval
+remain frozen. No default changed and no model is product-qualified.
+
+Next work: freeze better severity/operational labels on train, broaden allowed
+honest low-quality controls (including JPEG/WebP and local allocations), then
+qualify the perceptual base and complete composition against human panels,
+raw/shape tails, HFNL/dial, per-image bounded 1/2/3-shot targeting and native
+spatial RD. Keep existing gates and avoid selecting on this eval's five misses.
+
 ## September 14, latest: restore the composite/panel/scatter interpretation
 
 The user corrected the MAE-led summary. Read the

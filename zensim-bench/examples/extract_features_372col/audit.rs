@@ -397,6 +397,67 @@ impl Config {
                         .map_err(|e| e.to_string())?
                 );
             }
+            if std::env::var("ZENSIM_AUDIT_PREPARED_STEERING").as_deref() == Ok("1") {
+                let head = self
+                    .head
+                    .as_ref()
+                    .ok_or("prepared integrity audit requires a head")?;
+                let rs = RgbSlice::new(
+                    src.pixels.as_chunks::<3>().0,
+                    src.width as usize,
+                    src.height as usize,
+                );
+                let ds = RgbSlice::new(
+                    dst.pixels.as_chunks::<3>().0,
+                    dst.width as usize,
+                    dst.height as usize,
+                );
+                let expected_active = !identical
+                    && head.probability_f64(features).map_err(|e| e.to_string())? > head.deadband();
+                let actual = scorer
+                    .prepare_steering(&rs, 8)
+                    .map_err(|e| e.to_string())?
+                    .compute(&ds, None);
+                match actual {
+                    Err(zensim::ZensimError::CorruptionDetected) if expected_active => {
+                        record["prepared_steering"] =
+                            json!({"status":"REJECTED_INTEGRITY", "map_queries":0});
+                    }
+                    Ok(value) if !expected_active => {
+                        let baseline = base
+                            .prepare_steering(&rs, 8)
+                            .map_err(|e| e.to_string())?
+                            .compute(&ds, None)
+                            .map_err(|e| e.to_string())?;
+                        if value.result().score().to_bits() != score.to_bits()
+                            || value.result().features() != computed.features()
+                        {
+                            return Err("prepared/scalar identity mismatch".into());
+                        }
+                        let mut queries = 0;
+                        for y in (0..src.height as usize).step_by(32) {
+                            for x in (0..src.width as usize).step_by(32) {
+                                let w = 32.min(src.width as usize - x);
+                                let h = 32.min(src.height as usize - y);
+                                let gain = value.refinement_gain(x, y, w, h);
+                                if !gain.is_finite()
+                                    || gain.to_bits()
+                                        != baseline.refinement_gain(x, y, w, h).to_bits()
+                                {
+                                    return Err(
+                                        "inactive integrity head changed perceptual map".into()
+                                    );
+                                }
+                                queries += 1;
+                            }
+                        }
+                        record["prepared_steering"] =
+                            json!({"status":"ACCEPTED", "map_queries":queries});
+                    }
+                    Err(e) => return Err(format!("prepared integrity audit: {e}")),
+                    Ok(_) => return Err("prepared integrity audit accepted an active head".into()),
+                }
+            }
             if ![score, cached, cached_f32, base_score]
                 .iter()
                 .all(|v| v.is_finite())

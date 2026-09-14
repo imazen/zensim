@@ -298,6 +298,11 @@ SPRINT_BEST = [
     ("balance campaign", "W10L9PH_s4004_packed"),
 ]
 
+# September 14: fixed nine-composition diagnostic review, with LEGACY badges intact.
+CURATED_BOARD.extend(["MT913_" + name for name in (
+    "y40_h32_ens5", "y40_h128_ens5", "y60_h32_ens5", "y60_h128_ens5",
+    "local120_h128_ens5", "selected619_h128_ens5", "full944_h128_ens5",
+    "full944_h256_ens5", "linear60")])
 CURATED = set(CURATED_BOARD)
 
 
@@ -1124,7 +1129,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
         # cloud is stripped, and its per-pair data stays in the source verdict (never
         # deleted) exactly as `--strip-per-pair` already does for grid-interior cells.
         # This is what buys the fair view its size budget without dropping any DATA.
-        pp = o.get("per_pair", {}) if (curated and fair["tier"] != "LEGACY") else {}
+        pp = o.get("per_pair", {}) if ((curated and fair["tier"] != "LEGACY") or (name.startswith("MT913_") and ("ens5" in name or "linear60" in name))) else {}
         sc_json = o.get("scatter", {})
         for corp, cols in pp.items():
             pred = cols.get("pred")
@@ -1143,34 +1148,13 @@ def load_fulleval(fulleval_dir, best_per_day=None):
                 stats = sc_json.get(corp, {}).get(ref)
                 if not stats:                      # JSON omitted it -> canonical panel at build
                     stats = _panel_srocc_plcc(pred, rv)
-                # Geometric plot diagnostics (user directive 2026-08-28): computed in
-                # shape-normalized space (pred mapped BY RANK onto the reference's
-                # quantiles), residual r = qq - ref in ref units:
-                #   out4      — fraction outside the ±4·MAD envelope (G-OUT severe band)
-                #   maxd/p99d — max / p99 |r| as a fraction of the ref span p1..p99
-                #   cov/clump — fraction of 20 ref-span bins holding ≥0.5% of points /
-                #               largest single-bin share (density structure)
-                #   clampLo/Hi— mass sitting AT the prediction's exact min/max value
-                #               (dial floor/ceiling saturation, the incumbent-5.4 class)
-                geo = None
-                okm = np.isfinite(pred) & np.isfinite(rv)
-                if okm.sum() >= 50:
-                    pv, rr = pred[okm], rv[okm]
-                    order = np.argsort(pv, kind="stable")
-                    qq = np.empty(len(pv)); qq[order] = np.sort(rr)
-                    r = qq - rr
-                    mad = float(np.median(np.abs(r - np.median(r))) * 1.4826) or 1e-9
-                    span = float(np.percentile(rr, 99) - np.percentile(rr, 1)) or 1e-9
-                    hist, _ = np.histogram(rr, bins=20)
-                    geo = {"out4": round(float((np.abs(r) > 4 * mad).mean()), 4),
-                           "maxd": round(float(np.max(np.abs(r)) / span), 3),
-                           "p99d": round(float(np.percentile(np.abs(r), 99) / span), 3),
-                           "cov": round(float((hist >= max(1, len(rr) // 200)).mean()), 2),
-                           "clump": round(float(hist.max() / len(rr)), 2),
-                           "clampLo": round(float((pv == pv.min()).mean()), 4),
-                           "clampHi": round(float((pv == pv.max()).mean()), 4),
-                           "mad": round(mad, 3)}
-                cell[ref] = {"pts": pts, "fit": _fit_line(pred, rv), "geo": geo,
+                assessment = o.get("scatter_assessment", {}).get(corp, {}).get(ref)
+                geo = assessment.get("geo") if assessment and assessment.get("status") == "MEASURED" else None
+                raw = assessment.get("raw") if geo is not None else None
+                mapped = cols.get("normalized_pred")
+                normalized_pts = ([[float(mapped[i]), float(rv[i]), float(pred[i])] for i in idx]
+                                  if mapped is not None and len(mapped) == n else None)
+                cell[ref] = {"pts": pts, "normalized_pts":normalized_pts, "fit": _fit_line(pred, rv), "geo": geo, "raw":raw,
                              "srocc": stats.get("srocc"), "plcc": stats.get("plcc"),
                              "n": stats.get("n", len(pts))}
             if cell:
@@ -2866,14 +2850,18 @@ function qqMap(pts){
   const ys=pts.map(p=>p[1]).sort((a,b)=>a-b);
   const order=pts.map((p,i)=>[p[0],i]).sort((a,b)=>a[0]-b[0]);
   const out=new Array(pts.length);
-  order.forEach((oi,rank)=>{const i=oi[1];out[i]=[ys[Math.min(rank,ys.length-1)],pts[i][1],pts[i][0]];});
+  for(let first=0;first<order.length;){let end=first+1;
+    while(end<order.length&&order[end][0]===order[first][0])end++;
+    const mean=ys.slice(first,end).reduce((a,b)=>a+b,0)/(end-first);
+    for(let k=first;k<end;k++){const i=order[k][1];out[i]=[mean,pts[i][1],pts[i][0]];}first=end;
+  }
   return out;
 }
 function scatterOpt(b,corp,ref,cell){
   const t=TH();const c=color(b);
   const refLab=DATA.refLabels[ref]||ref;
   const norm=state.shapeNorm!==false;
-  const pts=norm?qqMap(cell.pts):cell.pts;
+  const pts=norm?(cell.normalized_pts||qqMap(cell.pts)):cell.pts;
   const series=[{type:'scatter',name:b.name,data:pts,symbolSize:6,
     itemStyle:{color:c,opacity:.55},emphasis:{itemStyle:{opacity:1}},z:2}];
   if(norm){
@@ -2901,9 +2889,9 @@ function scatterOpt(b,corp,ref,cell){
   return{animation:false,
     title:{text:(b.name.length>30?b.name.slice(0,29)+'…':b.name)+ensTag(b),
       subtext:'ρ '+f3(cell.srocc)+'   r '+f3(cell.plcc)+'   n='+cell.n
-        +(cell.geo?('\nout '+(cell.geo.out4*100).toFixed(1)+'%·maxd '+(cell.geo.maxd*100).toFixed(0)
-          +'%sp·cov '+(cell.geo.cov*100).toFixed(0)+'%·clump '+(cell.geo.clump*100).toFixed(0)
-          +'%·clamp '+(cell.geo.clampLo*100).toFixed(1)+'/'+(cell.geo.clampHi*100).toFixed(1)+'%'):''),
+        +(cell.geo?('\nout '+(cell.geo.out4*100).toFixed(1)+'%·p99/max '+f3(cell.geo.p99d)+'/'+f3(cell.geo.maxd)+' span'
+          +'\nraw clump '+(cell.raw&&cell.raw.clump!=null?(cell.raw.clump*100).toFixed(1)+'%':'—')
+          +'·floor/ceil '+(cell.geo.clampLo*100).toFixed(1)+'/'+(cell.geo.clampHi*100).toFixed(1)+'%'):''),
       top:2,left:8,itemGap:1,
       textStyle:{color:t['text-primary'],fontSize:10.5,fontWeight:600},
       subtextStyle:{color:t['text-secondary'],fontSize:9.5}},
@@ -2913,7 +2901,7 @@ function scatterOpt(b,corp,ref,cell){
             ?('pred(raw) <b>'+f3(p.value[2])+'</b> → ref-scale <b>'+f3(p.value[0])+'</b>')
             :('pred <b>'+f3(p.value[0])+'</b>'))+'<br>'+refLab+' <b>'+f3(p.value[1])+'</b>')
         :('OLS fit')}),
-    grid:{left:42,right:10,top:38,bottom:42},
+    grid:{left:42,right:10,top:cell.geo?54:38,bottom:42},
     xAxis:axX,yAxis:axY,
     dataZoom:[{type:'inside',xAxisIndex:0,filterMode:'none'},
               {type:'inside',yAxisIndex:0,filterMode:'none'},

@@ -85,7 +85,7 @@ impl<'a> BakeScorer<'a> {
     ///
     /// # Errors
     /// Refuses zero bins, invalid sources, unsupported feature families or
-    /// corruption companions, and incompatible arithmetic contracts.
+    /// incompatible arithmetic contracts, or unsupported companion features.
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     pub fn prepare_steering<'s, S: ImageSource>(
         &'s mut self,
@@ -95,12 +95,6 @@ impl<'a> BakeScorer<'a> {
         if bin == 0 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "steering bin must be nonzero",
-            });
-        }
-        #[cfg(feature = "corruption-head")]
-        if self.corruption.is_some() {
-            return Err(ZensimError::ModelLoadFailed {
-                reason: "steering session requires a model without a corruption companion",
             });
         }
         for (i, model) in std::iter::once(self.model)
@@ -416,8 +410,24 @@ impl<'a> BakeScorer<'a> {
         };
         let score = self.disposition.map_or(raw, |p| dispose_mlp_raw(raw, p));
         #[cfg(feature = "corruption-head")]
+        if let Some((value, threshold)) =
+            self.companion_score(features, width, height, codec_hint)?
+        {
+            return Ok(crate::corruption_head::gate_score(score, value, threshold));
+        }
+        Ok(score)
+    }
+
+    #[cfg(feature = "corruption-head")]
+    fn companion_score(
+        &mut self,
+        features: &[f64],
+        width: u32,
+        height: u32,
+        codec_hint: Option<&str>,
+    ) -> Result<Option<(f64, f64)>, ZensimError> {
         if let Some(head) = self.corruption.as_mut() {
-            let (value, threshold) = match head {
+            let value = match head {
                 Companion::Tree(h, t) => {
                     let row = features.get(..h.caller_input_width()).ok_or(
                         ZensimError::ModelForwardFailed {
@@ -436,9 +446,10 @@ impl<'a> BakeScorer<'a> {
                     (h.score_features(features, width, height, codec_hint)?, *t)
                 }
             };
-            return Ok(crate::corruption_head::gate_score(score, value, threshold));
+            Ok(Some(value))
+        } else {
+            Ok(None)
         }
-        Ok(score)
     }
 
     /// Local feature sensitivities of this complete candidate's served score.
@@ -1099,21 +1110,45 @@ impl<S: ImageSource> SteeringSession<'_, '_, S> {
     ///
     /// # Errors
     /// Returns the underlying pixel/scoring error or refuses incomplete
-    /// refinement coverage. A failed call does not invalidate the session.
+    /// refinement coverage. An activated integrity head returns
+    /// [`ZensimError::CorruptionDetected`], even if it would not lower the scalar
+    /// score. The returned map is the inactive perceptual branch; each new
+    /// reconstruction must be checked again. A failed call preserves the session.
     pub fn compute(
         &mut self,
         distorted: &impl ImageSource,
         codec_hint: Option<&str>,
     ) -> Result<crate::ScoredAttribution, ZensimError> {
-        let result = self.scorer.compute_with_ref_and_attribution(
+        // The head is evaluated on the exact extracted row, once per actual
+        // reconstruction. Local probes must never differentiate its threshold.
+        #[cfg(feature = "corruption-head")]
+        let companion = self.scorer.corruption.take();
+        let attempted = self.scorer.compute_with_ref_and_attribution(
             self.source,
             &self.reference,
             distorted,
             codec_hint,
             &mut self.scratch,
             self.bin,
-        )?;
-        if !result.unsupported_refinement_feature_ids().is_empty() || result.has_corruption_gate() {
+        );
+        #[cfg(feature = "corruption-head")]
+        {
+            self.scorer.corruption = companion;
+        }
+        let result = attempted?;
+        #[cfg(feature = "corruption-head")]
+        if !result.result().is_identical()
+            && let Some((value, threshold)) = self.scorer.companion_score(
+                result.result().features(),
+                distorted.width() as u32,
+                distorted.height() as u32,
+                codec_hint,
+            )?
+            && value < threshold
+        {
+            return Err(ZensimError::CorruptionDetected);
+        }
+        if !result.unsupported_refinement_feature_ids().is_empty() {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "steering comparison has incomplete refinement coverage",
             });
@@ -1214,6 +1249,67 @@ mod revision_contract_tests {
                         "dtype":"f32","weights":[1.0],"biases":[0.0]}]
         });
         zenpredict_bake::bake_from_json_str(&recipe.to_string()).expect("bake the recipe")
+    }
+
+    #[test]
+    #[cfg(all(
+        feature = "corruption-head",
+        feature = "feature-regime-v2",
+        feature = "custom-profiles"
+    ))]
+    fn prepared_integrity_gate_preserves_map_and_survives_failures() {
+        fn constant(value: f32) -> zenpredict::Model {
+            let recipe = serde_json::json!({
+                "schema_hash":1,"scaler_mean":[0.0],"scaler_scale":[1.0],
+                "metadata":[{"key":"zentrain.feature_ids","type":"utf8","text":"22"}],
+                "layers":[{"in_dim":1,"out_dim":1,"activation":"identity","dtype":"f32","weights":[-0.01],"biases":[value]}]
+            });
+            let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+            zenpredict::Model::from_bytes(&bytes).unwrap()
+        }
+        let base = constant(-50.0);
+        let src: Vec<_> = (0..96 * 96)
+            .map(|i| [(i % 251) as u8, (i % 199) as u8, (i % 127) as u8])
+            .collect();
+        let mut dst = src.clone();
+        dst[100] = [255, 0, 255];
+        let rs = crate::RgbSlice::new(&src, 96, 96);
+        let ds = crate::RgbSlice::new(&dst, 96, 96);
+        let mut plain = crate::BakeScorer::new(&base).unwrap().with_parallel(false);
+        let expected = plain
+            .prepare_steering(&rs, 8)
+            .unwrap()
+            .compute(&ds, None)
+            .unwrap();
+        for (bias, active) in [(100.0, false), (5.0, true)] {
+            let head = constant(bias);
+            let mut scorer = crate::BakeScorer::new(&base)
+                .unwrap()
+                .with_parallel(false)
+                .with_linear_corruption_head(&head, 10.0)
+                .unwrap();
+            // Already-poor perceptual scores hide activation in the minimum.
+            let scalar = scorer.compute(&rs, &ds, None).unwrap().score();
+            assert_eq!(scalar, expected.result().score());
+            let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
+            let invalid = crate::RgbSlice::new(&dst[..64], 8, 8);
+            assert!(worker.compute(&invalid, None).is_err());
+            for _ in 0..2 {
+                match worker.compute(&ds, None) {
+                    Err(crate::ZensimError::CorruptionDetected) => assert!(active),
+                    Ok(value) => {
+                        assert!(!active);
+                        assert_eq!(value.result().score(), scalar);
+                        assert_eq!(
+                            value.refinement_gain(0, 0, 32, 32),
+                            expected.refinement_gain(0, 0, 32, 32)
+                        );
+                    }
+                    Err(e) => panic!("unexpected error: {e}"),
+                }
+                assert_eq!(worker.compute(&rs, None).unwrap().result().score(), 100.0);
+            }
+        }
     }
 
     #[test]

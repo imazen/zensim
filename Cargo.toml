@@ -96,4 +96,4 @@ zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "05de3cb
 # Bump the rev deliberately when a zenstats fix zensim needs lands.
 # 2026-07-15: bumped to 0ce69492 for `per_group_srocc` — the within-group rank
 # agreement that pooled SROCC structurally hides (bake_verdict's per-ref column).
-zenstats = { git = "https://github.com/imazen/zenmetrics", rev = "29f1d61ee8cb6d9010764512a9db79697dc23430", default-features = false, features = ["parallel"] }
+zenstats = { git = "https://github.com/imazen/zenmetrics", rev = "3e16cb4550a7b47e534774ba5d48f9c08c7fc6c9", default-features = false, features = ["parallel"] }

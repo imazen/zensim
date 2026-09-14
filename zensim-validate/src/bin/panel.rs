@@ -153,7 +153,11 @@ use zensim_validate::panel::{self, PanelStats};
 // CLI
 // ----------------------------------------------------------------------
 
+#[path = "../scatter_json.rs"]
+mod scatter_json;
+
 struct Args {
+    scatter: bool,
     input: Option<PathBuf>,
     /// Batch mode: a manifest of many (x, y) vector pairs (`-` = stdin).
     /// Mutually exclusive with `--input`. See the module docs.
@@ -226,6 +230,7 @@ fn print_usage() {
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20lines: '#def N<TAB>csv', 'L<TAB>x-csv<TAB>y-csv',\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20'L<TAB>@X:@Y<TAB>idx-csv|*')\n\
          \x20\x20--stats <full|srocc>    batch column set (default full)\n\
+         \x20\x20--scatter              --input --json: full-population scatter diagnostics\n\
          \x20\x20--raw-errors            append raw MAE in batch mode (no score remapping)\n\
          \x20\x20--json                  emit JSON instead of text (aggregate mode only)\n\
          \x20\x20--col-predicted <NAME>  override the 'predicted' column name\n\
@@ -249,6 +254,7 @@ fn parse_args() -> Result<Args, String> {
     let mut batch: Option<PathBuf> = None;
     let mut stats_srocc_only = false;
     let mut raw_errors = false;
+    let mut scatter = false;
     let mut json = false;
     let mut col_predicted = "predicted".to_string();
     let mut col_target = "target".to_string();
@@ -277,6 +283,7 @@ fn parse_args() -> Result<Args, String> {
                 };
             }
             "--json" => json = true,
+            "--scatter" => scatter = true,
             "--raw-errors" => raw_errors = true,
             // Hidden — see Args::emit_rescaled.
             "--emit-rescaled" => emit_rescaled = true,
@@ -329,7 +336,11 @@ fn parse_args() -> Result<Args, String> {
     if raw_errors && batch.is_none() {
         return Err("--raw-errors requires --batch".to_string());
     }
+    if scatter && (input.is_none() || !json || per_group || emit_rescaled) {
+        return Err("--scatter requires --input --json without other modes".into());
+    }
     Ok(Args {
+        scatter,
         input,
         batch,
         stats_srocc_only,
@@ -1282,6 +1293,16 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+
+    if args.scatter {
+        let value = scatter_json::assess(&cols.predicted, &cols.target);
+        println!("{value}");
+        return if value["status"] == "MEASURED" {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(2)
+        };
+    }
 
     if cols.predicted.is_empty() {
         eprintln!("panel: no data rows in {:?}", args.input);

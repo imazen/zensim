@@ -551,6 +551,43 @@ fn main() {
                             })
                         });
                     }
+                    // Full cached-reference score+map cost, using the same
+                    // source-bound worker as codec reconstructions. Rejecting
+                    // the fixture is a failure, never a faster successful map.
+                    if env_usize("ZEN_S2_PREPARED", 0) == 1 {
+                        for with_head in [false, true] {
+                            let name = if with_head {
+                                "bake_prepared_corruption"
+                            } else {
+                                "bake_prepared"
+                            };
+                            group.bench(name, move |b| {
+                                let s = RgbSlice::new(src_s, n, n);
+                                let d = RgbSlice::new(dst_s, n, n);
+                                let mut scorer =
+                                    zensim::BakeScorer::new(&h.model).expect("servable bake");
+                                if with_head {
+                                    let Some(CorrHead::Tree(ch)) = corrhead else {
+                                        panic!("prepared integrity benchmark requires a tree head")
+                                    };
+                                    scorer = scorer
+                                        .with_corruption_head(ch, None)
+                                        .expect("servable head");
+                                }
+                                let mut worker =
+                                    scorer.prepare_steering(&s, 8).expect("prepared steering");
+                                b.iter(move || {
+                                    let value = worker
+                                        .compute(&d, None)
+                                        .expect("valid reconstruction must stay inactive");
+                                    zenbench::black_box((
+                                        value.result().score(),
+                                        value.refinement_gain(0, 0, 32, 32),
+                                    ))
+                                });
+                            });
+                        }
+                    }
                     group.bench("add156_156basic", move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();
                         let mut pred = Predictor::new(&h.model);

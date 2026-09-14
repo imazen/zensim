@@ -1872,6 +1872,9 @@ impl Ensemble {
 // Per-corpus pipeline
 // ============================================================================
 
+#[path = "../scatter_json.rs"]
+mod scatter_json;
+
 struct CorpusResult {
     display: &'static str,
     n: usize,
@@ -6347,6 +6350,7 @@ Run the dedicated q-sweep harness for those._\n",
         // under "mos" and render fine — only newly-emitted ones are relabelled.
         let jnd_prefixes = ["aic3", "aic4", "konjnd", "sdr25"];
         let mut per_pair = Map::new();
+        let mut scatter_assessment = Map::new();
         for r in &results {
             let idx = stride(r.rescaled_scores.len(), args.perpair_cap);
             let pred: Vec<f64> = idx.iter().map(|&i| r.rescaled_scores[i]).collect();
@@ -6356,7 +6360,20 @@ Run the dedicated q-sweep harness for those._\n",
             } else {
                 "mos"
             };
-            per_pair.insert(r.name.to_string(), json!({ "pred": pred, key: tgt }));
+            let mut assessment = scatter_json::assess(&r.rescaled_scores, &r.humans);
+            let normalized = assessment
+                .as_object_mut()
+                .unwrap()
+                .remove("normalized_pred");
+            let mapped = normalized.and_then(|v| {
+                v.as_array()
+                    .map(|v| idx.iter().map(|&i| v[i].clone()).collect::<Vec<_>>())
+            });
+            scatter_assessment.insert(r.name.to_string(), json!({key:assessment}));
+            per_pair.insert(
+                r.name.to_string(),
+                json!({ "pred": pred, key: tgt, "normalized_pred":mapped }),
+            );
         }
         // KADIS multi-metric per_pair. Read a bounded window (≤40k rows) then
         // stride to the cap for source diversity.
@@ -6533,6 +6550,7 @@ Run the dedicated q-sweep harness for those._\n",
             // Canonical product-weighted ranking composite (single Rust source;
             // the dashboard READS this, never re-derives it). KADID/TID excluded.
             "composite": product_composite(&results),
+            "scatter_assessment":scatter_assessment,
             // CODEC_TARGET_GOALS scorecard values (same numbers as the report's
             // scorecard table; null when the run computed no gates).
             "gates": gates_json.clone().unwrap_or(Value::Null),

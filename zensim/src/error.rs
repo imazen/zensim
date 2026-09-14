@@ -8,6 +8,10 @@
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ZensimError {
+    /// The configured integrity head rejected a steering reconstruction.
+    /// This is a model detection, not proof of the underlying software cause.
+    #[error("corruption head rejected the steering reconstruction")]
+    CorruptionDetected,
     /// Source and distorted images have different pixel counts.
     #[error("Source and distorted images must have the same dimensions")]
     DimensionMismatch,

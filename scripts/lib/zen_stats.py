@@ -279,3 +279,23 @@ def outlier_ratio(predicted, target) -> float:
 
 def z_rmse(predicted, target) -> float:
     return panel(predicted, target)["z_rmse"]
+
+
+def scatter(predicted: Sequence[float], target: Sequence[float]) -> dict:
+    """Full-population geometry and raw tails from Rust, without data dropping."""
+    predicted, target = list(predicted), list(target)
+    if len(predicted) != len(target) or any(not math.isfinite(float(v)) for v in predicted + target):
+        raise ValueError("scatter requires aligned finite pairs")
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv") as f:
+        f.write("predicted\ttarget\n")
+        for x, y in zip(predicted, target):
+            f.write(f"{float(x):.17g}\t{float(y):.17g}\n")
+        f.flush()
+        p = subprocess.run([_find_panel_bin(), "--input", f.name, "--json", "--scatter"],
+                           text=True, capture_output=True)
+        if p.returncode not in (0, 2) or not p.stdout.strip():
+            raise RuntimeError(f"Rust scatter failed: {p.stderr}")
+        result = json.loads(p.stdout)
+        if result.get("schema") != "scatter-v2":
+            raise ValueError("unexpected Rust scatter schema")
+        return result

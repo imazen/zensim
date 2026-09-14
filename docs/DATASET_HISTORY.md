@@ -10,6 +10,33 @@ and moves prediction/eval out of the training stage. Thirteen synthetic boundary
 checks and a real Rust fixture smoke verify the new path; no scientific corpus
 was read or a competitive model trained by this implementation.
 
+**September 14, newest strict integrity prototype — bounded evidence only:**
+[Protocol/results](../benchmarks/steering_integrity_2026-09-14.md) and
+[hash-bound summary](../benchmarks/steering_integrity_2026-09-14.results.json).
+Original corruption-manifest metadata admits eight fit, two training-calibration
+and eight eval origins; 8462/9066 are excluded because of later test roles.
+Fresh Rust Rev1/libm/f32 D228 extraction reads explicit source/native-codec paths;
+no historical mixed feature tables. New decoded-pixel hashes bind native inputs
+whose original records only pinned bitstreams. Original feature/decoder identity
+and role receipts remain in `TRAIN_ADMISSION_NATIVE.json` and the extraction
+audits; source manifest SHA is
+`1ec469fe694284f029cf769258fe7bd91e231f336825686699ea371be6c5f433`.
+Final training admission SHA:
+`d61262d19865a2abc6464317eb1090a9c6729aca073f189e58f342174b270eae`.
+
+Severity rules and visual layout amendment were frozen before fitting. Inert
+and weak/ambiguous operations are excluded from binary training, not relabelled
+as valid negatives. There are 900 unique fit and 124 calibration pairs. One
+HGB100 head plus a determinism replay (identical predictive bytes) gives zero
+calibration honest activation; frozen eval detects 175/180 admitted severe
+proxies, 109/113 real-bug proxies, with 0/320 honest activation. Full eval scores
+6,024 attempts / 5,679 pixel-unique pairs, retaining 1,086 activations among 5,173
+unlabelled weak/ambiguous pairs as unresolved specificity. A known binary label
+on duplicate pixels supersedes missing labels, with all catalog provenance
+retained; contrary binary labels refuse the report. No eval-tuned threshold,
+no test reads, no product qualification. See results for the five misses,
+prepared-map audit, frozen tools, complete input hashes and measured cost.
+
 **Purpose.** An honest ledger of *what training data and experiments were tried, what
 actually helped, and — where it differs — the **real** reason a thing failed vs the
 reason we thought at the time.* Several "verdicts" in this project were later found to
