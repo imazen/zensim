@@ -5165,13 +5165,12 @@ fn square_into(input: &[f32], out: &mut [f32]) {
     }
 }
 
-/// Per-channel-scale f64 sums for the v1 BASIC-13 fold — the exact subset
-/// of v1's `streaming::ChannelAccum` fields that the basic block
-/// (`f0..156`) finalizes from. Filled by v1's own
-/// [`crate::fused::fused_vblur_features_ssim`] kernel run over the v2
-/// strip walk's shared H-planes; the peak accumulators the kernel also
-/// returns (max/L8) are deliberately dropped — v1's peak block `f156..228`
-/// is deprecated (no current model reads it).
+/// Per-channel, per-scale raw sums for the folded v1 feature blocks.
+/// The canonical fused kernel supplies basic and peak (max/L8) accumulators,
+/// plus the weighted pools and free extras requested by the feature plan.
+/// Finalizers below emit the corresponding slots with global scale
+/// normalization. Peak slots 156..228 are supported and consumed by candidate
+/// models; they are not deprecated or silently discarded.
 #[derive(Debug, Clone, Copy, Default)]
 struct V1BasicSums {
     ssim_d: f64,

@@ -1,5 +1,30 @@
 # Start here — one target score, one development path
 
+## September 14, newest: bounded replay passes accuracy but fails the fine-grid cost
+
+[Tile-response study](benchmarks/tile_response_2026-09-14.md) uses existing
+kernels on fixed 32-column cells with real halos and complete model inference.
+All 138 checks on the same six models / 23 TRAIN pairs pass the preregistered
+approximation gates: minimum rank .999555, maximum gain error .008803 points.
+Row-local pyramid updates and reusable scratch preserve all 9,756 predictions
+exactly. Synthetic full-pyramid/restoration/public-feature and admission checks
+pass. No fitting, calibration or EVAL/test access.
+
+Cost still blocks it. Final basic228 sweeps cost 3.93–17.30 scalar calls in
+feasibility timing. Read-only JXL inspection confirms bin8 / 8-aligned queries;
+a separate finest-grid cost probe on admitted 1024² row4589 takes 3.144 seconds
+for basic228/H32, 59.28 scalar calls. Tile replay dominates (2.858 seconds).
+Dense8 accuracy and native RD are unmeasured; large-image accuracy witnesses
+remain block64. Timings are not p95 qualification or an optimized narrow model.
+
+Both prototypes are archived under `~/work/zensim-validation-2026-09-14/tile-response/`
+and removed from the implementation. Production arithmetic is unchanged; only
+the stale V1BasicSums peak-deprecation comment is corrected. Next share moment
+work across queries / bound interior-and-boundary response and whole-head cost,
+using the real caller's geometry. Do not repeat per-query tile-size sweeps or
+promote the coarse screen to a fine-grid claim. All jobs finished. The complete
+production goal stays active; no model qualifies.
+
 ## September 14, newest: exact finite response works; full-width bands cost too much
 
 [Band-response feasibility](benchmarks/band_response_2026-09-14.md) reuses the
