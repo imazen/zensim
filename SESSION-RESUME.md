@@ -1,5 +1,25 @@
 # Start here — one target score, one development path
 
+## September 14, newest: paired latency observations now retained
+
+[Latency evidence infrastructure](benchmarks/latency_evidence_2026-09-14.md)
+closes the summary-only timing exporter gap. The canonical zenbench owner
+(revision16fb8fdd, pushed) records each completed round's actual batch count,
+raw/compensated total durations and execution order. Aggregated multi-run
+results clear samples; historical summaries cannot become p95 evidence.
+The standalone Zensim benchmark pins that revision. Its existing saved-result
+path verifies 12 real observations on two tiny synthetic fixtures and two
+public scalar arms, three rounds each. This is an exporter smoke, not latency
+qualification. Owner tests, Clippy and API snapshot checks pass.
+
+Next performance campaigns can use the existing benchmark with
+`ZEN_S2_SINGLE_CALL=1` and `ZENBENCH_RESULT_PATH`, verifying one actual call
+in every retained round. Still require representative admitted inputs, frozen
+complete candidates, required geometry/hardware, at least30 accepted paired
+rounds, contention records and memory measurements. Do not infer p95 from old
+min/mean/max files. No fit, EVAL/TEST, production score change or model promotion.
+
+
 ## September 14, newest: derivative duality passes; finite repairs fail
 
 [Independent duality diagnostic](benchmarks/gradient_duality_2026-09-14.md)

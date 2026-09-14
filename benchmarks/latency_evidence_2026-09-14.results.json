@@ -1,0 +1,48 @@
+{
+  "date": "2026-09-14",
+  "scope": "canonical_paired_timing_export",
+  "qualified": false,
+  "checks": {
+    "owner_commit": "16fb8fddffdb90d944aec00d96a8358df6507358",
+    "owner_push_verified": true,
+    "owner_tests": "PASS_DEFAULT_AND_MINIMAL",
+    "library_tests": {
+      "passed": 142,
+      "failed": 0,
+      "ignored": 1
+    },
+    "owner_clippy": "PASS_DEFAULT_WASM_CRITERION_COMPAT",
+    "owner_api_snapshot": "PASS",
+    "consumer_clippy": "PASS",
+    "root_clippy": "PASS",
+    "format": "PASS",
+    "script_lint": "PASS_615",
+    "smoke": {
+      "groups": 2,
+      "arms_per_group": 2,
+      "rounds_per_group": 3,
+      "individual_call_observations": 12,
+      "raw_timing_and_order_present": true,
+      "summary_reconstructed": true,
+      "result_sha256": "b548823162d0a6516792110706a7d7155d15285de576cc30bbe8f2c272b2b29e",
+      "qualified": false
+    },
+    "qualification": "NOT_PERFORMED",
+    "model_or_production_scoring_changed": false,
+    "dataset_access": false
+  },
+  "evidence_sha256": {
+    "PROTOCOL.md": "f513b9a0bfb806a82862cff12f716393015eb73bbcb7b358477d595661166adc",
+    "SMOKE_REGISTRATION.json": "ccb3acddbd8536ceb3ea338558d2aa01c9c1c048ef74a86cd24a30298fe39d54",
+    "SMOKE_EXECUTION.json": "aa319c44fc370dde4588ae3132f2e366d9538c79c705e99f9798f1784c94bf76",
+    "SMOKE_VERIFIED.json": "0b6d10fd9cf9ebf9b5275228193c8b11d828ce42b02bde75195e7f88c9cdaabe",
+    "SMOKE.json": "b548823162d0a6516792110706a7d7155d15285de576cc30bbe8f2c272b2b29e",
+    "owner.patch": "156f65c36a540d2d016b1f525daa333605353e9b4662c843215a9a7723ead583",
+    "CHECKS.json": "85c63467d13c75277bb8efc9497bbc74d7307ff7118f98e90372586164261f7b",
+    "smoke.py": "0b3d76c614cbcb77064f3ecb1a45b4fa18aec338f232e30bc0217c0feb0f7983",
+    "measured-benchmark.rs": "b16d3cc27a7b61ec1bbc6bb23201c6408c45f0bffaa0b2fe43523be0ae219d0e",
+    "consumer-Cargo.toml": "245ba4a8eaee0941272610610ae0a1dc58d7f477ef3db3720c28bc1d3297081b",
+    "consumer-Cargo.lock": "e515305d7db3b9ee7f53010271642f80b3ec58f63ad448373565d37b6a9dc2b2",
+    "owner-Cargo.lock": "69da76cdada9fafcadd7f3034f9afc250829e0afae03f26537b0a0bb864224eb"
+  }
+}

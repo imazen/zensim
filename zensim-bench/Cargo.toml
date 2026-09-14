@@ -135,9 +135,9 @@ rgb = { version = "0.8", default-features = false, features = ["bytemuck"] }
 zenpnm = "0.1"
 bytemuck = { version = "1.25", default-features = false, features = ["derive"] }
 which = "8"
-# Linux gate must exclude its own exclusive-lock heartbeat task; registry
-# 0.1.8/0.1.9 otherwise wait 30 seconds per round and exhaust the sample budget.
-zenbench = { git = "https://github.com/imazen/zenbench", rev = "1bf8a6509fce2ff4baddf1e2252639acd78d576c" }
+# Includes the Linux heartbeat gate fix and retained paired timing rounds.
+# Registry 0.1.9 cannot export individual observations for latency p95.
+zenbench = { git = "https://github.com/imazen/zenbench", rev = "16fb8fddffdb90d944aec00d96a8358df6507358" }
 # `testable_dispatch` lets benches/tier_isolation.rs disable the baseline SIMD
 # token (NEON on aarch64) so the scalar arm is real rather than a second
 # measurement of the SIMD path.

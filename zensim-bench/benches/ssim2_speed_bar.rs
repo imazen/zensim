@@ -33,6 +33,12 @@
 //! `ZEN_S2_CALLS=N` sets a positive base batch size for throughput controls; it
 //! cannot be combined with `ZEN_S2_SINGLE_CALL=1`. Batched means are not
 //! individual-call latency percentiles.
+//! `ZENBENCH_RESULT_PATH` saves completed paired rounds, including actual call
+//! counts, raw/compensated total durations, and execution order. Use raw totals
+//! from rounds with exactly one call for latency distributions. Warmup and gate
+//! waits are excluded; sample retention alone does not establish quiet-machine
+//! admission or representative-input coverage. Historical summary-only files
+//! cannot supply latency percentiles.
 //!
 //! ## The amended-W4 arms (`benchmarks/hybrid_candidate_2026-09-01.md`, APPENDIX B)
 //!
