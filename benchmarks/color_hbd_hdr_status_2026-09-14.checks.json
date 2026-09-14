@@ -1,0 +1,23 @@
+{
+  "source_revision": "16be227e44794a3cb25d68c8c9a95077596ad0c9",
+  "scope": "Synthetic engineering checks only; no protected populations; no model quality qualification",
+  "checks": [
+    {
+      "log": "public-tests.log",
+      "sha256": "553427bdf5c9a817cc09a49e6d8ee03da2b2c38744721f85d41e1b24ab5d7e88",
+      "command": "../scripts/run-heavy --mem 16G --jobs 8 cargo test -p zensim --locked --features custom-profiles --test icc_coverage --test gamut_real_codec --test pu_entry --test linear_srgb_equiv"
+    },
+    {
+      "log": "hdr-tests.log",
+      "sha256": "dbb731ffe792cbded55f63e2a9b6a398c2d5b1df1577b4c5bb40bee7c064539a",
+      "command": "../scripts/run-heavy --mem 16G --jobs 8 cargo test -p zensim --locked --features custom-profiles --lib hdr"
+    },
+    {
+      "log": "transfer-tests.log",
+      "sha256": "4c0841f99c8d749289de3851f1bf896d59c16900f570ca6843a8ac7d5f17cdf8",
+      "command": "../scripts/run-heavy --mem 16G --jobs 8 cargo test -p zensim --locked --features custom-profiles --lib transfer::tests"
+    }
+  ],
+  "passed": 65,
+  "failed": 0
+}

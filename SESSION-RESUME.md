@@ -1,5 +1,18 @@
 # Start here — one target score, one development path
 
+## September 14, newest: color/HBD/HDR audit and two-day gauntlet discussion
+
+[Status and chronology](benchmarks/color_hbd_hdr_status_2026-09-14.md) distinguish
+65 fresh passing engineering checks from missing product qualification. The
+RGB8 adapter loses PNG ICC metadata and native HBD precision. HDR transfer and
+feature routes exist, but take primaries as-is; sampling-v1 refuses HDR. No new
+Rev3 HBD/HDR quality or spatial qualification follows from the six SDR panels.
+
+The September 13–14 discussion selects the nine measured MT913 candidates and
+matched baselines, with a visible review link and an index of recent records.
+TRAIN comparisons stay separate; all model verdicts remain unchanged. Next
+resolve the explicit color/precision contract and restore missing TRAIN coverage.
+
 ## September 14, newest: Rev3 integrity pilot trained; color coverage blocks EVAL
 
 [Registered fit and comparison](benchmarks/integrity_rev3_train_2026-09-14.md)

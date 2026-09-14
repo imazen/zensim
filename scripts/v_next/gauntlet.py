@@ -2381,6 +2381,12 @@ function renderBar(){
       state.mcorp=d.preferred_corpus||null;
       rerender();renderBar();};
     bar.append(sel);
+    const latestReport=ds.find(d=>d.report_url);
+    if(latestReport)bar.append(el('a',{
+      href:latestReport.report_url,
+      text:'Read latest discussion: '+latestReport.label,
+      style:'flex-basis:100%;padding:.3rem 0'
+    }));
   }
   bar.append(el('span',{text:'gate filter:',style:'margin-left:.6rem;color:var(--text-secondary);font-size:11px'}));
   const applyGF=()=>{if(state.gateFilter.size)DATA.bakes.forEach(b=>{if(gateExcluded(b))state.visible.delete(b.name);});

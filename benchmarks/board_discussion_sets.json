@@ -414,6 +414,28 @@
       "report_url": "/zensim/reports/integrity-rev3-train-2026-09-14/index.html",
       "bakes": [],
       "note": "Rev3 detects154/154 calibration and267/267 development severe proxies;0/792 and2/1,666 honest nonidentity activations. Native steering remains accepted. P3/mobile coverage and unresolved labels block EVAL. Two exact false-alarm A/Bs and all-catalog inventory; no model qualifies."
+    },
+    {
+      "id": "2026-09-14-two-day-color-hbd-hdr",
+      "date": "2026-09-14",
+      "label": "2026-09-13–14 · Feature overhaul + color / HBD / HDR status",
+      "report_url": "/zensim/reports/color-hbd-hdr-status-2026-09-14/index.html",
+      "bakes": [
+        "MT913_y40_h32_ens5",
+        "MT913_y40_h128_ens5",
+        "MT913_y60_h32_ens5",
+        "MT913_y60_h128_ens5",
+        "MT913_local120_h128_ens5",
+        "MT913_selected619_h128_ens5",
+        "MT913_full944_h128_ens5",
+        "MT913_full944_h256_ens5",
+        "MT913_linear60",
+        "MT914_matched_B",
+        "MT914_matched_D",
+        "peer_ssim2_mt914"
+      ],
+      "preferred_corpus": "imazen26",
+      "note": "Nine frozen Rev3 models have six SDR panels and remain NO-SHIP. Read the linked two-day review for TRAIN feature/spatial/corruption studies, 65 fresh correctness checks, ICC loss, RGB8 precision reduction, HDR primaries and sampling limitations. No new HBD/HDR qualification is implied."
     }
   ],
   "incumbent_notes": [
