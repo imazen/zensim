@@ -1,5 +1,15 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, newest row-fusion replay:**
+[Experiment and profile](../benchmarks/moment_rows_2026-09-14.md) reuse the same
+forty admitted TRAIN finite-moment cases without new training/calibration,
+source admission or EVAL/test access. Every report field matches exactly.
+The optimization is rejected after complete-path timing shows modest enabled
+benefit with slower disabled controls; production attribution stays at the
+preceding implementation. Synthetic hardware profiling locates bin folding,
+max retention and SSIM work as larger costs. No model qualification changes.
+
+
 **September 14, newest base-image finite moments:**
 [Protocol/results](../benchmarks/finite_moments_2026-09-14.md) apply the frozen
 four basic/peak ensembles to the same five admitted TRAIN JXL pairs at bins

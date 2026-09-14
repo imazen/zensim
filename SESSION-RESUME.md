@@ -1,5 +1,34 @@
 # Start here — one target score, one development path
 
+## September 14, newest: reject row fusion; profile the larger map costs
+
+[Row experiment](benchmarks/moment_rows_2026-09-14.md) reproduces all forty
+finite-moment TRAIN reports exactly (1,176 repairs). Three bracketed timing
+processes measure modest enabled-map gains (1.2–2.1% at 1MP, 3.7–5.7% at 4MP)
+but consistent disabled-map slowdowns (0.3–1.8%). Reject the added implementation
+complexity: production attribution is restored exactly to `7d964c3f`. Candidate
+source/patch/binaries and all results remain reproducible in the artifact packet.
+The existing SIMD integration owner gains finite-moment scalar/density parity,
+finiteness and signed-curvature checks; all ten dispatch permutations pass on
+both versions. Shipping-source Clippy passes. No public API or scalar change.
+
+A 3,230-sample hardware profile of the shipping basic228/H32 enabled map path
+at 4MP puts 20.65% self cycles in bin folding, 17.63% in max retention and
+24.48% in horizontal/vertical SSIM kernels. Use flat instruction-pointer
+attribution only: some reconstructed caller frames are unreliable. The profile
+includes reference setup and thirty map constructions, no rectangle queries.
+The initial query label is transparently corrected in retained metadata.
+
+Next register an aligned dyadic fast path in the existing bin owner, preserving
+summation order, partial edges, arbitrary-bin/fractional fallbacks and disabled
+controls. This is a larger measured target than repeating the edge-power work.
+No new fit is justified by this profile. Complete p95 measurement still needs
+the canonical benchmark owner to export samples/quantiles; registry zenbench
+0.1.9 currently exposes summaries only. All larger scientific/product gates
+remain open; no model qualifies and the full production goal remains active.
+Artifacts: `~/work/zensim-validation-2026-09-14/moment-rows/`.
+All timing, RSS, profiling and test processes finished.
+
 ## September 14, newest: base-image finite moments work, but cost more
 
 [Finite moments](benchmarks/finite_moments_2026-09-14.md) implements an opt-in

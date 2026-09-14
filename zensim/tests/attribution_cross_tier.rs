@@ -111,6 +111,26 @@ fn attribution_identities_hold_on_every_tier() {
                             "{label} candidate peak f{id}: {actual} != {expected}"
                         ));
                     }
+                    if slot >= 3 {
+                        let finite = scorer
+                            .with_finite_moment_refinement(true)
+                            .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
+                            .unwrap();
+                        assert_eq!(finite.result().score().to_bits(), scalar.score().to_bits());
+                        assert_eq!(finite.result().features(), scalar.features());
+                        assert_eq!(
+                            finite.attribution().density(),
+                            scored.attribution().density()
+                        );
+                        for (x1, y1) in [(w, h), (w / 2, h / 2), (w / 3, h / 3)] {
+                            let corrected = finite.refinement_gain(0, 0, x1, y1);
+                            let old = scored.refinement_gain(0, 0, x1, y1);
+                            assert!(corrected.is_finite(), "{label}: finite moment f{id}");
+                            // Removing frozen nonnegative mass has curvature in
+                            // the direction determined by the signed sensitivity.
+                            assert!((corrected - old) * finite.sensitivities()[id] <= 0.0);
+                        }
+                    }
                 }
             }
         }
