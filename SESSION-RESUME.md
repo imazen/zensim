@@ -2,6 +2,14 @@
 
 ## September 14, latest: canonical assessment and an integrity-head prototype
 
+Gauntlet display correction: the main table previously omitted KADID and the
+full panel defaulted to global CID22, hiding the new models’ only measured rank
+corpus. The table now exposes measured corpus/count and KADID SROCC, and the
+Rev3 discussion selects KADID. Sparse comparisons default to a measured corpus;
+a new gate checks actual displayed values against the stored results. This
+does not fill missing cross-corpus or product evaluation. An empty/partial
+knob-end instrument now stays unmeasured instead of acquiring a vacuous pass.
+
 [Protocol and results](benchmarks/steering_integrity_2026-09-14.md) now own the
 latest work. `zenstats::scatter` computes full-population geometry, robust
 outlier envelopes, raw tails, density and saturation; `bake_verdict` stores it,

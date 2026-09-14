@@ -338,6 +338,40 @@ const INITIAL_BOARD = (() => {
   return t.length === 1 ? t[0].slice(1).map(tr => cellText(tr.children[0]).trim()) : null;
 })();
 
+// Sparse eval must be visible in both the main table and the initial full panel.
+if (CMPMODE && DATA) {
+  const selected = DATA.bakes.filter(b=>CMPSET.includes(b.name));
+  if (selected.length && selected.every(b=>Object.keys(b.rank||{}).length===1 && b.rank.kadid)) {
+    const board = attachedTables(h=>h.includes('bake')&&h.includes('composite'))[0];
+    const heads = board ? board[0].children.map(cellText) : [];
+    const ki = heads.indexOf('KADID SROCC'), ni = heads.indexOf('measured rank data');
+    if (ki<0 || ni<0) fail('KADID-only eval is absent from the scoreboard columns');
+    else selected.forEach(b=>{
+      const row=board.slice(1).find(r=>cellText(r.children[0]).trim().startsWith(b.name));
+      const expected=(b.rank.kadid.srocc_signed ?? b.rank.kadid.srocc).toFixed(3);
+      if(!row || !deepText(row.children[ki]).includes(expected)
+          || !deepText(row.children[ni]).includes('KADID n='+b.rank.kadid.n))
+        fail('scoreboard does not display stored KADID eval for '+b.name);
+    });
+    if(vm.runInContext('state.mcorp',sandbox)!=='kadid') fail('KADID-only comparison opens an empty full panel');
+    const panel=attachedTables(h=>h.includes('bake')&&h.includes('SROCC ±CI')&&h.includes('n'))[0];
+    if(!panel || panel.length!==selected.length+1) fail('full panel omits selected KADID models');
+    else selected.forEach(b=>{
+      const row=panel.slice(1).find(r=>deepText(r.children[0]).startsWith(b.name));
+      if(!row || cellText(row.children[1])!==String(b.rank.kadid.n)
+          || !cellText(row.children[2]).includes((b.rank.kadid.srocc_signed??b.rank.kadid.srocc).toFixed(4)))
+        fail('full panel disagrees with stored KADID eval for '+b.name);
+    });
+    console.log('sparse eval check: scoreboard and full-panel values checked against stored KADID results');
+  }
+  selected.forEach(b=>{
+    if(!Object.keys((b.dial||{}).curves||{}).length) {
+      const gate=vm.runInContext('gateV(DATA.bakes.find(b=>b.name==='+JSON.stringify(b.name)+'),"knob")',sandbox);
+      if(gate!==null) fail('unmeasured knob-end gate reported a verdict for '+b.name);
+    }
+  });
+}
+
 if (panelsEl.children.length < 8) fail('panels not populated: ' + panelsEl.children.length + ' sections (< 8)');
 const chips = registry.filter(e => e.tagName === 'LABEL' && classesOf(e).includes('chip'));
 if (chips.length !== nBakes) fail('control-bar chips ' + chips.length + ' != bakes ' + nBakes);
@@ -368,16 +402,23 @@ if (DATA) {
   if (badOpt.length) fail(badOpt.length + ' .echart mounts lack a built option with series');
   const kinds = {};
   mounts.forEach(e => { const k = (e.attrs && e.attrs['data-kind']) || '?'; kinds[k] = (kinds[k] || 0) + 1; });
-  const visible = CMPMODE
-    ? DATA.bakes.filter(b => CMPSET.indexOf(b.name) >= 0)
-    : DATA.bakes.filter(b => !DATA.bakes.some(x => x.curated) || b.curated);
+  const visibleNames = vm.runInContext('Array.from(state.visible)', sandbox);
+  const visible = DATA.bakes.filter(b => visibleNames.includes(b.name));
+  const panelCorpus = vm.runInContext('state.mcorp', sandbox);
+  const tradeCount = ['nonphoto','konjnd'].filter(c => visible.some(b =>
+    b.rank && b.rank.cid22 && b.rank[c]
+    && Number.isFinite(b.rank.cid22.srocc) && Number.isFinite(b.rank[c].srocc))).length;
   const expect = [];
-  if (visible.some(b => b.rank && Object.keys(b.rank).length)) expect.push('heat', 'trade');
+  if (visible.some(b => b.rank && Object.keys(b.rank).length)) expect.push('heat');
+  if (tradeCount) expect.push('trade');
   if (visible.some(b => b.dial && b.dial.curves && Object.keys(b.dial.curves).length)) expect.push('dial');
-  if (visible.some(b => b.rank && Object.values(b.rank).some(r => r && r.bands))) expect.push('band');
+  if (visible.some(b => b.rank && b.rank[panelCorpus] && b.rank[panelCorpus].bands && b.rank[panelCorpus].band_scheme)) expect.push('band');
   if (visible.some(b => b.scatter && Object.keys(b.scatter).length)) expect.push('scatter');
   expect.forEach(k => { if (!kinds[k]) fail('expected an ECharts "' + k + '" mount, none rendered (kinds: ' + JSON.stringify(kinds) + ')'); });
-  if (kinds.trade && kinds.trade !== 2) fail('expected 2 trade-map charts, got ' + kinds.trade);
+  if ((kinds.trade||0) !== tradeCount) fail('expected '+tradeCount+' measured trade-map charts, got ' + (kinds.trade||0));
+  // A sparse comparison must open a measured panel, not an empty global default.
+  if (visible.some(b=>Object.keys(b.rank||{}).length) && !visible.some(b=>b.rank&&b.rank[panelCorpus]))
+    fail('full panel opened an unmeasured corpus for the entire selection');
   const th = DATA.chartThemes;
   if (!th || !th.light || !th.dark) fail('DATA.chartThemes must carry light + dark variants');
   else ['surface-1', 'text-primary', 'seq-lo', 'seq-hi'].forEach(k => {
@@ -676,7 +717,8 @@ if (DATA) (function failurePanelTest() {
           + '" instead of NOT MEASURED');
     }
   });
-  if (!nMeasured) fail('failure table: no visible bake carries a measured ladder-inversion split');
+  const expectedMeasured=DATA.bakes.filter(b=>selectedNames.includes(b.name)&&b.zones&&b.zones.rows).length;
+  if (nMeasured!==expectedMeasured) fail('failure table measured coverage differs from the selected evidence');
   // per-model cards: one per visible bake, and the visible set must produce real findings
   const cardNames = [];
   (function walk(e) {

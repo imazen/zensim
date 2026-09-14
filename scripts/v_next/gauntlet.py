@@ -1553,9 +1553,10 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
         nm = era_base_name(b.get("name") or "")
         fam = family_of(nm)
         if nm.startswith("peer_") or fam in ("HDR", "peers"):
-            b["knob_end_fail"] = []
+            b["knob_end_fail"] = None
             continue
         fails = []
+        measured = set()
         curves = ((b.get("dial") or {}).get("curves") or {})
         for c, pts in curves.items():
             if c not in _REACH:
@@ -1563,10 +1564,11 @@ def build_html(bakes, out_path, title="zensim summer gauntlet", loop_targeting=N
             hf = sorted([p for p in pts if p[0] >= 88])
             if len(hf) < 3:
                 continue
+            measured.add(c)
             p50 = [p[2] for p in hf]
             if (p50[-1] - p50[0]) < 8 or p50[-1] < _REACH[c] - 1:
                 fails.append(c)
-        b["knob_end_fail"] = fails
+        b["knob_end_fail"] = fails if fails or len(measured) == len(_REACH) else None
     # codename registry (user directive 2026-08-28: memorable word-chain names).
     _np = Path(__file__).resolve().parents[2] / "benchmarks" / "candidate_names.json"
     _nm = {}
@@ -2022,6 +2024,7 @@ function applyCompare(res){
   _lastHash=null;                               // a fresh read: let the next real edit write
   if(!res.found.length)return;                  // all ids missed -> banner + default view
   state.visible=new Set(res.found);
+  state.mcorp=null;
   state.sortKey='cmp';state.sortDir=1;
   state.gateFilter=new Set();
 }
@@ -2170,7 +2173,7 @@ const GATE_DEFS=[
   ['dialv2','D','G-GRAN v2 peer-anchored dial gate (REGISTERED W12 candidate, not yet frozen)'],
   ['knob','K','knob-end check (G-GRAN v1 semantics: HF-zone reach/span; computed at build)']];
 function gateV(b,g){
-  if(g==='knob')return (b.knob_end_fail===undefined)?null:(b.knob_end_fail.length?'fail':'pass');
+  if(g==='knob')return (b.knob_end_fail==null)?null:(b.knob_end_fail.length?'fail':'pass');
   const e=(b.gatecheck||{})[g];return e?e.v:null;}
 function gateWhy(b,g){
   if(g==='knob')return b.knob_end_fail&&b.knob_end_fail.length?('fails: '+b.knob_end_fail.join(', ')):'';
@@ -2262,7 +2265,7 @@ function renderBar(){
   const bar=$('#bar');bar.innerHTML='';
   const mk=(t,fn,title)=>{const x=el('button',{class:'btn',text:t});if(title)x.setAttribute('title',title);x.onclick=fn;return x;};
   bar.append(
-    mk('minimal / wide',()=>{state.visible=new Set(DATA.bakes.filter(b=>b.name.startsWith('MT913_')&&(b.name.endsWith('_ens5')||b.name==='MT913_linear60')).map(b=>b.name));rerender();renderBar();},
+    mk('minimal / wide',()=>{state.visible=new Set(DATA.bakes.filter(b=>b.name.startsWith('MT913_')&&(b.name.endsWith('_ens5')||b.name==='MT913_linear60')).map(b=>b.name));state.mcorp=null;rerender();renderBar();},
       'Registered train-only comparison: eight complete five-seed ensembles and a linear control. KADID eval only; product gates remain incomplete. Available on the all-rows board.'),
     mk('target models',()=>{state.visible=new Set(PRODUCT_SET);rerender();renderBar();},
       'B, D and the constrained three-seed challenger where present. Read product qualification before composite.'),
@@ -2353,6 +2356,7 @@ function renderBar(){
       const peers=DATA.bakes.filter(b=>b.name.startsWith('peer_')).map(b=>b.name);
       const want=new Set([...(d.bakes||[]),...(DATA.incumbents||[]),...peers]);
       state.visible=new Set(DATA.bakes.filter(b=>want.has(b.name)).map(b=>b.name));
+      state.mcorp=d.preferred_corpus||null;
       rerender();renderBar();};
     bar.append(sel);
   }
@@ -2503,6 +2507,9 @@ function fsid(b){return b.fsid?(b.fsid+(b.fsidInferred?' (inferred)':'')):
   ('NOT RECORDED — width '+b.regime+' is an alias, not an identity');}
 const COLS=[
   ['name','bake',true,b=>b.name],
+  ['measured','measured rank data',true,b=>{const cs=DATA.corpOrder.filter(c=>b.rank[c]&&b.rank[c].n>0);
+    return cs.length?cs[0].toUpperCase()+' n='+b.rank[cs[0]].n+(cs.length>1?' +'+(cs.length-1)+' corpora':''):'NOT MEASURED';}],
+  ['kadid','KADID SROCC',false,b=>rs(b,'kadid')],
   ['qualification','product qualification',true,b=>b.qualification?b.qualification.status:'not evaluated'],
   // FAIRNESS (2026-09-04). `fair` = the tier glyph; `k` = seed-group size; `cmean` =
   // the group's MEAN composite with its spread — the honest estimator against
@@ -2556,7 +2563,7 @@ const COLS=[
 // being read as a win (exam §2.1 + registry kadid-tid-train-eq-val +
 // hfnl-ssim2-self-target-circular-2026-09-01).
 const NONRANK={
-  kadid:'train==val (100% pair overlap) — integrity guard, never ranking signal',
+  kadid:'Populations differ: historical overlap guards and separately admitted source-disjoint studies. Read study admission; do not rank across populations.',
   tid:'train==val, and retired to train-only by user ruling 2026-08-29 — historical guard',
   nonphoto:'ssim2-ANCHORED: its target IS an ssim2 score, so this is AGREEMENT with ssim2, never a win over it',
   imazen26:'ssim2-ANCHORED: agreement with ssim2, not a win over it',
@@ -2596,7 +2603,7 @@ if(LT){COLS.push(
   ['loop3','3shot ±2',false,b=>{const c=ltCell(b,'k3_emit_best');return c?c.within2:null;}],
   ['loop3err','3shot med|err|',false,b=>{const c=ltCell(b,'k3_emit_best');return c!=null&&c.med_abs_err!=null?c.med_abs_err:null;}]);}
 function fmtCell(key,v,b){
-  if(key==='name'||key==='regime'||key==='fair'||key==='qualification')return v;
+  if(key==='name'||key==='regime'||key==='fair'||key==='qualification'||key==='measured')return v;
   if(key==='k')return v==null?'—':(v===1?'1 ⚠':String(v));
   if(key==='cspread')return v==null?'—':f3(v);
   if(key&&key.charAt(0)==='w'&&key.length===2)return v==null?'—':v;
@@ -2654,8 +2661,8 @@ function renderTable(){
     +'<b>HF-NL/ref</b> = hfnlproxy per-reference mean signed SROCC (quality-oriented; per-ref, '
     +'never pooled — hover the header; Δ under the ~0.04 axis LSD is noise; 80 pre-pin cells were '
     +'sign-flipped and are REPAIRED per appendix O — see the HF-NL axis panel) — “— (absent)” on cells that predate '
-    +'the instrument is <b>absent-not-failed</b> (not measured ≠ measured fail); KADID/TID stay '
-    +'train==val integrity guards everywhere. <b>dom</b>-tagged rows are DOMINATED (strictly '
+    +'the instrument is <b>absent-not-failed</b> (not measured ≠ measured fail). Historical KADID/TID overlap guards '
+    +'differ from the Rev3 study’s admitted KADID eval. <b>dom</b>-tagged rows are DOMINATED (strictly '
     +'beaten by a same-class sibling on every measured floor axis + composite) — kept on the '
     +'board, dimmed + default-off behind the “dominated” chip; nothing is deleted.'
     +(LT?' <b>2shot/3shot ±2</b> = JXL loop targeting: cells (of '+ltN()+') where the DECODED-judged score lands '
@@ -2711,6 +2718,7 @@ function renderTable(){
     COLS.forEach(c=>{
       const v=c[3](b);
       const td=el('td',{class:(c[0]==='name'||c[0]==='regime')?'lbl':'',text:fmtCell(c[0],v,b)});
+      if(c[0]==='measured')td.setAttribute('title',Object.entries(b.rank||{}).map(([corpus,r])=>corpus+': n='+r.n).join('\n')||'No rank results recorded');
       if(c[0]==='name'){td.textContent='';nameInto(td,b,b.is_stub?' ✳':'');}
       if(c[0]==='qualification'){td.title='Read from the qualification owner; research composite does not confer a pass.';
         td.style.color=v==='qualified'?'var(--good)':v==='failed'?'var(--critical)':'var(--warn)';}
@@ -2829,7 +2837,7 @@ function renderTable(){
     +'<p><b>The "Gate scorecard" table below</b> is a DIFFERENT system: CODEC_TARGET_GOALS soft-gates '
     +'(continuous 0–1 scores, weighted into a shippability scalar) — diagnostic shading, not pass/fail law.</p>'
     +'<p><b>Ruler caveats (read before comparing rows):</b> '
-    +'kadid rows are <b>train==eval for every current model</b> (integrity guards, not skill); '
+    +'historical kadid rows are overlap guards; the Rev3 study uses <b>3,125 separately admitted eval pairs</b>. Do not compare different populations as a matched experiment; '
     +'tid is <b>RETIRED TO TRAIN-ONLY</b> (user ruling 2026-08-29) — do not rank on it; '
     +'konjnd board rows for 372-class bakes historically scored the full 1,008-ref file while 944 bakes scored the '
     +'JPEG-504 — same-pair kon reads live in the campaign doc’s single-ruler table; '
@@ -3046,13 +3054,14 @@ function renderTrade(){
     if(pts.length)grid.append(mountChart('trade',390,300,tradeOpt(xc,yc,xl,yl,pts)));
   });
   if(grid.children.length)host.appendChild(grid);
+  else host.append(el('div',{class:'cap',text:'NOT MEASURED for this selection: these trade maps require paired CID22/nonphoto or CID22/KonJND results.'}));
 }
 
 // ---- FULL MOHAMMADI PANEL (all six stats per corpus, per visible bake)
 function renderMPanel(){
   const host=$('#mpanel');if(!host)return;host.innerHTML='';
   const bs=visBakes();if(!bs.length)return;
-  const corps=DATA.corpOrder.filter(c=>DATA.bakes.some(b=>b.rank[c]));
+  const corps=DATA.corpOrder.filter(c=>bs.some(b=>b.rank[c]));
   if(!state.mcorp||!corps.includes(state.mcorp))state.mcorp=corps[0];
   const TV=new Set();
   DATA.bakes.forEach(b=>Object.entries(b.rank||{}).forEach(([c,r])=>{if(r&&r.train_eq_val)TV.add(c);}));
@@ -3065,7 +3074,8 @@ function renderMPanel(){
     +'negative is the declared CONVENTION and a POSITIVE would be the defect — row shading follows the '
     +'orientation, not the bare sign. <b>per-ref / %bwd</b> = within-image mean SROCC '
     +'and share of reference ladders ranked backwards (— when the corpus carries no ref identity). '
-    +'⚠ = train==val (KADID/TID: memorization, not held-out skill). Click a header to sort.'}));
+    +'⚠ = stored historical overlap flag; explicit study admission governs source-disjoint eval. Click a header to sort.'}));
+  if(!corps.length){host.append(el('div',{class:'cap',text:'NOT MEASURED: no rank-corpus results for this selection.'}));return;}
   const sel=el('div',{class:'bar',style:'margin:6px 0 10px'});
   corps.forEach(c=>{
     const b=corpTitle(el('button',{class:'btn',text:corpMark(c)+(TV.has(c)?' ⚠':'')}),c);
@@ -3075,6 +3085,9 @@ function renderMPanel(){
   });
   host.append(sel);
   const c=state.mcorp;
+  const missing=bs.filter(b=>!b.rank[c]);
+  host.append(el('div',{class:'cap',text:c.toUpperCase()+': measured for '+(bs.length-missing.length)+' of '+bs.length+' selected models.'
+    +(missing.length?' No '+c+' result for: '+missing.map(b=>b.name).join(', '):'')}));
   const tbl=el('table',{});
   const thead=el('tr',{});
   ['bake','n','SROCC ±CI','PLCC','KROCC','OR','PWRC','Z-RMSE','per-ref','%bwd'].forEach((h,i)=>
