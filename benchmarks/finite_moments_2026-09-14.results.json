@@ -1,0 +1,2477 @@
+{
+  "status": "TRAIN_MECHANISM_PASSES_COST_UNQUALIFIED",
+  "scalar_unchanged": true,
+  "default_enabled": false,
+  "spatial": {
+    "status": "COMPLETE_TRAIN_ONLY_NOT_QUALIFIED",
+    "results": [
+      {
+        "name": "PP914_basic156_h128_plain_ens3",
+        "row_id": 396,
+        "bin": 1,
+        "m2": 0.9983716891011724,
+        "m3f": 0.9470256187581415,
+        "old_m3f": 0.9106600086843248,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 48,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--396--b1.json",
+        "sha256": "5e486c8c436c428254f85ac330d74f16bb60fb07161cb1b7da5febcb615891df",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_1060.png.scale192x256.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_1060.png.scale192x256_27b3dfa56bc85c3b_zenjxl_q50_615af36bb0728757.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--396--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic156_h128_plain_ens3",
+        "row_id": 2436,
+        "bin": 1,
+        "m2": 0.9879866518353725,
+        "m3f": 0.846941045606229,
+        "old_m3f": 0.8344827586206894,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 30,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--2436--b1.json",
+        "sha256": "d92c371bcb47ee3a8ae14e16e8f10e04ce8c71df4445c4bc808d31f89a2425d8",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_5202.png.scale148x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_5202.png.scale148x192_774b0e098a8eb980_zenjxl_q50_bd00caa35a36d66f.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--2436--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic156_h128_plain_ens3",
+        "row_id": 4597,
+        "bin": 1,
+        "m2": 0.9833333333333169,
+        "m3f": 0.9833333333333169,
+        "old_m3f": 0.9999999999999832,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 9,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--4597--b1.json",
+        "sha256": "e4cc2026c54c8c5a665121c52edfebe95545e12f3b303cb07f4e01ea6c04e976",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_7102.png.scale96x96.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_7102.png.scale96x96_61d2f3c71fec4a1c_zenjxl_q50_4e2697a6a68ac1a0.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--4597--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic156_h128_plain_ens3",
+        "row_id": 5316,
+        "bin": 1,
+        "m2": 0.9999999999999992,
+        "m3f": 0.859130434782608,
+        "old_m3f": 0.7808695652173907,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 24,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--5316--b1.json",
+        "sha256": "4b7be7dcea1eae1a2975450ffbe8f6cf400acb6d1866dae902e5b326a679158c",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_8286.png.scale108x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_8286.png.scale108x192_2519d583d9182746_zenjxl_q50_2ab4d1d38c3f8eb4.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--5316--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic156_h128_plain_ens3",
+        "row_id": 6577,
+        "bin": 1,
+        "m2": 0.9868725868725866,
+        "m3f": 0.9593307593307591,
+        "old_m3f": 0.9634491634491632,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 36,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--6577--b1.json",
+        "sha256": "be071e7ddb67d9cc9e291509a1b7e98befdd6e30f8222598c6e3fcde28b52e8e",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_9352.png.scale192x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_9352.png.scale192x192_b5381cf59ff14477_zenjxl_q50_0470750ec3f30e58.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--6577--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192l8_h128_plain_ens3",
+        "row_id": 396,
+        "bin": 1,
+        "m2": 0.9996743378202345,
+        "m3f": 0.9413808076422058,
+        "old_m3f": 0.7901650021710812,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 48,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--396--b1.json",
+        "sha256": "183ba195432df9382fad4f56969103198213af07126e0d88a4c623bb870ec52a",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_1060.png.scale192x256.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_1060.png.scale192x256_27b3dfa56bc85c3b_zenjxl_q50_615af36bb0728757.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--396--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192l8_h128_plain_ens3",
+        "row_id": 2436,
+        "bin": 1,
+        "m2": 0.9942157953281422,
+        "m3f": 0.8740823136818686,
+        "old_m3f": 0.8616240266963291,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 30,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--2436--b1.json",
+        "sha256": "9aa1f892570321c052fd9f96fb9ac073a202e636ae90c48459e0aba7f96ff98f",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_5202.png.scale148x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_5202.png.scale148x192_774b0e098a8eb980_zenjxl_q50_bd00caa35a36d66f.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--2436--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192l8_h128_plain_ens3",
+        "row_id": 4597,
+        "bin": 1,
+        "m2": 0.9166666666666512,
+        "m3f": 0.866666666666652,
+        "old_m3f": 0.866666666666652,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 9,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--4597--b1.json",
+        "sha256": "912e293ce0a8e4918fdb21e0a49520de94a54e23e4c64fd9707acd6df68b6f13",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_7102.png.scale96x96.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_7102.png.scale96x96_61d2f3c71fec4a1c_zenjxl_q50_4e2697a6a68ac1a0.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--4597--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192l8_h128_plain_ens3",
+        "row_id": 5316,
+        "bin": 1,
+        "m2": 0.9999999999999992,
+        "m3f": 0.8678260869565211,
+        "old_m3f": 0.750434782608695,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 24,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--5316--b1.json",
+        "sha256": "0db37065242541e3cf3bed62b8ba94d638edb77ebcae0755a356a94f9676a16f",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_8286.png.scale108x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_8286.png.scale108x192_2519d583d9182746_zenjxl_q50_2ab4d1d38c3f8eb4.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--5316--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192l8_h128_plain_ens3",
+        "row_id": 6577,
+        "bin": 1,
+        "m2": 0.998198198198198,
+        "m3f": 0.953153153153153,
+        "old_m3f": 0.9330759330759328,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 36,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--6577--b1.json",
+        "sha256": "ce6493fc23ed9e5cedd954426a5b77b492103e9f0a22574358479172418e053f",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_9352.png.scale192x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_9352.png.scale192x192_b5381cf59ff14477_zenjxl_q50_0470750ec3f30e58.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--6577--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192max_h128_plain_ens3",
+        "row_id": 396,
+        "bin": 1,
+        "m2": 0.9660225792444638,
+        "m3f": 0.8641988710377768,
+        "old_m3f": 0.8165436387320886,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 48,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--396--b1.json",
+        "sha256": "e64e94d2d69146648b4634f2f30e24c1f62788a05a1851d45b87e2db9c5a0681",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_1060.png.scale192x256.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_1060.png.scale192x256_27b3dfa56bc85c3b_zenjxl_q50_615af36bb0728757.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--396--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192max_h128_plain_ens3",
+        "row_id": 2436,
+        "bin": 1,
+        "m2": 0.8162402669632923,
+        "m3f": 0.7979977753058953,
+        "old_m3f": 0.9172413793103447,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 30,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--2436--b1.json",
+        "sha256": "ceedffdc34b421564e5b3ef31efbb2787cf3ef3b326a8a168023c8c617160f6a",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_5202.png.scale148x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_5202.png.scale148x192_774b0e098a8eb980_zenjxl_q50_bd00caa35a36d66f.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--2436--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192max_h128_plain_ens3",
+        "row_id": 4597,
+        "bin": 1,
+        "m2": 0.9833333333333169,
+        "m3f": 0.9999999999999832,
+        "old_m3f": 0.9999999999999832,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 9,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--4597--b1.json",
+        "sha256": "448976e86919f37d09a84505a9bb32f8dc9bb8afbe027d66d8b4dcdcaff61e9f",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_7102.png.scale96x96.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_7102.png.scale96x96_61d2f3c71fec4a1c_zenjxl_q50_4e2697a6a68ac1a0.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--4597--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192max_h128_plain_ens3",
+        "row_id": 5316,
+        "bin": 1,
+        "m2": 0.985217391304347,
+        "m3f": 0.9139130434782602,
+        "old_m3f": 0.6652173913043473,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 24,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--5316--b1.json",
+        "sha256": "233416dc6a73673da89e3aeffaaccd72e9fb7b16c62a60d616cf25114388870c",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_8286.png.scale108x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_8286.png.scale108x192_2519d583d9182746_zenjxl_q50_2ab4d1d38c3f8eb4.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--5316--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192max_h128_plain_ens3",
+        "row_id": 6577,
+        "bin": 1,
+        "m2": 0.9951093951093949,
+        "m3f": 0.9613899613899611,
+        "old_m3f": 0.9564993564993562,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 36,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--6577--b1.json",
+        "sha256": "ac87ead4345e39731981dc50c7115004786a97d5d09646b053e4aa7fb8e6b4a3",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_9352.png.scale192x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_9352.png.scale192x192_b5381cf59ff14477_zenjxl_q50_0470750ec3f30e58.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--6577--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic228_h32_plain_ens3",
+        "row_id": 396,
+        "bin": 1,
+        "m2": 0.9973947025618758,
+        "m3f": 0.9399696048632219,
+        "old_m3f": 0.8246851932262267,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 48,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--396--b1.json",
+        "sha256": "61d1adfe2babb41a3d04fce77a63bb37637b4c022774f0dfd7dc992b72aec0a6",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_1060.png.scale192x256.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_1060.png.scale192x256_27b3dfa56bc85c3b_zenjxl_q50_615af36bb0728757.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--396--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic228_h32_plain_ens3",
+        "row_id": 2436,
+        "bin": 1,
+        "m2": 0.9986651835372634,
+        "m3f": 0.9528364849833146,
+        "old_m3f": 0.875417130144605,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 30,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--2436--b1.json",
+        "sha256": "9f38b79e9a0eb8c7ca4fb9adbbcb5c2f3963de2367eb80286466f281a333758c",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_5202.png.scale148x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_5202.png.scale148x192_774b0e098a8eb980_zenjxl_q50_bd00caa35a36d66f.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--2436--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic228_h32_plain_ens3",
+        "row_id": 4597,
+        "bin": 1,
+        "m2": 0.9999999999999832,
+        "m3f": 0.9666666666666505,
+        "old_m3f": 0.9166666666666512,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 9,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--4597--b1.json",
+        "sha256": "672d40fdb3037eabf9ae98d8be4a18a0e4db28b80530979dd8df5998b6d927bd",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_7102.png.scale96x96.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_7102.png.scale96x96_61d2f3c71fec4a1c_zenjxl_q50_4e2697a6a68ac1a0.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--4597--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic228_h32_plain_ens3",
+        "row_id": 5316,
+        "bin": 1,
+        "m2": 0.9999999999999992,
+        "m3f": 0.9199999999999993,
+        "old_m3f": 0.6739130434782603,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 24,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--5316--b1.json",
+        "sha256": "ad6e73e6ac4a30529c953be39a36a2d0e6d050c7ebfe5faf4cb4701119ba331f",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_8286.png.scale108x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_8286.png.scale108x192_2519d583d9182746_zenjxl_q50_2ab4d1d38c3f8eb4.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--5316--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic228_h32_plain_ens3",
+        "row_id": 6577,
+        "bin": 1,
+        "m2": 0.998198198198198,
+        "m3f": 0.9814671814671813,
+        "old_m3f": 0.9629343629343627,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 36,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--6577--b1.json",
+        "sha256": "e40341ba05f821ffb90ab76ef9cfaeecf5692e6e3d8c968e166040622c53b8f2",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_9352.png.scale192x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_9352.png.scale192x192_b5381cf59ff14477_zenjxl_q50_0470750ec3f30e58.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--6577--b1.json"
+        ]
+      },
+      {
+        "name": "PP914_basic156_h128_plain_ens3",
+        "row_id": 396,
+        "bin": 8,
+        "m2": 0.9983716891011724,
+        "m3f": 0.9470256187581415,
+        "old_m3f": 0.9106600086843248,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 48,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--396--b8.json",
+        "sha256": "34071f55aa7fac042751fc927a13756f785b3e6362a82259082d64fb7afb94d9",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_1060.png.scale192x256.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_1060.png.scale192x256_27b3dfa56bc85c3b_zenjxl_q50_615af36bb0728757.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--396--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic156_h128_plain_ens3",
+        "row_id": 2436,
+        "bin": 8,
+        "m2": 0.9879866518353725,
+        "m3f": 0.846941045606229,
+        "old_m3f": 0.8344827586206894,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 30,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--2436--b8.json",
+        "sha256": "2e90536df65da186233f8ea31209706f39fc457157254fc95622bd32cd9ecda8",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_5202.png.scale148x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_5202.png.scale148x192_774b0e098a8eb980_zenjxl_q50_bd00caa35a36d66f.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--2436--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic156_h128_plain_ens3",
+        "row_id": 4597,
+        "bin": 8,
+        "m2": 0.9833333333333169,
+        "m3f": 0.9833333333333169,
+        "old_m3f": 0.9999999999999832,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 9,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--4597--b8.json",
+        "sha256": "04bb18fe288c9245f8552fa3ecfb047538e22cf02a5021df84d41ff06fd1a17b",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_7102.png.scale96x96.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_7102.png.scale96x96_61d2f3c71fec4a1c_zenjxl_q50_4e2697a6a68ac1a0.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--4597--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic156_h128_plain_ens3",
+        "row_id": 5316,
+        "bin": 8,
+        "m2": 0.9999999999999992,
+        "m3f": 0.859130434782608,
+        "old_m3f": 0.7808695652173907,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 24,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--5316--b8.json",
+        "sha256": "a7d5c12c32d84ec1561dfdc6acf990ad2ab3ab79cdb0b58ee40aa7ca0ae1cdf3",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_8286.png.scale108x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_8286.png.scale108x192_2519d583d9182746_zenjxl_q50_2ab4d1d38c3f8eb4.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--5316--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic156_h128_plain_ens3",
+        "row_id": 6577,
+        "bin": 8,
+        "m2": 0.9868725868725866,
+        "m3f": 0.9593307593307591,
+        "old_m3f": 0.9634491634491632,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 36,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--6577--b8.json",
+        "sha256": "0d64b6611c9ccf4237cf24b9ae29f700338da03e15a0b15946e6a5f3db0944ca",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_9352.png.scale192x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_9352.png.scale192x192_b5381cf59ff14477_zenjxl_q50_0470750ec3f30e58.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic156_h128_plain_ens3--6577--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192l8_h128_plain_ens3",
+        "row_id": 396,
+        "bin": 8,
+        "m2": 0.9996743378202345,
+        "m3f": 0.9413808076422058,
+        "old_m3f": 0.7901650021710812,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 48,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--396--b8.json",
+        "sha256": "345845b882821ff80a78fbaedeb01f1a60230431a292bcbd126d17cca6ec040f",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_1060.png.scale192x256.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_1060.png.scale192x256_27b3dfa56bc85c3b_zenjxl_q50_615af36bb0728757.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--396--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192l8_h128_plain_ens3",
+        "row_id": 2436,
+        "bin": 8,
+        "m2": 0.9942157953281422,
+        "m3f": 0.8740823136818686,
+        "old_m3f": 0.8616240266963291,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 30,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--2436--b8.json",
+        "sha256": "cd24f81e174abe8dec180226bd6a4a8dea1f294d5c7d9fb12350adca5d3200d1",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_5202.png.scale148x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_5202.png.scale148x192_774b0e098a8eb980_zenjxl_q50_bd00caa35a36d66f.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--2436--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192l8_h128_plain_ens3",
+        "row_id": 4597,
+        "bin": 8,
+        "m2": 0.9166666666666512,
+        "m3f": 0.866666666666652,
+        "old_m3f": 0.866666666666652,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 9,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--4597--b8.json",
+        "sha256": "74a354e70fcdd8a9bccaf5638b473672f0f5e42d61bb48b3914107809a6ca901",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_7102.png.scale96x96.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_7102.png.scale96x96_61d2f3c71fec4a1c_zenjxl_q50_4e2697a6a68ac1a0.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--4597--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192l8_h128_plain_ens3",
+        "row_id": 5316,
+        "bin": 8,
+        "m2": 0.9999999999999992,
+        "m3f": 0.8678260869565211,
+        "old_m3f": 0.750434782608695,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 24,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--5316--b8.json",
+        "sha256": "7c1c70ce5a35125cb99f4d724bb74ff810261d45ad0ac0e6d580742acea6daa6",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_8286.png.scale108x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_8286.png.scale108x192_2519d583d9182746_zenjxl_q50_2ab4d1d38c3f8eb4.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--5316--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192l8_h128_plain_ens3",
+        "row_id": 6577,
+        "bin": 8,
+        "m2": 0.998198198198198,
+        "m3f": 0.953153153153153,
+        "old_m3f": 0.9330759330759328,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 36,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--6577--b8.json",
+        "sha256": "542863218febebf5e30a02385ef7cb464d4359d0b31ff9b194459cad866b4a0f",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_9352.png.scale192x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_9352.png.scale192x192_b5381cf59ff14477_zenjxl_q50_0470750ec3f30e58.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192l8_h128_plain_ens3--6577--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192max_h128_plain_ens3",
+        "row_id": 396,
+        "bin": 8,
+        "m2": 0.9660225792444638,
+        "m3f": 0.8641988710377768,
+        "old_m3f": 0.8165436387320886,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 48,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--396--b8.json",
+        "sha256": "a17c2cbf4cba5ea930f0a9ae99d6c6682a7180dcba073305b23cc6fca472ac9c",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_1060.png.scale192x256.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_1060.png.scale192x256_27b3dfa56bc85c3b_zenjxl_q50_615af36bb0728757.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--396--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192max_h128_plain_ens3",
+        "row_id": 2436,
+        "bin": 8,
+        "m2": 0.8162402669632923,
+        "m3f": 0.7979977753058953,
+        "old_m3f": 0.9172413793103447,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 30,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--2436--b8.json",
+        "sha256": "49a4bc6c5baff45e5d81082231aec6a10ff8e532f3f41a6b20301296db86c4b7",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_5202.png.scale148x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_5202.png.scale148x192_774b0e098a8eb980_zenjxl_q50_bd00caa35a36d66f.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--2436--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192max_h128_plain_ens3",
+        "row_id": 4597,
+        "bin": 8,
+        "m2": 0.9833333333333169,
+        "m3f": 0.9999999999999832,
+        "old_m3f": 0.9999999999999832,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 9,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--4597--b8.json",
+        "sha256": "c3dd48b9ad3c07526b49359e277c850c2f0b2906ec35d9920e0e8258f0791957",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_7102.png.scale96x96.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_7102.png.scale96x96_61d2f3c71fec4a1c_zenjxl_q50_4e2697a6a68ac1a0.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--4597--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192max_h128_plain_ens3",
+        "row_id": 5316,
+        "bin": 8,
+        "m2": 0.985217391304347,
+        "m3f": 0.9139130434782602,
+        "old_m3f": 0.6652173913043473,
+        "pass_spatial": false,
+        "pass_m3": true,
+        "pixel_interventions": 24,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--5316--b8.json",
+        "sha256": "069123ead3c8e5fc442e278115ee7027b87dff1c831b93d7e049b3013976bdb8",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_8286.png.scale108x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_8286.png.scale108x192_2519d583d9182746_zenjxl_q50_2ab4d1d38c3f8eb4.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--5316--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic192max_h128_plain_ens3",
+        "row_id": 6577,
+        "bin": 8,
+        "m2": 0.9951093951093949,
+        "m3f": 0.9613899613899611,
+        "old_m3f": 0.9564993564993562,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 36,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--6577--b8.json",
+        "sha256": "c0913e0eac17037e1c13c0c62bfefa006fa7408a91f5e049898b57bcc73d5085",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_9352.png.scale192x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_9352.png.scale192x192_b5381cf59ff14477_zenjxl_q50_0470750ec3f30e58.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic192max_h128_plain_ens3--6577--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic228_h32_plain_ens3",
+        "row_id": 396,
+        "bin": 8,
+        "m2": 0.9973947025618758,
+        "m3f": 0.9399696048632219,
+        "old_m3f": 0.8246851932262267,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 48,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--396--b8.json",
+        "sha256": "c297956ed312f928d4d16f6c68f8d4246d2036409483136ab36e2936bd54b860",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_1060.png.scale192x256.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_1060.png.scale192x256_27b3dfa56bc85c3b_zenjxl_q50_615af36bb0728757.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--396--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic228_h32_plain_ens3",
+        "row_id": 2436,
+        "bin": 8,
+        "m2": 0.9986651835372634,
+        "m3f": 0.9528364849833146,
+        "old_m3f": 0.875417130144605,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 30,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--2436--b8.json",
+        "sha256": "8af5a417a254f78dc4d1bfe34dace09f791c2441a070fae3a6865b84fda614a8",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_5202.png.scale148x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_5202.png.scale148x192_774b0e098a8eb980_zenjxl_q50_bd00caa35a36d66f.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--2436--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic228_h32_plain_ens3",
+        "row_id": 4597,
+        "bin": 8,
+        "m2": 0.9999999999999832,
+        "m3f": 0.9666666666666505,
+        "old_m3f": 0.9166666666666512,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 9,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--4597--b8.json",
+        "sha256": "d1b96dc08f557c060caf2e665dc985c233eab6eb2bf07e771a893de66d75b63c",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_7102.png.scale96x96.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_7102.png.scale96x96_61d2f3c71fec4a1c_zenjxl_q50_4e2697a6a68ac1a0.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--4597--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic228_h32_plain_ens3",
+        "row_id": 5316,
+        "bin": 8,
+        "m2": 0.9999999999999992,
+        "m3f": 0.9199999999999993,
+        "old_m3f": 0.6739130434782603,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 24,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--5316--b8.json",
+        "sha256": "9423cba79c435065b663efeb9f83eb742627faa85172614a9504ff64244a1f6e",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_8286.png.scale108x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_8286.png.scale108x192_2519d583d9182746_zenjxl_q50_2ab4d1d38c3f8eb4.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--5316--b8.json"
+        ]
+      },
+      {
+        "name": "PP914_basic228_h32_plain_ens3",
+        "row_id": 6577,
+        "bin": 8,
+        "m2": 0.998198198198198,
+        "m3f": 0.9814671814671813,
+        "old_m3f": 0.9629343629343627,
+        "pass_spatial": true,
+        "pass_m3": true,
+        "pixel_interventions": 36,
+        "scalar_features_sensitivities_old_density_exact": true,
+        "path": "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--6577--b8.json",
+        "sha256": "2be18932f4eaeffc31125510eff28bc2a309890ec42e64413ec1f486c42f03a0",
+        "command": [
+          "/home/lilith/work/zen/zensim/target/release/examples/diffmap_block_coherence",
+          "/mnt/v/output/clean-picker-corpus-2026-06-26/o_9352.png.scale192x192.png",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/spatial-after/decoded/o_9352.png.scale192x192_b5381cf59ff14477_zenjxl_q50_0470750ec3f30e58.png",
+          "--block",
+          "32",
+          "--ensemble",
+          "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "--ensemble-weights",
+          "0.3333333333333333,0.3333333333333333,0.3333333333333333",
+          "--json",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/spatial/PP914_basic228_h32_plain_ens3--6577--b8.json"
+        ]
+      }
+    ]
+  },
+  "timing": {
+    "run_id": "1789384496-2fe21e",
+    "timestamp": "2026-09-14T11:17:05Z",
+    "git_hash": "c6c3b6108f3e742867afe56a80b9a2a5bdfd9b22",
+    "ci_environment": null,
+    "comparisons": [
+      {
+        "group_name": "sampling_spatial_1024",
+        "benchmarks": [
+          {
+            "name": "PP914_basic156_h128_plain_ens3_finite0",
+            "summary": {
+              "n": 30,
+              "min": 58522928.0,
+              "max": 60859838.0,
+              "mean": 59797336.46666667,
+              "variance": 189629052571.1545,
+              "median": 59823842.0,
+              "mad": 341682.96119999996
+            },
+            "cold_start_ns": 61083597.0,
+            "mean_ci": {
+              "lower": 59644054.46666667,
+              "median": 59798681.46666667,
+              "upper": 59945733.233333334
+            },
+            "timer_ticks_per_sample": 5979733.6466666665
+          },
+          {
+            "name": "PP914_basic156_h128_plain_ens3_finite1",
+            "summary": {
+              "n": 30,
+              "min": 91024534.0,
+              "max": 93583360.0,
+              "mean": 91974728.19999997,
+              "variance": 376543874872.7151,
+              "median": 91965847.0,
+              "mad": 632644.6938
+            },
+            "cold_start_ns": 91986377.0,
+            "mean_ci": {
+              "lower": 91769499.1,
+              "median": 91973088.8,
+              "upper": 92197927.16666667
+            },
+            "timer_ticks_per_sample": 9197472.819999997
+          },
+          {
+            "name": "PP914_basic192l8_h128_plain_ens3_finite0",
+            "summary": {
+              "n": 30,
+              "min": 61218608.0,
+              "max": 64002011.0,
+              "mean": 62482981.599999994,
+              "variance": 437382681774.1804,
+              "median": 62371987.5,
+              "mad": 652711.6847999999
+            },
+            "cold_start_ns": 63288348.0,
+            "mean_ci": {
+              "lower": 62251397.4,
+              "median": 62476323.46666667,
+              "upper": 62717781.63333333
+            },
+            "timer_ticks_per_sample": 6248298.159999999
+          },
+          {
+            "name": "PP914_basic192l8_h128_plain_ens3_finite1",
+            "summary": {
+              "n": 30,
+              "min": 108007069.0,
+              "max": 110825662.0,
+              "mean": 109590484.59999998,
+              "variance": 617396709774.5897,
+              "median": 109699108.5,
+              "mad": 1036368.5345999999
+            },
+            "cold_start_ns": 110466183.0,
+            "mean_ci": {
+              "lower": 109316934.03333333,
+              "median": 109592097.6,
+              "upper": 109861491.86666666
+            },
+            "timer_ticks_per_sample": 10959048.459999997
+          },
+          {
+            "name": "PP914_basic192max_h128_plain_ens3_finite0",
+            "summary": {
+              "n": 30,
+              "min": 82519941.0,
+              "max": 85103798.0,
+              "mean": 83548676.80000001,
+              "variance": 392291706949.0598,
+              "median": 83367356.5,
+              "mad": 591567.7782
+            },
+            "cold_start_ns": 83934936.0,
+            "mean_ci": {
+              "lower": 83332272.66666667,
+              "median": 83546688.46666667,
+              "upper": 83770993.03333333
+            },
+            "timer_ticks_per_sample": 8354867.680000002
+          },
+          {
+            "name": "PP914_basic192max_h128_plain_ens3_finite1",
+            "summary": {
+              "n": 30,
+              "min": 114900903.0,
+              "max": 117893752.0,
+              "mean": 116217833.10000002,
+              "variance": 514342804518.91785,
+              "median": 116081218.5,
+              "mad": 594880.6479
+            },
+            "cold_start_ns": 116204353.0,
+            "mean_ci": {
+              "lower": 115974877.9,
+              "median": 116216237.43333334,
+              "upper": 116478526.86666666
+            },
+            "timer_ticks_per_sample": 11621783.310000002
+          },
+          {
+            "name": "PP914_basic228_h32_plain_ens3_finite0",
+            "summary": {
+              "n": 30,
+              "min": 83180801.0,
+              "max": 85884131.0,
+              "mean": 84262083.30000003,
+              "variance": 385796638259.45526,
+              "median": 84221207.0,
+              "mad": 537221.5926
+            },
+            "cold_start_ns": 84628898.0,
+            "mean_ci": {
+              "lower": 84051222.96666667,
+              "median": 84261140.53333333,
+              "upper": 84485583.23333333
+            },
+            "timer_ticks_per_sample": 8426208.330000002
+          },
+          {
+            "name": "PP914_basic228_h32_plain_ens3_finite1",
+            "summary": {
+              "n": 30,
+              "min": 130720683.0,
+              "max": 135073503.0,
+              "mean": 131972585.93333331,
+              "variance": 936186913453.0336,
+              "median": 131965395.5,
+              "mad": 1078194.1631999998
+            },
+            "cold_start_ns": 132605697.0,
+            "mean_ci": {
+              "lower": 131644733.86666666,
+              "median": 131964988.36666666,
+              "upper": 132320229.66666667
+            },
+            "timer_ticks_per_sample": 13197258.59333333
+          }
+        ],
+        "analyses": [
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic156_h128_plain_ens3_finite1",
+            {
+              "baseline": {
+                "n": 29,
+                "min": 58522928.0,
+                "max": 60859838.0,
+                "mean": 59810149.62068965,
+                "variance": 191300307415.31583,
+                "median": 59828237.0,
+                "mad": 336708.8382
+              },
+              "candidate": {
+                "n": 29,
+                "min": 91024534.0,
+                "max": 93065655.0,
+                "mean": 91919258.13793105,
+                "variance": 294387328483.76825,
+                "median": 91958132.0,
+                "mad": 622637.1438
+              },
+              "diff": {
+                "n": 29,
+                "min": 31120994.0,
+                "max": 33112534.0,
+                "mean": 32109108.51724138,
+                "variance": 272323306860.11575,
+                "median": 32107284.0,
+                "mad": 584621.7971999999
+              },
+              "pct_change": 53.68504964604558,
+              "significant": true,
+              "cohens_d": 65.15754637896602,
+              "n_samples": 30,
+              "n_outliers": 1,
+              "ci_lower": 31921776.655172415,
+              "ci_median": 32108600.689655174,
+              "ci_upper": 32298612.44827586,
+              "drift_correlation": -0.2561576354679802,
+              "wilcoxon_p": 2.705475642114574e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic192l8_h128_plain_ens3_finite0",
+            {
+              "baseline": {
+                "n": 30,
+                "min": 58522928.0,
+                "max": 60859838.0,
+                "mean": 59797336.46666667,
+                "variance": 189629052571.1545,
+                "median": 59823842.0,
+                "mad": 341682.96119999996
+              },
+              "candidate": {
+                "n": 30,
+                "min": 61218608.0,
+                "max": 64002011.0,
+                "mean": 62482981.599999994,
+                "variance": 437382681774.1804,
+                "median": 62371987.5,
+                "mad": 652711.6847999999
+              },
+              "diff": {
+                "n": 30,
+                "min": 1191145.0,
+                "max": 4339639.0,
+                "mean": 2685645.1333333333,
+                "variance": 592905522795.0851,
+                "median": 2706190.5,
+                "mad": 675492.5751
+              },
+              "pct_change": 4.491245416642286,
+              "significant": true,
+              "cohens_d": 4.796514816201592,
+              "n_samples": 30,
+              "n_outliers": 0,
+              "ci_lower": 2413207.6333333333,
+              "ci_median": 2680491.2333333334,
+              "ci_upper": 2953652.1,
+              "drift_correlation": 0.11546162402669635,
+              "wilcoxon_p": 1.8276593551902626e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic192l8_h128_plain_ens3_finite1",
+            {
+              "baseline": {
+                "n": 30,
+                "min": 58522928.0,
+                "max": 60859838.0,
+                "mean": 59797336.46666667,
+                "variance": 189629052571.1545,
+                "median": 59823842.0,
+                "mad": 341682.96119999996
+              },
+              "candidate": {
+                "n": 30,
+                "min": 108007069.0,
+                "max": 110825662.0,
+                "mean": 109590484.59999998,
+                "variance": 617396709774.5897,
+                "median": 109699108.5,
+                "mad": 1036368.5345999999
+              },
+              "diff": {
+                "n": 30,
+                "min": 48341477.0,
+                "max": 51288444.0,
+                "mean": 49793148.13333335,
+                "variance": 641442130378.9523,
+                "median": 49704581.5,
+                "mad": 847130.2119
+              },
+              "pct_change": 83.2698428985879,
+              "significant": true,
+              "cohens_d": 78.386429633979,
+              "n_samples": 30,
+              "n_outliers": 0,
+              "ci_lower": 49514815.666666664,
+              "ci_median": 49795032.833333336,
+              "ci_upper": 50078461.06666667,
+              "drift_correlation": -0.2694104560622914,
+              "wilcoxon_p": 1.8276593551902626e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic192max_h128_plain_ens3_finite0",
+            {
+              "baseline": {
+                "n": 29,
+                "min": 58522928.0,
+                "max": 60859838.0,
+                "mean": 59804145.31034483,
+                "variance": 194961036361.43634,
+                "median": 59828237.0,
+                "mad": 336708.8382
+              },
+              "candidate": {
+                "n": 29,
+                "min": 82519941.0,
+                "max": 84660535.0,
+                "mean": 83495051.93103449,
+                "variance": 316952299437.7798,
+                "median": 83360166.0,
+                "mad": 572820.3012
+              },
+              "diff": {
+                "n": 29,
+                "min": 22607991.0,
+                "max": 24891560.0,
+                "mean": 23690906.62068966,
+                "variance": 400903228746.1015,
+                "median": 23720555.0,
+                "mad": 607676.2272
+              },
+              "pct_change": 39.61415466728799,
+              "significant": true,
+              "cohens_d": 46.82722876931288,
+              "n_samples": 30,
+              "n_outliers": 1,
+              "ci_lower": 23457918.24137931,
+              "ci_median": 23689820.310344826,
+              "ci_upper": 23915268.137931034,
+              "drift_correlation": -0.229064039408867,
+              "wilcoxon_p": 2.705475642114574e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic192max_h128_plain_ens3_finite1",
+            {
+              "baseline": {
+                "n": 28,
+                "min": 58522928.0,
+                "max": 60859838.0,
+                "mean": 59797494.00000001,
+                "variance": 177354754527.03577,
+                "median": 59823842.0,
+                "mad": 336093.55919999996
+              },
+              "candidate": {
+                "n": 28,
+                "min": 114900903.0,
+                "max": 117893752.0,
+                "mean": 116201210.49999999,
+                "variance": 432009045541.37213,
+                "median": 116081218.5,
+                "mad": 587993.9709
+              },
+              "diff": {
+                "n": 28,
+                "min": 55042305.0,
+                "max": 57675034.0,
+                "mean": 56403716.5,
+                "variance": 447568961010.8521,
+                "median": 56466243.0,
+                "mad": 606587.2575
+              },
+              "pct_change": 94.32454895183399,
+              "significant": true,
+              "cohens_d": 102.18435157993328,
+              "n_samples": 30,
+              "n_outliers": 2,
+              "ci_lower": 56160030.89285714,
+              "ci_median": 56401863.678571425,
+              "ci_upper": 56639460.71428572,
+              "drift_correlation": -0.18938149972632723,
+              "wilcoxon_p": 4.007457572040173e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic228_h32_plain_ens3_finite0",
+            {
+              "baseline": {
+                "n": 29,
+                "min": 58522928.0,
+                "max": 60859838.0,
+                "mean": 59816492.20689655,
+                "variance": 185000094667.74197,
+                "median": 59828237.0,
+                "mad": 336708.8382
+              },
+              "candidate": {
+                "n": 29,
+                "min": 83180801.0,
+                "max": 85507300.0,
+                "mean": 84206150.62068968,
+                "variance": 302369224807.815,
+                "median": 84193501.0,
+                "mad": 483846.50999999995
+              },
+              "diff": {
+                "n": 29,
+                "min": 23327923.0,
+                "max": 25573580.0,
+                "mean": 24389658.413793102,
+                "variance": 324309864178.32275,
+                "median": 24409955.0,
+                "mad": 669502.1298
+              },
+              "pct_change": 40.77413688758749,
+              "significant": true,
+              "cohens_d": 49.4073570272331,
+              "n_samples": 30,
+              "n_outliers": 1,
+              "ci_lower": 24181374.03448276,
+              "ci_median": 24389213.44827586,
+              "ci_upper": 24588513.724137932,
+              "drift_correlation": -0.16403940886699497,
+              "wilcoxon_p": 2.705475642114574e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic228_h32_plain_ens3_finite1",
+            {
+              "baseline": {
+                "n": 29,
+                "min": 58522928.0,
+                "max": 60859838.0,
+                "mean": 59804145.31034483,
+                "variance": 194961036361.43634,
+                "median": 59828237.0,
+                "mad": 336708.8382
+              },
+              "candidate": {
+                "n": 29,
+                "min": 130720683.0,
+                "max": 133104574.0,
+                "mean": 131865657.75862068,
+                "variance": 614362801211.4042,
+                "median": 131942380.0,
+                "mad": 1065087.9792
+              },
+              "diff": {
+                "n": 29,
+                "min": 70302778.0,
+                "max": 74581646.0,
+                "mean": 72061512.44827583,
+                "variance": 910357973489.1025,
+                "median": 72058511.0,
+                "mad": 995951.3759999999
+              },
+              "pct_change": 120.4958486979844,
+              "significant": true,
+              "cohens_d": 113.281034064027,
+              "n_samples": 30,
+              "n_outliers": 1,
+              "ci_lower": 71729548.86206897,
+              "ci_median": 72057785.55172414,
+              "ci_upper": 72421461.68965517,
+              "drift_correlation": -0.312807881773399,
+              "wilcoxon_p": 2.705475642114574e-06,
+              "resolution_limited": false
+            }
+          ]
+        ],
+        "completed_rounds": 30,
+        "cache_firewall": false,
+        "cache_firewall_bytes": 2097152,
+        "baseline_only": true,
+        "sort_by_speed": false,
+        "expect_sub_ns": false,
+        "cold_start": false,
+        "iterations_per_sample": 1
+      },
+      {
+        "group_name": "sampling_spatial_2048",
+        "benchmarks": [
+          {
+            "name": "PP914_basic156_h128_plain_ens3_finite0",
+            "summary": {
+              "n": 30,
+              "min": 232899389.0,
+              "max": 238554507.0,
+              "mean": 236402762.96666673,
+              "variance": 1203539706129.393,
+              "median": 236402843.0,
+              "mad": 877376.7344999999
+            },
+            "cold_start_ns": 237553032.0,
+            "mean_ci": {
+              "lower": 235999539.63333333,
+              "median": 236404496.73333332,
+              "upper": 236777350.4
+            },
+            "timer_ticks_per_sample": 23640276.296666674
+          },
+          {
+            "name": "PP914_basic156_h128_plain_ens3_finite1",
+            "summary": {
+              "n": 30,
+              "min": 373431165.0,
+              "max": 379764813.0,
+              "mean": 376383766.6999999,
+              "variance": 1753564801094.3833,
+              "median": 376568818.0,
+              "mad": 1291931.7096
+            },
+            "cold_start_ns": 377496207.0,
+            "mean_ci": {
+              "lower": 375918639.2,
+              "median": 376385404.76666665,
+              "upper": 376843440.4
+            },
+            "timer_ticks_per_sample": 37638376.669999994
+          },
+          {
+            "name": "PP914_basic192l8_h128_plain_ens3_finite0",
+            "summary": {
+              "n": 30,
+              "min": 244569166.0,
+              "max": 249419800.0,
+              "mean": 247292476.93333328,
+              "variance": 1276519373952.887,
+              "median": 247406035.5,
+              "mad": 1322429.5329
+            },
+            "cold_start_ns": 248757610.0,
+            "mean_ci": {
+              "lower": 246883511.1,
+              "median": 247291051.63333333,
+              "upper": 247683084.23333332
+            },
+            "timer_ticks_per_sample": 24729247.693333328
+          },
+          {
+            "name": "PP914_basic192l8_h128_plain_ens3_finite1",
+            "summary": {
+              "n": 30,
+              "min": 450291068.0,
+              "max": 455713869.0,
+              "mean": 452602724.6666667,
+              "variance": 1734687606187.9463,
+              "median": 452278372.0,
+              "mad": 963644.7807
+            },
+            "cold_start_ns": 455158870.0,
+            "mean_ci": {
+              "lower": 452156240.43333334,
+              "median": 452599460.8666667,
+              "upper": 453072739.26666665
+            },
+            "timer_ticks_per_sample": 45260272.46666667
+          },
+          {
+            "name": "PP914_basic192max_h128_plain_ens3_finite0",
+            "summary": {
+              "n": 30,
+              "min": 327287724.0,
+              "max": 333706864.0,
+              "mean": 328973741.8000001,
+              "variance": 2015115431949.2334,
+              "median": 328645574.0,
+              "mad": 671571.0981
+            },
+            "cold_start_ns": 330609264.0,
+            "mean_ci": {
+              "lower": 328520355.4,
+              "median": 328958261.3333333,
+              "upper": 329514391.8333333
+            },
+            "timer_ticks_per_sample": 32897374.180000007
+          },
+          {
+            "name": "PP914_basic192max_h128_plain_ens3_finite1",
+            "summary": {
+              "n": 30,
+              "min": 465247763.0,
+              "max": 470784937.0,
+              "mean": 467722188.8333334,
+              "variance": 2824166363331.7363,
+              "median": 467402986.5,
+              "mad": 1778186.7033
+            },
+            "cold_start_ns": 469925436.0,
+            "mean_ci": {
+              "lower": 467140151.6,
+              "median": 467722706.5,
+              "upper": 468327110.46666664
+            },
+            "timer_ticks_per_sample": 46772218.88333334
+          },
+          {
+            "name": "PP914_basic228_h32_plain_ens3_finite0",
+            "summary": {
+              "n": 30,
+              "min": 336118906.0,
+              "max": 341664791.0,
+              "mean": 338259534.66666675,
+              "variance": 1367204247441.3872,
+              "median": 338191622.5,
+              "mad": 1140635.3447999998
+            },
+            "cold_start_ns": 339536610.0,
+            "mean_ci": {
+              "lower": 337858137.4,
+              "median": 338259947.03333336,
+              "upper": 338689122.43333334
+            },
+            "timer_ticks_per_sample": 33825953.466666676
+          },
+          {
+            "name": "PP914_basic228_h32_plain_ens3_finite1",
+            "summary": {
+              "n": 30,
+              "min": 542730555.0,
+              "max": 566872722.0,
+              "mean": 545516243.3333333,
+              "variance": 18406172418460.637,
+              "median": 544575219.5,
+              "mad": 1234472.064
+            },
+            "cold_start_ns": 546047031.0,
+            "mean_ci": {
+              "lower": 544395730.6666666,
+              "median": 545412770.3333334,
+              "upper": 547261850.5
+            },
+            "timer_ticks_per_sample": 54551624.33333333
+          }
+        ],
+        "analyses": [
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic156_h128_plain_ens3_finite1",
+            {
+              "baseline": {
+                "n": 29,
+                "min": 235007852.0,
+                "max": 238554507.0,
+                "mean": 236523568.96551725,
+                "variance": 793064062001.6057,
+                "median": 236439894.0,
+                "mad": 912566.9868
+              },
+              "candidate": {
+                "n": 29,
+                "min": 373431165.0,
+                "max": 379764813.0,
+                "mean": 376334330.20689654,
+                "variance": 1740254573997.0032,
+                "median": 376513186.0,
+                "mad": 1333698.0341999999
+              },
+              "diff": {
+                "n": 29,
+                "min": 137376532.0,
+                "max": 141623508.0,
+                "mean": 139810761.24137926,
+                "variance": 1150598183477.985,
+                "median": 139810784.0,
+                "mad": 1064849.2806
+              },
+              "pct_change": 59.110710130440424,
+              "significant": true,
+              "cohens_d": 124.22548163248936,
+              "n_samples": 30,
+              "n_outliers": 1,
+              "ci_lower": 139422588.6551724,
+              "ci_median": 139812111.96551725,
+              "ci_upper": 140189170.06896552,
+              "drift_correlation": 0.24975369458128083,
+              "wilcoxon_p": 2.705475642114574e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic192l8_h128_plain_ens3_finite0",
+            {
+              "baseline": {
+                "n": 30,
+                "min": 232899389.0,
+                "max": 238554507.0,
+                "mean": 236402762.96666673,
+                "variance": 1203539706129.393,
+                "median": 236402843.0,
+                "mad": 877376.7344999999
+              },
+              "candidate": {
+                "n": 30,
+                "min": 244569166.0,
+                "max": 249419800.0,
+                "mean": 247292476.93333328,
+                "variance": 1276519373952.887,
+                "median": 247406035.5,
+                "mad": 1322429.5329
+              },
+              "diff": {
+                "n": 30,
+                "min": 6538044.0,
+                "max": 13724018.0,
+                "mean": 10889713.966666669,
+                "variance": 2527077139574.7925,
+                "median": 10911774.5,
+                "mad": 1685907.4553999999
+              },
+              "pct_change": 4.606424150889532,
+              "significant": true,
+              "cohens_d": 9.77913534825304,
+              "n_samples": 30,
+              "n_outliers": 0,
+              "ci_lower": 10318424.566666666,
+              "ci_median": 10891985.333333334,
+              "ci_upper": 11433344.766666668,
+              "drift_correlation": -0.2818687430478308,
+              "wilcoxon_p": 1.8276593551902626e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic192l8_h128_plain_ens3_finite1",
+            {
+              "baseline": {
+                "n": 27,
+                "min": 235007852.0,
+                "max": 238554507.0,
+                "mean": 236567326.37037036,
+                "variance": 823867768229.4677,
+                "median": 236513657.0,
+                "mad": 863298.7061999999
+              },
+              "candidate": {
+                "n": 27,
+                "min": 450291068.0,
+                "max": 455436681.0,
+                "mean": 452356653.037037,
+                "variance": 1255038021943.139,
+                "median": 452201485.0,
+                "mad": 853854.5442
+              },
+              "diff": {
+                "n": 27,
+                "min": 213448752.0,
+                "max": 217178743.0,
+                "mean": 215789326.66666666,
+                "variance": 776618359367.6913,
+                "median": 215852463.0,
+                "mad": 925999.3428
+              },
+              "pct_change": 91.21687680944848,
+              "significant": true,
+              "cohens_d": 211.65452281824142,
+              "n_samples": 30,
+              "n_outliers": 3,
+              "ci_lower": 215452773.4074074,
+              "ci_median": 215792246.44444445,
+              "ci_upper": 216112968.8888889,
+              "drift_correlation": 0.09706959706959706,
+              "wilcoxon_p": 5.940080712078468e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic192max_h128_plain_ens3_finite0",
+            {
+              "baseline": {
+                "n": 27,
+                "min": 235007852.0,
+                "max": 238554507.0,
+                "mean": 236556558.62962964,
+                "variance": 837671911912.3188,
+                "median": 236513657.0,
+                "mad": 1021928.0105999999
+              },
+              "candidate": {
+                "n": 27,
+                "min": 327287724.0,
+                "max": 330245372.0,
+                "mean": 328610947.1111111,
+                "variance": 577202209073.5637,
+                "median": 328557391.0,
+                "mad": 555057.2705999999
+              },
+              "diff": {
+                "n": 27,
+                "min": 89819109.0,
+                "max": 94651122.0,
+                "mean": 92054388.48148148,
+                "variance": 1520078591311.643,
+                "median": 91951242.0,
+                "mad": 1272122.6909999999
+              },
+              "pct_change": 38.91432518918598,
+              "significant": true,
+              "cohens_d": 109.4461763738132,
+              "n_samples": 30,
+              "n_outliers": 3,
+              "ci_lower": 91594831.92592593,
+              "ci_median": 92046593.1111111,
+              "ci_upper": 92509626.07407407,
+              "drift_correlation": -0.08058608058608052,
+              "wilcoxon_p": 5.940080712078468e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic192max_h128_plain_ens3_finite1",
+            {
+              "baseline": {
+                "n": 30,
+                "min": 232899389.0,
+                "max": 238554507.0,
+                "mean": 236402762.96666673,
+                "variance": 1203539706129.393,
+                "median": 236402843.0,
+                "mad": 877376.7344999999
+              },
+              "candidate": {
+                "n": 30,
+                "min": 465247763.0,
+                "max": 470784937.0,
+                "mean": 467722188.8333334,
+                "variance": 2824166363331.7363,
+                "median": 467402986.5,
+                "mad": 1778186.7033
+              },
+              "diff": {
+                "n": 30,
+                "min": 228211180.0,
+                "max": 234997812.0,
+                "mean": 231319425.86666667,
+                "variance": 3763135590499.7046,
+                "median": 231143772.5,
+                "mad": 1738748.0606999998
+              },
+              "pct_change": 97.84971332982397,
+              "significant": true,
+              "cohens_d": 163.0039838651455,
+              "n_samples": 30,
+              "n_outliers": 0,
+              "ci_lower": 230660266.33333334,
+              "ci_median": 231319659.9,
+              "ci_upper": 232028437.56666666,
+              "drift_correlation": -0.064293659621802,
+              "wilcoxon_p": 1.8276593551902626e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic228_h32_plain_ens3_finite0",
+            {
+              "baseline": {
+                "n": 28,
+                "min": 232899389.0,
+                "max": 238554507.0,
+                "mean": 236359859.8928572,
+                "variance": 1117930375453.5662,
+                "median": 236402843.0,
+                "mad": 863825.7705
+              },
+              "candidate": {
+                "n": 28,
+                "min": 336118906.0,
+                "max": 340312581.0,
+                "mean": 338169339.4642858,
+                "variance": 1001901332445.5015,
+                "median": 338191622.5,
+                "mad": 1068867.8679
+              },
+              "diff": {
+                "n": 28,
+                "min": 99755544.0,
+                "max": 104432743.0,
+                "mean": 101809479.57142855,
+                "variance": 1170188128545.0713,
+                "median": 101836241.0,
+                "mad": 1016566.9289999999
+              },
+              "pct_change": 43.07392956552739,
+              "significant": true,
+              "cohens_d": 98.89003333662406,
+              "n_samples": 30,
+              "n_outliers": 2,
+              "ci_lower": 101408640.85714285,
+              "ci_median": 101806758.14285715,
+              "ci_upper": 102204431.67857143,
+              "drift_correlation": -0.08319649698960041,
+              "wilcoxon_p": 4.007457572040173e-06,
+              "resolution_limited": false
+            }
+          ],
+          [
+            "PP914_basic156_h128_plain_ens3_finite0",
+            "PP914_basic228_h32_plain_ens3_finite1",
+            {
+              "baseline": {
+                "n": 28,
+                "min": 235007852.0,
+                "max": 238554507.0,
+                "mean": 236570134.71428573,
+                "variance": 757225116364.7991,
+                "median": 236476775.5,
+                "mad": 839191.6301999999
+              },
+              "candidate": {
+                "n": 28,
+                "min": 542730555.0,
+                "max": 549302830.0,
+                "mean": 544711240.5357141,
+                "variance": 2153114252138.991,
+                "median": 544476661.5,
+                "mad": 1141102.3638
+              },
+              "diff": {
+                "n": 28,
+                "min": 305809676.0,
+                "max": 312206886.0,
+                "mean": 308141105.8214286,
+                "variance": 2749226383974.8877,
+                "median": 307899728.5,
+                "mad": 1728429.1646999998
+              },
+              "pct_change": 130.25359527887227,
+              "significant": true,
+              "cohens_d": 255.4423009595812,
+              "n_samples": 30,
+              "n_outliers": 2,
+              "ci_lower": 307563815.8214286,
+              "ci_median": 308136387.78571427,
+              "ci_upper": 308765411.53571427,
+              "drift_correlation": 0.10673234811165844,
+              "wilcoxon_p": 4.007457572040173e-06,
+              "resolution_limited": false
+            }
+          ]
+        ],
+        "completed_rounds": 30,
+        "cache_firewall": false,
+        "cache_firewall_bytes": 2097152,
+        "baseline_only": true,
+        "sort_by_speed": false,
+        "expect_sub_ns": false,
+        "cold_start": false,
+        "iterations_per_sample": 1
+      }
+    ],
+    "standalones": [],
+    "total_time": {
+      "millis": 128666
+    },
+    "gate_waits": 0,
+    "gate_wait_time": {
+      "millis": 0
+    },
+    "unreliable": false,
+    "timer_resolution_ns": 10,
+    "loop_overhead_ns": 0.176,
+    "testbed": {
+      "cpu_model": "AMD Ryzen 9 9950X3D 16-Core Processor",
+      "arch": "x86_64",
+      "os": "linux",
+      "logical_cores": 32,
+      "physical_cores": 16
+    },
+    "calibration": {
+      "integer_ns": 0.1749189,
+      "memory_bw_gibps": 99.95522006141249,
+      "memory_lat_ns": 8.838875
+    }
+  },
+  "rss": {
+    "role": "development runtime",
+    "results": [
+      {
+        "size": 1024,
+        "finite_moments": false,
+        "model": "PP914_basic228_h32_plain_ens3",
+        "peak_process_rss_kib": 105672,
+        "worker_cap_bytes": 201326592,
+        "total_process_below_worker_cap": true,
+        "command": [
+          "/usr/bin/time",
+          "-v",
+          "-o",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/rss/1024-finite0.usage",
+          "taskset",
+          "-c",
+          "8",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/extract_paths_bench"
+        ],
+        "env": {
+          "RAYON_NUM_THREADS": "1",
+          "ZENSIM_FORMULA_REV": "3",
+          "ZEN_XP_RSS": "bake",
+          "ZEN_XP_BAKE": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "ZEN_XP_SIZE": "1024",
+          "ZEN_XP_ITERS": "30",
+          "ZEN_XP_SPATIAL": "1"
+        }
+      },
+      {
+        "size": 1024,
+        "finite_moments": true,
+        "model": "PP914_basic228_h32_plain_ens3",
+        "peak_process_rss_kib": 127144,
+        "worker_cap_bytes": 201326592,
+        "total_process_below_worker_cap": true,
+        "command": [
+          "/usr/bin/time",
+          "-v",
+          "-o",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/rss/1024-finite1.usage",
+          "taskset",
+          "-c",
+          "8",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/extract_paths_bench"
+        ],
+        "env": {
+          "RAYON_NUM_THREADS": "1",
+          "ZENSIM_FORMULA_REV": "3",
+          "ZEN_XP_RSS": "bake",
+          "ZEN_XP_BAKE": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "ZEN_XP_SIZE": "1024",
+          "ZEN_XP_ITERS": "30",
+          "ZEN_XP_SPATIAL": "1",
+          "ZEN_XP_FINITE_MOMENTS": "1"
+        }
+      },
+      {
+        "size": 2048,
+        "finite_moments": false,
+        "model": "PP914_basic228_h32_plain_ens3",
+        "peak_process_rss_kib": 369640,
+        "worker_cap_bytes": 603979776,
+        "total_process_below_worker_cap": true,
+        "command": [
+          "/usr/bin/time",
+          "-v",
+          "-o",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/rss/2048-finite0.usage",
+          "taskset",
+          "-c",
+          "8",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/extract_paths_bench"
+        ],
+        "env": {
+          "RAYON_NUM_THREADS": "1",
+          "ZENSIM_FORMULA_REV": "3",
+          "ZEN_XP_RSS": "bake",
+          "ZEN_XP_BAKE": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "ZEN_XP_SIZE": "2048",
+          "ZEN_XP_ITERS": "30",
+          "ZEN_XP_SPATIAL": "1"
+        }
+      },
+      {
+        "size": 2048,
+        "finite_moments": true,
+        "model": "PP914_basic228_h32_plain_ens3",
+        "peak_process_rss_kib": 453848,
+        "worker_cap_bytes": 603979776,
+        "total_process_below_worker_cap": true,
+        "command": [
+          "/usr/bin/time",
+          "-v",
+          "-o",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/rss/2048-finite1.usage",
+          "taskset",
+          "-c",
+          "8",
+          "/home/lilith/work/zensim-validation-2026-09-14/finite-moments/extract_paths_bench"
+        ],
+        "env": {
+          "RAYON_NUM_THREADS": "1",
+          "ZENSIM_FORMULA_REV": "3",
+          "ZEN_XP_RSS": "bake",
+          "ZEN_XP_BAKE": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin,/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "ZEN_XP_SIZE": "2048",
+          "ZEN_XP_ITERS": "30",
+          "ZEN_XP_SPATIAL": "1",
+          "ZEN_XP_FINITE_MOMENTS": "1"
+        }
+      }
+    ],
+    "model": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin",
+          "sha256": "a8871222a19ec22b66add5c10840165b4b0fb5fbee96c953a0410b25014e0462"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin",
+          "sha256": "041f8740ea656113707e2549dfc1ff845e400ddfeb8c67573fe6011da0c54400"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "sha256": "27acfba052a4b549b6658f77d5a88738e11a04b52f03ad7e126209e4f6a9b960"
+        }
+      ],
+      "development": {
+        "human": {
+          "command": [
+            "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows",
+            "--parquet",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/tables/human_development.parquet",
+            "--output",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_ens3.human.tsv",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin"
+          ],
+          "seconds": 0.0293266789522022,
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_ens3.human.tsv",
+          "sha256": "bb8717e28193d80b1b064ee440292b1fc11ffedd68eee00889ce308abdd4c4c0"
+        },
+        "codec": {
+          "command": [
+            "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows",
+            "--parquet",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/tables/codec_development.parquet",
+            "--output",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_ens3.codec.tsv",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin"
+          ],
+          "seconds": 0.040141253964975476,
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_ens3.codec.tsv",
+          "sha256": "0e7ebf9c34a62da2354f8f11523ea72fd3f95ce5c4ebc99e53ee09a178c1409b"
+        }
+      }
+    },
+    "iterations": 30,
+    "tool_sha256": "78acd2532f2e732a19d6815f9777f50264f150692f392901fb12e2e00a63b20c",
+    "scope": "total process RSS bounds worker for synthetic 1MP/4MP inputs; not incremental/native-codec RSS"
+  },
+  "models": {
+    "PP914_basic156_h128_plain_ens3": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin",
+          "sha256": "97bbf5d1cf98e042a78b9ef68d312fa9cf6c262aeb3580941c311e23af67fd0b"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin",
+          "sha256": "45e8743eb6490f763c5711849ff06315f4f0a228234f7c894aba9c6c789c8840"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin",
+          "sha256": "8c66b962002624b3e8ac7d6220a55a40736c65a39a235ebd0a1116f9c527b427"
+        }
+      ],
+      "development": {
+        "human": {
+          "command": [
+            "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows",
+            "--parquet",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/tables/human_development.parquet",
+            "--output",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_ens3.human.tsv",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin"
+          ],
+          "seconds": 0.032140113005880266,
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_ens3.human.tsv",
+          "sha256": "e35536881b9f8bf9b452f53e23cbc82ad7d402b9c69b766f7f327e48ac8e7439"
+        },
+        "codec": {
+          "command": [
+            "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows",
+            "--parquet",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/tables/codec_development.parquet",
+            "--output",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_ens3.codec.tsv",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7101.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7103.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_s7107.bin"
+          ],
+          "seconds": 0.04279585799667984,
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic156_h128_plain_ens3.codec.tsv",
+          "sha256": "568867199f9ba04aff1e3f6eb719331c6255dcfd6c6dd042e7a1296726681c72"
+        }
+      }
+    },
+    "PP914_basic192l8_h128_plain_ens3": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin",
+          "sha256": "4349a245d824cc0fe152d7af033cad53287297a7d370eac8c8f6a65c7d6c7f83"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin",
+          "sha256": "d7f10429aaaa44b8f7440f522492cf2e73b6bba413b8002172336fafe9f39129"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin",
+          "sha256": "ed97e398024ecd48b2b041dd84196118fb7a47ebef5b6cd076360f5669a29db9"
+        }
+      ],
+      "development": {
+        "human": {
+          "command": [
+            "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows",
+            "--parquet",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/tables/human_development.parquet",
+            "--output",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_ens3.human.tsv",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin"
+          ],
+          "seconds": 0.031716651981696486,
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_ens3.human.tsv",
+          "sha256": "c3e85e7f074ac7c7d9583f0d52948cc6979c15846482b931a7d1945266f7d7bf"
+        },
+        "codec": {
+          "command": [
+            "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows",
+            "--parquet",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/tables/codec_development.parquet",
+            "--output",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_ens3.codec.tsv",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7101.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7103.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_s7107.bin"
+          ],
+          "seconds": 0.04288612795062363,
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192l8_h128_plain_ens3.codec.tsv",
+          "sha256": "8ebc721dafe652c50b24ecca0f30a39457385808ba4bec6cda8082c767c316e5"
+        }
+      }
+    },
+    "PP914_basic192max_h128_plain_ens3": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin",
+          "sha256": "47e0d518bccfc3f4ec952d6f7d89caaf2e4d6f2e56638c5383a272d7333fe6e7"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin",
+          "sha256": "64025a48cbf56f59bfb4a3a1feef98760bb71402ee5da6251c814ffe79feefeb"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin",
+          "sha256": "603e2e3f0fe9e5224bac9ea03f81d8a86adf30a10af348966798061291b11c56"
+        }
+      ],
+      "development": {
+        "human": {
+          "command": [
+            "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows",
+            "--parquet",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/tables/human_development.parquet",
+            "--output",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_ens3.human.tsv",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin"
+          ],
+          "seconds": 0.0342941940180026,
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_ens3.human.tsv",
+          "sha256": "5af52be37b6a61ff07cc6c3d5cd88e42b777c184d07fdae5c0bcadd5f11a223e"
+        },
+        "codec": {
+          "command": [
+            "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows",
+            "--parquet",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/tables/codec_development.parquet",
+            "--output",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_ens3.codec.tsv",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7101.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7103.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_s7107.bin"
+          ],
+          "seconds": 0.04343072004849091,
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic192max_h128_plain_ens3.codec.tsv",
+          "sha256": "eb479cdad610d4653c5f900acc3c6ada572866020e739599a3fcf9d2c1ec95e4"
+        }
+      }
+    },
+    "PP914_basic228_h32_plain_ens3": {
+      "members": [
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin",
+          "sha256": "a8871222a19ec22b66add5c10840165b4b0fb5fbee96c953a0410b25014e0462"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin",
+          "sha256": "041f8740ea656113707e2549dfc1ff845e400ddfeb8c67573fe6011da0c54400"
+        },
+        {
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin",
+          "sha256": "27acfba052a4b549b6658f77d5a88738e11a04b52f03ad7e126209e4f6a9b960"
+        }
+      ],
+      "development": {
+        "human": {
+          "command": [
+            "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows",
+            "--parquet",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/tables/human_development.parquet",
+            "--output",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_ens3.human.tsv",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin"
+          ],
+          "seconds": 0.0293266789522022,
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_ens3.human.tsv",
+          "sha256": "bb8717e28193d80b1b064ee440292b1fc11ffedd68eee00889ce308abdd4c4c0"
+        },
+        "codec": {
+          "command": [
+            "/home/lilith/work/zen/zensim/target/release/ensemble_score_rows",
+            "--parquet",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/tables/codec_development.parquet",
+            "--output",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_ens3.codec.tsv",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7101.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7103.bin",
+            "--bake",
+            "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_s7107.bin"
+          ],
+          "seconds": 0.040141253964975476,
+          "path": "/home/lilith/work/zensim-validation-2026-09-14/product-peaks/fits/PP914_basic228_h32_plain_ens3.codec.tsv",
+          "sha256": "0e7ebf9c34a62da2354f8f11523ea72fd3f95ce5c4ebc99e53ee09a178c1409b"
+        }
+      }
+    }
+  },
+  "artifacts": {
+    "REGISTRATION.json": "251800fed26e0acd38bb85e25c96eab8ea3c9661f9dafff92be67e204a453a1c",
+    "PROTOCOL.md": "9684cff0708e9ee4d7f2ab61d47ac7c9fb334deeecb48d80212aef9b4f3698e1",
+    "SPATIAL.json": "d4ddcfc20643d95ddea054b301bf79231189b31df494c7957c4134a2ca1e6da3",
+    "timing/PROTOCOL.json": "5703e9cc02f535faa56656c15c95565eb03d6b6ada3ee9e53d18e2a6c251b4d9",
+    "timing/result.json": "963f943e88ec443c3ac8e783360ec674d01dacd2e2b90d1b2b68d14861e522b3",
+    "rss/RESULT.json": "c9ebfdb79e03c2724a04d857597c71ecb2fd273992f08d238ca3062b73d2a838"
+  },
+  "limitations": [
+    "No EVAL/TEST/calibration accessed; no model refit",
+    "Small TRAIN JXL pixel repairs are not native codec RD",
+    "Human rank and above-100 failures in the frozen models are unchanged",
+    "Complete prepared timing is paired synthetic one-worker data; p95 is not exported",
+    "Memory is total process RSS upper bound for basic228/H32 only",
+    "Finite pool removal freezes signals; actual changed neighborhoods and nonlinear heads remain approximations"
+  ]
+}

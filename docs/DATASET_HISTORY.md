@@ -1,5 +1,16 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, newest base-image finite moments:**
+[Protocol/results](../benchmarks/finite_moments_2026-09-14.md) apply the frozen
+four basic/peak ensembles to the same five admitted TRAIN JXL pairs at bins
+1 and 8 (forty cases, 1,176 repairs). Only original base signals enter the new
+opt-in predictor; repaired images measure outcomes. Scores/features/gradients,
+old density and disabled refinement remain exact. Basic228/H32 passes all five
+spatial cases at both bins; other heads retain M2 failures. Paired runtime
+shows substantial added cost, so the option stays off by default. No training,
+calibration, new source admission or EVAL/test access. Artifact root:
+`~/work/zensim-validation-2026-09-14/finite-moments/`. No model is qualified.
+
 **September 14, newest moment-curvature diagnosis:**
 [Protocol/results](../benchmarks/moment_curvature_2026-09-14.md) reuse twenty
 immutable TRAIN reports from the basic/peak campaign, without new decoding,

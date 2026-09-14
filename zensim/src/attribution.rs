@@ -1735,6 +1735,8 @@ mod tests {
                             None,
                             &mut AttrSinkF32::Bins(&mut bins),
                             revision,
+                            None,
+                            8,
                         )
                         .unwrap();
                         bins.into_result()
@@ -1852,6 +1854,33 @@ mod tests {
                     256.0 * root * (1.0 - (1.0 - epsilon * fraction).powf(0.125)) / epsilon;
                 assert!((derivative - predicted).abs() <= 2e-5 * (256.0 * root).max(1e-12));
             }
+        }
+    }
+
+    #[test]
+    fn finite_moment_correction_matches_removed_raw_powers() {
+        for p in [2_u32, 4, 8] {
+            let values: Vec<f64> = (1..=64).map(|i| f64::from(i) / 64.0).collect();
+            let powers: Vec<f64> = values.iter().map(|x| x.powi(p as i32)).collect();
+            let total: f64 = powers.iter().sum();
+            let root = (total / 64.0).powf(1.0 / f64::from(p));
+            let map = MomentRemoval {
+                sensitivity: -7.0,
+                root,
+                power: p,
+                total,
+                mass: AttributionResult::from_bin_sums(powers.clone(), 64, 1, 1),
+            };
+            for end in [0, 1, 16, 63, 64] {
+                let removed: f64 = powers[..end].iter().sum();
+                let next = ((total - removed).max(0.0) / 64.0).powf(1.0 / f64::from(p));
+                let first_order = 7.0 * root * removed / (f64::from(p) * total);
+                let actual = first_order + map.correction(0, 0, end, 1);
+                assert!((actual - 7.0 * (root - next)).abs() < 2e-12);
+            }
+            assert_eq!(finite_root_extra(0.0, p), 0.0);
+            assert!(finite_root_extra(1e-12, p).abs() < 1e-23);
+            assert_eq!(finite_root_extra(1.0, p), 1.0 - 1.0 / f64::from(p));
         }
     }
 
@@ -3502,6 +3531,163 @@ pub(crate) struct MaxRemoval {
     bottom: Vec<f32>,
 }
 
+/// Opt-in finite-root correction. The integral contains only base-image mass.
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+pub(crate) struct MomentRemoval {
+    sensitivity: f64,
+    root: f64,
+    power: u32,
+    total: f64,
+    mass: AttributionResult,
+}
+
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+fn finite_root_extra(fraction: f64, power: u32) -> f64 {
+    let r = fraction.clamp(0.0, 1.0);
+    // Factor 1-u^p into (1-u)(1+u)... for p=2,4,8. This avoids
+    // cancellation in 1-(1-r)^(1/p) and needs only square roots.
+    let mut u = 1.0 - r;
+    let mut denominator = 1.0;
+    for _ in 0..power.trailing_zeros() {
+        u = u.sqrt();
+        denominator *= 1.0 + u;
+    }
+    r / denominator - r / f64::from(power)
+}
+
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+impl MomentRemoval {
+    fn correction(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
+        let fraction = self.mass.query_rect(x0, y0, x1, y1) / self.total;
+        -self.sensitivity * self.root * finite_root_extra(fraction, self.power)
+    }
+}
+
+#[autoversion]
+fn moment_signal_plane(
+    sd: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    signal: usize,
+    power: u32,
+    output: &mut [f32],
+) {
+    for i in 0..output.len() {
+        let value = if signal == 0 {
+            sd[i]
+        } else {
+            let ed = (1.0 + (dst[i] - mu2[i]).abs()) / (1.0 + (src[i] - mu1[i]).abs()) - 1.0;
+            if signal == 1 {
+                ed.max(0.0)
+            } else {
+                (-ed).max(0.0)
+            }
+        };
+        let p2 = value * value;
+        output[i] = if power == 2 {
+            p2
+        } else {
+            let p4 = p2 * p2;
+            if power == 4 { p4 } else { p4 * p4 }
+        };
+    }
+}
+
+fn retain_moment_removals(
+    output: &mut Vec<MomentRemoval>,
+    s: &[f64],
+    peaks: &[f64],
+    scale: usize,
+    stats: &crate::metric::ScaleStats,
+    width: usize,
+    height: usize,
+    sw: usize,
+    sh: usize,
+    src: [&[f32]; 3],
+    dst: [&[f32]; 3],
+    ret: &crate::streaming::AttrScaleRetention,
+    sampling: Option<&crate::sampling::Geometry>,
+    bin: usize,
+    radius: usize,
+) {
+    let n = sw * sh;
+    let mut plane = vec![0.0; n];
+    let mut spread = vec![0.0; n];
+    let mut tmp = Vec::new();
+    let mut scratch = Vec::new();
+    for c in 0..3 {
+        let roots = [
+            [stats.ssim_2nd[c], stats.ssim[c * 2 + 1], stats.ssim_p95[c]],
+            [
+                stats.edge_2nd[c * 2],
+                stats.edge[c * 4 + 1],
+                stats.art_p95[c],
+            ],
+            [
+                stats.edge_2nd[c * 2 + 1],
+                stats.edge[c * 4 + 3],
+                stats.det_p95[c],
+            ],
+        ];
+        for (signal, roots) in roots.into_iter().enumerate() {
+            for (j, (power, root)) in [2_u32, 4, 8].into_iter().zip(roots).enumerate() {
+                let sensitivity = if power == 8 {
+                    peaks.get((scale * 3 + c) * 6 + 3 + signal)
+                } else {
+                    s.get((scale * 3 + c) * 13 + signal * 3 + if j == 0 { 2 } else { 1 })
+                }
+                .copied()
+                .unwrap_or(0.0);
+                if sensitivity == 0.0 || root == 0.0 {
+                    continue;
+                }
+                moment_signal_plane(
+                    &ret.sd[c][..n],
+                    &src[c][..n],
+                    &dst[c][..n],
+                    &ret.mu1[c][..n],
+                    &ret.mu2[c][..n],
+                    signal,
+                    power,
+                    &mut plane,
+                );
+                let values = if signal == 0 {
+                    spread.fill(0.0);
+                    crate::blur::box_spread_merge_f32(
+                        &mut plane,
+                        &mut spread,
+                        sw,
+                        sh,
+                        radius,
+                        &mut tmp,
+                        &mut scratch,
+                        false,
+                    );
+                    &spread
+                } else {
+                    &plane
+                };
+                let mut accum = BinAccum::new(width, height, bin);
+                if let Some(geometry) = sampling {
+                    let projected = geometry.project(values, scale);
+                    accum.add_scale_plane_f32(&projected, width, height, 1);
+                } else {
+                    accum.add_scale_plane_f32(values, sw, sh, 1 << scale);
+                }
+                output.push(MomentRemoval {
+                    sensitivity,
+                    root,
+                    power,
+                    total: n as f64 * root.powi(power as i32),
+                    mass: accum.into_result(),
+                });
+            }
+        }
+    }
+}
+
 #[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
 impl MaxRemoval {
     fn new(feature_id: usize, sensitivity: f64, width: usize, height: usize) -> Self {
@@ -3973,6 +4159,7 @@ pub struct ScoredAttribution {
     pub(crate) unsupported_feature_ids: Vec<usize>,
     pub(crate) has_corruption_gate: bool,
     pub(crate) max_removals: Vec<MaxRemoval>,
+    pub(crate) moment_removals: Vec<MomentRemoval>,
     pub(crate) unsupported_refinement_feature_ids: Vec<usize>,
 }
 
@@ -4017,6 +4204,10 @@ impl ScoredAttribution {
     /// change blurred neighborhoods and can create new maxima. Root curvature,
     /// model nonlinearity and corruption/clamp crossing remain approximations.
     /// Binning affects only the additive term, as in [`AttributionResult::query_rect`].
+    /// With [`BakeScorer::with_finite_moment_refinement`](crate::BakeScorer::with_finite_moment_refinement),
+    /// this also adds finite L2/L4/L8 removal corrections from base-image
+    /// binned moment integrals. Those corrections are non-additive and use
+    /// the same bin interpolation. Frozen-signal and head approximations remain.
     ///
     /// Inspect [`Self::unsupported_refinement_feature_ids`] and
     /// [`Self::has_corruption_gate`]. Complete local coverage does not establish
@@ -4028,6 +4219,9 @@ impl ScoredAttribution {
         let mut gain = self.attribution.query_rect(x0, y0, x1, y1);
         for map in &self.max_removals {
             gain -= map.sensitivity * map.feature_drop(x0, y0, x1, y1);
+        }
+        for map in &self.moment_removals {
+            gain += map.correction(x0, y0, x1, y1);
         }
         gain
     }
@@ -4276,6 +4470,8 @@ impl crate::metric::Zensim {
             prime,
             sink,
             None,
+            None,
+            1,
         )
     }
 
@@ -4289,6 +4485,8 @@ impl crate::metric::Zensim {
         mut prime: Option<&mut AttributionSession>,
         sink: &mut AttrSinkF32<'_>,
         revision: Option<crate::feature_defs::FormulaRevision>,
+        mut moment_removals: Option<&mut Vec<MomentRemoval>>,
+        moment_bin: usize,
     ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
         const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
         let params = self.profile().params();
@@ -4531,6 +4729,25 @@ impl crate::metric::Zensim {
                 }
             }
             combine_ms.set(combine_ms.get() + t_c.elapsed().as_secs_f64() * 1e3);
+            if let Some(output) = moment_removals.as_deref_mut() {
+                retain_moment_removals(
+                    output,
+                    s,
+                    s_peaks,
+                    scale,
+                    stats,
+                    width,
+                    height,
+                    sw,
+                    sh,
+                    src_planes,
+                    dst_planes,
+                    ret,
+                    precomputed.sampling_geometry.as_ref(),
+                    moment_bin,
+                    config.blur_radius,
+                );
+            }
         };
 
         let result = crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes(
@@ -5054,6 +5271,7 @@ impl crate::metric::Zensim {
             s,
             &[],
             None,
+            None,
             session,
             bin,
             None,
@@ -5071,6 +5289,7 @@ impl crate::metric::Zensim {
         s: &[f64],
         s_peaks: &[f64],
         max_removals: Option<&mut Vec<MaxRemoval>>,
+        moment_removals: Option<&mut Vec<MomentRemoval>>,
         session: &mut Fused944Session,
         bin: usize,
         revision: Option<crate::feature_defs::FormulaRevision>,
@@ -5087,6 +5306,8 @@ impl crate::metric::Zensim {
             None,
             &mut AttrSinkF32::Bins(&mut accum),
             revision,
+            moment_removals,
+            bin,
         )?;
         let block = |start: usize, end: usize| -> Option<&[f64]> {
             (s.len() > start).then(|| &s[start..s.len().min(end)])

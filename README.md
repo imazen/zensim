@@ -552,6 +552,15 @@ returns the score with its features; `compute_hdr` uses the explicit HDR
 encoding; `score_features` scores admitted cached rows. The user still controls
 one target score. Model metadata and disposition are model-author settings.
 
+For SDR rectangle steering, `prepare_steering(&source, bin)` reuses the reference
+and scratch across reconstructions. The optional
+`with_finite_moment_refinement(true)` improves finite L2/L4/L8 removal estimates
+using binned base-image moments; it preserves scalar scores and additive density.
+It is disabled by default and currently adds substantial preparation cost.
+See the [measured accuracy and cost](benchmarks/finite_moments_2026-09-14.md)
+before enabling it. Map coverage and small TRAIN checks do not qualify native
+encoder improvements.
+
 New candidates must be evaluated through this same Rust surface. See
 [the workflow](docs/WAVE_PLAYBOOK.md), [feature identity](docs/FEATURE_SET_IDS.md)
 and [evaluation contract](docs/FULL_EVAL.md). The `serve_custom_bake` example

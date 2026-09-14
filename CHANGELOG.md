@@ -4,6 +4,11 @@
 
 ### Added
 
+- Opt-in `BakeScorer::with_finite_moment_refinement` retains binned base-image
+  L2/L4/L8 moments for finite rectangle corrections. Disabled by default;
+  scalar scores and existing additive density are preserved. This experimental
+  approximation requires independent accuracy and cost qualification.
+
 - Saved spatial-intervention analysis separates finite L2/L4/L8 root curvature
   from remaining map error, without new pixel comparisons. These are diagnostic
   oracle results; production features, scores and steering are unchanged.

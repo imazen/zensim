@@ -1,5 +1,38 @@
 # Start here — one target score, one development path
 
+## September 14, newest: base-image finite moments work, but cost more
+
+[Finite moments](benchmarks/finite_moments_2026-09-14.md) implements an opt-in
+`BakeScorer::with_finite_moment_refinement(bool)`, default false. The shared
+retained map owner builds binned L2/L4/L8 mass integrals and applies finite
+removal corrections in `ScoredAttribution::refinement_gain`. Only base-image
+signals enter prediction. Scalar scores, features, sensitivities, old density
+and disabled refinement values remain exact on the registered TRAIN checks.
+
+Forty complete cases / 1,176 repairs cover all four frozen basic/peak ensembles
+at bins 1 and 8. Basic228/H32 now passes all five M2/M3f cases at both bins;
+the screenshot M3f rises .6739→.9200. The H128 models retain their separate M2
+failures. This is actual public-API prediction, unlike the preceding oracle,
+but still a small TRAIN mechanism screen, not native encoder RD qualification.
+
+Cost blocks recommending it: basic228/H32 prepared median is 131.97/544.58 ms
+at 1024²/2048² versus 84.22/338.19 disabled, with 30 accepted paired single-call
+rounds. Process RSS is 127,144/453,848 KiB, below the declared worker cap on
+these synthetic inputs. p95 and isolated query latency remain unmeasured.
+Keep it opt-in. Next optimize shared retained accumulation and signal-power
+reuse against these exact outputs before promoting or widening this storage.
+
+Finite-power/reuse checks, 37 attribution tests (+2 existing ignored), the
+revision driver, two HDR retained-feature tests, minimal custom-profile build,
+Clippy, API snapshots/check and 196 semver checks pass. An unsorted synthetic
+test-bake declaration was correctly refused, then fixed; no guard was relaxed.
+No training, calibration or EVAL/test access. Artifacts:
+`~/work/zensim-validation-2026-09-14/finite-moments/` (`SPATIAL.json`, `timing/`,
+`rss/`, original registration and binaries). All experiment processes finished.
+Human rank, above-identity scores, corruption, broader spatial coverage,
+native bounded targeting/RD, HDR and full frozen qualification remain required.
+The complete production goal remains active.
+
 ## September 14, newest: finite-root curvature is worth correcting
 
 [Moment diagnosis](benchmarks/moment_curvature_2026-09-14.md) reuses all twenty

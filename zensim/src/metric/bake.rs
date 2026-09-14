@@ -27,6 +27,8 @@ pub struct BakeScorer<'a> {
     pixel_scratch: crate::feature_v2::V2Scratch,
     disposition: Option<&'a ProfileParams>,
     parallel: bool,
+    #[cfg(feature = "feature-regime-v2")]
+    finite_moments: bool,
     members: Vec<BakeScorer<'a>>,
     weights: Option<Vec<f64>>,
     #[cfg(feature = "corruption-head")]
@@ -56,6 +58,20 @@ impl<'a> BakeScorer<'a> {
     #[must_use]
     pub fn with_parallel(mut self, parallel: bool) -> Self {
         self.parallel = parallel;
+        self
+    }
+
+    /// Opt into finite L2/L4/L8 moment removal for rectangle refinement.
+    ///
+    /// Disabled by default. Scalar scores and additive density are unchanged.
+    /// Retains a binned integral per active root feature, using the requested
+    /// attribution bin; fine bins increase memory and preparation cost.
+    /// Predictions freeze the current signals and model sensitivities: actual
+    /// repairs can change neighboring windows, gates and nonlinear heads.
+    #[cfg(feature = "feature-regime-v2")]
+    #[must_use]
+    pub fn with_finite_moment_refinement(mut self, enabled: bool) -> Self {
+        self.finite_moments = enabled;
         self
     }
 
@@ -162,6 +178,8 @@ impl<'a> BakeScorer<'a> {
             pixel_scratch: crate::feature_v2::V2Scratch::default(),
             disposition: None,
             parallel: true,
+            #[cfg(feature = "feature-regime-v2")]
+            finite_moments: false,
             members: Vec::new(),
             weights: None,
             #[cfg(feature = "corruption-head")]
@@ -1034,6 +1052,7 @@ impl<'a> BakeScorer<'a> {
                 ),
                 unsupported_feature_ids: Vec::new(),
                 max_removals: Vec::new(),
+                moment_removals: Vec::new(),
                 unsupported_refinement_feature_ids: Vec::new(),
                 has_corruption_gate,
             });
@@ -1061,6 +1080,7 @@ impl<'a> BakeScorer<'a> {
         let (spatial, unsupported_feature_ids) =
             crate::attribution::candidate_map_sensitivities(&plan, &sensitivities);
         let mut max_removals = Vec::new();
+        let mut moment_removals = Vec::new();
         let (_, attribution) = Zensim::new(ZensimProfile::B)
             .with_parallel(self.parallel)
             .attribution_from_retention_binned(
@@ -1071,6 +1091,7 @@ impl<'a> BakeScorer<'a> {
                     .get(156..sensitivities.len().min(228))
                     .unwrap_or(&[]),
                 Some(&mut max_removals),
+                self.finite_moments.then_some(&mut moment_removals),
                 session,
                 bin,
                 Some(plan.compute.formula_revision),
@@ -1082,6 +1103,7 @@ impl<'a> BakeScorer<'a> {
         );
         Ok(crate::ScoredAttribution {
             max_removals,
+            moment_removals,
             unsupported_refinement_feature_ids,
             result: ZensimResult::new(score, raw_distance, features, ZensimProfile::B, mean_offset),
             attribution,
@@ -1355,6 +1377,67 @@ mod revision_contract_tests {
             }
         }
         (src, dst)
+    }
+
+    #[test]
+    #[cfg(feature = "feature-regime-v2")]
+    fn finite_moments_preserve_scalar_density_and_session_reuse() {
+        if !run_at_revision(
+            "3",
+            "metric::bake::revision_contract_tests::finite_moments_preserve_scalar_density_and_session_reuse",
+            "FINITE-MOMENTS-REUSE-RAN",
+        ) {
+            return;
+        }
+        let ids = [14, 15, 53, 54, 165, 183];
+        let recipe = serde_json::json!({
+            "schema_hash":1,"scaler_mean":vec![0.0;ids.len()],"scaler_scale":vec![1.0;ids.len()],
+            "metadata":[
+                {"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")},
+                {"key":"zentrain.formula_revision","type":"utf8","text":"3"}],
+            "layers":[{"in_dim":ids.len(),"out_dim":1,"activation":"identity","dtype":"f32",
+                "weights":vec![-1.0;ids.len()],"biases":[100.0]}]
+        });
+        let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+        for (w, h, bin) in [(128, 128, 8), (97, 131, 8), (17, 9, 1)] {
+            let (src, dst) = pair(w, h);
+            let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+            for parallel in [false, true] {
+                let mut old = crate::BakeScorer::new(&model)
+                    .unwrap()
+                    .with_parallel(parallel);
+                let scalar = old.compute(&rs, &ds, None).unwrap();
+                let mut finite = crate::BakeScorer::new(&model)
+                    .unwrap()
+                    .with_parallel(parallel)
+                    .with_finite_moment_refinement(true);
+                let mut old = old.prepare_steering(&rs, bin).unwrap();
+                let mut finite = finite.prepare_steering(&rs, bin).unwrap();
+                for image in [&ds, &rs, &ds] {
+                    let a = old.compute(image, None).unwrap();
+                    let b = finite.compute(image, None).unwrap();
+                    assert_eq!(a.result().features(), b.result().features());
+                    assert_eq!(a.result().score().to_bits(), b.result().score().to_bits());
+                    assert_eq!(a.sensitivities(), b.sensitivities());
+                    for rect in [(0, 0, w, h), (1, 1, w / 2, h / 2)] {
+                        let (x0, y0, x1, y1) = rect;
+                        assert_eq!(
+                            a.attribution().query_rect(x0, y0, x1, y1).to_bits(),
+                            b.attribution().query_rect(x0, y0, x1, y1).to_bits()
+                        );
+                        assert!(b.refinement_gain(x0, y0, x1, y1).is_finite());
+                    }
+                    if !b.result().is_identical() {
+                        assert_eq!(scalar.features(), b.result().features());
+                        assert!(b.refinement_gain(0, 0, w, h) > a.refinement_gain(0, 0, w, h));
+                    } else {
+                        assert_eq!(b.refinement_gain(0, 0, w, h), 0.0);
+                    }
+                }
+            }
+        }
+        println!("FINITE-MOMENTS-REUSE-RAN");
     }
 
     /// The premise the mismatch test below rests on, asserted rather than

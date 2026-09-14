@@ -202,7 +202,8 @@ fn rss_mode(arm: &str) {
             .map(|v| v.split(',').map(|x| x.parse().unwrap()).collect());
         let mut scorer = zensim::BakeScorer::ensemble(&models, weights.as_deref())
             .unwrap()
-            .with_parallel(parallel);
+            .with_parallel(parallel)
+            .with_finite_moment_refinement(std::env::var_os("ZEN_XP_FINITE_MOMENTS").is_some());
         let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
         if std::env::var_os("ZEN_XP_SPATIAL").is_some() {
             let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
@@ -358,11 +359,13 @@ fn subset_bench(sizes: &[usize]) {
 /// maps. Manifest rows are `name<TAB>bake_path[,bake_path...]`, without a
 /// header. An optional third TAB column supplies comma-separated weights.
 /// Without weights, multiple paths use the public uniform ensemble composition.
+/// A fourth column (`0` or `1`) selects finite-moment refinement for paired arms.
 fn sampling_models_bench(sizes: &[usize], manifest: &str) {
     struct Case {
         name: String,
         models: &'static [zenpredict::Model],
         weights: Option<&'static [f64]>,
+        finite_moments: bool,
     }
     let models: Vec<Case> = std::fs::read_to_string(manifest)
         .unwrap()
@@ -375,6 +378,11 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                 let values: Vec<f64> = s.split(',').map(|v| v.parse().unwrap()).collect();
                 &*Box::leak(values.into_boxed_slice())
             });
+            let finite_moments = match fields.next() {
+                None | Some("0") => false,
+                Some("1") => true,
+                _ => panic!("finite moments must be 0 or 1"),
+            };
             assert!(fields.next().is_none(), "unexpected model manifest column");
             let members: Vec<_> = path
                 .split(',')
@@ -387,6 +395,7 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                 name: name.to_string(),
                 models: Box::leak(members.into_boxed_slice()),
                 weights,
+                finite_moments,
             }
         })
         .collect();
@@ -431,10 +440,12 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                     }
                     for case in &models {
                         let (model, weights) = (case.models, case.weights);
+                        let finite_moments = case.finite_moments;
                         group.bench(case.name.clone(), move |b| {
                             let mut scorer = zensim::BakeScorer::ensemble(model, weights)
                                 .unwrap()
-                                .with_parallel(parallel);
+                                .with_parallel(parallel)
+                                .with_finite_moment_refinement(finite_moments);
                             let rs = RgbSlice::new(src, n, n);
                             let ds = RgbSlice::new(dst, n, n);
                             if spatial && prepared {

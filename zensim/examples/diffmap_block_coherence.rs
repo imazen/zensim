@@ -419,6 +419,10 @@ fn analyze_refinement(input: &str, output: &str) {
     let refinement = column("refinement_gain");
     let observed_max = column("max_observed_linear_gain");
     let predicted_max = column("max_predicted_gain");
+    let moment: Vec<f64> = blocks
+        .iter()
+        .map(|b| b.get("finite_moment_gain").map_or(0.0, &number))
+        .collect();
     for (name, vector) in [("m2", &linear), ("m3a", &density), ("m3f", &refinement)] {
         assert!(
             (spearman(vector, &actual) - number(&value[name])).abs() <= 1e-12,
@@ -428,7 +432,8 @@ fn analyze_refinement(input: &str, output: &str) {
     let oracle_max: Vec<f64> = density
         .iter()
         .zip(&observed_max)
-        .map(|(a, b)| a + b)
+        .zip(&moment)
+        .map(|((a, b), c)| a + b + c)
         .collect();
     let oracle_nonmax: Vec<f64> = linear
         .iter()
@@ -654,19 +659,27 @@ fn run_bake_mode(
             .expect("candidate pixel comparison")
     };
     #[cfg(feature = "feature-regime-v2")]
+    let mut moment_baseline = None;
+    #[cfg(feature = "feature-regime-v2")]
     let (base_spatial, candidate_ms) = {
         let ds = RgbSlice::new(dpx, w, h);
+        let finite_moments = std::env::var_os("ZENSIM_FINITE_MOMENTS").is_some();
+        let map_bin: usize =
+            std::env::var("ZENSIM_STEERING_BIN").map_or(1, |v| v.parse().expect("map bin"));
+        sensitivity_scorer = sensitivity_scorer.with_finite_moment_refinement(finite_moments);
         let prepared = std::env::var_os("ZENSIM_PREPARED_STEERING").is_some();
         let mut worker = if prepared {
             Some(
                 sensitivity_scorer
-                    .prepare_steering(&rs, 1)
+                    .prepare_steering(&rs, map_bin)
                     .expect("complete prepared steering contract"),
             )
         } else {
             None
         };
-        let mut fallback = zensim::BakeScorer::ensemble(&models, weights).expect("candidate");
+        let mut fallback = zensim::BakeScorer::ensemble(&models, weights)
+            .expect("candidate")
+            .with_finite_moment_refinement(finite_moments);
         let pre = if prepared {
             None
         } else {
@@ -690,11 +703,34 @@ fn run_bake_mode(
                     &ds,
                     None,
                     &mut session,
-                    1,
+                    map_bin,
                 )
                 .expect("candidate score and attribution")
         };
         let elapsed = start.elapsed().as_secs_f64() * 1e3;
+        if finite_moments {
+            let mut ordinary = zensim::BakeScorer::ensemble(&models, weights).expect("baseline");
+            let pre = ordinary
+                .precompute_reference(&rs)
+                .expect("baseline reference");
+            let baseline = ordinary
+                .compute_with_ref_and_attribution(
+                    &rs,
+                    &pre,
+                    &ds,
+                    None,
+                    &mut zensim::Fused944Session::new(),
+                    map_bin,
+                )
+                .expect("baseline map");
+            assert_eq!(baseline.result().features(), result.result().features());
+            assert_eq!(
+                baseline.result().score().to_bits(),
+                result.result().score().to_bits()
+            );
+            assert_eq!(baseline.sensitivities(), result.sensitivities());
+            moment_baseline = Some(baseline);
+        }
         println!(
             "  candidate unsupported spatial IDs: {:?}; corruption gate: {}",
             result.unsupported_feature_ids(),
@@ -1052,7 +1088,10 @@ fn run_bake_mode(
     let attr_diag = std::env::var("ZENSIM_ATTR_DIAG").as_deref() == Ok("1");
     // Diagnostic-only decomposition through the existing density surface.
     // Save feature deltas below so later subdivisions need no pixel rescoring.
-    let family_density: Vec<Vec<f64>> = if attr_diag && s.iter().skip(228).all(|&v| v == 0.0) {
+    let family_density: Vec<Vec<f64>> = if attr_diag
+        && std::env::var_os("ZENSIM_FINITE_MOMENTS").is_none()
+        && s.iter().skip(228).all(|&v| v == 0.0)
+    {
         (0..4)
             .map(|family| {
                 let masked: Vec<f64> = s_basic
@@ -1144,6 +1183,22 @@ fn run_bake_mode(
             block_records.push(serde_json::json!({"bounds":[x0,y0,x1,y1],"score_delta":delta_s[b],
                 "linearized_gain":lin_pred[b],"density_gain":attr_block[b],"refinement_gain":refinement_block[b],
                 "max_observed_linear_gain":max_lin[b],"max_predicted_gain":refinement_block[b]-attr_block[b]}));
+            #[cfg(feature = "feature-regime-v2")]
+            if let Some(baseline) = &moment_baseline {
+                let old_density = baseline.attribution().query_rect(x0, y0, x1, y1);
+                assert_eq!(
+                    old_density.to_bits(),
+                    base_spatial
+                        .attribution()
+                        .query_rect(x0, y0, x1, y1)
+                        .to_bits()
+                );
+                let old_gain = baseline.refinement_gain(x0, y0, x1, y1);
+                let record = block_records.last_mut().unwrap();
+                record["max_predicted_gain"] = serde_json::json!(old_gain - old_density);
+                record["finite_moment_gain"] = serde_json::json!(refinement_block[b] - old_gain);
+                record["baseline_refinement_gain"] = serde_json::json!(old_gain);
+            }
             if !family_density.is_empty() {
                 let feature_linear_deltas: Vec<f64> = (0..n_in)
                     .map(|k| s[k] * (rfeats[k] - base_feats[k]))
@@ -1424,12 +1479,19 @@ fn run_bake_mode(
         let mut result = serde_json::json!({"schema":"zensim-finite-rectangle-coherence-v1",
             "models":bake_paths.iter().zip(&model_bytes).map(|(p,b)| serde_json::json!({"path":p,"sha256":sha(b)})).collect::<Vec<_>>(),
             "weights":weights,"width":w,"height":h,"block_size":block,"base_score":base_score,
+            "finite_moment_refinement":std::env::var_os("ZENSIM_FINITE_MOMENTS").is_some(),
+            "attribution_bin":std::env::var("ZENSIM_STEERING_BIN").map_or(1, |v| v.parse::<usize>().expect("map bin")),
             "reference_pixels_sha256":sha(&pixel_bytes(rpx)),"distorted_pixels_sha256":sha(&pixel_bytes(dpx)),
             "pixel_interventions":nblocks,"candidate_pixel_comparisons":nblocks+1,"candidate_maps":1,"rectangle_queries":nblocks,
             "refinement_available":cfg!(feature = "feature-regime-v2"),
             "m2":m2,"m3a":m3a,"m3f":m3f,"sse":sse,"blocks":block_records});
         #[cfg(feature = "feature-regime-v2")]
         {
+            if moment_baseline.is_some() {
+                result["candidate_pixel_comparisons"] = serde_json::json!(nblocks + 2);
+                result["candidate_maps"] = serde_json::json!(2);
+                result["finite_moment_base_parity"] = serde_json::json!(true);
+            }
             result["density_unsupported_ids"] =
                 serde_json::json!(base_spatial.unsupported_feature_ids());
             result["refinement_unsupported_ids"] =
