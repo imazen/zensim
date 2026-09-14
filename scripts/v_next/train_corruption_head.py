@@ -187,7 +187,7 @@ def _fnv1a64(b):
 
 
 def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_knots,
-                     version=ZCTH_VERSION):
+                     version=ZCTH_VERSION, formula_revision=None):
     """The canonical shape descriptor, byte-for-byte what
     `corruption_head::schema_descriptor` builds. Covers SHAPE and the read set,
     never the fitted numbers: the hash answers "is this structurally the head I
@@ -201,12 +201,21 @@ def zcth_schema_hash(caller_width, n_declared, n_trees, n_nodes, clip, ids, n_kn
     for i in ids:
         d += _s.pack("<H", int(i))
     d += _s.pack("<I", n_knots)
+    if version == 3:
+        if formula_revision not in (1, 2, 3):
+            raise ValueError("ZCTH v3 requires formula revision 1, 2 or 3")
+        d += _s.pack("<I", formula_revision)
+    elif formula_revision is not None:
+        raise ValueError("explicit formula revision requires ZCTH v3")
     return _fnv1a64(bytes(d))
 
 
 def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
-              deadband_t, provenance, *, input_precision="native"):
-    """Emit ZCTH v1 (native inputs) or v2 (f32 before standardisation).
+              deadband_t, provenance, *, input_precision="native", formula_revision=None):
+    """Emit legacy Rev1 ZCTH v1/v2, or explicit-revision v3 with f32 inputs.
+
+    Explicit formula_revision opts into v3; it requires freshly matching
+    extraction, not relabeling historical weights. Defaults preserve v1/v2 bytes.
 
     The mirror of `emit_znpr`, and the reason `can_bake` is no longer
     `name == "logistic"`. Every field is copied out of the fitted estimator;
@@ -231,6 +240,10 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
     if input_precision not in ("native", "f32"):
         raise SystemExit(f"unsupported ZCTH input precision: {input_precision}")
     version = 2 if input_precision == "f32" else ZCTH_VERSION
+    if formula_revision is not None:
+        if formula_revision not in (1, 2, 3) or input_precision != "f32":
+            raise ValueError("ZCTH v3 requires f32 inputs and formula revision 1, 2 or 3")
+        version = 3
 
     if getattr(clf, "n_trees_per_iteration_", 1) != 1:
         raise SystemExit(f"ZCTH is binary-only; this estimator emits "
@@ -289,7 +302,7 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
 
     flags = ZCTH_FLAG_SCALER | (ZCTH_FLAG_ISOTONIC if len(iso_x) else 0)
     schema = zcth_schema_hash(caller_width, len(ids), len(preds), n_nodes,
-                              float(clip), ids, len(iso_x), version=version)
+                              float(clip), ids, len(iso_x), version=version, formula_revision=formula_revision)
     h = bytearray(ZCTH_HEADER_LEN)
     h[0:4] = ZCTH_MAGIC
     h[4:6] = _s.pack("<H", version)
@@ -302,6 +315,8 @@ def emit_zcth(out_path, caller_width, feat_idx, mean, scale, clip, clf, iso,
     h[32:40] = _s.pack("<d", baseline)
     h[40:48] = _s.pack("<d", float(deadband_t))
     h[48:52] = _s.pack("<f", float(clip))
+    if version == 3:
+        h[52:56] = _s.pack("<I", formula_revision)
     for k, (off, ln) in enumerate(secs):
         h[56 + k * 8: 64 + k * 8] = _s.pack("<II", off, ln)
 

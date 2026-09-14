@@ -284,7 +284,9 @@ impl<'a> BakeScorer<'a> {
     /// preserve the perceptual score. Equality at the threshold is inactive.
     ///
     /// # Errors
-    /// The deadband must be finite and within 0–100 score units.
+    /// The deadband must be finite and within 0–100 score units. The head
+    /// must match the base's arithmetic revision and available native features;
+    /// legacy ZCTH v1/v2 require revision 1.
     #[cfg(feature = "corruption-head")]
     pub fn with_corruption_head(
         mut self,
@@ -702,9 +704,16 @@ impl<'a> BakeScorer<'a> {
                 });
             }
             let needed = match companion {
-                Companion::Tree(h, _) => crate::feature_set_id::SlotSet::from_slots(
-                    h.declared_feature_ids().iter().map(|&id| usize::from(id)),
-                ),
+                Companion::Tree(h, _) => {
+                    if h.formula_revision() != plan.formula_revision() {
+                        return Err(ZensimError::ModelLoadFailed {
+                            reason: "corruption head requires another feature revision",
+                        });
+                    }
+                    crate::feature_set_id::SlotSet::from_slots(
+                        h.declared_feature_ids().iter().map(|&id| usize::from(id)),
+                    )
+                }
                 Companion::Linear(h, _) => {
                     let p = h.plan()?;
                     if !plan.revisions_agree(&p) {
@@ -755,6 +764,14 @@ impl<'a> BakeScorer<'a> {
             #[cfg(feature = "corruption-head")]
             if let Some(head) = &self.corruption {
                 match head {
+                    Companion::Tree(h, _)
+                        if h.formula_revision()
+                            != crate::feature_layout::formula_revision(self.model)? =>
+                    {
+                        return Err(ZensimError::ModelLoadFailed {
+                            reason: "corruption head requires another feature revision",
+                        });
+                    }
                     Companion::Tree(h, _) if h.caller_input_width() > 372 => {
                         return Err(ZensimError::ModelLoadFailed {
                             reason: "corruption head requires feature-regime-v2",

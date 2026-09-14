@@ -53,6 +53,11 @@
 
 ### Fixed
 
+- Tree corruption companions now reject a base/profile with a different
+  feature arithmetic revision. Legacy ZCTH v1/v2 remain Rev1; new ZCTH v3
+  stores a hash-bound revision with f32 input semantics. Existing valid legacy
+  inference is unchanged. This does not qualify a new corruption model.
+
 - Selective v2 attribution skips cells with no active sensitivity before
   normalizing retained samples. Omitted fine-scale/chroma cells could otherwise
   inject NaNs into valid coarse-feature maps. Active contributions and scalar

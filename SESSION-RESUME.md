@@ -1,5 +1,20 @@
 # Start here — one target score, one development path
 
+## September 14, newest: corruption heads now bind arithmetic revisions
+
+[Serving correction](benchmarks/corruption_revision_contract_2026-09-14.md)
+reproduces and fixes legacy Rev1 tree attachment to Rev3 bases. Slot coverage
+alone was insufficient. ZCTH v3 stores a hash-bound formula revision with f32
+input semantics; valid v1/v2 bytes and inference remain unchanged. Matching
+scalar/prepared compositions preserve maps when inactive and reject corruption
+when active, even if a negative base masks activation in the scalar minimum.
+
+This is engineering verification on synthetic data, not a new head fit or
+qualification. The strict trainer still owns the original Rev1-only recipe.
+Next admit representative TRAIN corruption and honest low-quality/native
+controls for an explicitly registered Rev3 fit; do not retag old weights.
+Broader recovery and all unmet product gates remain open.
+
 ## September 14, newest: exact-project memories complete; input layout rechecked
 
 [Chronology recovery](benchmarks/claude_memory_chronology_2026-09-14.md) now

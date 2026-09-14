@@ -1,0 +1,61 @@
+{
+  "status": "SERVING_CONTRACT_FIXED_NO_MODEL_QUALIFIED",
+  "baseline_commit": "eb3df151b86040a38eedd0eb258739012f44e0b2",
+  "scientific_dataset_reads": 0,
+  "scientific_fits": 0,
+  "synthetic_fits": 1,
+  "legacy_mismatch_reproduced": true,
+  "rust_corruption_tests": 27,
+  "no_planner_tests": 1,
+  "public_api_unchanged": true,
+  "api_check_passed": true,
+  "lint_scripts": 616,
+  "format_rows": 2560,
+  "raw_max_ulp": 0,
+  "probability_max_abs": 0,
+  "activation_disagreements": 0,
+  "legacy_v1_v2_fixture_bytes_identical": true,
+  "writer_invalid_contracts_refused": 3,
+  "source_hashes": {
+    "zensim/src/corruption_head.rs": "29f7f2d079f9e6988a44546ade85588f012ddba1a4f35138e799d4b3440d5f7c",
+    "zensim/src/metric/bake.rs": "64ededab5de64e58b84c61d9a3aefe23a46b23c9912516ae26acf916ae07b4e6",
+    "scripts/v_next/train_corruption_head.py": "4114f28a68f3b5fc8d64b080ee3130a98f7a6ececf076cbcb3d2e71aab2d253b",
+    "scripts/verify_corrhead_format.py": "709fddb32db16b5ef9f4c55425e8125c0805996d13694714ca1db4660999167d",
+    "Cargo.lock": "6d7775df785bfd3194772ccd59ea47a70566e976de303aa9bf051fcad2722a86"
+  },
+  "format_cases": [
+    {
+      "file": "current-native.zcth",
+      "sha256": "89d9b0b90b3430c78cbd3327de05920126bd44fd61af4aba457f8358c3fb7aca",
+      "parity_log_sha256": "95d87288aaac4edcb27dd6331a517e3ce91e03e193aba18edd2f1906f207e9b4"
+    },
+    {
+      "file": "current-f32.zcth",
+      "sha256": "1e555361de7afbeb226e53146a4b907d302ae3493f220103df489b59b40dc8e5",
+      "parity_log_sha256": "b943f492c9474d720e8200cc02c2cdb98f781ea949ba9f421e5c89a5ab5db60c"
+    },
+    {
+      "file": "revision-1.zcth",
+      "sha256": "0d98a91ac7409059be0b223a6cc347fbc4fa4b7fe651bec789ec4a9854186341",
+      "parity_log_sha256": "c43164904e544ac446c6273accc95fe9f35ca52c634e57b320bca26b8e5868ff"
+    },
+    {
+      "file": "revision-2.zcth",
+      "sha256": "e93428d5cbe57d6f5f29a9a5f2489c008938071539ef45bb6cfe17a2956b7782",
+      "parity_log_sha256": "54ab023ac1250736284f3cffaeccd28e1c82fe4a4bb3b68dc0c0586cb409c4ff"
+    },
+    {
+      "file": "revision-3.zcth",
+      "sha256": "3810554ea5210512a069677bd748301c8f7acb3dc9e9584dda14dabc593974ea",
+      "parity_log_sha256": "4c754b8b4d813dc31ac43e91ad0f06c686646460a885f588db2cf048edef67de"
+    }
+  ],
+  "format_fixture_sha256": "e92c28d382efbfe1afd465dad95fed90ab7f7a01e3dbc62c496a90d5b0200e96",
+  "parity_binary_sha256": "3da77fb22fe56e9f07f89052437f90168e54f525dcad21d3f92066f2ddff4cf1",
+  "known_rev2_near_identity_failure": {
+    "retained": true,
+    "ssim_error": -1.2874603e-05,
+    "formula_changed": false
+  },
+  "remaining": "Strict integrity trainer remains Rev1-only. Rev3 recipe/data admission, honest/native specificity, all model qualification and broader goal work remain open."
+}

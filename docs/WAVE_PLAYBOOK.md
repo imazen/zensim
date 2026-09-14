@@ -34,6 +34,7 @@ legacy default corpus/terminal scans to fill missing evidence.
 | Native content overlap screen | `check_holdout_overlap --native-png` or `--native-linear` | Explicit hash era, exact counts, source color interpretation and file identities, full close-pair review; unsupported formats leave admission incomplete |
 | Transform selection | Trainer `--auto-transforms` | Declared score/method, top-N and parameter bounds; preserve independent screen references |
 | Serialize / inspect ZNPR v3 | `zenpredict-bake` | Versioned metadata and final artifact hashes |
+| Serialize tree corruption companions | Existing `train_corruption_head.py::emit_zcth`; Rust `CorruptionHead` and `BakeScorer` admission | Legacy ZCTH v1/v2 require native Rev1 features; explicit-revision v3 requires f32 inputs and matching base arithmetic. `verify_corrhead_format.py` uses synthetic rows and the Rust parity owner; a format test does not qualify trained weights. |
 | Quantize / calibrate / densify | `bake_dial_refit` | Quantize before calibration; spline-coordinate and boundary gates; final served bytes |
 | Full evaluation and reuse | `scripts/run_full_eval.sh` | Content-bound input/scorer identity, atomic stages, no stale reuse |
 | Training-only base preference screen | `rd_probe_analyze_2026-07-18.py --model-preferences`, optional `--family NAME --advancement noninferior` | Explicit family/rule registration, D plus all three seeds, unchanged source/model/pixel/judge identity guards; legacy nine-model strict mode remains unchanged. Passing scalar preferences does not qualify spatial guidance. |
@@ -68,6 +69,13 @@ optimization failure, calibration and absent information. ZNPR input support
 uses `W[input * out_dim + output]`; a nonzero path is structural evidence, not
 proof of functional dependence. Use a sparse asymmetric negative control when
 checking layouts; dense random weights cannot distinguish the two orientations.
+
+The [tree revision contract](../benchmarks/corruption_revision_contract_2026-09-14.md)
+closes the missing arithmetic check for tree companions. Slot coverage alone
+does not admit a Rev1 head to a Rev3 base. New heads must be refitted on matching
+features; changing a header is not a refit. The strict integrity trainer's
+current v1 manifest remains a Rev1 recipe, and its historical head is unchanged.
+Fractional sampling still has no matching tree-head contract and is refused.
 
 Native controllers stay in their codec repositories. The
 [September 8 reuse audit](../benchmarks/diffmap_reuse_audit_2026-09-08.md)
