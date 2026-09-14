@@ -94,9 +94,11 @@ def build_native_gallery(root, out):
     """Render saved native probes without pretending they are rectangle repairs.
 
     Consumes the native mode of diffmap_block_coherence and canonical panel
-    assessments. No statistics, scoring, image modification or model selection.
+    assessments. Only aggregates recorded cell correlations; no new correlation
+    calculation, scoring, image modification or model selection.
     """
     from html import escape
+    from statistics import median
 
     root, out = Path(root), Path(out)
     if out.exists():
@@ -132,6 +134,16 @@ def build_native_gallery(root, out):
         raise ValueError("native gallery model coverage mismatch")
     rows = []
     for m in models:
+        model_cases = [c for c in primary["cases"] + baseline["cases"]
+                       if c["model"] == m["model"]]
+        if len(model_cases) != len(cases) or {c["id"] for c in model_cases} != set(cases):
+            raise ValueError("native gallery correlation cell coverage mismatch")
+        peer_ranks = []
+        for key in ("ssim2_delta", "ba_quality_delta"):
+            values = [c["mass_ranks"][key] for c in model_cases]
+            if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in values):
+                raise ValueError("nonfinite native gallery peer correlation")
+            peer_ranks.append(median(values))
         fields = [m["m2_min"], m["native_mass_rank_median"], m["native_mass_rank_min"],
                   m["density_byte_rank_median"]]
         if not all(math.isfinite(v) for v in fields):
@@ -140,6 +152,7 @@ def build_native_gallery(root, out):
                     + ("complete" if m["complete_map_gate_eligible"] else "PARTIAL — hard maxima omitted")
                     + f"</td><td>{m['m2_min']:.3f}</td><td>{m['native_mass_rank_median']:.3f} / "
                     + f"{m['native_mass_rank_min']:.3f}</td><td>{m['density_byte_rank_median']:.3f}</td>"
+                    + f"<td>{peer_ranks[0]:.3f}</td><td>{peer_ranks[1]:.3f}</td>"
                     + f"<td>{peer[m['model']]['conflicts']} / {peer[m['model']]['consensus_cases']}</td></tr>")
     assets, examples = {}, []
     for example in consensus["worst_per_model"]:
@@ -180,9 +193,9 @@ section{background:white;padding:1rem;margin:1.5rem 0}.views{display:flex;gap:1r
 <h1>Native JXL steering comparison · September 14, 2026</h1>
 <p class="notice"><strong>TRAIN development only. No model qualifies.</strong> NATIVE_POPULATION These are actual encoder interventions, not reference-pixel replacements.</p>
 <p>Complete Rust models score every output. Maps are predicted from baseline pixels before probe scoring. Hard-max additive maps are explicitly partial. Native correlations are mechanism diagnostics, not the original repair gates or a matched-rate–distortion win.</p>
-<div class="table"><table><thead><tr><th>Model</th><th>Additive map coverage</th><th>Native M2 minimum</th><th>Mass/response rank median / min</th><th>Density/gain-per-byte rank median</th><th>Robust peer conflicts</th></tr></thead><tbody>"""
+<div class="table"><table><thead><tr><th>Model</th><th>Additive map coverage</th><th>Native M2 minimum</th><th>Own-score mass/response rank median / min</th><th>Own-score density/gain-per-byte rank median</th><th>SSIM2 mass/response rank median</th><th>Butteraugli quality mass/response rank median</th><th>Robust peer conflicts</th></tr></thead><tbody>"""
     page += "".join(rows) + """</tbody></table></div>
-<p>Peer conflicts require both SSIM2 and Butteraugli to agree beyond the registered margins and Zensim to move oppositely by more than .1. These peers are not human truth. D uses its frozen revision1; candidate ensembles use revision3.</p>
+<p>Own-score columns measure internal consistency. The SSIM2 and Butteraugli columns compare map mass with those peers' measured quality responses; each column is the median of the recorded cell correlations. High internal consistency does not establish perceptual quality or encoding benefit. Peer conflicts require both SSIM2 and Butteraugli to agree beyond the registered margins and Zensim to move oppositely by more than .1. These peers are not human truth; consult the report for their use in training. D uses its frozen revision1; candidate ensembles use revision3.</p>
 <p><a href="native_map_replay_2026-09-14.md">Full report and limitations</a> · <a href="native_map_replay_2026-09-14.results.json">Results and evidence hashes</a> · <a href="FILES.json">Evidence index</a></p>
 <h2>Raw native response scatter</h2><a href="native_scatter.svg"><img class="plot" src="native_scatter.svg" alt="Per-model and per-image raw attribution mass versus actual native quantizer response"></a>
 <h2>Exact A/B failure examples</h2><p>Largest signed peer-consensus conflict for each affected model. Selected illustrations, not a representative population. Click an image for original-size PNG bytes. No synthetic repair or image resizing is stored.</p>"""

@@ -1,5 +1,28 @@
 # Start here — one target score, one development path
 
+## September 14, newest: existing constrained heads fail native advancement
+
+[Native constraint comparison](benchmarks/native_constraints_2026-09-14.md)
+measures the six already-trained product ensembles on the retained native JXL
+packets. No new fits, encodes, extraction, EVAL or TEST. All three constrained
+profiles fail the registered screen: y60 introduces conflicts; local120 reduces
+them 10→6/79 but loses .03618 human rank. All native M2 diagnostics pass.
+
+Internal map consistency is not quality agreement: constrained local120 has
+median own-score map rank .743, versus .385 SSIM2 and .472 Butteraugli quality.
+The existing native gallery now labels own-score columns explicitly and shows
+both peer medians, requiring complete cell coverage. Two prior packets remain
+renderable; the missing-cell negative control is refused.
+
+All 1,220 decoded pixel/peer rows and 1,628 overlapping plain-model scores
+match prior evidence. Report/gallery:
+`/zensim/reports/native-constraints-2026-09-14/index.html`.
+Do not repeat the already measured nonnegative-distance/capacity sweep. Next
+diagnose retained native feature deltas through existing contribution owners
+before registering another fit. The cumulative exact-project memory audit is
+24/99 full reads; related roots/transcripts remain incomplete. No model
+qualifies; the full scalar/targeting/spatial/corruption/runtime goal stays active.
+
 ## September 14, newest: robust native pairs assessed; sampler replay corrected
 
 [Robust-pair experiment](benchmarks/native_robust_train_2026-09-14.md) reuses

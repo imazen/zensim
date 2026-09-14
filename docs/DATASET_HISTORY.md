@@ -1,5 +1,16 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, frozen constrained-model native replay:**
+[Comparison](../benchmarks/native_constraints_2026-09-14.md) reuses six existing
+product TRAIN ensembles, all 812 native-local outputs and 408 earlier diagnostic
+outputs. The same four development families remain the primary comparison;
+fitting-role and earlier diagnostic content are separately labelled. No new
+admission, fitting, calibration, encoding, extraction, EVAL or TEST. All prior
+decoded pixel/peer rows and overlapping plain-model scores/maps reproduce.
+All three constrained profiles fail the registered advancement screen despite
+improved own-score map consistency. Peer-response associations are now visible
+alongside internal consistency in the existing gallery. No model is promoted.
+
 **September 14, explicit robust native-pair comparison:**
 [Results](../benchmarks/native_robust_train_2026-09-14.md) reuse the preceding
 eight TRAIN fit/four TRAIN development families and exact Rev3 features.

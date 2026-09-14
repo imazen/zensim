@@ -66,6 +66,15 @@ indexes the already implemented JXL attribution loop, JPEG research workspace,
 WebP segment loop and AVIF CQ attribution experiment, with later corrections
 and negative results. Check that record before proposing another implementation.
 
+Native galleries distinguish own-score map consistency from map association
+with SSIM2/Butteraugli quality responses. The latter aggregate recorded Rust
+cell correlations and require complete cell coverage. Neither establishes
+native RD benefit; state whether the peers also supplied training supervision.
+The [constrained-head replay](../benchmarks/native_constraints_2026-09-14.md)
+demonstrates that improving own-score consistency can coexist with worse
+quality ordering. The architecture was already trained; its native failures
+do not justify repeating the same capacity/constraint sweep.
+
 ## A complete experiment
 
 1. Register the hypothesis, baseline, exact intervention, sources, seeds,
