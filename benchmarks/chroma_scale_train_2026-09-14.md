@@ -92,7 +92,11 @@ frozen Rev1 context. All272 decoded pixel/peer rows and the original control's
 scores/maps reproduce exactly;3,536 pixel/cache comparisons cover all264 unique
 native development rows for every new/control composition. All244,800 consumed
 feature values match the native float64 cache exactly, with matching scorer
-float32 casts. Packed input IDs/revisions and all live columns are verified. Neutral encoding
+float32 casts. Packed input IDs/revisions are verified. The later
+[layout-sensitive inspection](chroma_scale_train_2026-09-14.input_support.json)
+confirms nonzero structural paths for every declared input, with asymmetric
+and disconnected-output controls. This does not prove functional necessity
+or nonzero sensitivity everywhere. Neutral encoding
 identity and full additive/refinement coverage remain checked by the Rust owner.
 
 The initial control check used the earliest six-decimal TSV exports and refused

@@ -1,17 +1,18 @@
 # Claude-era recovery: chronology and consequences, September 14, 2026
 
-The exact-project memory audit is **97/99 files read in full**, with unchanged
+The exact-project memory audit is **99/99 files read in full**, with unchanged
 source hashes recorded in the [audit](claude_memory_chronology_2026-09-14.audit.json).
 This is not completion of the user's broader memory/transcript/document request.
-`project_profile_b_hdr.md` and `project_lan_era_refinement_plan.md` remain unread
-in full; related project roots, transcripts and repository documents also retain
-unfinished scope. Reading historical claims does not reproduce their experiments
+The final two reads are `project_profile_b_hdr.md` (568 lines) and
+`project_lan_era_refinement_plan.md` (854 lines). Related project roots,
+transcripts and repository documents retain unfinished scope.
+Reading historical claims does not reproduce their experiments
 or authorize access to their historical protected datasets.
 
-The private cumulative audit supersedes the earlier 30/99 and 87/99 counts.
-Its final ten reads comprise nine completed after the 87-file checkpoint and
-the storage-migration memory in this continuation. All 99 source identities
-were rechecked. File modification time and the opening status paragraph are
+The private cumulative audit supersedes the earlier 30/99, 87/99 and 97/99
+counts; all earlier receipts are retained. The final audit rechecks all 99
+source identities, unchanged from the 97-file checkpoint. File modification
+time and the opening status paragraph are
 not reliable chronology: several memories retain early verdicts below later
 corrections or add corrections after an older front-matter timestamp.
 One infrastructure source name is redacted in the public audit; its content
@@ -96,8 +97,56 @@ checks615 scripts; Clippy passes. Chromium renders the page successfully. The
 published board and all five report destinations return HTTP200 with bytes
 matching their local artifacts. This verifies discoverability, not model quality.
 
-The next feature question remains the signed coarse-B phase/filter response
-on the exact saved TRAIN pixels. The contribution diagnosis establishes an
-unexpected response, not its cause. That diagnosis should distinguish sampling,
-feature normalization and learned sensitivity before changing the feature set.
-Full targeting, native RD, corruption, runtime and EVAL qualification remain open.
+The phase/filter question above was subsequently measured in the
+[phase diagnostic](native_phase_2026-09-14.md),
+[filter comparison](native_filter_2026-09-14.md), and
+[quarter-chroma refit](chroma_scale_train_2026-09-14.md). Those results supersede
+its earlier pending status: phase effects are real, alternative filters do not
+uniformly improve the signals, and added quarter-chroma fails the registered
+model screen. Full targeting, native RD, corruption, runtime and EVAL
+qualification remain open.
+
+## Final two memories: corrections that govern further model science
+
+These are reconciled historical reports, not newly reproduced results.
+Source identities are in the audit; the detailed private memories remain private.
+
+| Chronology | Finding | Current consequence |
+|---|---|---|
+| July 5–7, B/HDR | The near-lossless linear-model ceiling was later traced to HDR-only clipping bounds that made 245/372 features constant. Changing the bounds raised the reported near-lossless dial from 91.5 to 96.1 without a refit. | Diagnose preprocessing and clipping before claiming an information ceiling. A later July 10 broad-corpus clipping attempt also failed: widening bounds without a distribution-matched refit is not a general cure. |
+| July 12, B/HDR | A promoted HDR mixture lost significance after accounting for adaptive selection among seven arms: reported corrected maxT p=.221. TRAIN selection preferred a different arm. | Preserve the historical result and its correction. Previously exposed UPIQ evidence cannot be treated as a fresh independent gate. Do not reproduce old selection on that population. |
+| July 12–15, B/HDR | Pooled HDR rank mixed distinct study scales. Proxy improvements and broader synthetic training hid within-study or product-critical photo-human losses, including a reported .083 rank loss in the 80–90 band. | Require per-study/content/quality-band evidence. More rows and better proxy agreement do not establish representative human quality. Current source admission remains authoritative. |
+| July 14–15, B/HDR | Negative-range remapping preserved ordering but could not repair poor ordering; a Python raw forward differed from the served path. The MLP conversion notes require input-major ZNPR weights. | Separate calibration from discrimination. Use complete Rust serving, packed parity, and layout-sensitive inspection controls. Historical favorable MLP results are not current Rev3 qualification. |
+| August 26, LAN refinement | JPEG spatial redistribution could not raise an undershooting global quality seed; a bounded global adjustment resolved that census failure. | Global reachability and spatial allocation need separate checks and a shared actual-encode budget. |
+| August 26–28, LAN refinement | Initial missing-JXL-loop, stale-census and never-run-HDR statements were superseded by refreshed censuses, completed jobs and default seed wiring. Some differently named JXL arms matched all 108 semantic cells. | Reuse actual codec owners; bind claims to model and encoder versions. Count distinct configurations rather than aliases. These old censuses do not qualify current candidates. |
+| August 27–28, LAN refinement | The corpus audit was corrected to root-derived family provenance after a wrong estate copy was found; family-pure rescoring followed. | Use canonical family identity, not a convenient copy or a historical claim that leakage had little measured effect. Current never-TEST restrictions supersede every old recipe. |
+
+Operational diagnoses in the LAN memory also reverse repeatedly: apparent GPU
+limitations were later attributed to implementation routing, ledger state and
+storage behavior. Inspect current implementations, processes and distinct
+completed work before allocating more compute. Historical progress timestamps
+and process counts are insufficient evidence of useful execution.
+
+## Layout-sensitive inspection follow-up
+
+The quarter-chroma receipt previously said “all inputs live” without recording
+the indexing rule or a discriminating checker. The new
+[input-support receipt](chroma_scale_train_2026-09-14.input_support.json)
+rechecks the same nine immutable bakes and their hash-bound Rust inspection
+outputs against the pinned ZNPR owner: `W[input * out_dim + output]`.
+
+All 630 declared inputs have a nonzero first-layer row and a nonzero graph path
+to the output. An asymmetric sparse fixture rejects the transposed interpretation;
+a disconnected-output fixture and nonfinite-weight refusal also pass. This is
+structural support, not proof of nonzero local sensitivity, absence of functional
+cancellation, or indispensable features. The original model verdicts and all
+predictions are unchanged. The old inspection receipt is preserved.
+
+[Replay script and correction receipts](/zensim/reports/memory-recovery-2026-09-14/index.html)
+are served separately from the immutable original training bundle. No model is
+trained or scored and no dataset is read by this follow-up.
+
+The next model comparison must address the observed quality tradeoff with a
+specific TRAIN-side hypothesis and representative selection evidence. It must
+not be another unbounded filter, feature-count or loss-weight sweep. Broader
+memory/transcript/document recovery and all unmet product gates remain open.

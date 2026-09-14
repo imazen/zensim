@@ -1,10 +1,10 @@
 {
   "scope": "Claude exact-project zensim memory directory; related roots/transcripts/docs are a separate unfinished audit",
   "date": "2026-09-14",
-  "files_read_in_full": 97,
+  "files_read_in_full": 99,
   "total_files": 99,
-  "complete": false,
-  "private_audit_sha256": "13a4abbcc7c8440f442aca81cb03e4209f0f5a757d34caa950d1635a2e8a98ad",
+  "complete": true,
+  "private_audit_sha256": "9d03883858f5acbba7c434a40a8ed624ba3cb2c48d7587f074821bce337fd70e",
   "files": [
     {
       "name": "MEMORY.md",
@@ -412,7 +412,7 @@
       "name": "project_lan_era_refinement_plan.md",
       "bytes": 65240,
       "sha256": "4d08c40a4729b82de0cdd9277a9c52ad4702b8ddb5199fe2741e8f9a06515760",
-      "read_in_full_cumulative": false
+      "read_in_full_cumulative": true
     },
     {
       "name": "project_lan_storage_migration.md",
@@ -466,7 +466,7 @@
       "name": "project_profile_b_hdr.md",
       "bytes": 46260,
       "sha256": "4ec63c6a068652fe1e75f150aa34370f00b161db370e01b5fd005fee07d09e4e",
-      "read_in_full_cumulative": false
+      "read_in_full_cumulative": true
     },
     {
       "name": "project_sdf_font_and_layout_crates.md",
@@ -601,5 +601,6 @@
       "sha256": "ee093fdb259bbd8c33afaa38c9b595c6382c647c960638d5994a6d2cdd834c5f",
       "read_in_full_cumulative": true
     }
-  ]
+  ],
+  "broader_scope_complete": false
 }

@@ -60,6 +60,15 @@ model requires the complete Rust serving surface first; evaluation must execute
 that surface. Do not implement a second owner to bypass unsupported metadata.
 Inspect `../zenpapers` and later summaries before fundamental changes.
 
+The [completed exact-project memory reconciliation](../benchmarks/claude_memory_chronology_2026-09-14.md)
+records later corrections to clipping-induced ceilings, adaptively selected HDR
+claims and stale codec-loop status. Broader recovery remains incomplete. Before
+calling a feature set inadequate, distinguish preprocessing saturation,
+optimization failure, calibration and absent information. ZNPR input support
+uses `W[input * out_dim + output]`; a nonzero path is structural evidence, not
+proof of functional dependence. Use a sparse asymmetric negative control when
+checking layouts; dense random weights cannot distinguish the two orientations.
+
 Native controllers stay in their codec repositories. The
 [September 8 reuse audit](../benchmarks/diffmap_reuse_audit_2026-09-08.md)
 indexes the already implemented JXL attribution loop, JPEG research workspace,

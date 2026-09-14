@@ -1,5 +1,20 @@
 # Start here — one target score, one development path
 
+## September 14, newest: exact-project memories complete; input layout rechecked
+
+[Chronology recovery](benchmarks/claude_memory_chronology_2026-09-14.md) now
+records 99/99 exact-project memories read in full, with all source hashes
+unchanged. Broader related roots, transcripts and repository documents remain
+incomplete. Later corrections reverse early linear-ceiling claims (clipping),
+HDR significance claims (adaptive selection), and missing codec-loop claims.
+Historical successes do not qualify current Rev3 models.
+
+The same nine quarter-chroma bakes pass an explicit input-major inspection
+check, including asymmetric and disconnected-output negative controls. All 630
+inputs have nonzero structural paths; this does not establish indispensable
+features or nonzero sensitivity everywhere. No models, predictions or gates
+change. The earlier failed feature recipes remain failed; no immediate sweep.
+
 ## September 14, newest: trained quarter-chroma variants fail tail/quality gates
 
 [Paired y60/y70/y80 study](benchmarks/chroma_scale_train_2026-09-14.md) completes
