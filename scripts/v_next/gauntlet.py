@@ -2348,7 +2348,7 @@ function renderBar(){
   if(ds.length){
     const sel=el('select',{class:'btn',title:'filter to a discussion set + incumbents + iqa peers (benchmarks/board_discussion_sets.json, latest first)'});
     sel.append(el('option',{text:'discussion set\u2026',value:''}));
-    ds.forEach((d,i)=>sel.append(el('option',{text:d.label,value:String(i)})));
+    ds.forEach((d,i)=>sel.append(el('option',{text:d.label,value:String(i),title:d.note||''})));
     sel.onchange=()=>{if(sel.value==='')return;const d=ds[+sel.value];
       const peers=DATA.bakes.filter(b=>b.name.startsWith('peer_')).map(b=>b.name);
       const want=new Set([...(d.bakes||[]),...(DATA.incumbents||[]),...peers]);
