@@ -324,6 +324,51 @@
       ],
       "preferred_corpus": "imazen26",
       "note": "All nine frozen candidates and matched native B/D have six measured panels: KADID SELECT 3,125; KonJND JPEG SELECT 404; KonFiG validation 436; imazen26 validate 6,953; nonphoto validate 6,142; hfnlproxy validate 7,717. The last three overlap (20,655 unique pairs across 20,812 memberships) and are ONE historical SSIMULACRA2 proxy instrument, not three independent human studies. The matched SSIMULACRA2 row retains only its three human panels; teacher self-agreement is deliberately excluded. Native Rev3 and Rev1 extraction use identical original bitstreams; no size-dependent drops. Earlier human results are unchanged. All candidates remain NO-SHIP: wide models emit distorted scores above 100, small models compress the high-quality range, selected619 retains failed spatial parity, and full944 lacks complete refinement. No complete product composite (3/6 required axes), native targeting/RD or p95 qualification. B/D legacy training-era metadata remains unknown despite exact native prediction audits. Source-cluster uncertainty and teacher drift are reported separately; all models remain frozen and no test/terminal segment is accessed. Record: benchmarks/rev3_codec_eval_2026-09-14.md."
+    },
+    {
+      "id": "2026-09-14-native-local-train",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Native local supervision: y60 and basic156",
+      "report_url": "/zensim/reports/native-local-train-2026-09-14/index.html",
+      "bakes": [],
+      "note": "Twelve fits plus controls. Basic156 reduces native conflicts but loses human rank; y60 introduces a screen conflict. Neither recipe advances."
+    },
+    {
+      "id": "2026-09-14-native-robust-train",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Robust native pairs: y60 and basic156",
+      "report_url": "/zensim/reports/native-robust-train-2026-09-14/index.html",
+      "bakes": [],
+      "note": "Twelve primary fits after correcting sampling overlap. Basic156 fails human noninferiority; y60 retains weak maps and worse human tails. No promotion."
+    },
+    {
+      "id": "2026-09-14-native-constraints",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Constrained heads: y60, local120 and basic156",
+      "report_url": "/zensim/reports/native-constraints-2026-09-14/index.html",
+      "bakes": [],
+      "note": "Six existing ensembles on retained native pixels. All three constrained profiles fail advancement. Own-score map consistency is separate from independent quality agreement."
+    },
+    {
+      "id": "2026-09-14-native-contributions",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Signed feature contributions to native failures",
+      "report_url": "/zensim/reports/native-contributions-2026-09-14/index.html",
+      "bakes": [],
+      "note": "Seven frozen models; all 22 observed preference conflicts are already wrong in feature-level linearization. This diagnoses responses, not feature capacity or ablation benefit."
+    },
+    {
+      "id": "2026-09-14-native-tv-train",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · TV pair margins: local120 control versus treatment",
+      "report_url": "/zensim/reports/native-tv-train-2026-09-14/index.html",
+      "bakes": [],
+      "note": "Six scientific fits plus two integrity controls. Native conflicts increase from 9 to 10 of 79 despite improved human rank. Fitting margins also remain unsatisfied; this recipe fails, not a proven feature ceiling."
     }
   ],
   "incumbent_notes": [

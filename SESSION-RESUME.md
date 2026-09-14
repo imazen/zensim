@@ -1,5 +1,21 @@
 # Start here — one target score, one development path
 
+## September 14, newest: chronological memory recovery and TRAIN report discovery
+
+[Recovery record](benchmarks/claude_memory_chronology_2026-09-14.md) reconciles
+the exact-project memory audit at97/99 full reads with source hashes. Two large
+memories, related roots/transcripts and repository-document scope remain open.
+Historical V2 “kill” conclusions were recipe/configuration dependent; better
+HDR ramps hid a large human-quality loss. Current native failures likewise do
+not prove a feature ceiling. Existing numerical and split requirements stand.
+
+The frozen MT913 candidates already have six measured gauntlet panels. Five
+later TRAIN-development comparisons are now registered and linked separately
+on the board, with explicit verdicts and their full panels/spatial A/Bs.
+No TRAIN evidence is promoted to EVAL, and no new models are fitted. The
+coarse-B phase/filter diagnosis remains the next concrete feature question;
+no immediate TV weight sweep. No model qualifies; full product work stays open.
+
 ## September 14, newest: native TV recipe fails; checkpoint trap caught
 
 [Pair-margin study](benchmarks/native_tv_train_2026-09-14.md) completes six

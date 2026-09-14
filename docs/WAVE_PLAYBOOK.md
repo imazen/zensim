@@ -75,6 +75,13 @@ demonstrates that improving own-score consistency can coexist with worse
 quality ordering. The architecture was already trained; its native failures
 do not justify repeating the same capacity/constraint sweep.
 
+Every completed study must remain discoverable from the gauntlet. Append its
+discussion entry to `benchmarks/board_discussion_sets.json`. TRAIN-development
+studies use `role: train-development` with a served `report_url` and a concise
+measured verdict; the board links their complete comparisons separately from
+EVAL model filters. Do not synthesize qualification rows to make TRAIN models
+appear in the EVAL table. Regenerate the board and run its browser gates.
+
 `ZENSIM_ATTR_DIAG=1` on native replay retains the baseline sensitivities already
 used for complete-model linearization. Their signed products with saved feature
 deltas expose signal/scale/channel tradeoffs without another scoring owner;

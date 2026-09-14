@@ -287,6 +287,27 @@ try { DATA = payload ? JSON.parse(payload[1]) : null; } catch (e) { DATA = null;
 if (!DATA) fail('could not re-parse the embedded DATA payload');
 const nBakes = DATA ? DATA.bakes.length : 0;
 
+// TRAIN reports must be reachable without masquerading as EVAL model rows.
+// Inspect the attached controls produced by the actual page renderer.
+if (DATA) {
+  const studies=(DATA.discussionSets||[]).filter(d=>d.role==='train-development');
+  if(studies.length){
+    const box=treeFind(e=>e.id==='train-studies');
+    if(!box) fail('TRAIN study comparisons are not discoverable');
+    else studies.forEach(d=>{
+      const links=[];
+      (function walk(e){if(e.tagName==='A')links.push(e);(e.children||[]).forEach(walk);})(box);
+      if(!links.some(e=>e.attrs.href===d.report_url && e.textContent===d.label))
+        fail('TRAIN comparison link missing: '+d.id);
+      if(!d.report_url.startsWith('/zensim/reports/'))
+        fail('TRAIN comparison must use a served report URL: '+d.id);
+      const filter=treeFind(e=>e.tagName==='SELECT' && String(e.attrs.title||'').startsWith('filter to a discussion set'));
+      if(filter && filter.children.some(e=>e.textContent===d.label))
+        fail('TRAIN report incorrectly offered as EVAL row filter: '+d.id);
+    });
+  }
+}
+
 const countTag = (tag) => registry.filter(e => e.tagName === tag.toUpperCase()).length;
 const texts = (tag) => registry.filter(e => e.tagName === tag.toUpperCase()).map(e => e.textContent);
 

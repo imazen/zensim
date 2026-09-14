@@ -1,0 +1,605 @@
+{
+  "scope": "Claude exact-project zensim memory directory; related roots/transcripts/docs are a separate unfinished audit",
+  "date": "2026-09-14",
+  "files_read_in_full": 97,
+  "total_files": 99,
+  "complete": false,
+  "private_audit_sha256": "13a4abbcc7c8440f442aca81cb03e4209f0f5a757d34caa950d1635a2e8a98ad",
+  "files": [
+    {
+      "name": "MEMORY.md",
+      "bytes": 18818,
+      "sha256": "b23ef435d29ae50d89c6bdecc2a17e8f5f7cc5b0a5f0d1665c7410ea4286052a",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_archmage_dispatch.md",
+      "bytes": 1785,
+      "sha256": "4b373860945003f4d2b3834e9f03658233dd7d0185efa060fc3fe3ae07582daa",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_archmage_minimal_surface.md",
+      "bytes": 1763,
+      "sha256": "6895a79cbfc2a4e0d0c022e602a8642fac459f425ab9af9f7230e4ec708d222f",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_audit_transcripts_not_reports.md",
+      "bytes": 3458,
+      "sha256": "a8a144ee91743323cb2a3d18b0bf8140c8deee656df2b172c55e4f80ea8e82f6",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_avif_hold_backend_rewrite.md",
+      "bytes": 2422,
+      "sha256": "3212f417acf333ba727d8082a78cc8a417a31306f878c4d3d91b30ecfb0ad6d4",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_avif_priority.md",
+      "bytes": 924,
+      "sha256": "c28f360ac2c11f053dca4b44c34cb3213227f8c22e2f821ab5272c7bfe19b305",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_avif_tuner_lives_in_zenavif.md",
+      "bytes": 1740,
+      "sha256": "67f0bc534433ba5a23b247e1791b7435f0d89ee8f35733c6d9d691d2a1532fe6",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_build_push_images_locally.md",
+      "bytes": 1956,
+      "sha256": "aed249d543709711e52fdd51d4ef0069cabe0110085efb593f869610e8f018cf",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_cfg_gated_tests_in_modules.md",
+      "bytes": 1545,
+      "sha256": "1f786e2fee2e0428a190cf761c8f95e76525dcef06a39896a6c63e2119145255",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_check_disk_before_building.md",
+      "bytes": 1606,
+      "sha256": "e14dc1371560f2be4aded2199beedf6cd53824bb6971992cc251ded6d9c99f49",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_cvvdp_scalar_target_dead_end.md",
+      "bytes": 3948,
+      "sha256": "4366fcc9c3add9752638bd9e090397dc8ab7602c5c8e683a3a7d7a565e5f23a4",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_delegate_execution_to_opus.md",
+      "bytes": 2949,
+      "sha256": "4b16dd1098d57dfb163b7b73cb8998b6b6ba47f73a3aa00f54fba860bca7c0b1",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_dense_id_contract_no_cruft.md",
+      "bytes": 1684,
+      "sha256": "f29208c3958ee2213bff8b9abe3f7a054284df0339f7442fb0d5057ae8e35e87",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_dial_addressability_hard_gate.md",
+      "bytes": 10629,
+      "sha256": "da0f149a09307626422f910cd50c1e19ae09ffccc134cda4679a4ce4827a3f59",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_fair_gauntlet.md",
+      "bytes": 4311,
+      "sha256": "b369ee344fd3f1cf4fd0a4a51890295016bf53124a011450abe2d971e0f024cd",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_feature_numbering_append_only.md",
+      "bytes": 1945,
+      "sha256": "08254be9d3174447107c40282fa50d0e1c5e04a903f7e66b9e456f3e40661653",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_feature_set_naming.md",
+      "bytes": 3665,
+      "sha256": "9cfc6e4edf409dcddbede17873bce865779615395bef1e66bb6fbf6accc7689d",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_gauntlet_always_current.md",
+      "bytes": 1209,
+      "sha256": "37bf8b5a4a7c9d7563e5bbd4ca35ccc172ceaf8b7646780f2616a1f8aa377542",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_hetzner_cpu_vastai_gpu.md",
+      "bytes": 2279,
+      "sha256": "bd5f5e583aa965b3d8f03852b7dd8e663e7f6b0691cabefe4a15684b0e3c1f4d",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_imazen26_canonical_copy.md",
+      "bytes": 1570,
+      "sha256": "7c1d7b96e713d9a132a179b6210f7ac192f09cb62bec4fc3525069d6dbb91a80",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_imazen_only_codec_tools.md",
+      "bytes": 4329,
+      "sha256": "a2c144ae98e44fd47a98de8f8913fca1aea8b41b1a3101a3aa569e1ed7b4b1b2",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_inversion_truth_two_refs.md",
+      "bytes": 1687,
+      "sha256": "178fa85baaf125f0455de482c6c65794e5c428ac9724cbe37099d8442c8e638f",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_jj_autoadvance_after_push.md",
+      "bytes": 3490,
+      "sha256": "e0f6cf22cda425ded6b43d9739738adae49e7f0b254f4694ca6e3cff94d58d89",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_jj_sideways_push_clobber.md",
+      "bytes": 3576,
+      "sha256": "a12b3a1fd6542af30c3b1797916477d7336fe88acc2f8cc2d378f44ec2b2c468",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_keep_launching_review_sets.md",
+      "bytes": 1293,
+      "sha256": "f90e58f46c53d88e5ace666605d6f020e7b021186051e66ac74e3aedaf5c9f6d",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_konjnd_human_score_two_columns.md",
+      "bytes": 2519,
+      "sha256": "df86951b9f86c7e5c382e94c9990e975a9a2c503bae6f515e2ce9618d80d65f0",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_no_dash_after_zen_in_crate_names.md",
+      "bytes": 1823,
+      "sha256": "b18948a9b69ca259106ebea6027534c6228ab99abfce3954806a3c8e158aa581",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_no_deferring_assigned_work.md",
+      "bytes": 1911,
+      "sha256": "ef3eee820852cf7c669a6b75d7c2018ca6ab6468539a3c866843e60908df5af7",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_no_parallel_scheduler_rebuilds.md",
+      "bytes": 1392,
+      "sha256": "db855af65dff1df19ecd8faaa97d9a186e2b7b760c0597a8aa37be17cbefc9df",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_no_questions_overnight.md",
+      "bytes": 1774,
+      "sha256": "3da13c1acf3d68fac8171fa5de4edd58bc4d8e1a2f38b25dbf57345bf9301d62",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_no_ram_backed_tmp.md",
+      "bytes": 1327,
+      "sha256": "9912f9fc150bc5a29d4a96a08072c2842a8d55d06be2fffca179a5ccab976380",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_no_today_deferral.md",
+      "bytes": 702,
+      "sha256": "8b45065697435086d0ffbc2f397b425fde925e0d900695464da9e63cc83a3769",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_observe_before_load.md",
+      "bytes": 1540,
+      "sha256": "eef65936720d658ed4cf055877b43801ecce4d0dfe1f1d10dc28d24e7ed79fcd",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_per_codec_loop_ownership.md",
+      "bytes": 3726,
+      "sha256": "712ce2cd6c6aa356d816bcc530a640dd1b25d645b58b25fb0dab5cd80718eb8d",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_rigor_and_efficiency.md",
+      "bytes": 1724,
+      "sha256": "68849e377c274ec7f5d4194dc911bc3a1863b81d2b050940abe18d5a83f379ca",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_seed_subsets_not_equal.md",
+      "bytes": 5546,
+      "sha256": "b630a2ed0b8f238ed6061d3480f194df62aafdf84ba3344b50f6a9dbd29e68bc",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_supervisor_owns_timers.md",
+      "bytes": 2704,
+      "sha256": "8b1517d9e9f400b17ed6dcc314e9bda8078d36167e73368f170e9a39ed1fb67b",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_tmp_volatile.md",
+      "bytes": 1525,
+      "sha256": "e4974071dd1ecacf16a2acfc6b706052e1a568f7316f3538625713603a6fa715",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_workongoing_wait_window.md",
+      "bytes": 1705,
+      "sha256": "f971c3b7ac2b7f2e23c7d91cdd4ad033b2af117ac216629cb731694380f0cf65",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "feedback_zenavif_in_flux_no_datagen.md",
+      "bytes": 2675,
+      "sha256": "49e725dc2b46cf7f75f3eaea95e7437869071bf12816560d50a65fe72e763920",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "historical-2026-03-notes.md",
+      "bytes": 3782,
+      "sha256": "f10a34707ad36e2b7b10235f0e16ee02a91eaabece9efd9b448dba68d35f143e",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_2layer_blend_best_output.md",
+      "bytes": 2740,
+      "sha256": "0fb3be8a50eb68f915ed35a50a9444edd074c14c4a5b7b378c3102d48c455328",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_8h_steering_program.md",
+      "bytes": 1898,
+      "sha256": "38e4930d6807a670c9f8d40536f0a385bdad7127dd6fd74c9aac0ed306e13a33",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_924_v3_campaign.md",
+      "bytes": 31694,
+      "sha256": "0be3b5e9f8e04e59d4cea454683983ea0b2b198b5bcdd5d544bd9baeca9d0b90",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_additive_vs_mlp_mislabel.md",
+      "bytes": 4369,
+      "sha256": "07eaf613cc595470f33c61d8e93a90578eece2d0207ec819403cd91a349e8250",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_avif_knob_tuning_goal.md",
+      "bytes": 9642,
+      "sha256": "acf1fd11e9a96a76c5f6fc12e0904ef19081d50db4bac4f09816e8adf536f32b",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_balance_campaign_24h.md",
+      "bytes": 3701,
+      "sha256": "aaa9f08f024616e3ef5a9360a72f64773540863b83f2b8fb220b5df8db4faede",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_band_srocc_range_restriction.md",
+      "bytes": 3488,
+      "sha256": "1b3cee8d9d534ab6e3c26f5e22ae4b8ff855673a1a9b893395a31400541c5be7",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_bandvis_dst_activity.md",
+      "bytes": 2840,
+      "sha256": "0ffb723169c38a35d5ccee83cb20a3252391ad148769091f9b7c99c9053ac80f",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_best_of_all_constrained_mlp.md",
+      "bytes": 2327,
+      "sha256": "f7d7181d00612e9d6244bdeddedf9c8ebd02dd1a96fa0805ce125b483575fa73",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_bhdr_hdranch3_falsified.md",
+      "bytes": 2055,
+      "sha256": "24d3599f0f2f37355dcbced1f1e44923c2fe1a1e3955e4fb1cffe014c2c80f12",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_carrier_streaming_pools.md",
+      "bytes": 2277,
+      "sha256": "7943c16ba2effdd8c8e9ea907b55e957866f25243b1bc9bc6b7b57142ce89bcf",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_codec_picker_retrain_design.md",
+      "bytes": 2161,
+      "sha256": "5710ff69b67a188a345bce719d334e98c643312bdf7caff6c62bc746b2ecf592",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_coherent_regime_frontier.md",
+      "bytes": 1915,
+      "sha256": "3a0326f0163948b1a5f546e5ee5b69ef69757e1e67697c748db0dda4637535ed",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_corruption_corpus_butter_wins.md",
+      "bytes": 2779,
+      "sha256": "2f4ed9554b29cdbd974042cbdf2e641f753d489f7722fce6b5e73ed392102fcc",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_dial_findings_2026-05-29.md",
+      "bytes": 4390,
+      "sha256": "d0ca1ca340e5e75ce4ca20da26f755dfe23065d557c77aec6b159c97b5320cd2",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_fastclass2_campaign.md",
+      "bytes": 2321,
+      "sha256": "902dd2d2b3c00735bbb011dfef2b4aaa9c3f652c78957263ea34ed47de410d2b",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_feature_system_rewrite.md",
+      "bytes": 5022,
+      "sha256": "9cca4b4a2067d33a063058cfde8f3f2b675c5cf24f7e4d1cf45cde343da8b5c4",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_feature_v2_program.md",
+      "bytes": 12615,
+      "sha256": "05aad508689a2f86a3e6da03609ec8cf0c7827492a4809bafc2a3f28d98fbae6",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_fresh_avif_waves_2026-08-30.md",
+      "bytes": 12050,
+      "sha256": "8510b8173cdf2a4b16ff493e37d66da49821a0d1be38c4c6b26090e89a43535c",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_images_png_cache_deleted.md",
+      "bytes": 1891,
+      "sha256": "7f0d74d72ab64ad0ab5c232d78c35d75eff5ab9a0a5c1dccdbf3cc9819bdb929",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_iw_feature_normalization.md",
+      "bytes": 2896,
+      "sha256": "953e7974df91a839b99b6d7737feee744ea66f00d61ff36688b3a54cc3b2d171",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_jxl_nearlossless_contamination.md",
+      "bytes": 4383,
+      "sha256": "6bfeeb35388834406dc53750cb055da46cba065f486921f1f7b5ff670a6f0f25",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_kadis720_rescore_from_links.md",
+      "bytes": 3352,
+      "sha256": "2ed472864c25e070babda7f9b9d4705713ae18721b6d505e38ee15b6ee34ed6f",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_kadis_fulldata_lever.md",
+      "bytes": 2597,
+      "sha256": "bc22193dcc9773740d6cd1cc09e79d3ca1263b007872b87e1dc30024ca4a20af",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_konjnd_bpg_leg.md",
+      "bytes": 1566,
+      "sha256": "5916f9b5240d2f4f6850baa9f7c19a602cfdb9c0d3a7cd10c35f68d22deb3e09",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_ladder_instrument_2026-09-05.md",
+      "bytes": 2447,
+      "sha256": "168b51f8624d2ef038f1be7a9dcdfd86a14c684a8087411d6b3da55ba39f94be",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_lan_era_refinement_plan.md",
+      "bytes": 65240,
+      "sha256": "4d08c40a4729b82de0cdd9277a9c52ad4702b8ddb5199fe2741e8f9a06515760",
+      "read_in_full_cumulative": false
+    },
+    {
+      "name": "project_lan_storage_migration.md",
+      "bytes": 17130,
+      "sha256": "3e47947dc269d18bdf6db5968446724012a81f1358e0350fa96e2a1adccd1e9c",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_linear_projections.md",
+      "bytes": 1951,
+      "sha256": "eabfe9b279694a014e8c419a7afc031a8cf7ef197cadc618c084dedb12b52976",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_linear_projections_2026-07-03.md",
+      "bytes": 5958,
+      "sha256": "e72a1c252d864a56e8c94b011cf950ef49b0927aa77cf50d9e3683a3c5ae6d42",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_m3a_screen_gap.md",
+      "bytes": 1168,
+      "sha256": "4da8212fde4f82b0f3e501d275928708fff5480ccbcfa11d9585ef6d3edef309",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_mandatory_bake_repro.md",
+      "bytes": 2152,
+      "sha256": "7909391663c068d940b18b6d9a857387fe2375bdc505b0f65a457bdf2cec5ca4",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_minmax_monotone_dial.md",
+      "bytes": 2843,
+      "sha256": "ec0a7f9e94c408ac2a2da602e543dca59df382966999b73d2078a29c587c1ac8",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_model_selection_scorecard.md",
+      "bytes": 6859,
+      "sha256": "fef0478aba53a224ba1f56d3ee94bf652d87c6211d90151b50fcbf95d19e66d8",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_picker_retrain_zenpredict_caps.md",
+      "bytes": 3442,
+      "sha256": "eefdbbd30f416c553c7e366519e79cefda7bf158dbbf02e691a0456b31c0cfb5",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_profile_b_hdr.md",
+      "bytes": 46260,
+      "sha256": "4ec63c6a068652fe1e75f150aa34370f00b161db370e01b5fd005fee07d09e4e",
+      "read_in_full_cumulative": false
+    },
+    {
+      "name": "project_sdf_font_and_layout_crates.md",
+      "bytes": 2196,
+      "sha256": "507401150cbf699ddf7f882f46d340da64cdc652774ab783265e61637dab53d8",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_ssim2_replacement_bar.md",
+      "bytes": 5767,
+      "sha256": "b8b4e00b81b46c8c7c534998919c3bb51345e504543e7ea4e7a3dacffa1220b5",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_stats_eval_review.md",
+      "bytes": 3432,
+      "sha256": "6446a8bfec55571f34dd141653e1056967501a4efe0077c45e484741f3d3b7c0",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_steering_pair_and_names.md",
+      "bytes": 1820,
+      "sha256": "8470c3844832fb4408354e80f073ffdd8ec11d0e4c0aa77f482b520ffd3d31ca",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_top_models_and_944_gate.md",
+      "bytes": 3831,
+      "sha256": "169aa75f1a66ea2546c3063f5081e49767522ea1e65134912059b5b78f878dab",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_tv_monotonicity_pareto.md",
+      "bytes": 5880,
+      "sha256": "d2a029372791dbfc9e3ebcf7212bcf5378249e62743da3bd29b3b9765cd43fd5",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_two_day_production_push.md",
+      "bytes": 3358,
+      "sha256": "82d7288fe19bae44c87afd5c2e4917c2017c04ede94845afa8bfbf4a5221d37d",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_v02_bvls_shaped_results.md",
+      "bytes": 1906,
+      "sha256": "9c71ccd3dc0dedf12c18496b24a73f1968e0f81708134209a2393015c5ed7ae5",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_v1_extractor_drift_2026-08-30.md",
+      "bytes": 5702,
+      "sha256": "045ad0f159765978b63c66cb56e50d8f6597ffe6c08f75d9f166e7442322e2e2",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_v39_correctness_defect.md",
+      "bytes": 8473,
+      "sha256": "d7e7b652539fa234b6c641a0c20f5f94e822cd660062ea07972d7580af115c2a",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_zenmetrics_hdr_score_batch.md",
+      "bytes": 6085,
+      "sha256": "30929f16b5cd37b0b2dde6ee17b5d78dfe303f010694f323af45646ecd96b25e",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_zensim_score_judge_eras.md",
+      "bytes": 1635,
+      "sha256": "66a9b73ecff64e02eed2055d399e155bd678352a6394aed1f2b4466aec1c0dd1",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "project_zenstats_pwrc_oom_latent.md",
+      "bytes": 2169,
+      "sha256": "f21909145416341799caef8d11e889cb5851ec70357b145ef09c7f7a5dacb3b4",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "reference_browser_url.md",
+      "bytes": 1002,
+      "sha256": "c7f6e77f2d6868d2c5815d2b8f43dbd95b76e0d47bf56b24226623c9e248ec6e",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "reference_dev_box_no_clipboard.md",
+      "bytes": 1855,
+      "sha256": "ff623a2ea182faad7fc3d5c035a1583b7e1a8465bb09bd78b914942131966d4e",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "reference_eval_grids_r2.md",
+      "bytes": 3427,
+      "sha256": "9b43749980b6a8447567cc1dba4f750b0592a399266cb33ff74b9fc4b01dd2aa",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "reference_gpu_image_blackwell_cuda.md",
+      "bytes": 1509,
+      "sha256": "f05a58ed834b4e7900b2b7b36d6241f6c4a5a4244baf8bd58acab36dc4f2b10f",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "reference_konjnd1k.md",
+      "bytes": 2992,
+      "sha256": "8b331a37a04917bc7a08afc319ea8c83de50a8f1fa30bbfa2a2deae5d877a349",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "private-infrastructure-memory-01",
+      "bytes": 3630,
+      "sha256": "1048a5b7247198d1662aaf5070db66a7ce4dc683873cff4f45bcfe17ce5a8aff",
+      "read_in_full_cumulative": true,
+      "source_name_redacted": true
+    },
+    {
+      "name": "reference_zenpapers.md",
+      "bytes": 1078,
+      "sha256": "4320ed7ebdb6d5b77f1fc09cf2142e8d9680350b1946ff6e1368c7802bd8074a",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "synthetic-pipeline.md",
+      "bytes": 6299,
+      "sha256": "0e55900f142aad3703e5e4f8e8e7c4b736801f305f90a09c16a06dd0c7ecaae5",
+      "read_in_full_cumulative": true
+    },
+    {
+      "name": "user_zensim_mission.md",
+      "bytes": 1462,
+      "sha256": "ee093fdb259bbd8c33afaa38c9b595c6382c647c960638d5994a6d2cdd834c5f",
+      "read_in_full_cumulative": true
+    }
+  ]
+}

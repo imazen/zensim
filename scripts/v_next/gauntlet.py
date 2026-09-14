@@ -2272,7 +2272,7 @@ function renderBar(){
   const mk=(t,fn,title)=>{const x=el('button',{class:'btn',text:t});if(title)x.setAttribute('title',title);x.onclick=fn;return x;};
   bar.append(
     mk('minimal / wide',()=>{state.visible=new Set(DATA.bakes.filter(b=>b.name.startsWith('MT913_')&&(b.name.endsWith('_ens5')||b.name==='MT913_linear60')).map(b=>b.name));state.mcorp=null;rerender();renderBar();},
-      'Registered train-only comparison: eight complete five-seed ensembles and a linear control. KADID eval only; product gates remain incomplete. Available on the all-rows board.'),
+      'Eight frozen five-seed ensembles and a linear control; six measured human/codec EVAL panels. Product gates remain incomplete. Available on the all-rows board.'),
     mk('target models',()=>{state.visible=new Set(PRODUCT_SET);rerender();renderBar();},
       'B, D and the constrained three-seed challenger where present. Read product qualification before composite.'),
     mk('VERIFIED-FAIR',()=>{state.visible=new Set(VFAIRSET);rerender();renderBar();},
@@ -2353,7 +2353,23 @@ function renderBar(){
   // while it is a registered-not-adopted W12 candidate).
   // discussion-set dropdown (user directive 2026-08-28): pick a board
   // generation's discussion set -> visible = set UNION incumbents UNION peers.
-  const ds=DATA.discussionSets||[];
+  // TRAIN reports retain their own population/assessment owner. They are
+  // discoverable here without inventing qualification rows or filtering to
+  // only historical incumbents when none of the study models is on this board.
+  const studies=(DATA.discussionSets||[]).filter(d=>d.role==='train-development');
+  if(studies.length){
+    const box=el('details',{id:'train-studies',style:'flex-basis:100%;padding:.4rem 0'});
+    box.append(el('summary',{text:'TRAIN development comparisons and spatial A/Bs ('+studies.length+')'}));
+    box.append(el('p',{text:'These experiments use TRAIN development populations. Open each complete comparison for scalar panels, spatial checks and failure evidence. They are not EVAL qualification rows.'}));
+    const list=el('ul');
+    studies.forEach(d=>{
+      const row=el('li');
+      row.append(el('a',{href:d.report_url,text:d.label}),el('span',{text:' — '+d.note}));
+      list.append(row);
+    });
+    box.append(list);bar.append(box);
+  }
+  const ds=(DATA.discussionSets||[]).filter(d=>d.role!=='train-development');
   if(ds.length){
     const sel=el('select',{class:'btn',title:'filter to a discussion set + incumbents + iqa peers (benchmarks/board_discussion_sets.json, latest first)'});
     sel.append(el('option',{text:'discussion set\u2026',value:''}));
