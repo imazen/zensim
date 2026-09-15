@@ -1,5 +1,19 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 15, frozen recovery and corrected HDR:**
+[Complete results](../benchmarks/recovery_completion_2026-09-15.md). Ten Rust
+TRAIN-only fits, two fixed five-member compositions; complete full-composite,
+scatter, ladder, 27-cell JPEG, bounded scalar/native JXL, native input/HDR and
+strict latency assessment. Published TEST only for frozen evaluation where no
+EVAL exists, historical exposure linked; secret holdouts untouched. All old
+TRAIN reservations preserved. Corrected declared-primary PQ extraction has
+7,425 pairs / 495 reference variants / 33 source families, all live peak
+columns, fresh native CVVDP and PU-SSIM2 labels. Old mislabeled/all-zero-peak
+or 8-bit-shell HDR products are not reusable under this contract. Native UPIQ
+uses zenexr and fails the shared-weight hypothesis against BHdr. Model bytes
+remain fixed after evaluation; neither candidate is promoted.
+
+
 **September 14, complete native JXL ensembles:**
 [Native evidence](../benchmarks/jxl_ensemble_native_2026-09-14.md) retains the
 preceding corrected nine-family TRAIN/eight-family validation admission and all

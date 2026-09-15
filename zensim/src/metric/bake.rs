@@ -108,6 +108,33 @@ impl<'a> BakeScorer<'a> {
         source: &'s S,
         bin: usize,
     ) -> Result<SteeringSession<'s, 'a, S>, ZensimError> {
+        self.prepare_steering_input(source, bin, None)
+    }
+
+    /// Bind native HDR input and viewing parameters for repeated spatial steering.
+    /// Uses the same basic/peak features, inference and map composition as SDR.
+    /// The encoding applies to both images; decoded primaries remain authoritative.
+    ///
+    /// # Errors
+    /// Refuses invalid HDR input/display parameters, unsupported sampling or feature
+    /// families, and incompatible model/companion arithmetic. No SDR conversion occurs.
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    pub fn prepare_steering_hdr<'s, S: ImageSource>(
+        &'s mut self,
+        source: &'s S,
+        encoding: crate::feature_v2::HdrEncoding,
+        bin: usize,
+    ) -> Result<SteeringSession<'s, 'a, S>, ZensimError> {
+        self.prepare_steering_input(source, bin, Some(encoding))
+    }
+
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn prepare_steering_input<'s, S: ImageSource>(
+        &'s mut self,
+        source: &'s S,
+        bin: usize,
+        encoding: Option<crate::feature_v2::HdrEncoding>,
+    ) -> Result<SteeringSession<'s, 'a, S>, ZensimError> {
         if bin == 0 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "steering bin must be nonzero",
@@ -135,8 +162,18 @@ impl<'a> BakeScorer<'a> {
                 });
             }
         }
-        let reference = self.precompute_reference(source)?;
+        let reference = if let Some(encoding) = encoding {
+            self.check_pixel_revision()?;
+            if self.plan()?.compute.sampling.is_some() {
+                return Err(ZensimError::HdrInputRequiresPuPath);
+            }
+            crate::feature_v2::validate_hdr_pair(source, source, encoding, Some(120_000_000))?;
+            crate::PrecomputedReference::for_candidate(source, self.parallel, Some(encoding))
+        } else {
+            self.precompute_reference(source)?
+        };
         Ok(SteeringSession {
+            encoding,
             scorer: self,
             source,
             reference,
@@ -1018,6 +1055,22 @@ impl<'a> BakeScorer<'a> {
             )?;
             return Ok(sampling.reference(source, self.parallel));
         }
+        let plan = self.plan()?;
+        if plan.toggles().v1_only
+            && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
+            && matches!(
+                plan.compute.v1_pools,
+                crate::feature_v2::V1PoolsMode::Off | crate::feature_v2::V1PoolsMode::Peaks
+            )
+        {
+            validate_pair(source, source)?;
+            check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
+            return Ok(crate::PrecomputedReference::for_candidate(
+                source,
+                self.parallel,
+                None,
+            ));
+        }
         Zensim::new(ZensimProfile::B)
             .with_parallel(self.parallel)
             .precompute_reference(source)
@@ -1058,13 +1111,40 @@ impl<'a> BakeScorer<'a> {
         session: &mut crate::Fused944Session,
         bin: usize,
     ) -> Result<crate::ScoredAttribution, ZensimError> {
+        self.compute_attribution_input(
+            source,
+            precomputed,
+            distorted,
+            codec_hint,
+            session,
+            bin,
+            None,
+        )
+    }
+
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    #[allow(clippy::too_many_arguments)]
+    fn compute_attribution_input(
+        &mut self,
+        source: &impl ImageSource,
+        precomputed: &crate::PrecomputedReference,
+        distorted: &impl ImageSource,
+        codec_hint: Option<&str>,
+        session: &mut crate::Fused944Session,
+        bin: usize,
+        encoding: Option<crate::feature_v2::HdrEncoding>,
+    ) -> Result<crate::ScoredAttribution, ZensimError> {
         if bin == 0 {
             return Err(ZensimError::ModelForwardFailed {
                 reason: "attribution bin must be nonzero",
             });
         }
         self.check_pixel_revision()?;
-        validate_pair(source, distorted)?;
+        if let Some(encoding) = encoding {
+            crate::feature_v2::validate_hdr_pair(source, distorted, encoding, Some(120_000_000))?;
+        } else {
+            validate_pair(source, distorted)?;
+        }
         validate_ref_dimensions(precomputed, distorted)?;
         check_within_max_pixels(source.width(), source.height(), Some(120_000_000))?;
         let plan = self.plan()?;
@@ -1096,8 +1176,14 @@ impl<'a> BakeScorer<'a> {
                 has_corruption_gate,
             });
         }
-        let (mut features, mean_offset) =
-            session.planned_features(source, precomputed, distorted, &plan, self.parallel)?;
+        let (mut features, mean_offset) = session.planned_features(
+            source,
+            precomputed,
+            distorted,
+            &plan,
+            self.parallel,
+            encoding,
+        )?;
         features.truncate(
             plan.walk_width()
                 .max(crate::fold_engine::v1_feature_width(&config)),
@@ -1158,6 +1244,7 @@ impl<'a> BakeScorer<'a> {
 /// borrows keep lifetimes explicit; no image or model is installed globally.
 #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
 pub struct SteeringSession<'s, 'a, S: ImageSource> {
+    encoding: Option<crate::feature_v2::HdrEncoding>,
     scorer: &'s mut BakeScorer<'a>,
     source: &'s S,
     reference: crate::PrecomputedReference,
@@ -1184,13 +1271,14 @@ impl<S: ImageSource> SteeringSession<'_, '_, S> {
         // reconstruction. Local probes must never differentiate its threshold.
         #[cfg(feature = "corruption-head")]
         let companion = self.scorer.corruption.take();
-        let attempted = self.scorer.compute_with_ref_and_attribution(
+        let attempted = self.scorer.compute_attribution_input(
             self.source,
             &self.reference,
             distorted,
             codec_hint,
             &mut self.scratch,
             self.bin,
+            self.encoding,
         );
         #[cfg(feature = "corruption-head")]
         {

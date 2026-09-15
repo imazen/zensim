@@ -806,7 +806,7 @@ pub fn compute_zensim_with_ref_and_config(
 }
 
 /// Per-scale statistics collected during computation.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct ScaleStats {
     /// SSIM statistics: [mean_d, root4_d] per channel = 6 values
     pub(crate) ssim: [f64; 6],

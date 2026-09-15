@@ -971,6 +971,26 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
 /// `Linear`, code values for `Pq`/`Hlg`; alpha ignored, Opaque required)
 /// and `Srgb16Rgba` (u16 code values normalized by 65535 — `Pq`/`Hlg`
 /// code-value containers like cICP-spliced 16-bit PNG).
+pub(crate) fn hdr_source_to_xyb(
+    source: &impl ImageSource,
+    encoding: HdrEncoding,
+    out: &mut [Vec<f32>; 3],
+) {
+    let width = source.width();
+    let mut row = vec![[0.0; 3]; width];
+    let [x, y, b] = out;
+    for r in 0..source.height() {
+        hdr_source_row_to_nits(source, r, encoding, &mut row);
+        let range = r * width..(r + 1) * width;
+        crate::color::linear_to_pu_xyb_planar_into(
+            &row,
+            &mut x[range.clone()],
+            &mut y[range.clone()],
+            &mut b[range],
+        );
+    }
+}
+
 fn hdr_source_row_to_nits(
     src: &impl ImageSource,
     y: usize,

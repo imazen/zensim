@@ -304,6 +304,8 @@ CURATED_BOARD.extend(["MT913_" + name for name in (
     "y40_h32_ens5", "y40_h128_ens5", "y60_h32_ens5", "y60_h128_ens5",
     "local120_h128_ens5", "selected619_h128_ens5", "full944_h128_ens5",
     "full944_h256_ens5", "linear60")])
+# September 15: frozen TRAIN-only recovery, fully assessed without promotion.
+CURATED_BOARD.extend(["R915_y60_h32_ens5", "R915_basic228_h128_ens5"])
 CURATED = set(CURATED_BOARD)
 
 

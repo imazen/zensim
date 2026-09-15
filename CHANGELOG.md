@@ -4,6 +4,14 @@
 
 ### Added
 
+- Native `BakeScorer::prepare_steering_hdr` binds PQ/HLG/absolute-linear inputs
+  to the existing prepared steering session. Basic/peak scoring and map assembly
+  share retained signals, eliminating repeated extraction. Candidate reference
+  pyramids now follow canonical natural-width geometry at odd dimensions.
+- HDR datagen accepts declared PQ cICP primaries in PNG and JXL, preserving
+  native16 samples and live peak features. JXL format preferences select storage;
+  codestream metadata defines color. Partial extractions are refused.
+
 - Native PQ16 decoding caches the existing EOTF for all 65,536 codes (256 KiB),
   retaining per-comparison display parameters and exact float-route results.
 - Wide feature extraction rejects mismatched explicit/process formula revisions

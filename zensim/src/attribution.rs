@@ -2019,6 +2019,7 @@ mod tests {
                             revision,
                             None,
                             8,
+                            None,
                         )
                         .unwrap();
                         bins.into_result()
@@ -4647,6 +4648,23 @@ impl FusedBasicCanvas {
     }
 }
 
+// Basic/peak signals retained by the scoring walk until model sensitivities
+// are available. Reference planes remain in the caller's existing cache.
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+#[derive(Default)]
+struct BasicRetention {
+    scales: Vec<BasicRetainedScale>,
+    result: Option<crate::ZensimResult>,
+}
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))]
+struct BasicRetainedScale {
+    stats: crate::metric::ScaleStats,
+    distorted: [Vec<f32>; 3],
+    planes: crate::streaming::AttrScaleRetention,
+    width: usize,
+    height: usize,
+}
+
 /// Reusable state for the fused folded-944 compare
 /// ([`crate::Zensim::compute_folded944_score_and_attribution`]): the
 /// streaming extraction's scratch + the walk retention (planes, pyramid
@@ -4659,6 +4677,7 @@ impl FusedBasicCanvas {
 #[cfg(feature = "feature-regime-v2")]
 #[derive(Default)]
 pub struct Fused944Session {
+    basic: BasicRetention,
     scratch: crate::feature_v2::V2Scratch,
     retention: crate::feature_v2::FoldRetention,
     /// f32 pass-B scratch (appendix P lever 1) — plane-sized buffers
@@ -4681,7 +4700,88 @@ impl Fused944Session {
         distorted: &impl ImageSource,
         plan: &crate::feature_plan::Plan,
         parallel: bool,
+        encoding: Option<crate::feature_v2::HdrEncoding>,
     ) -> Result<(Vec<f64>, [f64; 3]), ZensimError> {
+        self.basic.result = None;
+        if plan.toggles().v1_only
+            && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
+            && plan.compute.sampling.is_none()
+            && matches!(
+                plan.compute.v1_pools,
+                crate::feature_v2::V1PoolsMode::Off | crate::feature_v2::V1PoolsMode::Peaks
+            )
+        {
+            let mut config = config_from_params(crate::ZensimProfile::B.params(), parallel);
+            config.formula_revision = Some(plan.compute.formula_revision);
+            config.compute_all_features = true;
+            config.extended_features = false;
+            config.compute_iw_features = false;
+            config.local_only = plan.compute.local_only;
+            config.omit_edges = plan.compute.omit_edges;
+            config.attribution_channels = Some(core::array::from_fn(|scale| {
+                core::array::from_fn(|ch| plan.compute.channel_active(scale, ch))
+            }));
+            let supplied_xyb = encoding.map(|encoding| {
+                let (_, w, h) = precomputed.scale(0);
+                let mut planes = core::array::from_fn(|_| vec![0.0; w * h]);
+                if distorted.width() < 64 || distorted.height() < 64 {
+                    let padded = crate::metric::reflect_pad_to_min(distorted);
+                    crate::feature_v2_stream::hdr_source_to_xyb(&padded, encoding, &mut planes);
+                } else {
+                    crate::feature_v2_stream::hdr_source_to_xyb(distorted, encoding, &mut planes);
+                }
+                planes
+            });
+            let result = crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes_input(
+                precomputed,
+                distorted,
+                &config,
+                crate::ZensimProfile::B.params().weights,
+                supplied_xyb,
+                |scale, stats, _src, dst, planes, w, h| {
+                    let n = w * h;
+                    if self.basic.scales.len() <= scale {
+                        self.basic.scales.push(BasicRetainedScale {
+                            stats: stats.clone(),
+                            distorted: core::array::from_fn(|_| Vec::new()),
+                            planes: crate::streaming::AttrScaleRetention::new(0),
+                            width: w,
+                            height: h,
+                        });
+                    }
+                    let out = &mut self.basic.scales[scale];
+                    out.stats.clone_from(stats);
+                    out.width = w;
+                    out.height = h;
+                    for (ch, distorted) in dst.iter().enumerate() {
+                        if !plan.compute.channel_active(scale, ch) {
+                            out.distorted[ch].clear();
+                            out.planes.sd[ch].clear();
+                            out.planes.mu1[ch].clear();
+                            out.planes.mu2[ch].clear();
+                            continue;
+                        }
+                        for (target, source) in [
+                            (&mut out.distorted[ch], *distorted),
+                            (&mut out.planes.sd[ch], &planes.sd[ch][..n]),
+                            (&mut out.planes.mu1[ch], &planes.mu1[ch][..n]),
+                            (&mut out.planes.mu2[ch], &planes.mu2[ch][..n]),
+                        ] {
+                            target.resize(n, 0.0);
+                            target.copy_from_slice(source);
+                        }
+                    }
+                },
+            );
+            let mut features = result.features().to_vec();
+            features.resize(plan.walk_width().max(372), 0.0);
+            let mean_offset = result.mean_offset();
+            self.basic.result = Some(result);
+            return Ok((features, mean_offset));
+        }
+        if encoding.is_some() {
+            return Err(ZensimError::HdrInputRequiresPuPath);
+        }
         if plan.toggles().v1_only
             && plan.compute.free_extras == crate::feature_v2::V1FreeExtras::Off
             && !source.is_hdr()
@@ -5041,6 +5141,7 @@ impl crate::metric::Zensim {
             None,
             None,
             1,
+            None,
         )
     }
 
@@ -5056,6 +5157,7 @@ impl crate::metric::Zensim {
         revision: Option<crate::feature_defs::FormulaRevision>,
         mut moment_removals: Option<&mut Vec<MomentRemoval>>,
         moment_bin: usize,
+        retained: Option<&BasicRetention>,
     ) -> Result<(crate::metric::ZensimResult, f64, f64), ZensimError> {
         const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
         let params = self.profile().params();
@@ -5117,13 +5219,13 @@ impl crate::metric::Zensim {
         let mut spread_tmp: Vec<f32> = Vec::new();
         let mut spread_out: Vec<f32> = Vec::new();
 
-        let on_scale = |scale: usize,
-                        stats: &crate::metric::ScaleStats,
-                        src_planes: [&[f32]; 3],
-                        dst_planes: [&[f32]; 3],
-                        ret: &crate::streaming::AttrScaleRetention,
-                        sw: usize,
-                        sh: usize| {
+        let mut on_scale = |scale: usize,
+                            stats: &crate::metric::ScaleStats,
+                            src_planes: [&[f32]; 3],
+                            dst_planes: [&[f32]; 3],
+                            ret: &crate::streaming::AttrScaleRetention,
+                            sw: usize,
+                            sh: usize| {
             let t_c = std::time::Instant::now();
             let n = sw * sh;
             let n_f = n as f64;
@@ -5313,13 +5415,32 @@ impl crate::metric::Zensim {
             }
         };
 
-        let result = crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes(
-            precomputed,
-            distorted,
-            &config,
-            params.weights,
-            on_scale,
-        );
+        let result = if let Some(retained) = retained {
+            for (scale, cell) in retained.scales.iter().enumerate() {
+                on_scale(
+                    scale,
+                    &cell.stats,
+                    precomputed.scale(scale).0,
+                    cell.distorted.each_ref().map(Vec::as_slice),
+                    &cell.planes,
+                    cell.width,
+                    cell.height,
+                );
+            }
+            retained
+                .result
+                .as_ref()
+                .expect("successful retained extraction")
+                .clone()
+        } else {
+            crate::streaming::compute_zensim_streaming_with_ref_and_attr_planes(
+                precomputed,
+                distorted,
+                &config,
+                params.weights,
+                on_scale,
+            )
+        };
         let mut result = result.with_profile(self.profile());
         // Same real-scoring step as `compute_with_ref_and_diffmap` — the
         // scalar golden gate (`fused_score_bit_matches_diffmap_path`) holds
@@ -5711,6 +5832,7 @@ impl crate::metric::Zensim {
         ),
         ZensimError,
     > {
+        session.basic.result = None;
         validate_pair(source, distorted)?;
         // ZENSIM_ATTR_PERF=1: coarse section timing (perf lever triage).
         let perf_log = std::env::var("ZENSIM_ATTR_PERF").as_deref() == Ok("1");
@@ -5819,6 +5941,7 @@ impl crate::metric::Zensim {
                 session,
             );
         }
+        session.basic.result = None;
         validate_pair(source, distorted)?;
         let v2res = crate::feature_v2::compute_folded944_streaming_with_retention(
             source,
@@ -5871,6 +5994,7 @@ impl crate::metric::Zensim {
             revision,
             moment_removals,
             bin,
+            session.basic.result.as_ref().map(|_| &session.basic),
         )?;
         let block = |start: usize, end: usize| -> Option<&[f64]> {
             (s.len() > start).then(|| &s[start..s.len().min(end)])

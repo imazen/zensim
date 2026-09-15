@@ -366,3 +366,205 @@ fn public_wide_extraction_refuses_mixed_formula_revisions() {
         .is_err()
     );
 }
+
+#[cfg(feature = "custom-profiles")]
+#[test]
+fn prepared_native_maps_match_canonical_features_and_survive_failed_calls() {
+    let revision = format!("{:?}", zensim::feature_v2::active_formula_revision());
+    let revision = revision.trim_start_matches("Rev");
+    let ids: Vec<usize> = (0..228).collect();
+    let recipe = serde_json::json!({
+        "schema_hash":1, "scaler_mean":vec![0.;228], "scaler_scale":vec![1.;228],
+        "metadata":[
+            {"key":"zentrain.feature_ids","type":"utf8","text":ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")},
+            {"key":"zentrain.formula_revision","type":"utf8","text":revision}
+        ],
+        "layers":[{"in_dim":228,"out_dim":1,"activation":"identity","dtype":"f32",
+            "weights":(0..228).map(|i| -(i as f32+1.)/100.).collect::<Vec<_>>(),"biases":[100.]}]
+    });
+    let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+    let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+    for (w, h) in [(17, 9), (97, 65), (128, 129)] {
+        for encoding in [
+            HdrEncoding::Linear,
+            HdrEncoding::Pq { peak_nits: 1000. },
+            HdrEncoding::Hlg {
+                peak_nits: 1000.,
+                ambient_lux: 5.,
+            },
+        ] {
+            let factor = if matches!(encoding, HdrEncoding::Linear) {
+                1000.
+            } else {
+                1.
+            };
+            let a: Vec<[f32; 4]> = (0..w * h)
+                .map(|i| {
+                    [
+                        factor * (0.05 + (i * 17 % 233) as f32 / 256.),
+                        factor * (0.01 + (i * 37 % 239) as f32 / 256.),
+                        factor * (0.02 + (i * 53 % 241) as f32 / 256.),
+                        1.,
+                    ]
+                })
+                .collect();
+            let mut b = a.clone();
+            for y in h / 3..h * 2 / 3 {
+                for x in w / 3..w * 2 / 3 {
+                    b[y * w + x][0] *= 0.8;
+                    b[y * w + x][2] *= 0.9;
+                }
+            }
+            let src = source(&a, w, h, ColorPrimaries::Bt2020);
+            let dst = source(&b, w, h, ColorPrimaries::Bt2020);
+            let canonical = Zensim::new(ZensimProfile::B)
+                .with_parallel(false)
+                .compute_folded720_append_features_hdr(
+                    &src,
+                    &dst,
+                    encoding,
+                    V2NewFeatureToggles {
+                        v1_pools: zensim::feature_v2::V1PoolsMode::Full,
+                        ..Default::default()
+                    },
+                    &mut V2Scratch::new(),
+                )
+                .unwrap()
+                .features()
+                .to_vec();
+            let expected = zensim::BakeScorer::new(&model)
+                .unwrap()
+                .with_parallel(false)
+                .compute_hdr(&src, &dst, encoding, None)
+                .unwrap();
+            if !matches!(encoding, HdrEncoding::Linear) {
+                let codes = |pixels: &[[f32; 4]]| {
+                    pixels
+                        .iter()
+                        .map(|p| {
+                            [
+                                (p[0] * 65535.).round() as u16,
+                                (p[1] * 65535.).round() as u16,
+                                (p[2] * 65535.).round() as u16,
+                                65535,
+                            ]
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let (a16, b16) = (codes(&a), codes(&b));
+                let src16 = StridedBytes::with_alpha_mode(
+                    bytemuck::cast_slice(&a16),
+                    w,
+                    h,
+                    w * 8,
+                    PixelFormat::Srgb16Rgba,
+                    AlphaMode::Opaque,
+                )
+                .with_color_primaries(ColorPrimaries::Bt2020);
+                let dst16 = StridedBytes::with_alpha_mode(
+                    bytemuck::cast_slice(&b16),
+                    w,
+                    h,
+                    w * 8,
+                    PixelFormat::Srgb16Rgba,
+                    AlphaMode::Opaque,
+                )
+                .with_color_primaries(ColorPrimaries::Bt2020);
+                let mut scalar = zensim::BakeScorer::new(&model)
+                    .unwrap()
+                    .with_parallel(false);
+                let expected16 = scalar.compute_hdr(&src16, &dst16, encoding, None).unwrap();
+                let canonical16 = Zensim::new(ZensimProfile::B)
+                    .with_parallel(false)
+                    .compute_folded720_append_features_hdr(
+                        &src16,
+                        &dst16,
+                        encoding,
+                        V2NewFeatureToggles {
+                            v1_pools: zensim::feature_v2::V1PoolsMode::Full,
+                            ..Default::default()
+                        },
+                        &mut V2Scratch::new(),
+                    )
+                    .unwrap();
+                let mut worker = scalar.prepare_steering_hdr(&src16, encoding, 8).unwrap();
+                let actual16 = worker.compute(&dst16, None).unwrap();
+                assert_eq!(actual16.result().score(), expected16);
+                for id in 0..228 {
+                    assert!(
+                        (actual16.result().features()[id] - canonical16.features()[id]).abs()
+                            <= 2e-9 * canonical16.features()[id].abs().max(1.),
+                        "native16 {encoding:?} {w}x{h} f{id}"
+                    );
+                }
+            }
+            for parallel in [false, true] {
+                for bin in [1, 8] {
+                    let mut scorer = zensim::BakeScorer::new(&model)
+                        .unwrap()
+                        .with_parallel(parallel)
+                        .with_finite_moment_refinement(true);
+                    let mut worker = scorer.prepare_steering_hdr(&src, encoding, bin).unwrap();
+                    let first = worker.compute(&dst, None).unwrap();
+                    for (id, &value) in canonical[..228].iter().enumerate() {
+                        let actual = first.result().features()[id];
+                        assert!(
+                            (actual - value).abs() <= 2e-9 * value.abs().max(1.),
+                            "{encoding:?} {w}x{h} f{id}: {actual} vs {value}"
+                        );
+                    }
+                    assert_eq!(first.result().score(), expected, "{encoding:?} {w}x{h}");
+                    assert!(first.unsupported_refinement_feature_ids().is_empty());
+                    assert!(first.refinement_gain(0, 0, w, h).is_finite());
+                    let identity = worker.compute(&src, None).unwrap();
+                    assert_eq!(identity.result().score(), 100.);
+                    assert_eq!(identity.refinement_gain(0, 0, w, h), 0.);
+                    let bad = [[0u8; 3]; 64];
+                    assert!(
+                        worker
+                            .compute(&zensim::RgbSlice::new(&bad, 8, 8), None)
+                            .is_err()
+                    );
+                    let again = worker.compute(&dst, None).unwrap();
+                    assert_eq!(first.result().features(), again.result().features());
+                    assert_eq!(
+                        first.refinement_gain(0, 0, w, h),
+                        again.refinement_gain(0, 0, w, h)
+                    );
+                }
+            }
+        }
+        let a = vec![[130u8, 111, 95]; w * h];
+        let mut b = a.clone();
+        b[w * h / 2] = [100, 107, 105];
+        let src = zensim::RgbSlice::new(&a, w, h);
+        let dst = zensim::RgbSlice::new(&b, w, h);
+        let mut scorer = zensim::BakeScorer::new(&model)
+            .unwrap()
+            .with_parallel(false);
+        let expected = scorer.compute(&src, &dst, None).unwrap();
+        let mut worker = scorer.prepare_steering(&src, 8).unwrap();
+        let actual = worker.compute(&dst, None).unwrap();
+        for id in 0..228 {
+            assert!(
+                (actual.result().features()[id] - expected.features()[id]).abs()
+                    <= 2e-9 * expected.features()[id].abs().max(1.),
+                "SDR {w}x{h} f{id}"
+            );
+        }
+        assert_eq!(actual.result().score(), expected.score());
+        drop(worker);
+        // Public session scratch may alternate between candidate and legacy
+        // folded calls; retained candidate signals must not leak into a new pair.
+        let mut scratch = zensim::Fused944Session::new();
+        let pre = scorer.precompute_reference(&src).unwrap();
+        scorer.compute_with_ref_and_attribution(&src,&pre,&dst,None,&mut scratch,8).unwrap();
+        let z = Zensim::new(ZensimProfile::B).with_parallel(false);
+        let legacy_pre = z.precompute_reference(&src).unwrap();
+        let sensitivities = vec![-1.;944];
+        let reused = z.compute_folded944_score_and_attribution_binned(&src,&legacy_pre,&src,&sensitivities,&mut scratch,8).unwrap();
+        let fresh = z.compute_folded944_score_and_attribution_binned(&src,&legacy_pre,&src,&sensitivities,&mut zensim::Fused944Session::new(),8).unwrap();
+        assert_eq!(reused.0.features(),fresh.0.features());
+        assert_eq!(reused.2.query_rect(0,0,w,h),fresh.2.query_rect(0,0,w,h));
+    }
+}

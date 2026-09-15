@@ -1,5 +1,26 @@
 # Start here — one target score, one development path
 
+## September 15: implementation and frozen recovery assessment complete
+
+[Results, runtime and remaining product gates](benchmarks/recovery_completion_2026-09-15.md).
+Basic/peak prepared maps reuse the scoring extraction; native HDR prepared
+sessions preserve declared primaries and precision. JXL candidate tiles now
+consume complete rectangle refinement, including maxima. Both recovered
+five-seed TRAIN-only models are fully assessed: composite 0.8460 / 0.8760
+versus matched B 0.8382 / D 0.8308. Fast RGB8 1 MP scalar/prepared p95
+9.77 / 26.95 ms; richer 18.79 / 91.73 ms. No default changed.
+
+Both FAIL product qualification: CID22-band, addressability, targeting-tail,
+independent spatial RD and HDR human-ranking regressions. Rich map cost also
+fails the 3× ratio. No qualified corruption companion. Do not restart from
+September 14's unfinished list: use the exact frozen models, failure evidence
+and owner map. Corrected HDR TRAIN cache and native judges are complete;
+shared SDR/HDR calibration was tested and did not meet BHdr on UPIQ.
+Artifact authority `/var/tmp/zensim-validation-2026-09-15/`, served packet
+`recovery-completion-2026-09-15/` beside the gauntlet. Full chronology below
+is historical. The old autonomous goal remains paused; this was a direct task.
+
+
 ## September 14, latest implementation: Rev3 maps and native color/HDR
 
 Implemented fused basic/L8 combination with preserved rounding, shared native

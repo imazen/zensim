@@ -1,6 +1,6 @@
 # Develop, train and evaluate zensim
 
-Current owner map and workflow, September 8, 2026. Start from
+Current owner map and workflow, updated September 15, 2026. Start from
 [SESSION-RESUME](../SESSION-RESUME.md). The product is one target score with
 useful quality across codecs/content and affordable encoding loops. Read
 [CODEC_TARGET_METRIC](CODEC_TARGET_METRIC.md) and
@@ -31,6 +31,10 @@ legacy default corpus/terminal scans to fill missing evidence.
 | Complete canonical input audit | Same extractor audit, `BakeScorer::consumed_feature_ids` | Require `feature_audit_scope: complete-structural-read-set-v1` and measured IDs; compare every active member/companion input against canonical extraction. Older no-head zero maxima do not prove feature parity. [Evidence](../benchmarks/complete_feature_audit_2026-09-14.md). |
 | Cached pair identity / corruption screen | `BakeScorer::score_features_with_identity`, optional audit in `extract_features_372col`, `corruption_gate_eval.py --audit-jsonl` | Proven decoded identity, canonical consumed-feature and stored-f32 parity, complete keyed coverage; raw zero features are not identity proof |
 | Same-pixel SSIMULACRA2 comparison | `extract_features_372col --audit-jsonl PATH --audit-ssim2` | Existing fast-ssim2 on exact legacy RGB8 or canonical native SDR linear-float buffers; original and transformed hashes, finite scores; no RGB8 projection for native input, no HDR oracle claim |
+| Prepared SDR/HDR maps | `BakeScorer::prepare_steering` / `prepare_steering_hdr`, retained basic/peak extraction | Bind input contract once; complete canonical feature/scalar/refinement parity; bin8 finite moments are opt-in; report map cost and memory. [Recovery evidence](../benchmarks/recovery_completion_2026-09-15.md). |
+| Corrected native HDR extraction | Existing `hdr944_extract`, `--audit-composition` | Declared PQ cICP, actual JXL codestream metadata, live peak columns, canonical cached/pixel/prepared parity; never relabel old HDR tables |
+| Native HDR human assessment | Existing `upiq_pu_score --composition ... --input-contract upiq-exr-bt709-nits-v1`, `panel` | zenexr native float nits through complete `BakeScorer::compute_hdr`; original UPIQ split and frozen composition; matched BHdr control |
+| Native common-primary HDR judges | Existing zenmetrics `score-pairs --hdr --hdr-common-primaries` | Versioned PQ-only ingress; BT.709/P3/BT.2020 to unclipped common nits before native metric; CVVDP display contract explicit; no 8-bit shell/sidecar fallback |
 | Named-profile inference | `zensim::Zensim` | Profile/bake identity and supported pixel contract |
 | Spatial attribution / rectangle queries | `zensim/src/attribution.rs`, retained extraction in `feature_v2` | `BakeScorer::compute_with_ref_and_attribution` binds complete candidate scoring; signed density with L8, separate finite-max `ScoredAttribution::refinement_gain` and coverage, scalar/feature parity and reusable binned sessions |
 | MLP training / capability admission | `zensim_mlp_train`, `mlp_train::capabilities` | Explicit recipe, table declarations, source-disjoint selection, reproducible random streams |

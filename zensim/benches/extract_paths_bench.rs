@@ -346,7 +346,33 @@ fn rss_mode(arm: &str) {
             .unwrap()
             .with_parallel(parallel)
             .with_finite_moment_refinement(std::env::var_os("ZEN_XP_FINITE_MOMENTS").is_some());
-        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        let input = std::env::var("ZEN_XP_INPUT").unwrap_or_else(|_| "rgb8".into());
+        assert!(matches!(
+            input.as_str(),
+            "rgb8" | "sdr16" | "linear-p3" | "hdr-pq16" | "hdr-linear2020"
+        ));
+        let (rs, ds) = (
+            timing_source(Box::leak(src.into_boxed_slice()), w, h, &input),
+            timing_source(Box::leak(dst.into_boxed_slice()), w, h, &input),
+        );
+        let encoding = match input.as_str() {
+            "hdr-pq16" => Some(zensim::feature_v2::HdrEncoding::Pq { peak_nits: 1000. }),
+            "hdr-linear2020" => Some(zensim::feature_v2::HdrEncoding::Linear),
+            _ => None,
+        };
+        if let Some(encoding) = encoding {
+            if std::env::var_os("ZEN_XP_SPATIAL").is_some() {
+                let mut worker = scorer.prepare_steering_hdr(&rs, encoding, 8).unwrap();
+                for _ in 0..iters {
+                    zenbench::black_box(worker.compute(&ds, None).unwrap());
+                }
+            } else {
+                for _ in 0..iters {
+                    zenbench::black_box(scorer.compute_hdr(&rs, &ds, encoding, None).unwrap());
+                }
+            }
+            return;
+        }
         if std::env::var_os("ZEN_XP_SPATIAL").is_some() {
             let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
             for _ in 0..iters {
@@ -634,8 +660,8 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
     let spatial = std::env::var_os("ZEN_XP_SPATIAL").is_some();
     let prepared = std::env::var_os("ZEN_XP_PREPARED").is_some();
     assert!(
-        !spatial || encoding.is_none(),
-        "HDR prepared maps are not yet supported"
+        !spatial || encoding.is_none() || prepared,
+        "HDR spatial timing requires ZEN_XP_PREPARED"
     );
     let parallel = std::env::var("RAYON_NUM_THREADS").as_deref() != Ok("1");
     let pairs = timing_pairs(sizes);
@@ -704,11 +730,20 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                                 .with_finite_moment_refinement(finite_moments);
                             let (rs, ds) = (native_src, native_dst);
                             if let Some(encoding) = encoding {
-                                b.iter(move || {
-                                    zenbench::black_box(
-                                        scorer.compute_hdr(&rs, &ds, encoding, None).unwrap(),
-                                    )
-                                });
+                                if spatial {
+                                    let mut worker =
+                                        scorer.prepare_steering_hdr(&rs, encoding, 8).unwrap();
+                                    b.iter(move || {
+                                        let r = worker.compute(&ds, None).unwrap();
+                                        zenbench::black_box(r.refinement_gain(0, 0, w / 2, h / 2));
+                                    });
+                                } else {
+                                    b.iter(move || {
+                                        zenbench::black_box(
+                                            scorer.compute_hdr(&rs, &ds, encoding, None).unwrap(),
+                                        )
+                                    });
+                                }
                                 return;
                             }
                             if spatial && prepared {

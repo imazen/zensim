@@ -19,17 +19,11 @@
 //! and two bakes at different revisions coexist in one process — each getting
 //! its own arithmetic, in its own extraction.
 //!
-//! ## What is in scope, honestly
-//!
-//! `Rev2` has two halves. Its `paired_global_contrast` half is a FINALISER
-//! parameter, so it threads per-walk and is what these tests exercise — and
-//! it is also the half the shipped 944 bakes actually read. Its luma-form
-//! half (`ssim_form::active_luma_form`) is a `OnceLock` read inside the SIMD
-//! kernels; making that per-request is a change to the kernel dispatch, which
-//! this lane does not own. A per-bake `Rev2` therefore gets rev2's
-//! global-contrast arithmetic and the process's luma form. That is stated
-//! rather than papered over, and `mixed_revision_profiles_get_no_plan` pins
-//! the one place the limitation is load-bearing.
+//! September 15 correction: the September 13 implementation now selects SSIM
+//! luminance arithmetic per request. Rev2 changes both the basic/peak SSIM
+//! slots, HF energy gain and the append global-contrast finalizers. Edge, MSE
+//! and HF loss remain unchanged. The original phase-5 test described the older partial
+//! implementation and incorrectly required all basic features to be identical.
 
 #![cfg(all(feature = "training", feature = "feature-regime-v2"))]
 
@@ -71,6 +65,11 @@ fn extract_at(rev_two: bool, w: usize, h: usize) -> Vec<f64> {
     .into_features()
 }
 
+fn is_revision_basic_pool(id: usize) -> bool {
+    (id < 156 && matches!(id % 13, 0..=2 | 12))
+        || ((156..228).contains(&id) && matches!((id - 156) % 6, 0 | 3))
+}
+
 /// **The coexistence property.** Two extractions at two declared revisions,
 /// in ONE process, differ on exactly the slots the revision moves and agree
 /// everywhere else.
@@ -95,26 +94,40 @@ fn two_revisions_coexist_in_one_process_and_differ_only_where_the_revision_moves
              fixture does not exercise the moved slots, and neither is a \
              passing test"
         );
-        // Everything that moved must be a GLOBAL_* slot. The rest of the
-        // vector is untouched by this revision, and a value that moved
-        // outside it would mean the revision leaked.
+        // Bound both changed families explicitly; arbitrary basic or append
+        // movement is still a failure.
         use zensim::feature_v2::{FEATURES_PER_CHANNEL_APPEND, idx_append};
         let append_base = 372 + 4 * 3 * zensim::feature_v2::FEATURES_PER_CHANNEL_V2_TOTAL;
+        assert!(
+            moved.iter().any(|&i| i < 156),
+            "fixture must exercise per-request luminance arithmetic"
+        );
         for &i in &moved {
-            assert!(
-                i >= append_base,
-                "f{i} moved between revisions at {w}x{h} but is below the \
-                 append block — the revision leaked outside its blast radius"
-            );
+            if is_revision_basic_pool(i) {
+                continue;
+            }
+            if i < append_base {
+                // Distinct const-generic luminance kernels can move the final
+                // f64 reduction by a few ULPs. This bound cannot hide a changed
+                // edge/MSE/HF-loss formula and is much tighter than feature parity.
+                assert!(
+                    r1[i].to_bits().abs_diff(r2[i].to_bits()) <= 4,
+                    "f{i}: unaffected feature moved beyond four ULPs: {} vs {} at {w}x{h}",
+                    r1[i],
+                    r2[i]
+                );
+                continue;
+            }
             let local = (i - append_base) % FEATURES_PER_CHANNEL_APPEND;
             assert!(
-                local == idx_append::GLOBAL_DMEAN
-                    || local == idx_append::GLOBAL_CGAIN
-                    || local == idx_append::GLOBAL_CLOSS,
-                "f{i} (append-local {local}) moved between revisions at \
-                 {w}x{h} but is not a GLOBAL_* slot — the revision leaked \
-                 outside its declared blast radius"
+                local == idx_append::GLOBAL_CGAIN || local == idx_append::GLOBAL_CLOSS,
+                "f{i}: non-contrast append feature moved"
             );
+        }
+        // Rev2's HF gain has an independent closed-form relation to Rev1.
+        for id in (12..156).step_by(13) {
+            let expected = r1[id] / (1.0 + r1[id]);
+            assert!((r2[id] - expected).abs() < 1e-12, "f{id}: HF saturation");
         }
         // And the process default must be Rev1's answer, so nothing that
         // scores today changes.
@@ -150,18 +163,18 @@ fn two_revisions_coexist_in_one_process_and_differ_only_where_the_revision_moves
 
 /// **The blast radius, MEASURED and pinned in both directions.**
 ///
-/// Over the whole 944 vector the revision moves **11 slots**, every one of
+/// Within the append block the revision moves **11 slots**, every one of
 /// them a `GLOBAL_CGAIN` or `GLOBAL_CLOSS`, and **`GLOBAL_DMEAN` never moves
 /// anywhere**. That is narrower than the name `paired_global_contrast` might
 /// suggest and it is correct: the fix is to the paired CONTRAST estimate, not
 /// to the mean.
 ///
-/// Asserted over the whole vector rather than at one hand-picked cell,
+/// Asserted over the complete append block rather than one hand-picked cell,
 /// because a `CGAIN` can be legitimately `0.0` in both revisions on a given
 /// fixture — an earlier draft pinned (scale 0, Y) and failed for exactly that
 /// reason, on a fixture where that cell had no gain to move.
 #[test]
-fn the_revision_moves_only_the_global_contrast_pair() {
+fn the_append_revision_moves_only_the_global_contrast_pair() {
     use zensim::feature_v2::{
         FEATURES_PER_CHANNEL_APPEND, FEATURES_PER_CHANNEL_V2_TOTAL, idx_append,
     };
@@ -170,7 +183,7 @@ fn the_revision_moves_only_the_global_contrast_pair() {
     let r2 = extract_at(true, w, h);
     let base = 372 + 4 * 3 * FEATURES_PER_CHANNEL_V2_TOTAL;
     let mut moved_locals = Vec::new();
-    for i in 0..r1.len() {
+    for i in base..r1.len() {
         if r1[i].to_bits() == r2[i].to_bits() {
             continue;
         }

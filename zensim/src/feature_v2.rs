@@ -2301,7 +2301,7 @@ impl ComputeSet {
     }
 
     #[inline]
-    fn channel_active(&self, scale: usize, channel: usize) -> bool {
+    pub(crate) fn channel_active(&self, scale: usize, channel: usize) -> bool {
         channel == 1
             || if scale == 0 {
                 self.full_res_xb
@@ -8294,6 +8294,46 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
     planned_compute: Option<ComputeSet>,
 ) -> Result<ZensimV2Result, ZensimError> {
     validate_wide_revision(toggles)?;
+    validate_hdr_pair(source, distorted, encoding, max_pixels)?;
+    let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding);
+    if source.width() < crate::metric::MIN_PYRAMID_DIM
+        || source.height() < crate::metric::MIN_PYRAMID_DIM
+    {
+        let padded_src = crate::metric::reflect_pad_to_min(source);
+        let padded_dst = crate::metric::reflect_pad_to_min(distorted);
+        return Ok(foldapp_streaming_walk(
+            &padded_src,
+            &padded_dst,
+            parallel,
+            toggles,
+            front_end,
+            scratch,
+            FoldWalkExtras {
+                compute: planned_compute,
+                ..Default::default()
+            },
+        ));
+    }
+    Ok(foldapp_streaming_walk(
+        source,
+        distorted,
+        parallel,
+        toggles,
+        front_end,
+        scratch,
+        FoldWalkExtras {
+            compute: planned_compute,
+            ..Default::default()
+        },
+    ))
+}
+
+pub(crate) fn validate_hdr_pair(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+) -> Result<(), ZensimError> {
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
     let valid_display = match encoding {
@@ -8327,37 +8367,7 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
     {
         return Err(ZensimError::HdrInputRequiresPuPath);
     }
-    let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding);
-    if source.width() < crate::metric::MIN_PYRAMID_DIM
-        || source.height() < crate::metric::MIN_PYRAMID_DIM
-    {
-        let padded_src = crate::metric::reflect_pad_to_min(source);
-        let padded_dst = crate::metric::reflect_pad_to_min(distorted);
-        return Ok(foldapp_streaming_walk(
-            &padded_src,
-            &padded_dst,
-            parallel,
-            toggles,
-            front_end,
-            scratch,
-            FoldWalkExtras {
-                compute: planned_compute,
-                ..Default::default()
-            },
-        ));
-    }
-    Ok(foldapp_streaming_walk(
-        source,
-        distorted,
-        parallel,
-        toggles,
-        front_end,
-        scratch,
-        FoldWalkExtras {
-            compute: planned_compute,
-            ..Default::default()
-        },
-    ))
+    Ok(())
 }
 
 /// Folded-720+append+append2 pair entry (944; [`FeatureRegime::

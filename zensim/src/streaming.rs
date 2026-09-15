@@ -3095,6 +3095,38 @@ impl PrecomputedReference {
         }
     }
 
+    // Candidate folded extraction uses natural-width planes, including odd
+    // widths. Keep its cache geometry identical to its scalar producer.
+    #[cfg(feature = "feature-regime-v2")]
+    pub(crate) fn for_candidate(
+        source: &impl ImageSource,
+        parallel: bool,
+        encoding: Option<crate::feature_v2::HdrEncoding>,
+    ) -> Self {
+        if source.width() < 64 || source.height() < 64 {
+            let padded = crate::metric::reflect_pad_to_min(source);
+            return Self::for_candidate_inner(&padded, parallel, encoding)
+                .with_ref_dims(source.width(), source.height());
+        }
+        Self::for_candidate_inner(source, parallel, encoding)
+    }
+
+    #[cfg(feature = "feature-regime-v2")]
+    fn for_candidate_inner(
+        source: &impl ImageSource,
+        parallel: bool,
+        encoding: Option<crate::feature_v2::HdrEncoding>,
+    ) -> Self {
+        Self::build_from_dims(4, source.width(), source.height(), parallel, |planes| {
+            if let Some(encoding) = encoding {
+                crate::feature_v2_stream::hdr_source_to_xyb(source, encoding, planes);
+            } else {
+                convert_source_to_xyb_into(source, planes, source.width(), parallel);
+            }
+        })
+        .with_ref_dims(source.width(), source.height())
+    }
+
     fn new_inner(source: &impl ImageSource, num_scales: usize, parallel: bool) -> Self {
         let width = source.width();
         let height = source.height();
@@ -4353,6 +4385,32 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
+    on_scale: impl FnMut(
+        usize,
+        &ScaleStats,
+        [&[f32]; 3],
+        [&[f32]; 3],
+        &AttrScaleRetention,
+        usize,
+        usize,
+    ),
+) -> crate::metric::ZensimResult {
+    compute_zensim_streaming_with_ref_and_attr_planes_input(
+        precomputed,
+        distorted,
+        config,
+        weights,
+        None,
+        on_scale,
+    )
+}
+
+pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes_input(
+    precomputed: &PrecomputedReference,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    supplied_xyb: Option<[Vec<f32>; 3]>,
     mut on_scale: impl FnMut(
         usize,
         &ScaleStats,
@@ -4417,19 +4475,21 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes(
         || distorted.height() < crate::metric::MIN_PYRAMID_DIM
     {
         let padded = crate::metric::reflect_pad_to_min(distorted);
-        return compute_zensim_streaming_with_ref_and_attr_planes(
+        return compute_zensim_streaming_with_ref_and_attr_planes_input(
             precomputed,
             &padded,
             config,
             weights,
+            supplied_xyb,
             on_scale,
         );
     }
     let width = distorted.width();
     let height = distorted.height();
-    let padded_width = pyramid_plane_stride(width);
-    let mut dst_planes =
-        convert_source_to_xyb(distorted, padded_width, config.allow_multithreading);
+    let padded_width = precomputed.scale(0).1;
+    let mut dst_planes = supplied_xyb.unwrap_or_else(|| {
+        convert_source_to_xyb(distorted, padded_width, config.allow_multithreading)
+    });
 
     let num_scales = config.num_scales.min(precomputed.scales.len());
     let parallel = config.allow_multithreading;

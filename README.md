@@ -228,7 +228,7 @@ pub fn compute(
 ) -> Result<ZensimResult, zensim::ZensimError>
 ```
 
-`ZensimError` is a `#[non_exhaustive]` enum (so match it with a `_` arm) — the variants `compute` can return are `DimensionMismatch`, `ImageTooSmall`, and `ImageTooLarge` (dimensions exceed the configured `max_pixels` cap — **120 MP by default** since #49; tighten it with `Zensim::with_max_pixels`, or pass `with_max_pixels(usize::MAX)` to opt out for trusted input — or `width × height` overflows `usize` on 32-bit / wasm32). HDR-flagged sources (`ImageSource::is_hdr` returns `true`) are refused with `HdrInputRequiresPuPath` — score HDR via the PU21 front-end (`Zensim::compute_pu_linear`, fed absolute-luminance linear RGB in cd/m²) instead. On success, `ZensimResult::score()` is the `0..100` similarity; `raw_distance()`, `approx_ssim2()`, `approx_dssim()`, and `approx_butteraugli()` are also available (see "What the score means").
+`ZensimError` is a `#[non_exhaustive]` enum (so match it with a `_` arm) — the variants `compute` can return are `DimensionMismatch`, `ImageTooSmall`, and `ImageTooLarge` (dimensions exceed the configured `max_pixels` cap — **120 MP by default** since #49; tighten it with `Zensim::with_max_pixels`, or pass `with_max_pixels(usize::MAX)` to opt out for trusted input — or `width × height` overflows `usize` on 32-bit / wasm32). HDR-flagged sources (`ImageSource::is_hdr` returns `true`) are refused with `HdrInputRequiresPuPath` — score HDR via the PU21 front-end (`Zensim::compute_pu_linear`, fed absolute-luminance linear RGB in cd/m²) instead. On success, `ZensimResult::score()` is the signed similarity score (identity is 100 and severe damage can score below zero); `raw_distance()`, `approx_ssim2()`, `approx_dssim()`, and `approx_butteraugli()` are also available (see "What the score means").
 
 ### Strided / padded rows
 
@@ -552,11 +552,18 @@ returns the score with its features; `compute_hdr` uses the explicit HDR
 encoding; `score_features` scores admitted cached rows. The user still controls
 one target score. Model metadata and disposition are model-author settings.
 
-For SDR rectangle steering, `prepare_steering(&source, bin)` reuses the reference
-and scratch across reconstructions. The optional
+For rectangle steering, `prepare_steering(&source, bin)` binds SDR input;
+`prepare_steering_hdr(&source, encoding, bin)` binds native PQ, HLG or absolute
+linear HDR input. Both reuse the reference and retain basic/peak signals from
+the scoring extraction for subsequent map assembly. The HDR route preserves
+declared primaries and native precision; it currently refuses fractional
+sampling and unsupported feature families. These are input/implementation
+contracts, not evidence that an SDR-trained model is calibrated for HDR.
+The optional
 `with_finite_moment_refinement(true)` improves finite L2/L4/L8 removal estimates
 using binned base-image moments; it preserves scalar scores and additive density.
-It is disabled by default and currently adds substantial preparation cost.
+It is disabled by default and adds preparation cost; see the
+[measured runtime and qualification](benchmarks/recovery_completion_2026-09-15.md).
 See the [accuracy evidence](benchmarks/finite_moments_2026-09-14.md) and
 [updated preparation cost](benchmarks/aligned_bins_2026-09-14.md)
 before enabling it. Map coverage and small TRAIN checks do not qualify native
