@@ -1,5 +1,17 @@
 # Start here — one target score, one development path
 
+## September 14, latest: optimize Rev3 and unify native color/HDR
+
+The user explicitly permits further arithmetic changes and prioritizes peaks
+and spatial maps, native precision/ICC/HDR, and a maintainable unified model.
+Follow the [revised order and code findings](docs/REV3_OPTIMIZATION_AND_COLOR_PLAN.md).
+Keep the current recovery running; its RGB8 caches are an explicit SDR control,
+not native qualification. Rev3 is the starting point, not permanently frozen.
+Shared kernels already exist, but native peer audit, HDR primaries normalization
+and avoiding repeated map extraction remain gaps. No new optimization or model
+result has been measured by this inspection. Supersedes “color-specific
+retraining is a separate scope” in the initial recovery protocol below.
+
 ## September 14, controlling priority: baseline recovery on improved extraction
 
 The user clarified that recovery means incumbent-level quality **using the

@@ -1,5 +1,11 @@
 # Baseline recovery on improved extraction — September 14
 
+Later user amendment: [optimize Rev3 and unify native color/HDR](../docs/REV3_OPTIMIZATION_AND_COLOR_PLAN.md).
+Arithmetic may change with explicit versioning and refitting. The RGB8 cache
+below remains an initial control; native color/HBD/HDR is part of the intended
+product and cannot be qualified by this extraction. This supersedes the
+“separate scope” wording below without changing the running cache's contract.
+
 Latest user direction: recover incumbent-level quality on the faster/better
 extraction algorithms, not by reverting the product to legacy extraction.
 Prioritize this over new corruption, codec integration or infrastructure work.
