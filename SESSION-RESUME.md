@@ -1,5 +1,26 @@
 # Start here — one target score, one development path
 
+## September 14, controlling priority: baseline recovery on improved extraction
+
+The user clarified that recovery means incumbent-level quality **using the
+faster/better feature extraction**, not a return to the old product extractor.
+Restore the established SafeSyn/CID22 TRAIN supervision, adequate training and
+train-only calibration on current Rev3 features before more broad science.
+Keep B/C/D as matched controls; initially compare one fast and one richer
+extraction regime. EVAL/public TEST cannot select recipes or features.
+
+All17,611 CID22 TRAIN pairs/201 references are re-extracted and verified at
+Rev3/full944 plus same-buffer SSIM2 (134.7s, zero failures). All196,086 SafeSyn
+pairs/3,218 source paths are reachable; their full extraction is running.
+Inspect the actual live process/status before continuing; never restart a live
+run. [Recovery protocol](benchmarks/baseline_recovery_2026-09-14.md).
+Work/protocol: `/var/tmp/zensim-validation-2026-09-14/baseline-recovery/`.
+These are canonical training caches for cheaper served read sets, not a
+requirement to compute full944 at runtime. Initial recovery uses the explicit
+legacy RGB8 SDR input contract; native color/HBD/HDR qualification stays separate.
+No fit has launched. Do not resume corruption/infrastructure work ahead of this
+priority. Prior completed evidence and qualifications remain unchanged.
+
 ## September 14, newest: color-correct corruption fixtures
 
 [Color resolution](benchmarks/integrity_color_resolution_2026-09-14.md) adds an
