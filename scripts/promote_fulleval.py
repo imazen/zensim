@@ -26,8 +26,8 @@ rescores. What it adds per mode:
      per_pair (list: `scripts/v_next/gauntlet.py` CURATED_BOARD — the one owner).
 
   ENSEMBLES (`--members` / `--members-file`):
-  4. **M3 / M3a are NOT COMPUTABLE for an ensemble** (`diffmap_block_coherence --bake`
-     loads one ZNPR; an ensemble has no single ZNPR) — nulls per (2).
+  4. M3 / M3a require an explicit complete-ensemble sweep. The Rust coherence
+     instrument and m3a_sweep accept members and weights; absent results stay null.
   5. **The `model` block describes member 0 only** (`bake_verdict` introspects
      `Ensemble::primary`). This stamps `model.kind="ensemble"` + `model.members=k` + the
      member list, and `gauntlet.py` renders an `ens×k` marker wherever the bake is named.
@@ -168,9 +168,8 @@ def promote(verdict: Path, name: str, members: list[str] | None, out_dir: Path,
         model["members"] = len(members)
         model["member_names"] = list(members)
         model["anchor"] = Path(str(src.get("bake", ""))).name or None
-        # An ensemble has no single ZNPR: the coherence instruments are NOT-MEASURED —
-        # a different statement from "measured low". (A carry still applies if a future
-        # ensemble-aware instrument fills them in the source.)
+        # Complete-ensemble coherence is carried when measured; absent values
+        # remain null rather than borrowing the anchor member's measurement.
 
     doc["source_verdict"] = {
         "path": str(verdict),
@@ -774,7 +773,8 @@ def registered_ladder_grid_shas(registry: Path | None = None) -> dict:
         return {}
     want = {str(Path(p)) for p in LADDER_GRID_PATHS}
     return {r["dial_grid_sha256"]: r.get("label", "")
-            for r in rows if r.get("path") and str(Path(r["path"])) in want}
+            for r in rows if r.get("path") and
+            (r.get("instrument_kind") == "floor-dense-ladder" or str(Path(r["path"])) in want)}
 
 
 def graft_gaddr_ladder(board: Path, gaddr: Path, dry_run: bool = False) -> bool:

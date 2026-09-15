@@ -1,6 +1,29 @@
 # DATA_SPLITS.md — canonical train/val/test conventions (locked 2026-07-02)
 
-## September 13 user ruling: train / eval only; never touch test
+## September 14 clarification: test evaluation when no eval split exists
+
+The user's later clarification supersedes the September 13 blanket ban:
+"when there is no eval you can eval against test, but use guards from
+overfitting and know that there are secret holdout sets".
+
+Keep original dataset roles. CID22's 201-reference SSIMULACRA2-oracle training
+population (including its safesyn use) is distinct from the 49-reference
+human-scored test population. Human test labels never become training targets.
+Use an existing EVAL split when present; otherwise the published TEST population
+may assess a frozen candidate. This permits CID22 gold, AIC-3 and the AIC-4 public
+sample for assessment; it does not authorize reading secret holdouts.
+
+Before a read, freeze model bytes/composition, population, metrics and gates.
+Record each batch's exposure and retain all candidate results and failures.
+Never use these results for fitting, calibration, feature/hyperparameter search,
+checkpoint selection or repeated adaptive tuning. Develop changes on TRAIN;
+subsequent public-test assessments must disclose prior exposure and cannot be
+claimed as fresh independent holdout confirmation. Do not scan secret holdouts.
+Existing historical admissions remain immutable; new batches cite this ruling.
+
+<a id="september-13-user-ruling-train--eval-only-never-touch-test"></a>
+
+## September 13 user ruling (superseded where clarified above)
 
 This later explicit instruction supersedes every historical permission below
 to read a test/terminal segment, including "touch once" or frozen-finalist reads.

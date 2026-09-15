@@ -103,6 +103,10 @@ fi
 }
 
 BV_ARGS=(--bake "$BAKE" --name "$NAME" --regime "$BV_REGIME" "${BV_EXTRA[@]}")
+if [[ -n "${ZENSIM_EVAL_ENSEMBLE:-}" ]]; then
+    [[ -n "${ZENSIM_EVAL_ENSEMBLE_WEIGHTS:-}" ]] || { echo "complete ensemble needs explicit weights" >&2; exit 2; }
+    BV_ARGS+=(--ensemble "$ZENSIM_EVAL_ENSEMBLE" --ensemble-weights "$ZENSIM_EVAL_ENSEMBLE_WEIGHTS")
+fi
 "${HEAVY[@]}" "$BV" "${BV_ARGS[@]}" --print-inputs > "$WORK/verdict-inputs.json"
 valid_verdict() {
     [[ -s "$1" ]] && jq -e --slurpfile i "$WORK/verdict-inputs.json" \
@@ -146,6 +150,10 @@ if [[ -z "${ZENSIM_DIFFMAP_BIN:-}" ]]; then
         --features custom-profiles,feature-regime-v2 --example diffmap_block_coherence >&2
 fi
 M3_ARGS=(--bake "$BAKE" --bin "$DM" --grid "${ZENSIM_M3_GRID:-full}" --label "$NAME" --logdir "$OUTDIR")
+if [[ -n "${ZENSIM_EVAL_ENSEMBLE:-}" ]]; then
+    M3_ARGS=(--ensemble "$ZENSIM_EVAL_ENSEMBLE" --ensemble-weights "$ZENSIM_EVAL_ENSEMBLE_WEIGHTS"
+        --bin "$DM" --grid "${ZENSIM_M3_GRID:-full}" --label "$NAME" --logdir "$OUTDIR")
+fi
 # A missing historical fixture is a refusal. Generating one with a newer
 # codec would silently mix fixture eras; use m3_fixture_gen in a NEW directory.
 "$REPO_ROOT/scripts/m3a_sweep.sh" "${M3_ARGS[@]}" --print-inputs > "$WORK/coherence-inputs.json"

@@ -64,10 +64,12 @@ and a matching pushed tag; this cleanup does not authorize a release.
 
 ## Scientific data and reproducibility
 
-**September 13 user ruling:** train-only for training, transforms, calibration
-and checkpoint selection; eval only for gates/evaluation. **Never touch test
-segments**, including terminal/frozen-finalist reads. Do not rename historical
-test segments to eval. This overrides older touch-once rules in docs/memories.
+**September 14 user clarification:** train-only for training, transforms,
+calibration, feature/hyperparameter and checkpoint selection. Use EVAL when
+available; when no EVAL exists, published TEST may assess frozen candidates
+with recorded exposure and guards against adaptive tuning. CID22's oracle
+training references and human test references are distinct. Secret holdouts
+remain untouched. Preserve original roles rather than renaming TEST to EVAL.
 Use explicit split admission; the legacy checker scans terminal tables and is
 not an allowed default for this work. See the current DATA_SPLITS override.
 

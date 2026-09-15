@@ -1,5 +1,15 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, clarified public TEST assessment:**
+[Complete frozen comparison](../benchmarks/rev3_public_human_eval_2026-09-14.md)
+adds CID22 gold 4,292, AIC-3 600 and AIC-4 300 under the later user ruling:
+TEST can assess frozen candidates when no EVAL exists; secret holdouts remain
+untouched. Original roles and exposure are recorded. All prior EVAL predictions
+are unchanged. Eleven model rows now have nine panels and 6/6 composite coverage;
+all nine MT913 models fail necessary ranking and dial gates. Fresh 9,593-cell
+ladder features in both revisions and all 297 ensemble JPEG repair cells complete.
+No training or adaptive selection. Native RD/targeting/corruption/HDR remain open.
+
 **September14, native integrity admission:**
 [Evidence](../benchmarks/native_integrity_admission_2026-09-14.md) reuses the
 same214 TRAIN-fit pairs and215 files. The trainer's native scoring command

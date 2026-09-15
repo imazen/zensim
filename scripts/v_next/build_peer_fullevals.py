@@ -27,8 +27,19 @@ def build_admitted(manifest_path, out_dir):
 
     manifest_path = Path(manifest_path)
     spec = json.loads(manifest_path.read_text())
-    if spec.get("schema") != "zensim-peer-eval-v1" or spec.get("role") != "eval":
+    public_test = spec.get("schema") == "zensim-peer-eval-v2"
+    if spec.get("schema") not in ("zensim-peer-eval-v1", "zensim-peer-eval-v2") or spec.get("role") != "eval":
         raise ValueError("peer manifest requires explicit zensim-peer-eval-v1 eval role")
+    if public_test:
+        exposure = spec["public_test_exposure"]
+        path = Path(exposure["path"])
+        with path.open("rb") as f:
+            digest = hashlib.file_digest(f, "sha256").hexdigest()
+        if digest != exposure["sha256"]:
+            raise ValueError("public-test exposure hash mismatch")
+        record = json.loads(path.read_text())
+        if record.get("schema") != "frozen-public-test-exposure-v1" or record.get("secret_holdouts_accessed") is not False:
+            raise ValueError("explicit frozen public-test exposure required")
     name = spec["name"]
     if not name.startswith("peer_") or Path(name).name != name:
         raise ValueError("peer name must be a single peer_ filename component")
@@ -40,7 +51,10 @@ def build_admitted(manifest_path, out_dir):
                rank={}, per_pair={}, scatter_assessment={}, peer_provenance={},
                m3_coherence=None, m3a_coherence=None)
     for corpus, entry in spec["corpora"].items():
-        if entry.get("role") != "eval":
+        if entry.get("role") == "test" and public_test:
+            if entry.get("use") != "frozen_eval_no_separate_eval" or corpus not in record["populations"]:
+                raise ValueError(f"{corpus}: public test is not admitted for this batch")
+        elif entry.get("role") != "eval":
             raise ValueError(f"{corpus}: non-eval peer input refused")
         path = Path(entry["path"])
         with path.open("rb") as f:
@@ -69,6 +83,8 @@ def build_admitted(manifest_path, out_dir):
         doc["scatter_assessment"][corpus] = {axis: assessment}
         doc["peer_provenance"][corpus] = entry
     doc["eval_admission"] = spec["admission"]
+    if public_test:
+        doc["public_test_exposure"] = spec["public_test_exposure"]
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     with out.open("x") as f:
         json.dump(doc, f, indent=1, allow_nan=False)

@@ -494,6 +494,27 @@
       "report_url": "/zensim/reports/native-integrity-admission-2026-09-14/index.html",
       "bakes": [],
       "note": "All214 TRAIN rows bind native color interpretation and exact f32 features. Fixes root-era mismatch and CSV parsing drift; scores/maps unchanged. 181 nonidentities remain unresolved, and fitting that packet is refused. No new fit or EVAL."
+    },
+    {
+      "id": "2026-09-14-frozen-public-human-ladder-coherence",
+      "date": "2026-09-14",
+      "label": "2026-09-14 · Rev3 full composite, codec ladders and ensemble spatial assessment",
+      "bakes": [
+        "MT913_full944_h128_ens5",
+        "MT913_full944_h256_ens5",
+        "MT913_local120_h128_ens5",
+        "MT913_selected619_h128_ens5",
+        "MT913_y40_h32_ens5",
+        "MT913_y40_h128_ens5",
+        "MT913_y60_h32_ens5",
+        "MT913_y60_h128_ens5",
+        "MT913_linear60",
+        "MT914_matched_B",
+        "MT914_matched_D",
+        "peer_ssim2_mt914"
+      ],
+      "report_url": "/zensim/reports/rev3-public-human-eval-2026-09-14/index.html",
+      "note": "Frozen assessment under the clarified public TEST rule. Nine human/codec panels per model, canonical composite 6/6, all five codec ladder families and 27 JPEG coherence cells per complete composition. All nine MT913 candidates fail necessary ranking and dial gates. Native target loops, spatial RD, corruption and native color/HBD/HDR qualification remain separate."
     }
   ],
   "incumbent_notes": [

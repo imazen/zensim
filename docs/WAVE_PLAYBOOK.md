@@ -7,7 +7,12 @@ useful quality across codecs/content and affordable encoding loops. Read
 [MODEL_SELECTION_SCORECARD](MODEL_SELECTION_SCORECARD.md) before selecting
 objectives. B/C/D can be replaced; good rank alone is not product readiness.
 
-**September 13 split override:** [train only / eval only / never test](DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)
+**September 14 clarification:** [published TEST assessment when no EVAL exists](DATA_SPLITS.md#september-14-clarification-test-evaluation-when-no-eval-split-exists)
+supersedes the blanket TEST ban for frozen assessments. Freeze compositions and
+gates before reads, record exposure, prevent adaptive tuning, and leave secret
+holdouts untouched. Historical admission packets retain their original rules.
+
+**September 13 split override (historical):** train only / eval only / never test
 supersedes older terminal-read and checkpoint-dev instructions below. The
 feature-screen v1 recipes are historical and now refused. Use the explicit
 [v2 segment contract](FULL_EVAL.md#strict-train-eval-feature-screens-september-13),

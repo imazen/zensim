@@ -1,5 +1,24 @@
 # Start here — one target score, one development path
 
+## September 14, newest: public TEST assessment and complete ensembles
+
+The latest user permits published TEST evaluation when no separate EVAL exists,
+with overfitting guards and secret holdouts untouched. CID22 oracle TRAIN and
+human TEST are distinct. This supersedes the blanket ban in older entries below;
+read the current top of DATA_SPLITS. Frozen public-test exposure is recorded in
+the `rev3-public-human-eval/EXPOSURE.json` artifact. No training or selection
+uses these new measurements.
+
+All nine frozen MT913 candidates and matched B/D have fresh CID22/AIC3/AIC4
+panels; all previous six EVAL predictions are unchanged, and composite coverage
+is now 6/6. All 297 matched JPEG coherence cells (11 compositions ×27) complete
+through the Rust ensemble surface. This does not establish native codec RD or
+HDR qualification. All 9,593 ladder cells complete in both revisions; the
+[full comparison](benchmarks/rev3_public_human_eval_2026-09-14.md) records actual
+qualification failures and remaining gaps. The published assessment uses
+`assessed-current/`; the first assembly incorrectly applied historical M3 to
+current attribution and is superseded without changing any measurement.
+
 ## September 14, newest: native TRAIN input admission and exact CSV binding
 
 [Native integrity admission](benchmarks/native_integrity_admission_2026-09-14.md)

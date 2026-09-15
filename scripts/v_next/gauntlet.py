@@ -23,8 +23,8 @@ ENSEMBLE rows (2026-08-04): a fulleval JSON carrying ``model.kind == "ensemble"`
 named, and its Model-details card leads with a warning that the architecture/repro shown is the
 ANCHOR member. An ensemble is a Rust-servable composition — its rank/dial/
 corruption numbers come from the identical verdict invocation as every single-bake row and are
-directly comparable, but ``m3_coherence``/``m3a_coherence`` are **null** because the coherence
-instrument loads one ZNPR. Null renders as an em-dash (NOT MEASURED) and is excluded from column
+directly comparable. Complete-ensemble M3/M3a come from the explicitly weighted
+coherence sweep; absent measurements remain null. Null renders as an em-dash (NOT MEASURED) and is excluded from column
 shading and min/max — it is never displayed or shaded as a measured zero.
 
 NO external requests: all CSS/JS/data are inlined (no CDN, no web fonts) so the file opens
@@ -1360,6 +1360,8 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "zones": compact_zones(o.get("dial")),
             "zoneSkip": zone_skip.get(name),
             "m3a": o.get("m3a_coherence"),
+            "coherence": o.get("coherence_assessment"),
+            "publicTestExposure": o.get("public_test_exposure"),
             "corruption": o.get("corruption", {}), "composite": comp, "reject": reject,
             "composite_coverage": o.get("composite_coverage"),
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
@@ -2677,8 +2679,8 @@ function renderTable(){
     +'measured zero. Greyed row = reject-gate (CID22&lt;0.84 or nonphoto&lt;0.80). '
     +'<b>ens×k</b> = an equal-weight ENSEMBLE of k bakes, scored through the identical verdict invocation '
     +'as every single-bake row: rank/dial/corruption numbers are directly comparable, but an ensemble is an '
-    +'<b>Rust-servable composition</b>. The current coherence instrument loads one ZNPR, so '
-    +'<b>M3a/M3 are not measured for this composition</b>; the Model-details card describes '
+    +'<b>Rust-servable composition</b>. M3a/M3 require a complete-ensemble sweep; '
+    +'missing measurements stay blank. The Model-details card describes '
     +'the ANCHOR member only. Composition identity and product qualification are separate evidence. '
     +'Rows list EVERY promoted cell (dimmed = hidden from charts; click a row to toggle it). '
     +'Hidden-by-default grid cells carry the same scalar stats as curated ones — only embedded '
@@ -3637,6 +3639,11 @@ function renderModels(){
       text:'Product qualification: '+(q?q.status:'not evaluated'),
       title:q?(q.checks||[]).map(c=>c.gate+': '+c.state+' — '+c.detail).join('\n'):
         'A research rank or the absence of a failing badge does not establish product qualification.'}));
+    if(b.publicTestExposure)card.append(el('div',{style:'font-size:10px;margin-bottom:7px',
+      text:'Includes frozen public TEST assessment where no EVAL split exists. Prior exposure recorded; secret holdouts untouched.'}));
+    if(b.coherence)card.append(el('div',{style:'font-size:10px;margin-bottom:7px',
+      text:b.coherence.note,
+      title:JSON.stringify(b.coherence)}));
     // An ensemble has no single ZNPR: everything below (arch, size, transforms,
     // repro, spline) is the ANCHOR member. Say so before the numbers, not after.
     if(isEns(b)){
@@ -3647,8 +3654,7 @@ function renderModels(){
       note.append(el('b',{text:'Equal-weight ensemble of '+ensK(b)+' bakes.'}),
         document.createTextNode(' The fields below describe the ANCHOR member '+(m.anchor||'?')
           +' only. Rust supports complete ensemble serving through BakeScorer; this row still needs '
-          +'product qualification. The current coherence instrument measures one ZNPR, so it cannot '
-          +'supply an ensemble M3/M3a measurement.'));
+          +'product qualification. Ensemble M3/M3a measurements use every declared member and weight.'));
       if(mem.length){
         const det=el('details',{style:'margin-top:4px'});
         det.append(el('summary',{style:'font-size:9.5px;cursor:pointer;opacity:.75',
@@ -3965,7 +3971,7 @@ function failures(b){
       'm3_coherence'));
   }
   if(b.m3a==null&&b.m3==null)nm.push({what:'Steering coherence (M3 / M3a)',
-    why:isEns(b)?'ensemble — the coherence instrument loads one ZNPR':'not measured for this cell'});
+    why:'No complete-composition coherence measurement is attached to this row'});
   // ---- 9. band tails -------------------------------------------------------
   Object.keys(R).forEach(c=>{
     const r=R[c];if(!r||!r.bands)return;

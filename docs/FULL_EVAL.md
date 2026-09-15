@@ -1,8 +1,29 @@
 # Full-eval — one comprehensive Rust eval per bake → machine-readable JSON
 
+## September 14: frozen public TEST assessment and complete ensembles
+
+The [September 14 clarification](DATA_SPLITS.md#september-14-clarification-test-evaluation-when-no-eval-split-exists)
+permits published TEST assessment of frozen candidates when no EVAL exists.
+Record exposure and preserve original roles; no adaptive training, calibration
+or selection may use these results. Secret holdouts remain untouched. This
+supersedes the blanket policy below, but does not relax the v2 feature-screen
+loader's explicit train/eval contract or authorize historical default scans.
+
+For complete ensembles, `run_full_eval.sh` accepts `ZENSIM_EVAL_ENSEMBLE`
+(ordered comma-separated member paths) and `ZENSIM_EVAL_ENSEMBLE_WEIGHTS`
+(explicit weights). Both verdict and coherence stages use the complete
+composition. The positional bake remains the primary member. The coherence
+owner also accepts `--ensemble`, `--ensemble-weights`, and `--json-cells`;
+its input identity binds every member's bytes, order and weights. Missing
+coherence is not an inherent ensemble limitation.
+
+The [frozen assessment](../benchmarks/rev3_public_human_eval_2026-09-14.md)
+records the actual nine-panel, codec-ladder and ensemble-coherence results,
+including qualification failures and remaining native product gates.
+
 ## Strict train/eval feature screens (September 13)
 
-The later [user split instruction](DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)
+The historical [user split instruction](DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)
 forbids any test/terminal read, even for final qualification. The historical
 v1 screen recipes and their fit/dev/test caches are no longer executable via
 `feature_screen.py`. Preserve them as evidence; do not rename their segments.
