@@ -1,5 +1,13 @@
 # Develop, train and evaluate zensim
 
+**Controlling work order (September 15):** follow
+[the production priorities](PRODUCTION_PRIORITIES_2026-09-15.md) before older
+task lists. It preserves the completed recovery and assigns concrete next
+experiments to the owners below. The separately assignable
+[Squintly study handoff](https://github.com/imazen/squintly/blob/main/docs/STUDY_READINESS_2026-09-15.md)
+owns paid-human readiness, phone pixel zoom and display qualification. Do not
+reuse historical study assumptions as current launch evidence.
+
 Current owner map and workflow, updated September 15, 2026. Start from
 [SESSION-RESUME](../SESSION-RESUME.md). The product is one target score with
 useful quality across codecs/content and affordable encoding loops. Read

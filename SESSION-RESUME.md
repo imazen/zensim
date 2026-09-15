@@ -1,5 +1,21 @@
 # Start here — one target score, one development path
 
+## September 15, latest directive: production priorities and paid-study readiness
+
+[The controlling execution plan](docs/PRODUCTION_PRIORITIES_2026-09-15.md)
+supersedes conflicting older task orders, including paused goal text. It gives
+the next agent measured blockers, existing owners, bounded experiments,
+dependencies and exit criteria. Start with evidence admission and fixed-model
+targeting diagnosis; continue TRAIN local ranking, JXL spatial value, native
+HDR training, integrity specificity and full runtime/qualification.
+
+[The Squintly agent handoff](https://github.com/imazen/squintly/blob/main/docs/STUDY_READINESS_2026-09-15.md)
+owns phone/color/HDR presentation, pixel-preserving zoom, worker instructions
+and the readiness decision before full paid collection. The September 1 study
+is historical, not a ready current-model multi-observer study. Relevant
+`zenpapers` summaries require primary-source checks before implementation.
+Documentation/handoff work does not change models, gates or release status.
+
 ## September 15: implementation and frozen recovery assessment complete
 
 [Results, runtime and remaining product gates](benchmarks/recovery_completion_2026-09-15.md).

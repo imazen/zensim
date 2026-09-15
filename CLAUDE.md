@@ -1,5 +1,22 @@
 # zensim — current working rules
 
+## Controlling user priorities — September 15, 2026
+
+Follow [the production execution plan](docs/PRODUCTION_PRIORITIES_2026-09-15.md)
+before any conflicting older task list or paused goal: close evidence gaps;
+fix attainable targeting tails; recover local ranking on TRAIN; establish JXL
+spatial value; train correct native HDR; qualify the integrity head; finish
+runtime and product gates. Preserve the fast Rev3 and richer controls and the
+completed recovery work. Use the existing owners and tight local checks.
+
+The [Squintly study handoff](https://github.com/imazen/squintly/blob/main/docs/STUDY_READINESS_2026-09-15.md)
+owns the separately assignable paid-human task. Consult `../zenpapers` and
+primary sources; qualify phone color and unsmoothed pixel zoom, distinguish
+normal and magnified judgments, and require verified display behavior for HDR.
+Do not start full paid collection from the historical September 1 protocol.
+These are the user's current work priorities; they do not weaken data-split,
+mathematical-correctness, provenance or registered qualification requirements.
+
 Start with [SESSION-RESUME.md](SESSION-RESUME.md), then the
 [wave playbook](docs/WAVE_PLAYBOOK.md). This file was consolidated on September
 7, 2026. The [dated instruction archive](docs/history/CLAUDE-through-2026-09-07.md)

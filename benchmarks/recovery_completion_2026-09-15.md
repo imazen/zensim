@@ -1,5 +1,10 @@
 # Rev3 recovery, prepared maps and native HDR — September 15, 2026
 
+**Later September 15 work order:** the
+[controlling production plan](../docs/PRODUCTION_PRIORITIES_2026-09-15.md)
+turns the measured blockers below into the next agent's tasks. It changes no
+result, frozen artifact or gate in this report.
+
 The implementation and frozen recovery assessment are complete. The two recovered
 models beat matched B/D on the registered SDR composite, and prepared maps are
 faster. **Neither model qualifies as an all-purpose replacement.** Both fail
