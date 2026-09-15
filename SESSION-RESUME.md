@@ -1,5 +1,19 @@
 # Start here — one target score, one development path
 
+## September 14, newest: complete ensembles in native JXL steering
+
+[Native comparison](benchmarks/jxl_ensemble_native_2026-09-14.md) measures seven
+frozen compositions, 4,914 targeting cases and 8,442 pairs under two independent
+judges. Four compositions refuse unsupported spatial terms. Correcting native
+seed quantizer reparameterization restores all 2,646 neutral ladder pairs to
+byte/pixel/score identity. Independent sample pixel/score parity is 21/21, with
+21 libjxl v0.12 compatibility decodes. All prior human/dial qualification failures
+remain. New models show mixed independent-judge RD; no model is promoted.
+The full/fair gauntlets add a native discussion and measured/unsupported annotations.
+Next: TRAIN-side product failures, direct native RD, corruption specificity,
+color/HBD/HDR and production latency; no adaptive changes from these EVAL results.
+
+
 ## September 14, newest: complete frozen scalar targeting
 
 [The bounded targeting comparison](benchmarks/rev3_targeting_2026-09-14.md)

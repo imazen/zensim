@@ -1363,6 +1363,7 @@ def load_fulleval(fulleval_dir, best_per_day=None):
             "coherence": o.get("coherence_assessment"),
             "publicTestExposure": o.get("public_test_exposure"),
             "scalarTargeting": o.get("scalar_targeting_assessment"),
+            "nativeSpatial": o.get("native_spatial_assessment"),
             "corruption": o.get("corruption", {}), "composite": comp, "reject": reject,
             "composite_coverage": o.get("composite_coverage"),
             "m3_dropped_mass": o.get("m3_dropped_mass_pct"),
@@ -3648,6 +3649,9 @@ function renderModels(){
     if(b.scalarTargeting)card.append(el('div',{style:'font-size:10px;margin-bottom:7px',
       text:b.scalarTargeting.note,
       title:JSON.stringify(b.scalarTargeting)}));
+    if(b.nativeSpatial)card.append(el('div',{style:'font-size:10px;margin-bottom:7px',
+      text:b.nativeSpatial.note,
+      title:JSON.stringify(b.nativeSpatial)}));
     // An ensemble has no single ZNPR: everything below (arch, size, transforms,
     // repro, spline) is the ANCHOR member. Say so before the numbers, not after.
     if(isEns(b)){

@@ -423,7 +423,9 @@ def native_target_summary(root, inp, rows):
                 "native_reconstructions":sum(w["internal_reconstructions"] for r in group for w in r["native_work"]),
                 "native_pixel_comparisons":sum(w["native_pixel_comparisons"] for r in group for w in r["native_work"]),
                 "map_evaluations":sum(w["map_evaluations"] for r in group for w in r["native_work"]),
-                "consumed_non_neutral_maps":sum(w.get("consumed_maps",0) for r in group for w in r["native_work"]),
+                # Older JXL receipts count map evaluations, not non-neutral
+                # maps consumed. Missing instrumentation must not read as zero.
+                "consumed_non_neutral_maps":sum(w["consumed_maps"] for r in group for w in r["native_work"]) if shared else None,
                 "search_pixel_comparisons":sum(r["search_pixel_comparisons"] for r in group),
                 "terminal_decodes_and_comparisons":len(group),
                 "process_peak_rss_kib":max(r["process_peak_rss_kib"] for r in group)}

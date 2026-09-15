@@ -1,5 +1,16 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, complete native JXL ensembles:**
+[Native evidence](../benchmarks/jxl_ensemble_native_2026-09-14.md) retains the
+preceding corrected nine-family TRAIN/eight-family validation admission and all
+frozen model bytes. Seven compositions complete 4,914 target cases; four refuse
+unsupported spatial terms. A TRAIN-discovered discrete quantizer bug is fixed;
+2,646 neutral ladder pairs are byte/pixel/score exact. Two independent judges
+cover all 8,442 output pairs. No human TEST/secret access, model fitting or
+EVAL-adaptive tuning. Native RD remains diagnostic and all previous product
+qualification states remain unchanged.
+
+
 **September 14, scalar targeting:**
 [Complete-composition comparison](../benchmarks/rev3_targeting_2026-09-14.md)
 uses nine TRAIN calibration families and eight original validation families.

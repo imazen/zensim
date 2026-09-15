@@ -536,6 +536,27 @@
       ],
       "report_url": "/zensim/reports/rev3-targeting-2026-09-14/index.html",
       "note": "Complete frozen compositions; separate TRAIN seed calibration and eight validation families; JXL/JPEG/WebP witnessed bounds and actual encode budgets. Initial obsolete calibration admission is retained as inadmissible. Native spatial RD, AVIF and HDR remain separate."
+    },
+    {
+      "id": "2026-09-14-frozen-native-jxl",
+      "date": "2026-09-14",
+      "label": "Frozen feature regimes: measured native JXL steering",
+      "models": [
+        "MT913_full944_h128_ens5",
+        "MT913_full944_h256_ens5",
+        "MT913_local120_h128_ens5",
+        "MT913_selected619_h128_ens5",
+        "MT913_y40_h32_ens5",
+        "MT913_y40_h128_ens5",
+        "MT913_y60_h32_ens5",
+        "MT913_y60_h128_ens5",
+        "MT913_linear60",
+        "MT914_matched_B",
+        "MT914_matched_D",
+        "peer_ssim2_mt914"
+      ],
+      "report_url": "/zensim/reports/jxl-ensemble-native-2026-09-14/index.html",
+      "note": "Seven complete frozen compositions measured with neutral/scalar/active controls, nine TRAIN seed families and eight validation families; four explicitly unsupported. Independent judges and 1/2/3-shot results; no model promoted."
     }
   ],
   "incumbent_notes": [
