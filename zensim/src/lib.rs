@@ -504,6 +504,15 @@ pub mod __bench_stages {
         box_blur_1pass_into, box_spread_merge_f32, downscale_2x_into, fused_blur_h_ssim,
     };
     pub use crate::color::srgb_to_positive_xyb_planar_into;
+
+    /// Exact native SDR linear input for peer audits. Supports u16 sRGB and
+    /// f32 linear RGBA, declared primaries and the scorer's alpha composite.
+    /// Refuses HDR, preserve-gamut mode, invalid geometry and nonfinite input.
+    pub fn native_sdr_linear_rgb(
+        source: &impl crate::ImageSource,
+    ) -> Result<Vec<[f32; 3]>, crate::ZensimError> {
+        crate::streaming::native_sdr_linear_rgb(source)
+    }
     pub use crate::simd_ops::{abs_diff_sum, mul_into, sq_diff_sum, sq_sum_into};
 }
 /// Classification API — requires `features = ["classification"]`.

@@ -4400,3 +4400,25 @@ Frozen head assessment only: 716 rows, 705 distinct, 30/31 severe proxies,
 0/3 known-valid activations. No fit/calibration/EVAL/public TEST access. Original
 181 native nonidentity quarantines remain; dirty historical producer prevents
 conclusive color admission. Do not mix old and v2 training packets.
+
+## 2026-09-14: complete Rev3 recovery caches and corrected native input audit
+
+Full TRAIN-only legacy-RGB8 Rev3 caches are verified: CID22 17,611 pairs/201
+references; SafeSyn 196,086 pairs/3,218 source paths,944finite features each,
+zero failures. Original oracles remain alongside fresh same-buffer fast-ssim2.
+SafeSyn retains 11,591 negative targets. Parquet SHA256:
+`6044fdc8cf4f646cda6457a9e73e54edd7d9fed57dfd95f1c47e1f4091220c68`.
+Source-family fit/development/calibration partition admission is still pending;
+no fitting, EVAL/TEST access or qualification occurred.
+
+The214-pair native SDR TRAIN audit now supports existing fast-ssim2 on canonical
+linear-float buffers with original and transformed hashes. Existing feature,
+scalar and spatial results remain unchanged. This does not resolve historical
+producer quarantines or make SDR peer scores an HDR oracle.
+
+HDR input correction is `hdr-common-primaries-v2`: declared primaries transform
+to the opsin linear-sRGB basis without SDR clipping; HLG uses source-basis
+luminance. Affected old HDR caches/calibrations are incompatible. The datagen
+extractor requires `hdr-common-primaries-v2-bt2020-pq10000`, preserves native16,
+checks color metadata and refuses partial failures before producing output.
+No corrected HDR training cache is claimed here. See [results](../benchmarks/rev3_native_optimization_2026-09-14.md).

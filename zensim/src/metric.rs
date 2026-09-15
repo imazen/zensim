@@ -2116,8 +2116,8 @@ impl Zensim {
     /// lands on the scale the downstream formulas were tuned on) feeds
     /// the UNCHANGED streaming 720 walk. Sources: `LinearF32Rgba` (f32)
     /// or `Srgb16Rgba` (code values; `Pq`/`Hlg` only), `AlphaMode::Opaque`,
-    /// primaries taken as-is. SDR sRGB extraction is untouched by this
-    /// route existing (byte-stability gated).
+    /// declared primaries converted to the opsin matrix's linear-sRGB basis
+    /// without clipping absolute light to the SDR range. SDR extraction is unchanged.
     ///
     /// # Errors
     ///
@@ -3244,7 +3244,9 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
 /// nits need f32 linear, so an `is_hdr()` source in a u8/u16 sRGB format is
 /// a self-contradictory descriptor and errors rather than guessing.
 fn nits_rgb_from_hdr_source(src: &impl ImageSource) -> Result<Vec<f32>, ZensimError> {
-    if src.pixel_format() != crate::source::PixelFormat::LinearF32Rgba {
+    if src.pixel_format() != crate::source::PixelFormat::LinearF32Rgba
+        || src.alpha_mode() != crate::source::AlphaMode::Opaque
+    {
         return Err(ZensimError::HdrInputRequiresPuPath);
     }
     let (w, h) = (src.width(), src.height());
@@ -3253,7 +3255,13 @@ fn nits_rgb_from_hdr_source(src: &impl ImageSource) -> Result<Vec<f32>, ZensimEr
         let row = src.row_bytes(y);
         let px: &[f32] = bytemuck::cast_slice(&row[..w * 16]);
         for x in 0..w {
-            out.extend_from_slice(&px[x * 4..x * 4 + 3]);
+            let mut pixel = [px[x * 4], px[x * 4 + 1], px[x * 4 + 2]];
+            crate::color::apply_gamut_matrix(
+                &mut pixel,
+                src.color_primaries(),
+                crate::source::GamutMapping::Preserve,
+            );
+            out.extend_from_slice(&pixel);
         }
     }
     Ok(out)

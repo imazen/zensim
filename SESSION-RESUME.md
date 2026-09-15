@@ -1,16 +1,20 @@
 # Start here — one target score, one development path
 
-## September 14, latest: optimize Rev3 and unify native color/HDR
+## September 14, latest implementation: Rev3 maps and native color/HDR
 
-The user explicitly permits further arithmetic changes and prioritizes peaks
-and spatial maps, native precision/ICC/HDR, and a maintainable unified model.
-Follow the [revised order and code findings](docs/REV3_OPTIMIZATION_AND_COLOR_PLAN.md).
-Keep the current recovery running; its RGB8 caches are an explicit SDR control,
-not native qualification. Rev3 is the starting point, not permanently frozen.
-Shared kernels already exist, but native peer audit, HDR primaries normalization
-and avoiding repeated map extraction remain gaps. No new optimization or model
-result has been measured by this inspection. Supersedes “color-specific
-retraining is a separate scope” in the initial recovery protocol below.
+Implemented fused basic/L8 combination with preserved rounding, shared native
+SDR float peer input, declared-primary HDR conversion without SDR clipping,
+and exact PQ16 EOTF lookup. Wide extraction now refuses mixed process/requested
+formula revisions. Native HDR datagen requires its explicit corrected input
+contract. See [implementation, tests and timing](benchmarks/rev3_native_optimization_2026-09-14.md).
+
+Both full legacy-RGB8 Rev3 TRAIN caches are verified: CID22 17,611 pairs and
+SafeSyn 196,086 pairs. Native 214-pair peer replay preserves previous feature,
+score and spatial results. No new fit, EVAL/TEST read or product promotion.
+Next: complete source-family fit/development/calibration admission, recover
+one fast and one peak-capable recipe, remove repeated prepared-map extraction,
+and implement/qualify native HDR maps and matched HDR supervision. Shared
+weights across SDR/HDR remain a hypothesis, not an established calibration.
 
 ## September 14, controlling priority: baseline recovery on improved extraction
 
@@ -22,10 +26,9 @@ Keep B/C/D as matched controls; initially compare one fast and one richer
 extraction regime. EVAL/public TEST cannot select recipes or features.
 
 All17,611 CID22 TRAIN pairs/201 references are re-extracted and verified at
-Rev3/full944 plus same-buffer SSIM2 (134.7s, zero failures). All196,086 SafeSyn
-pairs/3,218 source paths are reachable; their full extraction is running.
-Inspect the actual live process/status before continuing; never restart a live
-run. [Recovery protocol](benchmarks/baseline_recovery_2026-09-14.md).
+Rev3/full944 plus same-buffer SSIM2 (134.7s, zero failures). All 196,086 SafeSyn
+pairs/3,218 source paths are fully extracted and verified with zero failures.
+Do not restart the completed extraction; verify its receipts before reuse. [Recovery protocol](benchmarks/baseline_recovery_2026-09-14.md).
 Work/protocol: `/var/tmp/zensim-validation-2026-09-14/baseline-recovery/`.
 These are canonical training caches for cheaper served read sets, not a
 requirement to compute full944 at runtime. Initial recovery uses the explicit
@@ -100,7 +103,7 @@ adds strict trainer-v3 / diagnostic-admission-v2 for native Rev3 D228. Exact
 scoring interpretation, complete feature audit, root settings and per-row f32
 hashes are required before fitting. Native final scoring uses pairs-tsv/sqrt;
 round-trip CSV parsing fixes47 f32 mismatches on29 of214 real audit rows.
-All214 corrected rows match canonical hashes; prior features/scores/maps remain
+All 214 corrected rows match canonical hashes; prior features/scores/maps remain
 unchanged. Equal bytes with different primaries no longer deduplicate.
 The181 unresolved pairs remain unlabelled;33 identities are valid. A real
 attempt to admit that diagnostic packet for training refuses before payload
@@ -138,7 +141,7 @@ SDR samples retain u16/linear-f32 precision with declared primaries; arbitrary
 ICC goes through the existing full CMS. JPEG XYB output metadata is corrected
 at the codec owner. Legacy RGB8 remains byte-identical on all214 admitted pairs.
 
-All214 TRAIN-fit pairs pass native372 base/head audits and native944 ensemble
+All 214 TRAIN-fit pairs pass native372 base/head audits and native944 ensemble
 scalar/spatial audits.30,136 accepted-head queries and626,249 ensemble refinement
 queries pass; q85 remains the sole integrity rejection. No new fit, EVAL,
 clean-negative admission, native RD or HDR qualification. New audit-v2 and

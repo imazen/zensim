@@ -979,6 +979,7 @@ fn hdr_source_row_to_nits(
 ) {
     let width = src.width();
     let row_bytes = src.row_bytes(y);
+    let mut already_nits = false;
     match src.pixel_format() {
         PixelFormat::LinearF32Rgba => {
             let px: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
@@ -987,28 +988,49 @@ fn hdr_source_row_to_nits(
             }
         }
         PixelFormat::Srgb16Rgba => {
-            const INV: f32 = 1.0 / 65535.0;
-            for (x, o) in out[..width].iter_mut().enumerate() {
-                let off = x * 8;
-                let r = u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
-                let g = u16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
-                let b = u16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
-                *o = [r as f32 * INV, g as f32 * INV, b as f32 * INV];
+            if let HdrEncoding::Pq { peak_nits } = encoding {
+                crate::transfer::decode_pq_u16_rgba_row(row_bytes, &mut out[..width], peak_nits);
+                already_nits = true;
+            } else {
+                const INV: f32 = 1.0 / 65535.0;
+                for (x, o) in out[..width].iter_mut().enumerate() {
+                    let off = x * 8;
+                    let r = u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
+                    let g = u16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
+                    let b = u16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
+                    *o = [r as f32 * INV, g as f32 * INV, b as f32 * INV];
+                }
             }
         }
         other => unreachable!(
             "HDR route accepts LinearF32Rgba/Srgb16Rgba only (validated at the entry); got {other:?}"
         ),
     }
-    match encoding {
-        HdrEncoding::Linear => {}
-        HdrEncoding::Pq { peak_nits } => {
-            crate::transfer::decode_pq_row(&mut out[..width], peak_nits)
+    if !already_nits {
+        match encoding {
+            HdrEncoding::Linear => {}
+            HdrEncoding::Pq { peak_nits } => {
+                crate::transfer::decode_pq_row(&mut out[..width], peak_nits)
+            }
+            HdrEncoding::Hlg {
+                peak_nits,
+                ambient_lux,
+            } => crate::transfer::decode_hlg_row_in_primaries(
+                &mut out[..width],
+                peak_nits,
+                ambient_lux,
+                src.color_primaries(),
+            ),
         }
-        HdrEncoding::Hlg {
-            peak_nits,
-            ambient_lux,
-        } => crate::transfer::decode_hlg_row(&mut out[..width], peak_nits, ambient_lux),
+    }
+    // Absolute light must remain absolute: never apply the SDR [0, 1]
+    // display clamp here. The opsin matrix is defined in linear sRGB.
+    for pixel in &mut out[..width] {
+        crate::color::apply_gamut_matrix(
+            pixel,
+            src.color_primaries(),
+            crate::source::GamutMapping::Preserve,
+        );
     }
 }
 

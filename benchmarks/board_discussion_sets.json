@@ -566,6 +566,15 @@
       "report_url": "/zensim/reports/integrity-color-resolution-2026-09-14/index.html",
       "bakes": [],
       "note": "TRAIN only: 718 legacy files byte-exact; mobile full-CMS fixtures restored. Canonical audit 705 unique pairs: 30/31 severe proxies, 0/3 valid activations. Progressive truncation miss retained. Independent decoders reproduce q85 cast; 181 historical native nonidentities remain quarantined. No fit, EVAL, HDR qualification or promotion."
+    },
+    {
+      "id": "2026-09-14-rev3-native-optimization",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Rev3 map fusion, native SDR audit and HDR decoding optimization",
+      "report_url": "/zensim/reports/rev3-native-optimization-2026-09-14/index.html",
+      "bakes": [],
+      "note": "Native214-pair replay unchanged; full SafeSyn/CID22 TRAIN caches verified. PQ16 synthetic scalar cost roughly halved, exact all-code parity; map gain modest and real-image timing inconclusive. HDR primaries corrected and input era explicit. No new fit, EVAL/TEST read or promotion. Prepared HDR maps and HDR calibration remain incomplete."
     }
   ],
   "incumbent_notes": [

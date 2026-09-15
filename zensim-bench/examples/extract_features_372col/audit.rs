@@ -339,30 +339,56 @@ impl Config {
             );
         }
         if self.ssim2 {
-            if contract != InputContract::LegacyRgb8 {
-                return Err("RGB8 peer audit cannot consume native input".into());
-            }
-            // Same decoded RGB8 buffers and geometry as the candidate audit.
-            // Reuse the existing fast-ssim2 crate; no peer decoding or kernel here.
-            let reference = imgref::Img::new(
-                bytemuck::cast_slice::<u8, [u8; 3]>(src.bytes()),
-                src.width as usize,
-                src.height as usize,
-            );
-            let distorted = imgref::Img::new(
-                bytemuck::cast_slice::<u8, [u8; 3]>(dst.bytes()),
-                dst.width as usize,
-                dst.height as usize,
-            );
-            let score = fast_ssim2::compute_ssimulacra2(reference, distorted)
-                .map_err(|e| format!("fast-ssim2 audit: {e}"))?;
+            let (score, peer_input) = if contract == InputContract::LegacyRgb8 {
+                let reference = imgref::Img::new(
+                    bytemuck::cast_slice::<u8, [u8; 3]>(src.bytes()),
+                    src.width as usize,
+                    src.height as usize,
+                );
+                let distorted = imgref::Img::new(
+                    bytemuck::cast_slice::<u8, [u8; 3]>(dst.bytes()),
+                    dst.width as usize,
+                    dst.height as usize,
+                );
+                let score = fast_ssim2::compute_ssimulacra2(reference, distorted)
+                    .map_err(|e| format!("fast-ssim2 audit: {e}"))?;
+                (score, json!({"input":"same decoded RGB8 buffers"}))
+            } else {
+                let reference = zensim::__bench_stages::native_sdr_linear_rgb(&src.source())
+                    .map_err(|e| format!("native peer reference: {e}"))?;
+                let distorted = zensim::__bench_stages::native_sdr_linear_rgb(&dst.source())
+                    .map_err(|e| format!("native peer distorted: {e}"))?;
+                let binding = json!({"input":"canonical native SDR linear sRGB f32, display-clipped",
+                    "reference_linear_f32_sha256":sha(bytemuck::cast_slice(&reference)),
+                    "distorted_linear_f32_sha256":sha(bytemuck::cast_slice(&distorted)),
+                    "linear_endianness":if cfg!(target_endian="little") {"little"} else {"big"}});
+                let score = fast_ssim2::compute_ssimulacra2(
+                    imgref::Img::new(
+                        reference.as_slice(),
+                        src.width as usize,
+                        src.height as usize,
+                    ),
+                    imgref::Img::new(
+                        distorted.as_slice(),
+                        dst.width as usize,
+                        dst.height as usize,
+                    ),
+                )
+                .map_err(|e| format!("native fast-ssim2 audit: {e}"))?;
+                (score, binding)
+            };
             if !score.is_finite() {
                 return Err("nonfinite fast-ssim2 audit score".into());
             }
             record["peer_ssim2"] = json!({"score":score,
-                "implementation":"fast-ssim2", "input":"same decoded RGB8 buffers",
+                "implementation":"fast-ssim2", "input":peer_input["input"],
                 "reference_pixels_sha256":record["reference_pixels_sha256"],
                 "distorted_pixels_sha256":record["distorted_pixels_sha256"]});
+            if let Some(fields) = peer_input.as_object() {
+                for (key, value) in fields {
+                    record["peer_ssim2"][key] = value.clone();
+                }
+            }
         }
         if !self.models.is_empty() {
             if let Some(weights) = &self.weights {

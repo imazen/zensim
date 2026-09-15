@@ -140,8 +140,8 @@ fn main() {
         .expect("input contract");
     if input_contract != InputContract::LegacyRgb8 {
         assert!(
-            audit_out.is_some() && allow_failures == 0 && !audit_ssim2,
-            "native input requires --audit-jsonl, zero failures and no RGB8-only --audit-ssim2"
+            audit_out.is_some() && allow_failures == 0,
+            "native input requires --audit-jsonl and zero failures"
         );
         assert!(
             matches!(corpus.as_str(), "pairs-tsv"),

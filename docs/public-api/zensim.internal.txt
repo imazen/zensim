@@ -12,7 +12,7 @@
 #   pub modules                                 7
 #   pub types (struct/enum/trait/alias)        19
 #   pub consts/statics                          7
-#   free functions                             35
+#   free functions                             36
 #   inherent methods                          128
 #   struct fields                              92
 #   enum variants                              26
@@ -21,7 +21,7 @@
 #
 # per-module pub lines:
 #   (root)                           34
-#   __bench_stages                    9
+#   __bench_stages                   10
 #   bake_metadata                    43
 #   corruption_head                  70
 #   det_math                         13
@@ -34,7 +34,7 @@
 #   score_math                       26
 #   source                            4
 
-## items (314 lines)
+## items (315 lines)
 
 pub const fn det_math::PowForm::for_revision(feature_v2::FormulaRevision) -> Self
 pub const ZENTRAIN_FEATURE_IDS_KEY: &str
@@ -76,6 +76,7 @@ pub fn __bench_stages::box_spread_merge_f32(&mut [f32], &mut [f32], usize, usize
 pub fn __bench_stages::downscale_2x_into(&[f32], usize, &mut [f32], usize, usize)
 pub fn __bench_stages::fused_blur_h_ssim(&[f32], &[f32], &mut [f32], &mut [f32], &mut [f32], &mut [f32], usize, usize, usize)
 pub fn __bench_stages::mul_into(&[f32], &[f32], &mut [f32])
+pub fn __bench_stages::native_sdr_linear_rgb(&impl source::ImageSource) -> core::result::Result<alloc::vec::Vec<[f32; 3]>, ZensimError>
 pub fn __bench_stages::sq_diff_sum(&[f32], &[f32]) -> f64
 pub fn __bench_stages::sq_sum_into(&[f32], &[f32], &mut [f32])
 pub fn __bench_stages::srgb_to_positive_xyb_planar_into(&[[u8; 3]], &mut [f32], &mut [f32], &mut [f32])

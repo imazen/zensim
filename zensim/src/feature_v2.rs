@@ -7265,6 +7265,7 @@ pub(crate) fn compute_folded720_impl_with_toggles(
     parallel: bool,
     toggles: V2NewFeatureToggles,
 ) -> Result<ZensimV2Result, ZensimError> {
+    validate_wide_revision(toggles)?;
     let mut scratch = V2Scratch::new();
     compute_folded720_streaming_impl(
         source,
@@ -7949,6 +7950,18 @@ fn blockiness_sparse_strip_wide(
     }
 }
 
+// Wide kernels still consult process arithmetic. Never feed them direct-error
+// moments prepared under a different explicit revision. Basic-only plans carry
+// their revision through both passes and remain safe to serve side by side.
+fn validate_wide_revision(toggles: V2NewFeatureToggles) -> Result<(), ZensimError> {
+    if !toggles.v1_only && toggles.formula_revision != crate::ssim_form::active_revision() {
+        return Err(ZensimError::ModelLoadFailed {
+            reason: "wide feature extraction requires matching process and requested formula revisions",
+        });
+    }
+    Ok(())
+}
+
 /// Streaming folded-720[+append] pair entry: validation + sub-64
 /// reflect-pad exactly like the materialized pair entry
 /// ([`compute_folded720_impl_with_toggles`] → prepare → with-ref inner),
@@ -7963,6 +7976,7 @@ pub(crate) fn compute_folded720_streaming_impl(
     scratch: &mut V2Scratch,
     planned_compute: Option<ComputeSet>,
 ) -> Result<ZensimV2Result, ZensimError> {
+    validate_wide_revision(toggles)?;
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
     // HDR routing (HDR_PLAN chunk 2) in the exact position the
@@ -8265,8 +8279,9 @@ pub(crate) fn compute_folded_v1_372_with_ref_impl(
 /// values for `Pq`/`Hlg`) or `Srgb16Rgba` (u16 code values, `Pq`/`Hlg`
 /// only) — both with `AlphaMode::Opaque` (the alpha noise-background
 /// compositor is `[0,1]`-relative and NOT validated on absolute-light
-/// pixels). `ColorPrimaries` are taken as-is (no gamut mapping — the
-/// `compute_pu_linear` contract). Everything else:
+/// pixels). Declared primaries are converted to linear sRGB before opsin,
+/// preserving negative and above-one components (no SDR display clamp).
+/// Everything else:
 /// `HdrInputRequiresPuPath`.
 pub(crate) fn compute_folded720_hdr_streaming_impl(
     source: &impl ImageSource,
@@ -8278,8 +8293,25 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
     scratch: &mut V2Scratch,
     planned_compute: Option<ComputeSet>,
 ) -> Result<ZensimV2Result, ZensimError> {
+    validate_wide_revision(toggles)?;
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
+    let valid_display = match encoding {
+        HdrEncoding::Linear => true,
+        HdrEncoding::Pq { peak_nits } => peak_nits.is_finite() && peak_nits > 0.0,
+        HdrEncoding::Hlg {
+            peak_nits,
+            ambient_lux,
+        } => {
+            peak_nits.is_finite()
+                && peak_nits > 0.0
+                && ambient_lux.is_finite()
+                && ambient_lux >= 0.0
+        }
+    };
+    if !valid_display {
+        return Err(ZensimError::HdrInputRequiresPuPath);
+    }
     let shape_ok = |fmt: crate::source::PixelFormat, alpha: crate::source::AlphaMode| {
         let fmt_ok = match encoding {
             HdrEncoding::Linear => fmt == crate::source::PixelFormat::LinearF32Rgba,

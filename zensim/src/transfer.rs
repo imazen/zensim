@@ -136,7 +136,12 @@ impl DisplayModel {
     /// peak, so the highlight clamps to `y_peak`.
     #[inline]
     pub(crate) fn pq_to_luminance(&self, v: f32) -> f32 {
-        pq_eotf(v).min(self.y_peak) + self.y_black + self.y_refl
+        self.pq_nits_to_display(pq_eotf(v))
+    }
+
+    #[inline]
+    fn pq_nits_to_display(&self, nits: f32) -> f32 {
+        nits.min(self.y_peak) + self.y_black + self.y_refl
     }
 }
 
@@ -165,6 +170,30 @@ pub(crate) fn decode_pq_row(row: &mut [[f32; 3]], peak_nits: f32) {
     }
 }
 
+/// Native PQ16 uses the exact same normalized f32 codes/EOTF as the float
+/// route. Cache only the display-independent EOTF, so peak/black/reflection
+/// remain per comparison. The shared table is 256 KiB, initialized once.
+/// RGBA16 source layout is validated by the HDR entry; alpha is opaque.
+pub(crate) fn decode_pq_u16_rgba_row(row: &[u8], out: &mut [[f32; 3]], peak_nits: f32) {
+    static LUT: std::sync::OnceLock<Box<[f32]>> = std::sync::OnceLock::new();
+    let lut = LUT.get_or_init(|| {
+        (0..=u16::MAX)
+            .map(|code| pq_eotf(f32::from(code) * (1.0 / 65535.0)))
+            .collect::<Vec<_>>()
+            .into_boxed_slice()
+    });
+    let dm = DisplayModel {
+        y_peak: peak_nits,
+        ..DisplayModel::STANDARD_HDR_PQ_1000
+    };
+    for (px, source) in out.iter_mut().zip(row.as_chunks::<8>().0) {
+        for c in 0..3 {
+            let code = u16::from_ne_bytes([source[c * 2], source[c * 2 + 1]]);
+            px[c] = dm.pq_nits_to_display(lut[usize::from(code)]);
+        }
+    }
+}
+
 /// Decode one row of HLG signal-value RGB triples (`[0, 1]`) IN PLACE to
 /// absolute display-light cd/m² per BT.2100's reference OOTF:
 /// per-channel scene light `E_s = OETF⁻¹(E')`, scene luminance
@@ -173,6 +202,28 @@ pub(crate) fn decode_pq_row(row: &mut [[f32; 3]], peak_nits: f32) {
 /// `γ = hlg_system_gamma(peak, ambient)`. Black/reflection lift matches
 /// the PQ decode's display model for cross-transfer consistency.
 pub(crate) fn decode_hlg_row(row: &mut [[f32; 3]], peak_nits: f32, ambient_lux: f32) {
+    decode_hlg_row_in_primaries(
+        row,
+        peak_nits,
+        ambient_lux,
+        crate::source::ColorPrimaries::Bt2020,
+    );
+}
+
+/// HLG OOTF in the declared source basis, before the linear gamut transform.
+/// D65 RGB-to-XYZ Y rows; BT.2020 keeps the published BT.2100 coefficients.
+pub(crate) fn decode_hlg_row_in_primaries(
+    row: &mut [[f32; 3]],
+    peak_nits: f32,
+    ambient_lux: f32,
+    primaries: crate::source::ColorPrimaries,
+) {
+    use crate::source::ColorPrimaries;
+    let luma = match primaries {
+        ColorPrimaries::Srgb => [0.212_639, 0.715_168_7, 0.072_192_32],
+        ColorPrimaries::DisplayP3 => [0.228_974_57, 0.691_738_55, 0.079_286_91],
+        ColorPrimaries::Bt2020 => BT2100_LUMA,
+    };
     let gamma = hlg_system_gamma(peak_nits, ambient_lux);
     let lift =
         DisplayModel::STANDARD_HDR_PQ_1000.y_black + DisplayModel::STANDARD_HDR_PQ_1000.y_refl;
@@ -180,7 +231,7 @@ pub(crate) fn decode_hlg_row(row: &mut [[f32; 3]], peak_nits: f32, ambient_lux: 
         let rs = hlg_inverse_oetf(px[0].clamp(0.0, 1.0));
         let gs = hlg_inverse_oetf(px[1].clamp(0.0, 1.0));
         let bs = hlg_inverse_oetf(px[2].clamp(0.0, 1.0));
-        let ys = BT2100_LUMA[0] * rs + BT2100_LUMA[1] * gs + BT2100_LUMA[2] * bs;
+        let ys = luma[0] * rs + luma[1] * gs + luma[2] * bs;
         // Y_s = 0 ⇒ 0^(γ−1) with γ > 1 is 0; the multiply keeps it 0.
         let scale = peak_nits * ys.max(0.0).powf(gamma - 1.0);
         px[0] = scale * rs + lift;
@@ -192,6 +243,29 @@ pub(crate) fn decode_hlg_row(row: &mut [[f32; 3]], peak_nits: f32, ambient_lux: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pq16_lookup_matches_float_decode_for_every_code_and_display_peak() {
+        let codes: Vec<[u16; 4]> = (0..=u16::MAX)
+            .map(|c| [c, c.wrapping_add(21845), c.wrapping_add(43690), u16::MAX])
+            .collect();
+        for peak in [100.0, 1000.0, 4000.0, 10000.0] {
+            let mut expected: Vec<[f32; 3]> = codes
+                .iter()
+                .map(|p| core::array::from_fn(|c| f32::from(p[c]) * (1.0 / 65535.0)))
+                .collect();
+            decode_pq_row(&mut expected, peak);
+            let mut actual = vec![[0.0; 3]; codes.len()];
+            decode_pq_u16_rgba_row(bytemuck::cast_slice(&codes), &mut actual, peak);
+            for (code, (a, b)) in actual.iter().zip(&expected).enumerate() {
+                assert_eq!(
+                    a.map(f32::to_bits),
+                    b.map(f32::to_bits),
+                    "code={code} peak={peak}"
+                );
+            }
+        }
+    }
 
     fn close(a: f32, b: f32, tol: f32) -> bool {
         (a - b).abs() <= tol

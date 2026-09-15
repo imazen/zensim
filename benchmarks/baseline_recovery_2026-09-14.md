@@ -4,7 +4,7 @@ Later user amendment: [optimize Rev3 and unify native color/HDR](../docs/REV3_OP
 Arithmetic may change with explicit versioning and refitting. The RGB8 cache
 below remains an initial control; native color/HBD/HDR is part of the intended
 product and cannot be qualified by this extraction. This supersedes the
-“separate scope” wording below without changing the running cache's contract.
+“separate scope” wording below without changing the recovered cache's contract.
 
 Latest user direction: recover incumbent-level quality on the faster/better
 extraction algorithms, not by reverting the product to legacy extraction.
@@ -54,16 +54,18 @@ pre-extraction admission. The target column now contains verified peer scores,
 not extraction placeholders. Source-reference grouping is explicit. No model
 has been fitted; fitting/calibration/development family assignments are pending.
 
-Full SafeSyn inventory contains196,086 pairs across3,218 source paths and six
-codec configurations, with zero missing files. Original oracle labels use
-100,932 CPU scores and95,154 GPU fallbacks; all are finite. The full current-era
-extraction has started and must be verified before fitting. Keep both original
-oracles and fresh same-buffer scores. Do not replace missing/failed rows with
-a convenient smaller sample.
+## Second recovered training leg — completion amendment
 
-Artifacts and live status:
-`/var/tmp/zensim-validation-2026-09-14/baseline-recovery/`.
-`CID22_VERIFIED.json` proves the completed training cache; SafeSyn completion
-requires its actual process exit, full count verification and final artifacts.
-No EVAL/public TEST or secret holdout was read. This is progress toward the
-new-feature model recovery, not a competitive model result or qualification.
+All 196,086 SafeSyn pairs across 3,218 source paths completed full944 extraction
+in 4,347.6s (4,359.1s command), zero failures. Verification binds the original
+manifest/admission/pairs hashes, keyed finite feature rows, source/decoded file
+hashes, original CPU/GPU oracle labels and fresh same-buffer fast-ssim2 labels.
+There are 11,591 negative fresh targets, range −743.8610 to 100; identities remain 100.
+The reusable parquet preserves original oracle values and source-family keys.
+
+Parquet SHA256: `6044fdc8cf4f646cda6457a9e73e54edd7d9fed57dfd95f1c47e1f4091220c68`.
+Artifacts: `/var/tmp/zensim-validation-2026-09-14/baseline-recovery/`;
+`CID22_VERIFIED.json` and `SAFESYN_VERIFIED.json` prove the two completed caches.
+Both use Rev3 and legacy RGB8 SDR. Fit/development/calibration family admission
+is pending. No model has been fitted, and no EVAL/public TEST or secret holdout
+was read. Cache completion does not establish competitive model quality.

@@ -1131,6 +1131,90 @@ fn multiscale_stats_over_pu_xyb(
     (stats, mean_offset)
 }
 
+/// Shared native SDR conversion before XYB. The caller validated the format.
+fn native_sdr_linear_row(
+    source: &impl ImageSource,
+    y: usize,
+    absolute_y: usize,
+    out: &mut [[f32; 3]],
+) {
+    let row = source.row_bytes(y);
+    let width = source.width();
+    let opaque = matches!(source.alpha_mode(), AlphaMode::Opaque);
+    match source.pixel_format() {
+        PixelFormat::Srgb16Rgba => {
+            if opaque {
+                for (x, pixel) in out.iter_mut().enumerate().take(width) {
+                    *pixel = core::array::from_fn(|c| {
+                        let off = x * 8 + c * 2;
+                        crate::color::srgb_u16_to_linear(u16::from_ne_bytes([
+                            row[off],
+                            row[off + 1],
+                        ]))
+                    });
+                }
+            } else {
+                composite_srgb16_rgba_to_linear(row, width, absolute_y, out);
+            }
+        }
+        PixelFormat::LinearF32Rgba => {
+            let pixels: &[[f32; 4]] = bytemuck::cast_slice(row);
+            if opaque {
+                for (out, p) in out.iter_mut().zip(&pixels[..width]) {
+                    *out = [p[0], p[1], p[2]];
+                }
+            } else {
+                composite_linear_f32_rgba(&pixels[..width], absolute_y, out);
+            }
+        }
+        _ => unreachable!("validated native SDR input"),
+    }
+    if source.color_primaries() != ColorPrimaries::Srgb {
+        for pixel in out {
+            apply_gamut_matrix(pixel, source.color_primaries(), source.gamut_mapping());
+        }
+    }
+}
+
+/// Native SDR audit input: the scorer's actual linear-light samples, with its
+/// sRGB-display clipping, before XYB. No decoding or second ICC transform.
+pub(crate) fn native_sdr_linear_rgb(
+    source: &impl ImageSource,
+) -> Result<Vec<[f32; 3]>, crate::ZensimError> {
+    use crate::ZensimError;
+    crate::metric::reject_hdr_input(source)?;
+    if !matches!(
+        source.pixel_format(),
+        PixelFormat::Srgb16Rgba | PixelFormat::LinearF32Rgba
+    ) || source.gamut_mapping() != crate::GamutMapping::Clip
+    {
+        return Err(ZensimError::InvalidDataLength);
+    }
+    let (w, h) = (source.width(), source.height());
+    if w == 0 || h == 0 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+    crate::metric::check_within_max_pixels(w, h, Some(120_000_000))?;
+    let count = w.checked_mul(h).ok_or(ZensimError::InvalidDataLength)?;
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(count)
+        .map_err(|_| ZensimError::InvalidDataLength)?;
+    pixels.resize(count, [0.0; 3]);
+    for (y, row) in pixels.chunks_exact_mut(w).enumerate() {
+        native_sdr_linear_row(source, y, y, row);
+        for pixel in row {
+            for value in pixel {
+                if !value.is_finite() {
+                    return Err(ZensimError::InvalidDataLength);
+                }
+                *value = value.clamp(0.0, 1.0);
+            }
+        }
+    }
+    Ok(pixels)
+}
+
 /// Convert an ImageSource to planar XYB at padded width, parallelized over row chunks.
 ///
 /// Handles both RGB and RGBA sources row-by-row. RGBA is composited over a noise background.
@@ -1461,33 +1545,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                 PixelFormat::Srgb16Rgba => {
                     let mut linear_row = vec![[0.0f32; 3]; width];
                     for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        if opaque {
-                            // Opaque: linearize RGB, ignore alpha
-                            for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
-                                let off = x * 8;
-                                let r = u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
-                                let g =
-                                    u16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
-                                let b =
-                                    u16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
-                                *pixel = [
-                                    crate::color::srgb_u16_to_linear(r),
-                                    crate::color::srgb_u16_to_linear(g),
-                                    crate::color::srgb_u16_to_linear(b),
-                                ];
-                            }
-                        } else {
-                            composite_srgb16_rgba_to_linear(
-                                row_bytes,
-                                width,
-                                abs_row_offset + y,
-                                &mut linear_row,
-                            );
-                        }
-                        if need_gamut {
-                            gamut_convert_row(&mut linear_row[..width], primaries, gamut_mapping);
-                        }
+                        native_sdr_linear_row(source, y, abs_row_offset + y, &mut linear_row);
                         let row_offset = (y - row_start) * width;
                         xyb_row_convert(
                             preserve_oog,
@@ -1520,28 +1578,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                     } else {
                         let mut linear_row = vec![[0.0f32; 3]; width];
                         for y in row_start..row_end {
-                            let row_bytes = source.row_bytes(y);
-                            let rgba_row: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
-                            if opaque {
-                                // Opaque non-sRGB: extract RGB + gamut
-                                for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
-                                    let [r, g, b, _a] = rgba_row[x];
-                                    *pixel = [r, g, b];
-                                }
-                            } else {
-                                composite_linear_f32_rgba(
-                                    &rgba_row[..width],
-                                    abs_row_offset + y,
-                                    &mut linear_row,
-                                );
-                            }
-                            if need_gamut {
-                                gamut_convert_row(
-                                    &mut linear_row[..width],
-                                    primaries,
-                                    gamut_mapping,
-                                );
-                            }
+                            native_sdr_linear_row(source, y, abs_row_offset + y, &mut linear_row);
                             let row_offset = (y - row_start) * width;
                             xyb_row_convert(
                                 preserve_oog,

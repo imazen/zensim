@@ -497,6 +497,75 @@ fn subset_bench(sizes: &[usize]) {
     }
 }
 
+/// Synthetic native-format throughput probes. Values exercise low u16 bits;
+/// they do not carry human labels or establish cross-input calibration.
+fn timing_source(
+    pixels: &'static [[u8; 3]],
+    w: usize,
+    h: usize,
+    input: &str,
+) -> zensim::StridedBytes<'static> {
+    use zensim::{AlphaMode, ColorPrimaries, PixelFormat, StridedBytes};
+    if input == "rgb8" {
+        return StridedBytes::with_alpha_mode(
+            bytemuck::cast_slice(pixels),
+            w,
+            h,
+            w * 3,
+            PixelFormat::Srgb8Rgb,
+            AlphaMode::Opaque,
+        );
+    }
+    if matches!(input, "sdr16" | "hdr-pq16") {
+        let pixels: Vec<[u16; 4]> = pixels
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let c: [u16; 3] = core::array::from_fn(|c| {
+                    u16::from(p[c]) * 256 + ((i * 37 + c * 53) % 256) as u16
+                });
+                [c[0], c[1], c[2], 65535]
+            })
+            .collect();
+        let pixels = Box::leak(pixels.into_boxed_slice());
+        return StridedBytes::with_alpha_mode(
+            bytemuck::cast_slice(pixels),
+            w,
+            h,
+            w * 8,
+            PixelFormat::Srgb16Rgba,
+            AlphaMode::Opaque,
+        )
+        .with_color_primaries(if input == "hdr-pq16" {
+            ColorPrimaries::Bt2020
+        } else {
+            ColorPrimaries::Srgb
+        });
+    }
+    let pixels: Vec<[f32; 4]> = pixels
+        .iter()
+        .map(|p| {
+            let factor = if input == "hdr-linear2020" { 1000. } else { 1. };
+            let c = p.map(|v| linear_srgb::default::srgb_u8_to_linear(v) * factor);
+            [c[0], c[1], c[2], 1.]
+        })
+        .collect();
+    let pixels = Box::leak(pixels.into_boxed_slice());
+    StridedBytes::with_alpha_mode(
+        bytemuck::cast_slice(pixels),
+        w,
+        h,
+        w * 16,
+        PixelFormat::LinearF32Rgba,
+        AlphaMode::Opaque,
+    )
+    .with_color_primaries(if input == "hdr-linear2020" {
+        ColorPrimaries::Bt2020
+    } else {
+        ColorPrimaries::DisplayP3
+    })
+}
+
 /// Complete public-API model comparisons, including optional cached spatial
 /// maps. Manifest rows are `name<TAB>bake_path[,bake_path...]`, without a
 /// header. An optional third TAB column supplies comma-separated weights.
@@ -541,8 +610,33 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
             }
         })
         .collect();
+    let input = std::env::var("ZEN_XP_INPUT").unwrap_or_else(|_| "rgb8".into());
+    assert!(
+        matches!(
+            input.as_str(),
+            "rgb8" | "sdr16" | "linear-p3" | "hdr-pq16" | "hdr-linear2020"
+        ),
+        "unknown native input probe"
+    );
+    assert!(
+        input == "rgb8" || std::env::var_os("ZEN_XP_PAIRS").is_none(),
+        "native-format synthetic probes cannot relabel manifest pixels"
+    );
+    assert!(
+        input == "rgb8" || std::env::var_os("ZEN_XP_CONTROLS").is_none(),
+        "RGB8 peer controls require RGB8 input"
+    );
+    let encoding = match input.as_str() {
+        "hdr-pq16" => Some(zensim::feature_v2::HdrEncoding::Pq { peak_nits: 1000. }),
+        "hdr-linear2020" => Some(zensim::feature_v2::HdrEncoding::Linear),
+        _ => None,
+    };
     let spatial = std::env::var_os("ZEN_XP_SPATIAL").is_some();
     let prepared = std::env::var_os("ZEN_XP_PREPARED").is_some();
+    assert!(
+        !spatial || encoding.is_none(),
+        "HDR prepared maps are not yet supported"
+    );
     let parallel = std::env::var("RAYON_NUM_THREADS").as_deref() != Ok("1");
     let pairs = timing_pairs(sizes);
     let result_path = std::env::var_os("ZENBENCH_RESULT_PATH").map(std::path::PathBuf::from);
@@ -555,6 +649,15 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
             let (src, dst) = (pair.source, pair.distorted);
             let src: &'static [[u8; 3]] = Box::leak(src.into_boxed_slice());
             let dst: &'static [[u8; 3]] = Box::leak(dst.into_boxed_slice());
+            let (native_src, native_dst) = (
+                timing_source(src, w, h, &input),
+                timing_source(dst, w, h, &input),
+            );
+            let label = if input == "rgb8" {
+                label
+            } else {
+                format!("{label}_{input}")
+            };
             suite.compare(
                 format!(
                     "sampling_{}_{label}",
@@ -599,8 +702,15 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                                 .unwrap()
                                 .with_parallel(parallel)
                                 .with_finite_moment_refinement(finite_moments);
-                            let rs = RgbSlice::new(src, w, h);
-                            let ds = RgbSlice::new(dst, w, h);
+                            let (rs, ds) = (native_src, native_dst);
+                            if let Some(encoding) = encoding {
+                                b.iter(move || {
+                                    zenbench::black_box(
+                                        scorer.compute_hdr(&rs, &ds, encoding, None).unwrap(),
+                                    )
+                                });
+                                return;
+                            }
                             if spatial && prepared {
                                 let mut worker = scorer.prepare_steering(&rs, 8).unwrap();
                                 b.iter(move || {

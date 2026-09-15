@@ -1893,6 +1893,55 @@ mod tests {
     }
 
     #[test]
+    fn fused_l8_matches_separate_passes_with_tails_and_signed_coefficients() {
+        for n in [1, 7, 8, 15, 16, 17, 63, 129, 1025] {
+            let plane = |seed: usize| -> Vec<f32> {
+                (0..n)
+                    .map(|i| ((i * 37 + seed * 53) % 257) as f32 / 128.0)
+                    .collect()
+            };
+            let planes = [plane(0), plane(1), plane(2), plane(3), plane(4)];
+            let [sd, src, dst, mu1, mu2] = planes.each_ref().map(Vec::as_slice);
+            for co in [[0.0; 12], core::array::from_fn(|i| (i as f32 - 5.0) / 13.0)] {
+                for l8 in [[1.0, -0.75, 0.5], [1e30, -1e-30, 0.0], [0.0; 3]] {
+                    let mut id = plane(5);
+                    let mut win = plane(6);
+                    let mut expected_id = id.clone();
+                    let mut expected_win = win.clone();
+                    fused_combine_plane_f32(
+                        sd,
+                        src,
+                        dst,
+                        mu1,
+                        mu2,
+                        co,
+                        &mut expected_id,
+                        &mut expected_win,
+                    );
+                    fused_combine_l8_f32(
+                        sd,
+                        src,
+                        dst,
+                        mu1,
+                        mu2,
+                        l8,
+                        &mut expected_id,
+                        &mut expected_win,
+                    );
+                    combine_basic_and_l8::<true>(sd, src, dst, mu1, mu2, co, l8, &mut id, &mut win);
+                    for (a, b) in id
+                        .iter()
+                        .chain(&win)
+                        .zip(expected_id.iter().chain(&expected_win))
+                    {
+                        assert_eq!(a.to_bits(), b.to_bits(), "length {n}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn l8_reconstructs_each_canonical_feature() {
         let (w, h) = (128, 128);
         let (src, dst) = test_pair(w, h);
@@ -3731,7 +3780,6 @@ fn coeffs_to_f32(co: &SlotCoeffs) -> [f32; 12] {
 /// Precision class: the density-sum identities move from the f64 path's
 /// 1e-9/1e-6 to ~1e-5 relative (measured; the standalone f64 path and its
 /// strict tests are unchanged — this kernel serves the fused entry only).
-#[autoversion]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fused_combine_plane_f32(
     sd: &[f32],
@@ -3740,6 +3788,22 @@ pub(crate) fn fused_combine_plane_f32(
     mu1: &[f32],
     mu2: &[f32],
     co: [f32; 12],
+    id_plane: &mut [f32],
+    win_plane: &mut [f32],
+) {
+    combine_basic_and_l8::<false>(sd, src, dst, mu1, mu2, co, [0.0; 3], id_plane, win_plane);
+}
+
+#[autoversion]
+#[allow(clippy::too_many_arguments)]
+fn combine_basic_and_l8<const L8: bool>(
+    sd: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    co: [f32; 12],
+    l8: [f64; 3],
     id_plane: &mut [f32],
     win_plane: &mut [f32],
 ) {
@@ -3772,6 +3836,15 @@ pub(crate) fn fused_combine_plane_f32(
         let px_term = co[9] * (pd * pd);
         id_plane[i] += px_term + res_term;
         win_plane[i] += win_term;
+        if L8 {
+            // Preserve both old accumulation/rounding points. Only the loads,
+            // division and powers are shared; L8 coefficients remain f64.
+            let sd4 = sd2 * sd2;
+            let a4 = a2 * a2;
+            let d4 = dt2 * dt2;
+            win_plane[i] += (l8[0] * f64::from(sd4 * sd4)) as f32;
+            id_plane[i] += (l8[1] * f64::from(a4 * a4) + l8[2] * f64::from(d4 * d4)) as f32;
+        }
     }
 }
 
@@ -4314,10 +4387,12 @@ pub(crate) fn bind_max_removals(
         .collect()
 }
 
-/// Candidate-only extension of the retained combine. Evaluate the signal and
+/// Independent pre-fusion L8 combine retained for numerical regression tests.
+/// Evaluate the signal and
 /// eighth powers in the SAME f32 order as the canonical fused accumulator;
 /// multiply in f64 before writing finite f32 mass. Keeping this separate
 /// preserves every legacy basic/stale combine operation and rounding point.
+#[cfg(test)]
 #[autoversion]
 fn fused_combine_l8_f32(
     sd: &[f32],
@@ -5107,28 +5182,22 @@ impl crate::metric::Zensim {
                     if co32[c].iter().all(|v| *v == 0.0) && l8_co[c].iter().all(|v| *v == 0.0) {
                         continue;
                     }
-                    fused_combine_plane_f32(
+                    let combine = if l8_co[c].iter().any(|v| *v != 0.0) {
+                        combine_basic_and_l8::<true>
+                    } else {
+                        combine_basic_and_l8::<false>
+                    };
+                    combine(
                         &ret.sd[c][off..off + len],
                         &src_planes[c][off..off + len],
                         &dst_planes[c][off..off + len],
                         &ret.mu1[c][off..off + len],
                         &ret.mu2[c][off..off + len],
                         co32[c],
+                        l8_co[c],
                         idc,
                         winc,
                     );
-                    if l8_co[c].iter().any(|v| *v != 0.0) {
-                        fused_combine_l8_f32(
-                            &ret.sd[c][off..off + len],
-                            &src_planes[c][off..off + len],
-                            &dst_planes[c][off..off + len],
-                            &ret.mu1[c][off..off + len],
-                            &ret.mu2[c][off..off + len],
-                            l8_co[c],
-                            idc,
-                            winc,
-                        );
-                    }
                 }
             };
             #[cfg(feature = "threads")]

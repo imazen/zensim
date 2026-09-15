@@ -132,6 +132,25 @@ The [TRAIN peak study](../benchmarks/product_peaks_2026-09-14.md) found useful
 quality contributions from peaks and mixed spatial results; dropping them for
 speed alone is not established as a good product choice.
 
-This document records inspection and the revised implementation order. It
-contains no new kernel optimization, benchmark result, trained model or HDR
-qualification. The current recovery remains live and separately verifiable.
+The findings above record the initial inspection chronologically. The following
+registration has now been implemented; see the [dated results](../benchmarks/rev3_native_optimization_2026-09-14.md).
+Repeated prepared-map extraction, native HDR maps and model qualification remain
+open. Both full recovery caches are complete; no new model has been fitted.
+
+## September 14 implementation registration
+
+The existing native extractor audit needs the exact SDR linear input used by
+the public scorer. Add only the hidden instrumentation function
+`__bench_stages::native_sdr_linear_rgb(&impl ImageSource) -> Result<Vec<[f32; 3]>, ZensimError>`.
+Its concrete caller is `shared/score_input` for native fast-ssim2 audit. Share
+the u16/f32 row conversion with streaming extraction; preserve the RGB8 fast
+path. Accept only the existing native SDR formats and clipping contract, and
+refuse HDR. This is instrumentation, not another color or scoring algorithm.
+
+HDR input interpretation correction: declared primaries are authoritative;
+linear/PQ/HLG use the existing gamut matrix without SDR clipping, and HLG's
+OOTF luminance uses the declared basis. Record this as
+`hdr-common-primaries-v2`; older as-is-primary caches remain incompatible where
+conversion or HLG luminance changes. Existing raw linear APIs require the
+caller's RGB already be in the opsin matrix's linear-sRGB basis. No trained
+HDR calibration is certified by these corrections.

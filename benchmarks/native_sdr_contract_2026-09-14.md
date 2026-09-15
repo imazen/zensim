@@ -1,5 +1,11 @@
 # Native SDR input contract — September 14, 2026
 
+Later September14 amendment: the existing audit now supports native linear-float
+fast-ssim2 through shared scorer conversion. All 214 admitted pairs replay with
+unchanged public features/scores/spatial measurements;33 identities score 100.
+See [implementation and evidence](rev3_native_optimization_2026-09-14.md).
+Historical native-peer refusal descriptions below refer to the earlier build.
+
 Registered before implementation and new corpus reads. Concrete caller:
 `extract_features_372col` and its existing complete-candidate audit need to
 score native-depth, color-interpreted samples through the public Rust surface.

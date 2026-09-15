@@ -62,6 +62,9 @@ impl zensim::source::ImageSource for Pq16Image {
     fn is_hdr(&self) -> bool {
         true
     }
+    fn color_primaries(&self) -> zensim::ColorPrimaries {
+        zensim::ColorPrimaries::Bt2020
+    }
 }
 
 #[derive(Clone)]
@@ -73,11 +76,43 @@ struct Cell {
 }
 
 fn decode_ref_png16(path: &Path) -> Result<(Vec<[u16; 3]>, usize, usize), String> {
-    let img = image::open(path).map_err(|e| format!("ref {path:?}: {e}"))?;
-    let rgb = img.to_rgb16();
-    let (w, h) = (rgb.width() as usize, rgb.height() as usize);
-    let px: Vec<[u16; 3]> = rgb.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-    Ok((px, w, h))
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let out = zenpng::decode(
+        &bytes,
+        &zenpng::PngDecodeConfig::default(),
+        &enough::Unstoppable,
+    )
+    .map_err(|e| format!("ref {path:?}: {e}"))?;
+    let info = &out.info;
+    if info.bit_depth != 16
+        || info.icc_profile.is_some()
+        || info.srgb_intent.is_some()
+        || info.source_gamma.is_some()
+        || info.chromaticities.is_some()
+        || info
+            .cicp
+            .is_some_and(|c| c != zenpixels::Cicp::new(9, 16, 0, true))
+    {
+        return Err(format!(
+            "ref {path:?}: requires native16 BT.2020 PQ or explicitly declared untagged datagen input; conflicting/ICC color unsupported"
+        ));
+    }
+    let buf = out.pixels;
+    let (w, h) = (buf.width() as usize, buf.height() as usize);
+    let bytes = buf.copy_to_contiguous_bytes();
+    let channels = bytes.len() / (w * h * 2);
+    if !matches!(channels, 3 | 4) {
+        return Err("HDR reference requires RGB/RGBA16".into());
+    }
+    let mut pixels = Vec::with_capacity(w * h);
+    for p in bytes.chunks_exact(channels * 2) {
+        let c = |i: usize| u16::from_ne_bytes([p[i * 2], p[i * 2 + 1]]);
+        if channels == 4 && c(3) != 65535 {
+            return Err("HDR reference requires opaque alpha".into());
+        }
+        pixels.push([c(0), c(1), c(2)]);
+    }
+    Ok((pixels, w, h))
 }
 
 fn decode_dist_jxl16(path: &Path) -> Result<(Vec<[u16; 3]>, usize, usize), String> {
@@ -85,6 +120,11 @@ fn decode_dist_jxl16(path: &Path) -> Result<(Vec<[u16; 3]>, usize, usize), Strin
     let out = zenjxl::decode(&bytes, None, &[zenpixels::PixelDescriptor::RGB16_BT2100_PQ])
         .map_err(|e| format!("jxl decode {path:?}: {e:?}"))?;
     let buf = out.pixels;
+    if buf.descriptor() != zenpixels::PixelDescriptor::RGB16_BT2100_PQ {
+        return Err(format!(
+            "jxl {path:?}: decoder did not return requested native BT.2020 PQ"
+        ));
+    }
     let w = buf.width() as usize;
     let h = buf.height() as usize;
     let slice = buf.as_slice();
@@ -108,6 +148,7 @@ fn main() {
     let mut ref_root = PathBuf::new();
     let mut out_path = PathBuf::new();
     let mut n_threads = 8usize;
+    let mut input_contract = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -127,6 +168,11 @@ fn main() {
                 out_path = PathBuf::from(&args[i + 1]);
                 i += 2;
             }
+            "--input-contract" => {
+                assert!(input_contract.is_none(), "duplicate input contract");
+                input_contract = Some(args[i + 1].clone());
+                i += 2;
+            }
             "--threads" => {
                 n_threads = args[i + 1].parse().expect("threads");
                 i += 2;
@@ -134,6 +180,15 @@ fn main() {
             other => panic!("unknown arg {other}"),
         }
     }
+    assert_eq!(
+        input_contract.as_deref(),
+        Some("hdr-common-primaries-v2-bt2020-pq10000"),
+        "explicit current HDR input contract required; old caches are incompatible"
+    );
+    assert!(
+        n_threads > 0 && !out_path.exists(),
+        "nonzero threads and fresh output required"
+    );
     assert_eq!(
         pairs_tsvs.len(),
         enc_roots.len(),
@@ -225,7 +280,7 @@ fn main() {
                         Err(e) => eprintln!("SKIP {e}"),
                     }
                     let d = done.fetch_add(1, Ordering::Relaxed) + 1;
-                    if d % 500 == 0 {
+                    if d.is_multiple_of(500) {
                         eprintln!("  {d}/{} cells", cells.len());
                     }
                 }
@@ -233,7 +288,33 @@ fn main() {
         }
     });
 
-    let f = std::fs::File::create(&out_path).expect("out");
+    assert!(
+        rows.iter().all(Option::is_some),
+        "failed HDR rows: refusing partial output"
+    );
+    let manifest = serde_json::json!({
+        "input_contract":input_contract,
+        "formula_revision":format!("{:?}",zensim::feature_v2::active_formula_revision()),
+        "rows":cells.len(), "feature_count":944,
+        "reference_primaries":"BT.2020", "distorted_primaries":"BT.2020",
+        "transfer":"PQ", "display_peak_nits":10000,
+        "untagged_reference_policy":"explicit datagen declaration; never inferred from bit depth",
+        "source_manifests":pairs_tsvs, "decoder":"zenpng native16 + zenjxl RGB16_BT2100_PQ",
+        "feature_input_era":"hdr-common-primaries-v2"
+    });
+    let manifest_path = out_path.with_extension("manifest.json");
+    let mut manifest_file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(manifest_path)
+        .expect("fresh manifest");
+    serde_json::to_writer_pretty(&mut manifest_file, &manifest).unwrap();
+    writeln!(manifest_file).unwrap();
+    let f = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&out_path)
+        .expect("fresh out");
     let mut w = BufWriter::new(f);
     let mut header = String::from("dist_basename\tq");
     for i in 0..944 {
@@ -254,4 +335,79 @@ fn main() {
         cells.len(),
         "SKIPped cells present — investigate before use"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn hdr_datagen_keeps_low_bits_and_refuses_conflicting_transfer() {
+        let root = std::env::temp_dir().join(format!(
+            "zensim-hdr-native-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let pixels: Vec<_> = (0..256)
+            .map(|i| rgb::Rgb::new(12000 + i, 22000, 33000))
+            .collect();
+        for (tag, metadata, valid) in [
+            ("declared-untagged", None, true),
+            (
+                "pq",
+                Some(zencodec::Metadata::none().with_cicp(zenpixels::Cicp::new(9, 16, 0, true))),
+                true,
+            ),
+            (
+                "hlg",
+                Some(zencodec::Metadata::none().with_cicp(zenpixels::Cicp::new(9, 18, 0, true))),
+                false,
+            ),
+            (
+                "p3",
+                Some(zencodec::Metadata::none().with_cicp(zenpixels::Cicp::new(12, 16, 0, true))),
+                false,
+            ),
+        ] {
+            let bytes = zenpng::encode_rgb16(
+                imgref::Img::new(pixels.as_slice(), 16, 16),
+                metadata.as_ref(),
+                &zenpng::EncodeConfig::default(),
+                &enough::Unstoppable,
+                &enough::Unstoppable,
+            )
+            .unwrap();
+            let path = root.join(format!("{tag}.png"));
+            std::fs::write(&path, bytes).unwrap();
+            let result = decode_ref_png16(&path);
+            assert_eq!(result.is_ok(), valid, "{tag}");
+            if let Ok((actual, w, h)) = result {
+                assert_eq!((w, h), (16, 16));
+                for (a, b) in actual.iter().zip(&pixels) {
+                    assert_eq!(*a, [b.r, b.g, b.b]);
+                }
+                assert_eq!(
+                    zensim::ImageSource::color_primaries(&Pq16Image::from_rgb16(&actual, w, h)),
+                    zensim::ColorPrimaries::Bt2020
+                );
+            }
+        }
+        let pixels8 = vec![[128u8; 3]; 256];
+        let rgb8: &[rgb::Rgb<u8>] = bytemuck::cast_slice(&pixels8);
+        let bytes = zenpng::encode_rgb8(
+            imgref::Img::new(rgb8, 16, 16),
+            None,
+            &zenpng::EncodeConfig::default(),
+            &enough::Unstoppable,
+            &enough::Unstoppable,
+        )
+        .unwrap();
+        let path = root.join("eight.png");
+        std::fs::write(&path, bytes).unwrap();
+        assert!(decode_ref_png16(&path).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

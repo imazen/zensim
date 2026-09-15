@@ -4,6 +4,21 @@
 
 ### Added
 
+- Native PQ16 decoding caches the existing EOTF for all 65,536 codes (256 KiB),
+  retaining per-comparison display parameters and exact float-route results.
+- Wide feature extraction rejects mismatched explicit/process formula revisions
+  instead of mixing incompatible moment interpretations.
+
+- Native SDR peer audits reuse the scorer's u16/f32 color conversion and pass
+  linear floats to fast-ssim2, with hashes of the transformed inputs.
+- Fused basic/L8 spatial combination shares loads, division and powers while
+  preserving the separate accumulation rounding points.
+- HDR ImageSource paths now normalize declared primaries without SDR clipping;
+  HLG uses luminance coefficients for the declared source basis. This is input
+  era `hdr-common-primaries-v2`; affected historical HDR caches/calibrations
+  need regeneration and assessment. HDR datagen extraction now requires an
+  explicit input contract and presents BT.2020 PQ as BT.2020.
+
 - Complete-candidate canonical-feature auditing covers active ensemble members
   and corruption companions through the hidden `BakeScorer::consumed_feature_ids`
   diagnostic. Structural planning now includes replacement min-max head inputs

@@ -519,6 +519,37 @@ mod tests {
         let identity = metric.compute(&a.source(), &a.source()).unwrap();
         assert_ne!(different.features(), identity.features());
         assert!(different.features().iter().all(|v| v.is_finite()));
+        let al = zensim::__bench_stages::native_sdr_linear_rgb(&a.source()).unwrap();
+        let bl = zensim::__bench_stages::native_sdr_linear_rgb(&b.source()).unwrap();
+        assert_ne!(al, bl, "native peer input lost the low bits");
+        let score = fast_ssim2::compute_ssimulacra2(
+            imgref::Img::new(al.as_slice(), 16, 16),
+            imgref::Img::new(bl.as_slice(), 16, 16),
+        )
+        .unwrap();
+        assert!(score.is_finite());
+        // Independent f64 check of the canonical C0-continuous sRGB curve
+        // used by linear-srgb (not the slightly different IEC constants).
+        // Quantization to RGB8 cannot pass this check.
+        for (actual, pixel) in al
+            .iter()
+            .zip(bytemuck::cast_slice::<u8, [u16; 4]>(a.bytes()))
+        {
+            for c in 0..3 {
+                let code = f64::from(pixel[c]) / 65535.;
+                let expected = if code < 12.92 * 0.003_041_282_560_127_521 {
+                    code / 12.92
+                } else {
+                    ((code + 0.055_010_718_947_586_6) / 1.055_010_718_947_586_6).powf(2.4)
+                };
+                assert!(
+                    (f64::from(actual[c]) - expected).abs() < 2e-7,
+                    "u16 {}: {} vs {expected}",
+                    pixel[c],
+                    actual[c]
+                );
+            }
+        }
     }
 
     #[test]

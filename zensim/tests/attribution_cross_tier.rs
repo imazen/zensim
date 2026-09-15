@@ -72,63 +72,75 @@ fn attribution_identities_hold_on_every_tier() {
             let rs = RgbSlice::new(&src, w, h);
             let ds = RgbSlice::new(&dst, w, h);
             let mut session = zensim::Fused944Session::new();
-            for cell in 0..12 {
-                for slot in 0..6 {
-                    let id = 156 + cell * 6 + slot;
-                    let weight = if id % 2 == 0 { -1.0 } else { 0.75 };
-                    let recipe = serde_json::json!({
-                        "schema_hash": 1, "scaler_mean": [0.0], "scaler_scale": [1.0],
-                        "metadata": [{"key":"zentrain.feature_ids","type":"utf8","text":id.to_string()}],
-                        "layers": [{"in_dim":1,"out_dim":1,"activation":"identity",
-                                    "dtype":"f32","weights":[weight],"biases":[0.0]}]
-                    });
-                    let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
-                    let model = zenpredict::Model::from_bytes(&bytes).unwrap();
-                    let mut scorer = zensim::BakeScorer::new(&model).unwrap();
-                    let pre = scorer.precompute_reference(&rs).unwrap();
-                    let scalar = scorer.compute(&rs, &ds, None).unwrap();
-                    let scored = scorer
-                        .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
-                        .unwrap();
-                    assert_eq!(scalar.score().to_bits(), scored.result().score().to_bits());
-                    assert_eq!(scalar.features(), scored.result().features());
-                    assert!(scored.unsupported_refinement_feature_ids().is_empty());
-                    let (actual, divisor) = if slot < 3 {
-                        assert_eq!(scored.unsupported_feature_ids(), &[id]);
-                        assert!(scored.attribution().density().iter().all(|v| *v == 0.0));
-                        (scored.refinement_gain(0, 0, w, h), 1.0)
-                    } else {
-                        assert!(scored.unsupported_feature_ids().is_empty());
-                        assert_eq!(
-                            scored.refinement_gain(0, 0, w, h),
-                            scored.attribution().query_rect(0, 0, w, h)
-                        );
-                        (scored.attribution().query_rect(0, 0, w, h), 8.0)
-                    };
-                    let expected = -scored.sensitivities()[id] * scalar.features()[id] / divisor;
-                    if (actual - expected).abs() > 2e-5 * expected.abs().max(1e-12) {
-                        failures.push(format!(
-                            "{label} candidate peak f{id}: {actual} != {expected}"
-                        ));
-                    }
-                    if slot >= 3 {
-                        let finite = scorer
-                            .with_finite_moment_refinement(true)
+            for revision in ["1", "3"] {
+                for cell in 0..12 {
+                    for slot in 0..6 {
+                        let id = 156 + cell * 6 + slot;
+                        let weight = if id % 2 == 0 { -1.0 } else { 0.75 };
+                        let recipe = serde_json::json!({
+                            "schema_hash": 1, "scaler_mean": [0.0], "scaler_scale": [1.0],
+                            "metadata": [{"key":"zentrain.feature_ids","type":"utf8","text":id.to_string()},
+                                         {"key":"zentrain.formula_revision","type":"utf8","text":revision}],
+                            "layers": [{"in_dim":1,"out_dim":1,"activation":"identity",
+                                        "dtype":"f32","weights":[weight],"biases":[0.0]}]
+                        });
+                        let bytes =
+                            zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+                        let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+                        let mut scorer = zensim::BakeScorer::new(&model).unwrap();
+                        let pre = scorer.precompute_reference(&rs).unwrap();
+                        let scalar = scorer.compute(&rs, &ds, None).unwrap();
+                        let scored = scorer
                             .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
                             .unwrap();
-                        assert_eq!(finite.result().score().to_bits(), scalar.score().to_bits());
-                        assert_eq!(finite.result().features(), scalar.features());
-                        assert_eq!(
-                            finite.attribution().density(),
-                            scored.attribution().density()
-                        );
-                        for (x1, y1) in [(w, h), (w / 2, h / 2), (w / 3, h / 3)] {
-                            let corrected = finite.refinement_gain(0, 0, x1, y1);
-                            let old = scored.refinement_gain(0, 0, x1, y1);
-                            assert!(corrected.is_finite(), "{label}: finite moment f{id}");
-                            // Removing frozen nonnegative mass has curvature in
-                            // the direction determined by the signed sensitivity.
-                            assert!((corrected - old) * finite.sensitivities()[id] <= 0.0);
+                        assert_eq!(scalar.score().to_bits(), scored.result().score().to_bits());
+                        assert_eq!(scalar.features(), scored.result().features());
+                        assert!(scored.unsupported_refinement_feature_ids().is_empty());
+                        let (actual, divisor) = if slot < 3 {
+                            assert_eq!(scored.unsupported_feature_ids(), &[id]);
+                            assert!(scored.attribution().density().iter().all(|v| *v == 0.0));
+                            (scored.refinement_gain(0, 0, w, h), 1.0)
+                        } else {
+                            assert!(scored.unsupported_feature_ids().is_empty());
+                            assert_eq!(
+                                scored.refinement_gain(0, 0, w, h),
+                                scored.attribution().query_rect(0, 0, w, h)
+                            );
+                            (scored.attribution().query_rect(0, 0, w, h), 8.0)
+                        };
+                        let expected =
+                            -scored.sensitivities()[id] * scalar.features()[id] / divisor;
+                        if (actual - expected).abs() > 2e-5 * expected.abs().max(1e-12) {
+                            failures.push(format!(
+                                "{label} candidate peak f{id}: {actual} != {expected}"
+                            ));
+                        }
+                        if slot >= 3 {
+                            let finite = scorer
+                                .with_finite_moment_refinement(true)
+                                .compute_with_ref_and_attribution(
+                                    &rs,
+                                    &pre,
+                                    &ds,
+                                    None,
+                                    &mut session,
+                                    8,
+                                )
+                                .unwrap();
+                            assert_eq!(finite.result().score().to_bits(), scalar.score().to_bits());
+                            assert_eq!(finite.result().features(), scalar.features());
+                            assert_eq!(
+                                finite.attribution().density(),
+                                scored.attribution().density()
+                            );
+                            for (x1, y1) in [(w, h), (w / 2, h / 2), (w / 3, h / 3)] {
+                                let corrected = finite.refinement_gain(0, 0, x1, y1);
+                                let old = scored.refinement_gain(0, 0, x1, y1);
+                                assert!(corrected.is_finite(), "{label}: finite moment f{id}");
+                                // Removing frozen nonnegative mass has curvature in
+                                // the direction determined by the signed sensitivity.
+                                assert!((corrected - old) * finite.sensitivities()[id] <= 0.0);
+                            }
                         }
                     }
                 }
