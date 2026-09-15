@@ -1,5 +1,19 @@
 # Start here — one target score, one development path
 
+## September 14, newest: complete frozen scalar targeting
+
+[The bounded targeting comparison](benchmarks/rev3_targeting_2026-09-14.md)
+adds 9,648 actual 1/2/3-shot cases for all eleven frozen compositions on
+JXL/JPEG/WebP. Seed calibration uses nine TRAIN families after correcting the
+old twelve-family admission for later reservations; the initial stopped run
+is explicitly inadmissible. All eight validation families stay unchanged.
+33 independent output samples have exact decoded-pixel and complete-score parity.
+The existing bounds instrument now accepts hash-bound ensembles; no new public
+API or controller. The gauntlet carries measured scalar-targeting scope beside
+unchanged failed product qualifications. Native spatial RD, AVIF targeting,
+corruption specificity, HDR and production latency remain incomplete. Do not
+adapt the frozen candidates to these assessment results.
+
 ## September 14, newest: public TEST assessment and complete ensembles
 
 The latest user permits published TEST evaluation when no separate EVAL exists,

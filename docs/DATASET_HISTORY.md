@@ -1,5 +1,14 @@
 # Zensim Dataset & Experiment History — accurate record
 
+**September 14, scalar targeting:**
+[Complete-composition comparison](../benchmarks/rev3_targeting_2026-09-14.md)
+uses nine TRAIN calibration families and eight original validation families.
+The first attempted twelve-family calibration missed later reservations and
+was stopped during evaluation; it is retained as inadmissible. The corrected
+batch excludes 6068/9066/8462 without replacement, preserving the frozen models,
+policies, target grids and gates. All 9,648 admitted steering cases complete;
+no human TEST or secret holdout is used. Native spatial qualification remains open.
+
 **September 14, clarified public TEST assessment:**
 [Complete frozen comparison](../benchmarks/rev3_public_human_eval_2026-09-14.md)
 adds CID22 gold 4,292, AIC-3 600 and AIC-4 300 under the later user ruling:
