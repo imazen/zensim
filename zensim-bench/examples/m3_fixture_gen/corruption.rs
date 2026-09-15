@@ -28,12 +28,29 @@ pub(super) fn run(args: &[String]) -> Res<()> {
     let mut flags = BTreeSet::new();
     for pair in args[1..].chunks(2) {
         if pair.len() != 2
-            || !["--in", "--out", "--ref-id", "--class", "--seed"].contains(&pair[0].as_str())
+            || ![
+                "--in",
+                "--out",
+                "--ref-id",
+                "--class",
+                "--seed",
+                "--input-contract",
+            ]
+            .contains(&pair[0].as_str())
             || pair[1].starts_with("--")
             || !flags.insert(&pair[0])
         {
             return Err("invalid, missing, or duplicate corruption argument".into());
         }
+    }
+    let native = match arg(args, "--input-contract").as_deref() {
+        None => false,
+        Some("sdr-native-clip-v1") => true,
+        Some(_) => return Err("unsupported corruption input contract".into()),
+    };
+    #[cfg(not(feature = "zen-decode"))]
+    if native {
+        return Err("native corruption input requires the zen-decode feature".into());
     }
     let input = PathBuf::from(need(args, "--in")?);
     let out = PathBuf::from(need(args, "--out")?);
@@ -68,15 +85,16 @@ pub(super) fn run(args: &[String]) -> Res<()> {
     let info = &decoded.info;
     if info.sequence.is_animation()
         || info.sequence.is_multi()
-        || info.icc_profile.is_some()
-        || info.cicp.is_some()
         || info.exif.is_some()
-        || info.chromaticities.is_some()
         || info.content_light_level.is_some()
         || info.mastering_display.is_some()
-        || info
-            .source_gamma
-            .is_some_and(|g| g != 45455 || info.srgb_intent.is_none())
+        || (!native
+            && (info.icc_profile.is_some()
+                || info.cicp.is_some()
+                || info.chromaticities.is_some()
+                || info
+                    .source_gamma
+                    .is_some_and(|g| g != 45455 || info.srgb_intent.is_none())))
     {
         return Err(
             "source requires color/orientation handling outside this sRGB corpus contract".into(),
@@ -98,6 +116,24 @@ pub(super) fn run(args: &[String]) -> Res<()> {
         h: decoded.info.height,
         px,
     };
+    #[cfg(feature = "zen-decode")]
+    let (img, input_audit) = if native {
+        let input = super::score_input::ScoreInput::decode(
+            &input,
+            super::score_input::InputContract::SdrNativeClipV1,
+        )?;
+        (
+            Rgb8 {
+                px: input.to_opaque_srgb8()?,
+                ..img
+            },
+            input.receipt,
+        )
+    } else {
+        (img, None)
+    };
+    #[cfg(not(feature = "zen-decode"))]
+    let input_audit: Option<serde_json::Value> = None;
     if img.w < 8 || img.h < 8 {
         return Err("corruption source must be at least 8x8".into());
     }
@@ -181,13 +217,21 @@ pub(super) fn run(args: &[String]) -> Res<()> {
     if source != fs::read(&input)? {
         return Err("source changed during generation".into());
     }
-    let manifest = json!({"schema":"native-corruption-fixtures-v1","source":input,
+    let mut manifest = json!({"schema":"native-corruption-fixtures-v1","source":input,
         "source_sha256":sha(&source),"source_pixels_sha256":sha(&img.px),
         "reference_png_sha256":reference_png_sha,"pixel_contract":"packed opaque RGB8 sRGB; no color/orientation transform",
         "origin":origin,"content_class":class_text,"width":img.w,"height":img.h,
         "base_seed":seed,"generator_revision":"8e10d4d765667c1c49d74413878fc4bfb46dcf8d",
         "anchor_config":"zenjpeg YCbCr 4:2:0 q20/q10; independently decoded",
         "records":records});
+    if native {
+        manifest["schema"] = json!("native-corruption-fixtures-v2");
+        manifest["input_contract"] = json!("sdr-native-clip-v1");
+        manifest["input_audit"] = input_audit.into();
+        manifest["pixel_contract"] = json!(
+            "packed opaque RGB8 sRGB; canonical native SDR interpretation, clip to sRGB gamut and quantize to u8 before corruption; no orientation transform"
+        );
+    }
     fs::write(
         out.join("_MANIFEST.json"),
         serde_json::to_vec_pretty(&manifest)?,

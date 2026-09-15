@@ -1,6 +1,17 @@
 # Production release scorecard
 
-## September 13 split override
+## September 14 split clarification
+
+The later [user clarification](DATA_SPLITS.md#september-14-clarification-test-evaluation-when-no-eval-split-exists)
+allows published TEST assessment of frozen candidates when a population has no
+EVAL split. Freeze model bytes/composition, populations and gates before reading;
+record exposure and prohibit adaptive fitting or selection against the results.
+CID22 oracle TRAIN remains distinct from human TEST. Secret holdouts remain
+untouched, and all fitting/calibration/feature/checkpoint decisions stay TRAIN-only.
+This supersedes the blanket prohibition in the historical paragraph below,
+without changing any numerical gate or authorizing secret/terminal access.
+
+## September 13 split override (superseded as clarified above)
 
 The later [user split ruling](DATA_SPLITS.md#september-13-user-ruling-train--eval-only-never-touch-test)
 prohibits all test/terminal access, including the frozen-finalist reads proposed

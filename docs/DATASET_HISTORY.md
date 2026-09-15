@@ -4388,3 +4388,15 @@ Artifacts: `~/work/zensim-validation-2026-09-14/rev3-codec-eval/`, including
 original protocol/binary, admission, per-file/pixel hashes, full row predictions,
 source bootstrap, codec panels and teacher drift. No test/terminal table or
 historical internal test segment was opened or reclassified.
+
+## 2026-09-14: explicit native SDR corruption delivery
+
+[Color resolution](../benchmarks/integrity_color_resolution_2026-09-14.md) restores
+original TRAIN mobile source8014 via full CMS and explicit sRGB clipping/u8
+quantization before existing corruption operators. New manifest era
+`native-corruption-fixtures-v2`; original/source-delivered/generated hashes and
+input receipt are bound. TRAIN source1200 is byte-exact with v1 (718 files).
+Frozen head assessment only: 716 rows, 705 distinct, 30/31 severe proxies,
+0/3 known-valid activations. No fit/calibration/EVAL/public TEST access. Original
+181 native nonidentity quarantines remain; dirty historical producer prevents
+conclusive color admission. Do not mix old and v2 training packets.

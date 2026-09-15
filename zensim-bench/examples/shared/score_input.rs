@@ -328,6 +328,41 @@ impl ScoreInput {
         }
     }
 
+    /// Explicit lossy delivery conversion for RGB8-only corruption operators.
+    /// This does not replace the native-precision scoring input.
+    pub fn to_opaque_srgb8(&self) -> Result<Vec<u8>, String> {
+        let descriptor = match &self.pixels {
+            Pixels::Rgb8(v) => return Ok(v.clone()),
+            Pixels::LinearRgba(v, p) => {
+                if v.iter().any(|v| v[3] != 1.0) {
+                    return Err("RGB8 delivery requires opaque alpha".into());
+                }
+                PixelDescriptor::RGBAF32_LINEAR.with_primaries(*p)
+            }
+            Pixels::SrgbRgba16(v, p) => {
+                if v.iter().any(|v| v[3] != u16::MAX) {
+                    return Err("RGB8 delivery requires opaque alpha".into());
+                }
+                PixelDescriptor::RGBA16_SRGB.with_primaries(*p)
+            }
+        };
+        let options = ConvertOptions::permissive().with_clip_out_of_gamut(true);
+        let mut converter =
+            RowConverter::new_explicit(descriptor, PixelDescriptor::RGB8_SRGB, &options)
+                .map_err(|e| e.to_string())?;
+        let row_bytes = self.bytes().len() / self.height as usize;
+        let output_row_bytes = self.width as usize * 3;
+        let mut output = vec![0u8; output_row_bytes * self.height as usize];
+        for (source, target) in self
+            .bytes()
+            .chunks_exact(row_bytes)
+            .zip(output.chunks_exact_mut(output_row_bytes))
+        {
+            converter.convert_row(source, target, self.width);
+        }
+        Ok(output)
+    }
+
     /// Cached identity includes the interpretation of the samples. Equal RGB
     /// codes tagged P3 and sRGB are not the same input to the public scorer.
     pub fn is_identical_to(&self, other: &Self) -> bool {
@@ -404,6 +439,7 @@ mod tests {
             zencodec::Metadata::none().with_icc(zenpixels_convert::icc_profiles::DISPLAY_P3_V4);
         let a = ScoreInput::from_native(png16(&pixels, Some(&icc))).unwrap();
         let av: &[[f32; 4]] = bytemuck::cast_slice(a.bytes());
+        let delivered = a.to_opaque_srgb8().unwrap();
         // Independent f64 sRGB EOTF and published D65 P3 -> sRGB matrix.
         // ICC s15Fixed16 colorants/TRC and CMS LUT precision are bounded here;
         // this is deliberately separate from exact native-code retention.
@@ -421,16 +457,46 @@ mod tests {
             [-0.0196375546, -0.0786360456, 1.0982736001],
         ];
         let mut max_delta = 0f64;
-        for (p, a) in pixels.iter().zip(av) {
+        for (i, (p, a)) in pixels.iter().zip(av).enumerate() {
             let linear = [decode(p.r), decode(p.g), decode(p.b)];
             for c in 0..3 {
                 let expected: f64 = m[c].iter().zip(linear).map(|(a, b)| a * b).sum();
                 max_delta = max_delta.max((f64::from(a[c]) - expected).abs());
+                let v = expected.clamp(0.0, 1.0);
+                let srgb = if v <= 0.0031308 {
+                    12.92 * v
+                } else {
+                    1.055 * v.powf(1.0 / 2.4) - 0.055
+                };
+                let expected_u8 = (srgb * 255.0).round() as i32;
+                assert!((i32::from(delivered[i * 3 + c]) - expected_u8).abs() <= 1);
             }
             assert_eq!(a[3], 1.0);
         }
         assert!(max_delta < 0.0005, "ICC/reference mismatch {max_delta}");
         assert_eq!(a.receipt.as_ref().unwrap()["full_cms"], true);
+    }
+
+    #[test]
+    fn rgb8_delivery_preserves_codes_and_refuses_transparency() {
+        let pixels: Vec<_> = (0u16..256)
+            .map(|i| rgb::Rgb::new(i * 257, (255 - i) * 257, 85 * 257))
+            .collect();
+        let mut input = ScoreInput::from_native(png16(&pixels, None)).unwrap();
+        let before = input.bytes().to_vec();
+        let expected: Vec<u8> = pixels
+            .iter()
+            .flat_map(|p| [p.r / 257, p.g / 257, p.b / 257])
+            .map(|v| v as u8)
+            .collect();
+        assert_eq!(input.to_opaque_srgb8().unwrap(), expected);
+        assert_eq!(input.bytes(), before);
+        if let Pixels::SrgbRgba16(v, _) = &mut input.pixels {
+            v[0][3] = 65534;
+        }
+        assert!(input.to_opaque_srgb8().is_err());
+        input.pixels = Pixels::LinearRgba(vec![[0.5, 0.5, 0.5, 0.99]; 256], ColorPrimaries::Bt709);
+        assert!(input.to_opaque_srgb8().is_err());
     }
 
     #[test]

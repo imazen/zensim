@@ -70,6 +70,13 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 #[path = "m3_fixture_gen/corruption.rs"]
 mod corruption;
 
+#[cfg(feature = "zen-decode")]
+#[path = "shared/score_input.rs"]
+mod score_input;
+#[cfg(feature = "zen-decode")]
+#[path = "shared/zen_decode.rs"]
+mod zen_decode;
+
 /// An RGB8 image: packed `w * h * 3` bytes.
 struct Rgb8 {
     w: u32,

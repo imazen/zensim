@@ -557,6 +557,15 @@
       ],
       "report_url": "/zensim/reports/jxl-ensemble-native-2026-09-14/index.html",
       "note": "Seven complete frozen compositions measured with neutral/scalar/active controls, nine TRAIN seed families and eight validation families; four explicitly unsupported. Independent judges and 1/2/3-shot results; no model promoted."
+    },
+    {
+      "id": "2026-09-14-integrity-color-resolution",
+      "date": "2026-09-14",
+      "role": "train-development",
+      "label": "2026-09-14 · Color-correct corruption fixtures and preserved mobile failure",
+      "report_url": "/zensim/reports/integrity-color-resolution-2026-09-14/index.html",
+      "bakes": [],
+      "note": "TRAIN only: 718 legacy files byte-exact; mobile full-CMS fixtures restored. Canonical audit 705 unique pairs: 30/31 severe proxies, 0/3 valid activations. Progressive truncation miss retained. Independent decoders reproduce q85 cast; 181 historical native nonidentities remain quarantined. No fit, EVAL, HDR qualification or promotion."
     }
   ],
   "incumbent_notes": [

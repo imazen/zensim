@@ -1,5 +1,18 @@
 # Start here — one target score, one development path
 
+## September 14, newest: color-correct corruption fixtures
+
+[Color resolution](benchmarks/integrity_color_resolution_2026-09-14.md) adds an
+explicit native SDR input route to the existing RGB8 corruption generator.
+Both sRGB routes preserve all 718 old files exactly; the originally refused
+mobile source now generates with full CMS provenance. Canonical TRAIN audit:
+705 unique pairs, 30/31 severe proxies detected, 0/3 known-valid activations;
+progressive-AC truncation remains a head miss despite negative perceptual score.
+Both independent decoders reproduce the old AVIF q85 cast; exact producer cause
+is unresolved. All 181 old native nonidentities stay quarantined. No fit, EVAL,
+HDR qualification or promotion. Next: freeze a representative color-correct
+TRAIN integrity packet before head refit; preserve source-family separation.
+
 ## September 14, newest: complete ensembles in native JXL steering
 
 [Native comparison](benchmarks/jxl_ensemble_native_2026-09-14.md) measures seven
