@@ -33,6 +33,20 @@
 > folded 944 extraction scales only 2.2× / 2.5× (its serial share, not SSIM arithmetic); the
 > buffered v1 path 3.8× / 5.4×. UHD 3840×2160 per-call table included. Raw in `k4_2026-09-10/`.
 
+> **Cross-generation speed matrix + its speed-vs-accuracy join (2026-09-18):**
+> [`speed_matrix_2026-09-18.md`](speed_matrix_2026-09-18.md) is the measurement — every named
+> profile, both frozen Rev3 ensembles and three peers, interleaved across 64²–4096² at 1/4/8/16
+> threads, with per-column anchor validity checks and an explicit refusal where the anchor drifts
+> past 5%. [`speed_accuracy_2026-09-18.json`](speed_accuracy_2026-09-18.json) joins it to the
+> board's `fulleval` rows BY BAKE SHA256 and records the Pareto frontier at each geometry;
+> `just demo-speed-accuracy` regenerates both it and the viewable page. **Two arms have no
+> accuracy value and are not given one:** the shipped `C` bake
+> (`c_sdr_purity944_byid_2026-09-07.bin`, `996dfbb1…`) appears on no board row, and `PreviewV0_2`
+> carries no bake at all, so nothing can key a row to it. Frontier at 1024²/1T: the two Rev3
+> ensembles and `fast_ssim2`; at 4096²/1T `D` joins them. `B` is on neither one-thread frontier —
+> at both geometries it is beaten on BOTH axes by the Rev3 rich ensemble, which fails the product
+> gates. (`B` does make the eight-thread 4096² frontier, alongside `D` and `fast_ssim2`.)
+
 > [`nonmax_diagnosis_2026-09-08.md`](nonmax_diagnosis_2026-09-08.md) (diagnosis) →
 > [`stable_ssim_kernel_2026-09-08.md`](stable_ssim_kernel_2026-09-08.md) (kernel + the September 9
 > INTEGRATION section) → [`../docs/PLAN_FEATURE_REV3_2026-09-09.md`](../docs/PLAN_FEATURE_REV3_2026-09-09.md)

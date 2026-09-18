@@ -66,6 +66,21 @@ metric-eval bake ref="" ramp="" out="/mnt/v/output/zensim/reports":
 demo-diffmap *options:
     python3 scripts/demos/diffmap_gallery.py "$@"
 
+# Join the cross-generation speed matrix to the board's full-evaluation rows
+# and lay the result out as one self-contained speed-vs-accuracy page under
+# /mnt/v/output (served at localhost:3300). Runs NOTHING -- no benchmark, no
+# scorer, no cargo -- every number is read out of files that already exist,
+# and an arm with no provable accuracy row is drawn on the speed axis alone
+# rather than given a lookalike row's value. Also refreshes the committed
+# joined table in benchmarks/. `--raster` additionally writes PNGs of the
+# charts (needs `resvg` on PATH) so the result can be looked at.
+#   just demo-speed-accuracy
+#   just demo-speed-accuracy --raster --out ~/tmp/speed-accuracy
+[doc("Speed-vs-accuracy page from the speed matrix + board rows (demo, joins existing data)")]
+[positional-arguments]
+demo-speed-accuracy *options:
+    python3 scripts/demos/speed_accuracy_page.py "$@"
+
 # Fail on scripts that cannot run: pinned to a deleted sibling worktree, or
 # hardcoding a binary with no source anywhere. On 2026-07-15 an audit found 25
 # of 130 scripts in scripts/v_next/ pointing into worktrees that had been
