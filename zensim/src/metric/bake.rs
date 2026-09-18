@@ -2072,6 +2072,169 @@ mod revision_contract_tests {
         }
     }
 
+    /// **The exact configuration the 2026-09-18 speed-matrix report accused of
+    /// silent mis-serving: the frozen R915 narrow plans.**
+    ///
+    /// `R915_y60_h32_*.bin` declares `zentrain.formula_revision = 3` over the
+    /// 60 ids `13..23, 52..62, 91..101, 117..127, 130..140, 143..153`, and
+    /// `R915_basic228_h128_*.bin` declares revision 3 over `0..228`. The report
+    /// claimed that with `ZENSIM_FORMULA_REV` unset (a revision-1 process) the
+    /// narrow route neither refused nor selected, and scored at the process
+    /// arithmetic. Measured on 2026-09-18 against the real bakes and against
+    /// these reconstructions, it does neither of those things: it SELECTS. The
+    /// two properties that have to hold together, and that this test pins:
+    ///
+    /// 1. every served number is bit-identical across revision-1, -2 and -3
+    ///    processes — the environment is not a serving requirement; and
+    /// 2. a revision-1 and a revision-3 bake over the SAME ids score
+    ///    differently in one process — so property 1 is selection, not a
+    ///    declaration that never reaches the kernels.
+    ///
+    /// The sibling
+    /// [`prepared_workers_honor_model_revision_and_local_subset`] covers the
+    /// 228-id and 120-id local sets; this adds the 60-id Y plan the report
+    /// named and the HDR entry, which no cross-process test reached.
+    #[test]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn narrow_plans_serve_the_declared_revision_in_every_process() {
+        use crate::feature_v2::HdrEncoding;
+        use crate::source::{AlphaMode, PixelFormat, StridedBytes};
+        const MARK: &str = "NARROW-DECLARED-BITS ";
+        let path = "metric::bake::revision_contract_tests::narrow_plans_serve_the_declared_revision_in_every_process";
+        if std::env::var("ZENSIM_NARROW_REVISION_CHILD").is_err() {
+            let mut expected: Option<Vec<String>> = None;
+            for process in ["1", "2", "3"] {
+                let out = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([path, "--exact", "--nocapture", "--test-threads=1"])
+                    .env("ZENSIM_FORMULA_REV", process)
+                    .env("ZENSIM_NARROW_REVISION_CHILD", "1")
+                    .env_remove("ZENSIM_CROSS_REVISION_DIAGNOSTIC")
+                    .output()
+                    .unwrap();
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                assert!(
+                    out.status.success(),
+                    "{stdout}\n{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                let lines: Vec<_> = stdout
+                    .lines()
+                    .filter_map(|l| l.find(MARK).map(|i| l[i..].to_owned()))
+                    .collect();
+                assert_eq!(lines.len(), 4, "child at revision {process}: {stdout}");
+                if let Some(expected) = &expected {
+                    assert_eq!(
+                        &lines, expected,
+                        "ZENSIM_FORMULA_REV={process} changed a served number; the \
+                         process revision must not reach a declared-revision bake"
+                    );
+                } else {
+                    expected = Some(lines);
+                }
+            }
+            return;
+        }
+        let (w, h) = (127usize, 97usize);
+        let (src, mut dst) = pair(w, h);
+        for (i, px) in dst.iter_mut().enumerate() {
+            *px = [
+                ((i * 71 + 19) % 256) as u8,
+                ((i * 31 + 87) % 256) as u8,
+                ((i * 113 + 3) % 256) as u8,
+            ];
+        }
+        let (rs, ds) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
+        // HDR-declared copies of the same pair, in absolute linear light.
+        let to_hdr = |px: &[[u8; 3]]| -> Vec<[f32; 4]> {
+            px.iter()
+                .map(|p| {
+                    [
+                        f32::from(p[0]) * 4.0 + 1.0,
+                        f32::from(p[1]) * 4.0 + 1.0,
+                        f32::from(p[2]) * 4.0 + 1.0,
+                        1.0,
+                    ]
+                })
+                .collect()
+        };
+        let (hs, hd) = (to_hdr(&src), to_hdr(&dst));
+        fn hdr_source(px: &[[f32; 4]], w: usize, h: usize) -> StridedBytes<'_> {
+            StridedBytes::with_alpha_mode(
+                bytemuck::cast_slice(px),
+                w,
+                h,
+                w * 16,
+                PixelFormat::LinearF32Rgba,
+                AlphaMode::Opaque,
+            )
+        }
+        let y60: Vec<usize> = [13usize, 52, 91, 117, 130, 143]
+            .iter()
+            .flat_map(|&base| base..base + 10)
+            .collect();
+        let basic228: Vec<usize> = (0..228).collect();
+        for (name, ids) in [("y60", &y60), ("basic228", &basic228)] {
+            let mut per_revision = Vec::new();
+            for revision in ["1", "3"] {
+                let recipe = serde_json::json!({
+                    "schema_hash":1,
+                    "scaler_mean": vec![0.0; ids.len()],
+                    "scaler_scale": vec![1.0; ids.len()],
+                    "metadata":[
+                        {"key":"zentrain.feature_ids","type":"utf8",
+                         "text": ids.iter().map(usize::to_string).collect::<Vec<_>>().join(" ")},
+                        {"key":"zentrain.formula_revision","type":"utf8","text":revision}],
+                    "layers":[{"in_dim":ids.len(),"out_dim":1,"activation":"identity",
+                        "dtype":"f32","weights": vec![-1.0; ids.len()],"biases":[100.0]}]
+                });
+                let bytes = zenpredict_bake::bake_from_json_str(&recipe.to_string()).unwrap();
+                let model = zenpredict::Model::from_bytes(&bytes).unwrap();
+                let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+                let scalar = scorer.compute(&rs, &ds, None).unwrap();
+                let hdr_score = scorer
+                    .compute_hdr(
+                        &hdr_source(&hs, w, h),
+                        &hdr_source(&hd, w, h),
+                        HdrEncoding::Linear,
+                        None,
+                    )
+                    .unwrap();
+                let steering = scorer
+                    .prepare_steering(&rs, 8)
+                    .unwrap()
+                    .compute(&ds, None)
+                    .unwrap()
+                    .result()
+                    .score()
+                    .to_bits();
+                assert_eq!(
+                    scalar.score().to_bits(),
+                    steering,
+                    "{name} rev{revision}: the steering session and the scalar entry \
+                     must serve one arithmetic"
+                );
+                println!(
+                    "{MARK}{name} {revision} {} {}",
+                    scalar.score().to_bits(),
+                    hdr_score.to_bits()
+                );
+                per_revision.push((scalar.score().to_bits(), hdr_score.to_bits()));
+            }
+            // Both entries, separately: a tuple comparison would pass while one
+            // of the two quietly stopped selecting.
+            assert_ne!(
+                per_revision[0].0, per_revision[1].0,
+                "{name}: the revision-1 and revision-3 bakes scored the same SDR \
+                 number, so this fixture cannot tell selection from a declaration \
+                 that never reaches the kernels"
+            );
+            assert_ne!(
+                per_revision[0].1, per_revision[1].1,
+                "{name}: same, for the HDR entry"
+            );
+        }
+    }
+
     #[test]
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn prepared_worker_refuses_incomplete_contracts_before_use() {

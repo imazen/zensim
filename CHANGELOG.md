@@ -93,6 +93,16 @@
 
 ### Fixed
 
+- Corrected the registered claim that `BakeScorer` serves a declared-revision
+  bake at the process revision. No serving behaviour changed: measured on the
+  ten frozen R915 bakes and on reconstructed Y60/basic228 bakes, every scalar,
+  HDR and steering number is bit-identical with `ZENSIM_FORMULA_REV` unset, `=1`
+  and `=3`, while a revision-1 bake over the same ids scores differently in the
+  same process — the narrow route selects the declared revision, and the
+  variable is not a serving requirement. The gap was in coverage, now closed for
+  the 60-id Y plan, `compute_hdr` and `prepare_steering` across revision-1/2/3
+  processes.
+
 - `Zensim::compute_with_diffmap`, `Zensim::compute_streaming_strips` and
   `Zensim::compute_folded944_score_and_attribution{,_binned}` now certify
   identity through the same owner `Zensim::compute` uses, instead of scoring a

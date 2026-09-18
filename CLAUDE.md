@@ -172,8 +172,26 @@ because cleanup tests or a historical training reproduction pass.
   cannot reach the identity owner and scores a perfect copy through the model.
   `diffmap::tests::identity_is_undecidable_without_the_source` pins that.
 * **2026-09-18 — `BakeScorer` scores a Rev3 bake at the process revision without
-  refusing (reported by the speed-matrix run, not yet independently reproduced).**
-  With `ZENSIM_FORMULA_REV` unset (Rev1), the narrow basic/peak plan serves the
-  frozen R915 Rev3 ensembles and returns a score at the wrong arithmetic; only
-  the wide-family route checks the declared revision (`metric/bake.rs` ~885-902).
-  Until fixed, run Rev3 bakes only in a process started with `ZENSIM_FORMULA_REV=3`.
+  refusing. NOT A BUG — the report was wrong; entry corrected, not deleted.**
+  The claim was that with `ZENSIM_FORMULA_REV` unset (a Rev1 process) the narrow
+  basic/peak plan serves the frozen R915 Rev3 bakes at the wrong arithmetic.
+  Measured 2026-09-18 on all ten `/var/tmp/zensim-validation-2026-09-15/recovery/
+  calibrated/R915_*.bin` (each of which DOES declare `zentrain.formula_revision
+  = 3`; a raw byte grep misses the key, `zenpredict::Model::metadata` is the
+  only reliable reader): every score is **bit-identical** with the variable
+  unset, `=1` and `=3`. Reconstructed Y60 and basic228 bakes over the same ids
+  show the same invariance, and a Rev1-declaring bake over identical ids scores
+  differently in the same process — so the narrow route SELECTS the declared
+  revision rather than ignoring it. The `metric/bake.rs` early return (~862-884)
+  is that selection; the ~885-902 refusal is the wide-family path, which still
+  refuses a mismatch. `ZENSIM_FORMULA_REV` is NOT a serving requirement for a
+  declared-revision bake. Pinned by
+  `metric::bake::revision_contract_tests::narrow_plans_serve_the_declared_revision_in_every_process`
+  (Y60 + basic228 + `compute_hdr` + `prepare_steering`, across Rev1/2/3 child
+  processes) alongside the pre-existing
+  `prepared_workers_honor_model_revision_and_local_subset`. A bake that declares
+  NO revision still resolves to `SHIPPED_REVISION` (Rev1) in every process —
+  never to the process revision — and an unknown revision is refused at load.
+  If the speed-matrix run really saw two different numbers, the cause is
+  somewhere other than revision selection; re-open with the two scores and the
+  bake sha256.
