@@ -1089,6 +1089,17 @@ impl crate::metric::Zensim {
     /// # Errors
     ///
     /// Returns [`ZensimError`] if dimensions are mismatched or too small.
+    ///
+    /// # Identity
+    ///
+    /// A byte-identical pair returns exactly what
+    /// [`Zensim::compute`](crate::Zensim::compute) returns — 100 — with an
+    /// all-zero map. The
+    /// [`compute_with_ref_and_diffmap`](Self::compute_with_ref_and_diffmap)
+    /// form cannot make that call: a [`PrecomputedReference`] holds an XYB
+    /// pyramid, not the source pixels, so there is nothing for the identity
+    /// owner to compare against and a perfect copy is scored through the model
+    /// like any other pair.
     pub fn compute_with_diffmap(
         &self,
         source: &impl ImageSource,
@@ -1096,6 +1107,26 @@ impl crate::metric::Zensim {
         options: impl Into<DiffmapOptions>,
     ) -> Result<DiffmapResult, ZensimError> {
         validate_pair(source, distorted)?;
+        // ONE identity owner for every entry that holds both images
+        // (`metric::images_byte_identical` -> `identical_result_at`, reached
+        // through `compute`). Before 2026-09-18 this path had none, so a
+        // perfect copy scored the model's forward on an all-zero feature row —
+        // 96.2017 for `B` at 900x675 — while `compute` returned exactly 100 on
+        // the same pair. Delegating to `compute` cannot drift from it, and
+        // `compute` short-circuits before any walk, so nothing is recomputed.
+        // `validate_pair` above has already refused HDR-declared input, so this
+        // never diverts an HDR pair away from that refusal. The map is exactly
+        // zero, which `sqrt` and contrast masking both preserve.
+        if crate::metric::images_byte_identical(source, distorted) {
+            let (width, height) = (distorted.width(), distorted.height());
+            let _ = options.into();
+            return Ok(DiffmapResult {
+                result: self.compute(source, distorted)?,
+                diffmap: vec![0.0; width * height],
+                width,
+                height,
+            });
+        }
         let precomputed = self.precompute_reference(source)?;
         self.compute_with_ref_and_diffmap(&precomputed, distorted, options)
     }
@@ -1105,6 +1136,265 @@ impl crate::metric::Zensim {
 mod tests {
     use super::DiffmapWeighting;
     use crate::{RgbSlice, ZensimProfile};
+
+    /// A one-input identity bake declaring no arithmetic revision — the
+    /// cheapest `BakeScorer` that exercises the pixel front end.
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+    fn minimal_bake() -> Vec<u8> {
+        let recipe = serde_json::json!({
+            "schema_hash": 1, "scaler_mean": [0.0], "scaler_scale": [1.0],
+            "metadata": [{"key":"zentrain.feature_ids","type":"utf8","text":"0"}],
+            "layers": [{"in_dim":1,"out_dim":1,"activation":"identity",
+                        "dtype":"f32","weights":[1.0],"biases":[0.0]}]
+        });
+        zenpredict_bake::bake_from_json_str(&recipe.to_string()).expect("bake the recipe")
+    }
+
+    /// Deterministic non-flat synthetic content: structured enough that every
+    /// scale of the pyramid sees real signal (a flat field makes the identity
+    /// question vacuous — every SSIM term is already saturated).
+    fn synth(w: usize, h: usize) -> Vec<[u8; 3]> {
+        (0..w * h)
+            .map(|i| {
+                let x = (i % w) as u32;
+                let y = (i / w) as u32;
+                [
+                    ((x * 7 + y * 13) % 251) as u8,
+                    ((x * x + y * 3 + (x ^ y)) % 241) as u8,
+                    (((x ^ y) * 5 + 17 + y * y) % 239) as u8,
+                ]
+            })
+            .collect()
+    }
+
+    /// The identity contract: on a byte-identical pair EVERY score-returning
+    /// entry must return the same number [`crate::Zensim::compute`] does —
+    /// exactly 100, from the one identity owner
+    /// (`metric::images_byte_identical` → `metric::identical_result_at`),
+    /// never the model's forward on an all-zero feature row (~96.2 for `B`).
+    ///
+    /// Entries that take a [`crate::PrecomputedReference`] instead of the
+    /// source image are NOT in this list and cannot be: the reference holds
+    /// an XYB pyramid, not the source pixels, so there is nothing for the
+    /// identity owner to compare the distorted image against. They are
+    /// covered by `identity_is_undecidable_without_the_source` below, which
+    /// pins that limitation rather than hiding it.
+    #[test]
+    fn identity_agrees_across_every_scoring_entry() {
+        let mut failures: Vec<String> = Vec::new();
+        for &(w, h) in &[(37usize, 29usize), (64usize, 64usize), (129usize, 128usize)] {
+            let px = synth(w, h);
+            let img = RgbSlice::new(&px, w, h);
+            let z = crate::Zensim::new(ZensimProfile::codec_target());
+            let baseline = z.compute(&img, &img).unwrap().score();
+            assert_eq!(baseline, 100.0, "compute must certify identity at {w}x{h}");
+
+            #[allow(unused_mut)]
+            let mut got: Vec<(&'static str, f64)> = vec![
+                (
+                    "compute_with_codec_hint",
+                    z.compute_with_codec_hint(&img, &img, None).unwrap().score(),
+                ),
+                (
+                    "compute_extended_features",
+                    z.compute_extended_features(&img, &img).unwrap().score(),
+                ),
+                (
+                    "compute_streaming_strips_default",
+                    z.compute_streaming_strips_default(&img, &img)
+                        .unwrap()
+                        .score(),
+                ),
+                (
+                    "compute_with_diffmap",
+                    z.compute_with_diffmap(&img, &img, DiffmapWeighting::default())
+                        .unwrap()
+                        .score(),
+                ),
+            ];
+            #[cfg(feature = "training")]
+            got.push((
+                "compute_all_features",
+                z.compute_all_features(&img, &img).unwrap().score(),
+            ));
+            #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
+            {
+                // The fused folded-944 entry takes source AND reference AND
+                // distorted, so unlike the rest of the attribution family it
+                // CAN reach the identity owner. Its `ZensimResult` is the v1
+                // walk's under this profile, so it must agree with `compute`.
+                let mut session = crate::Fused944Session::new();
+                got.push((
+                    "compute_folded944_score_and_attribution",
+                    z.compute_folded944_score_and_attribution(
+                        &img,
+                        &z.precompute_reference(&img).unwrap(),
+                        &img,
+                        &[0.0; 944],
+                        &mut session,
+                    )
+                    .unwrap()
+                    .0
+                    .score(),
+                ));
+                // The dynamic-candidate surface. A one-input identity bake is
+                // enough: what is under test is which branch runs, not the
+                // model. `BakeScorer` takes the source image on both entries,
+                // so the identity owner is reachable there.
+                let model = zenpredict::Model::from_bytes(&minimal_bake()).unwrap();
+                let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+                got.push((
+                    "BakeScorer::compute",
+                    scorer.compute(&img, &img, None).unwrap().score(),
+                ));
+                let mut scorer = crate::BakeScorer::new(&model).unwrap().with_parallel(false);
+                got.push((
+                    "SteeringSession::compute",
+                    scorer
+                        .prepare_steering(&img, 8)
+                        .unwrap()
+                        .compute(&img, None)
+                        .unwrap()
+                        .result()
+                        .score(),
+                ));
+            }
+
+            for (name, score) in got {
+                if score != baseline {
+                    failures.push(format!("{w}x{h} {name}: {score} != compute {baseline}"));
+                }
+            }
+
+            // The diffmap itself must be exactly zero, not "small".
+            let dm = z
+                .compute_with_diffmap(&img, &img, DiffmapWeighting::default())
+                .unwrap();
+            if dm.diffmap().iter().any(|v| *v != 0.0) {
+                let max = dm.diffmap().iter().copied().fold(0.0f32, f32::max);
+                failures.push(format!("{w}x{h} compute_with_diffmap map max {max} != 0"));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "entry points disagreeing with compute on an identical pair:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    /// The reference-cached family takes an XYB pyramid, not the source
+    /// pixels, so it cannot invoke the identity owner. This pins that these
+    /// entries score the pair through the model (a finite, non-100 number)
+    /// rather than silently claiming identity by some second, weaker test
+    /// (a zero feature row is not evidence of identical pixels).
+    #[test]
+    fn identity_is_undecidable_without_the_source() {
+        let (w, h) = (129usize, 128usize);
+        let px = synth(w, h);
+        let img = RgbSlice::new(&px, w, h);
+        let z = crate::Zensim::new(ZensimProfile::codec_target());
+        let pre = z.precompute_reference(&img).unwrap();
+        let mut scratch = crate::ZensimScratch::default();
+
+        let mut scores: Vec<(&'static str, f64)> = vec![
+            (
+                "compute_with_ref",
+                z.compute_with_ref(&pre, &img).unwrap().score(),
+            ),
+            (
+                "compute_with_ref_into",
+                z.compute_with_ref_into(&pre, &img, &mut scratch)
+                    .unwrap()
+                    .score(),
+            ),
+            (
+                "compute_with_ref_streaming_strips_default",
+                z.compute_with_ref_streaming_strips_default(&pre, &img)
+                    .unwrap()
+                    .score(),
+            ),
+            (
+                "compute_with_ref_and_diffmap",
+                z.compute_with_ref_and_diffmap(&pre, &img, DiffmapWeighting::default())
+                    .unwrap()
+                    .score(),
+            ),
+        ];
+        // The planar entry has the same shape: a linear-f32 reference cache,
+        // no source pixels to compare against.
+        let planes: [Vec<f32>; 3] = core::array::from_fn(|c| {
+            px.iter()
+                .map(|p| f32::from(p[c]) / 255.0)
+                .collect::<Vec<f32>>()
+        });
+        let planar_ref = z
+            .precompute_reference_linear_planar([&planes[0], &planes[1], &planes[2]], w, h, w)
+            .unwrap();
+        scores.push((
+            "compute_with_ref_and_diffmap_linear_planar",
+            z.compute_with_ref_and_diffmap_linear_planar(
+                &planar_ref,
+                [&planes[0], &planes[1], &planes[2]],
+                w,
+                h,
+                w,
+                DiffmapWeighting::default(),
+            )
+            .unwrap()
+            .score(),
+        ));
+        #[cfg(feature = "feature-regime-v2")]
+        scores.push((
+            "compute_with_ref_score_and_attribution",
+            z.compute_with_ref_score_and_attribution(&pre, &img, &[0.0; 156])
+                .unwrap()
+                .0
+                .score(),
+        ));
+
+        for (name, score) in scores {
+            assert!(score.is_finite(), "{name} must still produce a score");
+            assert_ne!(
+                score, 100.0,
+                "{name} now certifies identity — the limitation is gone, move it \
+                 into identity_agrees_across_every_scoring_entry"
+            );
+        }
+    }
+
+    /// Near-identity must NOT be short-circuited: a single 1-LSB pixel change
+    /// still runs the model, and the two paths agree to the cross-path
+    /// tolerance the strip parity tests use (`rel < 1e-10`).
+    #[test]
+    fn one_lsb_difference_is_not_short_circuited() {
+        let (w, h) = (129usize, 128usize);
+        let src_px = synth(w, h);
+        let mut dst_px = src_px.clone();
+        dst_px[(h / 2) * w + w / 2][1] = dst_px[(h / 2) * w + w / 2][1].wrapping_add(1);
+        let src = RgbSlice::new(&src_px, w, h);
+        let dst = RgbSlice::new(&dst_px, w, h);
+        let z = crate::Zensim::new(ZensimProfile::codec_target());
+
+        let scalar = z.compute(&src, &dst).unwrap().score();
+        assert_ne!(
+            scalar, 100.0,
+            "a 1-LSB difference must go through the model, not the identity owner"
+        );
+        let dm = z
+            .compute_with_diffmap(&src, &dst, DiffmapWeighting::default())
+            .unwrap();
+        assert_ne!(dm.score(), 100.0, "diffmap path must not short-circuit");
+        let rel = (scalar - dm.score()).abs() / scalar.abs().max(1e-12);
+        assert!(
+            rel < 1e-10,
+            "compute {scalar} vs compute_with_diffmap {} (rel {rel})",
+            dm.score()
+        );
+        assert!(
+            dm.diffmap().iter().any(|v| *v > 0.0),
+            "a real difference must leave mass in the map"
+        );
+    }
 
     #[test]
     fn test_diffmap_identical_images() {

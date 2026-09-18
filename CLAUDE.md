@@ -158,11 +158,19 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
-* **2026-09-18 — identity disagrees between scoring paths.** On a byte-identical
-  pair `Zensim::compute` returns exactly 100 (identity short-circuit) while
-  `Zensim::compute_with_diffmap` returns 96.2017 (Profile B, 900×675). The two
-  agree to full precision on distorted pairs. The diffmap path therefore cannot
-  certify identity. Reproduce: `target/release/examples/diffmap_heatmap x.png x.png ~/tmp/o`.
+* **2026-09-18 — identity disagrees between scoring paths. FIXED** (this
+  commit). On a byte-identical pair `Zensim::compute` returned exactly 100
+  (identity short-circuit) while `Zensim::compute_with_diffmap` returned
+  96.2017 (Profile B, 900×675), `Zensim::compute_streaming_strips` returned
+  96.2368 (129×128) and `compute_folded944_score_and_attribution{,_binned}`
+  returned 96.2368. All now delegate to `compute`, which owns the single
+  identity check (`metric::images_byte_identical` → `identical_result_at`); the
+  diffmap is exactly zero. Pinned by
+  `diffmap::tests::identity_agrees_across_every_scoring_entry` and
+  `one_lsb_difference_is_not_short_circuited`. **Still open by construction:**
+  every `*_with_ref*` entry takes an XYB pyramid, not the source pixels, so it
+  cannot reach the identity owner and scores a perfect copy through the model.
+  `diffmap::tests::identity_is_undecidable_without_the_source` pins that.
 * **2026-09-18 — `BakeScorer` scores a Rev3 bake at the process revision without
   refusing (reported by the speed-matrix run, not yet independently reproduced).**
   With `ZENSIM_FORMULA_REV` unset (Rev1), the narrow basic/peak plan serves the

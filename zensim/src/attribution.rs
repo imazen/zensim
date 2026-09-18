@@ -5811,6 +5811,13 @@ impl crate::metric::Zensim {
     /// bounds). SDR route only: HDR-declared inputs get
     /// [`ZensimError::HdrInputRequiresPuPath`].
     ///
+    /// A byte-identical pair returns exactly what
+    /// [`crate::Zensim::compute`] returns — 100 — with a zero map; the 944
+    /// feature row is the real extraction either way. Only this entry and the
+    /// [`crate::BakeScorer`] ones can make that call: the `*_with_ref*`
+    /// attribution entries hold an XYB pyramid, not the source pixels, so a
+    /// perfect copy is scored through the model there.
+    ///
     /// # Errors
     ///
     /// The C3a fused contract (all-basic-features profile,
@@ -5847,6 +5854,24 @@ impl crate::metric::Zensim {
             &mut session.retention,
         )?;
         let t_extract = t0.elapsed();
+        // Identity: the fused v1 walk has no short-circuit of its own, so a
+        // byte-identical pair scored 96.2384 here while `compute` returned
+        // exactly 100 on the same pixels. This entry is the one member of the
+        // attribution family that HOLDS the source, so it can reach the single
+        // identity owner (`metric::images_byte_identical` -> `compute`); the
+        // `*_with_ref*` entries cannot and still score a perfect copy through
+        // the model. Same disposition `BakeScorer::compute_attribution_input`
+        // already uses: identity result plus a zero map. The 944 feature row is
+        // the real extraction either way — its bitwise contract with
+        // `compute_folded720_append2_features` (G-N1) is unconditional.
+        if crate::metric::images_byte_identical(source, distorted) {
+            validate_ref_match(precomputed, distorted)?;
+            return Ok((
+                self.compute(source, distorted)?,
+                v2res,
+                zero_attribution(distorted.width(), distorted.height(), 1),
+            ));
+        }
         // 2) Fused v1 walk — basic-block canvas + the map-profile result.
         let t1 = std::time::Instant::now();
         let fb = self.fused_basic_canvas(precomputed, distorted, s, None)?;
@@ -5951,6 +5976,15 @@ impl crate::metric::Zensim {
             &mut session.scratch,
             &mut session.retention,
         )?;
+        // Same identity disposition as the per-pixel entry above, at this
+        // entry's map density.
+        if crate::metric::images_byte_identical(source, distorted) {
+            return Ok((
+                self.compute(source, distorted)?,
+                v2res,
+                zero_attribution(distorted.width(), distorted.height(), bin),
+            ));
+        }
         let (result, attribution) = self.attribution_from_retention_binned(
             precomputed,
             distorted,

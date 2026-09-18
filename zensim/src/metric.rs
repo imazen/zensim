@@ -2495,6 +2495,17 @@ impl Zensim {
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
         crate::ssim_form::check_route(&config)?;
+        // Identity is decided by ONE owner (`images_byte_identical` ->
+        // `identical_result_at`, inside `compute`). The strip walk has no
+        // short-circuit of its own, so a perfect copy scored here returned the
+        // model's forward on an all-zero feature row (96.24 for `B`) while
+        // `compute` returned exactly 100 — two paths, two answers, same pair.
+        // Delegating to `compute` cannot drift from it; `compute` short-circuits
+        // immediately so no strip work is done. Same shape as the sub-64px
+        // delegation above.
+        if images_byte_identical(source, distorted) {
+            return self.compute(source, distorted);
+        }
 
         let (stats, mean_offset) = crate::streaming::compute_multiscale_stats_streaming_strips(
             source,
@@ -3369,7 +3380,10 @@ pub(crate) fn check_within_max_pixels(
 
 /// Check if source and distorted images have byte-identical pixel data
 /// and matching color interpretation (format + primaries).
-fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource) -> bool {
+pub(crate) fn images_byte_identical(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+) -> bool {
     use crate::source::{AlphaMode, PixelFormat};
 
     let (w, h) = (source.width(), source.height());

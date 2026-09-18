@@ -93,6 +93,23 @@
 
 ### Fixed
 
+- `Zensim::compute_with_diffmap`, `Zensim::compute_streaming_strips` and
+  `Zensim::compute_folded944_score_and_attribution{,_binned}` now certify
+  identity through the same owner `Zensim::compute` uses, instead of scoring a
+  perfect copy through the model on an all-zero feature row. A byte-identical
+  pair returned 96.2017 from the diffmap path and 96.2368 from the strip and
+  fused-944 paths (Profile B, measured at 900x675 and 129x128) while `compute`
+  returned exactly 100 on the same pair; the diffmap and the fused-944
+  attribution map are now exactly zero rather than ~1e-5 float residue. The 944
+  feature row the fused entry returns is unchanged — its bitwise contract with
+  `compute_folded720_append2_features` is unconditional. Entries that take a `PrecomputedReference` instead
+  of the source image (`compute_with_ref`, `compute_with_ref_into`,
+  `compute_with_ref_streaming_strips`, `compute_with_ref_and_diffmap`,
+  `compute_with_ref_and_diffmap_linear_planar`,
+  `compute_with_ref_score_and_attribution`) still cannot decide identity — the
+  cache holds an XYB pyramid, not the source pixels — and that limitation is
+  now pinned by a test and stated on the public docs rather than left implicit.
+
 - Tree corruption companions now reject a base/profile with a different
   feature arithmetic revision. Legacy ZCTH v1/v2 remain Rev1; new ZCTH v3
   stores a hash-bound revision with f32 input semantics. Existing valid legacy
