@@ -163,3 +163,9 @@ because cleanup tests or a historical training reproduction pass.
   `Zensim::compute_with_diffmap` returns 96.2017 (Profile B, 900×675). The two
   agree to full precision on distorted pairs. The diffmap path therefore cannot
   certify identity. Reproduce: `target/release/examples/diffmap_heatmap x.png x.png ~/tmp/o`.
+* **2026-09-18 — `BakeScorer` scores a Rev3 bake at the process revision without
+  refusing (reported by the speed-matrix run, not yet independently reproduced).**
+  With `ZENSIM_FORMULA_REV` unset (Rev1), the narrow basic/peak plan serves the
+  frozen R915 Rev3 ensembles and returns a score at the wrong arithmetic; only
+  the wide-family route checks the declared revision (`metric/bake.rs` ~885-902).
+  Until fixed, run Rev3 bakes only in a process started with `ZENSIM_FORMULA_REV=3`.
