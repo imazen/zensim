@@ -53,12 +53,17 @@ at revision 1 and 165.8 µs at revision 3 in the smoke runs. So:
   comparison. Within a process, every number is interleaved and therefore
   paired; across processes, nothing is.
 
-One trap worth recording, because it bit this run: `BakeScorer`'s narrow-plan
-fast path does **not** refuse a revision mismatch. The revision-3 ensembles
-load and score happily inside a revision-1 process, silently, at revision-1
-pixels. The first attempt at this sweep did exactly that and was discarded.
-The driver now names its arms explicitly per process instead of relying on a
-refusal that does not come.
+**Correction (same day):** an earlier draft of this note claimed `BakeScorer`'s
+narrow-plan path serves a revision-3 bake at revision-1 arithmetic inside a
+revision-1 process. That was tested directly and is false: all ten R915 bakes
+score bit-identically with `ZENSIM_FORMULA_REV` unset, `=1` and `=3`, because
+`Plan::for_bake` selects the revision the bake declares (pinned by
+`revision_contract_tests::narrow_plans_serve_the_declared_revision_in_every_process`).
+The two-process split is therefore not required for the ensembles' correctness;
+the first sweep was discarded on a wrong premise. The split is kept as run; the raw extraction arms (no bake) do follow the
+process revision, and `fast_ssim2` bridges the two processes either way. The ensembles could share
+the revision-1 process in a future run, which would make every end-to-end
+comparison paired.
 
 ## What is inside each timed region
 

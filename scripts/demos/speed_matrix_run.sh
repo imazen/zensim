@@ -54,11 +54,10 @@ bakes() { local p="$1" s; local -a out=(); for s in 17101 17103 17107 17111 1711
 E1="$(bakes R915_y60_h32)"
 E2="$(bakes R915_basic228_h128)"
 W=0.2,0.2,0.2,0.2,0.2
-# Explicit arm lists, never "" (which means ALL). The Rev3 ensembles must not
-# run inside the Rev1 process: `BakeScorer`'s narrow-plan fast path does NOT
-# refuse a revision mismatch, so they would quietly score at revision-1 pixels
-# and be published as revision-3 numbers. Naming the arms is what keeps the two
-# processes from bleeding into each other.
+# Explicit arm lists, never "" (which means ALL). The ensembles run in the Rev3
+# process by convention only: `BakeScorer` serves a bake at its DECLARED
+# revision in any process (measured 2026-09-18), so this split is not a
+# correctness requirement for them. `fast_ssim2` bridges the two processes.
 REV1_ARMS=fast_ssim2,butteraugli,ssimulacra2_rs,zensim_V0_2,zensim_B,zensim_C,zensim_D
 ENS_ARMS=fast_ssim2,rev3_fast_y60_ens5,rev3_rich_basic228_ens5
 # The intermediate thread counts drop the two non-threading peers. Neither
