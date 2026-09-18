@@ -110,6 +110,36 @@ rev3-rss out sizes="1024 2048" arms="buf_v1_372 fold372_full fold944_full" cpu="
 rev3-spatial out:
     ./scripts/bench/rev3_spatial_replay.sh "$1"
 
+# The cross-generation speed matrix: every named zensim profile, the two
+# frozen Rev3 ensembles, and the peer metrics (fast-ssim2, butteraugli,
+# ssimulacra2/rust-av) interleaved across 64/256/1024/2048/4096 squares at 1
+# and 16 threads. Builds BOTH fast-ssim2 feature configurations, because its
+# rayon parallelism is a cargo feature and an MT row measured against a
+# single-threaded opponent is not an MT comparison.
+# The BUILDS go through run-heavy; the RUNS deliberately do not (its cgroup
+# makes zenbench's own gating refuse the run — see rev3-cost above).
+#   just bench-speed-matrix
+[doc("Cross-generation + peer-metric speed matrix (writes raw rounds, then the summary)")]
+[positional-arguments]
+bench-speed-matrix raw="/mnt/v/output/zensim/demos/speed-matrix-2026-09-18/raw" stem="benchmarks/speed_matrix_2026-09-18":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    raw=$1
+    stem=$2
+    # cargo prints one JSON message per line; run-heavy's own chatter is not
+    # JSON, so the `^{` filter keeps the two apart without swallowing errors.
+    build() {
+        ~/work/zen/scripts/run-heavy --mem 16G --jobs 8 -- \
+            cargo bench --no-run --message-format=json-render-diagnostics \
+            --manifest-path zensim-bench/Cargo.toml --bench ssim2_speed_bar "$@" \
+        | grep '^{' \
+        | python3 -c "import json,sys; print(next(e for e in (json.loads(l).get('executable') for l in sys.stdin) if e and 'ssim2_speed_bar' in e))"
+    }
+    BIN_PLAIN=$(build) BIN_RAYON=$(build --features ssim2-rayon) \
+        scripts/demos/speed_matrix_run.sh "$raw"
+    python3 scripts/demos/speed_matrix_report.py --raw-dir "$raw" \
+        --out-json "$stem.json" --out-md "$stem.md" --notes "$stem.notes.md"
+
 # Report only, never fails — for a quick survey.
 lint-scripts-list:
     python3 scripts/lint_scripts.py --list

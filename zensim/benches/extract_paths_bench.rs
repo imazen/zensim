@@ -944,6 +944,19 @@ fn main() {
         subset_bench(&sizes);
         return;
     }
+    // `ZENBENCH_RESULT_PATH` saves the completed paired rounds — raw per-round
+    // durations, call counts, execution order and each round's pre-round gate
+    // status — the same contract `zensim-bench/benches/ssim2_speed_bar.rs`
+    // honours. Until 2026-09-18 this arm dropped its `RunResult` on the floor,
+    // so a matrix run across thread counts and revisions produced only the
+    // terminal summary table: medians survived as text, every raw round and
+    // every gate flag did not, and no percentile could be recomputed. Checked
+    // BEFORE the run, so a path collision costs nothing instead of discarding
+    // a finished sweep.
+    let result_path = std::env::var_os("ZENBENCH_RESULT_PATH").map(std::path::PathBuf::from);
+    if let Some(path) = &result_path {
+        assert!(!path.exists(), "refusing to overwrite benchmark evidence");
+    }
     let z = fold_zensim();
     let (off, full) = (toggles_off(), toggles_full());
     let result = zenbench::run(|suite| {
@@ -1052,5 +1065,8 @@ fn main() {
             });
         }
     });
-    let _ = result;
+    match result_path {
+        Some(path) => result.save(path).expect("save benchmark evidence"),
+        None => drop(result),
+    }
 }
