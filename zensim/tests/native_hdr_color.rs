@@ -558,13 +558,36 @@ fn prepared_native_maps_match_canonical_features_and_survive_failed_calls() {
         // folded calls; retained candidate signals must not leak into a new pair.
         let mut scratch = zensim::Fused944Session::new();
         let pre = scorer.precompute_reference(&src).unwrap();
-        scorer.compute_with_ref_and_attribution(&src,&pre,&dst,None,&mut scratch,8).unwrap();
+        scorer
+            .compute_with_ref_and_attribution(&src, &pre, &dst, None, &mut scratch, 8)
+            .unwrap();
         let z = Zensim::new(ZensimProfile::B).with_parallel(false);
         let legacy_pre = z.precompute_reference(&src).unwrap();
-        let sensitivities = vec![-1.;944];
-        let reused = z.compute_folded944_score_and_attribution_binned(&src,&legacy_pre,&src,&sensitivities,&mut scratch,8).unwrap();
-        let fresh = z.compute_folded944_score_and_attribution_binned(&src,&legacy_pre,&src,&sensitivities,&mut zensim::Fused944Session::new(),8).unwrap();
-        assert_eq!(reused.0.features(),fresh.0.features());
-        assert_eq!(reused.2.query_rect(0,0,w,h),fresh.2.query_rect(0,0,w,h));
+        let sensitivities = vec![-1.; 944];
+        let reused = z
+            .compute_folded944_score_and_attribution_binned(
+                &src,
+                &legacy_pre,
+                &src,
+                &sensitivities,
+                &mut scratch,
+                8,
+            )
+            .unwrap();
+        let fresh = z
+            .compute_folded944_score_and_attribution_binned(
+                &src,
+                &legacy_pre,
+                &src,
+                &sensitivities,
+                &mut zensim::Fused944Session::new(),
+                8,
+            )
+            .unwrap();
+        assert_eq!(reused.0.features(), fresh.0.features());
+        assert_eq!(
+            reused.2.query_rect(0, 0, w, h),
+            fresh.2.query_rect(0, 0, w, h)
+        );
     }
 }
