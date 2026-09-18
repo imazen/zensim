@@ -54,6 +54,18 @@ metric-eval bake ref="" ramp="" out="/mnt/v/output/zensim/reports":
     "${CARGO_TARGET_DIR:-target}/release/bake_verdict" "${args[@]}"
     echo "report: $out/$stem.html"
 
+# Build the viewable spatial-diffmap demo gallery: six imazen-26 TRAIN sources
+# x a zenjpeg q20/q50/q80 ladder, each rendered as a zensim diffmap heatmap and
+# overlay, laid out as one self-contained page under /mnt/v/output (served at
+# localhost:3300). A DEMO, not evidence -- one pass, no replication, no ranking
+# claim. Extra args pass through (--max-dim / --profile / --scale-max / --out).
+#   just demo-diffmap
+#   just demo-diffmap --profile d --max-dim 1200
+[doc("Build the spatial-diffmap heatmap demo gallery (demo, not evidence)")]
+[positional-arguments]
+demo-diffmap *options:
+    python3 scripts/demos/diffmap_gallery.py "$@"
+
 # Fail on scripts that cannot run: pinned to a deleted sibling worktree, or
 # hardcoding a binary with no source anywhere. On 2026-07-15 an audit found 25
 # of 130 scripts in scripts/v_next/ pointing into worktrees that had been

@@ -164,6 +164,26 @@ pub fn encode_jpeg_q(pixels: &[[u8; 3]], w: usize, h: usize, quality: u8) -> Vec
     enc.finish().expect("zenjpeg finish")
 }
 
+/// Encode packed RGB8 to PNG via zenpng (default `EncodeConfig`).
+///
+/// The counterpart to [`decode_png_rgb8`] — lives here rather than in a
+/// consumer so example tooling that needs to WRITE a viewable image (the
+/// diffmap heatmap demo) uses the same zen codec the readers do, instead of
+/// reaching for the `image` crate.
+pub fn encode_png_rgb8(pixels: &[[u8; 3]], w: usize, h: usize) -> Vec<u8> {
+    let rgb: Vec<rgb::Rgb<u8>> = pixels
+        .iter()
+        .map(|p| rgb::Rgb {
+            r: p[0],
+            g: p[1],
+            b: p[2],
+        })
+        .collect();
+    let img = imgref::ImgRef::new(&rgb, w, h);
+    let cfg = zenpng::EncodeConfig::default();
+    zenpng::encode_rgb8(img, None, &cfg, &Unstoppable, &Unstoppable).expect("zenpng encode")
+}
+
 /// Decode a PNG to packed RGB u16 (native 16-bit samples preserved — for
 /// PQ/HLG code-value containers like the kadis-hdr cICP-spliced PNGs);
 /// 8-bit inputs widen by `v * 257`. Alpha dropped. Panics on failure.

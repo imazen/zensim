@@ -4,6 +4,18 @@
 
 ### Added
 
+- `diffmap_heatmap` example renders `Zensim::compute_with_diffmap`'s spatial map
+  as a colour heatmap and as an overlay on the distorted image, and prints the
+  score plus map percentiles as one JSON line. Normalization defaults to a fixed
+  absolute scale shared across images (`--scale-max`), so a low-quality encode
+  renders hotter than a high-quality one; the map is already at full image
+  resolution, so nothing is upsampled. `gen_jpeg_distortion` gained optional
+  `--max-dim` / `--ref-out` so it owns building a matched (reference, distorted)
+  pair at a display size. `scripts/demos/diffmap_gallery.py` (`just
+  demo-diffmap`) drives both over six imazen-26 TRAIN sources and a zenjpeg
+  q20/q50/q80 ladder into a self-contained page. Demo tooling only: no library
+  behaviour changes, and the page is an illustration, not evidence.
+
 - Native `BakeScorer::prepare_steering_hdr` binds PQ/HLG/absolute-linear inputs
   to the existing prepared steering session. Basic/peak scoring and map assembly
   share retained signals, eliminating repeated extraction. Candidate reference
