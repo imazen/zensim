@@ -155,3 +155,11 @@ The authorized cleanup checklist and bounded acceptance evidence are in
 [PLAN_CRUFT_PURGE](docs/PLAN_CRUFT_PURGE_2026-09-06.md). Record negative results
 and unresolved product limitations; do not declare a model qualified merely
 because cleanup tests or a historical training reproduction pass.
+
+## Known Bugs
+
+* **2026-09-18 — identity disagrees between scoring paths.** On a byte-identical
+  pair `Zensim::compute` returns exactly 100 (identity short-circuit) while
+  `Zensim::compute_with_diffmap` returns 96.2017 (Profile B, 900×675). The two
+  agree to full precision on distorted pairs. The diffmap path therefore cannot
+  certify identity. Reproduce: `target/release/examples/diffmap_heatmap x.png x.png ~/tmp/o`.
