@@ -81,10 +81,11 @@ miss). Anything as "shipped".
 | # | Deliverable | Owner extended | Status |
 |---|---|---|---|
 | 1 | Diffmap heatmap example + served gallery | `zensim/examples/diffmap_heatmap.rs`, `scripts/demos/diffmap_gallery.py`, `just demo-diffmap` | done (`d58f15a9`); JPEG only, Profile B, TRAIN-role imazen-26 sources; served under `zensim/demos/diffmap-heatmap-2026-09-18/` |
-| 2 | Speed matrix: PreviewV0_2, B, D, C, Rev3 fast, Rev3 rich vs fast-ssim2 / ssimulacra2-rs / butteraugli; 64² / 256² / 1024² / 2048² / 4096²; 1T and MT; α + β·pixels fit | `ssim2_speed_bar` (zenbench) | next |
-| 3 | Speed × accuracy Pareto page from #2 + existing fulleval CID22 rows (with bootstrap CIs) | `gauntlet.py` data, one new static page | after #2 |
-| 4 | Targeting demo: `zensim-target` vs fixed-q on TRAIN images, per codec | `demo_matrix` | after #3 |
-| 5 | README correction batch | — | needs user approval |
+| 2 | Speed matrix: PreviewV0_2, B, D, C, Rev3 fast, Rev3 rich vs fast-ssim2 / ssimulacra2-rs / butteraugli; 64²–4096²; 1/4/8/16 threads; end-to-end and raw extraction at Rev1 and Rev3 | `ssim2_speed_bar`, `extract_paths_bench`; `just bench-speed-matrix` | done (`0175bed5`): [record](../benchmarks/speed_matrix_2026-09-18.md). The α + β·pixels fit fails for every arm; marginal ms/MP is reported instead |
+| 3 | Speed × accuracy page from #2 + board rows | `scripts/demos/speed_accuracy_page.py`; `just demo-speed-accuracy` | done (`36816d7c`); served under `zensim/demos/speed-accuracy-2026-09-18/`. C and PreviewV0_2 have no board row, so they appear on the speed axis only |
+| 4 | Board rows for shipped C and PreviewV0_2 (full-eval owner) so the page can place what crates.io users have today | `just full-eval` | next |
+| 5 | Targeting demo: `zensim-target` vs fixed-q on TRAIN images, per codec | `demo_matrix` | after #3 |
+| 6 | README correction batch | — | needs user approval |
 
 ## Findings from building the demos
 
@@ -98,3 +99,19 @@ miss). Anything as "shipped".
   is unchanged pending the README/doc correction batch.
 * One absolute heat scale cannot serve photos and flat graphics together:
   photo q20 texture clips at 0.06 while clipart p99 is 0.009.
+* **Speed matrix (1 thread, 1024², same process as fast-ssim2 at 66.7 ms):**
+  Rev3 fast 12.7 ms, Rev3 rich 27.9, D 28.4, PreviewV0_2 29.6, B 42.4, C 63.6,
+  butteraugli 95.4, ssimulacra2-rs 441.7. zensim B and C are *slower* than
+  fast-ssim2 at 64². PreviewV0_2 is faster than B at every size.
+* **B is off the single-thread speed/CID22 frontier**: Rev3 rich is faster and
+  ranks the same. Frontier at 1024²: Rev3 fast, Rev3 rich, fast-ssim2.
+* **Threading:** fold extraction scales ~4–4.5× at 8 threads on 1024² but only
+  2–3× on 4096², and 4→8 threads buys ≤25% there; the buffered v1 path scales
+  better and wins at 16 threads. fast-ssim2 with its rayon feature does not
+  scale at all in these runs.
+* **Identity bug fixed** (`6c47bdf3`) for entries holding both images; every
+  `*_with_ref*` entry still cannot certify identity (no source pixels kept).
+* **The suspected silent revision mismatch was a false report**: `BakeScorer`
+  serves a bake at its declared revision in any process (`f79ad7ba` pins it).
+  `zensim-validate/tests/bake_surface.rs` still asserts the older refusal
+  contract and fails on `main`; which contract holds is a user decision.
