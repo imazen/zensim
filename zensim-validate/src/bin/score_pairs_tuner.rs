@@ -208,9 +208,10 @@ fn score_one(specs: &[ModelSpec], rw: u32, rh: u32, rpx: &[u8], dpx: &[u8]) -> V
     specs
         .iter()
         .map(|m| match m {
-            ModelSpec::Profile { zensim, .. } => {
-                zensim.compute(&rs, &ds).map(|r| r.score()).unwrap_or(f64::NAN)
-            }
+            ModelSpec::Profile { zensim, .. } => zensim
+                .compute(&rs, &ds)
+                .map(|r| r.score())
+                .unwrap_or(f64::NAN),
             ModelSpec::Bakes { models, .. } => BakeScorer::ensemble(models, None)
                 .and_then(|mut s| s.compute(&rs, &ds, None))
                 .map(|r| r.score())
