@@ -337,6 +337,11 @@ pub mod feature_v2;
 #[cfg(feature = "feature-regime-v2")]
 pub(crate) mod feature_v2_stream;
 
+// DVIFM-style block-visibility features (f956..f985, opt-in, off by
+// default). zenpapers/docs/iqa-methods/dvifm-zensim-feature-design.md.
+#[cfg(feature = "feature-regime-v2")]
+pub(crate) mod dvifm;
+
 // The extraction PLAN: one derivation from "what a consumer needs" to "what
 // the walk must run and how wide the answer is" — the pair (compute, layout)
 // the runtime was missing. Gated with `feature_v2` because it resolves to a
