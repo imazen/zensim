@@ -32,6 +32,9 @@
 //!   [720, 924)  append   scale*3*17 + ch*17 + local
 //!   [924, 944)  append2  scale*5 + local     (Y-only: one cell per scale)
 //!   [944, 956)  csfw     scale*3 + local     (Y-only)
+//!   [956, 986)  dvifm    level*6 + local     (flat: one cell, no scale axis —
+//!                                            DVIFM runs its OWN 5-level
+//!                                            pyramid off the scale-0 Y rows)
 //! ```
 //!
 //! ## Why the geometry constants are DERIVED here, not copied
@@ -300,6 +303,8 @@ pub(crate) enum KernelId {
     Append2,
     /// The CSFW tier-1 kernel.
     Csfw,
+    /// The DVIFM block-visibility pyramid pump (`dvifm.rs`).
+    Dvifm,
     /// The free raw-moment accumulator a v1-only walk finalizes.
     FreeRawMoments,
     /// The free bounded-error (class C) accumulator.
@@ -318,6 +323,7 @@ impl KernelId {
             KernelId::Append => "append",
             KernelId::Append2 => "append2",
             KernelId::Csfw => "csfw",
+            KernelId::Dvifm => "dvifm",
             KernelId::FreeRawMoments => "free_raw_moments",
             KernelId::FreeBoundedErr => "free_bounded_err",
         }
@@ -1978,6 +1984,69 @@ pub(crate) static CSFW: [SignalDef; 3] = {
     ]
 };
 
+/// The 30 DVIFM block-visibility signals — F1 plus five F2 bins for each of
+/// the family's OWN five pyramid levels (not the walk's scales; DVIFM is a
+/// [`Replication::Flat`] block fed by the scale-0 Y rows). Index-aligned
+/// with `dvifm::DVIFM_FEATURES`: `level*6 + local` where local 0 is the
+/// parametric visibility-weighted block error and locals 1..6 are the five
+/// triangular log-contrast bins.
+pub(crate) static DVIFM: [SignalDef; 30] = {
+    use ComputeToken::Dvifm as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    use KernelId::Dvifm as K;
+    use Statistic::Mean;
+    const fn dv(block_local: u16, name: &'static str) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic: Mean,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: NO_REV,
+        }
+    }
+    [
+        dv(0, "l0_f1"),
+        dv(1, "l0_f2b0"),
+        dv(2, "l0_f2b1"),
+        dv(3, "l0_f2b2"),
+        dv(4, "l0_f2b3"),
+        dv(5, "l0_f2b4"),
+        dv(6, "l1_f1"),
+        dv(7, "l1_f2b0"),
+        dv(8, "l1_f2b1"),
+        dv(9, "l1_f2b2"),
+        dv(10, "l1_f2b3"),
+        dv(11, "l1_f2b4"),
+        dv(12, "l2_f1"),
+        dv(13, "l2_f2b0"),
+        dv(14, "l2_f2b1"),
+        dv(15, "l2_f2b2"),
+        dv(16, "l2_f2b3"),
+        dv(17, "l2_f2b4"),
+        dv(18, "l3_f1"),
+        dv(19, "l3_f2b0"),
+        dv(20, "l3_f2b1"),
+        dv(21, "l3_f2b2"),
+        dv(22, "l3_f2b3"),
+        dv(23, "l3_f2b4"),
+        dv(24, "l4_f1"),
+        dv(25, "l4_f2b0"),
+        dv(26, "l4_f2b1"),
+        dv(27, "l4_f2b2"),
+        dv(28, "l4_f2b3"),
+        dv(29, "l4_f2b4"),
+    ]
+};
+
 // ============================================================================
 // Layout arithmetic — THE owner
 // ============================================================================
@@ -1989,6 +2058,13 @@ pub(crate) enum Replication {
     PerChannel,
     /// One cell per scale (the Y-only blocks).
     PerScale,
+    /// One cell TOTAL — the signal table is the whole block (DVIFM: the
+    /// family's own pyramid levels are its signal axis, not the walk's
+    /// scales, so there is nothing to replicate). [`def_at`] reports
+    /// `scale = 0, channel = Scalar` for every flat slot, which is also what
+    /// `ComputeSet::at_scale` narrowing needs: a flat family's slots live
+    /// and die with the scale-0 walk rows that feed them.
+    Flat,
 }
 
 /// A registered block: a signal table plus where it sits in the layout.
@@ -2042,6 +2118,11 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         signals: &CSFW,
         replication: Replication::PerScale,
     },
+    BlockDef {
+        family: ComputeToken::Dvifm,
+        signals: &DVIFM,
+        replication: Replication::Flat,
+    },
 ];
 
 impl BlockDef {
@@ -2050,6 +2131,7 @@ impl BlockDef {
         let cells = match self.replication {
             Replication::PerChannel => n_scales * 3,
             Replication::PerScale => n_scales,
+            Replication::Flat => 1,
         };
         cells * self.signals.len()
     }
@@ -2082,12 +2164,12 @@ pub(crate) fn block_base(
 /// because guessing would name a different set.
 ///
 /// Sourced from `benchmarks/feature_sets_registry.json`'s `sets[].layout`
-/// (append-only; 2026-09-06: 372, 720, 924, 944, 956) plus the registry's full
-/// width. `zensim-validate`'s
+/// (append-only; 2026-09-19: 372, 720, 924, 944, 956, 986) plus the registry's
+/// full width. `zensim-validate`'s
 /// `every_registered_layout_width_is_a_candidate` holds the two in sync, so
 /// registering a set at a new width fails the build rather than silently
 /// becoming unreproducible.
-pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[372, 720, 924, 944, 956];
+pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[372, 720, 924, 944, 956, 986];
 
 /// Total layout width at `n_scales` with every registered block present.
 pub(crate) fn full_width(n_scales: usize) -> usize {
@@ -2096,7 +2178,9 @@ pub(crate) fn full_width(n_scales: usize) -> usize {
 
 /// The slot id of one signal placement.
 ///
-/// `channel` is ignored for [`Replication::PerScale`] blocks.
+/// `channel` is ignored for [`Replication::PerScale`] and
+/// [`Replication::Flat`] blocks; `Flat` additionally requires `scale == 0`
+/// (it has no scale axis — see the variant's doc).
 pub(crate) fn slot_id(
     family: ComputeToken,
     block_local: usize,
@@ -2105,18 +2189,33 @@ pub(crate) fn slot_id(
     n_scales: usize,
 ) -> Option<usize> {
     let (base, block) = block_base(family, n_scales)?;
-    if scale >= n_scales || block_local >= block.signals.len() {
+    if block_local >= block.signals.len() {
         return None;
     }
     let per = block.signals.len();
     Some(match block.replication {
         Replication::PerChannel => {
-            if channel >= 3 {
+            if scale >= n_scales || channel >= 3 {
                 return None;
             }
             base + (scale * 3 + channel) * per + block_local
         }
-        Replication::PerScale => base + scale * per + block_local,
+        Replication::PerScale => {
+            if scale >= n_scales {
+                return None;
+            }
+            base + scale * per + block_local
+        }
+        // One cell: no (scale, channel) axes. `scale == 0` is required so
+        // this round-trips [`def_at`]'s flat-block reading, and so a
+        // per-scale enumeration of a flat block does not silently answer
+        // the same slot once per scale.
+        Replication::Flat => {
+            if scale != 0 {
+                return None;
+            }
+            base + block_local
+        }
     })
 }
 
@@ -2136,6 +2235,7 @@ pub(crate) fn def_at(id: usize, n_scales: usize) -> Option<FeatureDef> {
                     (cell / 3, Channel::TRIPLE[cell % 3], off % per)
                 }
                 Replication::PerScale => (off / per, Channel::Scalar, off % per),
+                Replication::Flat => (0, Channel::Scalar, off),
             };
             return Some(FeatureDef {
                 id: u16::try_from(id).ok()?,
@@ -2509,7 +2609,7 @@ mod tests {
     #[test]
     fn id_arithmetic_round_trips_on_every_slot() {
         let w = full_width(NS);
-        assert_eq!(w, 956, "full registered width at 4 scales");
+        assert_eq!(w, 986, "full registered width at 4 scales");
         for id in 0..w {
             let d = def_at(id, NS).unwrap_or_else(|| panic!("no def for slot {id}"));
             let ch = match d.channel {
@@ -2544,6 +2644,7 @@ mod tests {
             (ComputeToken::Append, 720, 204),
             (ComputeToken::Append2, 924, 20),
             (ComputeToken::Csfw, 944, 12),
+            (ComputeToken::Dvifm, 956, 30),
         ];
         for (family, base, width) in expect {
             let (b, blk) = block_base(family, NS).expect("registered family");
@@ -2565,7 +2666,7 @@ mod tests {
             );
             assert!(seen.insert(n.clone()), "duplicate slot name {n:?} at {id}");
         }
-        assert_eq!(seen.len(), 956);
+        assert_eq!(seen.len(), 986);
     }
 
     /// Signal names are unique WITHIN a family (the family prefix is what
@@ -2996,10 +3097,11 @@ mod owner_gates {
             append2: false,
             append2_dst_activity: false,
             csfw: false,
+            dvifm: false,
             free_extras: V1FreeExtras::Off,
         };
         // One `ComputeSet` per token that turns on EXACTLY that family.
-        let cases: [(T, ComputeSet); 9] = [
+        let cases: [(T, ComputeSet); 10] = [
             (
                 T::Basic,
                 ComputeSet {
@@ -3036,6 +3138,7 @@ mod owner_gates {
                 },
             ),
             (T::Csfw, ComputeSet { csfw: true, ..off }),
+            (T::Dvifm, ComputeSet { dvifm: true, ..off }),
             // `Peaks` alone is expressible; `Masked`/`Iw` are not (v1's pool
             // modes turn the two on together), so they are checked as the
             // DIFFERENCE between `Full` and `Peaks` below.

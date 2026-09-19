@@ -1117,8 +1117,15 @@ pub enum FeatureRegime {
     /// chunk-3 tier-1, Y-only luminance-CSF-weighted GLOBAL_* twins).
     /// Additive-only and default-OFF — new-regime rows only (the HDR
     /// backfill wave); never mixed into 944- or 924-regime tables. The
-    /// chroma tiers (f956..f979) are a later wave.
+    /// chroma tiers' old f956..f979 claim was released (CSF design doc);
+    /// f956..f985 is now DVIFM's — see [`Folded720Dvifm`].
     Folded720Csfw,
+    /// [`Folded720Csfw`](Self::Folded720Csfw) plus the f956+ DVIFM
+    /// block-visibility block (30 flat slots — the family's own five-level
+    /// pyramid off the scale-0 Y rows; see [`crate::dvifm`]). Additive-only
+    /// and default-OFF — a pre-screen qualification regime; never mixed
+    /// into 956- or narrower-regime tables.
+    Folded720Dvifm,
 }
 
 /// Result of [`compute_v2_features_impl`]/[`crate::Zensim::compute_v2_features`].
@@ -1182,6 +1189,15 @@ impl ZensimV2Result {
                 let end = self.features.len() - tail;
                 &self.features[end - v2_len..end]
             }
+            FeatureRegime::Folded720Dvifm => {
+                let tail = self.n_scales
+                        * (3 * FEATURES_PER_CHANNEL_APPEND
+                            + APPEND2_PER_SCALE
+                            + CSFW_PER_SCALE)
+                    + crate::dvifm::DVIFM_FEATURES;
+                let end = self.features.len() - tail;
+                &self.features[end - v2_len..end]
+            }
             _ => &self.features[..],
         };
         FeatureViewV2::new(v2_block, self.n_scales)
@@ -1209,13 +1225,22 @@ impl ZensimV2Result {
                     - self.n_scales * (APPEND2_PER_SCALE + CSFW_PER_SCALE);
                 Some(&self.features[start..start + append_len])
             }
+            FeatureRegime::Folded720Dvifm => {
+                let append_len = self.n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
+                let start = self.features.len()
+                    - append_len
+                    - self.n_scales * (APPEND2_PER_SCALE + CSFW_PER_SCALE)
+                    - crate::dvifm::DVIFM_FEATURES;
+                Some(&self.features[start..start + append_len])
+            }
             _ => None,
         }
     }
 
     /// The f924+ append2 slots (`n_scales × APPEND2_PER_SCALE`), when the
-    /// result carries them ([`FeatureRegime::Folded720Append2`] or
-    /// [`FeatureRegime::Folded720Csfw`]).
+    /// result carries them ([`FeatureRegime::Folded720Append2`],
+    /// [`FeatureRegime::Folded720Csfw`], or
+    /// [`FeatureRegime::Folded720Dvifm`]).
     pub fn append2_features(&self) -> Option<&[f64]> {
         match self.regime {
             FeatureRegime::Folded720Append2 => {
@@ -1227,16 +1252,43 @@ impl ZensimV2Result {
                 let start = self.features.len() - len - self.n_scales * CSFW_PER_SCALE;
                 Some(&self.features[start..start + len])
             }
+            FeatureRegime::Folded720Dvifm => {
+                let len = self.n_scales * APPEND2_PER_SCALE;
+                let start = self.features.len()
+                    - len
+                    - self.n_scales * CSFW_PER_SCALE
+                    - crate::dvifm::DVIFM_FEATURES;
+                Some(&self.features[start..start + len])
+            }
             _ => None,
         }
     }
 
     /// The f944+ CSFW slots (`n_scales × CSFW_PER_SCALE`), when the
-    /// result carries them ([`FeatureRegime::Folded720Csfw`]).
+    /// result carries them ([`FeatureRegime::Folded720Csfw`] or
+    /// [`FeatureRegime::Folded720Dvifm`]).
     pub fn csfw_features(&self) -> Option<&[f64]> {
         match self.regime {
             FeatureRegime::Folded720Csfw => {
                 let len = self.n_scales * CSFW_PER_SCALE;
+                Some(&self.features[self.features.len() - len..])
+            }
+            FeatureRegime::Folded720Dvifm => {
+                let len = self.n_scales * CSFW_PER_SCALE;
+                let start = self.features.len() - len - crate::dvifm::DVIFM_FEATURES;
+                Some(&self.features[start..start + len])
+            }
+            _ => None,
+        }
+    }
+
+    /// The f956+ DVIFM slots ([`crate::dvifm::DVIFM_FEATURES`] flat slots —
+    /// `level*6 + local`, F1 then five F2 bins per level), when the result
+    /// carries them ([`FeatureRegime::Folded720Dvifm`]).
+    pub fn dvifm_features(&self) -> Option<&[f64]> {
+        match self.regime {
+            FeatureRegime::Folded720Dvifm => {
+                let len = crate::dvifm::DVIFM_FEATURES;
                 Some(&self.features[self.features.len() - len..])
             }
             _ => None,
@@ -1463,6 +1515,15 @@ pub struct V2NewFeatureToggles {
     /// at f944+ after append2. Additive-only; joins the NEXT extraction
     /// regime wave (the HDR backfill).
     pub csfw_block: bool,
+    /// Emit the f956+ DVIFM block-visibility block
+    /// ([`crate::dvifm::DVIFM_FEATURES`] flat slots — the family's own
+    /// five-level binomial pyramid off the scale-0 Y rows, F1 + five F2
+    /// bins per level). Default OFF: with this false the DVIFM pump never
+    /// runs and every existing path, layout, and byte — SDR and HDR
+    /// routes — is unchanged. Requires `csfw_block` (asserted): the block
+    /// sits at f956+ after CSFW. Additive-only; pre-screen qualification
+    /// stage — the constants are seed placeholders, not fitted.
+    pub dvifm_block: bool,
     /// BANDVIS dst-activity plane (the recorded V3(b)/(c) cross-fire fix
     /// from `benchmarks/append2_bandvis_gates_2026-07-27.md` REMAINDERS
     /// #3, implemented + adjudicated 2026-08-02 for the SOTA-944 P1.5
@@ -1802,6 +1863,7 @@ impl Default for V2NewFeatureToggles {
             append_block: false,
             append2_block: false,
             csfw_block: false,
+            dvifm_block: false,
             append2_dst_activity: false,
             formula_revision: crate::ssim_form::active_revision(),
             v1_pools: V1PoolsMode::Off,
@@ -1958,6 +2020,9 @@ pub(crate) struct ComputeSet {
     pub append2: bool,
     pub append2_dst_activity: bool,
     pub csfw: bool,
+    /// The DVIFM block-visibility pump (f956+; the family's own pyramid off
+    /// the scale-0 Y rows — NOT replicated per walk scale).
+    pub dvifm: bool,
     /// The free v2-era slots a v1-only walk emits ([`V1FreeExtras`]). Held
     /// here rather than re-read from the toggles at each site, so
     /// `raw_moments` has ONE derivation.
@@ -2018,6 +2083,10 @@ impl ComputeSet {
             append: self.append && live,
             append2: self.append2 && live,
             csfw: self.csfw && live,
+            // DVIFM's pump reads the scale-0 strips only, so this flag can
+            // ever be live at scale 0 — and `def_at` reports its flat slots
+            // as scale 0, which is the same attribution.
+            dvifm: self.dvifm && live,
             ..self
         }
     }
@@ -2069,6 +2138,7 @@ impl ComputeSet {
             append2,
             append2_dst_activity: t.append2_dst_activity && append2,
             csfw: t.csfw_block && v2_blocks,
+            dvifm: t.dvifm_block && v2_blocks,
             free_extras: t.free_extras,
         }
     }
@@ -2186,6 +2256,9 @@ impl ComputeSet {
         if self.csfw {
             p = p.with(T::Csfw);
         }
+        if self.dvifm {
+            p = p.with(T::Dvifm);
+        }
         if self.raw_moments() {
             p = p.with(T::Moments);
         }
@@ -2235,6 +2308,9 @@ impl ComputeSet {
         let append_end = v2_end + n_scales * 3 * FEATURES_PER_CHANNEL_APPEND;
         let append2_end = append_end + n_scales * APPEND2_PER_SCALE;
         let csfw_end = append2_end + n_scales * CSFW_PER_SCALE;
+        // Flat block: 30 slots at `csfw_end` regardless of `n_scales`
+        // (`feature_defs::Replication::Flat` owns the same arithmetic).
+        let dvifm_end = csfw_end + crate::dvifm::DVIFM_FEATURES;
 
         let mut ranges: Vec<(usize, usize)> = Vec::new();
         let mut scattered: Vec<usize> = Vec::new();
@@ -2258,6 +2334,9 @@ impl ComputeSet {
         }
         if self.csfw {
             ranges.push((append2_end, csfw_end));
+        }
+        if self.dvifm {
+            ranges.push((csfw_end, dvifm_end));
         }
         if self.raw_moments() {
             scattered.extend(free_slot_indices(n_scales));
@@ -8667,6 +8746,46 @@ pub(crate) fn compute_folded720_csfw_impl(
     compute_folded720_impl_with_toggles(source, distorted, max_pixels, parallel, toggles)
 }
 
+/// Folded-720+append+append2+CSFW+DVIFM pair entry (986; [`FeatureRegime::
+/// Folded720Dvifm`]): forces `append_block` + `append2_block` +
+/// `csfw_block` + `dvifm_block`. `pub(crate)` only — no `Zensim` surface
+/// yet; the qualification gates drive it through the test entry.
+#[allow(dead_code)] // used by the DVIFM gates; no product caller yet
+pub(crate) fn compute_folded720_dvifm_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    mut toggles: V2NewFeatureToggles,
+) -> Result<ZensimV2Result, ZensimError> {
+    toggles.append_block = true;
+    toggles.append2_block = true;
+    toggles.csfw_block = true;
+    toggles.dvifm_block = true;
+    compute_folded720_impl_with_toggles(source, distorted, max_pixels, parallel, toggles)
+}
+
+/// Declared-HDR 986 entry: [`compute_folded720_hdr_streaming_impl`] with
+/// append + append2 + CSFW + DVIFM forced on (PU-route normalisation).
+#[allow(dead_code)] // used by the DVIFM gates; no product caller yet
+pub(crate) fn compute_folded720_dvifm_hdr_streaming_impl(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    mut toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+) -> Result<ZensimV2Result, ZensimError> {
+    toggles.append_block = true;
+    toggles.append2_block = true;
+    toggles.csfw_block = true;
+    toggles.dvifm_block = true;
+    compute_folded720_hdr_streaming_impl(
+        source, distorted, encoding, max_pixels, parallel, toggles, scratch, None,
+    )
+}
+
 /// Declared-HDR 956 entry: [`compute_folded720_hdr_streaming_impl`] with
 /// append + append2 + CSFW forced on (PU-route φ constants).
 pub(crate) fn compute_folded720_csfw_hdr_streaming_impl(
@@ -8947,6 +9066,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let layout_append = toggles.append_block;
     let layout_append2 = toggles.append2_block;
     let layout_csfw = toggles.csfw_block;
+    let layout_dvifm = toggles.dvifm_block;
     // Only read below under `threads` (the `fuse_channels` derivation a few
     // lines down); the `not(threads)` arm hardcodes `fuse_channels = false`
     // without it, so `--no-default-features --features feature-regime-v2`
@@ -8984,6 +9104,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         !layout_csfw || layout_append2,
         "csfw_block requires append2_block (f944+ sits after the append2 block)"
     );
+    assert!(
+        !layout_dvifm || layout_csfw,
+        "dvifm_block requires csfw_block (f956+ sits after the CSFW block)"
+    );
     // Route-local derived φ: the SAME weighting mechanism on both routes,
     // pre-composed with each route's own encoding (design §6 — runtime
     // never inverts an encoding; the route-dependence lives entirely in
@@ -8995,6 +9119,17 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             FrontEnd::Hdr(_) => CsfwParams::for_phi(CSFW_PHI_Y_PU),
         }
     });
+    // DVIFM's normalization is route-local for the same reason append2's
+    // deltas and CSFW's φ are: the baked constants are measured over the
+    // Y range each front-end actually produces (`dvifm::DVIFM_NORM_*`).
+    let dvifm_norm = match front_end {
+        crate::feature_v2_stream::FrontEnd::Sdr => crate::dvifm::DVIFM_NORM_SDR,
+        crate::feature_v2_stream::FrontEnd::Hdr(_) => crate::dvifm::DVIFM_NORM_PU,
+    };
+    // The accumulator is created on the first scale-0 strip, whose `info`
+    // carries the producer's OWN scale-0 dims (post-sampling, post any
+    // minimum-size padding) — not `dims[0]`.
+    let mut dvifm_acc: Option<crate::dvifm::DvifmAccum> = None;
     let n_scales = crate::NUM_SCALES;
     let (w0, h0) = (source.width(), source.height());
 
@@ -9099,6 +9234,30 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             });
             mo.add_strip(info.y0, info.strip_h, info.plane_w, src, dst, parallel);
             crate::fold_timing::stop(__t_mo, crate::fold_timing::Phase::MeanOffset, scale);
+        }
+
+        // DVIFM block-visibility pump (f956+): the scale-0 strips tile
+        // [0, h0) exactly once in ascending order — the same guarantee
+        // `mean_offset` relies on — so the pyramid pump sees each Y row
+        // once, serially, before the channel fan-out. `local.dvifm` is the
+        // compute-set flag (dvifm && scale-0 live in `v2_scales`), matching
+        // `populated_slots`' attribution of the flat slots to scale 0.
+        if scale == 0 && local.dvifm {
+            let __t_dv = crate::fold_timing::start();
+            let y1 = info.y0 + info.strip_h;
+            let src = producer.rows(crate::feature_v2_stream::Side::Source, 1, 0, info.y0, y1);
+            let dst =
+                producer.rows(crate::feature_v2_stream::Side::Distorted, 1, 0, info.y0, y1);
+            let acc = dvifm_acc.get_or_insert_with(|| {
+                crate::dvifm::DvifmAccum::new(
+                    info.plane_w,
+                    info.plane_h,
+                    dvifm_norm,
+                    &crate::dvifm::DvifmParams::default(),
+                )
+            });
+            crate::dvifm::dvifm_push_rows_walk(acc, src, dst);
+            crate::fold_timing::stop(__t_dv, crate::fold_timing::Phase::DvifmKernel, scale);
         }
 
         // ref_y strip rows straight from the producer's rolling plane
@@ -9454,10 +9613,17 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     } else {
         0
     };
-    let mut features = vec![0.0f64; v12_total + append_total + append2_total + csfw_total];
+    let dvifm_total = if layout_dvifm {
+        crate::dvifm::DVIFM_FEATURES
+    } else {
+        0
+    };
+    let mut features =
+        vec![0.0f64; v12_total + append_total + append2_total + csfw_total + dvifm_total];
     let (features_v12, features_tail) = features.split_at_mut(v12_total);
     let (features_app, features_tail2) = features_tail.split_at_mut(append_total);
-    let (features_app2, features_csfw) = features_tail2.split_at_mut(append2_total);
+    let (features_app2, features_tail3) = features_tail2.split_at_mut(append2_total);
+    let (features_csfw, features_dvifm) = features_tail3.split_at_mut(csfw_total);
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
     #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
@@ -9717,6 +9883,19 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         }
     }
 
+    // --- DVIFM finalize (flat block, fed by the scale-0 strips): one
+    //     cascade flush, then the 30 slots. `dvifm_acc` is `Some` only when
+    //     `local.dvifm` saw a scale-0 strip — with `layout_dvifm` off the
+    //     pump never ran and the (absent) tail is already the structural 0.
+    if let Some(mut acc) = dvifm_acc {
+        debug_assert!(
+            layout_dvifm,
+            "dvifm ran without dvifm_block — the tail has nowhere to land"
+        );
+        let out = crate::dvifm::dvifm_finish_walk(&mut acc);
+        features_dvifm[..crate::dvifm::DVIFM_FEATURES].copy_from_slice(&out);
+    }
+
     ZensimV2Result {
         features,
         n_scales,
@@ -9725,11 +9904,17 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         } else {
             V1PoolsMode::Off
         },
-        regime: match (layout_append, layout_append2, layout_csfw) {
-            (true, true, true) => FeatureRegime::Folded720Csfw,
-            (true, true, false) => FeatureRegime::Folded720Append2,
-            (true, false, _) => FeatureRegime::Folded720Append,
-            (false, _, _) => FeatureRegime::Folded720,
+        regime: match (
+            layout_append,
+            layout_append2,
+            layout_csfw,
+            layout_dvifm,
+        ) {
+            (true, true, true, true) => FeatureRegime::Folded720Dvifm,
+            (true, true, true, false) => FeatureRegime::Folded720Csfw,
+            (true, true, false, _) => FeatureRegime::Folded720Append2,
+            (true, false, _, _) => FeatureRegime::Folded720Append,
+            (false, _, _, _) => FeatureRegime::Folded720,
         },
     }
 }
@@ -14210,6 +14395,9 @@ pub(crate) mod tests {
                     append_block: bits & 16 != 0,
                     append2_block: bits & 32 != 0,
                     csfw_block: bits & 64 != 0,
+                    // The 8-bit space predates DVIFM; the family's own gates
+                    // cover `dvifm_block` directly.
+                    dvifm_block: false,
                     append2_dst_activity: bits & 128 != 0,
                     v1_pools: pm,
                     v1_only: bits & 3 == 3,
@@ -19028,6 +19216,150 @@ pub(crate) mod tests {
             .unwrap();
         for (i, v) in idr.csfw_features().unwrap().iter().enumerate() {
             assert_eq!(*v, 0.0, "HDR identity csfw[{i}] = {v}");
+        }
+    }
+
+    // ========================================================================
+    // DVIFM registration gates (f956..985, flat 30-slot block)
+    // ========================================================================
+
+    /// The 986 walk registers: regime, width, tail accessors, identity
+    /// zeros, and first-956 bit-stability against the CSFW walk (the full
+    /// byte-stability gate is its own commit — this pins registration).
+    #[test]
+    fn dvifm_registration_986_shape_identity_and_first956_stable() {
+        let (w, h) = (150usize, 170usize);
+        let src = textured_image(w, h, 23);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+
+        let a956 = compute_folded720_csfw_impl(
+            &sref,
+            &dref,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+        )
+        .unwrap();
+        let a986 = compute_folded720_dvifm_impl(
+            &sref,
+            &dref,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+        )
+        .unwrap();
+        assert_eq!(a986.regime(), FeatureRegime::Folded720Dvifm);
+        assert_eq!(a986.features().len(), 986);
+        assert_eq!(a986.dvifm_features().unwrap().len(), 30);
+        assert_eq!(a986.csfw_features().unwrap().len(), 12);
+        assert_eq!(a986.append2_features().unwrap().len(), 20);
+        assert_eq!(a986.append_features().unwrap().len(), 204);
+        // The windowed accessors agree with the 956 result's views.
+        assert_eq!(
+            a986.csfw_features().unwrap(),
+            a956.csfw_features().unwrap()
+        );
+        // Turning DVIFM on must not move a bit of the first 956.
+        for i in 0..956 {
+            assert_eq!(
+                a956.features()[i].to_bits(),
+                a986.features()[i].to_bits(),
+                "dvifm toggled on moved f{i}"
+            );
+        }
+        // DVIFM must be finite everywhere and non-constant on a real
+        // distortion (a dead pump would read all zeros).
+        let dv = a986.dvifm_features().unwrap();
+        for (i, v) in dv.iter().enumerate() {
+            assert!(v.is_finite(), "dvifm[{i}] = {v}");
+        }
+        assert!(
+            dv.iter().any(|v| v.abs() > 1e-12),
+            "all-zero DVIFM on a distorted pair — pump inert? {dv:?}"
+        );
+
+        // Identity pair: every DVIFM slot exactly 0 (identical planes ⇒
+        // identical bands ⇒ zero block error at every level).
+        let idr = compute_folded720_dvifm_impl(
+            &sref,
+            &sref,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+        )
+        .unwrap();
+        for (i, v) in idr.dvifm_features().unwrap().iter().enumerate() {
+            assert_eq!(*v, 0.0, "identity dvifm[{i}] = {v}");
+        }
+
+        // Default OFF: a plain toggles set must not light the block.
+        let off = compute_folded720_csfw_impl(
+            &sref,
+            &dref,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+        )
+        .unwrap();
+        assert_eq!(off.features().len(), 956);
+        assert!(off.dvifm_features().is_none());
+    }
+
+    /// HDR route registers the same block: 986-wide PU-normalised result,
+    /// HDR entry parity, identity zeros.
+    #[test]
+    fn dvifm_hdr_route_registers() {
+        let (w, h) = (128usize, 128usize);
+        let mut scratch = V2Scratch::new();
+        let ramp: Vec<[f32; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let t = (x + y) as f32 / (w + h - 2) as f32;
+                let nits = 0.5 * (2000.0f32 / 0.5).powf(t);
+                [nits, nits, nits]
+            })
+            .collect();
+        let dst: Vec<[f32; 3]> = ramp
+            .iter()
+            .map(|&[r, g, b]| [r * 1.12, g * 1.12, b * 1.12])
+            .collect();
+        let sref = NitsImage::from_rgb_nits(&ramp, w, h);
+        let dref = NitsImage::from_rgb_nits(&dst, w, h);
+
+        let a = compute_folded720_dvifm_hdr_streaming_impl(
+            &sref,
+            &dref,
+            HdrEncoding::Linear,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+        .unwrap();
+        assert_eq!(a.regime(), FeatureRegime::Folded720Dvifm);
+        assert_eq!(a.features().len(), 986);
+        let dv = a.dvifm_features().unwrap();
+        for (i, v) in dv.iter().enumerate() {
+            assert!(v.is_finite(), "hdr dvifm[{i}] = {v}");
+        }
+        assert!(
+            dv.iter().any(|v| v.abs() > 1e-12),
+            "all-zero HDR DVIFM on a 12% gain pair — pump inert?"
+        );
+        let idr = compute_folded720_dvifm_hdr_streaming_impl(
+            &sref,
+            &sref,
+            HdrEncoding::Linear,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+        .unwrap();
+        for (i, v) in idr.dvifm_features().unwrap().iter().enumerate() {
+            assert_eq!(*v, 0.0, "HDR identity dvifm[{i}] = {v}");
         }
     }
 

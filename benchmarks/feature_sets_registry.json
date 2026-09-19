@@ -70,6 +70,11 @@
    "owner": "feature_v2::ComputeSet::csfw",
    "note": "CSFW tier-1, Y-only; default-OFF, no canonical root yet"
   },
+  "dvifm": {
+   "slots": "956-985",
+   "owner": "feature_v2::ComputeSet::dvifm",
+   "note": "DVIFM block-visibility pyramid, Y-only FLAT block (5 own levels x [F1 + 5 F2]); default-OFF, no canonical root yet"
+  },
   "moments": {
    "slots": "733-735,750-752,784-786,801-803,818-820,835-837,852-854,869-871,886-888,903-905,920-922,926,931,936,941",
    "owner": "feature_v2::V1FreeExtras::RawMoments / free_slot_indices",
@@ -941,6 +946,18 @@
    "role": "producer",
    "kind": "set",
    "evidence": "benchmarks/scale_selective_944_2026-09-13.md; public BakeScorer producer"
+  },
+  "basic+peaks+masked+iw+v2+append+append2+csfw+dvifm@w986/unknown": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2+csfw+dvifm",
+   "layout": 986,
+   "era": "unknown",
+   "slots": "0-985",
+   "slots_hash8": "685eb6ef",
+   "n_slots": 986,
+   "role": "producer",
+   "kind": "set",
+   "legacy_name": "986",
+   "evidence": "feature_v2::FeatureRegime::Folded720Dvifm \u2014 default-OFF, no canonical root yet"
   }
  },
  "roots": {
@@ -1069,6 +1086,12 @@
     "basic+peaks+moments@w944/era2r4#0b476506"
    ],
    "note": "the 156+free reader set minus the four LUMA_MEAN_REF slots \u2014 identity-clean to 4.8e-3, same walk, same W4."
+  },
+  "986": {
+   "ids": [
+    "basic+peaks+masked+iw+v2+append+append2+csfw+dvifm@w986/unknown"
+   ],
+   "note": "no canonical root yet."
   }
  }
 }

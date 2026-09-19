@@ -101,8 +101,14 @@ pub enum ComputeToken {
     /// The class-C bounded-error tranche
     /// (`V1FreeExtras::RawMomentsPlusBoundedErr`) — 24 scattered slots.
     ClassC,
-    /// RESERVED for the future HDR block. Append-only, above `csfw`.
+    /// RESERVED for the future HDR block. Append-only; its enum position
+    /// (and so its `bit()`) predates `Dvifm` and must not move.
     Hdr,
+    /// DVIFM block-visibility pyramid, `f956..985`.
+    ///
+    /// Declared after `Hdr` so every existing variant's `bit()` stays put;
+    /// `ALL` renders it in slot order (between `csfw` and `moments`).
+    Dvifm,
 }
 
 impl ComputeToken {
@@ -117,6 +123,7 @@ impl ComputeToken {
         ComputeToken::Append,
         ComputeToken::Append2,
         ComputeToken::Csfw,
+        ComputeToken::Dvifm,
         ComputeToken::Moments,
         ComputeToken::ClassC,
         ComputeToken::Hdr,
@@ -136,6 +143,7 @@ impl ComputeToken {
             ComputeToken::Append => "append",
             ComputeToken::Append2 => "append2",
             ComputeToken::Csfw => "csfw",
+            ComputeToken::Dvifm => "dvifm",
             ComputeToken::Moments => "moments",
             ComputeToken::ClassC => "classc",
             ComputeToken::Hdr => "hdr",

@@ -29,6 +29,7 @@
 use std::collections::VecDeque;
 
 use archmage::SimdToken;
+use archmage::magetypes;
 use magetypes::simd::backends::F64x8Backend;
 use magetypes::simd::generic::f64x8 as GenericF64x8;
 
@@ -36,8 +37,6 @@ use magetypes::simd::generic::f64x8 as GenericF64x8;
 pub(crate) const DVIFM_LEVELS: usize = 5;
 /// Analysis block edge: odd, coprime with every power-of-two codec lattice.
 pub(crate) const DVIFM_BLOCK: usize = 5;
-/// Corner sub-block edge (four overlapping 3×3 corners of a 5×5 block).
-const DVIFM_CORNER: usize = 3;
 /// Triangular F2 bins per level.
 pub(crate) const DVIFM_BINS: usize = 5;
 /// Features per level: one F1 + `DVIFM_BINS` F2.
@@ -142,6 +141,7 @@ pub(crate) const DVIFM_Y_SCALE_PU: f64 = 2.323_035_230_860_114;
 /// `(min_Y, max_Y)`; the baked scale is `max − min`. Chunked cube enumeration
 /// through the real front-end (a coarse grid can miss the extrema — the Y
 /// channel mixes all three sRGB channels).
+#[cfg_attr(not(test), allow(dead_code))] // recompute oracle; tests pin the baked constants
 pub(crate) fn derive_norm_sdr() -> (f64, f64) {
     const CHUNK: usize = 65536;
     let mut lo = f64::INFINITY;
@@ -192,6 +192,7 @@ pub(crate) fn derive_norm_sdr() -> (f64, f64) {
 
 /// Recompute the PU-route Y normalisation over the PU21 encodable grid.
 /// Returns `(min_Y, max_Y)`.
+#[cfg_attr(not(test), allow(dead_code))] // recompute oracle; tests pin the baked constants
 pub(crate) fn derive_norm_pu() -> (f64, f64) {
     const K: usize = 32; // {0} plus 31 log-spaced codes per channel
     let mut axis = Vec::with_capacity(K);
@@ -273,7 +274,9 @@ fn log1pexp(x: f64) -> f64 {
 #[inline]
 fn visibility(c: f64, lp: &DvifmLevelParams) -> f64 {
     // np.log(np.maximum(c, 0)) = −inf for c ≤ 0 → both softplus terms vanish.
-    if !(c > 0.0) {
+    // `partial_cmp` (not `<=`) so a NaN contrast still takes the v=1 arm —
+    // the same result `!(c > 0)` gave, kept explicit.
+    if c.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
         return 1.0;
     }
     let k = lp.beta * lp.sharp;
@@ -341,7 +344,7 @@ fn hblur_row<T: F64x8Backend>(t: T, row: &[f64], out: &mut [f64]) {
     out[0] = (row[1] + 2.0 * row[0] + row[1]) * 0.25;
     out[w - 1] = (row[w - 2] + 2.0 * row[w - 1] + row[w - 2]) * 0.25;
     let mut c = 1;
-    while c + 8 + 1 <= w {
+    while c + 8 < w {
         let a = V::<T>::from_array(t, row[c - 1..c + 7].try_into().unwrap());
         let b = V::<T>::from_array(t, row[c..c + 8].try_into().unwrap());
         let d = V::<T>::from_array(t, row[c + 1..c + 9].try_into().unwrap());
@@ -349,7 +352,7 @@ fn hblur_row<T: F64x8Backend>(t: T, row: &[f64], out: &mut [f64]) {
         out[c..c + 8].copy_from_slice(&v.to_array());
         c += 8;
     }
-    while c + 1 <= w - 1 {
+    while c < w - 1 {
         out[c] = (row[c - 1] + 2.0 * row[c] + row[c + 1]) * 0.25;
         c += 1;
     }
@@ -451,12 +454,14 @@ fn zrow(x: &[f64], w: usize, out: &mut Vec<f64>) {
 
 /// A normalised f64 plane.
 #[derive(Clone)]
+#[cfg_attr(not(test), allow(dead_code))] // whole-plane reference path; test oracle
 pub(crate) struct Plane {
     pub v: Vec<f64>,
     pub w: usize,
     pub h: usize,
 }
 
+#[cfg_attr(not(test), allow(dead_code))] // whole-plane reference path; test oracle
 impl Plane {
     fn new(w: usize, h: usize) -> Self {
         Self {
@@ -476,6 +481,7 @@ impl Plane {
 
 /// `blur121`: separable `[1 2 1]/16` with reflect borders — the literal
 /// pad-then-convolve of the numpy reference.
+#[cfg_attr(not(test), allow(dead_code))] // whole-plane reference path; test oracle
 pub(crate) fn blur121_plane<T: F64x8Backend>(t: T, src: &Plane) -> Plane {
     let mut hb = Plane::new(src.w, src.h);
     for r in 0..src.h {
@@ -492,6 +498,7 @@ pub(crate) fn blur121_plane<T: F64x8Backend>(t: T, src: &Plane) -> Plane {
 
 /// `down`: `blur121` then `[::2, ::2]` (odd remainders keep the last even
 /// index, matching numpy's slicing).
+#[cfg_attr(not(test), allow(dead_code))] // whole-plane reference path; test oracle
 fn downsample<T: F64x8Backend>(t: T, src: &Plane) -> Plane {
     let w2 = src.w.div_ceil(2);
     let h2 = src.h.div_ceil(2);
@@ -508,6 +515,7 @@ fn downsample<T: F64x8Backend>(t: T, src: &Plane) -> Plane {
 /// `expand`: zero insertion onto the target `(h, w)` lattice, `blur121`, `×4`
 /// — mirrors the numpy `_up` literally (no separate crop needed: `z` already
 /// has the target shape).
+#[cfg_attr(not(test), allow(dead_code))] // whole-plane reference path; test oracle
 fn expand<T: F64x8Backend>(t: T, down: &Plane, w: usize, h: usize) -> Plane {
     debug_assert_eq!(down.w, w.div_ceil(2));
     debug_assert_eq!(down.h, h.div_ceil(2));
@@ -532,6 +540,7 @@ fn expand<T: F64x8Backend>(t: T, down: &Plane, w: usize, h: usize) -> Plane {
 
 /// `laplacian_pyramid`: `L_l = G_l − E(G_{l+1})` for `l < n−1`, `L_{n−1} =
 /// G_{n−1}`.
+#[cfg_attr(not(test), allow(dead_code))] // whole-plane reference path; test oracle
 pub(crate) fn laplacian_pyramid<T: F64x8Backend>(
     t: T,
     img: &Plane,
@@ -556,6 +565,7 @@ pub(crate) fn laplacian_pyramid<T: F64x8Backend>(
 }
 
 /// `local_band_pyramid`: `L_l = G_l − B²G_l` for `l < n−1`, `L_{n−1} = G_{n−1}`.
+#[cfg_attr(not(test), allow(dead_code))] // whole-plane reference path; test oracle
 pub(crate) fn local_band_pyramid<T: F64x8Backend>(
     t: T,
     img: &Plane,
@@ -567,11 +577,11 @@ pub(crate) fn local_band_pyramid<T: F64x8Backend>(
         g.push(next);
     }
     let mut out = Vec::with_capacity(n);
-    for l in 0..n - 1 {
-        let b2 = blur121_plane(t, &blur121_plane(t, &g[l]));
-        let mut band = Plane::new(g[l].w, g[l].h);
-        for r in 0..g[l].h {
-            sub_row(t, g[l].row(r), b2.row(r), band.row_mut(r));
+    for gl in g.iter().take(n - 1) {
+        let b2 = blur121_plane(t, &blur121_plane(t, gl));
+        let mut band = Plane::new(gl.w, gl.h);
+        for r in 0..gl.h {
+            sub_row(t, gl.row(r), b2.row(r), band.row_mut(r));
         }
         out.push(band);
     }
@@ -591,6 +601,7 @@ pub(crate) struct BlockRec {
     /// Hard max |ρ_s − ρ_d| over the block.
     pub m: f64,
     /// Soft peak `Σ σ·δ / max(Σσ, 1e-30)`, σ = δ/(δ+0.01) (training record).
+    #[allow(dead_code)] // training record field; the pooled features read `m`
     pub peak: f64,
     /// Per-corner 3×3 max/min of the src-side band.
     pub cmax_s: [f64; 4],
@@ -613,7 +624,7 @@ fn scan_block_row(
     mut emit: impl FnMut(BlockRec),
 ) {
     let nbx = w / n;
-    let q = (n + 1) / 2; // corner sub-block edge: 3 for n=5, 2 for n=4
+    let q = n.div_ceil(2); // corner sub-block edge: 3 for n=5, 2 for n=4
     for bx in 0..nbx {
         let c0 = bx * n;
         let mut m = 0.0f64;
@@ -669,6 +680,7 @@ fn scan_block_row(
 }
 
 /// `block_stats` over one band plane pair — block-row-major `BlockRec`s.
+#[cfg_attr(not(test), allow(dead_code))] // training-record producer; test oracle
 pub(crate) fn block_stats_level(bs: &Plane, bd: &Plane) -> (usize, usize, Vec<BlockRec>) {
     debug_assert_eq!(bs.w, bd.w);
     debug_assert_eq!(bs.h, bd.h);
@@ -735,8 +747,8 @@ fn pool_block(sums: &mut LevelSums, lp: &DvifmLevelParams, rec: &BlockRec) {
     sums.f1 += vb * e;
     let ell = (cs.min(cd) + 1e-6).ln();
     let h = hat_memberships(ell, &lp.f2_centers);
-    for j in 0..DVIFM_BINS {
-        sums.f2[j] += h[j] * e;
+    for (hj, f2) in h.iter().zip(sums.f2.iter_mut()) {
+        *f2 += hj * e;
     }
     sums.n += 1;
 }
@@ -756,6 +768,7 @@ fn level_out(sums: &LevelSums) -> [f64; DVIFM_PER_LEVEL] {
 
 /// Whole-plane feature extraction from normalised f64 planes — the parity
 /// reference for the numpy fixtures and the streaming gate.
+#[cfg_attr(not(test), allow(dead_code))] // whole-plane reference path; test oracle
 pub(crate) fn dvifm_features_whole(
     ref_norm: &[f64],
     dst_norm: &[f64],
@@ -886,7 +899,7 @@ impl LevelPump {
     }
 }
 
-fn ring_row<'a>(ring: &'a VecDeque<Vec<f64>>, first: usize, i: usize) -> &'a [f64] {
+fn ring_row(ring: &VecDeque<Vec<f64>>, first: usize, i: usize) -> &[f64] {
     debug_assert!(i >= first && i < first + ring.len());
     &ring[i - first]
 }
@@ -923,11 +936,13 @@ impl DvifmAccum {
     }
 
     /// Training side output: keep every block's 18-float record.
+    #[allow(dead_code)] // training surface; the served path leaves it `None`
     pub(crate) fn enable_block_cache(&mut self) {
         self.block_cache = Some(vec![Vec::new(); DVIFM_LEVELS]);
     }
 
     /// The collected block records, level-major — `None` unless enabled.
+    #[allow(dead_code)] // training surface; the served path leaves it `None`
     pub(crate) fn block_cache(&self) -> Option<&Vec<Vec<BlockRec>>> {
         self.block_cache.as_ref()
     }
@@ -1091,7 +1106,7 @@ fn pump_local_progress<T: F64x8Backend>(
             }
         }
         if pump.band_q[0].len() == DVIFM_BLOCK {
-            pump_consume_block_row(pump, cache.as_mut().map(|c| &mut **c), t);
+            pump_consume_block_row(pump, cache.as_deref_mut(), t);
         }
     }
 }
@@ -1134,11 +1149,11 @@ fn level_push_row<T: F64x8Backend>(
                 sd.gq.push_back(row);
             }
             // Emit decimated rows whose real taps (2j−1, 2j, 2j+1) arrived.
-            while pump.down_emitted < pump.h2 && 2 * pump.down_emitted + 1 <= r {
+            while pump.down_emitted < pump.h2 && 2 * pump.down_emitted < r {
                 let j = pump.down_emitted;
                 pump.down_emitted += 1;
                 let mut down_pair = [Vec::new(), Vec::new()];
-                for side_i in 0..2 {
+                for (side_i, dp) in down_pair.iter_mut().enumerate() {
                     let sd = &mut pump.side[side_i];
                     let h = pump.h;
                     let tap = |i: isize| -> &[f64] {
@@ -1151,7 +1166,7 @@ fn level_push_row<T: F64x8Backend>(
                     );
                     let mut down = vec![0.0f64; w2];
                     vblur3(t, &a, &b, &c, &mut down);
-                    down_pair[side_i] = down;
+                    *dp = down;
                 }
                 for side_i in 0..2 {
                     let sd = &mut pump.side[side_i];
@@ -1161,9 +1176,9 @@ fn level_push_row<T: F64x8Backend>(
                     }
                 }
                 if pump.mode == BandMode::Laplacian {
-                    for side_i in 0..2 {
+                    for (side_i, dp) in down_pair.iter().enumerate() {
                         let mut z = Vec::new();
-                        zrow(&down_pair[side_i], pump.w, &mut z);
+                        zrow(dp, pump.w, &mut z);
                         let mut zb = vec![0.0f64; pump.w];
                         hblur_row(t, &z, &mut zb);
                         pump.side[side_i].zb.push_back(zb);
@@ -1172,7 +1187,7 @@ fn level_push_row<T: F64x8Backend>(
                         if rr >= 0 && (rr as usize) < pump.h {
                             pump_emit_band_row_lap(
                                 pump,
-                                cache.as_mut().map(|c| &mut **c),
+                                cache.as_deref_mut(),
                                 t,
                                 rr as usize,
                             );
@@ -1205,7 +1220,7 @@ fn level_flush<T: F64x8Backend>(acc: &mut DvifmAccum, t: T, l: usize) {
                 let j = pump.down_emitted;
                 pump.down_emitted += 1;
                 let mut down_pair = [Vec::new(), Vec::new()];
-                for side_i in 0..2 {
+                for (side_i, dp) in down_pair.iter_mut().enumerate() {
                     let sd = &mut pump.side[side_i];
                     let h = pump.h;
                     let w2 = pump.w2;
@@ -1217,12 +1232,12 @@ fn level_flush<T: F64x8Backend>(acc: &mut DvifmAccum, t: T, l: usize) {
                     let c = tap(2 * j as isize + 1);
                     let mut down = vec![0.0f64; w2];
                     vblur3(t, &a, &b, &c, &mut down);
-                    down_pair[side_i] = down;
+                    *dp = down;
                 }
                 if pump.mode == BandMode::Laplacian {
-                    for side_i in 0..2 {
+                    for (side_i, dp) in down_pair.iter().enumerate() {
                         let mut z = Vec::new();
-                        zrow(&down_pair[side_i], pump.w, &mut z);
+                        zrow(dp, pump.w, &mut z);
                         let mut zb = vec![0.0f64; pump.w];
                         hblur_row(t, &z, &mut zb);
                         pump.side[side_i].zb.push_back(zb);
@@ -1231,7 +1246,7 @@ fn level_flush<T: F64x8Backend>(acc: &mut DvifmAccum, t: T, l: usize) {
                         if rr >= 0 && (rr as usize) < pump.h {
                             pump_emit_band_row_lap(
                                 pump,
-                                cache.as_mut().map(|c| &mut **c),
+                                cache.as_deref_mut(),
                                 t,
                                 rr as usize,
                             );
@@ -1245,12 +1260,7 @@ fn level_flush<T: F64x8Backend>(acc: &mut DvifmAccum, t: T, l: usize) {
                     // Remaining band rows (the last row of even heights).
                     while pump.band_emitted < pump.h {
                         let r = pump.band_emitted;
-                        pump_emit_band_row_lap(
-                            pump,
-                            cache.as_mut().map(|c| &mut **c),
-                            t,
-                            r,
-                        );
+                        pump_emit_band_row_lap(pump, cache.as_deref_mut(), t, r);
                     }
                 }
                 BandMode::Local => {
@@ -1293,6 +1303,10 @@ pub(crate) fn dvifm_finish<T: F64x8Backend>(
     t: T,
     acc: &mut DvifmAccum,
 ) -> [f64; DVIFM_FEATURES] {
+    debug_assert_eq!(
+        acc.levels[0].arrived, acc.h,
+        "finish before every plane row was pushed"
+    );
     level_flush(acc, t, 0);
     let mut out = [0.0f64; DVIFM_FEATURES];
     for (l, pump) in acc.levels.iter().enumerate() {
@@ -1305,6 +1319,7 @@ pub(crate) fn dvifm_finish<T: F64x8Backend>(
 
 /// Push a whole f32 plane pair at once (the `strip = h` case) — used by the
 /// served path's whole-plane comparison tests.
+#[cfg_attr(not(test), allow(dead_code))] // convenience wrapper; test oracle
 pub(crate) fn dvifm_features_stream(
     src: &[f32],
     dst: &[f32],
@@ -1317,6 +1332,41 @@ pub(crate) fn dvifm_features_stream(
     let mut acc = DvifmAccum::new(w, h, norm, params);
     dvifm_push_rows(t, &mut acc, src, dst);
     dvifm_finish(t, &mut acc)
+}
+
+// ---------------------------------------------------------------------------
+// Walk dispatch — the `#[magetypes]`/`incant!` shape `feature_v2` uses for
+// every kernel. `incant!` resolves one tier per process, so every strip's
+// push and the final flush run the SAME backend (a per-call pick would still
+// be bit-safe here — the op sequence is identical per lane — but one pick is
+// the cheaper and clearer contract).
+// ---------------------------------------------------------------------------
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn dvifm_push_rows_entry(token: Token, acc: &mut DvifmAccum, src: &[f32], dst: &[f32]) {
+    dvifm_push_rows(token, acc, src, dst)
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn dvifm_finish_entry(token: Token, acc: &mut DvifmAccum) -> [f64; DVIFM_FEATURES] {
+    dvifm_finish(token, acc)
+}
+
+/// Runtime dispatch for the strip-loop pump ([`crate::feature_v2`]'s
+/// `foldapp_streaming_walk_impl` hook).
+pub(crate) fn dvifm_push_rows_walk(acc: &mut DvifmAccum, src: &[f32], dst: &[f32]) {
+    archmage::incant!(
+        dvifm_push_rows_entry(acc, src, dst),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+/// Runtime dispatch for the walk's finalize.
+pub(crate) fn dvifm_finish_walk(acc: &mut DvifmAccum) -> [f64; DVIFM_FEATURES] {
+    archmage::incant!(
+        dvifm_finish_entry(acc),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1597,25 +1647,25 @@ mod tests {
         for r in 0..src.h {
             let row = src.row(r);
             let o = tmp.row_mut(r);
-            for c in 0..src.w {
+            for (c, oc) in o.iter_mut().enumerate().take(src.w) {
                 let mut acc = 0.0;
                 for (i, &kv) in k.iter().enumerate() {
                     let cc = reflect_101(c as isize + i as isize - rad as isize, src.w);
                     acc += kv * row[cc];
                 }
-                o[c] = acc;
+                *oc = acc;
             }
         }
         let mut out = Plane::new(src.w, src.h);
         for r in 0..src.h {
             let o = out.row_mut(r);
-            for c in 0..src.w {
+            for (c, oc) in o.iter_mut().enumerate().take(src.w) {
                 let mut acc = 0.0;
                 for (i, &kv) in k.iter().enumerate() {
                     let rr = reflect_101(r as isize + i as isize - rad as isize, src.h);
                     acc += kv * tmp.row(rr)[c];
                 }
-                o[c] = acc;
+                *oc = acc;
             }
         }
         out
@@ -1625,7 +1675,7 @@ mod tests {
     fn block_stats_n(bs: &Plane, bd: &Plane, n: usize) -> Vec<BlockRec> {
         let nbx = bs.w / n;
         let nby = bs.h / n;
-        let q = (n + 1) / 2;
+        let q = n.div_ceil(2);
         let mut recs = Vec::with_capacity(nbx * nby);
         for by in 0..nby {
             for bx in 0..nbx {

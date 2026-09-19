@@ -37,7 +37,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 /// One accumulator slot. Indices are `(phase, scale)`; see [`Phase`].
-const N_PHASE: usize = 21;
+const N_PHASE: usize = 22;
 const N_SCALE: usize = 8;
 
 // Inline-const array repeat, so each element is its own `AtomicU64::new(0)`
@@ -115,6 +115,10 @@ pub(crate) enum Phase {
     /// only for the append block's sigma split, plus the optional
     /// BANDVIS dst-activity twin.
     PhaseAAppendPlanes = 20,
+    /// `dvifm_push_rows` — the f956+ DVIFM block-visibility pyramid pump
+    /// (scale-0 Y only, default off). Runs serially between `next_strip`
+    /// and the channel fan-out, like `MeanOffset`.
+    DvifmKernel = 21,
 }
 
 #[inline(always)]
@@ -258,6 +262,7 @@ fn dump(walks: u64) {
     row("  v2:gradient", Phase::GradKernel, None);
     row("  v2:append", Phase::AppendKernel, None);
     row("  v2:csfw", Phase::CsfwKernel, None);
+    row("  v2:dvifm", Phase::DvifmKernel, None);
     row("  v2:blockiness", Phase::BlockKernel, None);
     row("  v2:planesA", Phase::PhaseAV2Planes, None);
     row("  v2:planesApp", Phase::PhaseAAppendPlanes, None);
@@ -269,6 +274,7 @@ fn dump(walks: u64) {
             Phase::GradKernel,
             Phase::AppendKernel,
             Phase::CsfwKernel,
+            Phase::DvifmKernel,
             Phase::BlockKernel,
             Phase::PhaseAV2Planes,
             Phase::PhaseAAppendPlanes,

@@ -168,12 +168,15 @@ impl Plan {
         // accumulators — `V2NewFeatureToggles::append2_block` asserts it).
         let append = append || append2;
         let csfw = touches(ComputeToken::Csfw);
+        let dvifm = touches(ComputeToken::Dvifm);
         // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
         // request implies the v2-era pass regardless of what else is asked.
+        // DVIFM is the same shape (`dvifm_block && v2_blocks`), one block up.
         let v2_blocks = (touches(ComputeToken::V2) && outside_tranche(ComputeToken::V2))
             || append
             || append2
-            || csfw;
+            || csfw
+            || dvifm;
 
         // Free extras: only meaningful when the owning block is NOT running.
         let free_extras = if touches(ComputeToken::ClassC) && !append {
@@ -232,6 +235,7 @@ impl Plan {
             append2,
             append2_dst_activity: false,
             csfw,
+            dvifm,
             free_extras,
         };
         let mut requested = requested;
@@ -423,6 +427,7 @@ impl Plan {
             append2: false,
             append2_dst_activity: false,
             csfw: false,
+            dvifm: false,
             free_extras: V1FreeExtras::Off,
         };
         Plan::normalized(compute, Layout::identity(layout_width))
@@ -467,15 +472,17 @@ impl Plan {
             transducers_luma_only: c.transducers_luma_only,
             // LAYOUT: a block's flag is on when the declared width reaches
             // it, whether or not its kernel runs. The chain is NESTED, not
-            // three independent tests — `append2_block` asserts `append_block`
-            // and `csfw_block` asserts `append2_block` (each sits above the
-            // previous and reuses its accumulators), so a width that reaches
+            // four independent tests — `append2_block` asserts
+            // `append_block`, `csfw_block` asserts `append2_block`, and
+            // `dvifm_block` asserts `csfw_block` (each sits above the
+            // previous), so a width that reaches
             // one necessarily reaches the ones below it. Written as a chain
-            // rather than three `>` tests so a future non-contiguous width
+            // rather than four `>` tests so a future non-contiguous width
             // cannot violate the assertion.
             append_block: layout.append,
             append2_block: layout.append2,
             csfw_block: layout.csfw,
+            dvifm_block: layout.dvifm,
             // A sub-toggle that REFINES a block cannot outlive it: the walk
             // asserts `append2_dst_activity => append2_block`. `everything`
             // (the fallback compute set for a wide bake) turns it on
@@ -554,6 +561,7 @@ impl Plan {
             append2: a.append2 || b.append2,
             append2_dst_activity: a.append2_dst_activity || b.append2_dst_activity,
             csfw: a.csfw || b.csfw,
+            dvifm: a.dvifm || b.dvifm,
             free_extras: free_union(a.free_extras, b.free_extras),
         };
         let _ = ns;
@@ -568,11 +576,13 @@ impl Plan {
 /// Which optional blocks a declared layout width reaches.
 ///
 /// The chain is nested by construction: `append2` implies `append`, `csfw`
-/// implies `append2`. The walk asserts exactly these implications.
+/// implies `append2`, `dvifm` implies `csfw`. The walk asserts exactly
+/// these implications.
 struct LayoutBlocks {
     append: bool,
     append2: bool,
     csfw: bool,
+    dvifm: bool,
 }
 
 impl LayoutBlocks {
@@ -580,10 +590,12 @@ impl LayoutBlocks {
         let append = width > base_of(ComputeToken::Append, ns);
         let append2 = append && width > base_of(ComputeToken::Append2, ns);
         let csfw = append2 && width > base_of(ComputeToken::Csfw, ns);
+        let dvifm = csfw && width > base_of(ComputeToken::Dvifm, ns);
         Self {
             append,
             append2,
             csfw,
+            dvifm,
         }
     }
 }
@@ -1265,6 +1277,104 @@ mod toggle_gates {
         assert!(t.append2_block, "layout reaches append2");
         assert!(!t.csfw_block, "944 does not reach csfw");
         assert_eq!(t.free_extras, V1FreeExtras::RawMoments);
+    }
+
+    /// DVIFM (f956..985, the flat block): a request that touches it plans
+    /// the full nested chain — `dvifm` compute on, and through `toggles()`
+    /// every layout flag below it — and the plan emits the slots. Below
+    /// 986 the slots do not exist, so the request clips away and no dvifm
+    /// flag is set (the same serve-by-clipping rule every family obeys).
+    #[test]
+    fn dvifm_plans_the_full_chain_at_986_and_clips_below_it() {
+        let ns = crate::NUM_SCALES;
+        let dvifm = crate::feature_defs::family_slots(ComputeToken::Dvifm, ns);
+        assert_eq!(
+            dvifm,
+            SlotSet::parse("956-985").unwrap(),
+            "the flat block owns exactly f956..985"
+        );
+        // Request the dvifm slots plus a v1 base at the 986 layout.
+        let want = SlotSet::from_ranges([(0, 228)]).union(&dvifm);
+        let p = Plan::derive(&want, 986).expect("plan");
+        assert!(
+            p.compute.dvifm,
+            "a dvifm-slot request must turn the kernel on"
+        );
+        // The nested chain resolved through `toggles()`: the 986 layout
+        // reaches every block below DVIFM, and normalization makes the
+        // compute flags agree with the layout flags.
+        assert!(
+            p.compute.csfw && p.compute.append2 && p.compute.append && p.compute.v2_blocks,
+            "the 986 layout computes every block it reaches"
+        );
+        let t = p.toggles();
+        assert!(
+            t.dvifm_block && t.csfw_block && t.append2_block && t.append_block,
+            "layout flags form the nested chain"
+        );
+        // `v2_scales` is private plan data the toggles do not carry —
+        // the request touched only scale-0 slots (the flat block's
+        // attribution), so the mask is `0b0001` while `from_toggles`
+        // reports ALL. Compare with it set equal, the same substitution
+        // `normalized` performs.
+        let round = ComputeSet::from_toggles(t);
+        assert_eq!(
+            ComputeSet {
+                v2_scales: p.compute.v2_scales,
+                ..round
+            },
+            p.compute,
+            "toggles resolve to the planned compute set"
+        );
+        assert_eq!(
+            p.compute.v2_scales, 1,
+            "the flat block lives on the scale-0 walk rows"
+        );
+        assert!(p.emit.covers(&dvifm), "the plan must emit f956..985");
+
+        // At 956 the family does not exist: the request clips away, the
+        // plan stays dvifm-free, and no flag is set.
+        let p956 = Plan::derive(&want, 956).expect("956 plan");
+        assert!(!p956.compute.dvifm);
+        assert!(!p956.toggles().dvifm_block);
+        assert!(
+            p956.emit.missing_from(&want.clipped_to(956)).is_empty(),
+            "the 956 plan still covers everything inside its layout"
+        );
+    }
+
+    /// `dvifm_block` is a LAYOUT flag: turning it on at the 986 width
+    /// makes `from_toggles` compute the family (gated on `v2_blocks`,
+    /// same shape as `csfw`), and a v1-only request at the same width
+    /// computes nothing — the slots stay structural zeros.
+    #[test]
+    fn dvifm_block_is_layout_on_compute_gated_on_v2() {
+        use crate::feature_v2::V2NewFeatureToggles;
+        let cs = ComputeSet::from_toggles(V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            ..Default::default()
+        });
+        assert!(cs.dvifm && cs.csfw && cs.append2 && cs.append);
+        let v1only = ComputeSet::from_toggles(V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            v1_only: true,
+            ..Default::default()
+        });
+        assert!(
+            !v1only.dvifm && !v1only.csfw,
+            "v1_only forces every v2-era block off, dvifm included"
+        );
+        // Default is OFF: the flag defaults false and populates nothing.
+        assert!(!V2NewFeatureToggles::default().dvifm_block);
+        assert!(
+            !ComputeSet::from_toggles(V2NewFeatureToggles::default()).dvifm
+        );
     }
 }
 
