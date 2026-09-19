@@ -173,3 +173,25 @@ python3 scripts/dvifm_parity_fixture.py > tests/fixtures/dvifm_parity_v1.txt
 
 Evidence dirs: `~/tmp/devin/dvifm-ab/` (A/B logs, run.meta, binary.sha256,
 competing_procs.txt), `~/tmp/devin/dvifm-rss/rss.tsv`.
+
+## Phase-2 screen outcome (2026-09-19) — NEGATIVE, MISSING #1 resolved
+
+The preregistered TRAIN-development screen ran all four stages
+(`benchmarks/dvifm_screen_prereg_2026-09-19.md`, committed `67aa9057`
+before training; full record `benchmarks/dvifm_screen_2026-09-19.{md,json}`):
+
+| screen | configuration | median paired Δ | verdict |
+|---|---|---|---|
+| 1 | mechanism check at w986 | — | PASS |
+| 2 | Laplacian, derived constants | −0.0041 | NEGATIVE |
+| 3 | local band, derived constants | −0.0036 | NEGATIVE |
+| 4 | local band, fitted (g,P,C₀,β,ς) | −0.0023 | NEGATIVE |
+
+All nine seed-paired diffs (seeds 9201/9207/9211 × three rounds, E=40
+plateau-verified) were negative. The family does not advance: no
+five-seed confirmation, no frozen EVAL opened, `dvifm_block` stays
+default-OFF, nothing is qualified. `DvifmParams::default()` holds the
+last-tested fitted-local constants (`DVIFM_SCREEN_FITTED`) purely as the
+reproducible screen configuration; LAP/LOCAL rounds are kept as
+`DVIFM_SCREEN_LAP`/`DVIFM_SCREEN_LOCAL`. The +31.6 ms @1024² cost stands
+unamortised — no gain exists to justify optimisation.
