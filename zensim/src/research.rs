@@ -1717,21 +1717,27 @@ mod tests {
 
         // A spec override moves ONLY the f956+ block — the other 956 slots
         // are byte-identical, and the records (raw stats) are unchanged by
-        // constants.
-        let mut levels: Vec<DvifmLevelSpec> = (0..5)
-            .map(|_| DvifmLevelSpec {
-                g: 1.4,
-                p: 0.8,
-                c0: 0.05,
-                beta: 0.5,
-                sharp: 2.5,
-                c_hi: f64::INFINITY,
-                f2_centers: [-7.0, -5.0, -3.0, -1.5, -0.5],
-                band: DvifmBand::Laplacian,
-                edge: true,
+        // constants. The spec keeps each level's band identical to the
+        // default's (bands change the band plane, hence the records) and
+        // perturbs only constants, so EVERY level's records must match.
+        let levels: Vec<DvifmLevelSpec> = crate::dvifm::DvifmParams::default()
+            .levels
+            .iter()
+            .map(|lp| DvifmLevelSpec {
+                g: lp.g + 0.4,
+                p: lp.p,
+                c0: lp.c0,
+                beta: lp.beta,
+                sharp: lp.sharp,
+                c_hi: lp.c_hi,
+                f2_centers: lp.f2_centers,
+                band: match lp.band {
+                    crate::dvifm::BandMode::Laplacian => DvifmBand::Laplacian,
+                    crate::dvifm::BandMode::Local => DvifmBand::Local,
+                },
+                edge: lp.edge,
             })
             .collect();
-        levels[2].band = DvifmBand::Local;
         let e2 = extract(
             &Request::for_slots(all, 986)
                 .with_dvifm_spec(DvifmSpec { levels })
@@ -1753,11 +1759,14 @@ mod tests {
             "a spec that differs from the defaults must move f956+"
         );
         let stats2 = e2.dvifm_blocks().expect("blocks");
-        // Band affects the records: level 2 ran the local band, so its
-        // records may differ; levels 0/1 (laplacian in both) must be
-        // identical to the first collect's.
+        // Band-matched levels: constants never enter the record, so all
+        // five levels' caches are bit-identical across the two collects.
         assert_eq!(stats.grid, stats2.grid);
-        assert_eq!(stats.records[0], stats2.records[0]);
-        assert_eq!(stats.records[1], stats2.records[1]);
+        for l in 0..5 {
+            assert_eq!(
+                stats.records[l], stats2.records[l],
+                "level {l} records moved under a constants-only spec"
+            );
+        }
     }
 }
