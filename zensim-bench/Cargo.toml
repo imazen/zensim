@@ -277,6 +277,13 @@ required-features = ["training"]
 name = "extract_features_372col_omni"
 required-features = ["extract-omni"]
 
+# `peer_metric_pairs` decodes through the same imazen-only owner, so it carries
+# the same REQUIRED feature: there is no build where the peer scorer exists but
+# cannot read the corpus it is pointed at.
+[[example]]
+name = "peer_metric_pairs"
+required-features = ["zen-decode"]
+
 # `verify_bitstream_decode` needs at least the JPEG decode path (verify-decode).
 [[example]]
 name = "verify_bitstream_decode"
