@@ -60,6 +60,18 @@ def validate_recipe(recipe):
         digest = recipe.get("spatial_manifest_sha256", "")
         if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ValueError("spatial eval manifest needs a pinned SHA256")
+    width = recipe.get("feature_width", 944)
+    if width not in (944, 986):
+        raise ValueError("feature_width must be a registered producer width (944 or 986)")
+    if width == 986:
+        spec = recipe.get("dvifm_spec")
+        if not isinstance(spec, dict) or not spec.get("path") or len(spec.get("sha256", "")) != 64:
+            raise ValueError("a w986 recipe needs dvifm_spec {path, sha256}")
+        allowed_path(spec["path"])
+    elif recipe.get("dvifm_spec") or recipe.get("dvifm_block_stats"):
+        raise ValueError("dvifm_spec/dvifm_block_stats require feature_width 986")
+    if recipe.get("dvifm_block_stats") and Path(recipe["dvifm_block_stats"]).name != recipe["dvifm_block_stats"]:
+        raise ValueError("dvifm_block_stats must be an output basename, not a path")
 
 
 def admitted_segment(segment):
@@ -156,7 +168,7 @@ def training_command(trainer, out, recipe, task, hidden, fraction, seed, ids, ba
     command += ["--target-column", "human_score", "--target-scale", "1", "--hidden", str(hidden),
         "--epochs", str(recipe["epochs"]), "--pairs-per-epoch", str(recipe["pairs_per_epoch"]),
         "--seed", str(seed), "--init-seed", str(seed), "--sample-seed", str(seed+10000),
-        "--pair-sampling", "stratified", "--max-features", "944", "--keep-features", ",".join(map(str, ids)),
+        "--pair-sampling", "stratified", "--max-features", str(recipe.get("feature_width", 944)), "--keep-features", ",".join(map(str, ids)),
         "--mse-weight", "1", "--early-stop-patience", "0", "--out-dtype", "f32", "--log-every", str(recipe.get("log_every", 1)),
         "--no-auto-eval", "--out", bake]
     if recipe.get("nonneg_distance", False):
@@ -212,12 +224,13 @@ def execute(args, recipe):
                RAYON_NUM_THREADS="8", OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
     if recipe["formula_revision"] != 3:
         raise ValueError("screen requires explicit fresh Rev3 preparation")
+    feature_width = recipe.get("feature_width", 944)
     for k in env:
         if k.startswith("ZENSIM_") and (k.endswith("_FORM") or k.endswith("_ARM") or
                 k in {"ZENSIM_SSIM_LUMA", "ZENSIM_CROSS_REVISION_DIAGNOSTIC"}):
             raise ValueError(f"unset arithmetic override {k}")
     for name, ids in recipe["arms"].items():
-        if Path(name).name != name or not ids or ids != sorted(set(ids)) or not 0 <= min(ids) <= max(ids) < 944:
+        if Path(name).name != name or not ids or ids != sorted(set(ids)) or not 0 <= min(ids) <= max(ids) < feature_width:
             raise ValueError("invalid layout")
     tasks = recipe.get("tasks", ["human", "codec", "corruption"])
     if not tasks or len(set(tasks)) != len(tasks) or set(tasks) - {"human", "codec", "corruption"}:
@@ -287,8 +300,18 @@ def execute(args, recipe):
             w = csv.writer(f, delimiter="\t")
             w.writerow(["ref_path", "dist_path", "human_score", "row_id"])
             w.writerows((r["reference"], r["distorted"], r["target"], r["row_id"]) for r in rows)
-        sampling_args = ["--sampling", recipe["sampling"]] if recipe.get("sampling") else []
-        run("extract", [bins["extractor"], "--full-944", *sampling_args, "--corpus", "pairs-tsv", "--path", pairs, "--out", raw])
+        extract_args = [bins["extractor"], f"--full-{feature_width}"]
+        if feature_width == 944:
+            extract_args += ["--sampling", recipe["sampling"]] if recipe.get("sampling") else []
+        else:
+            spec = recipe["dvifm_spec"]
+            if sha(allowed_path(spec["path"])) != spec["sha256"]:
+                raise ValueError("dvifm spec bytes changed since preregistration")
+            extract_args += ["--dvifm-spec", spec["path"]]
+            if recipe.get("dvifm_block_stats"):
+                extract_args += ["--dvifm-block-stats", str(out / recipe["dvifm_block_stats"])]
+        extract_args += ["--corpus", "pairs-tsv", "--path", pairs, "--out", raw]
+        run("extract", extract_args)
         import pyarrow.csv as pc
         table = pc.read_csv(raw)
         # Integral labels (including corruption's 0/100) are still regression
@@ -309,6 +332,13 @@ def execute(args, recipe):
         manifest["decoder_era"] = "canonical native decode; extractor binary and original input bytes pinned"
         manifest["files"] = {}
         manifest["split_policy"] = SPLIT_POLICY
+        if recipe.get("dvifm_block_stats"):
+            # Pin the training-only block cache and its row index alongside
+            # the tables; the extractor's manifest carries the producer
+            # surface, spec hash and per-level grids.
+            for suffix in ("", ".index.jsonl"):
+                name = recipe["dvifm_block_stats"] + suffix
+                manifest["files"][name] = {"sha256": sha(out / name)}
         result["tables"] = {}
         for task in tasks:
             result["tables"][task] = {}
@@ -339,9 +369,9 @@ def execute(args, recipe):
                         pq.write_table(part, path, compression=None)
                         manifest["files"][path.name] = {"sha256": sha(path)}
             all_ids = [r["row_id"] for r in rows if r["task"] == task and r["role"] == "eval"]
-            features = np.column_stack([table[f"f{i}"].to_numpy()[all_ids] for i in range(944)]).astype("<f4")
+            features = np.column_stack([table[f"f{i}"].to_numpy()[all_ids] for i in range(feature_width)]).astype("<f4")
             with (out / (task + ".features.bin")).open("wb") as f:
-                f.write(struct.pack("<II", 944, len(all_ids)))
+                f.write(struct.pack("<II", feature_width, len(all_ids)))
                 f.write(features.tobytes())
             manifest["files"][task + ".features.bin"] = {"sha256": sha(out / (task + ".features.bin"))}
         write_json(out / "_MANIFEST.json", manifest)
@@ -495,8 +525,16 @@ def audit(args, recipe):
             raise ValueError("bake changed")
         pairs, n = pairs_files[fit["task"]]
         records_path = dst / (name + ".jsonl")
-        sampling_args = ["--sampling", recipe["sampling"]] if recipe.get("sampling") else []
-        call([extractor, "--full-944", *sampling_args, "--corpus", "pairs-tsv", "--path", pairs,
+        feature_width = recipe.get("feature_width", 944)
+        extract_args = [extractor, f"--full-{feature_width}"]
+        if feature_width == 944:
+            extract_args += ["--sampling", recipe["sampling"]] if recipe.get("sampling") else []
+        else:
+            spec = recipe["dvifm_spec"]
+            if sha(allowed_path(spec["path"])) != spec["sha256"]:
+                raise ValueError("dvifm spec bytes changed since fitting")
+            extract_args += ["--dvifm-spec", spec["path"]]
+        call([*extract_args, "--corpus", "pairs-tsv", "--path", pairs,
               "--out", dst / (name + ".csv"), "--audit-jsonl", records_path,
               "--audit-bake", bake], dst / (name + ".log"))
         records = [json.loads(x) for x in records_path.read_text().splitlines()]
