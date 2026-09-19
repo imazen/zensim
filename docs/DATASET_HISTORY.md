@@ -4436,3 +4436,58 @@ luminance. Affected old HDR caches/calibrations are incompatible. The datagen
 extractor requires `hdr-common-primaries-v2-bt2020-pq10000`, preserves native16,
 checks color metadata and refuses partial failures before producing output.
 No corrected HDR training cache is claimed here. See [results](../benchmarks/rev3_native_optimization_2026-09-14.md).
+
+## 2026-09-19: JPEG AIC2026 ingested as a metric-agreement panel (no human labels)
+
+**What it is.** `AIC2026` (DaRUS doi:10.18419/DARUS-6156, v2.0, CC BY-SA 4.0;
+Jenadeleh, Sneyers, Ascenso, Richter, Karabutov, Jia, Alshina, Watanabe,
+Pinheiro, Ebrahimi, Saupe; arXiv:2607.22783) — 70 source images, 17
+codec/configuration arms (5 base codecs on all 70: JPG, J2K, JXL, AVIF, JAI;
+12 extended arms on 11–13 sources each), 20 distortion levels per arm (FTIC has
+6), **9,618 distorted images**. Levels are placed to span roughly 0.2–4.0 JND
+using CVVDP estimates. Ships full-resolution decodes, 840×944 `PTC_` (plain) and
+`BTC_` (boosted/flicker) crops, codec-native bitstreams, and two score tables —
+`metrics_fullres.csv` and `metrics_cropped.csv`, 9,618 rows each, 71 objective
+IQA-method score columns (including `JND_*` calibrations for seven of them).
+Local at `/mnt/v/datasets/aic2026/`.
+
+**Why ingested.** It is the largest public population that holds *one content
+set* against *17 codec arms* at *matched, finely-spaced fidelity* in the
+high-quality range — the exact shape needed to ask whether a single zensim dial
+value means the same thing across codecs, and whether our ladders are monotone
+where a codec's operating points are only ~0.2 JND apart. It also carries peer
+implementations of metrics we ship our own versions of (`SSIMULACRA2`,
+`proposal-Butteraugli`), which makes an implementation-parity check possible
+against a third party's numbers rather than our own.
+
+**What it cannot show.** *It contains no human scores.* The subjective study
+over these stimuli had not been released. Therefore:
+
+- Nothing computed on it is accuracy against human judgment. Every number is
+  **metric-vs-metric agreement** or **ladder behaviour**. Say so wherever it
+  is cited.
+- It must not be given a synthesised `human_score`, and it must not become a
+  `rank.<corpus>` board axis that feeds the composite. If it ever becomes a
+  board axis it is a clearly-labelled non-human agreement axis, excluded from
+  the composite.
+- **CVVDP placed the levels**, so CVVDP is monotone on these ladders by
+  construction and is not a fair contestant on the monotonicity axis. A
+  monotonicity table that ranks CVVDP first is reporting the selection rule.
+- Column orientation is mixed (`JND_*` and the distance metrics rise with
+  distortion; `SSIMULACRA2`/`CVVDP`/`PSNR`/`SSIM` families fall). Sign-normalise
+  per column or every correlation sign is a coin flip.
+- `BTC_*` crops are *boosted* stimuli (2× magnification and amplified
+  artifacts, built for flicker presentation). They are not ordinary images and
+  the shipped score tables do not cover them — `metrics_cropped.csv` is the
+  `PTC_` population.
+
+**Split role.** Registered in [DATA_SPLITS](DATA_SPLITS.md) §3 and §3d as a
+member of `jpeg-aic-family-holdout-2026-09-01`: T0-family, **eval-only, never
+trained on**, membership by content.
+
+**Exposure.** First read by any zensim model on **2026-09-19**. All six models
+scored in that first read (`PreviewV0_2`, `B`, `C`, `D`, and the two frozen
+Rev3 ensembles `R915_y60_h32_ens5` / `R915_basic228_h128_ens5`) were frozen
+before that date, so the first read is an honest out-of-sample observation for
+all of them. Results: `benchmarks/aic2026_agreement_2026-09-19.md`; artifacts +
+manifest pointer `benchmarks/aic2026_2026-09-19.pointer.md`.
