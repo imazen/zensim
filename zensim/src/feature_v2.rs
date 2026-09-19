@@ -19523,6 +19523,52 @@ pub(crate) mod tests {
         }
     }
 
+    /// Byte-stability gate: enabling `dvifm_block` must not perturb any of
+    /// the 956 slots that exist without it — the family is append-only.
+    /// Compares the 956-wide CSFW result against the 986-wide DVIFM result
+    /// prefix, bit-for-bit, in both walk parallelisms. (Toggle-OFF
+    /// stability against pre-DVIFM bytes is the job of the pre-existing
+    /// golden/regression suite, which does not touch this toggle.)
+    #[test]
+    fn dvifm_toggle_on_preserves_prefix_slots() {
+        for &(w, h) in &[(150usize, 170usize), (131, 129)] {
+            let src = textured_image(w, h, 5);
+            let dst = quantize_distort(&src, w, h);
+            let sref = RgbSlice::new(&src, w, h);
+            let dref = RgbSlice::new(&dst, w, h);
+            for parallel in [false, true] {
+                let off = compute_folded720_csfw_impl(
+                    &sref,
+                    &dref,
+                    None,
+                    parallel,
+                    V2NewFeatureToggles::default(),
+                )
+                .unwrap();
+                let on = compute_folded720_dvifm_impl(
+                    &sref,
+                    &dref,
+                    None,
+                    parallel,
+                    V2NewFeatureToggles::default(),
+                )
+                .unwrap();
+                assert_eq!(off.features().len(), 956);
+                assert_eq!(on.features().len(), 986);
+                for i in 0..956 {
+                    assert_eq!(
+                        off.features()[i].to_bits(),
+                        on.features()[i].to_bits(),
+                        "{w}x{h} parallel={parallel}: slot f{i} changed by \
+                         dvifm_block: {:e} -> {:e}",
+                        off.features()[i],
+                        on.features()[i]
+                    );
+                }
+            }
+        }
+    }
+
     /// CSFW φ-constant derivation (design §13, the
     /// `bandvis_delta_derivation_table` pattern): recompute the derived
     /// weight `w(L) = S_Ach(L) / (L · dV/dL)` from castleCSF Eq. 21 and
