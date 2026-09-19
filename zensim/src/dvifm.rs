@@ -113,6 +113,8 @@ pub(crate) struct DvifmParams {
 /// per level C₀ = p10 of `min(C̃_ref, C̃_dist)`, F2 centres = the {10,30,50,
 /// 70,90}% quantiles of `ln(min C̃ + 1e-6)`; g = 1, P = 1, β = 0.65, ς = 4,
 /// c_hi = ∞, edge discount on, Laplacian band — the design's first screen.
+/// Kept as the round-2 record while `Default` tracks the current round.
+#[allow(dead_code)]
 pub(crate) const DVIFM_SCREEN_LAP: [DvifmLevelParams; DVIFM_LEVELS] = [
     DvifmLevelParams {
         g: 1.0,
@@ -201,10 +203,101 @@ pub(crate) const DVIFM_SCREEN_LAP: [DvifmLevelParams; DVIFM_LEVELS] = [
     },
 ];
 
+/// Screen-3 constants — same derivation as `DVIFM_SCREEN_LAP` but on the
+/// local-band cache (`G_l − B²·G_l`; `specs/dvifm-local-derived.json`).
+/// Level 4 is the shared low-pass plane, so its constants are identical.
+pub(crate) const DVIFM_SCREEN_LOCAL: [DvifmLevelParams; DVIFM_LEVELS] = [
+    DvifmLevelParams {
+        g: 1.0,
+        p: 1.0,
+        c0: 0.0017179555335587794,
+        beta: 0.65,
+        sharp: 4.0,
+        c_hi: f64::INFINITY,
+        f2_centers: [
+            -6.3660384205374179,
+            -5.0771838099160851,
+            -4.0509926853489322,
+            -3.0965231739704522,
+            -2.0768170070202023,
+        ],
+        band: BandMode::Local,
+        edge: true,
+    },
+    DvifmLevelParams {
+        g: 1.0,
+        p: 1.0,
+        c0: 0.0017369159618283454,
+        beta: 0.65,
+        sharp: 4.0,
+        c_hi: f64::INFINITY,
+        f2_centers: [
+            -6.3550686066866762,
+            -4.9226504489722513,
+            -3.8031681801002697,
+            -2.962335986131186,
+            -2.1237110965030142,
+        ],
+        band: BandMode::Local,
+        edge: true,
+    },
+    DvifmLevelParams {
+        g: 1.0,
+        p: 1.0,
+        c0: 0.0019748518825508654,
+        beta: 0.65,
+        sharp: 4.0,
+        c_hi: f64::INFINITY,
+        f2_centers: [
+            -6.2267556406892153,
+            -4.3993971486530379,
+            -3.4262334766903426,
+            -2.7637835577922258,
+            -2.0757735898377474,
+        ],
+        band: BandMode::Local,
+        edge: true,
+    },
+    DvifmLevelParams {
+        g: 1.0,
+        p: 1.0,
+        c0: 0.0036813775077462196,
+        beta: 0.65,
+        sharp: 4.0,
+        c_hi: f64::INFINITY,
+        f2_centers: [
+            -5.6041966735218747,
+            -3.7882233755442565,
+            -3.0261522625847137,
+            -2.5011945261472182,
+            -1.9427330173568897,
+        ],
+        band: BandMode::Local,
+        edge: true,
+    },
+    DvifmLevelParams {
+        g: 1.0,
+        p: 1.0,
+        c0: 0.017739474773406982,
+        beta: 0.65,
+        sharp: 4.0,
+        c_hi: f64::INFINITY,
+        f2_centers: [
+            -4.03190653958357,
+            -2.9995830128137255,
+            -2.4690981949129278,
+            -1.970045059050014,
+            -1.4573178491587075,
+        ],
+        band: BandMode::Local,
+        edge: true,
+    },
+];
+
 impl Default for DvifmParams {
     fn default() -> Self {
         Self {
-            levels: DVIFM_SCREEN_LAP,
+            levels: DVIFM_SCREEN_LOCAL,
         }
     }
 }
