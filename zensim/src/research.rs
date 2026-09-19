@@ -150,6 +150,102 @@ impl core::fmt::Display for ResearchError {
 
 impl std::error::Error for ResearchError {}
 
+/// Training-only (`feature = "training"`): the DVIFM family's per-level
+/// constants as an extraction-time override — what the screen's spec JSON
+/// carries. All values are the kernel's own; conversion to
+/// `crate::dvifm::DvifmParams` is one-for-one.
+#[cfg(feature = "training")]
+#[derive(Debug, Clone)]
+pub struct DvifmLevelSpec {
+    /// Signed-power contrast exponent (φ_g).
+    pub g: f64,
+    /// Error power applied to the block hard max.
+    pub p: f64,
+    /// Visibility half-energy contrast.
+    pub c0: f64,
+    /// Visibility log-slope.
+    pub beta: f64,
+    /// Visibility knee sharpness.
+    pub sharp: f64,
+    /// Upper knee (`f64::INFINITY` = the design's one-knee form).
+    pub c_hi: f64,
+    /// Triangular F2 bin centres on the `ln(min C̃ + 1e-6)` axis (5).
+    pub f2_centers: [f64; 5],
+    /// Band construction for this level.
+    pub band: DvifmBand,
+    /// Corner-min edge discount.
+    pub edge: bool,
+}
+
+/// Training-only: the DVIFM band-construction switch (the screen's
+/// Laplacian-vs-local arms).
+#[cfg(feature = "training")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DvifmBand {
+    /// `L_l = G_l − blur(G_{l+1}↑)` — the default.
+    Laplacian,
+    /// `L_l = G_l − B²G_l` — the local-band arm.
+    Local,
+}
+
+/// Training-only: the full DVIFM spec — one [`DvifmLevelSpec`] per pyramid
+/// level (exactly five).
+#[cfg(feature = "training")]
+#[derive(Debug, Clone)]
+pub struct DvifmSpec {
+    /// Level-major constants; `levels.len() == 5` (asserted in `extract`).
+    pub levels: Vec<DvifmLevelSpec>,
+}
+
+#[cfg(feature = "training")]
+impl DvifmSpec {
+    fn to_params(&self) -> crate::dvifm::DvifmParams {
+        assert_eq!(
+            self.levels.len(),
+            crate::dvifm::DVIFM_LEVELS,
+            "DvifmSpec needs exactly {} level entries",
+            crate::dvifm::DVIFM_LEVELS,
+        );
+        let levels: [crate::dvifm::DvifmLevelParams; crate::dvifm::DVIFM_LEVELS] =
+            std::array::from_fn(|l| {
+                let s = &self.levels[l];
+                crate::dvifm::DvifmLevelParams {
+                    g: s.g,
+                    p: s.p,
+                    c0: s.c0,
+                    beta: s.beta,
+                    sharp: s.sharp,
+                    c_hi: s.c_hi,
+                    f2_centers: s.f2_centers,
+                    band: match s.band {
+                        DvifmBand::Laplacian => crate::dvifm::BandMode::Laplacian,
+                        DvifmBand::Local => crate::dvifm::BandMode::Local,
+                    },
+                    edge: s.edge,
+                }
+            });
+        crate::dvifm::DvifmParams { levels }
+    }
+}
+
+/// Training-only (`feature = "training"`): one extraction's collected DVIFM
+/// block records — the constants-fit cache row.
+///
+/// `grid[l] = (nby, nbx)` is level `l`'s full-block lattice and
+/// `records[l]` its records in block-row-major order, each the 18-f32
+/// serialization of `crate::dvifm::BlockRec`
+/// (`[m, peak, cmax_s×4, cmin_s×4, cmax_d×4, cmin_d×4]`, so
+/// `records[l].len() == nby * nbx * 18`). Partial border blocks are dropped
+/// per the family's spec — the same lattice the pooled features read.
+#[cfg(feature = "training")]
+#[derive(Debug, Clone)]
+pub struct DvifmBlockStats {
+    /// Per-level full-block grid `(nby, nbx)`.
+    pub grid: [(u32, u32); 5],
+    /// Per-level flattened 18-f32 records (`nby*nbx*18` each).
+    pub records: Vec<Vec<f32>>,
+}
+
 impl From<PlanError> for ResearchError {
     fn from(e: PlanError) -> Self {
         match e {
@@ -169,6 +265,12 @@ pub struct Request {
     era_label: String,
     parallel: bool,
     dense: bool,
+    /// `feature = "training"`: DVIFM constants override for this extraction.
+    #[cfg(feature = "training")]
+    dvifm_spec: Option<DvifmSpec>,
+    /// `feature = "training"`: collect the DVIFM per-block records.
+    #[cfg(feature = "training")]
+    dvifm_blocks: bool,
 }
 
 impl Request {
@@ -184,6 +286,10 @@ impl Request {
             era_label: crate::feature_set_id::ERA_UNKNOWN.to_string(),
             parallel: false,
             dense: false,
+            #[cfg(feature = "training")]
+            dvifm_spec: None,
+            #[cfg(feature = "training")]
+            dvifm_blocks: false,
         }
     }
 
@@ -197,6 +303,10 @@ impl Request {
             era_label: crate::feature_set_id::ERA_UNKNOWN.to_string(),
             parallel: false,
             dense: false,
+            #[cfg(feature = "training")]
+            dvifm_spec: None,
+            #[cfg(feature = "training")]
+            dvifm_blocks: false,
         }
     }
 
@@ -257,6 +367,10 @@ impl Request {
             era_label: id.era().to_string(),
             parallel: false,
             dense,
+            #[cfg(feature = "training")]
+            dvifm_spec: None,
+            #[cfg(feature = "training")]
+            dvifm_blocks: false,
         })
     }
 
@@ -291,6 +405,10 @@ impl Request {
             era_label: crate::feature_set_id::ERA_UNKNOWN.to_string(),
             parallel: false,
             dense: false,
+            #[cfg(feature = "training")]
+            dvifm_spec: None,
+            #[cfg(feature = "training")]
+            dvifm_blocks: false,
         })
     }
 
@@ -330,6 +448,33 @@ impl Request {
     #[must_use]
     pub fn with_parallel(mut self, parallel: bool) -> Request {
         self.parallel = parallel;
+        self
+    }
+
+    /// Training-only (`feature = "training"`): run the DVIFM family under
+    /// `spec`'s per-level constants instead of [`DvifmParams::default`].
+    ///
+    /// The emitted features are the spec-constant features — used by the
+    /// screen's bake-and-rescreen loop. It changes ONLY the DVIFM block:
+    /// the other 956 slots are untouched, and a request without the
+    /// `dvifm_block` compute token ignores the spec (asserted in
+    /// [`extract`]).
+    #[cfg(feature = "training")]
+    #[must_use]
+    pub fn with_dvifm_spec(mut self, spec: DvifmSpec) -> Request {
+        self.dvifm_spec = Some(spec);
+        self
+    }
+
+    /// Training-only (`feature = "training"`): collect the DVIFM family's
+    /// per-block records (the 18-f32 [`DvifmBlockStats`] side output) while
+    /// extracting. The records are raw block statistics — independent of
+    /// the constants — so ONE cache serves every spec a screen wants to
+    /// evaluate.
+    #[cfg(feature = "training")]
+    #[must_use]
+    pub fn collect_dvifm_blocks(mut self, on: bool) -> Request {
+        self.dvifm_blocks = on;
         self
     }
 
@@ -445,6 +590,10 @@ pub struct Extraction {
     feature_set_id: Option<FeatureSetId>,
     revision: RevisionRef,
     build_commit: Option<&'static str>,
+    /// `feature = "training"`: the DVIFM block-record side output —
+    /// `Some` iff the request had `collect_dvifm_blocks(true)`.
+    #[cfg(feature = "training")]
+    dvifm_blocks: Option<DvifmBlockStats>,
 }
 
 impl Extraction {
@@ -464,6 +613,14 @@ impl Extraction {
     #[must_use]
     pub fn provenance(&self) -> &[FeatureProvenance] {
         &self.provenance
+    }
+
+    /// Training-only (`feature = "training"`): the collected DVIFM block
+    /// records, or `None` when the request did not ask for them.
+    #[cfg(feature = "training")]
+    #[must_use]
+    pub fn dvifm_blocks(&self) -> Option<&DvifmBlockStats> {
+        self.dvifm_blocks.as_ref()
     }
 
     /// The declared layout width.
@@ -837,14 +994,47 @@ pub fn extract(
 
     let mut scratch = crate::feature_v2::V2Scratch::new();
     let toggles = plan.toggles();
-    let result = crate::feature_v2::compute_folded720_streaming_impl(
+    #[cfg(feature = "training")]
+    let mut extras = crate::feature_v2::FoldWalkExtras {
+        compute: Some(plan.compute),
+        ..Default::default()
+    };
+    #[cfg(not(feature = "training"))]
+    let extras = crate::feature_v2::FoldWalkExtras {
+        compute: Some(plan.compute),
+        ..Default::default()
+    };
+    // Training-only DVIFM side channel: a constants spec and/or the
+    // block-record sink, carried through the SAME walk — the records are
+    // raw stats, so one cached pass serves every spec the screen wants.
+    #[cfg(feature = "training")]
+    let mut dvifm_extras = if req.dvifm_spec.is_some() || req.dvifm_blocks {
+        assert!(
+            plan.compute.dvifm,
+            "a DVIFM spec/block request needs the dvifm compute token — \
+             extraction without it would silently emit nothing"
+        );
+        Some(crate::feature_v2::DvifmWalkExtras {
+            params: req.dvifm_spec.as_ref().map(DvifmSpec::to_params),
+            cache: req
+                .dvifm_blocks
+                .then(crate::feature_v2::DvifmBlockCacheOut::default),
+        })
+    } else {
+        None
+    };
+    #[cfg(feature = "training")]
+    {
+        extras.dvifm = dvifm_extras.as_mut();
+    }
+    let result = crate::feature_v2::compute_folded720_streaming_extras(
         source,
         distorted,
         Some(120_000_000),
         req.parallel,
         toggles,
         &mut scratch,
-        Some(plan.compute),
+        extras,
     )
     .map_err(ResearchError::Compute)?;
 
@@ -887,6 +1077,20 @@ pub fn extract(
             )
         });
 
+    // Training side output: flatten each level's records to their 18-f32
+    // wire form (level-major, block-row-major — the lattice `grid` names).
+    #[cfg(feature = "training")]
+    let dvifm_blocks = dvifm_extras
+        .and_then(|de| de.cache)
+        .map(|out| DvifmBlockStats {
+            grid: out.grid,
+            records: out
+                .levels
+                .iter()
+                .map(|recs| recs.iter().flat_map(|r| r.to_f32_18()).collect())
+                .collect(),
+        });
+
     Ok(Extraction {
         values,
         provenance,
@@ -896,6 +1100,8 @@ pub fn extract(
         feature_set_id,
         revision: req.revision.clone(),
         build_commit: BUILD_COMMIT,
+        #[cfg(feature = "training")]
+        dvifm_blocks,
     })
 }
 
@@ -1467,5 +1673,91 @@ mod tests {
             assert!(seen.insert(p.name.clone()), "duplicate name {}", p.name);
         }
         assert_eq!(seen.len(), full_width());
+    }
+
+    /// The training side output: `collect_dvifm_blocks` fills the record
+    /// cache (full-block grids, level-major), a spec override moves ONLY
+    /// the f956+ DVIFM slots, and an unrequested extraction returns `None`.
+    #[cfg(feature = "training")]
+    #[test]
+    fn dvifm_training_side_output() {
+        let (w, h) = (80usize, 96usize);
+        let (s, d) = pair(w, h);
+        let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));
+        let all = SlotSet::from_ranges([(0, 986)]);
+
+        let base = extract(&Request::for_slots(all.clone(), 986), &rs, &rd)
+            .expect("w986 extract")
+            .into_values();
+        assert_eq!(base.len(), 986);
+
+        // No flag → no cache.
+        let e = extract(&Request::for_slots(all.clone(), 986), &rs, &rd).expect("extract");
+        assert!(e.dvifm_blocks().is_none());
+
+        // Collect → five levels, each `floor(dim/5)·floor(dim/5)·18` wide
+        // (the walk's level dims halve the source dims).
+        let e = extract(
+            &Request::for_slots(all.clone(), 986).collect_dvifm_blocks(true),
+            &rs,
+            &rd,
+        )
+        .expect("collect");
+        let stats = e.dvifm_blocks().expect("blocks requested");
+        assert_eq!(stats.records.len(), 5);
+        let (mut wl, mut hl) = (w, h);
+        for l in 0..5 {
+            let (nby, nbx) = stats.grid[l];
+            assert_eq!((nby as usize, nbx as usize), (hl / 5, wl / 5));
+            assert_eq!(stats.records[l].len(), nby as usize * nbx as usize * 18);
+            assert!(stats.records[l].iter().all(|v| v.is_finite()));
+            wl = wl.div_ceil(2);
+            hl = hl.div_ceil(2);
+        }
+
+        // A spec override moves ONLY the f956+ block — the other 956 slots
+        // are byte-identical, and the records (raw stats) are unchanged by
+        // constants.
+        let mut levels: Vec<DvifmLevelSpec> = (0..5)
+            .map(|_| DvifmLevelSpec {
+                g: 1.4,
+                p: 0.8,
+                c0: 0.05,
+                beta: 0.5,
+                sharp: 2.5,
+                c_hi: f64::INFINITY,
+                f2_centers: [-7.0, -5.0, -3.0, -1.5, -0.5],
+                band: DvifmBand::Laplacian,
+                edge: true,
+            })
+            .collect();
+        levels[2].band = DvifmBand::Local;
+        let e2 = extract(
+            &Request::for_slots(all, 986)
+                .with_dvifm_spec(DvifmSpec { levels })
+                .collect_dvifm_blocks(true),
+            &rs,
+            &rd,
+        )
+        .expect("spec extract");
+        let v2 = e2.values();
+        for i in 0..956 {
+            assert_eq!(
+                base[i].to_bits(),
+                v2[i].to_bits(),
+                "f{i} moved under a dvifm-only spec"
+            );
+        }
+        assert!(
+            base[956..986] != v2[956..986],
+            "a spec that differs from the defaults must move f956+"
+        );
+        let stats2 = e2.dvifm_blocks().expect("blocks");
+        // Band affects the records: level 2 ran the local band, so its
+        // records may differ; levels 0/1 (laplacian in both) must be
+        // identical to the first collect's.
+        assert_eq!(stats.grid, stats2.grid);
+        assert_eq!(stats.records[0], stats2.records[0]);
+        assert_eq!(stats.records[1], stats2.records[1]);
     }
 }

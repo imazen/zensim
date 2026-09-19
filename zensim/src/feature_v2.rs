@@ -8054,6 +8054,33 @@ pub(crate) fn compute_folded720_streaming_impl(
     scratch: &mut V2Scratch,
     planned_compute: Option<ComputeSet>,
 ) -> Result<ZensimV2Result, ZensimError> {
+    compute_folded720_streaming_extras(
+        source,
+        distorted,
+        max_pixels,
+        parallel,
+        toggles,
+        scratch,
+        FoldWalkExtras {
+            compute: planned_compute,
+            ..Default::default()
+        },
+    )
+}
+
+/// [`compute_folded720_streaming_impl`] with the caller's
+/// [`FoldWalkExtras`] carried into the walk — the training surface's
+/// entry (DVIFM constants override + block-record sink). Identical
+/// validation, HDR routing and padding; the extras are the only delta.
+pub(crate) fn compute_folded720_streaming_extras(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+    extras: FoldWalkExtras<'_>,
+) -> Result<ZensimV2Result, ZensimError> {
     validate_wide_revision(toggles)?;
     crate::metric::validate_pair_dims(source, distorted)?;
     crate::metric::check_within_max_pixels(source.width(), source.height(), max_pixels)?;
@@ -8084,7 +8111,7 @@ pub(crate) fn compute_folded720_streaming_impl(
                 distorted.alpha_mode(),
             )
         {
-            return compute_folded720_hdr_streaming_impl(
+            return compute_folded720_hdr_streaming_extras(
                 source,
                 distorted,
                 HdrEncoding::Linear,
@@ -8092,7 +8119,7 @@ pub(crate) fn compute_folded720_streaming_impl(
                 parallel,
                 toggles,
                 scratch,
-                planned_compute,
+                extras,
             );
         }
         return Err(ZensimError::HdrInputRequiresPuPath);
@@ -8109,10 +8136,7 @@ pub(crate) fn compute_folded720_streaming_impl(
             toggles,
             crate::feature_v2_stream::FrontEnd::Sdr,
             scratch,
-            FoldWalkExtras {
-                compute: planned_compute,
-                ..Default::default()
-            },
+            extras,
         ));
     }
     Ok(foldapp_streaming_walk(
@@ -8122,10 +8146,7 @@ pub(crate) fn compute_folded720_streaming_impl(
         toggles,
         crate::feature_v2_stream::FrontEnd::Sdr,
         scratch,
-        FoldWalkExtras {
-            compute: planned_compute,
-            ..Default::default()
-        },
+        extras,
     ))
 }
 
@@ -8371,6 +8392,34 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
     scratch: &mut V2Scratch,
     planned_compute: Option<ComputeSet>,
 ) -> Result<ZensimV2Result, ZensimError> {
+    compute_folded720_hdr_streaming_extras(
+        source,
+        distorted,
+        encoding,
+        max_pixels,
+        parallel,
+        toggles,
+        scratch,
+        FoldWalkExtras {
+            compute: planned_compute,
+            ..Default::default()
+        },
+    )
+}
+
+/// [`compute_folded720_hdr_streaming_impl`] with the caller's
+/// [`FoldWalkExtras`] carried into the walk — the training surface's
+/// declared-HDR entry.
+pub(crate) fn compute_folded720_hdr_streaming_extras(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    encoding: HdrEncoding,
+    max_pixels: Option<usize>,
+    parallel: bool,
+    toggles: V2NewFeatureToggles,
+    scratch: &mut V2Scratch,
+    extras: FoldWalkExtras<'_>,
+) -> Result<ZensimV2Result, ZensimError> {
     validate_wide_revision(toggles)?;
     validate_hdr_pair(source, distorted, encoding, max_pixels)?;
     let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding);
@@ -8386,23 +8435,11 @@ pub(crate) fn compute_folded720_hdr_streaming_impl(
             toggles,
             front_end,
             scratch,
-            FoldWalkExtras {
-                compute: planned_compute,
-                ..Default::default()
-            },
+            extras,
         ));
     }
     Ok(foldapp_streaming_walk(
-        source,
-        distorted,
-        parallel,
-        toggles,
-        front_end,
-        scratch,
-        FoldWalkExtras {
-            compute: planned_compute,
-            ..Default::default()
-        },
+        source, distorted, parallel, toggles, front_end, scratch, extras,
     ))
 }
 
@@ -8983,6 +9020,37 @@ impl MeanOffsetRows {
     }
 }
 
+/// Training-only DVIFM side channel (`feature = "training"`): substitute
+/// the per-level constants the walk's DVIFM pump would otherwise take from
+/// [`crate::dvifm::DvifmParams::default`], and collect every block's
+/// 18-float [`crate::dvifm::BlockRec`] for the constants-fit cache
+/// (`research::Extraction::dvifm_block_stats`). `None` on every served
+/// path — nothing allocates.
+///
+/// The cache is filled AFTER the finalize flush inside the walk, so the
+/// records cover the same full-block lattice the pooled features read.
+#[cfg(feature = "training")]
+#[derive(Default)]
+pub(crate) struct DvifmWalkExtras {
+    /// Constants to run the pump under this walk (`None` = `DvifmParams::default()`).
+    pub(crate) params: Option<crate::dvifm::DvifmParams>,
+    /// Keep the per-block records: `Some` here enables the accumulator's
+    /// `block_cache`; the walk moves it in on finalize.
+    pub(crate) cache: Option<DvifmBlockCacheOut>,
+}
+
+/// The collected DVIFM block records one training walk produced —
+/// level-major, block-row-major over each level's full-block grid
+/// (`grid[l] = (nby, nbx)`; partial border blocks are dropped per spec).
+#[cfg(feature = "training")]
+#[derive(Debug, Default)]
+pub(crate) struct DvifmBlockCacheOut {
+    /// Per-level full-block grid `(nby, nbx)`.
+    pub(crate) grid: [(u32, u32); crate::dvifm::DVIFM_LEVELS],
+    /// `levels[l]` = the records the level's pump emitted, in order.
+    pub(crate) levels: Vec<Vec<crate::dvifm::BlockRec>>,
+}
+
 /// The fold walk's optional SIDE CHANNELS, bundled so the walk keeps one
 /// options parameter instead of growing a positional tail.
 ///
@@ -9000,6 +9068,11 @@ pub(crate) struct FoldWalkExtras<'a> {
     /// A pre-built source-side XYB pyramid the producer copies from instead
     /// of decoding + converting + downscaling (the ref-cached fold form).
     pub(crate) ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
+    /// Training-only DVIFM constants/cache sink (`feature = "training"`).
+    /// `None` everywhere the gate is off — and even under the gate the
+    /// served callers leave it `None`.
+    #[cfg(feature = "training")]
+    pub(crate) dvifm: Option<&'a mut DvifmWalkExtras>,
 }
 
 fn foldapp_streaming_walk<S: ImageSource, D: ImageSource>(
@@ -9040,6 +9113,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         mut mean_offset,
         ref_planes,
         compute,
+        // Training-only DVIFM side channel (`feature = "training"`): a
+        // params override + the block-record sink. `None` on every
+        // served path.
+        #[cfg(feature = "training")]
+        dvifm,
     } = extras;
     use crate::feature_v2_stream::StripPlaneProducer;
     // ITEM D: one derivation of WHAT this request computes. Every local
@@ -9247,12 +9325,21 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             let src = producer.rows(crate::feature_v2_stream::Side::Source, 1, 0, info.y0, y1);
             let dst = producer.rows(crate::feature_v2_stream::Side::Distorted, 1, 0, info.y0, y1);
             let acc = dvifm_acc.get_or_insert_with(|| {
-                crate::dvifm::DvifmAccum::new(
-                    info.plane_w,
-                    info.plane_h,
-                    dvifm_norm,
-                    &crate::dvifm::DvifmParams::default(),
-                )
+                #[cfg(feature = "training")]
+                let params = dvifm
+                    .as_deref()
+                    .and_then(|de| de.params)
+                    .unwrap_or_default();
+                #[cfg(not(feature = "training"))]
+                let params = crate::dvifm::DvifmParams::default();
+                #[allow(unused_mut)] // mutated only under `training` below
+                let mut acc =
+                    crate::dvifm::DvifmAccum::new(info.plane_w, info.plane_h, dvifm_norm, &params);
+                #[cfg(feature = "training")]
+                if dvifm.as_deref().is_some_and(|de| de.cache.is_some()) {
+                    acc.enable_block_cache();
+                }
+                acc
             });
             crate::dvifm::dvifm_push_rows_walk(acc, src, dst);
             crate::fold_timing::stop(__t_dv, crate::fold_timing::Phase::DvifmKernel, scale);
@@ -9892,6 +9979,17 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         );
         let out = crate::dvifm::dvifm_finish_walk(&mut acc);
         features_dvifm[..crate::dvifm::DVIFM_FEATURES].copy_from_slice(&out);
+        // Training side output: take AFTER the finish flush — the flush
+        // emits the tail's block records, so an earlier take would
+        // truncate them.
+        #[cfg(feature = "training")]
+        if let Some(de) = dvifm
+            && let Some(sink) = de.cache.as_mut()
+            && let Some((grid, levels)) = acc.take_block_cache()
+        {
+            sink.grid = grid;
+            sink.levels = levels;
+        }
     }
 
     ZensimV2Result {

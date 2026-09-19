@@ -99,7 +99,7 @@ impl DvifmLevelParams {
 }
 
 /// The family parameters: one set per pyramid level.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct DvifmParams {
     pub levels: [DvifmLevelParams; DVIFM_LEVELS],
 }
@@ -603,6 +603,32 @@ pub(crate) struct BlockRec {
     pub cmin_d: [f64; 4],
 }
 
+/// The 18-f32 wire record one block serializes to on the training side
+/// output (`research::Extraction::dvifm_block_stats`). Field order is the
+/// struct's: `[m, peak, cmax_s×4, cmin_s×4, cmax_d×4, cmin_d×4]`.
+#[cfg(feature = "training")]
+pub(crate) const DVIFM_BLOCK_F32: usize = 18;
+
+impl BlockRec {
+    /// Narrow the f64 kernel record to the 18-f32 training record.
+    ///
+    /// The narrowing is the contract — the cache exists so per-level
+    /// constants (g, P, C₀, β, ς, F2 centres) can be refit without
+    /// re-extracting pixels, and f32 keeps the record at ~3.8 B per source
+    /// pixel (design §"The block-stats cache").
+    #[cfg(feature = "training")]
+    pub(crate) fn to_f32_18(self) -> [f32; DVIFM_BLOCK_F32] {
+        let mut out = [0.0f32; DVIFM_BLOCK_F32];
+        out[0] = self.m as f32;
+        out[1] = self.peak as f32;
+        out[2..6].copy_from_slice(&self.cmax_s.map(|v| v as f32));
+        out[6..10].copy_from_slice(&self.cmin_s.map(|v| v as f32));
+        out[10..14].copy_from_slice(&self.cmax_d.map(|v| v as f32));
+        out[14..18].copy_from_slice(&self.cmin_d.map(|v| v as f32));
+        out
+    }
+}
+
 const SOFT_PEAK_KAPPA: f64 = 0.01;
 
 /// Scan one band block row (`DVIFM_BLOCK` rows of each side) and emit each
@@ -846,6 +872,11 @@ struct LevelSide {
     hb2_first: usize,
 }
 
+/// What [`DvifmAccum::take_block_cache`] returns: each level's full-block
+/// grid `(nby, nbx)` plus the records (level-major, block-row-major).
+#[cfg(feature = "training")]
+pub(crate) type DvifmBlockTake = ([(u32, u32); 5], Vec<Vec<BlockRec>>);
+
 struct LevelPump {
     w: usize,
     h: usize,
@@ -931,15 +962,38 @@ impl DvifmAccum {
     }
 
     /// Training side output: keep every block's 18-float record.
-    #[allow(dead_code)] // training surface; the served path leaves it `None`
+    ///
+    /// Reachable only through `feature_v2::FoldWalkExtras::dvifm`, which
+    /// exists under `feature = "training"` — the served path never enables
+    /// it and never allocates the per-level vectors.
+    #[cfg(feature = "training")]
     pub(crate) fn enable_block_cache(&mut self) {
         self.block_cache = Some(vec![Vec::new(); DVIFM_LEVELS]);
     }
 
     /// The collected block records, level-major — `None` unless enabled.
-    #[allow(dead_code)] // training surface; the served path leaves it `None`
+    #[cfg(feature = "training")]
+    #[cfg_attr(not(test), allow(dead_code))] // training surface; tests inspect it
     pub(crate) fn block_cache(&self) -> Option<&Vec<Vec<BlockRec>>> {
         self.block_cache.as_ref()
+    }
+
+    /// Take the collected records after [`dvifm_finish`], plus each level's
+    /// full-block grid `(nby, nbx)` — the record order is block-row-major
+    /// over that lattice (partial border blocks are dropped per spec).
+    ///
+    /// MUST be called after the finish flush: pending band rows below the
+    /// last full block row still contribute records, and taking earlier
+    /// would truncate the tail.
+    #[cfg(feature = "training")]
+    pub(crate) fn take_block_cache(&mut self) -> Option<DvifmBlockTake> {
+        let grid: [(u32, u32); 5] = std::array::from_fn(|l| {
+            (
+                (self.levels[l].h / DVIFM_BLOCK) as u32,
+                (self.levels[l].w / DVIFM_BLOCK) as u32,
+            )
+        });
+        self.block_cache.take().map(|levels| (grid, levels))
     }
 }
 
@@ -2167,6 +2221,133 @@ mod tests {
                 {
                     if let Some(t) = archmage::Wasm128Token::summon() {
                         check("wasm128", run(t, w, h, strip, mode));
+                    }
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Training side output: the block-record cache.
+    // -------------------------------------------------------------------
+
+    /// `to_f32_18` writes the struct's field order and nothing else.
+    #[cfg(feature = "training")]
+    #[test]
+    fn block_record_f32_field_order() {
+        let rec = BlockRec {
+            m: 0.5,
+            peak: 0.25,
+            cmax_s: [1.0, 2.0, 3.0, 4.0],
+            cmin_s: [-1.0, -2.0, -3.0, -4.0],
+            cmax_d: [10.0, 20.0, 30.0, 40.0],
+            cmin_d: [-10.0, -20.0, -30.0, -40.0],
+        };
+        let v = rec.to_f32_18();
+        assert_eq!(v[0], 0.5f32);
+        assert_eq!(v[1], 0.25f32);
+        assert_eq!(&v[2..6], &[1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(&v[6..10], &[-1.0, -2.0, -3.0, -4.0]);
+        assert_eq!(&v[10..14], &[10.0, 20.0, 30.0, 40.0]);
+        assert_eq!(&v[14..18], &[-10.0, -20.0, -30.0, -40.0]);
+    }
+
+    /// The served contract: no `enable_block_cache` call, no records.
+    #[cfg(feature = "training")]
+    #[test]
+    fn block_cache_off_by_default() {
+        let (w, h) = (97usize, 101usize);
+        let s32 = f32_plane(31, w, h);
+        let d32 = f32_plane(37, w, h);
+        let mut acc = DvifmAccum::new(w, h, DVIFM_NORM_SDR, &DvifmParams::default());
+        dvifm_push_rows(scalar(), &mut acc, &s32, &d32);
+        let _ = dvifm_finish(scalar(), &mut acc);
+        assert!(acc.block_cache().is_none());
+    }
+
+    /// The cache is the SAME block records the pooled features read: replay
+    /// `pool_block` over them (same accumulation order — records are stored
+    /// in emit order) reproduces the 30 outputs bit-for-bit, and each
+    /// level's record count is its full-block grid.
+    #[cfg(feature = "training")]
+    #[test]
+    fn block_cache_replays_to_pooled_features() {
+        for &(w, h) in &[(125usize, 130usize), (97, 101)] {
+            for &mode in &[BandMode::Laplacian, BandMode::Local] {
+                let s32 = f32_plane(31, w, h);
+                let d32 = f32_plane(37, w, h);
+                let mut params = DvifmParams::default();
+                for lp in &mut params.levels {
+                    lp.band = mode;
+                }
+                let t = scalar();
+                for strip in [h, 16] {
+                    // Rebuild the accumulator per strip size — the cache is
+                    // consumed by `take_block_cache`.
+                    let mut acc = DvifmAccum::new(w, h, DVIFM_NORM_SDR, &params);
+                    acc.enable_block_cache();
+                    let mut r = 0;
+                    while r < h {
+                        let n = strip.min(h - r);
+                        dvifm_push_rows(
+                            t,
+                            &mut acc,
+                            &s32[r * w..(r + n) * w],
+                            &d32[r * w..(r + n) * w],
+                        );
+                        r += n;
+                    }
+                    let want = dvifm_finish(t, &mut acc);
+                    let (grid, levels) = acc.take_block_cache().expect("cache enabled");
+                    assert_eq!(levels.len(), DVIFM_LEVELS);
+                    let mut got = [0.0f64; DVIFM_FEATURES];
+                    let (mut wl, mut hl) = (w, h);
+                    for l in 0..DVIFM_LEVELS {
+                        let (nby, nbx) = grid[l];
+                        assert_eq!(nby as usize, hl / DVIFM_BLOCK);
+                        assert_eq!(nbx as usize, wl / DVIFM_BLOCK);
+                        wl = wl.div_ceil(2);
+                        hl = hl.div_ceil(2);
+                        assert_eq!(levels[l].len(), nby as usize * nbx as usize);
+                        let mut sums = LevelSums::default();
+                        for rec in &levels[l] {
+                            pool_block(&mut sums, &params.levels[l], rec);
+                        }
+                        got[l * DVIFM_PER_LEVEL..(l + 1) * DVIFM_PER_LEVEL]
+                            .copy_from_slice(&level_out(&sums));
+                    }
+                    for (i, (&a, &b)) in want.iter().zip(&got).enumerate() {
+                        assert_eq!(
+                            a.to_bits(),
+                            b.to_bits(),
+                            "mode {mode:?} {w}x{h} strip={strip}: cached f{i} {a:e} != {b:e}"
+                        );
+                    }
+                    // The 18-f32 wire form keeps the record's information:
+                    // the narrowed replay agrees to f32 rounding, not less.
+                    let mut got32 = [0.0f64; DVIFM_FEATURES];
+                    for l in 0..DVIFM_LEVELS {
+                        let mut sums = LevelSums::default();
+                        for rec in &levels[l] {
+                            let v = rec.to_f32_18();
+                            let rec32 = BlockRec {
+                                m: v[0] as f64,
+                                peak: v[1] as f64,
+                                cmax_s: [v[2] as f64, v[3] as f64, v[4] as f64, v[5] as f64],
+                                cmin_s: [v[6] as f64, v[7] as f64, v[8] as f64, v[9] as f64],
+                                cmax_d: [v[10] as f64, v[11] as f64, v[12] as f64, v[13] as f64],
+                                cmin_d: [v[14] as f64, v[15] as f64, v[16] as f64, v[17] as f64],
+                            };
+                            pool_block(&mut sums, &params.levels[l], &rec32);
+                        }
+                        got32[l * DVIFM_PER_LEVEL..(l + 1) * DVIFM_PER_LEVEL]
+                            .copy_from_slice(&level_out(&sums));
+                    }
+                    for (i, (&a, &b)) in want.iter().zip(&got32).enumerate() {
+                        assert!(
+                            (a - b).abs() <= a.abs() * 1e-5 + 1e-9,
+                            "mode {mode:?} {w}x{h} strip={strip}: f32-record f{i} {a:e} vs {b:e}"
+                        );
                     }
                 }
             }
