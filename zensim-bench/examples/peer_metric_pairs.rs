@@ -180,11 +180,9 @@ fn main() {
         let (w_us, h_us) = (s.width as usize, s.height as usize);
         let src: &[[u8; 3]] = s.pixels.as_chunks::<3>().0;
         let dst: &[[u8; 3]] = d.pixels.as_chunks::<3>().0;
-        let ssim2 = fast_ssim2::compute_ssimulacra2(
-            Img::new(src, w_us, h_us),
-            Img::new(dst, w_us, h_us),
-        )
-        .unwrap_or(f64::NAN);
+        let ssim2 =
+            fast_ssim2::compute_ssimulacra2(Img::new(src, w_us, h_us), Img::new(dst, w_us, h_us))
+                .unwrap_or(f64::NAN);
         let src_rgb8: &[RGB8] = bytemuck::cast_slice(src);
         let dst_rgb8: &[RGB8] = bytemuck::cast_slice(dst);
         let bp = ButteraugliParams::default().with_compute_diffmap(true);
