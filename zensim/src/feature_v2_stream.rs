@@ -971,6 +971,15 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
 /// `Linear`, code values for `Pq`/`Hlg`; alpha ignored, Opaque required)
 /// and `Srgb16Rgba` (u16 code values normalized by 65535 — `Pq`/`Hlg`
 /// code-value containers like cICP-spliced 16-bit PNG).
+///
+/// Every reachable caller (`streaming::PrecomputedReference::for_candidate_inner`,
+/// `attribution::Fused944Session::planned_features`) sits behind
+/// `custom-profiles` in addition to this module's own `feature-regime-v2`
+/// gate; `allow` rather than `cfg` because `planned_features` itself is
+/// gated on `feature-regime-v2` alone and still calls this unconditionally,
+/// so cfg-stripping the function under `feature-regime-v2`-only would break
+/// that compile rather than just leave it unreached.
+#[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))]
 pub(crate) fn hdr_source_to_xyb(
     source: &impl ImageSource,
     encoding: HdrEncoding,

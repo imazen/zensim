@@ -8947,6 +8947,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let layout_append = toggles.append_block;
     let layout_append2 = toggles.append2_block;
     let layout_csfw = toggles.csfw_block;
+    // Only read below under `threads` (the `fuse_channels` derivation a few
+    // lines down); the `not(threads)` arm hardcodes `fuse_channels = false`
+    // without it, so `--no-default-features --features feature-regime-v2`
+    // (no `threads`) sees this as a genuinely unused binding.
+    #[cfg(feature = "threads")]
     let append_on = compute.append;
     let append2_on = compute.append2;
     assert!(

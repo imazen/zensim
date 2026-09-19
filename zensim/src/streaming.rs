@@ -3097,7 +3097,12 @@ impl PrecomputedReference {
 
     // Candidate folded extraction uses natural-width planes, including odd
     // widths. Keep its cache geometry identical to its scalar producer.
-    #[cfg(feature = "feature-regime-v2")]
+    // Both call sites (`metric/bake.rs`'s `prepare_steering_input` and
+    // `precompute_reference`) live behind `custom-profiles` in addition to
+    // `feature-regime-v2` — narrow the gate to match, or `feature-regime-v2`
+    // alone ships this as dead code (CI's "Feature permutations" `-D warnings`
+    // gate on the `feature-regime-v2`-only entry).
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     pub(crate) fn for_candidate(
         source: &impl ImageSource,
         parallel: bool,
@@ -3111,7 +3116,7 @@ impl PrecomputedReference {
         Self::for_candidate_inner(source, parallel, encoding)
     }
 
-    #[cfg(feature = "feature-regime-v2")]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn for_candidate_inner(
         source: &impl ImageSource,
         parallel: bool,

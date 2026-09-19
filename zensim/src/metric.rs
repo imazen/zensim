@@ -818,6 +818,8 @@ pub(crate) struct ScaleStats {
     /// Measures loss of local detail energy relative to source. Sensitive to blur/smoothing.
     pub(crate) hf_energy_loss: [f64; 3],
     /// Raw destination HF sum for the exact active gain-form derivative.
+    /// Read only by the `custom-profiles` attribution path.
+    #[cfg_attr(not(feature = "custom-profiles"), allow(dead_code))]
     pub(crate) hf_sq_dst_sum: [f64; 3],
     /// High-frequency magnitude loss (L1): max(0, 1 - Σ|dst-mu_dst|/Σ|src-mu_src|) per channel.
     /// Like hf_energy_loss but with L1 norm — more robust to outliers.
