@@ -1372,9 +1372,7 @@ mod toggle_gates {
         );
         // Default is OFF: the flag defaults false and populates nothing.
         assert!(!V2NewFeatureToggles::default().dvifm_block);
-        assert!(
-            !ComputeSet::from_toggles(V2NewFeatureToggles::default()).dvifm
-        );
+        assert!(!ComputeSet::from_toggles(V2NewFeatureToggles::default()).dvifm);
     }
 }
 

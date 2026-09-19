@@ -87,10 +87,10 @@ impl DvifmLevelParams {
         sharp: 4.0,
         c_hi: f64::INFINITY,
         f2_centers: [
-            -6.907_755_278_982_137,   // ln(1e-3)
-            -4.605_170_185_988_091,   // ln(1e-2)
-            -2.995_732_273_553_991,   // ln(5e-2)
-            -1.609_437_912_434_100_3, // ln(0.2)
+            -6.907_755_278_982_137,    // ln(1e-3)
+            -4.605_170_185_988_091,    // ln(1e-2)
+            -2.995_732_273_553_991,    // ln(5e-2)
+            -1.609_437_912_434_100_3,  // ln(0.2)
             -0.223_143_551_314_209_76, // ln(0.8)
         ],
         band: BandMode::Laplacian,
@@ -151,11 +151,11 @@ pub(crate) fn derive_norm_sdr() -> (f64, f64) {
     let mut yb = vec![0.0f32; CHUNK];
     let mut bb = vec![0.0f32; CHUNK];
     let flush = |pixels: &[[u8; 3]],
-                     xb: &mut [f32],
-                     yb: &mut [f32],
-                     bb: &mut [f32],
-                     lo: &mut f64,
-                     hi: &mut f64| {
+                 xb: &mut [f32],
+                 yb: &mut [f32],
+                 bb: &mut [f32],
+                 lo: &mut f64,
+                 hi: &mut f64| {
         let n = pixels.len();
         crate::color::srgb_to_positive_xyb_planar_into(
             pixels,
@@ -541,11 +541,7 @@ fn expand<T: F64x8Backend>(t: T, down: &Plane, w: usize, h: usize) -> Plane {
 /// `laplacian_pyramid`: `L_l = G_l − E(G_{l+1})` for `l < n−1`, `L_{n−1} =
 /// G_{n−1}`.
 #[cfg_attr(not(test), allow(dead_code))] // whole-plane reference path; test oracle
-pub(crate) fn laplacian_pyramid<T: F64x8Backend>(
-    t: T,
-    img: &Plane,
-    n: usize,
-) -> Vec<Plane> {
+pub(crate) fn laplacian_pyramid<T: F64x8Backend>(t: T, img: &Plane, n: usize) -> Vec<Plane> {
     let mut g = vec![img.clone()];
     for _ in 1..n {
         let next = downsample(t, g.last().unwrap());
@@ -566,11 +562,7 @@ pub(crate) fn laplacian_pyramid<T: F64x8Backend>(
 
 /// `local_band_pyramid`: `L_l = G_l − B²G_l` for `l < n−1`, `L_{n−1} = G_{n−1}`.
 #[cfg_attr(not(test), allow(dead_code))] // whole-plane reference path; test oracle
-pub(crate) fn local_band_pyramid<T: F64x8Backend>(
-    t: T,
-    img: &Plane,
-    n: usize,
-) -> Vec<Plane> {
+pub(crate) fn local_band_pyramid<T: F64x8Backend>(t: T, img: &Plane, n: usize) -> Vec<Plane> {
     let mut g = vec![img.clone()];
     for _ in 1..n {
         let next = downsample(t, g.last().unwrap());
@@ -688,10 +680,8 @@ pub(crate) fn block_stats_level(bs: &Plane, bd: &Plane) -> (usize, usize, Vec<Bl
     let nbx = bs.w / DVIFM_BLOCK;
     let mut recs = Vec::with_capacity(nby * nbx);
     for by in 0..nby {
-        let rows_s: [&[f64]; DVIFM_BLOCK] =
-            std::array::from_fn(|k| bs.row(by * DVIFM_BLOCK + k));
-        let rows_d: [&[f64]; DVIFM_BLOCK] =
-            std::array::from_fn(|k| bd.row(by * DVIFM_BLOCK + k));
+        let rows_s: [&[f64]; DVIFM_BLOCK] = std::array::from_fn(|k| bs.row(by * DVIFM_BLOCK + k));
+        let rows_d: [&[f64]; DVIFM_BLOCK] = std::array::from_fn(|k| bd.row(by * DVIFM_BLOCK + k));
         scan_block_row(&rows_s, &rows_d, bs.w, DVIFM_BLOCK, |rec| recs.push(rec));
     }
     (nby, nbx, recs)
@@ -922,7 +912,12 @@ impl DvifmAccum {
         let mut levels = Vec::with_capacity(DVIFM_LEVELS);
         let (mut lw, mut lh) = (w, h);
         for l in 0..DVIFM_LEVELS {
-            levels.push(LevelPump::new(lw, lh, l + 1 == DVIFM_LEVELS, params.levels[l]));
+            levels.push(LevelPump::new(
+                lw,
+                lh,
+                l + 1 == DVIFM_LEVELS,
+                params.levels[l],
+            ));
             lw = lw.div_ceil(2);
             lh = lh.div_ceil(2);
         }
@@ -954,10 +949,8 @@ fn pump_consume_block_row<T: F64x8Backend>(
     cache: Option<&mut Vec<BlockRec>>,
     _t: T,
 ) {
-    let rows_s: [&[f64]; DVIFM_BLOCK] =
-        std::array::from_fn(|k| &pump.band_q[0][k][..]);
-    let rows_d: [&[f64]; DVIFM_BLOCK] =
-        std::array::from_fn(|k| &pump.band_q[1][k][..]);
+    let rows_s: [&[f64]; DVIFM_BLOCK] = std::array::from_fn(|k| &pump.band_q[0][k][..]);
+    let rows_d: [&[f64]; DVIFM_BLOCK] = std::array::from_fn(|k| &pump.band_q[1][k][..]);
     let w = pump.w;
     let lp = pump.lp;
     let sums = &mut pump.sums;
@@ -1156,9 +1149,8 @@ fn level_push_row<T: F64x8Backend>(
                 for (side_i, dp) in down_pair.iter_mut().enumerate() {
                     let sd = &mut pump.side[side_i];
                     let h = pump.h;
-                    let tap = |i: isize| -> &[f64] {
-                        ring_row(&sd.hb, sd.hb_first, reflect_101(i, h))
-                    };
+                    let tap =
+                        |i: isize| -> &[f64] { ring_row(&sd.hb, sd.hb_first, reflect_101(i, h)) };
                     let (a, b, c) = (
                         tap(2 * j as isize - 1).to_vec(),
                         tap(2 * j as isize).to_vec(),
@@ -1185,12 +1177,7 @@ fn level_push_row<T: F64x8Backend>(
                     }
                     for rr in [2 * j as isize - 1, 2 * j as isize] {
                         if rr >= 0 && (rr as usize) < pump.h {
-                            pump_emit_band_row_lap(
-                                pump,
-                                cache.as_deref_mut(),
-                                t,
-                                rr as usize,
-                            );
+                            pump_emit_band_row_lap(pump, cache.as_deref_mut(), t, rr as usize);
                         }
                     }
                 }
@@ -1244,12 +1231,7 @@ fn level_flush<T: F64x8Backend>(acc: &mut DvifmAccum, t: T, l: usize) {
                     }
                     for rr in [2 * j as isize - 1, 2 * j as isize] {
                         if rr >= 0 && (rr as usize) < pump.h {
-                            pump_emit_band_row_lap(
-                                pump,
-                                cache.as_deref_mut(),
-                                t,
-                                rr as usize,
-                            );
+                            pump_emit_band_row_lap(pump, cache.as_deref_mut(), t, rr as usize);
                         }
                     }
                 }
@@ -1299,10 +1281,7 @@ pub(crate) fn dvifm_push_rows<T: F64x8Backend>(
 }
 
 /// Flush all levels and finalise the 30 features.
-pub(crate) fn dvifm_finish<T: F64x8Backend>(
-    t: T,
-    acc: &mut DvifmAccum,
-) -> [f64; DVIFM_FEATURES] {
+pub(crate) fn dvifm_finish<T: F64x8Backend>(t: T, acc: &mut DvifmAccum) -> [f64; DVIFM_FEATURES] {
     debug_assert_eq!(
         acc.levels[0].arrived, acc.h,
         "finish before every plane row was pushed"
@@ -1382,7 +1361,9 @@ mod tests {
         let mut s = seed;
         let v = (0..w * h)
             .map(|_| {
-                s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                s = s
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 ((s >> 33) & 0xffff_ffff) as f64 / u32::MAX as f64
             })
             .collect();
@@ -1401,8 +1382,7 @@ mod tests {
     fn norm_constants_sdr_recompute() {
         let (lo, hi) = derive_norm_sdr();
         assert!(
-            (lo - DVIFM_Y_MIN_SDR).abs() <= 1e-12
-                && (hi - lo - DVIFM_Y_SCALE_SDR).abs() <= 1e-12,
+            (lo - DVIFM_Y_MIN_SDR).abs() <= 1e-12 && (hi - lo - DVIFM_Y_SCALE_SDR).abs() <= 1e-12,
             "recomputed ({lo}, {hi}) vs baked ({}, {})",
             DVIFM_Y_MIN_SDR,
             DVIFM_Y_MIN_SDR + DVIFM_Y_SCALE_SDR
@@ -1413,8 +1393,7 @@ mod tests {
     fn norm_constants_pu_recompute() {
         let (lo, hi) = derive_norm_pu();
         assert!(
-            (lo - DVIFM_Y_MIN_PU).abs() <= 1e-9
-                && (hi - lo - DVIFM_Y_SCALE_PU).abs() <= 1e-9,
+            (lo - DVIFM_Y_MIN_PU).abs() <= 1e-9 && (hi - lo - DVIFM_Y_SCALE_PU).abs() <= 1e-9,
             "recomputed ({lo}, {hi}) vs baked ({}, {})",
             DVIFM_Y_MIN_PU,
             DVIFM_Y_MIN_PU + DVIFM_Y_SCALE_PU
@@ -1564,8 +1543,16 @@ mod tests {
         let mut s = vec![0.0f64; 25];
         let mut d = vec![0.0f64; 25];
         d[12] = 0.7; // centre pixel
-        let ps = Plane { v: s.clone(), w: 5, h: 5 };
-        let pd = Plane { v: d.clone(), w: 5, h: 5 };
+        let ps = Plane {
+            v: s.clone(),
+            w: 5,
+            h: 5,
+        };
+        let pd = Plane {
+            v: d.clone(),
+            w: 5,
+            h: 5,
+        };
         let (_, _, recs) = block_stats_level(&ps, &pd);
         assert_eq!(recs[0].m, 0.7);
         s[0] = 1.0; // (0,0) is only in corner sub-block q0
@@ -1695,10 +1682,9 @@ mod tests {
                         }
                     }
                 }
-                for (qi, &(rq, cq)) in
-                    [(0usize, 0usize), (0, n - q), (n - q, 0), (n - q, n - q)]
-                        .iter()
-                        .enumerate()
+                for (qi, &(rq, cq)) in [(0usize, 0usize), (0, n - q), (n - q, 0), (n - q, n - q)]
+                    .iter()
+                    .enumerate()
                 {
                     for r in r0 + rq..r0 + rq + q {
                         let rs = bs.row(r);
@@ -1805,7 +1791,14 @@ mod tests {
     #[test]
     fn f2_memberships_sum_to_one() {
         let lp = DvifmLevelParams::SEED;
-        for &ell in &[-20.0f64, lp.f2_centers[0], -4.0, -1.0, lp.f2_centers[4], 5.0] {
+        for &ell in &[
+            -20.0f64,
+            lp.f2_centers[0],
+            -4.0,
+            -1.0,
+            lp.f2_centers[4],
+            5.0,
+        ] {
             let h = hat_memberships(ell, &lp.f2_centers);
             let s: f64 = h.iter().sum();
             assert!((s - 1.0).abs() < 1e-12, "ell={ell} sum={s}");
@@ -1818,10 +1811,14 @@ mod tests {
             let s32 = f32_plane(23, w, h);
             let d32 = f32_plane(29, w, h);
             let norm = DVIFM_NORM_SDR;
-            let s64: Vec<f64> =
-                s32.iter().map(|&v| (v as f64 - norm.min) / norm.scale).collect();
-            let d64: Vec<f64> =
-                d32.iter().map(|&v| (v as f64 - norm.min) / norm.scale).collect();
+            let s64: Vec<f64> = s32
+                .iter()
+                .map(|&v| (v as f64 - norm.min) / norm.scale)
+                .collect();
+            let d64: Vec<f64> = d32
+                .iter()
+                .map(|&v| (v as f64 - norm.min) / norm.scale)
+                .collect();
             let whole = dvifm_features_whole(&s64, &d64, w, h, &DvifmParams::default());
             let stream = dvifm_features_stream(&s32, &d32, w, h, norm, &DvifmParams::default());
             for (i, (&a, &b)) in whole.iter().zip(&stream).enumerate() {
@@ -1878,10 +1875,14 @@ mod tests {
             let s32 = f32_plane(41, w, h);
             let d32 = f32_plane(43, w, h);
             let norm = DVIFM_NORM_SDR;
-            let s64: Vec<f64> =
-                s32.iter().map(|&v| (v as f64 - norm.min) / norm.scale).collect();
-            let d64: Vec<f64> =
-                d32.iter().map(|&v| (v as f64 - norm.min) / norm.scale).collect();
+            let s64: Vec<f64> = s32
+                .iter()
+                .map(|&v| (v as f64 - norm.min) / norm.scale)
+                .collect();
+            let d64: Vec<f64> = d32
+                .iter()
+                .map(|&v| (v as f64 - norm.min) / norm.scale)
+                .collect();
             let whole = dvifm_features_whole(&s64, &d64, w, h, &params);
             let want = dvifm_features_stream(&s32, &d32, w, h, norm, &params);
             for (i, (&a, &b)) in whole.iter().zip(&want).enumerate() {
@@ -1938,8 +1939,7 @@ mod tests {
         assert!(f.iter().all(|&v| v == 0.0));
         let s32: Vec<f32> = s.iter().map(|&v| v as f32).collect();
         let d32: Vec<f32> = d.iter().map(|&v| v as f32).collect();
-        let f2 =
-            dvifm_features_stream(&s32, &d32, w, h, DVIFM_NORM_SDR, &DvifmParams::default());
+        let f2 = dvifm_features_stream(&s32, &d32, w, h, DVIFM_NORM_SDR, &DvifmParams::default());
         assert!(f2.iter().all(|&v| v == 0.0));
     }
 
@@ -1981,15 +1981,11 @@ mod tests {
                 let (v, dv) = match name {
                     "a" => {
                         let v = 0.5
-                            + 0.28
-                                * (0.21 * ry + 0.13 * cx).sin()
-                                * (0.17 * ry - 0.11 * cx).cos()
+                            + 0.28 * (0.21 * ry + 0.13 * cx).sin() * (0.17 * ry - 0.11 * cx).cos()
                             + 0.07 * (0.53 * (ry + cx)).sin();
                         (
                             v,
-                            v + 0.03
-                                * (1.3 * ry - 0.7 * cx).sin()
-                                * (0.31 * ry + 0.9 * cx).cos(),
+                            v + 0.03 * (1.3 * ry - 0.7 * cx).sin() * (0.31 * ry + 0.9 * cx).cos(),
                         )
                     }
                     "b" => {
@@ -2057,10 +2053,7 @@ mod tests {
                             assert_eq!(row.len(), pw, "{name} L{l} row {r} width");
                             for (c, &e) in row.iter().enumerate() {
                                 let g = lap[l].row(r)[c];
-                                assert!(
-                                    (g - e).abs() <= TOL,
-                                    "{name} L{l} ({r},{c}): {g} vs {e}"
-                                );
+                                assert!((g - e).abs() <= TOL, "{name} L{l} ({r},{c}): {g} vs {e}");
                             }
                         }
                     }

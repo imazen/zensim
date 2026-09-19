@@ -1191,9 +1191,7 @@ impl ZensimV2Result {
             }
             FeatureRegime::Folded720Dvifm => {
                 let tail = self.n_scales
-                        * (3 * FEATURES_PER_CHANNEL_APPEND
-                            + APPEND2_PER_SCALE
-                            + CSFW_PER_SCALE)
+                    * (3 * FEATURES_PER_CHANNEL_APPEND + APPEND2_PER_SCALE + CSFW_PER_SCALE)
                     + crate::dvifm::DVIFM_FEATURES;
                 let end = self.features.len() - tail;
                 &self.features[end - v2_len..end]
@@ -9247,8 +9245,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             let __t_dv = crate::fold_timing::start();
             let y1 = info.y0 + info.strip_h;
             let src = producer.rows(crate::feature_v2_stream::Side::Source, 1, 0, info.y0, y1);
-            let dst =
-                producer.rows(crate::feature_v2_stream::Side::Distorted, 1, 0, info.y0, y1);
+            let dst = producer.rows(crate::feature_v2_stream::Side::Distorted, 1, 0, info.y0, y1);
             let acc = dvifm_acc.get_or_insert_with(|| {
                 crate::dvifm::DvifmAccum::new(
                     info.plane_w,
@@ -9905,12 +9902,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         } else {
             V1PoolsMode::Off
         },
-        regime: match (
-            layout_append,
-            layout_append2,
-            layout_csfw,
-            layout_dvifm,
-        ) {
+        regime: match (layout_append, layout_append2, layout_csfw, layout_dvifm) {
             (true, true, true, true) => FeatureRegime::Folded720Dvifm,
             (true, true, true, false) => FeatureRegime::Folded720Csfw,
             (true, true, false, _) => FeatureRegime::Folded720Append2,
@@ -19235,22 +19227,12 @@ pub(crate) mod tests {
         let sref = RgbSlice::new(&src, w, h);
         let dref = RgbSlice::new(&dst, w, h);
 
-        let a956 = compute_folded720_csfw_impl(
-            &sref,
-            &dref,
-            None,
-            false,
-            V2NewFeatureToggles::default(),
-        )
-        .unwrap();
-        let a986 = compute_folded720_dvifm_impl(
-            &sref,
-            &dref,
-            None,
-            false,
-            V2NewFeatureToggles::default(),
-        )
-        .unwrap();
+        let a956 =
+            compute_folded720_csfw_impl(&sref, &dref, None, false, V2NewFeatureToggles::default())
+                .unwrap();
+        let a986 =
+            compute_folded720_dvifm_impl(&sref, &dref, None, false, V2NewFeatureToggles::default())
+                .unwrap();
         assert_eq!(a986.regime(), FeatureRegime::Folded720Dvifm);
         assert_eq!(a986.features().len(), 986);
         assert_eq!(a986.dvifm_features().unwrap().len(), 30);
@@ -19258,10 +19240,7 @@ pub(crate) mod tests {
         assert_eq!(a986.append2_features().unwrap().len(), 20);
         assert_eq!(a986.append_features().unwrap().len(), 204);
         // The windowed accessors agree with the 956 result's views.
-        assert_eq!(
-            a986.csfw_features().unwrap(),
-            a956.csfw_features().unwrap()
-        );
+        assert_eq!(a986.csfw_features().unwrap(), a956.csfw_features().unwrap());
         // Turning DVIFM on must not move a bit of the first 956.
         for i in 0..956 {
             assert_eq!(
@@ -19283,27 +19262,17 @@ pub(crate) mod tests {
 
         // Identity pair: every DVIFM slot exactly 0 (identical planes ⇒
         // identical bands ⇒ zero block error at every level).
-        let idr = compute_folded720_dvifm_impl(
-            &sref,
-            &sref,
-            None,
-            false,
-            V2NewFeatureToggles::default(),
-        )
-        .unwrap();
+        let idr =
+            compute_folded720_dvifm_impl(&sref, &sref, None, false, V2NewFeatureToggles::default())
+                .unwrap();
         for (i, v) in idr.dvifm_features().unwrap().iter().enumerate() {
             assert_eq!(*v, 0.0, "identity dvifm[{i}] = {v}");
         }
 
         // Default OFF: a plain toggles set must not light the block.
-        let off = compute_folded720_csfw_impl(
-            &sref,
-            &dref,
-            None,
-            false,
-            V2NewFeatureToggles::default(),
-        )
-        .unwrap();
+        let off =
+            compute_folded720_csfw_impl(&sref, &dref, None, false, V2NewFeatureToggles::default())
+                .unwrap();
         assert_eq!(off.features().len(), 956);
         assert!(off.dvifm_features().is_none());
     }
@@ -19434,14 +19403,9 @@ pub(crate) mod tests {
             crate::dvifm::DVIFM_NORM_SDR,
             &crate::dvifm::DvifmParams::default(),
         );
-        let r = compute_folded720_dvifm_impl(
-            &sref,
-            &dref,
-            None,
-            false,
-            V2NewFeatureToggles::default(),
-        )
-        .unwrap();
+        let r =
+            compute_folded720_dvifm_impl(&sref, &dref, None, false, V2NewFeatureToggles::default())
+                .unwrap();
         for (i, (a, b)) in r
             .dvifm_features()
             .unwrap()
