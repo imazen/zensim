@@ -50,6 +50,13 @@ Report per-feature relative spread. A variant worse than the current extractor o
   fitted on human data as its authors did — CID22-A 25 refs under a ledgered exposure, one frozen read on the
   sealed 24 — then the REVERSE build: DVIFM-90 as the base, zensim feature families added by subset.
 
+- L6 (user, later 2026-09-19: "try yuv dvifm with xyb zensim, separate passes too") Y′CbCr DVIFM together with
+  XYB zensim, two ways: EARLY fusion — the DVIFM-90 columns and the XYB zensim columns in one head (each family
+  extracted by its own pass; no shared pyramid); LATE fusion — the standalone convex DVIFM score and the zensim
+  score computed as fully separate passes/models and combined by a convex 2-weight blend (plus one monotone map)
+  fitted on TRAIN. Late fusion keeps DVIFM's exact additive map for steering and lets either pass be skipped.
+  Compare early vs late vs each alone, same recipe/seeds, permuted control for the early arm.
+
 **Tier 2 — pyramid changes (every existing slot changes → one batched era break, TRAIN re-extract per arm)**
 - P1 downsample kernel: 2×2 box vs binomial [1 2 1].
 - P2 order: XYB-then-downsample vs linear-RGB-downsample-then-XYB.
@@ -59,7 +66,7 @@ Report per-feature relative spread. A variant worse than the current extractor o
 - P4 planes: Y-only vs XYB vs XYB+luma-only extra scale.
 - P5 colour mode (user 2026-09-19): the existing zensim kernels on BT.709 Y′CbCr in place of XYB — how much
   accuracy is actually lost, and how much extraction time the skipped XYB conversion buys (measured, all sizes).
-- P6 (user 2026-09-19) 1.5× and 3× scales added to the ladder — for the DVIFM pyramid and, separately, for
+- P6 **DEPRIORITISED (user, later 2026-09-19)** — runs last, after every other leg. 1.5× and 3× scales added to the ladder — for the DVIFM pyramid and, separately, for
   zensim's scale set: dyadic vs +1.5× vs +3× vs both, Mitchell via `zenresize`, identical on both sides.
 
 **Tier 3 — interactions, winners only:** best Tier-1 pooling × best Tier-2 pyramid (2×2), five seeds, then
