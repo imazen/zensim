@@ -130,6 +130,45 @@ bound. Possible (unregistered) follow-ups would be a different screen
 regime or joint training with the head; none are justified by these
 numbers.
 
+## Supervisor review (2026-09-19, read from the run logs — no new training)
+
+The preregistered verdict stands as **NEGATIVE at this operating point**. It is
+NOT evidence that the family carries no information, for three measured reasons:
+
+1. **The DVIFM arm fits better and generalises worse — an overfitting
+   signature, on 8,000 TRAIN rows.** 160-epoch probes, seed 9201, fitted
+   constants (`probe4/run/*.log`), basic228 → basic228+dvifm:
+
+   | epoch | train loss | fit SROCC | dev SROCC |
+   |---|---|---|---|
+   | 39 | 34.69 → 26.23 | 0.9665 → 0.9735 | 0.9367 → 0.9340 |
+   | 99 | 22.83 → 15.67 | 0.9776 → 0.9840 | 0.9338 → 0.9290 |
+   | 159 | 26.35 → 18.99 | 0.9679 → 0.9764 | 0.9360 → 0.9308 |
+
+   Train loss is 25–30% lower with the 30 columns at every matched epoch while
+   dev SROCC is 0.003–0.005 lower, and the gap widens with training. The columns
+   are used; at 8k rows the extra capacity does not transfer.
+2. **No dimensionality control.** There is no arm with 30 permuted/noise
+   columns, so "DVIFM hurts" cannot be separated from "any 30 extra inputs cost
+   ~0.003 dev SROCC for an h128 head on 8k rows".
+3. **The decision metric is not the hypothesis.** The hypothesis is about
+   LOCAL (within-image) ordering; the decision metric is pooled signed SROCC on
+   the 3,125-row dev segment. Within-reference panels were not reported.
+
+Also noted: the schedule is a 50-epoch cosine cycle and dev SROCC swings ~0.03
+within a cycle (0.906 at epoch 19, 0.937 at epoch 39), so E=40 stops off-cycle;
+it is matched across arms and the sign is the same at epochs 39/99/159, so this
+does not rescue the result. The plateau rule as written (last-20% delta
+≥ −0.002) is a non-degradation rule, not a flatness rule.
+
+**Status: family stays default-OFF and unqualified; result = NEGATIVE at the
+8k-row minimal-top screen, data-scale-confounded.** Under the 2026-09-19
+fairness ruling (matched seeds, sufficient budget for every arm) the follow-up
+that would settle it is: a permuted-column control, within-reference panels,
+cycle-aligned budgets, more seeds, and a TRAIN segment large enough that
+basic228 itself is not generalisation-limited. No optimisation work (i16 or
+otherwise) is justified for this family until that screen shows a gain.
+
 ## Cost line
 
 DVIFM extraction measures **+31.6 ms at 1024²** (Phase-1 gate) against
