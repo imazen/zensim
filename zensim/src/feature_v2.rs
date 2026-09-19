@@ -9199,14 +9199,31 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // DVIFM's normalization is route-local for the same reason append2's
     // deltas and CSFW's φ are: the baked constants are measured over the
     // Y range each front-end actually produces (`dvifm::DVIFM_NORM_*`).
-    let dvifm_norm = match front_end {
-        crate::feature_v2_stream::FrontEnd::Sdr => crate::dvifm::DVIFM_NORM_SDR,
-        crate::feature_v2_stream::FrontEnd::Hdr(_) => crate::dvifm::DVIFM_NORM_PU,
-    };
+    // The DVIFM input plane rides on the params (training-gated spec
+    // override); `XybY` is the default and keeps the historical producer
+    // tap. A non-XYB plane is SDR-only and incompatible with a sampling
+    // contract (the producer would serve sampled XYB rows, not the
+    // requested plane).
+    #[cfg(feature = "training")]
+    let dvifm_plane = dvifm
+        .as_deref()
+        .and_then(|de| de.params)
+        .map(|p| p.input_plane)
+        .unwrap_or_default();
+    #[cfg(not(feature = "training"))]
+    let dvifm_plane = crate::dvifm::DvifmInputPlane::default();
+    let dvifm_norm = crate::dvifm::dvifm_norm_for(
+        dvifm_plane,
+        matches!(front_end, crate::feature_v2_stream::FrontEnd::Hdr(_)),
+        compute.sampling.is_some(),
+    );
     // The accumulator is created on the first scale-0 strip, whose `info`
     // carries the producer's OWN scale-0 dims (post-sampling, post any
     // minimum-size padding) — not `dims[0]`.
     let mut dvifm_acc: Option<crate::dvifm::DvifmAccum> = None;
+    // Scratch for the non-XYB plane route: two strips of `strip_max_n`
+    // f32 (src + dst), allocated only when a Y'CbCr plane is requested.
+    let mut dvifm_plane_scratch: Vec<f32> = Vec::new();
     let n_scales = crate::NUM_SCALES;
     let (w0, h0) = (source.width(), source.height());
 
@@ -9322,8 +9339,6 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         if scale == 0 && local.dvifm {
             let __t_dv = crate::fold_timing::start();
             let y1 = info.y0 + info.strip_h;
-            let src = producer.rows(crate::feature_v2_stream::Side::Source, 1, 0, info.y0, y1);
-            let dst = producer.rows(crate::feature_v2_stream::Side::Distorted, 1, 0, info.y0, y1);
             let acc = dvifm_acc.get_or_insert_with(|| {
                 #[cfg(feature = "training")]
                 let params = dvifm
@@ -9341,7 +9356,52 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 }
                 acc
             });
-            crate::dvifm::dvifm_push_rows_walk(acc, src, dst);
+            match dvifm_plane {
+                crate::dvifm::DvifmInputPlane::XybY => {
+                    let src =
+                        producer.rows(crate::feature_v2_stream::Side::Source, 1, 0, info.y0, y1);
+                    let dst =
+                        producer.rows(crate::feature_v2_stream::Side::Distorted, 1, 0, info.y0, y1);
+                    crate::dvifm::dvifm_push_rows_walk(acc, src, dst);
+                }
+                plane => {
+                    // The DVIFM pump sees each scale-0 row once in ascending
+                    // order; the Y'CbCr planes are produced from the same
+                    // source rows the producer converts (same padding,
+                    // same alpha/gamut semantics — see the converter's
+                    // contract), so the pump's arithmetic is unchanged and
+                    // only the input plane differs.
+                    let n = info.strip_h * info.plane_w;
+                    if dvifm_plane_scratch.len() < 2 * n {
+                        dvifm_plane_scratch.resize(2 * n, 0.0);
+                    }
+                    let (sbuf, rest) = dvifm_plane_scratch.split_at_mut(n);
+                    let dbuf = &mut rest[..n];
+                    let ycbcr_plane = match plane {
+                        crate::dvifm::DvifmInputPlane::YcbcrY => crate::streaming::YcbcrPlane::Y,
+                        crate::dvifm::DvifmInputPlane::YcbcrCb => crate::streaming::YcbcrPlane::Cb,
+                        crate::dvifm::DvifmInputPlane::YcbcrCr => crate::streaming::YcbcrPlane::Cr,
+                        crate::dvifm::DvifmInputPlane::XybY => unreachable!(),
+                    };
+                    let sub_s = crate::source::SubsetView::new(source, info.y0, info.strip_h);
+                    crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+                        &sub_s,
+                        sbuf,
+                        info.plane_w,
+                        info.y0,
+                        ycbcr_plane,
+                    );
+                    let sub_d = crate::source::SubsetView::new(distorted, info.y0, info.strip_h);
+                    crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+                        &sub_d,
+                        dbuf,
+                        info.plane_w,
+                        info.y0,
+                        ycbcr_plane,
+                    );
+                    crate::dvifm::dvifm_push_rows_walk(acc, sbuf, dbuf);
+                }
+            }
             crate::fold_timing::stop(__t_dv, crate::fold_timing::Phase::DvifmKernel, scale);
         }
 
@@ -19429,6 +19489,45 @@ pub(crate) mod tests {
         for (i, v) in idr.dvifm_features().unwrap().iter().enumerate() {
             assert_eq!(*v, 0.0, "HDR identity dvifm[{i}] = {v}");
         }
+    }
+
+    /// The Y′CbCr planes are defined on the gamma-encoded SDR signal; a
+    /// non-`xyb_y` spec on the HDR walk must be refused, not silently
+    /// served on the PU plane.
+    #[cfg(feature = "training")]
+    #[test]
+    #[should_panic(expected = "SDR-only")]
+    fn dvifm_ycbcr_spec_rejects_the_hdr_route() {
+        let (w, h) = (64usize, 64usize);
+        let mut scratch = V2Scratch::new();
+        let ramp: Vec<[f32; 3]> = (0..w * h).map(|_| [10.0, 10.0, 10.0]).collect();
+        let sref = NitsImage::from_rgb_nits(&ramp, w, h);
+        let dref = NitsImage::from_rgb_nits(&ramp, w, h);
+        let mut dvifm = DvifmWalkExtras {
+            params: Some(crate::dvifm::DvifmParams {
+                input_plane: crate::dvifm::DvifmInputPlane::YcbcrY,
+                ..crate::dvifm::DvifmParams::default()
+            }),
+            cache: None,
+        };
+        let mut toggles = V2NewFeatureToggles::default();
+        toggles.append_block = true;
+        toggles.append2_block = true;
+        toggles.csfw_block = true;
+        toggles.dvifm_block = true;
+        let _ = compute_folded720_hdr_streaming_extras(
+            &sref,
+            &dref,
+            HdrEncoding::Linear,
+            None,
+            false,
+            toggles,
+            &mut scratch,
+            FoldWalkExtras {
+                dvifm: Some(&mut dvifm),
+                ..Default::default()
+            },
+        );
     }
 
     /// **Streaming parity gate**: the walk's f956..985 tail is BIT-IDENTICAL

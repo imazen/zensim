@@ -215,9 +215,20 @@ fn main() {
     // written after the walk completes.
     let dvifm_sink = dvifm_blocks.as_ref().map(|p| {
         let file = std::fs::File::create(p).expect("create dvifm-block-stats file");
+        let input_plane = research_req
+            .as_ref()
+            .and_then(|(r, _)| r.dvifm_spec())
+            .map(|s| match s.input_plane {
+                zensim::research::DvifmInputPlane::XybY => "xyb_y",
+                zensim::research::DvifmInputPlane::YcbcrY => "ycbcr_y",
+                zensim::research::DvifmInputPlane::YcbcrCb => "ycbcr_cb",
+                zensim::research::DvifmInputPlane::YcbcrCr => "ycbcr_cr",
+            })
+            .unwrap_or("xyb_y");
         DvifmSink {
             file: std::sync::Mutex::new((std::io::BufWriter::new(file), 0)),
             index: std::sync::Mutex::new(Vec::new()),
+            input_plane,
         }
     });
     let mut audit = audit::Config::load(
@@ -599,6 +610,9 @@ fn extract_features(
 struct DvifmSink {
     file: std::sync::Mutex<(std::io::BufWriter<std::fs::File>, u64)>,
     index: std::sync::Mutex<Vec<serde_json::Value>>,
+    /// The spec's input-plane name, stamped into every index entry so a
+    /// cache row is self-describing (Y′CbCr blocks are not XYB-Y blocks).
+    input_plane: &'static str,
 }
 
 impl DvifmSink {
@@ -639,6 +653,7 @@ impl DvifmSink {
             "grid": stats.grid,
             "offset": entry_offset,
             "level_records": level_records,
+            "input_plane": self.input_plane,
         }));
         Ok(())
     }
@@ -690,7 +705,17 @@ fn dvifm_spec_load(path: &Path) -> zensim::research::DvifmSpec {
             edge: lv.get("edge").and_then(|x| x.as_bool()).unwrap_or(true),
         })
         .collect();
-    zensim::research::DvifmSpec { levels }
+    let input_plane = match v.get("input_plane").and_then(|x| x.as_str()) {
+        None | Some("xyb_y") => zensim::research::DvifmInputPlane::XybY,
+        Some("ycbcr_y") => zensim::research::DvifmInputPlane::YcbcrY,
+        Some("ycbcr_cb") => zensim::research::DvifmInputPlane::YcbcrCb,
+        Some("ycbcr_cr") => zensim::research::DvifmInputPlane::YcbcrCr,
+        Some(other) => panic!("dvifm spec input_plane {other:?} unknown"),
+    };
+    zensim::research::DvifmSpec {
+        levels,
+        input_plane,
+    }
 }
 
 fn sha256_hex_of(path: &Path) -> String {

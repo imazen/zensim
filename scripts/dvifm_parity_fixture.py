@@ -19,6 +19,14 @@ Empty levels (no complete 5x5 block) emit an all-zero feature row — the Rust
 kernel's contract; numpy would produce NaN.
 
 Usage: python3 scripts/dvifm_parity_fixture.py [path-to-reference.py]
+
+Also writes the Y′CbCr companion fixture
+`dvifm_ycbcr_parity_2026-09-19.txt`: closed-form u8 sRGB cases converted
+through full-range BT.709 (the same equations `streaming.rs`'s
+`convert_source_to_ycbcr_plane_into_slice` implements), emitting both the
+converted plane values on their native ranges and the SEED-constant
+features computed after each plane's DvifmNorm — so the fixture pins the
+colour conversion AND the pump end-to-end.
 """
 from __future__ import annotations
 
@@ -31,6 +39,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REF = ROOT.parent / "zenpapers" / "scripts" / "dvifm_block_visibility.py"
 OUT = ROOT / "zensim" / "tests" / "fixtures" / "dvifm_parity_2026-09-19.txt"
+OUT_YCBCR = ROOT / "zensim" / "tests" / "fixtures" / "dvifm_ycbcr_parity_2026-09-19.txt"
 
 CENTERS = np.log(np.array([1e-3, 1e-2, 5e-2, 0.2, 0.8]))  # DvifmLevelParams::SEED.f2_centers
 THETA = (0.01, 0.65, 4.0)  # SEED c0, beta, sharp
@@ -100,6 +109,67 @@ def emit_features(f, rows: np.ndarray, band: str) -> None:
         f.write(" ".join(f"{v:.9e}" for v in row) + "\n")
 
 
+# --- Y′CbCr companion cases: closed-form u8 sRGB images -------------
+
+def ycbcr_rgb(name: str, h: int, w: int) -> np.ndarray:
+    """The same integer formula the Rust test regenerates (u8 triples).
+
+    `base` = the reference image; `dist` = the distorted side (a clipped
+    gain+lift of `base`)."""
+    img = np.zeros((h, w, 3), dtype=np.float64)
+    for y in range(h):
+        for x in range(w):
+            img[y, x, 0] = (x * 37 + y * 11 + 3) % 256
+            img[y, x, 1] = (x * 91 + y * 7 + 13) % 256
+            img[y, x, 2] = (x * 53 + y * 29 + 7) % 256
+    if name == "dist":
+        img = np.clip(img * 0.82 + 21.0, 0, 255).round()
+    return img
+
+
+def srgb_to_ycbcr_planes(rgb: np.ndarray) -> dict[str, np.ndarray]:
+    """Full-range BT.709 on the gamma code — mirrors ycbcr_plane_value."""
+    r = rgb[..., 0] / 255.0
+    g = rgb[..., 1] / 255.0
+    b = rgb[..., 2] / 255.0
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return {"y": y, "cb": (b - y) / 1.8556, "cr": (r - y) / 1.5748}
+
+
+def ycbcr_norm(plane: np.ndarray, name: str) -> np.ndarray:
+    """The route's DvifmNorm: (c − min)/scale — Y′ identity, Cb/Cr +0.5."""
+    return plane if name == "y" else plane + 0.5
+
+
+def write_ycbcr_fixture(mod) -> None:
+    with OUT_YCBCR.open("w") as f:
+        f.write("# DVIFM Y'CbCr parity fixture. Generator: scripts/dvifm_parity_fixture.py\n")
+        f.write("# BT.709 full-range on the gamma code; SEED constants; u8 sRGB inputs\n")
+        f.write("# closed-form (ycbcr_rgb). Plane values are the f32-rounded converter\n")
+        f.write("# output; features run on those f32 planes after the route's norm\n")
+        f.write("# (Y' identity, Cb/Cr + 0.5).\n")
+        for name, h, w in (("e", 13, 9), ("f", 17, 11)):
+            ref = ycbcr_rgb("base", h, w)
+            dist = ycbcr_rgb("dist", h, w)
+            f.write(f"case {name} {h} {w}\n")
+            ref_p = srgb_to_ycbcr_planes(ref)
+            dist_p = srgb_to_ycbcr_planes(dist)
+            for pname in ("y", "cb", "cr"):
+                # Emit AND analyse the f32-rounded plane — the Rust
+                # converter's output grid, so the feature rows compare
+                # same-input arithmetic rather than f64-vs-f32 drift.
+                plane32 = ref_p[pname].astype(np.float32)
+                f.write(f"plane_values {pname}\n")
+                for row in plane32:
+                    f.write(" ".join(f"{v:.9e}" for v in row) + "\n")
+            for pname in ("y", "cb", "cr"):
+                rn = ycbcr_norm(ref_p[pname].astype(np.float32), pname)
+                dn = ycbcr_norm(dist_p[pname].astype(np.float32), pname)
+                emit_features(f, features(mod, rn, dn, "laplacian"), f"ycbcr_{pname}")
+            f.write("end\n")
+    print(f"wrote {OUT_YCBCR} ({OUT_YCBCR.stat().st_size} bytes)")
+
+
 def main() -> None:
     ref_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_REF
     mod = load_reference(ref_path)
@@ -122,6 +192,7 @@ def main() -> None:
                 emit_features(f, features(mod, ref, dist, band), band)
             f.write("end\n")
     print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
+    write_ycbcr_fixture(mod)
 
 
 if __name__ == "__main__":

@@ -101,10 +101,40 @@ impl DvifmLevelParams {
     };
 }
 
-/// The family parameters: one set per pyramid level.
+/// Which scale-0 plane feeds the DVIFM pump (crate-private; surfaced on
+/// the training-gated `research::DvifmSpec` only).
+///
+/// `XybY` is the historical default: the producer's XYB channel 1,
+/// normalised by [`DVIFM_NORM_SDR`]/[`DVIFM_NORM_PU`]. The `Ycbcr*`
+/// variants convert the gamma-encoded sRGB input to full-range BT.709
+/// Y′CbCr instead (the DVIFM talk's native colour space) and are SDR-only
+/// — the HDR route keeps the PU-normalised `XybY` path.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+// The Ycbcr* variants are constructed only under `feature = "training"`
+// (the spec surface); the default `XybY` is what served builds ever see.
+#[cfg_attr(not(feature = "training"), allow(dead_code))]
+pub(crate) enum DvifmInputPlane {
+    /// XYB Y plane (existing behaviour; bit-identical to pre-field builds).
+    #[default]
+    XybY,
+    /// BT.709 full-range Y′ from the gamma-encoded sRGB signal.
+    YcbcrY,
+    /// BT.709 full-range Cb (centred on 0; normalisation maps to [0, 1]).
+    YcbcrCb,
+    /// BT.709 full-range Cr (centred on 0; normalisation maps to [0, 1]).
+    YcbcrCr,
+}
+
+/// The family parameters: one set per pyramid level plus the input-plane
+/// selection the pump's rows come from.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DvifmParams {
     pub levels: [DvifmLevelParams; DVIFM_LEVELS],
+    /// Scale-0 plane source (default [`DvifmInputPlane::XybY`]); read only
+    /// on the training-gated walk — the non-training build always takes
+    /// the default.
+    #[cfg_attr(not(feature = "training"), allow(dead_code))]
+    pub input_plane: DvifmInputPlane,
 }
 
 /// Screen-2 constants — derived from the Laplacian-band TRAIN block cache
@@ -398,6 +428,7 @@ impl Default for DvifmParams {
     fn default() -> Self {
         Self {
             levels: DVIFM_SCREEN_FITTED,
+            input_plane: DvifmInputPlane::default(),
         }
     }
 }
@@ -537,6 +568,43 @@ pub(crate) const DVIFM_NORM_PU: DvifmNorm = DvifmNorm {
     min: DVIFM_Y_MIN_PU,
     scale: DVIFM_Y_SCALE_PU,
 };
+
+/// Y′CbCr-route normalisation for the BT.709 Y′ plane: `Y′` already spans
+/// `[0, 1]` on the gamma-encoded display signal, so the map is identity.
+pub(crate) const DVIFM_NORM_YCBCR_Y: DvifmNorm = DvifmNorm {
+    min: 0.0,
+    scale: 1.0,
+};
+/// Y′CbCr-route normalisation for the chroma planes: full-range BT.709
+/// Cb/Cr are centred at 0 on `[-0.5, 0.5]`; `(c − min)/scale` lands them
+/// on the same `[0, 1]` contrast axis the pyramid machinery expects.
+pub(crate) const DVIFM_NORM_YCBCR_C: DvifmNorm = DvifmNorm {
+    min: -0.5,
+    scale: 1.0,
+};
+
+/// The route contract: which [`DvifmNorm`] a `(plane, front-end)` pair
+/// uses, and which combinations are refused outright. `XybY` is the only
+/// plane with an HDR route (PU normalisation); the Y′CbCr planes are
+/// SDR-only because the gamma-encoded BT.709 signal they are defined on
+/// does not exist for PQ input. A non-`XybY` plane is also incompatible
+/// with a sampling contract — the producer's sampled rows are XYB planes
+/// and cannot be reused as Y′CbCr rows.
+pub(crate) fn dvifm_norm_for(plane: DvifmInputPlane, is_hdr: bool, sampled: bool) -> DvifmNorm {
+    assert!(
+        plane == DvifmInputPlane::XybY || !sampled,
+        "dvifm input_plane != xyb_y cannot serve a sampling contract"
+    );
+    match (is_hdr, plane) {
+        (false, DvifmInputPlane::XybY) => DVIFM_NORM_SDR,
+        (true, DvifmInputPlane::XybY) => DVIFM_NORM_PU,
+        (false, DvifmInputPlane::YcbcrY) => DVIFM_NORM_YCBCR_Y,
+        (false, DvifmInputPlane::YcbcrCb | DvifmInputPlane::YcbcrCr) => DVIFM_NORM_YCBCR_C,
+        (true, _) => {
+            panic!("dvifm input_plane != xyb_y is SDR-only; HDR keeps the PU xyb_y route")
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Scalar element math — shared by every path, bit-exact building blocks.
@@ -2149,6 +2217,78 @@ mod tests {
         }
     }
 
+    /// The input-plane default is the historical XYB-Y tap — a spec that
+    /// does not name a plane must reproduce pre-field bytes exactly.
+    #[test]
+    fn input_plane_defaults_to_xyb_y() {
+        assert_eq!(DvifmInputPlane::default(), DvifmInputPlane::XybY);
+        assert_eq!(DvifmParams::default().input_plane, DvifmInputPlane::XybY);
+    }
+
+    /// The Y′CbCr norms: Y′ is already `[0,1]` (identity map); Cb/Cr are
+    /// centred at 0 on `[-0.5, 0.5]` and land on `[0,1]` under
+    /// `(c − min)/scale` — the same contrast axis the pyramid expects.
+    #[test]
+    fn ycbcr_norms_place_the_planes() {
+        let f = |v: f64, n: DvifmNorm| (v - n.min) / n.scale;
+        assert_eq!(f(0.35, DVIFM_NORM_YCBCR_Y), 0.35);
+        assert_eq!(f(1.0, DVIFM_NORM_YCBCR_Y), 1.0);
+        assert_eq!(f(-0.5, DVIFM_NORM_YCBCR_C), 0.0);
+        assert_eq!(f(0.0, DVIFM_NORM_YCBCR_C), 0.5);
+        assert_eq!(f(0.5, DVIFM_NORM_YCBCR_C), 1.0);
+    }
+
+    /// The route contract: SDR XybY → SDR norm, HDR XybY → PU norm, SDR
+    /// Y′CbCr → the plane's own norm; HDR + non-XYB and sampled + non-XYB
+    /// are refused.
+    #[test]
+    fn norm_for_route_table() {
+        for plane in [
+            DvifmInputPlane::XybY,
+            DvifmInputPlane::YcbcrY,
+            DvifmInputPlane::YcbcrCb,
+            DvifmInputPlane::YcbcrCr,
+        ] {
+            // Every plane serves un-sampled SDR.
+            let _ = dvifm_norm_for(plane, false, false);
+        }
+        assert_eq!(
+            dvifm_norm_for(DvifmInputPlane::XybY, false, false).min,
+            DVIFM_NORM_SDR.min
+        );
+        assert_eq!(
+            dvifm_norm_for(DvifmInputPlane::XybY, true, false).min,
+            DVIFM_NORM_PU.min
+        );
+        assert_eq!(
+            dvifm_norm_for(DvifmInputPlane::YcbcrY, false, false).min,
+            DVIFM_NORM_YCBCR_Y.min
+        );
+        assert_eq!(
+            dvifm_norm_for(DvifmInputPlane::YcbcrCb, false, false).min,
+            DVIFM_NORM_YCBCR_C.min
+        );
+        assert_eq!(
+            dvifm_norm_for(DvifmInputPlane::YcbcrCr, false, false).min,
+            DVIFM_NORM_YCBCR_C.min
+        );
+        // XYB-Y stays servable under a sampling contract (the historical
+        // route); only the new planes are refused there.
+        let _ = dvifm_norm_for(DvifmInputPlane::XybY, true, true);
+    }
+
+    #[test]
+    #[should_panic(expected = "SDR-only")]
+    fn norm_for_rejects_hdr_ycbcr() {
+        let _ = dvifm_norm_for(DvifmInputPlane::YcbcrY, true, false);
+    }
+
+    #[test]
+    #[should_panic(expected = "sampling contract")]
+    fn norm_for_rejects_sampled_ycbcr() {
+        let _ = dvifm_norm_for(DvifmInputPlane::YcbcrCb, false, true);
+    }
+
     #[test]
     fn whole_vs_pump_bit_identical() {
         for &(w, h) in &[(125usize, 125usize), (97, 89), (251, 129), (10, 7)] {
@@ -2408,6 +2548,7 @@ mod tests {
                         // screen-baked constants.
                         let mut params = DvifmParams {
                             levels: [DvifmLevelParams::SEED; DVIFM_LEVELS],
+                            input_plane: DvifmInputPlane::XybY,
                         };
                         if band == "local" {
                             for lp in &mut params.levels {
@@ -2435,6 +2576,130 @@ mod tests {
                     other => panic!("bad fixture line {other}"),
                 }
             }
+        }
+    }
+
+    /// The u8 sRGB case generator the fixture's `ycbcr_rgb` mirrors.
+    /// `dist` applies the clipped gain+lift of the Python `dist` side.
+    fn ycbcr_parity_rgb(distorted: bool, w: usize, h: usize) -> Vec<[u8; 3]> {
+        let mut img = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                img.push([
+                    ((x * 37 + y * 11 + 3) % 256) as u8,
+                    ((x * 91 + y * 7 + 13) % 256) as u8,
+                    ((x * 53 + y * 29 + 7) % 256) as u8,
+                ]);
+            }
+        }
+        if distorted {
+            for p in &mut img {
+                for c in p.iter_mut() {
+                    *c = ((*c as f64 * 0.82 + 21.0).round().clamp(0.0, 255.0)) as u8;
+                }
+            }
+        }
+        img
+    }
+
+    /// Y′CbCr companion fixture (`dvifm_ycbcr_parity_2026-09-19.txt`):
+    /// pins the BT.709 conversion (plane_values rows) and the SEED-constant
+    /// pump output on each plane after its route norm (features rows) —
+    /// the colour space AND the kernel end-to-end.
+    ///
+    /// Feature bound is looser than plane bound: the fixture computes on
+    /// the f32-rounded plane (emitted and analysed alike), but the Rust
+    /// f32 mul_add chain still differs from numpy's f32-mul+f32-add by an
+    /// ULP, and `ln(min C̃ + 1e-6)` amplifies that by ~1/C̃ near zero
+    /// contrast — an ULP plane diff becomes ~1e-5 in a membership.
+    #[test]
+    fn numpy_parity_ycbcr_planes_and_features() {
+        const TOL: f64 = 1e-6;
+        const FEATURE_TOL: f64 = 5e-5;
+        let text = include_str!("../tests/fixtures/dvifm_ycbcr_parity_2026-09-19.txt");
+        let mut lines = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'));
+        let read_grid = |lines: &mut dyn Iterator<Item = &str>, h: usize, w: usize| -> Vec<f32> {
+            let mut out = Vec::with_capacity(h * w);
+            for _ in 0..h {
+                for tok in lines.next().unwrap().split_whitespace() {
+                    out.push(tok.parse().unwrap());
+                }
+            }
+            out
+        };
+        while let Some(head) = lines.next() {
+            let mut it = head.split_whitespace();
+            assert_eq!(it.next(), Some("case"));
+            let _name = it.next().unwrap();
+            let h: usize = it.next().unwrap().parse().unwrap();
+            let w: usize = it.next().unwrap().parse().unwrap();
+            let srgb_s = ycbcr_parity_rgb(false, w, h);
+            let srgb_d = ycbcr_parity_rgb(true, w, h);
+            let rs = crate::RgbSlice::new(&srgb_s, w, h);
+            let rd = crate::RgbSlice::new(&srgb_d, w, h);
+            let planes = [
+                ("y", crate::streaming::YcbcrPlane::Y, DVIFM_NORM_YCBCR_Y),
+                ("cb", crate::streaming::YcbcrPlane::Cb, DVIFM_NORM_YCBCR_C),
+                ("cr", crate::streaming::YcbcrPlane::Cr, DVIFM_NORM_YCBCR_C),
+            ];
+            // 1) converted plane values on the native range
+            let mut converted: [Vec<f32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+            for (pi, (pname, conv, _norm)) in planes.iter().enumerate() {
+                let mut it = lines.next().unwrap().split_whitespace();
+                assert_eq!(it.next(), Some("plane_values"));
+                assert_eq!(it.next(), Some(*pname));
+                let expect = read_grid(&mut lines, h, w);
+                let mut got = vec![0.0f32; w * h];
+                crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+                    &rs, &mut got, w, 0, *conv,
+                );
+                for (i, (&g, &e)) in got.iter().zip(expect.iter()).enumerate() {
+                    assert!(
+                        (g as f64 - e as f64).abs() <= TOL,
+                        "{pname} px {i}: {g:e} vs {e:e}"
+                    );
+                }
+                converted[pi] = got;
+            }
+            // 2) SEED-constant features per plane, after the route norm
+            let params = DvifmParams {
+                levels: [DvifmLevelParams::SEED; DVIFM_LEVELS],
+                input_plane: DvifmInputPlane::XybY,
+            };
+            for (pi, (pname, conv, norm)) in planes.iter().enumerate() {
+                let mut it = lines.next().unwrap().split_whitespace();
+                assert_eq!(it.next(), Some("features"));
+                assert_eq!(it.next().unwrap(), format!("ycbcr_{pname}").as_str());
+                let mut d_plane = vec![0.0f32; w * h];
+                crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+                    &rd,
+                    &mut d_plane,
+                    w,
+                    0,
+                    *conv,
+                );
+                let got = dvifm_features_stream(&converted[pi], &d_plane, w, h, *norm, &params);
+                for l in 0..DVIFM_LEVELS {
+                    let row: Vec<f64> = lines
+                        .next()
+                        .unwrap()
+                        .split_whitespace()
+                        .map(|v| v.parse().unwrap())
+                        .collect();
+                    assert_eq!(row.len(), DVIFM_PER_LEVEL);
+                    for (j, &e) in row.iter().enumerate() {
+                        let g = got[l * DVIFM_PER_LEVEL + j];
+                        assert!(
+                            (g - e).abs() <= FEATURE_TOL,
+                            "{pname} L{l} f{j}: {g} vs {e}"
+                        );
+                    }
+                }
+            }
+            assert_eq!(lines.next(), Some("end"));
         }
     }
 

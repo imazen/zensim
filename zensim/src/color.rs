@@ -123,6 +123,15 @@ pub(crate) fn srgb_u16_to_linear(v: u16) -> f32 {
     linear_srgb::default::srgb_u16_to_linear(v)
 }
 
+/// sRGB opto-electronic transfer (linear → gamma-encoded display signal),
+/// the inverse of [`srgb_u8_to_linear`]'s transfer. Inputs outside [0, 1]
+/// are clamped — the gamma domain is the display signal, which is where
+/// the DVIFM Y′CbCr planes are defined.
+#[inline]
+pub(crate) fn linear_to_srgb_gamma(v: f32) -> f32 {
+    linear_srgb::default::linear_to_srgb(v)
+}
+
 /// Fast cube root: bit manipulation + 2 Newton-Raphson iterations in f32.
 /// Accurate to ~20 bits (sufficient for image quality metrics).
 #[inline(always)]
@@ -2092,6 +2101,42 @@ mod tests {
         linear_to_positive_xyb_planar_into_unclamped(&pixels, &mut x, &mut y, &mut b);
         for i in 0..n {
             assert!(x[i].is_finite() && y[i].is_finite() && b[i].is_finite());
+        }
+    }
+
+    /// `linear_to_srgb_gamma` is the sRGB OETF: exact anchors, continuity
+    /// across the linear/segmented knee, monotone, and the inverse of the
+    /// u8→linear LUT up to that LUT's own quantization error.
+    #[test]
+    fn linear_to_srgb_gamma_is_the_oetf() {
+        assert_eq!(linear_to_srgb_gamma(0.0), 0.0);
+        assert_eq!(linear_to_srgb_gamma(1.0), 1.0);
+        // Knee near 0.0031308: the two segments must agree there to
+        // well under a u8 code step.
+        let knee = 0.003_130_8f32;
+        let lo = 12.92 * knee;
+        let hi = 1.055 * knee.powf(1.0 / 2.4) - 0.055;
+        assert!((lo - hi).abs() < 1e-3, "knee discontinuity {lo} vs {hi}");
+        assert!((linear_to_srgb_gamma(knee) - lo).abs() < 1e-3);
+        // Out-of-range input clamps onto the display signal.
+        assert_eq!(linear_to_srgb_gamma(-0.2), 0.0);
+        assert_eq!(linear_to_srgb_gamma(1.7), 1.0);
+        // Monotone non-decreasing across the whole domain.
+        let mut prev = -f32::INFINITY;
+        for i in 0..=256 {
+            let v = linear_to_srgb_gamma(i as f32 / 255.0);
+            assert!(v >= prev, "not monotone at {i}");
+            prev = v;
+        }
+        // Inverse of the u8 LUT to within quantization: decode then
+        // re-encode lands within half a code step.
+        for v in 0u8..=255 {
+            let rt = linear_to_srgb_gamma(srgb_u8_to_linear(v));
+            let want = v as f32 / 255.0;
+            assert!(
+                (rt - want).abs() <= 0.5 / 255.0 + 1e-6,
+                "u8 {v}: roundtrip {rt} vs {want}"
+            );
         }
     }
 

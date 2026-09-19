@@ -1648,6 +1648,211 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
     }
 }
 
+/// Which BT.709 Y′CbCr plane to emit — the DVIFM pump's native planes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum YcbcrPlane {
+    /// `Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′` on the gamma-encoded
+    /// display signal, range `[0, 1]`.
+    Y,
+    /// `Cb = (B′ − Y′) / 1.8556` (full-range BT.709), range `[-0.5, 0.5]`.
+    Cb,
+    /// `Cr = (R′ − Y′) / 1.5748` (full-range BT.709), range `[-0.5, 0.5]`.
+    Cr,
+}
+
+/// One pixel of the BT.709 Y′CbCr plane from a gamma-encoded sRGB triple.
+#[inline(always)]
+fn ycbcr_plane_value(rgb: [f32; 3], plane: YcbcrPlane) -> f32 {
+    let [r, g, b] = rgb;
+    let y = 0.2126f32.mul_add(r, 0.7152f32.mul_add(g, 0.0722 * b));
+    match plane {
+        YcbcrPlane::Y => y,
+        YcbcrPlane::Cb => (b - y) / 1.8556,
+        YcbcrPlane::Cr => (r - y) / 1.5748,
+    }
+}
+
+/// Convert `source` rows to ONE BT.709 Y′CbCr plane at `padded_width`,
+/// for the DVIFM `input_plane` research route (`feature = "training"`).
+///
+/// Same source access, alpha compositing and gamut handling as
+/// [`convert_source_to_xyb_into_slices_chunked`], but the per-pixel value
+/// is the gamma-encoded sRGB display signal transformed by full-range
+/// BT.709 — not linearised, not opsin. `abs_row_offset` keeps the
+/// translucent-source noise background in the parent image's phase,
+/// identical to the XYB converter's contract. Pad columns carry the same
+/// horizontal mirror. Serial row order — the DVIFM pump consumes strips
+/// serially, so there is nothing to parallelise across.
+pub(crate) fn convert_source_to_ycbcr_plane_into_slice(
+    source: &impl ImageSource,
+    out: &mut [f32],
+    padded_width: usize,
+    abs_row_offset: usize,
+    plane: YcbcrPlane,
+) {
+    let width = source.width();
+    let height = source.height();
+    debug_assert!(out.len() >= padded_width * height);
+    debug_assert!(padded_width >= width);
+
+    let pad_count = padded_width - width;
+    let mirror_offsets: Vec<usize> = if pad_count > 0 {
+        let period = 2 * (width - 1);
+        (0..pad_count)
+            .map(|i| {
+                let m = (width + i) % period;
+                if m < width { m } else { period - m }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let pixel_format = source.pixel_format();
+    let opaque = matches!(source.alpha_mode(), AlphaMode::Opaque);
+    let primaries = source.color_primaries();
+    let need_gamut = primaries != ColorPrimaries::Srgb;
+
+    // One row of the gamma-encoded sRGB display signal, [0,1] triples.
+    // Mirrors the XYB converter's branches: fast paths read the stored
+    // gamma code directly; the linear/composite paths (alpha, non-sRGB
+    // primaries, float input) produce the same linear pixel the XYB path
+    // computes, then sRGB-encode it.
+    let gamma_row = |y: usize, dst: &mut [[f32; 3]], linear_scratch: &mut [[f32; 3]]| {
+        let row_bytes = source.row_bytes(y);
+        let mut direct_gamma = false;
+        match pixel_format {
+            PixelFormat::Srgb8Rgb => {
+                if need_gamut {
+                    let rgb_row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
+                    for (x, pixel) in linear_scratch.iter_mut().enumerate().take(width) {
+                        let [r, g, b] = rgb_row[x];
+                        *pixel = [
+                            crate::color::srgb_u8_to_linear(r),
+                            crate::color::srgb_u8_to_linear(g),
+                            crate::color::srgb_u8_to_linear(b),
+                        ];
+                    }
+                } else {
+                    let rgb_row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
+                    for (x, pixel) in dst.iter_mut().enumerate().take(width) {
+                        let [r, g, b] = rgb_row[x];
+                        *pixel = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+                    }
+                    direct_gamma = true;
+                }
+            }
+            PixelFormat::Srgb8Rgba => {
+                let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
+                if opaque && !need_gamut {
+                    for (x, pixel) in dst.iter_mut().enumerate().take(width) {
+                        let [r, g, b, _a] = rgba_row[x];
+                        *pixel = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+                    }
+                    direct_gamma = true;
+                } else if opaque {
+                    for (x, pixel) in linear_scratch.iter_mut().enumerate().take(width) {
+                        let [r, g, b, _a] = rgba_row[x];
+                        *pixel = [
+                            crate::color::srgb_u8_to_linear(r),
+                            crate::color::srgb_u8_to_linear(g),
+                            crate::color::srgb_u8_to_linear(b),
+                        ];
+                    }
+                } else {
+                    composite_srgb8_rgba_to_linear(
+                        &rgba_row[..width],
+                        abs_row_offset + y,
+                        linear_scratch,
+                    );
+                }
+            }
+            PixelFormat::Srgb8Bgra => {
+                let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
+                if opaque && !need_gamut {
+                    for (x, pixel) in dst.iter_mut().enumerate().take(width) {
+                        let [b, g, r, _a] = bgra_row[x];
+                        *pixel = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+                    }
+                    direct_gamma = true;
+                } else if opaque {
+                    for (x, pixel) in linear_scratch.iter_mut().enumerate().take(width) {
+                        let [b, g, r, _a] = bgra_row[x];
+                        *pixel = [
+                            crate::color::srgb_u8_to_linear(r),
+                            crate::color::srgb_u8_to_linear(g),
+                            crate::color::srgb_u8_to_linear(b),
+                        ];
+                    }
+                } else {
+                    composite_srgb8_bgra_to_linear(
+                        &bgra_row[..width],
+                        abs_row_offset + y,
+                        linear_scratch,
+                    );
+                }
+            }
+            PixelFormat::Srgb16Rgba => {
+                let rgba_row: &[[u16; 4]] = bytemuck::cast_slice(row_bytes);
+                if opaque && !need_gamut {
+                    for (x, pixel) in dst.iter_mut().enumerate().take(width) {
+                        let [r, g, b, _a] = rgba_row[x];
+                        *pixel = [r as f32 / 65535.0, g as f32 / 65535.0, b as f32 / 65535.0];
+                    }
+                    direct_gamma = true;
+                } else {
+                    native_sdr_linear_row(source, y, abs_row_offset + y, linear_scratch);
+                }
+            }
+            PixelFormat::LinearF32Rgba => {
+                native_sdr_linear_row(source, y, abs_row_offset + y, linear_scratch);
+            }
+            #[allow(unreachable_patterns)]
+            other => panic!(
+                "zensim: unsupported pixel format {:?} in Y'CbCr conversion",
+                other
+            ),
+        }
+        if direct_gamma {
+            return;
+        }
+        // The linear scratch holds the same pixels the XYB path would use
+        // (linearized u8 or composite/native rows, gamut-mapped below where
+        // it applies); encode them into the gamma domain.
+        if need_gamut
+            && matches!(
+                pixel_format,
+                PixelFormat::Srgb8Rgb | PixelFormat::Srgb8Rgba | PixelFormat::Srgb8Bgra
+            )
+        {
+            for pixel in linear_scratch.iter_mut().take(width) {
+                apply_gamut_matrix(pixel, primaries, source.gamut_mapping());
+            }
+        }
+        for (pixel, d) in linear_scratch.iter().take(width).zip(dst.iter_mut()) {
+            *d = [
+                crate::color::linear_to_srgb_gamma(pixel[0]),
+                crate::color::linear_to_srgb_gamma(pixel[1]),
+                crate::color::linear_to_srgb_gamma(pixel[2]),
+            ];
+        }
+    };
+
+    let mut rgb_row = vec![[0.0f32; 3]; width];
+    let mut linear_scratch = vec![[0.0f32; 3]; width];
+    for y in 0..height {
+        gamma_row(y, &mut rgb_row, &mut linear_scratch);
+        let row = &mut out[y * padded_width..y * padded_width + width];
+        for (x, pixel) in rgb_row.iter().enumerate() {
+            row[x] = ycbcr_plane_value(*pixel, plane);
+        }
+        let dst_start = y * padded_width;
+        for (i, &mx) in mirror_offsets.iter().enumerate() {
+            out[dst_start + width + i] = ycbcr_plane_value(rgb_row[mx], plane);
+        }
+    }
+}
+
 /// Process one channel of one strip: blur, extract inner rows, accumulate features.
 ///
 /// Three paths based on what features the channel needs:
@@ -8542,6 +8747,155 @@ mod tests {
         for (a, b) in nn.iter().zip(jbu.iter()) {
             assert!(b.is_finite());
             assert_eq!(a, b);
+        }
+    }
+
+    /// BT.709 full-range anchor values: neutral → zero chroma, saturated
+    /// primaries → the documented extremes, and a mid-grey check that the
+    /// gamma-domain signal is what the matrix consumes (not linear light).
+    #[test]
+    fn ycbcr_plane_bt709_anchor_values() {
+        let cases: [([f32; 3], f32, f32, f32); 5] = [
+            // (rgb, expected Y′, Cb, Cr)
+            ([0.0, 0.0, 0.0], 0.0, 0.0, 0.0),
+            ([1.0, 1.0, 1.0], 1.0, 0.0, 0.0),
+            (
+                [1.0, 0.0, 0.0],
+                0.2126,
+                -0.2126 / 1.8556,
+                (1.0 - 0.2126) / 1.5748,
+            ),
+            (
+                [0.0, 0.0, 1.0],
+                0.0722,
+                (1.0 - 0.0722) / 1.8556,
+                -0.0722 / 1.5748,
+            ),
+            ([0.5, 0.5, 0.5], 0.5, 0.0, 0.0),
+        ];
+        for (rgb, ey, ecb, ecr) in cases {
+            let y = ycbcr_plane_value(rgb, YcbcrPlane::Y);
+            let cb = ycbcr_plane_value(rgb, YcbcrPlane::Cb);
+            let cr = ycbcr_plane_value(rgb, YcbcrPlane::Cr);
+            assert!(
+                (y - ey).abs() < 1e-6 && (cb - ecb).abs() < 1e-6 && (cr - ecr).abs() < 1e-6,
+                "{rgb:?}: got ({y}, {cb}, {cr}) want ({ey}, {ecb}, {ecr})"
+            );
+            assert!((0.0..=1.0).contains(&y));
+            assert!((-0.5..=0.5).contains(&cb) && (-0.5..=0.5).contains(&cr));
+        }
+        // Saturated primaries reach the documented extremes exactly.
+        assert_eq!(ycbcr_plane_value([1.0, 0.0, 0.0], YcbcrPlane::Cr), 0.5);
+        assert_eq!(ycbcr_plane_value([0.0, 0.0, 1.0], YcbcrPlane::Cb), 0.5);
+    }
+
+    /// The u8 fast path must be the gamma code itself, bit-identical to
+    /// `v/255` fed through the matrix — no LUT round-trip error.
+    #[test]
+    fn ycbcr_converter_srgb8_is_exact_gamma_domain() {
+        let (w, h) = (9usize, 5usize);
+        let px: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                [
+                    (i * 37 % 251) as u8,
+                    (i * 91 % 239) as u8,
+                    (i * 53 % 233) as u8,
+                ]
+            })
+            .collect();
+        let src = RgbSlice::new(&px, w, h);
+        for plane in [YcbcrPlane::Y, YcbcrPlane::Cb, YcbcrPlane::Cr] {
+            let mut out = vec![0.0f32; w * h];
+            convert_source_to_ycbcr_plane_into_slice(&src, &mut out, w, 0, plane);
+            for (i, &[r, g, b]) in px.iter().enumerate() {
+                let want = ycbcr_plane_value(
+                    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0],
+                    plane,
+                );
+                assert_eq!(
+                    out[i].to_bits(),
+                    want.to_bits(),
+                    "{plane:?} px {i}: {} != {want}",
+                    out[i]
+                );
+            }
+        }
+    }
+
+    /// Opaque RGBA rows must take the same fast path as RGB (alpha
+    /// ignored); translucent rows must still produce finite, in-range
+    /// planes through the composite+encode fallback.
+    #[test]
+    fn ycbcr_converter_rgba_alpha_contract() {
+        let (w, h) = (7usize, 4usize);
+        let rgb: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                [
+                    (i * 31 % 251) as u8,
+                    (i * 17 % 241) as u8,
+                    (i * 71 % 229) as u8,
+                ]
+            })
+            .collect();
+        let rgba: Vec<[u8; 4]> = rgb.iter().map(|&[r, g, b]| [r, g, b, 255]).collect();
+        let rgb_src = RgbSlice::new(&rgb, w, h);
+        let rgba_src =
+            crate::source::RgbaSlice::with_alpha_mode(&rgba, w, h, crate::AlphaMode::Opaque);
+        for plane in [YcbcrPlane::Y, YcbcrPlane::Cb, YcbcrPlane::Cr] {
+            let (mut a, mut b) = (vec![0.0f32; w * h], vec![0.0f32; w * h]);
+            convert_source_to_ycbcr_plane_into_slice(&rgb_src, &mut a, w, 0, plane);
+            convert_source_to_ycbcr_plane_into_slice(&rgba_src, &mut b, w, 0, plane);
+            assert_eq!(a, b, "opaque RGBA must equal RGB for {plane:?}");
+        }
+        let translucent: Vec<[u8; 4]> = rgb
+            .iter()
+            .enumerate()
+            .map(|(i, &[r, g, b])| [r, g, b, (i % 4) as u8 * 85])
+            .collect();
+        let t_src = crate::source::RgbaSlice::new(&translucent, w, h);
+        let mut out = vec![0.0f32; w * h];
+        for plane in [YcbcrPlane::Y, YcbcrPlane::Cb, YcbcrPlane::Cr] {
+            convert_source_to_ycbcr_plane_into_slice(&t_src, &mut out, w, 0, plane);
+            let (lo, hi) = if plane == YcbcrPlane::Y {
+                (0.0f32, 1.0f32)
+            } else {
+                (-0.5, 0.5)
+            };
+            assert!(
+                out.iter().all(|v| v.is_finite() && *v >= lo && *v <= hi),
+                "translucent {plane:?} out of [{lo}, {hi}]"
+            );
+        }
+    }
+
+    /// Pad columns carry the horizontal mirror of the plane, matching the
+    /// XYB converter's padding contract.
+    #[test]
+    fn ycbcr_converter_mirror_pads_columns() {
+        let (w, h, padded_w) = (5usize, 3usize, 9usize);
+        let px: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                [
+                    (i * 41 % 251) as u8,
+                    (i * 19 % 239) as u8,
+                    (i * 97 % 233) as u8,
+                ]
+            })
+            .collect();
+        let src = RgbSlice::new(&px, w, h);
+        let mut out = vec![-1.0f32; padded_w * h];
+        convert_source_to_ycbcr_plane_into_slice(&src, &mut out, padded_w, 0, YcbcrPlane::Y);
+        let period = 2 * (w - 1);
+        for y in 0..h {
+            for i in 0..(padded_w - w) {
+                let m = (w + i) % period;
+                let mx = if m < w { m } else { period - m };
+                assert_eq!(
+                    out[y * padded_w + w + i].to_bits(),
+                    out[y * padded_w + mx].to_bits(),
+                    "row {y} pad {i} must mirror column {mx}"
+                );
+            }
         }
     }
 }

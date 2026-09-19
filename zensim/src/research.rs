@@ -188,13 +188,33 @@ pub enum DvifmBand {
     Local,
 }
 
+/// Training-only: which scale-0 plane feeds the DVIFM pump — the spec
+/// JSON's top-level `"input_plane"` (`"xyb_y"` default = the historical
+/// XYB-Y tap; `"ycbcr_y"`/`"ycbcr_cb"`/`"ycbcr_cr"` = the BT.709 planes).
+/// SDR-only: a non-`xyb_y` plane on the HDR front-end is refused.
+#[cfg(feature = "training")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DvifmInputPlane {
+    /// XYB Y (default; byte-identical to the pre-field path).
+    #[default]
+    XybY,
+    /// BT.709 full-range Y′ on the gamma-encoded sRGB signal.
+    YcbcrY,
+    /// BT.709 full-range Cb.
+    YcbcrCb,
+    /// BT.709 full-range Cr.
+    YcbcrCr,
+}
+
 /// Training-only: the full DVIFM spec — one [`DvifmLevelSpec`] per pyramid
-/// level (exactly five).
+/// level (exactly five) plus the input-plane selection.
 #[cfg(feature = "training")]
 #[derive(Debug, Clone)]
 pub struct DvifmSpec {
     /// Level-major constants; `levels.len() == 5` (asserted in `extract`).
     pub levels: Vec<DvifmLevelSpec>,
+    /// Scale-0 plane the pump consumes (default [`DvifmInputPlane::XybY`]).
+    pub input_plane: DvifmInputPlane,
 }
 
 #[cfg(feature = "training")]
@@ -224,7 +244,15 @@ impl DvifmSpec {
                     edge: s.edge,
                 }
             });
-        crate::dvifm::DvifmParams { levels }
+        crate::dvifm::DvifmParams {
+            levels,
+            input_plane: match self.input_plane {
+                DvifmInputPlane::XybY => crate::dvifm::DvifmInputPlane::XybY,
+                DvifmInputPlane::YcbcrY => crate::dvifm::DvifmInputPlane::YcbcrY,
+                DvifmInputPlane::YcbcrCb => crate::dvifm::DvifmInputPlane::YcbcrCb,
+                DvifmInputPlane::YcbcrCr => crate::dvifm::DvifmInputPlane::YcbcrCr,
+            },
+        }
     }
 }
 
@@ -476,6 +504,13 @@ impl Request {
     pub fn collect_dvifm_blocks(mut self, on: bool) -> Request {
         self.dvifm_blocks = on;
         self
+    }
+
+    /// The DVIFM spec override attached by [`Request::with_dvifm_spec`]
+    /// (`None` = the kernel defaults, XYB-Y plane).
+    #[cfg(feature = "training")]
+    pub fn dvifm_spec(&self) -> Option<&DvifmSpec> {
+        self.dvifm_spec.as_ref()
     }
 
     /// The slots asked for.
@@ -1740,7 +1775,10 @@ mod tests {
             .collect();
         let e2 = extract(
             &Request::for_slots(all, 986)
-                .with_dvifm_spec(DvifmSpec { levels })
+                .with_dvifm_spec(DvifmSpec {
+                    levels,
+                    input_plane: DvifmInputPlane::XybY,
+                })
                 .collect_dvifm_blocks(true),
             &rs,
             &rd,
@@ -1766,6 +1804,196 @@ mod tests {
             assert_eq!(
                 stats.records[l], stats2.records[l],
                 "level {l} records moved under a constants-only spec"
+            );
+        }
+    }
+
+    /// The `input_plane` routes feed the same pump the plane the
+    /// converter produces: an extraction under each `ycbcr_*` spec must
+    /// equal the whole-plane oracle (converter output →
+    /// `dvifm_features_stream` under the route's norm), and an `xyb_y`
+    /// spec must be bit-identical to no spec at all.
+    #[cfg(feature = "training")]
+    #[test]
+    fn dvifm_input_plane_routes_match_whole_plane_oracle() {
+        let default_spec = || DvifmSpec {
+            levels: crate::dvifm::DvifmParams::default()
+                .levels
+                .iter()
+                .map(|lp| DvifmLevelSpec {
+                    g: lp.g,
+                    p: lp.p,
+                    c0: lp.c0,
+                    beta: lp.beta,
+                    sharp: lp.sharp,
+                    c_hi: lp.c_hi,
+                    f2_centers: lp.f2_centers,
+                    band: match lp.band {
+                        crate::dvifm::BandMode::Laplacian => DvifmBand::Laplacian,
+                        crate::dvifm::BandMode::Local => DvifmBand::Local,
+                    },
+                    edge: lp.edge,
+                })
+                .collect(),
+            input_plane: DvifmInputPlane::XybY,
+        };
+        for &(w, h) in &[(80usize, 96usize), (150, 170)] {
+            let (s, d) = pair(w, h);
+            let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));
+            let all = SlotSet::from_ranges([(0, 986)]);
+            let base = extract(&Request::for_slots(all.clone(), 986), &rs, &rd)
+                .expect("base extract")
+                .into_values();
+
+            // xyb_y spec == no spec, on every slot.
+            let mut spec = default_spec();
+            let tagged = extract(
+                &Request::for_slots(all.clone(), 986).with_dvifm_spec(spec.clone()),
+                &rs,
+                &rd,
+            )
+            .expect("xyb_y spec extract")
+            .into_values();
+            for (i, (a, b)) in base.iter().zip(tagged.iter()).enumerate() {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "{w}x{h}: xyb_y spec moved f{i} off the default path"
+                );
+            }
+
+            for (plane_sel, conv_plane, norm) in [
+                (
+                    DvifmInputPlane::YcbcrY,
+                    crate::streaming::YcbcrPlane::Y,
+                    crate::dvifm::DVIFM_NORM_YCBCR_Y,
+                ),
+                (
+                    DvifmInputPlane::YcbcrCb,
+                    crate::streaming::YcbcrPlane::Cb,
+                    crate::dvifm::DVIFM_NORM_YCBCR_C,
+                ),
+                (
+                    DvifmInputPlane::YcbcrCr,
+                    crate::streaming::YcbcrPlane::Cr,
+                    crate::dvifm::DVIFM_NORM_YCBCR_C,
+                ),
+            ] {
+                spec.input_plane = plane_sel;
+                let got = extract(
+                    &Request::for_slots(all.clone(), 986).with_dvifm_spec(spec.clone()),
+                    &rs,
+                    &rd,
+                )
+                .expect("ycbcr spec extract")
+                .into_values();
+                let mut ps = vec![0.0f32; w * h];
+                let mut pd = vec![0.0f32; w * h];
+                crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+                    &rs, &mut ps, w, 0, conv_plane,
+                );
+                crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+                    &rd, &mut pd, w, 0, conv_plane,
+                );
+                let oracle =
+                    crate::dvifm::dvifm_features_stream(&ps, &pd, w, h, norm, &spec.to_params());
+                for i in 0..956 {
+                    assert_eq!(
+                        base[i].to_bits(),
+                        got[i].to_bits(),
+                        "{w}x{h} {plane_sel:?}: non-dvifm slot f{i} moved"
+                    );
+                }
+                for i in 0..30 {
+                    assert_eq!(
+                        got[956 + i].to_bits(),
+                        oracle[i].to_bits(),
+                        "{w}x{h} {plane_sel:?}: f956+{i} {} != oracle {}",
+                        got[956 + i],
+                        oracle[i]
+                    );
+                }
+                // The plane actually changed the features (not a no-op tap).
+                assert!(
+                    got[956..986] != base[956..986],
+                    "{w}x{h} {plane_sel:?}: f956+ identical to XYB-Y — tap not engaged"
+                );
+            }
+        }
+    }
+
+    /// Small inputs: the walk reflect-pads to the pyramid minimum before
+    /// the producer runs, so the Y′CbCr oracle must convert the PADDED
+    /// image — the pump's accumulator takes the strip's own dims.
+    #[cfg(feature = "training")]
+    #[test]
+    fn dvifm_input_plane_routes_match_oracle_on_padded_inputs() {
+        let (w, h) = (40usize, 50usize);
+        let (s, d) = pair(w, h);
+        let (rs, rd) = (RgbSlice::new(&s, w, h), RgbSlice::new(&d, w, h));
+        let ps = crate::metric::reflect_pad_to_min(&rs);
+        let pd = crate::metric::reflect_pad_to_min(&rd);
+        let (pw, ph) = (ps.width(), ps.height());
+        let spec = DvifmSpec {
+            levels: crate::dvifm::DvifmParams::default()
+                .levels
+                .iter()
+                .map(|lp| DvifmLevelSpec {
+                    g: lp.g,
+                    p: lp.p,
+                    c0: lp.c0,
+                    beta: lp.beta,
+                    sharp: lp.sharp,
+                    c_hi: lp.c_hi,
+                    f2_centers: lp.f2_centers,
+                    band: match lp.band {
+                        crate::dvifm::BandMode::Laplacian => DvifmBand::Laplacian,
+                        crate::dvifm::BandMode::Local => DvifmBand::Local,
+                    },
+                    edge: lp.edge,
+                })
+                .collect(),
+            input_plane: DvifmInputPlane::YcbcrCb,
+        };
+        let got = extract(
+            &Request::for_slots(SlotSet::from_ranges([(0, 986)]), 986)
+                .with_dvifm_spec(spec.clone()),
+            &rs,
+            &rd,
+        )
+        .expect("ycbcr spec extract")
+        .into_values();
+        let mut s_plane = vec![0.0f32; pw * ph];
+        let mut d_plane = vec![0.0f32; pw * ph];
+        crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+            &ps,
+            &mut s_plane,
+            pw,
+            0,
+            crate::streaming::YcbcrPlane::Cb,
+        );
+        crate::streaming::convert_source_to_ycbcr_plane_into_slice(
+            &pd,
+            &mut d_plane,
+            pw,
+            0,
+            crate::streaming::YcbcrPlane::Cb,
+        );
+        let oracle = crate::dvifm::dvifm_features_stream(
+            &s_plane,
+            &d_plane,
+            pw,
+            ph,
+            crate::dvifm::DVIFM_NORM_YCBCR_C,
+            &spec.to_params(),
+        );
+        for i in 0..30 {
+            assert_eq!(
+                got[956 + i].to_bits(),
+                oracle[i].to_bits(),
+                "padded {w}x{h}: f956+{i} {} != oracle {}",
+                got[956 + i],
+                oracle[i]
             );
         }
     }
