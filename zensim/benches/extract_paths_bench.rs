@@ -260,6 +260,23 @@ fn toggles_full() -> zensim::feature_v2::V2NewFeatureToggles {
     }
 }
 
+/// f956 shape: append + append2 + CSFW on, DVIFM off — the DVIFM cost
+/// gate's OFF arm (the widest pre-DVIFM folded layout).
+fn toggles_csfw() -> zensim::feature_v2::V2NewFeatureToggles {
+    zensim::feature_v2::V2NewFeatureToggles {
+        csfw_block: true,
+        ..toggles_off()
+    }
+}
+
+/// f986 shape: everything on — the DVIFM cost gate's ON arm.
+fn toggles_dvifm() -> zensim::feature_v2::V2NewFeatureToggles {
+    zensim::feature_v2::V2NewFeatureToggles {
+        dvifm_block: true,
+        ..toggles_csfw()
+    }
+}
+
 /// Raw extraction controls. Serving additionally derives its plan, gathers
 /// declared IDs and applies the complete scoring composition.
 fn toggles_v1_only(
@@ -439,6 +456,19 @@ fn rss_mode(arm: &str) {
                     .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
                     .expect("fold");
                 sink += v2.features()[943] as f64;
+            }
+            "fold956_csfw" | "fold986_dvifm" => {
+                let t = if arm == "fold986_dvifm" {
+                    toggles_dvifm()
+                } else {
+                    toggles_csfw()
+                };
+                let rsv = RgbSlice::new(&src, w, h);
+                let dsv = RgbSlice::new(&dst, w, h);
+                let v2 = z
+                    .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
+                    .expect("fold dvifm");
+                sink += v2.features()[v2.features().len() - 1] as f64;
             }
             other => panic!("unknown ZEN_XP_RSS arm: {other}"),
         }
@@ -1052,6 +1082,33 @@ fn main() {
                             .compute_folded720_features_streaming(&rsv, &dsv, full, &mut scratch)
                             .unwrap();
                         zenbench::black_box((v2.features()[178], v2.features()[943]));
+                    })
+                });
+                // DVIFM cost gate (2026-09-19): the OFF arm is the widest
+                // pre-DVIFM folded layout (956), the ON arm adds the flat
+                // 30-slot block (986). Same pixels, same process, paired.
+                group.bench("fold956_csfw", move |b| {
+                    let mut scratch = zensim::feature_v2::V2Scratch::new();
+                    let t = toggles_csfw();
+                    b.iter(move || {
+                        let rsv = RgbSlice::new(src_s, n, n);
+                        let dsv = RgbSlice::new(dst_s, n, n);
+                        let v2 = z
+                            .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
+                            .unwrap();
+                        zenbench::black_box(v2.features()[955]);
+                    })
+                });
+                group.bench("fold986_dvifm", move |b| {
+                    let mut scratch = zensim::feature_v2::V2Scratch::new();
+                    let t = toggles_dvifm();
+                    b.iter(move || {
+                        let rsv = RgbSlice::new(src_s, n, n);
+                        let dsv = RgbSlice::new(dst_s, n, n);
+                        let v2 = z
+                            .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
+                            .unwrap();
+                        zenbench::black_box(v2.features()[985]);
                     })
                 });
                 // The opponent. Same pixels, same process, same round.
