@@ -79,6 +79,9 @@ pub(crate) struct DvifmLevelParams {
 impl DvifmLevelParams {
     /// SEED 1.0 placeholders — the design's first-screen constants and the
     /// numpy reference self-check's bin centres `ln([1e-3,1e-2,5e-2,0.2,0.8])`.
+    /// Retained as the fixture/test baseline; `Default` tracks the current
+    /// screen-baked constants.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) const SEED: Self = Self {
         g: 1.0,
         p: 1.0,
@@ -104,10 +107,104 @@ pub(crate) struct DvifmParams {
     pub levels: [DvifmLevelParams; DVIFM_LEVELS],
 }
 
+/// Screen-2 constants — derived from the Laplacian-band TRAIN block cache
+/// (fit rows only, `row_index < 8000` of the 2026-09-19 minimal-top admitted
+/// segment set; `dvifm-screen-2026-09-19/specs/dvifm-lap-derived.json`):
+/// per level C₀ = p10 of `min(C̃_ref, C̃_dist)`, F2 centres = the {10,30,50,
+/// 70,90}% quantiles of `ln(min C̃ + 1e-6)`; g = 1, P = 1, β = 0.65, ς = 4,
+/// c_hi = ∞, edge discount on, Laplacian band — the design's first screen.
+pub(crate) const DVIFM_SCREEN_LAP: [DvifmLevelParams; DVIFM_LEVELS] = [
+    DvifmLevelParams {
+        g: 1.0,
+        p: 1.0,
+        c0: 0.0017294263816438615,
+        beta: 0.65,
+        sharp: 4.0,
+        c_hi: f64::INFINITY,
+        f2_centers: [
+            -6.3593874374616037,
+            -5.035320449097286,
+            -4.0195539725619414,
+            -3.0716793079739837,
+            -2.0480206073699097,
+        ],
+        band: BandMode::Laplacian,
+        edge: true,
+    },
+    DvifmLevelParams {
+        g: 1.0,
+        p: 1.0,
+        c0: 0.0017761460563633592,
+        beta: 0.65,
+        sharp: 4.0,
+        c_hi: f64::INFINITY,
+        f2_centers: [
+            -6.3327465405235808,
+            -4.870324628412102,
+            -3.7595773363237082,
+            -2.9265964629353478,
+            -2.0872582738627732,
+        ],
+        band: BandMode::Laplacian,
+        edge: true,
+    },
+    DvifmLevelParams {
+        g: 1.0,
+        p: 1.0,
+        c0: 0.002016443555476144,
+        beta: 0.65,
+        sharp: 4.0,
+        c_hi: f64::INFINITY,
+        f2_centers: [
+            -6.2059241356707071,
+            -4.3622657471446074,
+            -3.3855464852686756,
+            -2.7253109124144967,
+            -2.0380321799612053,
+        ],
+        band: BandMode::Laplacian,
+        edge: true,
+    },
+    DvifmLevelParams {
+        g: 1.0,
+        p: 1.0,
+        c0: 0.003740424606075978,
+        beta: 0.65,
+        sharp: 4.0,
+        c_hi: f64::INFINITY,
+        f2_centers: [
+            -5.5882888295057835,
+            -3.7874051334739729,
+            -3.0092883951992846,
+            -2.4612289364958166,
+            -1.9052735467604098,
+        ],
+        band: BandMode::Laplacian,
+        edge: true,
+    },
+    DvifmLevelParams {
+        g: 1.0,
+        p: 1.0,
+        c0: 0.017739474773406982,
+        beta: 0.65,
+        sharp: 4.0,
+        c_hi: f64::INFINITY,
+        f2_centers: [
+            -4.03190653958357,
+            -2.9995830128137255,
+            -2.4690981949129278,
+            -1.970045059050014,
+            -1.4573178491587075,
+        ],
+        band: BandMode::Laplacian,
+        edge: true,
+    },
+];
+
 impl Default for DvifmParams {
     fn default() -> Self {
         Self {
-            levels: [DvifmLevelParams::SEED; DVIFM_LEVELS],
+            levels: DVIFM_SCREEN_LAP,
         }
     }
 }
@@ -2113,7 +2210,12 @@ mod tests {
                     }
                     "features" => {
                         let band = it.next().unwrap();
-                        let mut params = DvifmParams::default();
+                        // The fixture was generated under the SEED constants —
+                        // pin them; `DvifmParams::default()` tracks the current
+                        // screen-baked constants.
+                        let mut params = DvifmParams {
+                            levels: [DvifmLevelParams::SEED; DVIFM_LEVELS],
+                        };
                         if band == "local" {
                             for lp in &mut params.levels {
                                 lp.band = BandMode::Local;
