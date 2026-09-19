@@ -609,6 +609,15 @@
       "report_url": "/zensim/benchmarks/dvifm_screen2b_2026-09-19.md",
       "bakes": [],
       "note": "Preregistered powered rerun fixing Phase-2 confounds: 4 arms (basic228 / +dvifm30 / +perm30 row-permuted control / y60), 10 paired seeds, cycle-aligned E={50,100} final-epoch checkpoints, nested N={2000,8000,8327=all admitted human TRAIN rows}, within-reference per_group_srocc primary metric. Verdict INFO-NOT-USEFUL at N_max E=100: DVIFM beats its own permuted control 10/10 seeds (+0.0064 paired, 2*SE 0.0018 \u2014 real signal) but loses to basic228 10/10 seeds (-0.0029 per-ref, -0.0050 pooled) with the overfitting signature intact (+0.0062 fit SROCC, -28% loss). KonFiG dev2 (4 refs) shows the same ordering. No E=150 (incomplete rule did not fire), no frozen EVAL, no optimization; family stays registered and default-OFF. Evidence: /mnt/v/output/zensim/dvifm-screen2b-2026-09-19/ (pointer file committed)."
+    },
+    {
+      "id": "2026-09-19-dvifm-screen2c",
+      "date": "2026-09-19",
+      "role": "train-development",
+      "label": "2026-09-19 \u00b7 DVIFM phase-2c: substitution + codec-proxy screen",
+      "report_url": "/zensim/benchmarks/dvifm_screen2c_2026-09-19.md",
+      "bakes": [],
+      "note": "Q1 NOT-A-SUBSTITUTE: y60+dvifm30 loses to y60 10/10 seeds (paired \u0394 \u22120.0045); gap to basic228 widened, not closed. dvifm30 alone carries real signal (0.857 vs 0.005 permuted twin). Q2 NEGATIVE on the TRAIN-role codec panel (PROXY labels): basic228+dvifm30 does not separate from its permuted twin (\u22120.0021, |0.0021| \u2264 2\u00b7SD/\u221a10 = 0.0085); JPEG shows the largest within-ladder loss. dvifm_block stays default-OFF. Record: benchmarks/dvifm_screen2c_2026-09-19.md"
     }
   ],
   "incumbent_notes": [

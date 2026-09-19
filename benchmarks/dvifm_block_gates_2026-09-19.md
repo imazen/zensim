@@ -215,3 +215,29 @@ learning-curve deficit is stable-to-growing across N; the KonFiG dev2 leg
 (4 refs) shows the same ordering. **INFO-NOT-USEFUL**: real but redundant
 signal. The family does not advance; `dvifm_block` stays registered and
 default-OFF; the +31.6 ms @1024² cost remains unamortised.
+
+## Phase-2c substitution + codec screen outcome (2026-09-19) — NOT-A-SUBSTITUTE / NEGATIVE
+
+The preregistered follow-up
+(`benchmarks/dvifm_screen2c_prereg_2026-09-19.md`, committed `4d6946db`
+before any fit; full record `benchmarks/dvifm_screen2c_2026-09-19.{md,json}`)
+asked the two questions 2b left open, with in-driver bake stamping and
+40 byte-identical 2b cells reused (hash-verified).
+
+- **Q1 (human TRAIN rows): NOT-A-SUBSTITUTE.** `y60+dvifm30` loses to
+  `y60` on the within-reference primary in all 10 seeds (paired Δ
+  −0.0045, 2·SD/√10 = 0.0015) and widens rather than closes the gap to
+  `basic228` (gap closed = −2.46). `dvifm30` alone carries real signal
+  (per-ref mean 0.857 vs 0.005 for its permuted twin, +10/−0) but the
+  fast tier does not gain from it.
+- **Q2 (TRAIN-role codec panel, PROXY labels): NEGATIVE.** The 2b
+  ordering does not hold on JPEG/WebP/AVIF-SVT/JXL sweeps scored by the
+  registered `score_ssim2` proxies: `basic228+dvifm30` does not separate
+  from its permuted twin (Δ(B−C) = −0.0021, |Δ| ≤ 2·SD/√10 = 0.0085,
+  +5/−5), and the y60 pair is again NOT-A-SUBSTITUTE (−0.0132, +0/−10).
+  JPEG — where an 8-lattice blockiness hypothesis should show first —
+  carries the largest within-ladder loss (−0.11).
+
+The family does not advance on either axis: not a fast-tier substitute,
+not codec-distortion-specific. `dvifm_block` stays registered and
+default-OFF; the +31.6 ms @1024² cost remains unamortised.
