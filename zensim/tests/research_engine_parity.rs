@@ -118,10 +118,12 @@ fn research_and_production_agree_bit_exactly_at_the_944_layout() {
     }
 }
 
-/// **G2.1, the COMPLETE half** — the full registered width (956) agrees
-/// bit-exactly with the production CSFW walk.
+/// **G2.1, the COMPLETE half** — the full registered width agrees
+/// bit-exactly with the production walk at the widest registered regime
+/// (986 = folded720 + append + append2 + CSFW + DVIFM; the DVIFM tail is
+/// itself bit-identical to the whole-plane oracle per the dvifm gates).
 #[test]
-fn research_everything_agrees_with_the_production_csfw_walk() {
+fn research_everything_agrees_with_the_production_walk() {
     use zensim::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
     let full = research::full_width();
     let z = Zensim::new(ZensimProfile::codec_target()).with_parallel(false);
@@ -136,12 +138,13 @@ fn research_everything_agrees_with_the_production_csfw_walk() {
                 V2NewFeatureToggles {
                     append2_block: true,
                     csfw_block: true,
+                    dvifm_block: true,
                     v1_pools: V1PoolsMode::Full,
                     ..V2NewFeatureToggles::default()
                 },
                 &mut scratch,
             )
-            .unwrap_or_else(|e| panic!("production 956 walk at {w}x{h}: {e:?}"));
+            .unwrap_or_else(|e| panic!("production {full} walk at {w}x{h}: {e:?}"));
         assert_eq!(prod.features().len(), full, "at {w}x{h}");
         let e = research::extract(&Request::everything(), &rs, &rd)
             .unwrap_or_else(|e| panic!("research everything at {w}x{h}: {e}"));
