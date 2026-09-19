@@ -600,6 +600,15 @@
       "report_url": "/zensim/benchmarks/dvifm_screen_2026-09-19.md",
       "bakes": [],
       "note": "Phase-2 screen of f956..f985 (w986) against basic228 on the admitted minimal-top segments: mechanism check PASS, then three negative band/constant screens \u2014 Laplacian median paired diff -0.0041, local -0.0036, fitted-local -0.0023 (all nine seed-paired diffs negative; 3 seeds x 3 rounds, E=40 plateau-verified). Adam fit of per-level (g,P,C0,beta,sharp) on the TRAIN block cache halved the deficit but never crossed zero. No five-seed confirmation; no frozen EVAL opened; family stays registered and default-OFF. Evidence: /mnt/v/output/zensim/dvifm-screen-2026-09-19/ (pointer file committed)."
+    },
+    {
+      "id": "2026-09-19-dvifm-screen2b",
+      "date": "2026-09-19",
+      "role": "train-development",
+      "label": "2026-09-19 \u00b7 DVIFM powered control-arm screen (Phase 2b): INFO-NOT-USEFUL",
+      "report_url": "/zensim/benchmarks/dvifm_screen2b_2026-09-19.md",
+      "bakes": [],
+      "note": "Preregistered powered rerun fixing Phase-2 confounds: 4 arms (basic228 / +dvifm30 / +perm30 row-permuted control / y60), 10 paired seeds, cycle-aligned E={50,100} final-epoch checkpoints, nested N={2000,8000,8327=all admitted human TRAIN rows}, within-reference per_group_srocc primary metric. Verdict INFO-NOT-USEFUL at N_max E=100: DVIFM beats its own permuted control 10/10 seeds (+0.0064 paired, 2*SE 0.0018 \u2014 real signal) but loses to basic228 10/10 seeds (-0.0029 per-ref, -0.0050 pooled) with the overfitting signature intact (+0.0062 fit SROCC, -28% loss). KonFiG dev2 (4 refs) shows the same ordering. No E=150 (incomplete rule did not fire), no frozen EVAL, no optimization; family stays registered and default-OFF. Evidence: /mnt/v/output/zensim/dvifm-screen2b-2026-09-19/ (pointer file committed)."
     }
   ],
   "incumbent_notes": [

@@ -195,3 +195,23 @@ last-tested fitted-local constants (`DVIFM_SCREEN_FITTED`) purely as the
 reproducible screen configuration; LAP/LOCAL rounds are kept as
 `DVIFM_SCREEN_LAP`/`DVIFM_SCREEN_LOCAL`. The +31.6 ms @1024² cost stands
 unamortised — no gain exists to justify optimisation.
+
+## Phase-2b powered screen outcome (2026-09-19) — INFO-NOT-USEFUL
+
+The powered control-arm rerun
+(`benchmarks/dvifm_screen2b_prereg_2026-09-19.md`, committed `c0ebca00`
+before any fit; full record `benchmarks/dvifm_screen2b_2026-09-19.{md,json}`)
+fixed Phase 2's three confounds: 10 paired seeds × cycle-aligned E∈{50,100}
+final-epoch checkpoints × nested N∈{2,000;8,000;8,327} (all admitted
+human-labelled TRAIN rows), a permuted-column dimensionality control, and
+the within-reference `per_group_srocc` panel as the primary metric.
+
+At the decision point (N_max, E=100): the DVIFM arm beats its permuted
+control on the primary metric in all 10 seeds (mean paired Δ(B−C) +0.0064,
+2·SD/√10 = 0.0018 — the columns carry real ordering signal), but loses to
+basic228 in all 10 seeds (Δ(B−A) −0.0029; pooled SROCC −0.0050) with the
+overfitting signature intact (fit SROCC +0.0062, loss −28%). The
+learning-curve deficit is stable-to-growing across N; the KonFiG dev2 leg
+(4 refs) shows the same ordering. **INFO-NOT-USEFUL**: real but redundant
+signal. The family does not advance; `dvifm_block` stays registered and
+default-OFF; the +31.6 ms @1024² cost remains unamortised.
