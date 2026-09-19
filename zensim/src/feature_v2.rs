@@ -1285,7 +1285,8 @@ impl ZensimV2Result {
     /// The f956+ DVIFM slots ([`crate::dvifm::DVIFM_FEATURES`] flat slots —
     /// `level*6 + local`, F1 then five F2 bins per level), when the result
     /// carries them ([`FeatureRegime::Folded720Dvifm`]).
-    pub fn dvifm_features(&self) -> Option<&[f64]> {
+    #[cfg(test)]
+    pub(crate) fn dvifm_features(&self) -> Option<&[f64]> {
         match self.regime {
             FeatureRegime::Folded720Dvifm => {
                 let len = crate::dvifm::DVIFM_FEATURES;
