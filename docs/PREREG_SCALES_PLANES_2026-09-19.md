@@ -1,7 +1,10 @@
 # Preregistration — alternate scales, planes, colour space and pooling (2026-09-19)
 
 Status: PREREGISTERED PLAN. Nothing here is run yet. Execution: bounded Devin swe-2 dispatches with their own
-per-leg preregistrations; Fable reviews gates. Companion: [spatial steering plan](PLAN_SPATIAL_STEERING_DVIFM_2026-09-19.md).
+per-leg preregistrations; Fable reviews gates. Companions: [spatial steering plan](PLAN_SPATIAL_STEERING_DVIFM_2026-09-19.md),
+[joint training core + pyramid tradeoff](PLAN_JOINT_CORE_SET_2026-09-19.md) (2026-09-19: one compact core set for
+both zensim and DVIFM; no luma-only arms; the six-arm Z/D/H tradeoff study lives there),
+[fitted-constant guards](FITTED_CONSTANT_GUARDS_2026-09-19.md).
 
 ## Why
 
