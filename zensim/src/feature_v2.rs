@@ -19363,6 +19363,166 @@ pub(crate) mod tests {
         }
     }
 
+    /// **Streaming parity gate**: the walk's f956..985 tail is BIT-IDENTICAL
+    /// to the whole-plane/pump oracle `dvifm_features_stream` run over the
+    /// producer's own scale-0 Y planes (`convert_source_to_xyb(..)[1]`).
+    /// Sizes cover: a two-strip image whose second strip is a 42-row
+    /// remainder (170 = 128 + 42, not a multiple of STRIP_ROWS), odd dims,
+    /// and dims not divisible by the 5×5 analysis block.
+    #[test]
+    fn dvifm_walk_tail_matches_streaming_oracle_bit_identical() {
+        for (w, h) in [
+            (150usize, 170usize), // second strip = 42 rows; w%5==0, h%5==0
+            (67, 83),             // single strip, both dims odd
+            (131, 129),           // two strips (129 = 128 + 1), w,h %5 != 0
+            (128, 128),           // exactly one strip, block-friendly
+        ] {
+            let src = textured_image(w, h, 23);
+            let dst = quantize_distort(&src, w, h);
+            let sref = RgbSlice::new(&src, w, h);
+            let dref = RgbSlice::new(&dst, w, h);
+            let y_s = crate::streaming::convert_source_to_xyb(&sref, w, false)[1].clone();
+            let y_d = crate::streaming::convert_source_to_xyb(&dref, w, false)[1].clone();
+            let oracle = crate::dvifm::dvifm_features_stream(
+                &y_s,
+                &y_d,
+                w,
+                h,
+                crate::dvifm::DVIFM_NORM_SDR,
+                &crate::dvifm::DvifmParams::default(),
+            );
+            for parallel in [false, true] {
+                let r = compute_folded720_dvifm_impl(
+                    &sref,
+                    &dref,
+                    None,
+                    parallel,
+                    V2NewFeatureToggles::default(),
+                )
+                .unwrap();
+                let tail = r.dvifm_features().unwrap();
+                assert_eq!(tail.len(), 30);
+                for (i, (a, b)) in tail.iter().zip(oracle.iter()).enumerate() {
+                    assert_eq!(
+                        a.to_bits(),
+                        b.to_bits(),
+                        "{w}x{h} parallel={parallel}: walk f956+{i} {a:e} != oracle {b:e}"
+                    );
+                }
+            }
+        }
+
+        // Sub-MIN_PYRAMID_DIM: the producer reflect-pads to 64², and the
+        // pump must see the PADDED plane (the accumulator takes its dims
+        // from the strip info, not the request). Oracle = pad then convert.
+        let (w, h) = (40usize, 50usize);
+        let src = textured_image(w, h, 23);
+        let dst = quantize_distort(&src, w, h);
+        let sref = RgbSlice::new(&src, w, h);
+        let dref = RgbSlice::new(&dst, w, h);
+        let ps = crate::metric::reflect_pad_to_min(&sref);
+        let pd = crate::metric::reflect_pad_to_min(&dref);
+        let (pw, ph) = (ps.width(), ps.height());
+        let y_s = crate::streaming::convert_source_to_xyb(&ps, pw, false)[1].clone();
+        let y_d = crate::streaming::convert_source_to_xyb(&pd, pw, false)[1].clone();
+        let oracle = crate::dvifm::dvifm_features_stream(
+            &y_s,
+            &y_d,
+            pw,
+            ph,
+            crate::dvifm::DVIFM_NORM_SDR,
+            &crate::dvifm::DvifmParams::default(),
+        );
+        let r = compute_folded720_dvifm_impl(
+            &sref,
+            &dref,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+        )
+        .unwrap();
+        for (i, (a, b)) in r
+            .dvifm_features()
+            .unwrap()
+            .iter()
+            .zip(oracle.iter())
+            .enumerate()
+        {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "padded {w}x{h}: walk f956+{i} {a:e} != oracle {b:e}"
+            );
+        }
+    }
+
+    /// The HDR route: the walk's tail is bit-identical to the oracle over
+    /// the PU-encoded Y plane (`linear_to_pu_xyb_planar_into` ch 1) under
+    /// `DVIFM_NORM_PU`.
+    #[test]
+    fn dvifm_walk_tail_matches_streaming_oracle_hdr() {
+        let (w, h) = (96usize, 101usize); // h = 101, not a strip multiple
+        let ramp: Vec<[f32; 3]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let t = (x + 2 * y) as f32 / (w + 2 * h - 3) as f32;
+                let nits = 0.5 * (2000.0f32 / 0.5).powf(t);
+                [nits, nits * 0.97, nits * 1.03]
+            })
+            .collect();
+        let dst: Vec<[f32; 3]> = ramp
+            .iter()
+            .map(|&[r, g, b]| [r * 1.12, g * 1.12, b * 1.12])
+            .collect();
+        let sref = NitsImage::from_rgb_nits(&ramp, w, h);
+        let dref = NitsImage::from_rgb_nits(&dst, w, h);
+        // The PU-Y plane the HDR front end produces for this pair.
+        let pu_y = |img: &Vec<[f32; 3]>| -> Vec<f32> {
+            let mut y = vec![0.0f32; w * h];
+            for row in 0..h {
+                let px: Vec<[f32; 3]> = img[row * w..(row + 1) * w].to_vec();
+                let mut o0 = vec![0.0f32; w];
+                let mut o1 = vec![0.0f32; w];
+                let mut o2 = vec![0.0f32; w];
+                crate::color::linear_to_pu_xyb_planar_into(&px, &mut o0, &mut o1, &mut o2);
+                y[row * w..(row + 1) * w].copy_from_slice(&o1);
+            }
+            y
+        };
+        let oracle = crate::dvifm::dvifm_features_stream(
+            &pu_y(&ramp),
+            &pu_y(&dst),
+            w,
+            h,
+            crate::dvifm::DVIFM_NORM_PU,
+            &crate::dvifm::DvifmParams::default(),
+        );
+        let mut scratch = V2Scratch::new();
+        let r = compute_folded720_dvifm_hdr_streaming_impl(
+            &sref,
+            &dref,
+            HdrEncoding::Linear,
+            None,
+            false,
+            V2NewFeatureToggles::default(),
+            &mut scratch,
+        )
+        .unwrap();
+        for (i, (a, b)) in r
+            .dvifm_features()
+            .unwrap()
+            .iter()
+            .zip(oracle.iter())
+            .enumerate()
+        {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "HDR walk f956+{i} {a:e} != PU oracle {b:e}"
+            );
+        }
+    }
+
     /// CSFW φ-constant derivation (design §13, the
     /// `bandvis_delta_derivation_table` pattern): recompute the derived
     /// weight `w(L) = S_Ach(L) / (L · dV/dL)` from castleCSF Eq. 21 and
