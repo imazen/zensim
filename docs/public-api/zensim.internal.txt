@@ -10,14 +10,14 @@
 ## summary
 #
 #   pub modules                                 7
-#   pub types (struct/enum/trait/alias)        19
+#   pub types (struct/enum/trait/alias)        23
 #   pub consts/statics                          7
 #   free functions                             36
-#   inherent methods                          128
-#   struct fields                              92
-#   enum variants                              26
-#   trait roster entries (type × trait)        98
-#   auto-trait-complete types                  17
+#   inherent methods                          141
+#   struct fields                             104
+#   enum variants                              28
+#   trait roster entries (type × trait)       110
+#   auto-trait-complete types                  21
 #
 # per-module pub lines:
 #   (root)                           34
@@ -30,11 +30,11 @@
 #   feature_v2                       22
 #   fold_engine                       8
 #   profile                           1
-#   research                         76
+#   research                        107
 #   score_math                       26
 #   source                            4
 
-## items (315 lines)
+## items (346 lines)
 
 pub const fn det_math::PowForm::for_revision(feature_v2::FormulaRevision) -> Self
 pub const ZENTRAIN_FEATURE_IDS_KEY: &str
@@ -47,6 +47,7 @@ pub enum corruption_head::CorruptionHeadError
 pub enum det_math::PowForm
 pub enum feature_v2::FormulaRevision
 pub enum fold_engine::ScoringEngine
+pub enum research::DvifmBand
 pub enum research::ResearchError
 pub enum research::RevisionRef
 pub fn f64::det_exp(self, det_math::PowForm) -> Self
@@ -158,8 +159,19 @@ pub fn fold_engine::ScoringEngine::default() -> fold_engine::ScoringEngine
 pub fn fold_engine::ScoringEngine::eq(&self, &fold_engine::ScoringEngine) -> bool
 pub fn fold_engine::ScoringEngine::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn precompute_reference_with_scales(&[[u8; 3]], usize, usize, usize) -> core::result::Result<PrecomputedReference, ZensimError>
+pub fn research::DvifmBand::assert_fields_are_eq(&self)
+pub fn research::DvifmBand::clone(&self) -> research::DvifmBand
+pub fn research::DvifmBand::eq(&self, &research::DvifmBand) -> bool
+pub fn research::DvifmBand::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::DvifmBlockStats::clone(&self) -> research::DvifmBlockStats
+pub fn research::DvifmBlockStats::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::DvifmLevelSpec::clone(&self) -> research::DvifmLevelSpec
+pub fn research::DvifmLevelSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::DvifmSpec::clone(&self) -> research::DvifmSpec
+pub fn research::DvifmSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn research::Extraction::build_commit(&self) -> &str
 pub fn research::Extraction::clone(&self) -> research::Extraction
+pub fn research::Extraction::dvifm_blocks(&self) -> core::option::Option<&research::DvifmBlockStats>
 pub fn research::Extraction::emitted(&self) -> &feature_set_id::SlotSet
 pub fn research::Extraction::feature_set_id(&self) -> core::option::Option<&feature_set_id::FeatureSetId>
 pub fn research::Extraction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -178,6 +190,7 @@ pub fn research::FeatureProvenance::eq(&self, &research::FeatureProvenance) -> b
 pub fn research::FeatureProvenance::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn research::Request::at_revision(self, research::RevisionRef) -> research::Request
 pub fn research::Request::clone(&self) -> research::Request
+pub fn research::Request::collect_dvifm_blocks(self, bool) -> research::Request
 pub fn research::Request::dense(self) -> research::Request
 pub fn research::Request::everything() -> research::Request
 pub fn research::Request::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -187,6 +200,7 @@ pub fn research::Request::for_slots(feature_set_id::SlotSet, usize) -> research:
 pub fn research::Request::layout_width(&self) -> usize
 pub fn research::Request::validate(&self) -> core::result::Result<feature_set_id::SlotSet, research::ResearchError>
 pub fn research::Request::want(&self) -> &feature_set_id::SlotSet
+pub fn research::Request::with_dvifm_spec(self, research::DvifmSpec) -> research::Request
 pub fn research::Request::with_era_label(self, impl core::convert::Into<alloc::string::String>) -> research::Request
 pub fn research::Request::with_parallel(self, bool) -> research::Request
 pub fn research::ResearchError::clone(&self) -> research::ResearchError
@@ -227,6 +241,9 @@ pub struct bake_metadata::PerSampleAlphaMeta
 pub struct bake_metadata::ScoreMetadata
 pub struct corruption_head::CorruptionHead
 pub struct corruption_head::CorruptionVerdict
+pub struct research::DvifmBlockStats
+pub struct research::DvifmLevelSpec
+pub struct research::DvifmSpec
 pub struct research::Extraction
 pub struct research::FeatureProvenance
 pub struct research::Request
@@ -310,6 +327,20 @@ pub feature_v2::V2NewFeatureToggles::v1_only: bool
 pub fold_engine::ScoringEngine::Buffered
 pub fold_engine::ScoringEngine::Fold
 pub profile::ZensimProfile::LegacyLinearV0_2
+pub research::DvifmBand::Laplacian
+pub research::DvifmBand::Local
+pub research::DvifmBlockStats::grid: [(u32, u32); 5]
+pub research::DvifmBlockStats::records: alloc::vec::Vec<alloc::vec::Vec<f32>>
+pub research::DvifmLevelSpec::band: research::DvifmBand
+pub research::DvifmLevelSpec::beta: f64
+pub research::DvifmLevelSpec::c0: f64
+pub research::DvifmLevelSpec::c_hi: f64
+pub research::DvifmLevelSpec::edge: bool
+pub research::DvifmLevelSpec::f2_centers: [f64; 5]
+pub research::DvifmLevelSpec::g: f64
+pub research::DvifmLevelSpec::p: f64
+pub research::DvifmLevelSpec::sharp: f64
+pub research::DvifmSpec::levels: alloc::vec::Vec<research::DvifmLevelSpec>
 pub research::FeatureProvenance::channel: &'static str
 pub research::FeatureProvenance::cost: &'static str
 pub research::FeatureProvenance::defect: core::option::Option<&'static str>
@@ -352,7 +383,7 @@ pub score_math::PerSampleAlphaParams::reducer_b: f32
 pub score_math::PerSampleAlphaParams::reducer_w: [f32; 4]
 pub score_math::PerSampleAlphaParams::w_alpha: &'a [f32]
 
-## trait impls (45 types)
+## trait impls (49 types)
 
 BlurKernel: TrivialClone
 DiffmapOptions: TrivialClone
@@ -385,6 +416,10 @@ feature_v2::V1PoolsMode: TrivialClone
 feature_v2::V2NewFeatureToggles: TrivialClone
 fold_engine::ScoringEngine: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
 profile::ZensimProfile: TrivialClone
+research::DvifmBand: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
+research::DvifmBlockStats: Clone, Debug
+research::DvifmLevelSpec: Clone, Debug
+research::DvifmSpec: Clone, Debug
 research::Extraction: Clone, Debug
 research::FeatureProvenance: Clone, Debug, Eq, PartialEq
 research::Request: Clone, Debug
@@ -402,4 +437,4 @@ source::StridedBytes<'a>: TrivialClone
 
 ## auto traits
 
-17 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+21 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

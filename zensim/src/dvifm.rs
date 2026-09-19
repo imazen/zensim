@@ -115,6 +115,7 @@ pub(crate) struct DvifmParams {
 /// c_hi = ∞, edge discount on, Laplacian band — the design's first screen.
 /// Kept as the round-2 record while `Default` tracks the current round.
 #[allow(dead_code)]
+#[allow(clippy::excessive_precision)] // baked quantile values, quoted in full
 pub(crate) const DVIFM_SCREEN_LAP: [DvifmLevelParams; DVIFM_LEVELS] = [
     DvifmLevelParams {
         g: 1.0,
@@ -208,6 +209,7 @@ pub(crate) const DVIFM_SCREEN_LAP: [DvifmLevelParams; DVIFM_LEVELS] = [
 /// Level 4 is the shared low-pass plane, so its constants are identical.
 /// Kept as the round-3 record while `Default` tracks the current round.
 #[allow(dead_code)]
+#[allow(clippy::excessive_precision)] // baked quantile values, quoted in full
 pub(crate) const DVIFM_SCREEN_LOCAL: [DvifmLevelParams; DVIFM_LEVELS] = [
     DvifmLevelParams {
         g: 1.0,
@@ -303,6 +305,7 @@ pub(crate) const DVIFM_SCREEN_LOCAL: [DvifmLevelParams; DVIFM_LEVELS] = [
 /// quantiles of `ln(min C̃ + 1e-6)` on the same fit rows
 /// (`specs/dvifm-local-fitted-final.json`). Local band, edge on, c_hi = ∞.
 /// `DVIFM_SCREEN_LOCAL` is kept as the round-3 record.
+#[allow(clippy::excessive_precision)] // baked quantile values, quoted in full
 pub(crate) const DVIFM_SCREEN_FITTED: [DvifmLevelParams; DVIFM_LEVELS] = [
     DvifmLevelParams {
         g: 0.8229549277499173,
