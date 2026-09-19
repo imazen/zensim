@@ -78,6 +78,14 @@ zen-decode = ["verify-all", "dep:serde_json", "dep:sha2", "zenpixels-convert/cms
 # build does not pay for encoder graphs it never calls.
 zen-decode-tests = ["zen-decode", "zenavif/encode", "zenjxl/encode", "zenjpeg/zencodec", "zenjpeg/__test-utils"]
 
+# joint-core-v1 fresh-leg generator (`examples/core_variant_gen.rs`): decode
+# sha-verified png-v3/CLIC sources via the zen-decode owner, render plain
+# Mitchell sharpen=0 renditions (zenresize via m3-fixtures), encode through all
+# four imazen lossy codecs (zenjpeg + zenwebp + zenavif + zenjxl), decode the
+# bitstreams back through the same owner, score ssim2 + butteraugli, and write
+# the sha256-keyed provenance rows the dataset manifest consumes.
+core-gen = ["zen-decode", "m3-fixtures", "zenavif/encode", "zenjxl/encode"]
+
 # `hdr944_extract` example (SOTA-944 hdr_v3mix amendment): decode the HDR
 # datagen's (PQ-PNG ref, .jxl dist) pairs in memory and extract the 944
 # folded+append2 HDR-PQ features — no PNG decode-cache on disk.
@@ -288,6 +296,10 @@ required-features = ["zen-decode"]
 [[example]]
 name = "verify_bitstream_decode"
 required-features = ["verify-decode"]
+
+[[example]]
+name = "core_variant_gen"
+required-features = ["core-gen"]
 
 [[test]]
 name = "zen_decode_formats"

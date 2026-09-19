@@ -338,3 +338,114 @@ the five pre-existing `bake_surface.rs` failures untouched.
 D first (cheapest, most decisive) → C arms → A arms. If wall time or
 disk forces a cut: cut A before C, never D. Fewer arms run at full
 seeds/budget rather than shrunken versions of more.
+
+## Amendment 1 (2026-09-19, post-stop fitting correction)
+
+Supervisor stop of the first Part-D fit run (20:45Z) found the standalone
+fit was measuring the wrong thing, plus one data bug found while applying
+the mandated orientation check. This amendment replaces the §5.2 fitting
+procedure and records a target-column correction. Original text above is
+unchanged; where they conflict, this amendment governs. **No
+decision-relevant result had been read**: every number produced before the
+stop was fit-domain (CID22-A / TID / KADID-train fit losses and surfaces —
+themselves invalid, now discarded to `.bak`); CID22-B labels remain sealed
+(zero reads of `human_score` on `cid22b.tsv` — it is emitted blanked).
+
+### A1.1 Measured defects being fixed
+
+1. **Scale-confounded grid.** `grid_sweep_level` scored each (C₀, β) cell
+   as `100·exp(−λ·E)` at the *current* λ — λ was not refit per cell, so the
+   surface ranked cells by how well they rescale E to a fixed λ rather than
+   by masking quality. Measured on `cid22a.tsv`: target variance 172
+   (sd 13.1) vs init MSE 908 and logged "best" grid cells 775–894 — 4.5–5×
+   *worse* than predicting the mean. `tidkadid.tsv`: variance 751, init MSE
+   3,777 (see A1.3 — half that pool was also inverted). The K1 control on
+   the same rows, which refits λ, reached MSE 64.7 — confirming the fixed-λ
+   objective, not the model class, was the failure.
+2. **Every grid optimum on the grid edge.** C₀ = 0.3 (upper bound) and
+   β = 1.267–1.400 (upper bound) on every level/variant logged (cid22a
+   luma l0/l1/l2, xyb-y l0/l1, native3 l0, tidkadid luma l0). A bounded grid
+   whose optimum is always the corner is not identifying an optimum.
+3. **`native3` (the primary arm) crashed** — `ZeroDivisionError` in
+   `fit_variant` because the grid's best cell β = 1.4 is a logit infinity
+   under the [0.2, 1.4] bounded parameterisation. It was never rerun.
+
+### A1.2 New objective and search (replaces §5.1 loss tail + §5.2)
+
+- **Output map fitted per evaluation.** Every loss evaluation — sanity
+  gate, every grid cell, every Adam objective call, every accept/reject,
+  every reported MSE — first fits `ŷ = A·exp(−λ·E) + B` with **A > 0**
+  (score monotone in −E; identity stays top of scale). For a given λ, A
+  and B are the closed-form least-squares solution on basis `exp(−λE)`;
+  if the unconstrained fit gives A ≤ 0 the constrained optimum is the
+  boundary A→0⁺, i.e. ŷ = ȳ, MSE = var(y) — the cell is honestly recorded
+  as "no better than constant". λ is selected by golden-section search on
+  log λ over [1e-9, 1e9], ≤ 40 evaluations. Gradients for Adam use the
+  envelope-theorem form: (A, B, λ) held at their argmin while differentiating
+  w.r.t. level/head parameters.
+- **Per-cell records.** Each grid cell records the refit MSE **and** the
+  scale-free rank criteria of −E vs y (SROCC and KROCC). Selection is by
+  refit MSE; all three surfaces are published per (plane, level, sweep) in
+  `surfaces/<dom>_<var>/grid_*.csv` (`c0,beta,mse_refit,srocc,krocc`).
+- **Sanity gate before any grid.** With the map refit, the init parameters
+  must beat the constant predictor (MSE < var(y)) on each fit set; both
+  numbers are printed. If not, the fit stops with diagnostics (per-subset
+  means, SROCC(−E, y)) before fitting anything.
+- **Widened grid + parameterisation.** Grid: C₀ ∈ [1e-4, 3] log-spaced ×
+  18 points, β ∈ [0.05, 3.0] log-spaced × 18 points (the β spacing choice
+  is recorded; log covers the 60× range uniformly). Parameterisation bounds
+  strictly contain the grid: g ∈ (0.2, 2.0) logit (unchanged), β ∈
+  (0.01, 10) logit, C₀ = exp(raw) with raw clamp [ln 1e-8, ln 1e4],
+  ς = 1 + softplus (unchanged). Grid endpoints encode interiorly
+  (lo + ε, hi − ε); no grid value is a logit infinity. If a grid optimum
+  lands on an edge, that axis is extended once (8 points, same spacing);
+  if it still lands on the edge the edge optimum is **reported as the
+  finding** (e.g. "β wants > 3" / "the knee sits above every observed
+  contrast = masking effectively off at this level"), never silently
+  clamped.
+- Everything else in §5.2 stands: ≥8 multi-start Adam refinements per
+  (plane, level), alternating with the head; convex-by-construction
+  assertions unchanged (A > 0 keeps the score non-increasing in E and
+  E = 0 at identity ⇒ score = A + B, the fitted top of scale); sharpness
+  (loss increase at ±1 grid step per axis), cross-level agreement and
+  luma-vs-chroma knees reported from the surfaces.
+- `eval-consts` (K1 control) uses the same map family: constants and
+  uniform level weights as given, (A, B, λ) fitted by the same procedure —
+  a 3-scalar head, still no MLP/selection.
+- Artefact schema → `dvifm-standalone-fit-v2` (adds `map {A,B,lambda}`,
+  per-level edge/sharpness diagnostics; `score` accepts v1 artefacts via
+  `lambda` → map (100, 0, λ)).
+
+### A1.3 Target orientation finding and correction (KADID legs)
+
+The mandated pre-pooling orientation check (per
+`scripts/canonical_corpus/check_target_orientation.py` ground truths)
+measured, on `kadid_train.tsv` (400 rows, refs {0,2,4,6,8}) and
+`kadid_dev.tsv` (250 rows, refs {1,3,5}):
+
+- stored `human_score` ≡ `(5 − dmos)/4` exactly (max |err| = 0 vs
+  `kadid10k/dmos.csv` join);
+- KADID's `dmos.csv` column is **quality-oriented** (a MOS in disguise —
+  Appendix F of the 2026-08-03 campaign): its mean on the joined train
+  rows falls 4.434 → 4.245 → 3.904 → 2.211 → 1.384 across levels 1→5;
+- hence `corr(human_score, quality) = −1.0` — **both KADID legs were
+  stored exactly inverted**, and `tidkadid.tsv` / `pooled_*` pooled 400
+  inverted rows with 250 correct ones.
+
+TID verified correct: `human_score = MOS/9` exactly (max |err| = 0 vs
+`mos_with_names.txt`), corr = +1.0. CID22-A = MCOS/100 (quality-oriented
+by definition). imazen26 = `score_ssim2` (metric oracle, quality-oriented).
+KonFiG val = `1 − q/3.2` (already quality-oriented per Appendix L).
+
+**Correction**: all KADID-derived rows re-emitted as
+`human_score = (dmos − 1)/4` — the canonical quality transform — identical
+row order (block caches join on row order and stay valid). Old TSVs renamed
+`.bak`, never deleted; manifests updated with `target_orientation` verdicts.
+The range question is thereby answered: `tidkadid` spanning 5–97.5 while
+CID22-A spans 28–92 is a genuine data property (the JPEG/JP2K ladder runs
+to more severe distortion than CID22's operating range), *not* a scale
+mismatch — after correction all sets sit on the shared 0–100 quality axis
+`quality = human_score·100` with no further per-set affine.
+
+No refit result from the inverted targets is carried forward; the `.bak`
+surfaces/fits from the stopped run are retained for audit only.

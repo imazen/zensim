@@ -19510,11 +19510,13 @@ pub(crate) mod tests {
             }),
             cache: None,
         };
-        let mut toggles = V2NewFeatureToggles::default();
-        toggles.append_block = true;
-        toggles.append2_block = true;
-        toggles.csfw_block = true;
-        toggles.dvifm_block = true;
+        let toggles = V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            ..Default::default()
+        };
         let _ = compute_folded720_hdr_streaming_extras(
             &sref,
             &dref,

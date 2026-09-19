@@ -371,7 +371,9 @@ fn decode_farbfeld(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeErr
 fn decode_png(bytes: &[u8], label: &str) -> Result<DecodedNative, DecodeError> {
     let out = zenpng::decode(
         bytes,
-        &zenpng::PngDecodeConfig::default(),
+        // corpus sources include ~102 MP masters; the crates.io default cap is
+        // 100 MP. 1e9 matches the zenpng CLI's own decode stance.
+        &zenpng::PngDecodeConfig::default().with_max_pixels(1_000_000_000),
         &enough::Unstoppable,
     )
     .map_err(|e| DecodeError::Codec {

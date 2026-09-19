@@ -103,6 +103,9 @@ fn main() {
     let mut full_986 = false;
     let mut dvifm_spec = None;
     let mut dvifm_blocks = None;
+    let mut dvifm_cap = 0usize;
+    let mut dvifm_quant_f16 = false;
+    let mut dvifm_hist = None;
     let mut input_contract = None;
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -113,6 +116,19 @@ fn main() {
             "--dvifm-spec" => dvifm_spec = Some(args.next().expect("--dvifm-spec value")),
             "--dvifm-block-stats" => {
                 dvifm_blocks = Some(args.next().expect("--dvifm-block-stats value"))
+            }
+            "--dvifm-cap" => {
+                dvifm_cap = args.next().expect("--dvifm-cap value").parse().unwrap()
+            }
+            "--dvifm-quant" => {
+                dvifm_quant_f16 = match args.next().expect("--dvifm-quant value").as_str() {
+                    "f16" => true,
+                    "f32" => false,
+                    other => panic!("--dvifm-quant must be f16|f32, got {other}"),
+                }
+            }
+            "--dvifm-hist" => {
+                dvifm_hist = Some(args.next().expect("--dvifm-hist value"))
             }
             "--corpus" => corpus = Some(args.next().unwrap()),
             "--path" => path = Some(args.next().unwrap().into()),
@@ -141,8 +157,17 @@ fn main() {
         "--full-944 and --full-986 are mutually exclusive"
     );
     assert!(
-        (dvifm_spec.is_none() && dvifm_blocks.is_none()) || full_986,
-        "--dvifm-spec/--dvifm-block-stats require --full-986 (the research path)"
+        (dvifm_spec.is_none() && dvifm_blocks.is_none() && dvifm_hist.is_none())
+            || full_986,
+        "--dvifm-spec/--dvifm-block-stats/--dvifm-hist require --full-986 (the research path)"
+    );
+    assert!(
+        dvifm_hist.is_none() || dvifm_spec.is_some(),
+        "--dvifm-hist needs --dvifm-spec (per-level g/edge constants)"
+    );
+    assert!(
+        dvifm_hist.is_none() || dvifm_blocks.is_some(),
+        "--dvifm-hist accompanies --dvifm-block-stats"
     );
     assert!(
         !full_986 || sampling.is_none(),
@@ -225,10 +250,32 @@ fn main() {
                 zensim::research::DvifmInputPlane::YcbcrCr => "ycbcr_cr",
             })
             .unwrap_or("xyb_y");
+        let hist = dvifm_hist.as_ref().map(|_| {
+            let spec = research_req
+                .as_ref()
+                .and_then(|(r, _)| r.dvifm_spec())
+                .expect("--dvifm-hist requires --dvifm-spec");
+            DvifmHist {
+                levels: spec
+                    .levels
+                    .iter()
+                    .map(|lv| LevelHist {
+                        counts: vec![0u32; HIST_BINS * HIST_BINS],
+                        g: lv.g,
+                        edge: lv.edge,
+                        n_blocks: 0,
+                        n_c_nonpos: 0,
+                    })
+                    .collect(),
+            }
+        });
         DvifmSink {
             file: std::sync::Mutex::new((std::io::BufWriter::new(file), 0)),
             index: std::sync::Mutex::new(Vec::new()),
             input_plane,
+            cap: dvifm_cap,
+            quant_f16: dvifm_quant_f16,
+            hist: hist.map(std::sync::Mutex::new),
         }
     });
     let mut audit = audit::Config::load(
@@ -467,6 +514,40 @@ fn main() {
                 writeln!(iw, "{}", serde_json::to_string(e).unwrap()).unwrap();
             }
             std::io::Write::flush(&mut iw).unwrap();
+            if let (Some(hist), Some(hp)) =
+                (&sink.hist, dvifm_hist.as_ref())
+            {
+                let h = hist.lock().unwrap();
+                // Layout: one JSON header line, then 5×256×256 u32 LE counts.
+                let mut hw = std::io::BufWriter::new(
+                    std::fs::File::create(hp).expect("create dvifm hist"),
+                );
+                let header = serde_json::json!({
+                    "schema": "dvifm-hist-v1",
+                    "input_plane": sink.input_plane,
+                    "bins": HIST_BINS,
+                    "ln_lo": HIST_LN_LO,
+                    "ln_hi": HIST_LN_HI,
+                    "bin0_semantics": "v<=0 or NaN (C: v=1 arm; m: term=0)",
+                    "levels": h.levels.iter().map(|l| serde_json::json!({
+                        "g": l.g, "edge": l.edge,
+                        "n_blocks": l.n_blocks,
+                        "n_c_nonpos": l.n_c_nonpos,
+                    })).collect::<Vec<_>>(),
+                    "spec": dvifm_spec,
+                    "cap": sink.cap,
+                    "quant": if sink.quant_f16 { "f16" } else { "f32" },
+                });
+                use std::io::Write as _;
+                writeln!(hw, "{}", serde_json::to_string(&header).unwrap())
+                    .unwrap();
+                for l in &h.levels {
+                    for &c in &l.counts {
+                        hw.write_all(&c.to_le_bytes()).unwrap();
+                    }
+                }
+                std::io::Write::flush(&mut hw).unwrap();
+            }
         }
         write_research_manifest(
             &out,
@@ -603,16 +684,124 @@ fn extract_features(
 // `--dvifm-block-stats`: the training-only block-record side output.
 // ---------------------------------------------------------------------------
 
+/// `(C̃, m)` histogram axes. Both axes share one log domain: bin 0 is the
+/// nonpositive/NaN arm (visibility v = 1 for C̃ ≤ 0; the m^P factor is 0 for
+/// m = 0, so both arms carry exact semantics); bins 1..=255 cover
+/// `exp(HIST_LN_LO)..exp(HIST_LN_HI)` uniformly in ln. `HIST_LN_LO = ln(1e-7)`,
+/// `HIST_LN_HI = ln(16)` — block extrema/m differences live far inside this.
+const HIST_BINS: usize = 256;
+const HIST_LN_LO: f64 = -16.11809565095832;
+const HIST_LN_HI: f64 = 2.772588722239781;
+
+fn hist_bin(v: f64) -> usize {
+    if !(v > 0.0) {
+        return 0;
+    }
+    let t = (v.ln() - HIST_LN_LO) / (HIST_LN_HI - HIST_LN_LO);
+    let k = 1 + (t * (HIST_BINS - 1) as f64).floor() as i64;
+    k.clamp(1, (HIST_BINS - 1) as i64) as usize
+}
+
+/// One level's `(C̃, m)` accumulator plus the constants the histogram was
+/// built at — C̃ depends on (g, edge), so they ride in the header.
+struct LevelHist {
+    counts: Vec<u32>, // HIST_BINS² row-major: [c_bin][m_bin]
+    g: f64,
+    edge: bool,
+    n_blocks: u64,
+    n_c_nonpos: u64,
+}
+
+/// Per-(plane,level) pooled histograms — the exact sufficient statistic for
+/// any grid loss that is a sum of per-block terms `F(C̃_b, m_b)` evaluated at
+/// bin centres.
+struct DvifmHist {
+    levels: Vec<LevelHist>,
+}
+
+/// Per-block C̃ for one side, replicating `dvifm::contrast_g_rec`: signed
+/// power `phi_g(x) = sign(x)·|x|^g`; `edge` = min over the 4 corner
+/// quadrants, else whole-block range.
+fn dvifm_contrast(rec: &[f32], side: usize, g: f64, edge: bool) -> f64 {
+    let (mx, mn) = if side == 0 {
+        (&rec[2..6], &rec[6..10])
+    } else {
+        (&rec[10..14], &rec[14..18])
+    };
+    let phi = |x: f32| {
+        let x = x as f64;
+        x.signum() * x.abs().powf(g)
+    };
+    if edge {
+        let mut c = f64::INFINITY;
+        for q in 0..4 {
+            c = c.min(phi(mx[q]) - phi(mn[q]));
+        }
+        c
+    } else {
+        let mut a = f64::NEG_INFINITY;
+        let mut b = f64::INFINITY;
+        for q in 0..4 {
+            a = a.max(mx[q] as f64);
+            b = b.min(mn[q] as f64);
+        }
+        a.signum() * a.abs().powf(g) - b.signum() * b.abs().powf(g)
+    }
+}
+
+/// f32 → IEEE-754 binary16, round-to-nearest-even (the cache's quantisation).
+fn f32_to_f16(x: f32) -> u16 {
+    let b = x.to_bits();
+    let sign = ((b >> 16) & 0x8000) as u16;
+    let exp = ((b >> 23) & 0xff) as i32;
+    let man = b & 0x007f_ffff;
+    if exp == 0xff {
+        return sign | if man == 0 { 0x7c00 } else { 0x7e00 };
+    }
+    let e = exp - 127 + 15;
+    if e >= 31 {
+        return sign | 0x7c00;
+    }
+    if e <= 0 {
+        if e < -10 {
+            return sign;
+        }
+        let m = man | 0x0080_0000;
+        let shift = (1 - e + 13) as u32;
+        let half = 1u32 << (shift - 1);
+        let rounded = (m + half - 1 + ((m >> shift) & 1)) >> shift;
+        return sign | rounded as u16;
+    }
+    let m16 = man + 0x0fff + ((man >> 13) & 1);
+    if m16 & 0x0080_0000 != 0 {
+        let e2 = e + 1;
+        if e2 >= 31 {
+            return sign | 0x7c00;
+        }
+        return sign | ((e2 as u16) << 10);
+    }
+    sign | ((e as u16) << 10) | ((m16 >> 13) as u16 & 0x3ff)
+}
+
 /// Streams each pair's records into the `.f32` blob from inside the
 /// parallel walk — records never accumulate in memory. `index` keeps one
 /// jsonl-ready entry per pair (row order, byte offset, per-level counts,
 /// input hashes); `offset` is the running byte position.
+///
+/// `cap` bounds the kept records per row across the five levels
+/// (deterministic stride per level, proportional allocation; 0 = keep all).
+/// `quant_f16` stores each field as IEEE f16 (36 B/record) instead of f32.
+/// `hist`, when set, accumulates full-resolution `(C̃, m)` histograms over
+/// ALL records — the cap never applies to the histograms.
 struct DvifmSink {
     file: std::sync::Mutex<(std::io::BufWriter<std::fs::File>, u64)>,
     index: std::sync::Mutex<Vec<serde_json::Value>>,
     /// The spec's input-plane name, stamped into every index entry so a
     /// cache row is self-describing (Y′CbCr blocks are not XYB-Y blocks).
     input_plane: &'static str,
+    cap: usize,
+    quant_f16: bool,
+    hist: Option<std::sync::Mutex<DvifmHist>>,
 }
 
 impl DvifmSink {
@@ -624,18 +813,71 @@ impl DvifmSink {
     ) -> Result<(), String> {
         use std::io::Write as _;
         let (ref_sha256, dist_sha256) = audit::file_hashes(kp)?;
+        // Histogram pass over the FULL record set (before any cap) — the
+        // pooled (C̃, m) census is the exact statistic the C₀×β grid reads.
+        if let Some(hist) = &self.hist {
+            let mut h = hist.lock().unwrap();
+            for (l, recs) in stats.records.iter().enumerate() {
+                let lh = &mut h.levels[l];
+                for rec in recs.chunks_exact(18) {
+                    let cs = dvifm_contrast(rec, 0, lh.g, lh.edge);
+                    let cd = dvifm_contrast(rec, 1, lh.g, lh.edge);
+                    let ctilde = cs.min(cd);
+                    let m = rec[0] as f64;
+                    lh.counts[hist_bin(ctilde) * HIST_BINS + hist_bin(m)] += 1;
+                    lh.n_blocks += 1;
+                    if !(ctilde > 0.0) {
+                        lh.n_c_nonpos += 1;
+                    }
+                }
+            }
+        }
+        // Per-level stride caps: level l keeps ceil(n_l/stride_l) records
+        // with stride_l = ceil(n_l/cap_l), cap_l ∝ n_l of the row total.
+        let n_l: Vec<usize> =
+            stats.records.iter().map(|r| r.len() / 18).collect();
+        let n_total: usize = n_l.iter().sum();
+        let caps: Vec<usize> = if self.cap > 0 && n_total > self.cap {
+            n_l.iter()
+                .map(|&n| {
+                    if n == 0 {
+                        0
+                    } else {
+                        (self.cap * n / n_total).max(1).min(n)
+                    }
+                })
+                .collect()
+        } else {
+            n_l.clone()
+        };
         let mut bytes = Vec::new();
         let mut level_records = [0u64; 5];
+        let mut level_strides = [0u64; 5];
         for (l, recs) in stats.records.iter().enumerate() {
-            level_records[l] = recs.len() as u64 / 18;
-            for v in recs {
-                bytes.extend_from_slice(&v.to_le_bytes());
+            let stride = if caps[l] >= n_l[l] || n_l[l] == 0 {
+                1
+            } else {
+                n_l[l].div_ceil(caps[l])
+            };
+            level_strides[l] = stride as u64;
+            let mut kept = 0u64;
+            for (i, rec) in recs.chunks_exact(18).enumerate() {
+                if stride > 1 && i % stride != 0 {
+                    continue;
+                }
+                kept += 1;
+                if self.quant_f16 {
+                    for &v in rec {
+                        bytes.extend_from_slice(&f32_to_f16(v).to_le_bytes());
+                    }
+                } else {
+                    for &v in rec {
+                        bytes.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
             }
-            debug_assert_eq!(
-                level_records[l],
-                stats.grid[l].0 as u64 * stats.grid[l].1 as u64,
-                "record count must equal the full-block grid"
-            );
+            level_records[l] = kept;
+            debug_assert!(kept as usize <= n_l[l]);
         }
         let mut guard = self.file.lock().unwrap();
         let (file, offset) = &mut *guard;
@@ -653,6 +895,10 @@ impl DvifmSink {
             "grid": stats.grid,
             "offset": entry_offset,
             "level_records": level_records,
+            "level_records_full": n_l,
+            "level_strides": level_strides,
+            "quant": if self.quant_f16 { "f16" } else { "f32" },
+            "cap": self.cap,
             "input_plane": self.input_plane,
         }));
         Ok(())
