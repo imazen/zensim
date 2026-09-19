@@ -1917,4 +1917,132 @@ mod tests {
             }
         }
     }
+
+    // ---- numpy reference parity -----------------------------------------
+
+    /// The four closed-form cases of `scripts/dvifm_parity_fixture.py` —
+    /// the formulas must stay identical to that generator.
+    fn parity_inputs(name: &str, h: usize, w: usize) -> (Plane, Plane) {
+        let mut r = Plane::new(w, h);
+        let mut d = Plane::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let (ry, cx) = (y as f64, x as f64);
+                let (v, dv) = match name {
+                    "a" => {
+                        let v = 0.5
+                            + 0.28
+                                * (0.21 * ry + 0.13 * cx).sin()
+                                * (0.17 * ry - 0.11 * cx).cos()
+                            + 0.07 * (0.53 * (ry + cx)).sin();
+                        (
+                            v,
+                            v + 0.03
+                                * (1.3 * ry - 0.7 * cx).sin()
+                                * (0.31 * ry + 0.9 * cx).cos(),
+                        )
+                    }
+                    "b" => {
+                        let v = 0.45
+                            + 0.25 * (0.35 * ry).sin() * (0.28 * cx).cos()
+                            + if cx >= 18.0 { 0.12 } else { 0.0 };
+                        (v, v + 0.02 * (0.9 * ry - 0.4 * cx).cos())
+                    }
+                    "c" => {
+                        let v = 0.5 + 0.2 * (0.9 * ry).sin() * (1.1 * cx).cos();
+                        (v, v + 0.03 * (3.0 * ry + 2.0 * cx).sin())
+                    }
+                    "d" => {
+                        let v = 0.5 + 0.3 * (0.8 * ry + 0.5 * cx).sin();
+                        (v, v + 0.04 * (1.7 * ry - 0.6 * cx).cos())
+                    }
+                    _ => panic!("unknown parity case {name}"),
+                };
+                r.v[y * w + x] = v;
+                d.v[y * w + x] = dv;
+            }
+        }
+        (r, d)
+    }
+
+    #[test]
+    fn numpy_parity_planes_and_features() {
+        // Fixture written by scripts/dvifm_parity_fixture.py from the numpy
+        // reference. Bound is 1e-6; the fixture itself is %.9e (~5e-10
+        // quantisation) and inputs differ by ~1 ulp between libms.
+        const TOL: f64 = 1e-6;
+        let t = scalar();
+        let text = include_str!("../tests/fixtures/dvifm_parity_2026-09-19.txt");
+        let mut lines = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'));
+        while let Some(head) = lines.next() {
+            let mut it = head.split_whitespace();
+            assert_eq!(it.next(), Some("case"));
+            let name = it.next().unwrap();
+            let h: usize = it.next().unwrap().parse().unwrap();
+            let w: usize = it.next().unwrap().parse().unwrap();
+            let (refp, dist) = parity_inputs(name, h, w);
+            let lap = laplacian_pyramid(t, &refp, DVIFM_LEVELS);
+            loop {
+                let line = lines.next().expect("case end");
+                if line == "end" {
+                    break;
+                }
+                let mut it = line.split_whitespace();
+                match it.next().unwrap() {
+                    "plane" => {
+                        let l: usize = it.next().unwrap().parse().unwrap();
+                        let ph: usize = it.next().unwrap().parse().unwrap();
+                        let pw: usize = it.next().unwrap().parse().unwrap();
+                        assert_eq!((lap[l].h, lap[l].w), (ph, pw), "{name} L{l} shape");
+                        for r in 0..ph {
+                            let row: Vec<f64> = lines
+                                .next()
+                                .unwrap()
+                                .split_whitespace()
+                                .map(|v| v.parse().unwrap())
+                                .collect();
+                            assert_eq!(row.len(), pw, "{name} L{l} row {r} width");
+                            for (c, &e) in row.iter().enumerate() {
+                                let g = lap[l].row(r)[c];
+                                assert!(
+                                    (g - e).abs() <= TOL,
+                                    "{name} L{l} ({r},{c}): {g} vs {e}"
+                                );
+                            }
+                        }
+                    }
+                    "features" => {
+                        let band = it.next().unwrap();
+                        let mut params = DvifmParams::default();
+                        if band == "local" {
+                            for lp in &mut params.levels {
+                                lp.band = BandMode::Local;
+                            }
+                        }
+                        let got = dvifm_features_whole(&refp.v, &dist.v, w, h, &params);
+                        for l in 0..DVIFM_LEVELS {
+                            let row: Vec<f64> = lines
+                                .next()
+                                .unwrap()
+                                .split_whitespace()
+                                .map(|v| v.parse().unwrap())
+                                .collect();
+                            assert_eq!(row.len(), DVIFM_PER_LEVEL);
+                            for (j, &e) in row.iter().enumerate() {
+                                let g = got[l * DVIFM_PER_LEVEL + j];
+                                assert!(
+                                    (g - e).abs() <= TOL,
+                                    "{name} {band} L{l} f{j}: {g} vs {e}"
+                                );
+                            }
+                        }
+                    }
+                    other => panic!("bad fixture line {other}"),
+                }
+            }
+        }
+    }
 }
