@@ -1343,7 +1343,7 @@ mod tests {
             .unwrap()
             .score(),
         ));
-        #[cfg(feature = "feature-regime-v2")]
+        #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
         scores.push((
             "compute_with_ref_score_and_attribution",
             z.compute_with_ref_score_and_attribution(&pre, &img, &[0.0; 156])

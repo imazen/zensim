@@ -1599,7 +1599,7 @@ mod revision_contract_tests {
     }
 
     #[test]
-    #[cfg(feature = "feature-regime-v2")]
+    #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
     fn finite_moments_preserve_scalar_density_and_session_reuse() {
         if !run_at_revision(
             "3",
