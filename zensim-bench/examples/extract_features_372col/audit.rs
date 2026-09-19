@@ -294,8 +294,8 @@ impl Config {
         hashes: &(String, String),
         contract: InputContract,
     ) -> Result<Value, String> {
-        if !matches!(features.len(), 372 | 944) || !features.iter().all(|v| v.is_finite()) {
-            return Err("audit requires 372 or 944 finite canonical features".into());
+        if !matches!(features.len(), 372 | 944 | 986) || !features.iter().all(|v| v.is_finite()) {
+            return Err("audit requires 372, 944 or 986 finite canonical features".into());
         }
         // Reuse the native decoder owner; a changed file across either extraction
         // or this independent pixel-surface check invalidates the audit.

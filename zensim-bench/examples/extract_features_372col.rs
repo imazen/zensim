@@ -100,12 +100,20 @@ fn main() {
     let mut audit_ssim2 = false;
     let mut sampling = None;
     let mut full_944 = false;
+    let mut full_986 = false;
+    let mut dvifm_spec = None;
+    let mut dvifm_blocks = None;
     let mut input_contract = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--input-contract" => audit::take_value(&mut input_contract, args.next()),
             "--sampling" => sampling = Some(args.next().expect("--sampling value")),
             "--full-944" => full_944 = true,
+            "--full-986" => full_986 = true,
+            "--dvifm-spec" => dvifm_spec = Some(args.next().expect("--dvifm-spec value")),
+            "--dvifm-block-stats" => {
+                dvifm_blocks = Some(args.next().expect("--dvifm-block-stats value"))
+            }
             "--corpus" => corpus = Some(args.next().unwrap()),
             "--path" => path = Some(args.next().unwrap().into()),
             "--out" => out = Some(args.next().unwrap().into()),
@@ -128,6 +136,18 @@ fn main() {
     let corpus = corpus.expect("--corpus REQUIRED (konjnd or aic3)");
     let path = path.expect("--path REQUIRED");
     let out = out.expect("--out REQUIRED");
+    assert!(
+        !(full_944 && full_986),
+        "--full-944 and --full-986 are mutually exclusive"
+    );
+    assert!(
+        (dvifm_spec.is_none() && dvifm_blocks.is_none()) || full_986,
+        "--dvifm-spec/--dvifm-block-stats require --full-986 (the research path)"
+    );
+    assert!(
+        !full_986 || sampling.is_none(),
+        "--full-986 does not take a sampling contract"
+    );
     assert!(
         !full_944 || sampling.as_deref().is_none_or(|s| s.starts_with("v2:")),
         "--full-944 sampling requires a direct v2 contract"
@@ -158,7 +178,27 @@ fn main() {
             );
         }
     }
-    let producer = if full_944 {
+    // The w986 request goes through `research::extract` (the plan-driven
+    // owner) — `--dvifm-spec`/`--dvifm-block-stats` exist only there. The
+    // request is built once and shared by every pair.
+    let research_req = full_986.then(|| {
+        let spec = dvifm_spec.as_deref().map(|p| dvifm_spec_load(Path::new(p)));
+        let spec_sha = dvifm_spec.as_deref().map(|p| sha256_hex_of(Path::new(p)));
+        let mut req = zensim::research::Request::for_slots(
+            zensim::feature_set_id::SlotSet::from_ranges([(0, 986)]),
+            986,
+        );
+        if let Some(spec) = spec {
+            req = req.with_dvifm_spec(spec);
+        }
+        if dvifm_blocks.is_some() {
+            req = req.collect_dvifm_blocks(true);
+        }
+        (req, spec_sha)
+    });
+    let producer = if full_986 {
+        None
+    } else if full_944 {
         Some(diagnostic_producer(
             sampling.as_deref(),
             &out,
@@ -169,6 +209,17 @@ fn main() {
             .as_deref()
             .map(|tag| diagnostic_producer(Some(tag), &out, input_contract))
     };
+    // Per-pair block-record sink: streamed (a row's records run ~4 MB —
+    // collecting them would not fit in memory). `index` keeps (row order,
+    // byte offset, per-level record counts, input hashes) for the jsonl
+    // written after the walk completes.
+    let dvifm_sink = dvifm_blocks.as_ref().map(|p| {
+        let file = std::fs::File::create(p).expect("create dvifm-block-stats file");
+        DvifmSink {
+            file: std::sync::Mutex::new((std::io::BufWriter::new(file), 0)),
+            index: std::sync::Mutex::new(Vec::new()),
+        }
+    });
     let mut audit = audit::Config::load(
         audit_out,
         audit::CandidateInputs {
@@ -195,7 +246,13 @@ fn main() {
 
     if let Some(audit) = &audit {
         audit
-            .validate_feature_width(if full_944 { 944 } else { 372 })
+            .validate_feature_width(if full_944 {
+                944
+            } else if full_986 {
+                986
+            } else {
+                372
+            })
             .expect("audit feature width");
     }
 
@@ -230,13 +287,15 @@ fn main() {
         std::process::exit(3);
     }
 
+    let research_fsid = std::sync::Mutex::new(None::<String>);
     let started = std::time::Instant::now();
     let progress = AtomicUsize::new(0);
     let log_every = (n_total / 20).max(1);
 
     let scored: Vec<_> = pairs
         .par_iter()
-        .map(|kp| {
+        .enumerate()
+        .map(|(row_index, kp)| {
             let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
             if p.is_multiple_of(log_every) {
                 let elapsed = started.elapsed().as_secs_f64();
@@ -245,7 +304,23 @@ fn main() {
                 eprintln!("  {corpus} {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
             }
             let hashes = audit.as_ref().map(|_| audit::file_hashes(kp)).transpose()?;
-            let row = extract_features(kp, producer.as_deref(), input_contract)?;
+            let (row, research_out) = extract_features(
+                kp,
+                producer.as_deref(),
+                input_contract,
+                research_req.as_ref().map(|(r, _)| r),
+            )?;
+            if let Some(out) = research_out {
+                if let (Some(sink), Some(stats)) = (dvifm_sink.as_ref(), out.blocks) {
+                    sink.write(row_index, kp, &stats)?;
+                }
+                if let Some(id) = out.feature_set_id {
+                    let mut slot = research_fsid.lock().unwrap();
+                    if slot.is_none() {
+                        *slot = Some(id);
+                    }
+                }
+            }
             let record = audit
                 .as_ref()
                 .map(|a| a.score(kp, &row.3, hashes.as_ref().unwrap(), input_contract))
@@ -304,7 +379,13 @@ fn main() {
     }
 
     let n_feat = rows.first().map(|r| r.3.len()).unwrap_or(0);
-    let expected_width = if full_944 { 944 } else { 372 };
+    let expected_width = if full_944 {
+        944
+    } else if full_986 {
+        986
+    } else {
+        372
+    };
     assert_eq!(n_feat, expected_width, "producer feature width");
     assert!(
         rows.iter()
@@ -357,6 +438,43 @@ fn main() {
         rows.len(),
         out.display()
     );
+    if let Some((req, spec_sha)) = &research_req {
+        // Write the block-record index (sorted by the pairs.tsv row order)
+        // and the producer manifest once the walk is complete — the
+        // manifest carries the feature-set id the extraction produced plus
+        // the cache bytes' sha256.
+        if let Some(sink) = dvifm_sink.as_ref() {
+            let index_path = format!("{}.index.jsonl", dvifm_blocks.as_ref().unwrap());
+            let mut index = std::mem::take(&mut *sink.index.lock().unwrap());
+            index.sort_by_key(|e| e["row_index"].as_u64().unwrap());
+            std::io::Write::flush(&mut sink.file.lock().unwrap().0).unwrap();
+            let mut iw = std::io::BufWriter::new(
+                std::fs::File::create(&index_path).expect("create block index"),
+            );
+            for e in &index {
+                use std::io::Write as _;
+                writeln!(iw, "{}", serde_json::to_string(e).unwrap()).unwrap();
+            }
+            std::io::Write::flush(&mut iw).unwrap();
+        }
+        write_research_manifest(
+            &out,
+            input_contract,
+            req,
+            research_fsid.lock().unwrap().as_deref(),
+            spec_sha.as_deref(),
+            dvifm_blocks.as_deref(),
+        );
+    }
+}
+
+/// The research path's per-pair side products (`--full-986`): the DVIFM
+/// block records when `--dvifm-block-stats` was given, plus the
+/// feature-set id string the extraction derived (same for every row —
+/// captured once for the manifest).
+struct ResearchOut {
+    blocks: Option<zensim::research::DvifmBlockStats>,
+    feature_set_id: Option<String>,
 }
 
 /// Extract one pair's canonical features: default 372, or the explicit producer.
@@ -373,7 +491,8 @@ fn extract_features(
     kp: &Pair,
     producer: Option<&[u8]>,
     contract: InputContract,
-) -> Result<FeatureRow, String> {
+    research: Option<&zensim::research::Request>,
+) -> Result<(FeatureRow, Option<ResearchOut>), String> {
     let src = ScoreInput::decode(&kp.reference, contract).map_err(|e| format!("reference: {e}"))?;
     let dst = ScoreInput::decode(&kp.distorted, contract).map_err(|e| format!("distorted: {e}"))?;
     if src.width != dst.width || src.height != dst.height {
@@ -395,6 +514,26 @@ fn extract_features(
             kp.reference.display()
         ));
     }
+    if let Some(req) = research {
+        // The plan-driven owner: emits the w986 identity layout through the
+        // SAME walk the producer path uses, and is the only surface that
+        // carries the DVIFM constants override / block-record side output.
+        let ext = zensim::research::extract(req, &src.source(), &dst.source())
+            .map_err(|e| format!("research extract ({}): {e:?}", kp.distorted.display()))?;
+        let out = ResearchOut {
+            blocks: ext.dvifm_blocks().cloned(),
+            feature_set_id: ext.feature_set_id().map(|id| id.to_string()),
+        };
+        return Ok((
+            (
+                kp.ref_basename.clone(),
+                kp.human_score,
+                kp.extra_targets.clone(),
+                ext.values().to_vec(),
+            ),
+            Some(out),
+        ));
+    }
     if let Some(bytes) = producer {
         let model = zenpredict::Model::from_bytes(bytes).map_err(|e| e.to_string())?;
         let mut scorer = zensim::BakeScorer::new(&model).map_err(|e| e.to_string())?;
@@ -402,10 +541,13 @@ fn extract_features(
             .compute(&src.source(), &dst.source(), None)
             .map_err(|e| e.to_string())?;
         return Ok((
-            kp.ref_basename.clone(),
-            kp.human_score,
-            kp.extra_targets.clone(),
-            result.features().to_vec(),
+            (
+                kp.ref_basename.clone(),
+                kp.human_score,
+                kp.extra_targets.clone(),
+                result.features().to_vec(),
+            ),
+            None,
         ));
     }
     let mut config = ZensimConfig::default();
@@ -436,11 +578,173 @@ fn extract_features(
     .map_err(|e| format!("compute_zensim ({}): {e:?}", kp.distorted.display()))?;
     let features: Vec<f64> = result.features().to_vec();
     Ok((
-        kp.ref_basename.clone(),
-        kp.human_score,
-        kp.extra_targets.clone(),
-        features,
+        (
+            kp.ref_basename.clone(),
+            kp.human_score,
+            kp.extra_targets.clone(),
+            features,
+        ),
+        None,
     ))
+}
+
+// ---------------------------------------------------------------------------
+// `--dvifm-block-stats`: the training-only block-record side output.
+// ---------------------------------------------------------------------------
+
+/// Streams each pair's records into the `.f32` blob from inside the
+/// parallel walk — records never accumulate in memory. `index` keeps one
+/// jsonl-ready entry per pair (row order, byte offset, per-level counts,
+/// input hashes); `offset` is the running byte position.
+struct DvifmSink {
+    file: std::sync::Mutex<(std::io::BufWriter<std::fs::File>, u64)>,
+    index: std::sync::Mutex<Vec<serde_json::Value>>,
+}
+
+impl DvifmSink {
+    fn write(
+        &self,
+        row_index: usize,
+        kp: &Pair,
+        stats: &zensim::research::DvifmBlockStats,
+    ) -> Result<(), String> {
+        use std::io::Write as _;
+        let (ref_sha256, dist_sha256) = audit::file_hashes(kp)?;
+        let mut bytes = Vec::new();
+        let mut level_records = [0u64; 5];
+        for (l, recs) in stats.records.iter().enumerate() {
+            level_records[l] = recs.len() as u64 / 18;
+            for v in recs {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+            debug_assert_eq!(
+                level_records[l],
+                stats.grid[l].0 as u64 * stats.grid[l].1 as u64,
+                "record count must equal the full-block grid"
+            );
+        }
+        let mut guard = self.file.lock().unwrap();
+        let (file, offset) = &mut *guard;
+        let entry_offset = *offset;
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
+        *offset += bytes.len() as u64;
+        drop(guard);
+        self.index.lock().unwrap().push(serde_json::json!({
+            "row_index": row_index,
+            "ref_basename": kp.ref_basename,
+            "ref_path": kp.reference.display().to_string(),
+            "dist_path": kp.distorted.display().to_string(),
+            "ref_sha256": ref_sha256,
+            "dist_sha256": dist_sha256,
+            "grid": stats.grid,
+            "offset": entry_offset,
+            "level_records": level_records,
+        }));
+        Ok(())
+    }
+}
+
+/// Parse a `--dvifm-spec` JSON file into a `research::DvifmSpec`.
+///
+/// Schema `dvifm-spec-v1`: `{"levels": [{"g","p","c0","beta","sharp","c_hi"
+/// (or null = ∞),"f2_centers":[5],"band":"laplacian"|"local","edge"}×5]}`.
+fn dvifm_spec_load(path: &Path) -> zensim::research::DvifmSpec {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("dvifm spec {}: {e}", path.display()));
+    let v: serde_json::Value =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("dvifm spec JSON: {e}"));
+    let num = |v: &serde_json::Value, k: &str| {
+        v.get(k)
+            .and_then(|x| x.as_f64())
+            .unwrap_or_else(|| panic!("dvifm spec level missing `{k}`"))
+    };
+    let levels = v
+        .get("levels")
+        .and_then(|l| l.as_array())
+        .expect("dvifm spec needs `levels`")
+        .iter()
+        .map(|lv| zensim::research::DvifmLevelSpec {
+            g: num(lv, "g"),
+            p: num(lv, "p"),
+            c0: num(lv, "c0"),
+            beta: num(lv, "beta"),
+            sharp: num(lv, "sharp"),
+            c_hi: lv
+                .get("c_hi")
+                .and_then(|x| x.as_f64())
+                .unwrap_or(f64::INFINITY),
+            f2_centers: {
+                let c: Vec<f64> = lv
+                    .get("f2_centers")
+                    .and_then(|x| x.as_array())
+                    .expect("f2_centers")
+                    .iter()
+                    .map(|x| x.as_f64().expect("f2_centers entry"))
+                    .collect();
+                c.try_into().expect("f2_centers needs 5 entries")
+            },
+            band: match lv.get("band").and_then(|b| b.as_str()) {
+                Some("local") => zensim::research::DvifmBand::Local,
+                _ => zensim::research::DvifmBand::Laplacian,
+            },
+            edge: lv.get("edge").and_then(|x| x.as_bool()).unwrap_or(true),
+        })
+        .collect();
+    zensim::research::DvifmSpec { levels }
+}
+
+fn sha256_hex_of(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).expect("hash dvifm spec");
+    Sha256::digest(&bytes)
+        .iter()
+        .map(|v| format!("{v:02x}"))
+        .collect()
+}
+
+/// The `.manifest.json` for the `--full-986` research path — same role as
+/// the diagnostic producer's manifest: records the producer surface, the
+/// feature-set identity, the formula revision, and (when present) the
+/// DVIFM spec identity + block-record cache.
+fn write_research_manifest(
+    out: &Path,
+    contract: InputContract,
+    req: &zensim::research::Request,
+    feature_set_id: Option<&str>,
+    spec_sha256: Option<&str>,
+    block_stats: Option<&str>,
+) {
+    let revision = std::env::var("ZENSIM_FORMULA_REV")
+        .expect("diagnostic extraction requires explicit ZENSIM_FORMULA_REV");
+    let emit = req
+        .validate()
+        .expect("w986 request must plan")
+        .iter_slots()
+        .collect::<Vec<usize>>();
+    let mut manifest = serde_json::json!({
+        "formula_revision": revision,
+        "producer_surface": "zensim::research::extract",
+        "layout": format!("w{}", req.layout_width()),
+        "populated_feature_ids": emit,
+        "feature_set_id": feature_set_id,
+        "dvifm_spec_sha256": spec_sha256,
+        "dvifm_block_stats": block_stats,
+        "dvifm_block_record": {
+            "schema": "dvifm-block-records-v1",
+            "record_f32": 18,
+            "fields": ["m","peak","cmax_s[4]","cmin_s[4]","cmax_d[4]","cmin_d[4]"],
+            "order": "level-major, block-row-major over the full-block grid",
+        },
+    });
+    if contract == InputContract::SdrNativeClipV1 {
+        manifest["input_contract"] = serde_json::json!("sdr-native-clip-v1");
+        manifest["input_era"] = serde_json::json!("native_sdr_clip_v1");
+    }
+    std::fs::write(
+        format!("{}.manifest.json", out.display()),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
 }
 
 /// Generic (ref, dist) pairs from a TSV with header columns `ref_path`,
