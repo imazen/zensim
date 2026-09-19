@@ -4491,3 +4491,52 @@ Rev3 ensembles `R915_y60_h32_ens5` / `R915_basic228_h128_ens5`) were frozen
 before that date, so the first read is an honest out-of-sample observation for
 all of them. Results: `benchmarks/aic2026_agreement_2026-09-19.md`; artifacts +
 manifest pointer `benchmarks/aic2026_2026-09-19.pointer.md`.
+
+## 2026-09-19: CID22 49-ref human set — registered A/B split for DVIFM standalone constants fitting
+
+**User direction (verbatim):** "use the training recipie from prior leading
+models. for optimizing the coefficient and exponents you should consider
+learning from cid22 test as they did, and compare it to other data sets like
+imazen26 crops with ssim2 as oracle" — the DVIFM authors fitted their ~29
+luma parameters on CID22 human data (talk transcript, fit list: CID22,
+TID2013, KADID-10k JPEG/JPEG2000 subsets, NLCD/NNCD, AIC-4 example set);
+this entry is our ledgered equivalent inside the existing holdout rules.
+
+**The split.** The 49 references of `CID22_validation_set.csv`
+(`reference_img` membership only; zero overlap with the 201-ref
+SSIMULACRA2-anchored train population — verified disjoint) sorted by
+basename, Fisher–Yates shuffled with recorded seed **20260919**:
+
+- **CID22-A (25 refs, FIT-ALLOWED for the Phase-2d constants fit only):**
+  `1189261.png`, `1531677.png`, `159550.png`, `1624487.png`,
+  `162520.png`, `164595.png`, `2079234.png`,
+  `21169144185_3f7977cb5a_o.png`, `225228.png`, `2389166.png`,
+  `2936831.png`, `3316926.png`, `3653963.png`, `373965.png`,
+  `3762075.png`, `4215100.png`, `6078297.png`, `6292444.png`,
+  `70497.png`, `7062219.png`, `844297.png`, `pexels-photo-2686358.png`,
+  `pexels-photo-2802032.png`, `pexels-photo-4210863.png`,
+  `ularapi_Semarang_City_Logo.png`
+- **CID22-B (24 refs, SEALED):** `1025469.png`, `1044329.png`,
+  `1279330.png`, `1418519.png`, `1420710.png`, `1475938.png`,
+  `1544947.png`, `2190188.png`, `2253934.png`, `2670327.png`,
+  `2736139.png`, `2775196.png`, `2887497.png`, `297394.png`,
+  `3156482.png`, `3316926_opo25u.png`, `3637739.png`, `382297.png`,
+  `5055743.png`, `5458393.png`, `7552578.png`, `792079.png`,
+  `adriankierman-report-page.png`, `pexels-photo-1933873.png`
+
+**What is fitted on A.** The standalone DVIFM convex head only: per-level
+visibility/block constants `{g, P, C₀, β, ς}` + simplex level/channel
+weights + one scale λ — ≤ ~90 scalars for the 3-plane variant (30 for
+luma-only), plus a per-domain min-max normalisation constant pair. **No
+MLP, no feature selection, no checkpoint selection** — this is the
+throwaway linear-head analogue the dispatch specified, not a zensim model
+fit.
+
+**Consequence.** Any artefact consuming CID22-A-derived constants carries
+CID22-A exposure and may only quote CID22 on subset B, labelled
+`CID22-B(24)`. CID22-B is read exactly once, after all Phase-2d variants
+are frozen, as a single descriptive table (SROCC/KROCC/PLCC per variant +
+comparators; prereg `benchmarks/dvifm_screen2d_prereg_2026-09-19.md` §5.4).
+No iteration after that read. This entry was committed before any MCOS
+value was read for fitting (membership columns only were used to build
+the split).

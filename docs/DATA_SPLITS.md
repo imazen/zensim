@@ -563,3 +563,18 @@ between the two target vectors on the same 779 pairs). One of them carries a
 target defect or a different label version. LIVE is EXCLUDED from
 cross-regime comparisons until audited (owner: canonical_corpus; annotate
 any cross-root live citation). Registered in `eval_annotations.json`.
+
+## Exposure ledger — 2026-09-19: CID22-49 A/B split (DVIFM Phase-2d)
+
+Per "Record each batch's exposure" above: the CID22 49-reference
+human-scored set was split into **A (25 refs, fit-allowed for the
+Phase-2d standalone-DVIFM constants fit only)** and **B (24 refs, sealed
+until one frozen descriptive read)** under recorded seed 20260919. The
+full ref lists, the user direction, what is fitted (≤~90 scalar constants
++ per-domain affine; no MLP/feature-selection/checkpoint-selection), and
+the consequence (artefacts consuming A-derived constants quote CID22 only
+as `CID22-B(24)`) are recorded in
+`docs/DATASET_HISTORY.md` under 2026-09-19 and preregistered in
+`benchmarks/dvifm_screen2d_prereg_2026-09-19.md` §4–§5. The CID22 registry
+row above is otherwise unchanged: the 49-ref set remains holdout-only for
+every other purpose, and no zensim model fit consumes these labels.
