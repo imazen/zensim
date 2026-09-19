@@ -2095,4 +2095,88 @@ mod tests {
             }
         }
     }
+
+    // Commit-5 gate: every SIMD tier is bit-identical to the scalar path.
+    // The kernel's `mul_add`s all carry power-of-two factors (exact on any
+    // tier — doubling/quadrupling cannot change the mantissa rounding), and
+    // `GenericF64x8` is a fixed 8-lane type on every backend, so lane order
+    // in every reduction is identical; each tier must reproduce scalar bits.
+    #[test]
+    fn simd_tier_parity() {
+        use archmage::SimdToken as _;
+
+        fn run<T: F64x8Backend + Copy>(
+            t: T,
+            w: usize,
+            h: usize,
+            strip: usize,
+            mode: BandMode,
+        ) -> [f64; DVIFM_FEATURES] {
+            let s32 = f32_plane(53, w, h);
+            let d32 = f32_plane(59, w, h);
+            let mut params = DvifmParams::default();
+            for lp in &mut params.levels {
+                lp.band = mode;
+            }
+            let mut acc = DvifmAccum::new(w, h, DVIFM_NORM_SDR, &params);
+            let mut r = 0;
+            while r < h {
+                let n = strip.min(h - r);
+                dvifm_push_rows(
+                    t,
+                    &mut acc,
+                    &s32[r * w..(r + n) * w],
+                    &d32[r * w..(r + n) * w],
+                );
+                r += n;
+            }
+            dvifm_finish(t, &mut acc)
+        }
+
+        // Widths exercising every remainder path: full 8-lane + tail (125),
+        // lane-adjacent (97), a width narrower than one lane (6), and the
+        // block-friendly walk case (128). Strips are non-multiples of the
+        // decimation stride and of 128.
+        let cases: &[(usize, usize, usize)] =
+            &[(125, 130, 7), (97, 101, 16), (6, 11, 3), (128, 128, 64)];
+        for &mode in &[BandMode::Laplacian, BandMode::Local] {
+            for &(w, h, strip) in cases {
+                let want = run(scalar(), w, h, strip, mode);
+                let check = |tier: &str, got: [f64; DVIFM_FEATURES]| {
+                    for (i, (&a, &b)) in got.iter().zip(want.iter()).enumerate() {
+                        assert_eq!(
+                            a.to_bits(),
+                            b.to_bits(),
+                            "tier {tier} mode {mode:?} {w}x{h} strip={strip}: \
+                             f{i} {a:e} != scalar {b:e}"
+                        );
+                    }
+                };
+                #[cfg(target_arch = "x86_64")]
+                {
+                    if let Some(t) = archmage::X64V3Token::summon() {
+                        check("v3", run(t, w, h, strip, mode));
+                    }
+                    if let Some(t) = archmage::X64V4Token::summon() {
+                        check("v4", run(t, w, h, strip, mode));
+                    }
+                    if let Some(t) = archmage::X64V4xToken::summon() {
+                        check("v4x", run(t, w, h, strip, mode));
+                    }
+                }
+                #[cfg(target_arch = "aarch64")]
+                {
+                    if let Some(t) = archmage::NeonToken::summon() {
+                        check("neon", run(t, w, h, strip, mode));
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if let Some(t) = archmage::Wasm128Token::summon() {
+                        check("wasm128", run(t, w, h, strip, mode));
+                    }
+                }
+            }
+        }
+    }
 }
