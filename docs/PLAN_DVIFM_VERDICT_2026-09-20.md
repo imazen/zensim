@@ -81,3 +81,49 @@ feature block — and the add-on screens already showed that bolting 30 columns 
 paired gain from the pooling transplant AND X6 shows the map no better than the current attribution map, the family
 is recorded as a negative result, the kernel stays default-off as research surface, and the program ends. Any single
 one of those passing is worth the next round.
+
+## 4. Why these sampling kernels, and the block-edge-contrast experiment
+
+**The kernels are not interchangeable and they answer different requirements.**
+
+- **2×2 box (zensim's scale step).** Exact area average, so it matches the "pixel = area" sensor/display model and
+  preserves DC exactly, at 1 add per input pixel. Its response is |cos πf|: it zeroes Nyquist but passes 0.71 at
+  half-Nyquist, so most of the band that folds under 2:1 decimation survives the filter. That is the theoretical
+  root of the measured aliasing — F1 swings 1.62× over codec-grid phases at level 3 on box scales against 1.12× on
+  the binomial pyramid.
+- **Binomial [1 2 1]/4 (DVIFM's, Burt–Adelson).** Response cos²(πf): 0.5 at half-Nyquist, zero at Nyquist, so it
+  attenuates the folding band far better at 4 adds and 2 shifts. Repeated binomial convolution approaches a
+  Gaussian, and the Gaussian is the kernel for which coarsening creates no new extrema (scale-space causality,
+  Koenderink/Lindeberg) — structure at a coarse level is inherited, never invented. Its coefficients are powers of
+  two, so it is **exact in integer arithmetic**, which is why the i16 kernel can be bit-identical everywhere.
+- **Mitchell–Netravali (B=C=1/3).** Justified empirically, not information-theoretically: Mitchell and Netravali
+  mapped the cubic (B,C) plane into blur / ringing / blocking regions by subjective study and picked the balance
+  point. That is a statement about human preference, which is why it belongs on the **data** side (renditions).
+- **Lanczos.** Maximises stopband attenuation by windowing a sinc, and pays in ringing. For metric work that is
+  actively harmful: ringing is a visible artifact, so a Lanczos-resampled reference makes the metric measure the
+  resampler. It is why the Lanczos renditions were excluded from the core.
+
+**Hence the split we have landed on, stated as a rule:** binomial inside the metric (integer-exact, no ringing,
+no invented structure, good folding-band attenuation), Mitchell for preparing image data (perceptual preference),
+Lanczos nowhere, box only where its exact-DC property is the point.
+
+## 5. X7 — block-edge contrast (user question, 2026-09-20)
+
+Worth testing, and cheap, but note the tension: **every low-pass step smears exactly the feature we want.** A DC
+step at an 8-pixel codec boundary becomes a ramp after [1 2 1], so the block-peak statistic on a band plane is least
+sensitive at the boundary where blocking artifacts live. Three additive terms, each one change:
+
+1. **Unfiltered level-0 peak.** Compute the 5×5 block peak on the RAW difference plane (no band, no blur) alongside
+   the band planes. Costs nothing new — the difference already exists — and it is the only term that sees a step at
+   full amplitude.
+2. **Across-boundary vs within-block contrast.** Per 5×5 block, the contrast measured across its interior columns
+   and rows against the contrast within the neighbouring 3×3 corners: a step confined to one line is blocking;
+   the same contrast spread over the block is texture. This is the discriminator the current edge-discounted
+   contrast does not provide — that discount exists to stop an edge MASKING error, not to detect the edge itself.
+3. **Phase-agnostic lattice.** zensim's existing blockiness slot (v2 idx 25) is oriented but fixed-phase, so it
+   sees a codec whose partition is offset only weakly. Run the term over all 8 phases and keep the maximum, or run
+   it on the coprime 5-grid so alignment averages out; report both against the fixed-phase control.
+
+Gate: on TRAIN codec pairs, per codec, does any of the three raise within-image agreement with ssim2 ∧ butteraugli
+on JPEG and WebP (where blocking dominates) without hurting AVIF/JXL? Run as variants inside X4, whose pooling
+machinery already exists; the permuted-column control applies to each added term.
