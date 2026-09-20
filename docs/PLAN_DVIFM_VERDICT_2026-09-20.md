@@ -127,3 +127,60 @@ sensitive at the boundary where blocking artifacts live. Three additive terms, e
 Gate: on TRAIN codec pairs, per codec, does any of the three raise within-image agreement with ssim2 ∧ butteraugli
 on JPEG and WebP (where blocking dominates) without hurting AVIF/JXL? Run as variants inside X4, whose pooling
 machinery already exists; the permuted-column control applies to each added term.
+
+## 6. Why the constants came out unphysical — the loss and the fitting loop need iteration
+
+User question, 2026-09-20: "our loss and learn must need iteration if we aren't getting enough psychovisual
+constants — but I thought we did??" Both halves are right, and the second deserves a correction.
+
+**We never actually measured psychovisual constants.** The 2026-09-19 phase-2 fit reported β = 0.604–0.658 per
+level, which looks exactly like Legge & Foley's 0.62 and Watson's 0.7 — but it was initialised at 0.65 with a prior
+pulling it there, and the whole fit moved the loss by 2.3%. Those numbers were the prior, not evidence. The
+phase-2d fit dropped that prior, and with the prior gone the data did not constrain β at all: one grid step changes
+the loss by under 0.3% at 13 of 15 cells, and the optimum runs to the grid edge. So the honest statement is that the
+fit is uninformative about β, not that β is 20.
+
+**Five reasons the loss cannot see a masking exponent, each a concrete iteration:**
+
+1. **Pooled MSE against MOS is the wrong objective for a within-image weighting.** The exponent changes how blocks
+   are weighted *inside* an image; pooled MSE mostly cares about each image's overall level, and the per-cell refit
+   of the output map (A, B, λ) absorbs level error before β ever sees a gradient. **Iteration: fit the constants
+   against a within-reference ranking loss** — pairwise hinge over same-reference pairs, or Spearman surrogate —
+   with pooled MSE kept only as a reported diagnostic.
+2. **Coordinate-wise sweeps let levels compensate for each other,** which is what produces boundary optima that
+   later sweeps undo (Y′ l0 went 20.6 → 3.8 and the loss *improved*). **Iteration: joint optimisation** over all
+   (plane, level) constants and the head together, with the grid used only for initialisation.
+3. **Too many free constants for the data.** 15 knees + 15 exponents + 15 sharpnesses + weights on 2,192 rows.
+   **Iteration: fit TIED first** — one β shared across levels, Cb tied to Cr — and untie only what beats seed noise
+   on the development leg. A tied β is identifiable where 15 free ones are not.
+4. **The prior was silently dropped** between phase 2 and phase 2d. **Iteration: always fit both** (free and
+   prior-pulled toward 0.65) and report the pair; ship the prior-pulled one when the development leg cannot tell
+   them apart.
+5. **Our contrast axis is not the axis the psychophysics is stated on.** Legge–Foley-style exponents describe
+   threshold elevation against masker contrast *relative to local mean luminance* at a given spatial frequency. Our
+   C̃ is a band-plane amplitude range over a 3×3 corner, globally normalised by the channel's sRGB-cube span — a
+   band amplitude, not a Weber or Michelson contrast. No exponent fitted on that axis is comparable to the
+   literature. **Iteration: define contrast as band amplitude ÷ local mean (a Weber-like ratio) and refit** — this
+   is the variant whose exponent can be compared to published values at all, and it is the one that would let us
+   claim a psychovisual constant honestly.
+
+Until at least (1), (3) and (5) are done, "the exponent wants a step" should be read as "this loss cannot
+distinguish a step from a slope", which is a statement about our fitting, not about vision.
+
+## 7. X8 — SafeSyn as a constants domain, alone and as majority weight
+
+User, 2026-09-20: "we can also try safesyn alone or safesyn as majority weight". Legitimate and cheap, and it
+attacks the identifiability problem from the data side rather than the loss side:
+
+- **SafeSyn alone** (`/var/tmp/zensim-validation-2026-09-15/recovery/tables/safesyn_{fit,development}.parquet`,
+  141,054 / 38,758 rows, all-TRAIN, zero holdout exposure, **signed** ssim2 targets down to −744 — never clipped).
+  64× more rows than CID22-A, and 25 distortion types × 5 severities, which is exactly the contrast-by-noise
+  coverage a masking exponent needs. The catch is stated on every table: the target is a metric teacher, so a
+  constant fitted here is fitted to SSIMULACRA2's opinion of masking, not a human's.
+- **SafeSyn-majority core variant** as an arm in X1/X2: the same model fitted on a core reweighted so SafeSyn
+  dominates, against the 75%-photography core. This is a deliberate exception to the composition rule, run as a
+  comparison rather than a replacement, and it measures how much the teacher's own distortion distribution is
+  driving the constants.
+- Judge both on the TRAIN-side development legs; the sealed CID22-B read stays single and is spent in X1.
+  Report the constants three ways — CID22-A, TID/KADID, SafeSyn — with profile intervals, and mark a constant
+  portable only where all three intervals overlap. That is the first test with enough rows to expect an answer.
