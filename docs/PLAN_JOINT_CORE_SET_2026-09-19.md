@@ -49,6 +49,14 @@ Diversity is enforced, not hoped for:
 - **Quality-axis floor:** within each codec leg, q5–q60 carries at least the same pair density as q60–q100.
 - **Near-lossless and identity anchors** present by construction (the dial's ends), plus the corruption-gate
   negatives as a small tail so the integrity head keeps a training signal.
+- **Never clip a teacher target** (user, 2026-09-19: "don't clip ssim2 scores!"). SSIMULACRA2 is signed and goes
+  below 0 on badly damaged pairs; clipping to [0,1] pins those rows at a floor with no gradient and biases every
+  constant fitted against them toward whatever explains the flat region. Measured on the imazen26 leg as built for
+  the phase-2d constants fit: **885 of 12,246 rows (7.2%) had a negative raw score clipped to 0** — all at the
+  aggressive end, exactly where the dial has to work. The core keeps the RAW SIGNED teacher value. If a bounded
+  target is required by a loss, use a strictly monotone squashing map (order-preserving, invertible) and record
+  it; never a clamp. Rows are dropped only when the teacher itself is undefined, never because it is negative.
+  The guards doc's saturation detector fires on any fit where >5% of rows sit at a target bound.
 - **Dedup and audit:** exact-pixel dedup within legs, dHash audit against every T0 eval corpus (CID22-49, AIC-3,
   AIC-4, AIC2026, SDR25, KonJND val, KonFiG test) with flags adjudicated, not auto-quarantined.
 

@@ -56,6 +56,7 @@ Cheap, structural, and independent of the loss. Each one names the shipped simpl
 | Masking is a gate | fraction of blocks with `v ∈ (0.05, 0.95)` < 5% | one explicit threshold, not (C₀, β, ς) |
 | Map degeneracy | the output map's exponential runs in its linear regime (λ·E ≪ 1 over the data) | the linear map, with one parameter |
 | Parameter degeneracy | \|corr\| > 0.95 between two parameters in the finite-difference Hessian (e.g. `g` vs `C₀`: φ_g(s·x) = s^g·φ_g(x), so a contrast rescale trades against the knee; `β` vs level weight; `P` vs the map) | reparameterise, or fix one at its prior |
+| Target clamped | any target produced by clipping a signed teacher (e.g. `clip01(ssim2)`) — measured 7.2% of the imazen26 leg | refit on the RAW signed teacher, or a monotone squash; never a clamp |
 | Saturation | > 5% of TRAIN rows at the score ceiling or floor, or any feature clamped constant by a guard on the fit corpus (the Profile B winsor failure) | widen the guard corpus, or the feature is dead here |
 | Dead input | a term's removal changes the development metric by less than seed noise | remove it; record it as dead |
 
