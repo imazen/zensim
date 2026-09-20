@@ -45,7 +45,25 @@ Diversity is enforced, not hoped for:
 
 - **Stratify by clustering**, not at random: k-means over the existing `feat_*` embedding, pick centroid-nearest
   members per cluster, keep singleton clusters (they are the outliers a model fails on). Record cluster sizes.
-- **Content-class floor:** each of photo / screen / text / line-art / HDR holds ≥10% of its leg's references.
+- **Content-class floor:** each of photo / screen / text / line-art / HDR holds ≥10% of its leg's references, and
+  **real camera photography is the plurality of the core, not a minority.** Measured on the imazen26 leg that the
+  phase-2d constants fit actually used (all 212 origins / 12,246 pairs, gallery
+  `/mnt/v/output/zensim/demos/imazen26-subset-2026-09-19/origins.html`): AI-generated products/illustrations/clipart
+  34%, screenshots + plots 31%, document scans 15%, **camera photography only 19% from 40 origins**. Defensible for a
+  codec picker; wrong for fitting masking constants that model human vision on photographic texture. Target ≥40%
+  camera photography by pairs in the core, drawn from the imazen-26 photo classes
+  (1000-photos-general, 1200-interiors, 1400-nature, 1600-food, 2000-people, 3000/3300-museum) plus CID22-train.
+- **Scale ladder (user, 2026-09-19): balanced, Mitchell, capped near 1 MP.**
+  - **Cap ≈1 MP** (1024 px long edge). Nothing above it: the compute cost is not worth it, and the existing top step
+    already sits at 0.8–1.05 MP. "More pixels of photos" means moving pairs UP the existing ladder, not extending it.
+  - **Do not let tiny thumbnails dominate.** Measured today: the clean-picker rendition set is 1,656 tiny / 828 small
+    / 1,224 medium / 789 large of 4,497, and the imazen26 subset spreads ~1,100 pairs over each of 11 steps, so 5 of
+    11 steps (45% of pairs) sit at ≤256 px. Target instead: **≥55% of pairs at 384–1024 px**, ~25% at 192–256, and a
+    ~20% tail at 64–128 kept only because the sweep discipline needs the fixed-overhead end of the size axis.
+  - **Mitchell–Netravali is the standard downscaler** for every rendition and every gallery thumbnail — better for
+    human visual preference than Lanczos (which rings) and than Triangle (which blurs; the invalid 2026-09-13 scale
+    study used Triangle only). Via `zenresize`; record the kernel in `variants.tsv` per the codec-corpus
+    VARIANTS-SPEC. Identical kernel on both sides of every pair, always.
 - **Quality-axis floor:** within each codec leg, q5–q60 carries at least the same pair density as q60–q100.
 - **Near-lossless and identity anchors** present by construction (the dial's ends), plus the corruption-gate
   negatives as a small tail so the integrity head keeps a training signal.
