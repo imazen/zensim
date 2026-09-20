@@ -57,6 +57,13 @@ Diversity is enforced, not hoped for:
   target is required by a loss, use a strictly monotone squashing map (order-preserving, invertible) and record
   it; never a clamp. Rows are dropped only when the teacher itself is undefined, never because it is negative.
   The guards doc's saturation detector fires on any fit where >5% of rows sit at a target bound.
+  **If a consumer genuinely cannot take a negative target** (user, 2026-09-19: "if the system can't do negatives
+  well - try skipping those rows"), DROP those rows from that consumer's view and record the count and their
+  distribution over codec, quality and content class — never clamp them into the fit. Dropping loses the rows;
+  clamping corrupts every row's constant. Measured negative shares in the leaders' own legs: SafeSyn 8,195/141,054
+  (5.8%, minimum −743.9), codec 450/7,947 (5.7%, minimum −64.4); CID22-train and the human legs have none.
+  Separately, `codec_fit` has **1,227 of 7,947 rows (15.4%) pinned at exactly 100** — a ceiling saturation that
+  trips the same detector at the other end and needs the near-lossless rows spread, not stacked on the bound.
 - **Dedup and audit:** exact-pixel dedup within legs, dHash audit against every T0 eval corpus (CID22-49, AIC-3,
   AIC-4, AIC2026, SDR25, KonJND val, KonFiG test) with flags adjudicated, not auto-quarantined.
 
