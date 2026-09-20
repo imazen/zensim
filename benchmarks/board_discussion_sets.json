@@ -618,6 +618,15 @@
       "report_url": "/zensim/benchmarks/dvifm_screen2c_2026-09-19.md",
       "bakes": [],
       "note": "Q1 NOT-A-SUBSTITUTE: y60+dvifm30 loses to y60 10/10 seeds (paired \u0394 \u22120.0045); gap to basic228 widened, not closed. dvifm30 alone carries real signal (0.857 vs 0.005 permuted twin). Q2 NEGATIVE on the TRAIN-role codec panel (PROXY labels): basic228+dvifm30 does not separate from its permuted twin (\u22120.0021, |0.0021| \u2264 2\u00b7SD/\u221a10 = 0.0085); JPEG shows the largest within-ladder loss. dvifm_block stays default-OFF. Record: benchmarks/dvifm_screen2c_2026-09-19.md"
+    },
+    {
+      "id": "2026-09-20-joint-core-v1",
+      "date": "2026-09-20",
+      "role": "train",
+      "label": "2026-09-20 · joint-core-v1: 52,963-pair provenance-complete TRAIN view",
+      "report_url": "/zensim/benchmarks/joint_core_v1_2026-09-20.md",
+      "bakes": [],
+      "note": "Coverage PASS (mid 55.9%/small 24.4%/tiny 19.7%, photo 81.6%, guards >=5.6%, AI 1.5%, kernel provenance per leg). Leader reproduction: core basic228/h128 best-val 0.9696-0.9729 vs frozen R915 0.9775-0.9788, mean gap -0.0068 (smaller train pool). Convergence: flat-to-rising ep50->ep99 (mean +0.0047); the ep-100 dip is the recipe's LR-restart transient, present in frozen R915 too. Permuted-column control: 30-col row-permutation cost +0.0021 mean best-val SROCC vs ~0.003 seed noise -> indistinguishable; per the plan's own rule the core is TOO SMALL for feature screening — grow before any feature screen. DVIFM native3 constants fit measured with full provenance; dHash audit 21 flags all adjudicated false-positive. Evidence: /mnt/v/output/zensim/joint-core-v1/."
     }
   ],
   "incumbent_notes": [

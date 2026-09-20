@@ -578,3 +578,35 @@ as `CID22-B(24)`) are recorded in
 `benchmarks/dvifm_screen2d_prereg_2026-09-19.md` §4–§5. The CID22 registry
 row above is otherwise unchanged: the 49-ref set remains holdout-only for
 every other purpose, and no zensim model fit consumes these labels.
+
+## Addendum — 2026-09-20: `joint-core-v1` registered as a TRAIN-role view
+
+`joint-core-v1` (`/mnt/v/output/zensim/joint-core-v1/`, 52,963 pairs,
+`_MANIFEST.json` at the root carries `build_commit` + per-input sha256 +
+cluster/seed rules + per-leg kernel provenance) is a **TRAIN-role view**.
+It assigns no new role to any corpus: every source corpus keeps its
+registered role and the view only consumes rows already admissible for
+training.
+
+Composition (measured, `coverage_report.json`): mid band 55.9% /
+small 24.4% / tiny 19.7% (rung ≤1024 px); photography 81.6%; screen,
+document, line-art guards 5.6% each; AI-labelled 1.5%. Legs:
+fresh_imazen26 62.2% / cid22 14.2% / human 9.6% / fresh_safesyn 8.7% /
+hdr 4.7% / konfig 0.6%. HDR rows are PQ-regime features — stored under
+`features/hdr_pq/` with their own manifest, never column-mixed into SDR
+tables or SDR DVIFM caches.
+
+Selection: k-means (seed 17) centroid-nearest over each leg's `feat_*`
+embedding; singleton clusters kept whole; imazen-26 contributes TRAIN
+manifest ids only (even last digit), verified ref-disjoint from
+`codec_development`, `safesyn_development`, `cid22_development`,
+`human_development` and every eval corpus. dHash-64 audit against
+CID22-49, AIC-3, AIC-4, AIC2026, SDR25, KonJND-val and KonFiG-test
+produced 21 flags, each adjudicated false-positive by pixel RMSE/NCC —
+flags are recorded, nothing auto-quarantined.
+
+Kernel provenance per leg is recorded in the manifest: fresh legs are
+plain Mitchell `sharpen=0`; cid22/human/konfig are native (no resample);
+hdr is Mitchell `resize_sharpen=10` on linear PQ; the earlier PIL-Lanczos
+picker renditions were rejected and re-rendered. A per-leg
+`kernel` column is carried in `pairs/pairs_core.tsv`.
