@@ -101,6 +101,20 @@ Diversity is enforced, not hoped for:
 - Pixels are referenced by content hash through the existing store; the core set copies no image bytes.
 - Whole core, including caches for one DVIFM variant: **≤25 GB**, which fits alongside everything else on `/mnt/v`.
 
+## The one-hour gate (user, 2026-09-19: "let's try to make it something that can run in an hour")
+
+The core is only useful if a full cycle is cheap enough to repeat. Acceptance requires, on this box, measured:
+
+- **Constants fit ≤10 min** for all (plane, level) of a 3-plane DVIFM variant. This is what forces the histogram
+  design: each C₀ × β grid cell's loss is a sum of per-block terms, so a 2-D histogram of (C̃, m) per (plane, level)
+  gives the identical grid from a few hundred KB. The 2026-09-19 phase-2d run took **8 hours and did not finish**
+  because it re-read per-block records for every cell — 16 minutes per plane-level on the imazen26 domain alone.
+- **Five-seed model fit ≤40 min** for `basic228/h128` on the core, run ≤2 concurrent under run-heavy.
+- **Extraction is separate and amortised** (once per feature-set identity), but must be ≤2 h for the whole core and
+  produce a reusable table; the histograms are built in the same pass.
+- **Whole repeat cycle (fit constants → re-bake → fit model → panel) ≤1 h.** Anything slower is a design bug, not a
+  budget request: shrink the row count before shrinking seeds or budgets, and keep the fairness contract intact.
+
 ## How it is validated before anyone trains on it
 
 1. **Reproduce a known model on it.** Refit the leaders' `basic228/h128` recipe on the core (same seeds, same
