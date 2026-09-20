@@ -50,9 +50,16 @@ Diversity is enforced, not hoped for:
   phase-2d constants fit actually used (all 212 origins / 12,246 pairs, gallery
   `/mnt/v/output/zensim/demos/imazen26-subset-2026-09-19/origins.html`): AI-generated products/illustrations/clipart
   34%, screenshots + plots 31%, document scans 15%, **camera photography only 19% from 40 origins**. Defensible for a
-  codec picker; wrong for fitting masking constants that model human vision on photographic texture. Target ≥40%
-  camera photography by pairs in the core, drawn from the imazen-26 photo classes
-  (1000-photos-general, 1200-interiors, 1400-nature, 1600-food, 2000-people, 3000/3300-museum) plus CID22-train.
+  codec picker; wrong for fitting masking constants that model human vision on photographic texture. **Target ≥75%
+  camera photography by pairs** (user, 2026-09-19: "perhaps real photos should be 75% tbh"), drawn from the imazen-26
+  photo classes (1000-photos-general, 1200-interiors, 1400-nature, 1600-food, 2000-people, 3000/3300-museum) plus
+  CID22-train and the KADID/TID photographic references. The remaining ≤25% keeps a **floor of 5% each** for screen
+  content, document/text and line-art/synthetic, so a regression on those classes is still detectable — they are
+  guard classes here, not training mass. AI-generated imagery is not a content class for metric fitting: cap it at
+  5% and label it, since its statistics are a generator's, not a camera's or a renderer's.
+  Note the consequence: with only 40 photographic origins in today's imazen26 leg, a 75% photo core needs MORE photo
+  origins (the canonical corpus has 111 in the photo classes at a 12 MP median) and more renditions per origin, not
+  a reweighting of what already exists.
 - **Scale ladder (user, 2026-09-19): balanced, Mitchell, capped near 1 MP.**
   - **Cap ≈1 MP** (1024 px long edge). Nothing above it: the compute cost is not worth it, and the existing top step
     already sits at 0.8–1.05 MP. "More pixels of photos" means moving pairs UP the existing ladder, not extending it.
