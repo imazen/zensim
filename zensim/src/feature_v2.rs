@@ -9023,7 +9023,7 @@ impl MeanOffsetRows {
 /// Training-only DVIFM side channel (`feature = "training"`): substitute
 /// the per-level constants the walk's DVIFM pump would otherwise take from
 /// [`crate::dvifm::DvifmParams::default`], and collect every block's
-/// 18-float [`crate::dvifm::BlockRec`] for the constants-fit cache
+/// 20-float [`crate::dvifm::BlockRec`] for the constants-fit cache
 /// (`research::Extraction::dvifm_block_stats`). `None` on every served
 /// path — nothing allocates.
 ///
@@ -9047,6 +9047,8 @@ pub(crate) struct DvifmWalkExtras {
 pub(crate) struct DvifmBlockCacheOut {
     /// Per-level full-block grid `(nby, nbx)`.
     pub(crate) grid: [(u32, u32); crate::dvifm::DVIFM_LEVELS],
+    /// Per-level plane dims `(w, h)` — the canvas the steering field paints.
+    pub(crate) dims: [(u32, u32); crate::dvifm::DVIFM_LEVELS],
     /// `levels[l]` = the records the level's pump emitted, in order.
     pub(crate) levels: Vec<Vec<crate::dvifm::BlockRec>>,
 }
@@ -10045,9 +10047,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         #[cfg(feature = "training")]
         if let Some(de) = dvifm
             && let Some(sink) = de.cache.as_mut()
-            && let Some((grid, levels)) = acc.take_block_cache()
+            && let Some((grid, dims, levels)) = acc.take_block_cache()
         {
             sink.grid = grid;
+            sink.dims = dims;
             sink.levels = levels;
         }
     }

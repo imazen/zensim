@@ -959,23 +959,32 @@ pub(crate) struct BlockRec {
     /// Per-corner 3×3 max/min of the dst-side band.
     pub cmax_d: [f64; 4],
     pub cmin_d: [f64; 4],
+    /// Block mean of the src-side subtracted pedestal — the local DC the
+    /// band was differenced from (expanded next Gaussian level for `lap`,
+    /// B²G for `local`; for the low-pass level, the plane itself). The
+    /// Weber-contrast denominator for the constants fit: `C̃/(mean+ε)`.
+    pub mean_s: f64,
+    /// Block mean of the dst-side subtracted pedestal.
+    pub mean_d: f64,
 }
 
-/// The 18-f32 wire record one block serializes to on the training side
+/// The 20-f32 wire record one block serializes to on the training side
 /// output (`research::Extraction::dvifm_block_stats`). Field order is the
-/// struct's: `[m, peak, cmax_s×4, cmin_s×4, cmax_d×4, cmin_d×4]`.
-#[cfg(feature = "training")]
-pub(crate) const DVIFM_BLOCK_F32: usize = 18;
+/// struct's: `[m, peak, cmax_s×4, cmin_s×4, cmax_d×4, cmin_d×4, mean_s,
+/// mean_d]` — the 18-f32 v1 prefix is unchanged, so v1 readers can still
+/// parse a v2 blob given its record width.
+#[cfg(any(feature = "training", test))]
+pub(crate) const DVIFM_BLOCK_F32: usize = 20;
 
 impl BlockRec {
-    /// Narrow the f64 kernel record to the 18-f32 training record.
+    /// Narrow the f64 kernel record to the 20-f32 training record.
     ///
     /// The narrowing is the contract — the cache exists so per-level
     /// constants (g, P, C₀, β, ς, F2 centres) can be refit without
     /// re-extracting pixels, and f32 keeps the record at ~3.8 B per source
     /// pixel (design §"The block-stats cache").
-    #[cfg(feature = "training")]
-    pub(crate) fn to_f32_18(self) -> [f32; DVIFM_BLOCK_F32] {
+    #[cfg(any(feature = "training", test))]
+    pub(crate) fn to_f32(self) -> [f32; DVIFM_BLOCK_F32] {
         let mut out = [0.0f32; DVIFM_BLOCK_F32];
         out[0] = self.m as f32;
         out[1] = self.peak as f32;
@@ -983,6 +992,8 @@ impl BlockRec {
         out[6..10].copy_from_slice(&self.cmin_s.map(|v| v as f32));
         out[10..14].copy_from_slice(&self.cmax_d.map(|v| v as f32));
         out[14..18].copy_from_slice(&self.cmin_d.map(|v| v as f32));
+        out[18] = self.mean_s as f32;
+        out[19] = self.mean_d as f32;
         out
     }
 }
@@ -1051,6 +1062,10 @@ fn scan_block_row(
             cmin_s,
             cmax_d,
             cmin_d,
+            // The batch oracle has no level-plane rows — the streaming
+            // pump fills the Weber fields from `mean_q` after emit.
+            mean_s: 0.0,
+            mean_d: 0.0,
         });
     }
 }
@@ -1111,13 +1126,23 @@ struct LevelSums {
     f2: [f64; DVIFM_BINS],
 }
 
-/// Pool one block's record into the running sums — `f1_parametric` +
-/// `f2_binned` per block.
-fn pool_block(sums: &mut LevelSums, lp: &DvifmLevelParams, rec: &BlockRec) {
+/// One block's F1 terms under `lp`: the two side contrasts, the merged
+/// visibility `v_b`, and the powered hard-max `m_b^P`. The block's F1
+/// contribution is `ε_b = v_b · m_b^P` — [`pool_block`] adds exactly it,
+/// and the steering field ([`block_field`]) reports the same values, so
+/// "map mass" and "pooled score" cannot drift apart.
+fn block_terms(rec: &BlockRec, lp: &DvifmLevelParams) -> (f64, f64, f64, f64) {
     let cs = contrast_g_rec(rec, 0, lp.g, lp.edge);
     let cd = contrast_g_rec(rec, 1, lp.g, lp.edge);
     let vb = visibility(cs, lp).max(visibility(cd, lp));
     let e = rec.m.powf(lp.p);
+    (cs, cd, vb, e)
+}
+
+/// Pool one block's record into the running sums — `f1_parametric` +
+/// `f2_binned` per block.
+fn pool_block(sums: &mut LevelSums, lp: &DvifmLevelParams, rec: &BlockRec) {
+    let (cs, cd, vb, e) = block_terms(rec, lp);
     sums.f1 += vb * e;
     let ell = (cs.min(cd) + 1e-6).ln();
     let h = hat_memberships(ell, &lp.f2_centers);
@@ -1135,6 +1160,108 @@ fn level_out(sums: &LevelSums) -> [f64; DVIFM_PER_LEVEL] {
         out[0] = sums.f1 * inv;
         for j in 0..DVIFM_BINS {
             out[1 + j] = sums.f2[j] * inv;
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// The DVIFM steering field — per-block ε_b = v_b·m_b^P over the level's
+// full-block lattice, painted back over the level plane. The block vectors
+// come from the SAME `block_terms` the pump pools, and `f1_sum` accumulates
+// them in emit order, so the painted field's total mass is the pooled
+// `sums.f1` bit-for-bit. `test` builds see it so the gate tests can run
+// without the `training` feature.
+// ---------------------------------------------------------------------------
+
+/// One level's steering field: `ε_b`, `v_b`, `m_b` per block on the
+/// full-block lattice (block-row-major; partial border blocks dropped).
+#[cfg(any(test, all(feature = "training", feature = "custom-profiles")))]
+#[derive(Clone, Debug)]
+pub(crate) struct DvifmBlockField {
+    /// Lattice shape `(nby, nbx)` at this level's plane dims.
+    pub nby: usize,
+    pub nbx: usize,
+    /// `ε_b = v_b·m_b^P` — the block's F1 mass.
+    pub eps: Vec<f64>,
+    /// `v_b` — merged visibility.
+    pub vis: Vec<f64>,
+    /// `m_b` — block hard max |error|.
+    pub err: Vec<f64>,
+    /// `Σ_b ε_b` accumulated in record order — bitwise `LevelSums::f1`.
+    pub f1_sum: f64,
+}
+
+/// Derive one level's field from its cached records — `block_terms` per
+/// record in emit order, so `f1_sum` is bitwise-identical to the sum the
+/// pump pooled while it emitted them.
+#[cfg(any(test, all(feature = "training", feature = "custom-profiles")))]
+pub(crate) fn block_field(
+    recs: &[BlockRec],
+    lp: &DvifmLevelParams,
+    nby: usize,
+    nbx: usize,
+) -> DvifmBlockField {
+    debug_assert_eq!(recs.len(), nby * nbx);
+    let mut f = DvifmBlockField {
+        nby,
+        nbx,
+        eps: Vec::with_capacity(recs.len()),
+        vis: Vec::with_capacity(recs.len()),
+        err: Vec::with_capacity(recs.len()),
+        f1_sum: 0.0,
+    };
+    for rec in recs {
+        let (_cs, _cd, vb, e) = block_terms(rec, lp);
+        let eps_b = vb * e;
+        f.f1_sum += eps_b;
+        f.eps.push(eps_b);
+        f.vis.push(vb);
+        f.err.push(rec.m);
+    }
+    f
+}
+
+/// A block field painted over its level plane: `eps_density` carries
+/// `ε_b/25` per block pixel (total mass = `f1_sum` exactly — the painted
+/// cells are the whole blocks, partial border cells stay 0); `vis`/`err`
+/// are the block-constant `v_b`/`m_b` planes.
+#[cfg(any(test, all(feature = "training", feature = "custom-profiles")))]
+#[derive(Clone, Debug)]
+pub(crate) struct DvifmPainted {
+    /// `ε_b/25` per pixel inside each full block; 0 on the dropped border.
+    pub eps_density: Vec<f64>,
+    /// `v_b` per pixel (f32 — a display/query plane, not a mass term).
+    pub vis: Vec<f32>,
+    /// `m_b` per pixel (f32).
+    pub err: Vec<f32>,
+}
+
+/// Paint `f` onto a `w`×`h` canvas (the level's plane dims). The ε density
+/// is uniform `ε_b/25` inside each block — the stated rule that makes a
+/// fractional rectangle integral equal the sum of block terms cut by area.
+#[cfg(any(test, all(feature = "training", feature = "custom-profiles")))]
+pub(crate) fn paint_block_field(f: &DvifmBlockField, w: usize, h: usize) -> DvifmPainted {
+    debug_assert!(f.nbx * DVIFM_BLOCK <= w && f.nby * DVIFM_BLOCK <= h);
+    let mut out = DvifmPainted {
+        eps_density: vec![0.0; w * h],
+        vis: vec![0.0; w * h],
+        err: vec![0.0; w * h],
+    };
+    let inv_nb = 1.0 / (DVIFM_BLOCK * DVIFM_BLOCK) as f64;
+    for by in 0..f.nby {
+        for bx in 0..f.nbx {
+            let b = by * f.nbx + bx;
+            let density = f.eps[b] * inv_nb;
+            let (v, m) = (f.vis[b] as f32, f.err[b] as f32);
+            for r in by * DVIFM_BLOCK..(by + 1) * DVIFM_BLOCK {
+                for c in bx * DVIFM_BLOCK..(bx + 1) * DVIFM_BLOCK {
+                    let i = r * w + c;
+                    out.eps_density[i] = density;
+                    out.vis[i] = v;
+                    out.err[i] = m;
+                }
+            }
         }
     }
     out
@@ -1231,9 +1358,11 @@ struct LevelSide {
 }
 
 /// What [`DvifmAccum::take_block_cache`] returns: each level's full-block
-/// grid `(nby, nbx)` plus the records (level-major, block-row-major).
-#[cfg(feature = "training")]
-pub(crate) type DvifmBlockTake = ([(u32, u32); 5], Vec<Vec<BlockRec>>);
+/// grid `(nby, nbx)`, each level's plane dims `(w, h)` (the canvas the
+/// steering field paints over), and the records (level-major,
+/// block-row-major).
+#[cfg(any(feature = "training", test))]
+pub(crate) type DvifmBlockTake = ([(u32, u32); 5], [(u32, u32); 5], Vec<Vec<BlockRec>>);
 
 struct LevelPump {
     w: usize,
@@ -1252,6 +1381,9 @@ struct LevelPump {
     side: [LevelSide; 2],
     /// Pending band rows (paired across sides) awaiting a full block row.
     band_q: [VecDeque<Vec<f64>>; 2],
+    /// The level-plane rows (`g`) paired with `band_q` — same push/drain
+    /// discipline; the block's local mean for the record's Weber fields.
+    mean_q: [VecDeque<Vec<f64>>; 2],
     sums: LevelSums,
     lp: DvifmLevelParams,
 }
@@ -1272,6 +1404,7 @@ impl LevelPump {
             hb2_emitted: 0,
             side: [LevelSide::default(), LevelSide::default()],
             band_q: [VecDeque::new(), VecDeque::new()],
+            mean_q: [VecDeque::new(), VecDeque::new()],
             sums: LevelSums::default(),
             lp,
         }
@@ -1323,27 +1456,29 @@ impl DvifmAccum {
     ///
     /// Reachable only through `feature_v2::FoldWalkExtras::dvifm`, which
     /// exists under `feature = "training"` — the served path never enables
-    /// it and never allocates the per-level vectors.
-    #[cfg(feature = "training")]
+    /// it and never allocates the per-level vectors. `test` builds see it
+    /// so the field gates can exercise the streaming path directly.
+    #[cfg(any(feature = "training", test))]
     pub(crate) fn enable_block_cache(&mut self) {
         self.block_cache = Some(vec![Vec::new(); DVIFM_LEVELS]);
     }
 
     /// The collected block records, level-major — `None` unless enabled.
-    #[cfg(feature = "training")]
+    #[cfg(any(feature = "training", test))]
     #[cfg_attr(not(test), allow(dead_code))] // training surface; tests inspect it
     pub(crate) fn block_cache(&self) -> Option<&Vec<Vec<BlockRec>>> {
         self.block_cache.as_ref()
     }
 
     /// Take the collected records after [`dvifm_finish`], plus each level's
-    /// full-block grid `(nby, nbx)` — the record order is block-row-major
-    /// over that lattice (partial border blocks are dropped per spec).
+    /// full-block grid `(nby, nbx)` and plane dims `(w, h)` — the record
+    /// order is block-row-major over that lattice (partial border blocks
+    /// are dropped per spec).
     ///
     /// MUST be called after the finish flush: pending band rows below the
     /// last full block row still contribute records, and taking earlier
     /// would truncate the tail.
-    #[cfg(feature = "training")]
+    #[cfg(any(feature = "training", test))]
     pub(crate) fn take_block_cache(&mut self) -> Option<DvifmBlockTake> {
         let grid: [(u32, u32); 5] = std::array::from_fn(|l| {
             (
@@ -1351,7 +1486,9 @@ impl DvifmAccum {
                 (self.levels[l].w / DVIFM_BLOCK) as u32,
             )
         });
-        self.block_cache.take().map(|levels| (grid, levels))
+        let dims: [(u32, u32); 5] =
+            std::array::from_fn(|l| (self.levels[l].w as u32, self.levels[l].h as u32));
+        self.block_cache.take().map(|levels| (grid, dims, levels))
     }
 }
 
@@ -1363,11 +1500,26 @@ fn pump_consume_block_row<T: F64x8Backend>(
 ) {
     let rows_s: [&[f64]; DVIFM_BLOCK] = std::array::from_fn(|k| &pump.band_q[0][k][..]);
     let rows_d: [&[f64]; DVIFM_BLOCK] = std::array::from_fn(|k| &pump.band_q[1][k][..]);
+    let rows_ms: [&[f64]; DVIFM_BLOCK] = std::array::from_fn(|k| &pump.mean_q[0][k][..]);
+    let rows_md: [&[f64]; DVIFM_BLOCK] = std::array::from_fn(|k| &pump.mean_q[1][k][..]);
     let w = pump.w;
     let lp = pump.lp;
     let sums = &mut pump.sums;
     let mut cache = cache;
-    scan_block_row(&rows_s, &rows_d, w, DVIFM_BLOCK, |rec| {
+    let mut bx = 0usize;
+    scan_block_row(&rows_s, &rows_d, w, DVIFM_BLOCK, |mut rec| {
+        let c0 = bx * DVIFM_BLOCK;
+        let mut ms = 0.0f64;
+        let mut md = 0.0f64;
+        for r in 0..DVIFM_BLOCK {
+            for c in c0..c0 + DVIFM_BLOCK {
+                ms += rows_ms[r][c];
+                md += rows_md[r][c];
+            }
+        }
+        rec.mean_s = ms / (DVIFM_BLOCK * DVIFM_BLOCK) as f64;
+        rec.mean_d = md / (DVIFM_BLOCK * DVIFM_BLOCK) as f64;
+        bx += 1;
         pool_block(sums, &lp, &rec);
         if let Some(c) = cache.as_mut() {
             c.push(rec);
@@ -1375,6 +1527,8 @@ fn pump_consume_block_row<T: F64x8Backend>(
     });
     pump.band_q[0].drain(..DVIFM_BLOCK);
     pump.band_q[1].drain(..DVIFM_BLOCK);
+    pump.mean_q[0].drain(..DVIFM_BLOCK);
+    pump.mean_q[1].drain(..DVIFM_BLOCK);
 }
 
 /// Emit one Laplacian band row `L[r] = G[r] − E[r]` where
@@ -1413,6 +1567,9 @@ fn pump_emit_band_row_lap<T: F64x8Backend>(
         let mut band = vec![0.0f64; w];
         sub_row(t, &g, &e, &mut band);
         pump.band_q[side_i].push_back(band);
+        // Weber denominator: the subtracted pedestal E (expanded next
+        // Gaussian level) — the local DC this band sits on.
+        pump.mean_q[side_i].push_back(e);
         // Shrink rings: gq rows below the emitted index are dead; zb rows
         // below the lowest future z-tap are dead.
         let sd = &mut pump.side[side_i];
@@ -1499,6 +1656,9 @@ fn pump_local_progress<T: F64x8Backend>(
             let mut band = vec![0.0f64; w];
             sub_row(t, &g, &b2g, &mut band);
             pump.band_q[side_i].push_back(band);
+            // Weber denominator: the subtracted pedestal B²G — the local
+            // DC this band sits on.
+            pump.mean_q[side_i].push_back(b2g);
             // Ring housekeeping.
             while sd.gq_first < pump.band_emitted {
                 sd.gq.pop_front();
@@ -1530,7 +1690,10 @@ fn level_push_row<T: F64x8Backend>(
         let pump = &mut acc.levels[l];
         let mut cache = acc.block_cache.as_mut().map(|c| &mut c[l]);
         if pump.is_last {
-            // Low-pass level: the band is G itself.
+            // Low-pass level: the band is G itself — the mean rows are
+            // the same plane.
+            pump.mean_q[0].push_back(row_s.clone());
+            pump.mean_q[1].push_back(row_d.clone());
             pump.band_q[0].push_back(row_s);
             pump.band_q[1].push_back(row_d);
             pump.arrived += 1;
@@ -1703,6 +1866,7 @@ pub(crate) fn dvifm_finish<T: F64x8Backend>(t: T, acc: &mut DvifmAccum) -> [f64;
     for (l, pump) in acc.levels.iter().enumerate() {
         // Partial trailing block rows are dropped per spec.
         debug_assert!(pump.band_q[0].len() < DVIFM_BLOCK);
+        debug_assert!(pump.mean_q[0].len() == pump.band_q[0].len());
         out[l * DVIFM_PER_LEVEL..(l + 1) * DVIFM_PER_LEVEL].copy_from_slice(&level_out(&pump.sums));
     }
     out
@@ -1925,6 +2089,8 @@ mod tests {
             cmin_s: [0.1, 0.2, 0.3, 0.4],
             cmax_d: [0.5; 4],
             cmin_d: [0.5; 4],
+            mean_s: 0.0,
+            mean_d: 0.0,
         };
         assert_eq!(contrast_g_rec(&rec, 0, 1.0, false), 0.8); // 0.9 − 0.1
         assert!((contrast_g_rec(&rec, 0, 1.0, true) - 0.2).abs() < 1e-15); // min corner
@@ -1941,6 +2107,8 @@ mod tests {
             cmin_s: [-0.5; 4],
             cmax_d: [0.0; 4],
             cmin_d: [0.0; 4],
+            mean_s: 0.0,
+            mean_d: 0.0,
         };
         assert_eq!(contrast_g_rec(&rec, 0, 1.0, true), 1.0); // 0.5 − (−0.5)
         // φ₂(0.5) − φ₂(−0.5) = 0.25 − (−0.25) = 0.5: the signed-power range
@@ -2126,6 +2294,8 @@ mod tests {
                     cmin_s: cmin,
                     cmax_d: dmax,
                     cmin_d: dmin,
+                    mean_s: 0.0,
+                    mean_d: 0.0,
                 });
             }
         }
@@ -2791,7 +2961,8 @@ mod tests {
     // Training side output: the block-record cache.
     // -------------------------------------------------------------------
 
-    /// `to_f32_18` writes the struct's field order and nothing else.
+    /// `to_f32` writes the struct's field order and nothing else — the
+    /// 18-f32 v1 prefix is unchanged and the Weber means land at 18..20.
     #[cfg(feature = "training")]
     #[test]
     fn block_record_f32_field_order() {
@@ -2802,14 +2973,18 @@ mod tests {
             cmin_s: [-1.0, -2.0, -3.0, -4.0],
             cmax_d: [10.0, 20.0, 30.0, 40.0],
             cmin_d: [-10.0, -20.0, -30.0, -40.0],
+            mean_s: 0.6,
+            mean_d: 0.7,
         };
-        let v = rec.to_f32_18();
+        let v = rec.to_f32();
         assert_eq!(v[0], 0.5f32);
         assert_eq!(v[1], 0.25f32);
         assert_eq!(&v[2..6], &[1.0, 2.0, 3.0, 4.0]);
         assert_eq!(&v[6..10], &[-1.0, -2.0, -3.0, -4.0]);
         assert_eq!(&v[10..14], &[10.0, 20.0, 30.0, 40.0]);
         assert_eq!(&v[14..18], &[-10.0, -20.0, -30.0, -40.0]);
+        assert_eq!(v[18], 0.6f32);
+        assert_eq!(v[19], 0.7f32);
     }
 
     /// The served contract: no `enable_block_cache` call, no records.
@@ -2858,7 +3033,7 @@ mod tests {
                         r += n;
                     }
                     let want = dvifm_finish(t, &mut acc);
-                    let (grid, levels) = acc.take_block_cache().expect("cache enabled");
+                    let (grid, _dims, levels) = acc.take_block_cache().expect("cache enabled");
                     assert_eq!(levels.len(), DVIFM_LEVELS);
                     let mut got = [0.0f64; DVIFM_FEATURES];
                     let (mut wl, mut hl) = (w, h);
@@ -2883,13 +3058,13 @@ mod tests {
                             "mode {mode:?} {w}x{h} strip={strip}: cached f{i} {a:e} != {b:e}"
                         );
                     }
-                    // The 18-f32 wire form keeps the record's information:
+                    // The 20-f32 wire form keeps the record's information:
                     // the narrowed replay agrees to f32 rounding, not less.
                     let mut got32 = [0.0f64; DVIFM_FEATURES];
                     for l in 0..DVIFM_LEVELS {
                         let mut sums = LevelSums::default();
                         for rec in &levels[l] {
-                            let v = rec.to_f32_18();
+                            let v = rec.to_f32();
                             let rec32 = BlockRec {
                                 m: v[0] as f64,
                                 peak: v[1] as f64,
@@ -2897,6 +3072,8 @@ mod tests {
                                 cmin_s: [v[6] as f64, v[7] as f64, v[8] as f64, v[9] as f64],
                                 cmax_d: [v[10] as f64, v[11] as f64, v[12] as f64, v[13] as f64],
                                 cmin_d: [v[14] as f64, v[15] as f64, v[16] as f64, v[17] as f64],
+                                mean_s: v[18] as f64,
+                                mean_d: v[19] as f64,
                             };
                             pool_block(&mut sums, &params.levels[l], &rec32);
                         }
@@ -2909,6 +3086,233 @@ mod tests {
                             "mode {mode:?} {w}x{h} strip={strip}: f32-record f{i} {a:e} vs {b:e}"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // The steering field (S1): the painted ε map IS the pooled F1 mass.
+    // -------------------------------------------------------------------
+
+    fn rec_bits_eq(a: &BlockRec, b: &BlockRec) -> bool {
+        a.m.to_bits() == b.m.to_bits()
+            && a.peak.to_bits() == b.peak.to_bits()
+            && a.cmax_s
+                .iter()
+                .zip(&b.cmax_s)
+                .all(|(x, y)| x.to_bits() == y.to_bits())
+            && a.cmin_s
+                .iter()
+                .zip(&b.cmin_s)
+                .all(|(x, y)| x.to_bits() == y.to_bits())
+            && a.cmax_d
+                .iter()
+                .zip(&b.cmax_d)
+                .all(|(x, y)| x.to_bits() == y.to_bits())
+            && a.cmin_d
+                .iter()
+                .zip(&b.cmin_d)
+                .all(|(x, y)| x.to_bits() == y.to_bits())
+    }
+
+    /// The field's `f1_sum` is bitwise the pooled numerator: `block_field`
+    /// runs the same `vb*e` adds in the same emit order `pool_block` did.
+    /// `dims` reports each level's own plane dims (halved, ceil).
+    #[test]
+    fn block_field_f1_sum_is_the_pooled_numerator() {
+        for &(w, h) in &[(125usize, 130usize), (97, 101)] {
+            for &mode in &[BandMode::Laplacian, BandMode::Local] {
+                let s32 = f32_plane(31, w, h);
+                let d32 = f32_plane(37, w, h);
+                let mut params = DvifmParams::default();
+                for lp in &mut params.levels {
+                    lp.band = mode;
+                }
+                let t = scalar();
+                let mut acc = DvifmAccum::new(w, h, DVIFM_NORM_SDR, &params);
+                acc.enable_block_cache();
+                dvifm_push_rows(t, &mut acc, &s32, &d32);
+                let feats = dvifm_finish(t, &mut acc);
+                let (grid, dims, levels) = acc.take_block_cache().expect("cache enabled");
+                let (mut wl, mut hl) = (w, h);
+                for l in 0..DVIFM_LEVELS {
+                    assert_eq!(
+                        dims[l],
+                        (wl as u32, hl as u32),
+                        "{mode:?} {w}x{h} level {l} dims"
+                    );
+                    let (nby, nbx) = (grid[l].0 as usize, grid[l].1 as usize);
+                    let f = block_field(&levels[l], &params.levels[l], nby, nbx);
+                    let mut sums = LevelSums::default();
+                    for rec in &levels[l] {
+                        pool_block(&mut sums, &params.levels[l], rec);
+                    }
+                    assert_eq!(
+                        f.f1_sum.to_bits(),
+                        sums.f1.to_bits(),
+                        "{mode:?} {w}x{h} level {l}: field mass != pooled f1"
+                    );
+                    let n = (nby * nbx) as f64;
+                    if n > 0.0 {
+                        let f1 = feats[l * DVIFM_PER_LEVEL];
+                        assert!(
+                            (f.f1_sum / n - f1).abs() <= f1.abs() * 1e-12 + 1e-18,
+                            "{mode:?} {w}x{h} level {l}: f1_sum/n {} vs F1 {f1}",
+                            f.f1_sum / n
+                        );
+                    }
+                    wl = wl.div_ceil(2);
+                    hl = hl.div_ceil(2);
+                }
+            }
+        }
+    }
+
+    /// The painted ε map integrates back to the block terms: whole-canvas
+    /// mass ≈ `f1_sum` (the SAT's different summation order stays well
+    /// inside the 1e-6 f64 gate); block-aligned rects return their block's
+    /// ε_b; a rect cutting a block gets the area-weighted share (the
+    /// stated cut rule).
+    #[cfg(feature = "custom-profiles")] // the map owner lives behind custom-profiles
+    #[test]
+    fn painted_eps_map_rect_queries_match_block_terms() {
+        let (w, h) = (125usize, 130usize);
+        let s32 = f32_plane(31, w, h);
+        let d32 = f32_plane(37, w, h);
+        let params = DvifmParams::default();
+        let t = scalar();
+        let mut acc = DvifmAccum::new(w, h, DVIFM_NORM_SDR, &params);
+        acc.enable_block_cache();
+        dvifm_push_rows(t, &mut acc, &s32, &d32);
+        let _ = dvifm_finish(t, &mut acc);
+        let (grid, dims, levels) = acc.take_block_cache().unwrap();
+        for l in 0..DVIFM_LEVELS {
+            let (nby, nbx) = (grid[l].0 as usize, grid[l].1 as usize);
+            let (lw, lh) = (dims[l].0 as usize, dims[l].1 as usize);
+            let f = block_field(&levels[l], &params.levels[l], nby, nbx);
+            let painted = paint_block_field(&f, lw, lh);
+            // vis/err planes are block-constant (f32-painted); the dropped
+            // border is 0.
+            assert_eq!(painted.vis[0], f.vis[0] as f32);
+            assert_eq!(painted.err[0], f.err[0] as f32);
+            if lw % DVIFM_BLOCK != 0 {
+                assert_eq!(painted.eps_density[(lh / 2) * lw + lw - 1], 0.0);
+            }
+            let map =
+                crate::attribution::AttributionResult::from_f64_canvas(painted.eps_density, lw, lh);
+            let total = map.query_rect(0, 0, lw, lh);
+            assert!(
+                (total - f.f1_sum).abs() <= f.f1_sum.abs() * 1e-12 + 1e-15,
+                "level {l}: map total {total} vs f1_sum {}",
+                f.f1_sum
+            );
+            for &(by, bx) in &[
+                (0usize, 0usize),
+                (nby - 1, nbx - 1),
+                (nby / 2, nbx / 2),
+                (0, nbx - 1),
+            ] {
+                let b = by * nbx + bx;
+                let q = map.query_rect(
+                    bx * DVIFM_BLOCK,
+                    by * DVIFM_BLOCK,
+                    bx * DVIFM_BLOCK + DVIFM_BLOCK,
+                    by * DVIFM_BLOCK + DVIFM_BLOCK,
+                );
+                assert!(
+                    (q - f.eps[b]).abs() <= f.eps[b].abs() * 1e-9 + 1e-15,
+                    "level {l} block ({bx},{by}): rect {q} vs eps {}",
+                    f.eps[b]
+                );
+                // Cut rule: a rect covering the left half of the block by
+                // area receives exactly ε_b/2 (uniform painted density).
+                let qh = map.query_rect_frac(
+                    bx as f64 * DVIFM_BLOCK as f64,
+                    by as f64 * DVIFM_BLOCK as f64,
+                    bx as f64 * DVIFM_BLOCK as f64 + DVIFM_BLOCK as f64 / 2.0,
+                    by as f64 * DVIFM_BLOCK as f64 + DVIFM_BLOCK as f64,
+                );
+                assert!(
+                    (qh - f.eps[b] * 0.5).abs() <= f.eps[b].abs() * 1e-6 + 1e-12,
+                    "level {l} block ({bx},{by}): half-rect {qh} vs eps/2 {}",
+                    f.eps[b] * 0.5
+                );
+            }
+        }
+    }
+
+    /// Identity pair: `m_b` and `ε_b` are exactly 0 everywhere (the map is
+    /// all-zero), `f1_sum` is +0. `v_b` is NOT pinned to 1 — it is the
+    /// block's content visibility `v(C̃)` (both sides identical, so the
+    /// merge is `v` at the shared contrast).
+    #[test]
+    fn field_identity_is_zero() {
+        let (w, h) = (97usize, 89usize);
+        let p = f32_plane(7, w, h);
+        let params = DvifmParams::default();
+        let t = scalar();
+        let mut acc = DvifmAccum::new(w, h, DVIFM_NORM_SDR, &params);
+        acc.enable_block_cache();
+        dvifm_push_rows(t, &mut acc, &p, &p);
+        let _ = dvifm_finish(t, &mut acc);
+        let (grid, dims, levels) = acc.take_block_cache().unwrap();
+        for l in 0..DVIFM_LEVELS {
+            let lp = &params.levels[l];
+            let (nby, nbx) = (grid[l].0 as usize, grid[l].1 as usize);
+            let f = block_field(&levels[l], lp, nby, nbx);
+            for (i, &e) in f.eps.iter().enumerate() {
+                let want_v = visibility(contrast_g_rec(&levels[l][i], 0, lp.g, lp.edge), lp);
+                assert_eq!(e, 0.0, "level {l} block {i} eps on identity");
+                assert_eq!(f.err[i], 0.0, "level {l} block {i} err on identity");
+                assert_eq!(f.vis[i], want_v, "level {l} block {i} vis on identity");
+            }
+            assert_eq!(f.f1_sum, 0.0);
+            let painted = paint_block_field(&f, dims[l].0 as usize, dims[l].1 as usize);
+            assert!(painted.eps_density.iter().all(|&v| v == 0.0));
+            assert!(painted.err.iter().all(|&v| v == 0.0));
+        }
+    }
+
+    /// The cached records — and therefore the field derived from them —
+    /// are bitwise identical across strip sizes: the pump's emit order and
+    /// record arithmetic do not depend on chunking.
+    #[test]
+    fn field_strip_size_bit_identical() {
+        let (w, h) = (125usize, 130usize);
+        let s32 = f32_plane(31, w, h);
+        let d32 = f32_plane(37, w, h);
+        let params = DvifmParams::default();
+        let t = scalar();
+        let run = |strip: usize| -> DvifmBlockTake {
+            let mut acc = DvifmAccum::new(w, h, DVIFM_NORM_SDR, &params);
+            acc.enable_block_cache();
+            let mut r = 0;
+            while r < h {
+                let n = strip.min(h - r);
+                dvifm_push_rows(
+                    t,
+                    &mut acc,
+                    &s32[r * w..(r + n) * w],
+                    &d32[r * w..(r + n) * w],
+                );
+                r += n;
+            }
+            let _ = dvifm_finish(t, &mut acc);
+            acc.take_block_cache().unwrap()
+        };
+        let want = run(h);
+        for strip in [1usize, 2, 3, 5, 7, 11, 16, 33, 64, 97] {
+            let got = run(strip);
+            assert_eq!(got.0, want.0, "grid differs at strip {strip}");
+            assert_eq!(got.1, want.1, "dims differ at strip {strip}");
+            for l in 0..DVIFM_LEVELS {
+                assert_eq!(got.2[l].len(), want.2[l].len());
+                for (i, (a, b)) in got.2[l].iter().zip(&want.2[l]).enumerate() {
+                    assert!(
+                        rec_bits_eq(a, b),
+                        "level {l} block {i} differs at strip {strip}"
+                    );
                 }
             }
         }

@@ -205,6 +205,7 @@ use layout_ends::*;
 /// partition alignment (4/8/16 for AV1, 8 for JXL var-DCT) and every real
 /// query stays exact.
 #[non_exhaustive]
+#[derive(Clone, Debug)]
 pub struct AttributionResult {
     /// Grid-resolution signed density, row-major `grid_w × grid_h`, in
     /// per-pixel units (each value is its bin's mean; for `bin == 1` this is
@@ -258,7 +259,7 @@ impl AttributionResult {
     }
 
     /// Internal: build from the f64 accumulation canvas (SAT keeps f64 truth).
-    fn from_f64_canvas(canvas: Vec<f64>, width: usize, height: usize) -> Self {
+    pub(crate) fn from_f64_canvas(canvas: Vec<f64>, width: usize, height: usize) -> Self {
         debug_assert_eq!(canvas.len(), width * height);
         let sat = build_sat(|i| canvas[i], width, height);
         let density = canvas.iter().map(|&v| v as f32).collect();
@@ -396,6 +397,73 @@ impl AttributionResult {
         let v0 = self.grid_coord(y0, self.height, self.grid_h);
         let v1 = self.grid_coord(y1, self.height, self.grid_h);
         self.sat_at(u1, v1) - self.sat_at(u0, v1) - self.sat_at(u1, v0) + self.sat_at(u0, v0)
+    }
+
+    /// Fractional-edge variant of [`query_rect`](Self::query_rect) — the
+    /// integral of the stored density over `[x0, x1) × [y0, y1)` with the
+    /// rectangle edges allowed to cut cells. Each cell's mass counts with
+    /// the fraction of its area the rectangle covers (the uniform-within-
+    /// cell reading); integer edges reproduce `query_rect` exactly. This
+    /// is the stated cut-block rule for the DVIFM steering field's
+    /// rectangle queries — a rect clipped mid-block receives that block's
+    /// `ε_b` weighted by covered area.
+    ///
+    /// Coordinates clamp to the canvas; empty/inverted rects return `0.0`.
+    /// Unbinned maps integrate cell-wise at the stored `f32` density; binned
+    /// maps keep their uniform-mass-within-bin semantics via the
+    /// bilinear-SAT path.
+    pub(crate) fn query_rect_frac(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
+        let (x0, x1) = (
+            x0.clamp(0.0, self.width as f64),
+            x1.clamp(0.0, self.width as f64),
+        );
+        let (y0, y1) = (
+            y0.clamp(0.0, self.height as f64),
+            y1.clamp(0.0, self.height as f64),
+        );
+        if x0 >= x1 || y0 >= y1 {
+            return 0.0;
+        }
+        if self.bin == 1 {
+            let mut acc = 0.0f64;
+            let r_hi = (y1.ceil() as usize).min(self.height);
+            for r in (y0.floor() as usize)..r_hi {
+                let wy = ((r + 1) as f64).min(y1) - (r as f64).max(y0);
+                if wy <= 0.0 {
+                    continue;
+                }
+                let row = &self.density[r * self.width..(r + 1) * self.width];
+                let c_hi = (x1.ceil() as usize).min(self.width);
+                for (c, &v) in row.iter().enumerate().take(c_hi).skip(x0.floor() as usize) {
+                    let wx = ((c + 1) as f64).min(x1) - (c as f64).max(x0);
+                    if wx > 0.0 {
+                        acc += wy * wx * v as f64;
+                    }
+                }
+            }
+            return acc;
+        }
+        let u0 = self.grid_coord_f(x0, self.width, self.grid_w);
+        let u1 = self.grid_coord_f(x1, self.width, self.grid_w);
+        let v0 = self.grid_coord_f(y0, self.height, self.grid_h);
+        let v1 = self.grid_coord_f(y1, self.height, self.grid_h);
+        self.sat_at(u1, v1) - self.sat_at(u0, v1) - self.sat_at(u1, v0) + self.sat_at(u0, v0)
+    }
+
+    /// `f64` twin of [`grid_coord`](Self::grid_coord) for fractional-edge
+    /// queries — same "fraction measured against the cell's REAL pixel
+    /// extent" rule so edge-clamped queries stay exact.
+    fn grid_coord_f(&self, x: f64, limit: usize, grid: usize) -> (usize, f64) {
+        if x >= limit as f64 {
+            return (grid, 0.0);
+        }
+        if x <= 0.0 {
+            return (0, 0.0);
+        }
+        let idx = (x / self.bin as f64).floor() as usize;
+        let start = idx * self.bin;
+        let real = self.bin.min(limit - start);
+        (idx, (x - start as f64) / real as f64)
     }
 
     /// Pixel coordinate → (grid node index, fractional advance into the next
