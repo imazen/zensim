@@ -24,7 +24,6 @@ import numpy as np
 HIST_BINS = 256
 HIST_LN_LO = -16.11809565095832   # ln(1e-7) — Rust side constant
 HIST_LN_HI = 2.772588722239781    # ln(16)
-REC = 18
 F32 = np.dtype("<f4")
 F16 = np.dtype("<f2")
 
@@ -67,16 +66,28 @@ def load_index(bin_path):
     return [json.loads(x) for x in open(bin_path + ".index.jsonl")]
 
 
+def rec_width(bin_path, index, dtype):
+    """v1 = 18 f32/record, v2 = 20 (adds block means) — infer from the
+    file size vs the index's record total."""
+    import os
+    esz = np.dtype(dtype).itemsize
+    total = sum(sum(e["level_records"]) for e in index)
+    w = os.path.getsize(bin_path) / (esz * max(total, 1))
+    assert w in (18.0, 20.0), f"{bin_path}: record width {w}"
+    return int(w)
+
+
 def iter_level_records(bin_path, index, level, dtype):
     data = np.memmap(bin_path, dtype=dtype, mode="r")
     esz = np.dtype(dtype).itemsize
+    rec = rec_width(bin_path, index, dtype)
     for e in index:
         n = e["level_records"][level]
         if n == 0:
             continue
         base = e["offset"] // esz
-        start = base + int(np.sum(e["level_records"][:level])) * REC
-        yield data[start:start + n * REC].reshape(n, REC).astype(np.float64)
+        start = base + int(np.sum(e["level_records"][:level])) * rec
+        yield data[start:start + n * rec].reshape(n, rec).astype(np.float64)
 
 
 def contrast(recs, side, g, edge):

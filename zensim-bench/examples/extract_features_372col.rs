@@ -790,7 +790,8 @@ fn f32_to_f16(x: f32) -> u16 {
 ///
 /// `cap` bounds the kept records per row across the five levels
 /// (deterministic stride per level, proportional allocation; 0 = keep all).
-/// `quant_f16` stores each field as IEEE f16 (36 B/record) instead of f32.
+/// `quant_f16` stores each field as IEEE f16 (40 B/record at the v2
+/// width, 36 B for v1 readers) instead of f32.
 /// `hist`, when set, accumulates full-resolution `(C̃, m)` histograms over
 /// ALL records — the cap never applies to the histograms.
 struct DvifmSink {
@@ -813,13 +814,19 @@ impl DvifmSink {
     ) -> Result<(), String> {
         use std::io::Write as _;
         let (ref_sha256, dist_sha256) = audit::file_hashes(kp)?;
+        // Record width is derived, not assumed: `records[l]` is
+        // `nby*nbx*REC_W` f32 (v2 = 20 with Weber means; v1 = 18).
+        let recw = |l: usize| {
+            let nb = (stats.grid[l].0 * stats.grid[l].1) as usize;
+            if nb == 0 { 20 } else { stats.records[l].len() / nb }
+        };
         // Histogram pass over the FULL record set (before any cap) — the
         // pooled (C̃, m) census is the exact statistic the C₀×β grid reads.
         if let Some(hist) = &self.hist {
             let mut h = hist.lock().unwrap();
             for (l, recs) in stats.records.iter().enumerate() {
                 let lh = &mut h.levels[l];
-                for rec in recs.chunks_exact(18) {
+                for rec in recs.chunks_exact(recw(l)) {
                     let cs = dvifm_contrast(rec, 0, lh.g, lh.edge);
                     let cd = dvifm_contrast(rec, 1, lh.g, lh.edge);
                     let ctilde = cs.min(cd);
@@ -834,8 +841,12 @@ impl DvifmSink {
         }
         // Per-level stride caps: level l keeps ceil(n_l/stride_l) records
         // with stride_l = ceil(n_l/cap_l), cap_l ∝ n_l of the row total.
-        let n_l: Vec<usize> =
-            stats.records.iter().map(|r| r.len() / 18).collect();
+        let n_l: Vec<usize> = stats
+            .records
+            .iter()
+            .enumerate()
+            .map(|(l, r)| r.len() / recw(l))
+            .collect();
         let n_total: usize = n_l.iter().sum();
         let caps: Vec<usize> = if self.cap > 0 && n_total > self.cap {
             n_l.iter()
@@ -861,7 +872,7 @@ impl DvifmSink {
             };
             level_strides[l] = stride as u64;
             let mut kept = 0u64;
-            for (i, rec) in recs.chunks_exact(18).enumerate() {
+            for (i, rec) in recs.chunks_exact(recw(l)).enumerate() {
                 if stride > 1 && i % stride != 0 {
                     continue;
                 }
@@ -1001,9 +1012,9 @@ fn write_research_manifest(
         "dvifm_spec_sha256": spec_sha256,
         "dvifm_block_stats": block_stats,
         "dvifm_block_record": {
-            "schema": "dvifm-block-records-v1",
-            "record_f32": 18,
-            "fields": ["m","peak","cmax_s[4]","cmin_s[4]","cmax_d[4]","cmin_d[4]"],
+            "schema": "dvifm-block-records-v2",
+            "record_f32": 20,
+            "fields": ["m","peak","cmax_s[4]","cmin_s[4]","cmax_d[4]","cmin_d[4]","mean_s","mean_d"],
             "order": "level-major, block-row-major over the full-block grid",
         },
     });

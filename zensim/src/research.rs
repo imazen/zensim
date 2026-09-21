@@ -564,6 +564,7 @@ impl Request {
             dvifm_spec: None,
             #[cfg(feature = "training")]
             dvifm_blocks: false,
+            #[cfg(feature = "training")]
             dvifm_fields: false,
         }
     }
@@ -582,6 +583,7 @@ impl Request {
             dvifm_spec: None,
             #[cfg(feature = "training")]
             dvifm_blocks: false,
+            #[cfg(feature = "training")]
             dvifm_fields: false,
         }
     }
@@ -647,6 +649,7 @@ impl Request {
             dvifm_spec: None,
             #[cfg(feature = "training")]
             dvifm_blocks: false,
+            #[cfg(feature = "training")]
             dvifm_fields: false,
         })
     }
@@ -686,6 +689,7 @@ impl Request {
             dvifm_spec: None,
             #[cfg(feature = "training")]
             dvifm_blocks: false,
+            #[cfg(feature = "training")]
             dvifm_fields: false,
         })
     }
