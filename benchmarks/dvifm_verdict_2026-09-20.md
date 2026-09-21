@@ -6,7 +6,9 @@ Lane: `verdict`. Question: does the standalone three-plane Y′CbCr DVIFM block-
 
 **Standalone DVIFM is NOT competitive with `fast-ssim2` on real held-out labels.** On the five real-label legs the frozen gate scores SROCC 0.759–0.921 vs `fast-ssim2` 0.735–0.957. Paired ref-bootstrap deltas (dvifm−ssim2): significantly below on kadid_dev_full (−0.042, CI95 [−0.070, −0.017]) and the sealed CID22-B (−0.134, CI95 [−0.185, −0.089]); nominally below on human_dev (−0.030, n.s.) and kadid135 (−0.031, n.s.); significantly above only on konfig_val (+0.024, CI95 [+0.007, +0.038]).
 
-Against the project's own bakes the answer splits by label kind: on ssim2-pseudo-label development legs (safesyn, cid22_dev, codec_dev — targets are literally ssim2/100, so the bakes' 0.97–1.00 there is ssim2-target regression, not human agreement) dvifm_gate is last or near-last; on real-label dev legs it is mid-to-low; and on the sealed CID22-B read it is far ABOVE the bakes (+0.46 SROCC over B/D/R915, which collapse to ≈0.29–0.32 on real CID22 labels — the sealed-read failure mode these labels exist to detect).
+Against the project's own bakes the answer splits by label kind: on ssim2-pseudo-label development legs (safesyn, cid22_dev, codec_dev — targets are literally ssim2/100, so the bakes' 0.97–1.00 there is ssim2-target regression, not human agreement) dvifm_gate is last or near-last; on real-label legs it is below every bake on every leg with one exception (above bake_prof_d on konfig_val, +0.035 sig) — and on the sealed CID22-B read it is significantly below all of them (dvifm 0.774 vs B 0.890, D 0.879, R915_basic228 0.897, R915_y60 0.861, fast-ssim2 0.913; paired Δ −0.08..−0.13, all P(Δ≤0)≈1.0).
+
+**For the record — on real-label legs `R915_basic228` beats BOTH `fast-ssim2` and `dvifm_gate`:** human_dev 0.931 vs 0.817/0.783; kadid_dev_full 0.945 vs 0.944/0.901; konfig_val 0.839 vs 0.735/0.759; and on the sealed CID22-B read 0.897 vs 0.913/0.774 (second to fast-ssim2 there, above dvifm).
 
 Parameter cost: the X2 winner is the **gate** form — ≤15 fitted knees (one per active plane×level) + head, ≈35 constants total; the fully-fitted smooth curve's +0.0031 composite edge is under the 2σ seed-noise bar. So DVIFM's standalone ceiling here is reachable at near-constant cost — but the ceiling itself is below `fast-ssim2` on real labels. Per the plan's kill criterion, X1's first condition is met; any residual value must come from the X4/X5 transplant and X6 steering lanes (outside this lane's scope).
 
@@ -158,7 +160,7 @@ Frozen artefact: winning form refit on the union of the five seed subsets (≤5,
 |---|---|---|---|---|
 | dvifm_gate | 0.7593 | 0.6099 | 0.7789 | 436 |
 | fastssim2 | 0.7351 | 0.5749 | 0.7641 | 436 |
-| bake_prof_b | 0.8187 | 0.6643 | 0.8296 | 436 |
+| bake_prof_b | 0.8187 | 0.6643 | 0.8298 | 436 |
 | bake_prof_d | 0.7227 | 0.5730 | 0.7578 | 436 |
 | bake_r915_basic228 | 0.8393 | 0.6862 | 0.8477 | 436 |
 | bake_r915_y60 | 0.7996 | 0.6374 | 0.8104 | 436 |
@@ -192,24 +194,24 @@ Frozen artefact: winning form refit on the union of the five seed subsets (≤5,
 
 ## CID22-B — the single sealed read
 
-Unsealed 2026-09-21T06:06:15.646279+00:00 (2100 rows, source sha 3ce0f7438ea02277…). Scored once, post-freeze, no iteration.
+Unsealed 2026-09-21T06:06:15.646279+00:00 (2100 rows, source sha 3ce0f7438ea02277…). Scored once, post-freeze, no iteration. **Bake columns below are the corrected re-issue of that same single read** (era-matched w944/`ceiling_rev3` feature tables; see Provenance) — not a second exposure.
 
 | method | SROCC | KROCC | PLCC | n |
 |---|---|---|---|---|
 | dvifm_gate | 0.7738 | 0.5698 | 0.7685 | 2100 |
 | fastssim2 | 0.9131 | 0.7395 | 0.9174 | 2100 |
-| bake_prof_b | 0.3097 | 0.2739 | 0.5009 | 2100 |
-| bake_prof_d | 0.3203 | 0.2767 | 0.4909 | 2100 |
-| bake_r915_basic228 | 0.3108 | 0.2670 | 0.4635 | 2100 |
-| bake_r915_y60 | 0.2908 | 0.2500 | 0.4623 | 2100 |
+| bake_prof_b | 0.8899 | 0.7096 | 0.8933 | 2100 |
+| bake_prof_d | 0.8795 | 0.6910 | 0.8798 | 2100 |
+| bake_r915_basic228 | 0.8968 | 0.7163 | 0.9011 | 2100 |
+| bake_r915_y60 | 0.8613 | 0.6838 | 0.8596 | 2100 |
 
 | paired Δ SROCC | mean | CI95 | P(Δ≤0) |
 |---|---|---|---|
 | dvifm_gate-vs-fastssim2 | -0.1344 | [-0.1850, -0.0888] | 1.0000 |
-| dvifm_gate-vs-bake_prof_b | 0.4675 | [0.3345, 0.6019] | 0.0000 |
-| dvifm_gate-vs-bake_prof_d | 0.4581 | [0.3205, 0.6042] | 0.0000 |
-| dvifm_gate-vs-bake_r915_basic228 | 0.4659 | [0.3268, 0.6142] | 0.0000 |
-| dvifm_gate-vs-bake_r915_y60 | 0.4861 | [0.3459, 0.6311] | 0.0000 |
+| dvifm_gate-vs-bake_prof_b | -0.1118 | [-0.1656, -0.0648] | 1.0000 |
+| dvifm_gate-vs-bake_prof_d | -0.1025 | [-0.1420, -0.0625] | 1.0000 |
+| dvifm_gate-vs-bake_r915_basic228 | -0.1187 | [-0.1691, -0.0717] | 1.0000 |
+| dvifm_gate-vs-bake_r915_y60 | -0.0848 | [-0.1396, -0.0210] | 0.9975 |
 
 ## Provenance & limitations
 
@@ -219,5 +221,5 @@ Unsealed 2026-09-21T06:06:15.646279+00:00 (2100 rows, source sha 3ce0f7438ea0227
 - fast-ssim2 enters via the audit channel on identical decoded RGB8 buffers (not a separate pixel path).
 - Dev-leg targets: safesyn_dev, cid22_dev and codec_dev carry SIGNED fast-ssim2/100 pseudo-labels (verified: label == audit peer_ssim2.score ÷ 100 to full precision), so fastssim2 = 1.0000 there is circular by construction and the bakes' 0.97–0.99 measure ssim2-target regression. Real human labels: human_dev, kadid*, konfig_val, and the sealed cid22b.
 - KADID dev restricted to refs {I01,I03,I05} per the lane prompt; konfig is the originsplit validation split (4 source groups).
-- CID22-B bake collapse verified as real, not a join defect: audit-jsonl row order == pairs order (2100/2100 exact), features healthy (39 constant cols, no NaN), same csv→parquet→ensemble_score_rows pipeline produced sane scores on kadid_dev (B 0.918) and konfig_val (B 0.819). The bakes were fit on ssim2-target tables; this is the first real-label CID22-B read.
+- CID22-B bake values were initially corrupted by a feature-table era mismatch and have been CORRECTED: the lane's re-extracted peer tables were w986 research-path (f0..f985) while the bakes consume w944/`ceiling_rev3` (f0..f943). Supervisor-flagged; diagnosed by scoring B on the same rows through the pixel path (`score_pair_with_bake`/`BakeScorer::compute`, SROCC 0.897 vs labels on a 41-row sample) vs the w986 table path (0.56), corr(pixel,table) 0.49. Corrected scores use the historical `rev3-public-human-eval-2026-09-14/features-rev3` parquets (`w944/ceiling_rev3#b782e349`, producer surface `BakeScorer::compute`) — verified pixel≡table (corr 1.0) and joined row-for-row: cid22b 2100/2100 via eval pairs.tsv row_id→(ref,dist), konfig 436/436 positional label-identical, kadid 250/250 via (ref,type,level) canonical order with exact label match. Struck w986-era CSVs kept alongside as `*.w986era`. Same single registered read recomputed — no new holdout exposure.
 - No holdouts read except the single registered CID22-B read (see its section).

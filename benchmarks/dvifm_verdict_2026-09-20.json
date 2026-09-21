@@ -1124,21 +1124,21 @@
     "bake_prof_d": {
      "srocc": 0.960489853783067,
      "krocc": 0.8568220730458116,
-     "plcc": 0.9813879455786144,
+     "plcc": 0.9813879454346274,
      "n": 30,
      "n_refs": 3
     },
     "bake_r915_basic228": {
      "srocc": 0.958486514574713,
      "krocc": 0.8660600468791896,
-     "plcc": 0.9823441113396235,
+     "plcc": 0.9823441110960901,
      "n": 30,
      "n_refs": 3
     },
     "bake_r915_y60": {
      "srocc": 0.9531442766857691,
      "krocc": 0.8429651122957446,
-     "plcc": 0.9793240015369191,
+     "plcc": 0.9793240019380656,
      "n": 30,
      "n_refs": 3
     }
@@ -1210,28 +1210,28 @@
     "bake_prof_b": {
      "srocc": 0.8187316335515112,
      "krocc": 0.6642626539488661,
-     "plcc": 0.8295766367867062,
+     "plcc": 0.8297514199435752,
      "n": 436,
      "n_refs": 8
     },
     "bake_prof_d": {
      "srocc": 0.7227037790538285,
      "krocc": 0.5729960327546673,
-     "plcc": 0.7577507593737546,
+     "plcc": 0.7577507601807791,
      "n": 436,
      "n_refs": 8
     },
     "bake_r915_basic228": {
      "srocc": 0.8393269301696128,
      "krocc": 0.6861977935295529,
-     "plcc": 0.8476524915916611,
+     "plcc": 0.8476524914674932,
      "n": 436,
      "n_refs": 8
     },
     "bake_r915_y60": {
      "srocc": 0.7996230499381188,
      "krocc": 0.6374169850932129,
-     "plcc": 0.8104263420270436,
+     "plcc": 0.8104263409737477,
      "n": 436,
      "n_refs": 8
     }
@@ -1395,30 +1395,30 @@
     "n_refs": 24
    },
    "bake_prof_b": {
-    "srocc": 0.3096875853644509,
-    "krocc": 0.27391208867008143,
-    "plcc": 0.5009134770382262,
+    "srocc": 0.8899359133511119,
+    "krocc": 0.7095748175549713,
+    "plcc": 0.8933050900542459,
     "n": 2100,
     "n_refs": 24
    },
    "bake_prof_d": {
-    "srocc": 0.3202935815119108,
-    "krocc": 0.27666908505515914,
-    "plcc": 0.49090505990833133,
+    "srocc": 0.8794866378093833,
+    "krocc": 0.6910311364112462,
+    "plcc": 0.8797790361687032,
     "n": 2100,
     "n_refs": 24
    },
    "bake_r915_basic228": {
-    "srocc": 0.3108111884713562,
-    "krocc": 0.26699813244243614,
-    "plcc": 0.4634915719817339,
+    "srocc": 0.8968081015072571,
+    "krocc": 0.7162664454881195,
+    "plcc": 0.9010936751715346,
     "n": 2100,
     "n_refs": 24
    },
    "bake_r915_y60": {
-    "srocc": 0.290841562925967,
-    "krocc": 0.24995054329785768,
-    "plcc": 0.46229352676083835,
+    "srocc": 0.8613390982775267,
+    "krocc": 0.6838373682140506,
+    "plcc": 0.8595744227324513,
     "n": 2100,
     "n_refs": 24
    }
@@ -1434,39 +1434,39 @@
     "n_boots": 2000
    },
    "dvifm_gate-vs-bake_prof_b": {
-    "delta_mean": 0.467497543207259,
+    "delta_mean": -0.11178936729279362,
     "ci95": [
-     0.33449256266590627,
-     0.6018692263859151
+     -0.1655839152883623,
+     -0.06480558951294367
     ],
-    "p_delta_le_0": 0.0,
+    "p_delta_le_0": 1.0,
     "n_boots": 2000
    },
    "dvifm_gate-vs-bake_prof_d": {
-    "delta_mean": 0.4581431188173457,
+    "delta_mean": -0.10249997768239781,
     "ci95": [
-     0.3205030681626049,
-     0.6041619392196772
+     -0.141960917481715,
+     -0.06252608391611565
     ],
-    "p_delta_le_0": 0.0,
+    "p_delta_le_0": 1.0,
     "n_boots": 2000
    },
    "dvifm_gate-vs-bake_r915_basic228": {
-    "delta_mean": 0.46593759944535806,
+    "delta_mean": -0.11872342720953075,
     "ci95": [
-     0.3268109318331675,
-     0.6141623547879481
+     -0.169087539103196,
+     -0.07168479186215157
     ],
-    "p_delta_le_0": 0.0,
+    "p_delta_le_0": 1.0,
     "n_boots": 2000
    },
    "dvifm_gate-vs-bake_r915_y60": {
-    "delta_mean": 0.48610098259865203,
+    "delta_mean": -0.08477459580676903,
     "ci95": [
-     0.34587783810685646,
-     0.631073821369562
+     -0.1395947507305625,
+     -0.020998625967572754
     ],
-    "p_delta_le_0": 0.0,
+    "p_delta_le_0": 0.9975,
     "n_boots": 2000
    }
   },
@@ -1481,6 +1481,6 @@
    "sealed_matches_2d": true,
    "note": "CID22-B single registered read (verdict lane, X1): real MCOS/100 labels unsealed after all X2 arms and the X1 configuration were frozen and recorded. Row order identical to sealed cid22b.tsv (asserted)."
   },
-  "note": "single registered read; labels joined after all configs frozen"
+  "note": "single registered read; labels joined after all configs frozen. Bake scores in this table are a CORRECTION of that same single read (recomputed on the w944/ceiling_rev3 features-rev3 ext_cid22val table after the lane's w986 research-path table was found era-mismatched to the bakes) \u2014 NOT a second holdout exposure"
  }
 }
