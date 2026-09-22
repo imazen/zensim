@@ -106,6 +106,7 @@ Each stage refits and is accepted only if the paired dev-bootstrap delta clears 
 ## Recommended posture for the i16 kernel lane
 
 - **Ship β only where the cell exercises it.** Canonical: `ycbcr_y_l0` (0.635, closed [0.287, 1.648]) is the one data-identified per-cell value and sits in the band. `ycbcr_y_l1` is directionally constrained (β ≤ ~0.47, edge-truncated). All other cells: carry mode + (g, P, c0, σ) and treat β as unset — their fitted values are flat-objective artefacts (up to 23.0).
+- **Serving error measured** (constants-v1 `serving` block): curve cells on the declared LUT (u16 Q1.15, 64/e-fold over ln C) quantize to max err ycbcr_y_l0=0.003251, ycbcr_y_l1=0.0004912. gate/off cells served as step/const deviate up to 1.0 vs the f64 curve over the full LUT domain — the flat verdict holds on the observed range only; clamp C to the observed range at serve time.
 - **Where a single masking exponent is wanted, the pooled shared-β evidence supports ~0.65** — the 7 independently identified shared-mode intervals intersect at ≈[0.607, 0.779]. Quote it with the interval, not as a point: the honest data-supported claim is β_shared ∈ ~[0.6, 0.8].
 - **Per-cell β is not portable**: SafeSyn's prior-free fit scatters 0.20–23.0 (dev-optimal at λ=0), so shipping per-cell exponents would be shipping fit noise in inactive cells. The kernel's two-state (gate/off) reading of those cells is the honest structure.
 
@@ -113,6 +114,6 @@ Each stage refits and is accepted only if the paired dev-bootstrap delta clears 
 ## Provenance
 
 - Artefacts: cid22a, cid22a_weber, kadid_train, kadid_train_weber, majority, safesyn, safesyn_weber, tid_jp2kjpeg, tid_jp2kjpeg_weber, tidkadid, tidkadid_weber
-- Fitter: `/mnt/v/output/zensim/dvifm-loss-2026-09-20/tools/fit_loss.py` (sha ba3791716720)
+- Fitter: `/mnt/v/output/zensim/dvifm-loss-2026-09-20/tools/fit_loss.py` (sha f803214e328f)
 - Objective: within-reference pairwise logistic ranking loss, reference-normalized; tied-first untie ladder with paired-dev-bootstrap acceptance; prior sweep λ∈{0,0.003,0.01,0.03,0.1,0.3} toward β=0.65.
 - Detector globals: {"channel_min": 0.14074729098215757, "mixture_collapse": true, "level_weight_min": 0.00010663456496415709, "map": {"A": 225.52596701040648, "B": -123.1329716818716, "lambda": 39.45969950667347, "mse": 173.99321966419436}, "map_lambda_medE": 0.17681322249527415, "map_degenerate": false, "y_min": -743.8610103164912, "y_max": 99.15995927546757, "frac_at_min": 7.089483460235087e-06, "frac_at_max": 7.089483460235087e-06, "frac_negative": 0.05809831695662654, "target_clamped": false, "saturation": false}

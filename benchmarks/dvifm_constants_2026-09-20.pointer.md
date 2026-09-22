@@ -1,13 +1,13 @@
 # DVIFM constants fit — full JSON (pointer)
 
-The machine-readable output of the 2026-09-20 constants lane is 510988 bytes, too large for git
+The machine-readable output of the 2026-09-20 constants lane is 513175 bytes, too large for git
 (>30 KB rule). Summary and verdict: [`dvifm_constants_2026-09-20.md`](dvifm_constants_2026-09-20.md).
 
 | | |
 |---|---|
 | Path | `/mnt/v/output/zensim/dvifm-loss-2026-09-20/report/dvifm_constants_2026-09-20.json` |
-| sha256 | `167520938059b42dbf7d4f430ba9121cd2be4e34584d5140036d5d5fefa3c65d` |
-| Bytes | 510988 |
+| sha256 | `42c44931c9332370e85a8a891cdfd5598122d575e2e6d836167a2da6c80b2d69` |
+| Bytes | 513175 |
 | Produced by | `research/2026-09-dvifm/loss-constants/fit_loss.py` (+ `run_ladder.sh`, `collect.py`, `report.py`) |
 | Companion spec | `/mnt/v/output/zensim/dvifm-loss-2026-09-20/report/constants-v1.json` (15 cells + schema) |
 | Arm comparison | `/mnt/v/output/zensim/dvifm-loss-2026-09-20/report/compare.json` (11 arms) |
