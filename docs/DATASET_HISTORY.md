@@ -4619,3 +4619,195 @@ Sidecars over the 18 promoted bank sets (248,983 keys; pixels only, no label rea
 width. No feature is shown to help; the potential lane decides (arm proposal
 `benchmarks/rev4_restore_cuts_potential_prereg_proposal_2026-09-24.md`).
 
+
+## 2026-09-22: CID22-49 carries one picture under two names — CID22-B(24) corrected to CID22-B(23)
+
+**Finding.** The 49-reference CID22 validation set contains one picture twice:
+`844297.png` (in CID22-A) and `3316926_opo25u.png` (in CID22-B). The existing
+near-duplicate owner (`check_holdout_overlap --native-png`, all 49 references
+against themselves, review band d ≤ 16) returns exactly one cross pair at
+Hamming 0 — this one — and `flag_confirm` adjudicates it as the same picture
+(luma RMSE 0.74 on the 0–255 scale, RMSE/std 0.014, NCC 0.9999; not
+byte-identical). The four other review-band flags (`2887497.png` against
+`373965.png` d=14, `3316926_opo25u.png`, `3653963.png` and `844297.png`
+d=16) are unrelated content (NCC −0.15 to 0.40, RMSE/std ≥ 1.23). The
+similarly named `3316926.png` (in A) is **not** the same picture as
+`3316926_opo25u.png` (NCC −0.007) — the filename is misleading in both
+directions. Record: `benchmarks/dvifmish_cid22_nncd_audit_2026-09-22.md`.
+
+**Consequence for the A/B split.** The 2026-09-19 split was by reference
+filename (25/24, zero shared names) and so leaked this picture: one of B's 24
+references (89 of its 2,100 pairs) duplicates a fitted A reference. Any
+split of CID22-49 by filename leaks it; **splits must be by content hash**.
+
+**Correction of the spent read.** The single registered CID22-B read (verdict
+lane, 2026-09-21) was re-scored on the 23 clean references (2,011 pairs) from
+the per-row scores it already produced. This is a correction of the SAME
+already-spent read — no label was read that had not been read, no model was
+refit — and not a second read. SROCC 24 → 23: `dvifm_gate` 0.7738 → 0.7797,
+`fast-ssim2` 0.9131 → 0.9250, B 0.8899 → 0.9000, D 0.8795 → 0.8831,
+R915_basic228 0.8968 → 0.9115, R915_y60 0.8613 → 0.8737. Every paired
+reference-bootstrap delta (dvifm_gate − peer) stays negative with its 95% CI
+below zero. **No conclusion of the verdict record changes.** Script:
+`research/2026-09-dvifm/dvifmish-eval/cid22b_clean23.py`.
+
+## 2026-09-22: CID22-49 human labels — full-set exposure for the dvifmish author-style DVIFM fits
+
+**User direction (verbatim).** Work order §4: "Train the best configuration on
+full CID22 human data (user direction: \"consider\")" … "fit it on all CID22
+human validation pairs the way the author did, to get the like-for-like with
+their in-sample 0.88289 / 0.69446" (the talk's reported CID22 figures). Variant selection (2026-09-22):
+"Constants — THREE sources, each a preset: full CID22 human, author-style
+(ledger the exposure first, per §4)". This entry is committed before any
+CID22 label is read for these fits.
+
+**What is fitted.** Only standalone DVIFM constants and a small head: per
+(plane, level) visibility knee / slope / sharpness, signed-power exponent g,
+error power p and pooling exponent L as each configuration's structure
+defines them (visibility slope β shared across levels and planes), the
+simplex level and channel weights, and the three-parameter output map
+`a·exp(−λE)+b`. No MLP, no feature selection, no zensim model fit. Fitter:
+the faithful lane's refit-map-MSE fitter generalised to several planes
+(`research/2026-09-dvifm/dvifmish-eval/`). Data: all 4,292 human pairs of the
+49 references (48 distinct pictures).
+
+**Which artefacts.** The dvifmish presets whose name carries `cid22`
+(the "full CID22 human" constants source): the variant screen's
+constants arm, the §4 like-for-like fits of the talk-faithful and of the
+leading configuration, luma-only and three-plane.
+
+**Consequence.** Those presets have **zero held-out CID22 claim**: their
+CID22 numbers are fit-domain only, labelled so wherever they appear, exactly
+like the talk's reported in-sample CID22 figures. For every other model,
+CID22-B(23) remains the held-out CID22 read, and only for models never
+fitted or selected on B.
+
+**Also recorded here: CID22-A as a human selection leg.** The dvifmish
+variant screen ranks configurations fitted on SafeSyn (never on CID22) by
+their SROCC on CID22-A (with KonFiG validation) — the same DVIFM-constants
+purpose CID22-A was released for on 2026-09-19. Models chosen by that screen
+quote CID22 only as CID22-B(23).
+
+## 2026-09-22: NNCD-IQA registered as an EVAL-only corpus (zensim#62)
+
+**What it is.** NNCD-IQA (Khan, Dardouri, Kaaniche, Dauphin, Multimedia Tools
+and Applications 2022, doi:10.1007/s11042-022-13842-8): 16 Kodak reference
+photographs (768×512) × 5 codecs (JPEG 2000 and four learned codecs:
+bmshj2018-factorized, bmshj2018-hyperprior, cheng2020-anchor, FCNN-LS) × 4
+rates = 320 distorted images with MOS (higher = better). Local:
+`/mnt/v/datasets/nncd-iqa/` (zips + `MOS_scores_sorted.csv`, sha256 in
+`SHA256SUMS` and in `zenpapers/datasets/NNCD-IQA.pointer.md`); extracted
+copies for scoring under `/var/tmp/dvifmish/datasets/nncd-iqa/` (deterministic
+unzip of the pinned archives). It is the "NLCD/NCD ~320 images" set in the
+DVIFM talk's list.
+
+**Role.** EVAL-only, never trained on, never used for fitting, calibration or
+selection. Target orientation: quality (MOS rises with quality).
+
+**Audit before first read.** (1) dHash (`check_holdout_overlap --native-png`,
+16 NNCD references against 4,544 training sources: joint-core-v1 references,
+SafeSyn fit and development sources, TID2013 and KADID-10k references,
+CID22 train 201 and validation 49, KonFiG references): 2 strict flags and 3
+more at d ≤ 12, all unrelated content by `flag_confirm` (NCC ≤ 0.43).
+(2) Because dHash is crop-blind, a crop-containment scan
+(`research/2026-09-dvifm/dvifmish-eval/crop_containment.py`): **every one of
+NNCD's 16 references contains, as an unscaled 512×384 crop (NCC 1.0000), one
+of TID2013's references** — 16 of TID2013's 25 references (I03, I04, I06, I07,
+I09–I12, I15–I17, I19–I23) are crops of NNCD's 16 photographs. NNCD is
+therefore **not content-disjoint from TID2013**, which is a training-role
+corpus here: any model fitted on TID2013 rows has seen NNCD's scenes (as
+smaller crops, under different distortions). Scores on NNCD for such models
+must say so.
+
+**Exposure note.** During format inspection on 2026-09-22 the first four data
+rows of `MOS_scores_sorted.csv` (bmshj2018-factorized, image 1) were printed
+to the terminal before this registration. Nothing was fitted or selected with
+them.
+
+**First model read.** Frozen dvifmish presets and the frozen peers
+(fast-ssim2, zensim B and D, R915 Rev3 ensembles) after the dvifmish variant
+screen is closed; recorded in `benchmarks/dvifmish_eval_2026-09-22.md`.
+
+**Addendum (2026-09-23T05:32Z, before any DVIFM preset is scored on NNCD).**
+The frozen peers were read earlier than planned. Their NNCD scores were
+computed at 2026-09-23T03:50:26Z (files written, not examined by this lane).
+Around 05:10Z another session, while auditing the peer-score join, computed
+the peers' NNCD SROCCs (B 0.9325, D 0.9352, R915 basic228 ensemble 0.9299 in
+the bake's own row order) and reported them to this lane, which recomputed
+them at 05:14Z only to verify the corrected join. No DVIFM preset had been
+scored on NNCD. The variant screen's selection legs are CID22-A and KonFiG
+validation; NNCD plays no part in any fit or selection, and the peers are
+frozen external models. The DVIFM first read stays after the screen closes.
+
+**Addendum (2026-09-23T09:50:17Z, first DVIFM read).** The frozen dvifmish
+presets (27, frozen at dvifmish f562c519, 06:55:12Z) were first scored on
+NNCD at 09:50:17Z (to within 5 s), float path first, inside the final
+`repro/run.sh` of the evaluation record. The variant screen had closed at
+06:19:34Z. Nothing was fitted, calibrated or selected on NNCD, and no preset
+changes after this read.
+
+## 2026-09-22: CID22-B(23) read by frozen dvifmish presets (second batch on B)
+
+Work order §5 asks for CID22-B(23) as the held-out CID22 read of every dvifmish
+DVIFM configuration not fitted on CID22-49. Under the September 14 rule this is
+a frozen-model assessment of the published test population: presets are frozen
+(sha256 in the benchmark record) before the read, nothing is fitted, calibrated
+or selected on B, and no preset changes after it. **Prior exposure, disclosed:**
+B was read once before, on 2026-09-21 (verdict lane; its gate model is the
+`serving-gate-ycbcr3` preset, whose B number is that read's, 0.7738 on 24
+references / 0.7797 on 23). This second batch is not a fresh holdout for any
+model already read on B; for the new presets it is their first read. Presets
+fitted on CID22-49 (names containing `cid22`) are scored on all 49 references
+and labelled fit-domain, never on B as held-out. Record:
+`benchmarks/dvifmish_eval_2026-09-22.md`.
+
+## 2026-09-22: AIC-4 public sample read by frozen dvifmish presets (September 14 rule)
+
+**What is read.** The JPEG AIC-4 example dataset (`/mnt/v/dataset/aic4_sample/`,
+T0, eval-only): 5 sources × 60 test images = 300 pairs, as the 620×800 `PTC_`
+crops the subjects saw (zensim's existing pair list
+`/mnt/v/output/zensim/v2-backfill-2026-07-20/aic4_pairs.tsv`) and, separately,
+as the full-resolution encodes (853×945 to 2592×1946) with the same labels.
+Target: the reconstructed JND `distortion` (distortion-oriented — rises with
+distortion), so every table reports |SROCC| / |KROCC| with the orientation
+stated. The DVIFM talk reports a result on "the AIC-4 example data set (300)";
+this is that public sample, read for comparison with the reported figure.
+
+**Rule.** September 14 clarification: a published test population may assess
+a frozen candidate. Models are frozen before the read (preset JSON sha256 in
+the benchmark record); nothing is fitted, calibrated or selected on AIC-4, and
+no preset is changed after it. Presets read: every dvifmish preset frozen at
+read time (the talk-faithful, serving and faithful-lane presets, the variant
+screen presets and the §4 CID22 presets) and the frozen peers (fast-ssim2,
+zensim B and D, the R915 Rev3 ensemble).
+
+**Prior exposure, disclosed.** AIC-4 has been read by earlier zensim
+assessments (the board's full evaluations), and its 50-row JPEG-AI slice is
+SDR25, zensim's seed-selection oracle. So no zensim bake's AIC-4 number here
+is a fresh holdout read. No DVIFM preset has been fitted, calibrated or
+selected on any AIC-4 or SDR25 row. Record: `benchmarks/dvifmish_eval_2026-09-22.md`.
+
+**Addendum (2026-09-23, before the read).** The same labels are also correlated
+with the anchor-metric scores the organisers publish beside them
+(`JPEG-AIC_metric_scores.csv` in jpeg-aic/JPEG-AIC-4-datasets, commit
+`56723f7`: PSNR-Y, SSIM, MS-SSIM, IW-SSIM, VMAF-neg, SSIMULACRA2, HDR-VDP-2/3,
+CVVDP), to check that this 300-pair set is the one the DVIFM talk ranks
+metrics on. Frozen external metrics, published scores, no fitting or
+selection.
+
+## 2026-09-22: AIC2026 read by frozen dvifmish presets — metric agreement only
+
+AIC2026 (registered 2026-09-19, T0-family, eval-only, **no human labels**) is
+read by frozen dvifmish presets to measure **rank agreement with the
+organisers' own objective columns** `proposal-DVIFM`, `proposal-DVIFM-0.2` and
+`proposal-DVIFM-0.2-use_chroma` (Spearman and Kendall, no fitting, no
+calibration), on the 840×944 `PTC_` crops (`metrics_cropped.csv`) and on the
+full-resolution decodes (`metrics_fullres.csv`). Purpose: which submitted DVIFM
+version the talk-based reconstruction resembles. Nothing is fitted, selected
+or calibrated on AIC2026; every number is metric-vs-metric agreement, never
+accuracy. Presets read: those frozen before this entry
+(`talk-faithful-luma`, `serving-gate-ycbcr3`, `ours-full-luma`) and, later,
+the variant-screen presets once frozen. Images extracted from the pinned
+archives (`SHA256SUMS`/`MD5SUMS.zips` in `/mnt/v/datasets/aic2026/`) to
+`/var/tmp/dvifmish/datasets/aic2026/`. Record:
+`benchmarks/dvifmish_eval_2026-09-22.md`.
