@@ -580,6 +580,29 @@ as `CID22-B(24)`) are recorded in
 row above is otherwise unchanged: the 49-ref set remains holdout-only for
 every other purpose, and no zensim model fit consumes these labels.
 
+## Exposure ledger — 2026-09-22: AIC-4 frozen read, crops + full resolution
+
+Per the September 14 clarification (AIC-4 public sample = published TEST,
+assessable by frozen candidates with recorded exposure). Registered BEFORE the
+read (board-orientation lane, `benchmarks/board_orientation_fix_2026-09-22.md`):
+
+- **Population:** the AIC-4 public sample, 5 sources x 6 codecs x 10 levels =
+  300 stimuli, scored twice — on the `PTC_images` crops the study showed and on
+  the `full_resolution_images` encodes they were cut from. Labels: committed
+  `site/data/parquet/aic4_sample.parquet` (`human_jnd`, distortion-oriented).
+- **Models (all frozen before this read, no member changed):** named profiles
+  `PreviewV0_2`, B, C, D; `R915_y60_h32_ens5` and `R915_basic228_h128_ens5`
+  (member hashes as in `recovery/calibrated/FROZEN.json`); the MT914 matched
+  B/D bakes; our fast-ssim2 and butteraugli (`peer_metric_pairs`); the
+  organisers' published columns (crops only).
+- **Statistics:** global |SROCC| / |KROCC| and the orientation-aligned sign,
+  plus the same per source, all from the Rust `panel` owner.
+- **Use:** descriptive only. Nothing is fitted, calibrated, selected or tuned on
+  it. Five sources is a sanity check (is any ladder backwards?), never a
+  selection axis. Prior AIC-4 exposure of these models (the 2026-09-14/15
+  public-test panels on the feature tables) is disclosed; this is not a fresh
+  independent holdout confirmation.
+
 ## Exposure ledger — 2026-09-23: Rev4 step-1 E1 regime analysis (read-only)
 
 Purpose "rev4 step-1 e1". Registered before the read in
