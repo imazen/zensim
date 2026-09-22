@@ -8,7 +8,7 @@ The machine-readable output of the 2026-09-20 constants lane is 525118 bytes, to
 | Path | `/mnt/v/output/zensim/dvifm-loss-2026-09-20/report/dvifm_constants_2026-09-20.json` |
 | sha256 | `7cddfc47e65bd6fefee6c6c69b4c5cf287d99ae025833ef669c3d2e2ce2f8ca6` |
 | Bytes | 525118 |
-| Produced by | `research/2026-09-dvifm/loss-constants/fit_loss.py` (+ `run_ladder.sh`, `collect.py`, `report.py`) |
+| Produced by | `/mnt/v/output/zensim/dvifm-loss-2026-09-20/tools/fit_loss.py` (+ `run_ladder.sh`, `collect.py`, `report.py`) |
 | Companion spec | `/mnt/v/output/zensim/dvifm-loss-2026-09-20/report/constants-v1.json` (15 cells + schema) |
 | Arm comparison | `/mnt/v/output/zensim/dvifm-loss-2026-09-20/report/compare.json` (11 arms) |
 | Per-arm artefacts | `/mnt/v/output/zensim/dvifm-loss-2026-09-20/report/fits/artefact_*.json` |
