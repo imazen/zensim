@@ -939,10 +939,10 @@
      "winner_dial_Ebothg_hfgain_winsor_dial@cur372"
     ]
    },
-   "reason": "an @cur372 row is a CURRENT-extractor read on only 8 of its 14 corpora (cid22, kadid, tid, konjnd, aic3 re-extracted at build_commit ea16c7ee; csiq, live, pipal measured BIT-IDENTICAL to the stored tables). These six are BYTE-COPIES of the 2026-05-15 root because their distorted material is bigcodec/R2 encodes or \u2014 for aic4 \u2014 a source CSV that no longer exists, so an era delta of exactly zero on them is true by construction, not evidence of era-cleanliness; aic4 specifically is PRE-FIX (pre-2dab8f30) and unrefreshable, while nonphoto/imazen26 are believed post-fix by BUILD DATE only, an inference and not the measurement the csiq/live/pipal trio got. product_composite inherits the mix: imazen26 0.50 + nonphoto 0.30 + aic4 0.05 of its 2.15 denominator = 39.5% of the composite LEVEL rides on stored-era tables (the stored-vs-current composite DELTA is clean \u2014 those terms cancel)",
+   "reason": "an @cur372 row is a CURRENT-extractor read on only 8 of its 14 corpora (cid22, kadid, tid, konjnd, aic3 re-extracted at build_commit ea16c7ee; csiq, live, pipal measured BIT-IDENTICAL to the stored tables). These six are BYTE-COPIES of the 2026-05-15 root because their distorted material is bigcodec/R2 encodes or \u2014 for aic4 \u2014 a source CSV that no longer exists (CORRECTED 2026-09-22: the same labels are committed in site/data/parquet/aic4_sample.parquet and every crop + full-resolution PNG is on disk, so aic4 IS refreshable; the copy here is still the pre-fix table), so an era delta of exactly zero on them is true by construction, not evidence of era-cleanliness; aic4 specifically is PRE-FIX (pre-2dab8f30) \u2014 refreshable, not yet swapped in (corrected 2026-09-22), while nonphoto/imazen26 are believed post-fix by BUILD DATE only, an inference and not the measurement the csiq/live/pipal trio got. product_composite inherits the mix: imazen26 0.50 + nonphoto 0.30 + aic4 0.05 of its 2.15 denominator = 39.5% of the composite LEVEL rides on stored-era tables (the stored-vs-current composite DELTA is clean \u2014 those terms cancel)",
    "evidence": "benchmarks/eval372_current_root_2026-08-30.md \u00a72 (root table, 'COPIED \u2260 current') + \u00a73a; benchmarks/board_era_rows_2026-08-30.md",
    "date": "2026-08-30",
-   "fix_path": "re-extract the six at HEAD (needs a decode pass for the bigcodec/R2 legs; aic4 is permanent \u2014 its source CSV is gone). Until then read an @cur372 row's era-clean axes only: cid22/kadid/tid/konjnd/aic3/csiq/live/pipal"
+   "fix_path": "re-extract the six at HEAD (needs a decode pass for the bigcodec/R2 legs; aic4 included: build_fr_corpus_pairs.py aic4 now rebuilds its pairs from the committed labels (board_orientation_fix_2026-09-22 \u00a72); swapping a re-extracted aic4 into this root is a separate, deliberate step). Until then read an @cur372 row's era-clean axes only: cid22/kadid/tid/konjnd/aic3/csiq/live/pipal"
   },
   {
    "id": "dial372-grid-thread-dependent-era-current-rows-2026-08-30",
@@ -1062,10 +1062,10 @@
      "features_root": "/mnt/v/zen/zensim-training/2026-08-30-era3-full-features-372"
     }
    },
-   "reason": "the era-3 root re-extracted 8 corpora + kon504 under option C; these six are NOT re-extractable on this box and were COPIED from the era-2 root, so they carry era-2 (phantom-column-pooled) features inside an era-3 root. Read them as prior-era.",
+   "reason": "the era-3 root re-extracted 8 corpora + kon504 under option C; these six were believed NOT re-extractable on this box (false for aic4, corrected 2026-09-22) and were COPIED from the era-2 root, so they carry era-2 (phantom-column-pooled) features inside an era-3 root. Read them as prior-era.",
    "evidence": "_MANIFEST.json 'COPIED FROM THE OLD ROOT'; benchmarks/extraction_perf_and_buffered_removal_2026-08-30.md \u00a712.1",
    "date": "2026-08-30",
-   "fix_path": "re-extract on a box with the source corpora, then drop this annotation"
+   "fix_path": "re-extract on a box with the source corpora, then drop this annotation (aic4 needs no source-corpus box: its labels are committed in site/data/parquet/aic4_sample.parquet and its PNGs are on this box \u2014 board_orientation_fix_2026-09-22 \u00a72)"
   },
   {
    "id": "era2-tiling-bhdr-accepted-exception",
@@ -1559,17 +1559,18 @@
   },
   {
    "id": "aic4-corpus-wide-per-ref-inversion",
-   "kind": "annotated",
+   "kind": "invalidated",
    "fields": [
     "rank.aic4"
    ],
    "scope": {
-    "all": true
+    "manual": "RETIRED 2026-09-22 \u2014 documentation-only, applies to no fulleval cell (was {all: true})"
    },
-   "reason": "AIC-4's per-reference ranking is inverted for essentially every model on the board, which makes it a CORPUS property and not a model finding (ADD156 ship audit S3.4 measured it on two unrelated bakes: ADD156 -0.9325 and shipped B -0.8906, both 100% of references backwards, same root; the audit noted no registry entry covered it). MEASURED board-wide 2026-08-31 over 373 cells: median 60.0% of the 5 references backwards, median per-reference SROCC -0.018, median pooled signed SROCC -0.903, and 187 of 373 cells above 10% backwards. AIC-4 is the pre-fix, unrefreshable corpus. Do NOT read a model's aic4 frac_negative or per_ref_mean as evidence about that model; the same caveat applies to sdr25 (a subset of aic4): median 20.0% backwards over 356 cells.",
+   "reason": "RETIRED 2026-09-22 \u2014 FALSE FINDING. There was no corpus-wide inversion: aic4/sdr25 store q_jnd, a JND distance that RISES with distortion (declared DISTORTION in check_target_orientation.py), and bake_verdict pinned their per-reference statistic higher-is-better, so every correctly ranking bake read ~100% of references backwards; the 60% board median was a mix of pinned-era cells (100%) and pre-pin Auto cells (0%). The organisers' own CVVDP column anti-correlates with q_jnd within all 5 references, as every good metric must. Original text: AIC-4's per-reference ranking is inverted for essentially every model on the board, which makes it a CORPUS property and not a model finding (ADD156 ship audit S3.4 measured it on two unrelated bakes: ADD156 -0.9325 and shipped B -0.8906, both 100% of references backwards, same root; the audit noted no registry entry covered it). MEASURED board-wide 2026-08-31 over 373 cells: median 60.0% of the 5 references backwards, median per-reference SROCC -0.018, median pooled signed SROCC -0.903, and 187 of 373 cells above 10% backwards. AIC-4 is the pre-fix, unrefreshable corpus. Do NOT read a model's aic4 frac_negative or per_ref_mean as evidence about that model; the same caveat applies to sdr25 (a subset of aic4): median 20.0% backwards over 356 cells.",
    "evidence": "benchmarks/add156_ship_audit_2026-08-31.md S3.4; benchmarks/failure_profiles_2026-08-31.md S3; /mnt/v/output/zensim/failure-profiles-2026-08-31/failure_inventory_2026-08-31.tsv",
    "date": "2026-08-31",
-   "fix_path": "none \u2014 the corpus cannot be refreshed; treat aic4/sdr25 per-reference signs as corpus-level"
+   "fix_path": "superseded by aic4-sdr25-per-ref-declared-orientation-REPAIRED-2026-09-22 (bake_verdict fixed, board cells repaired in place)",
+   "status": "retired"
   },
   {
    "id": "aic3-target-is-design-jnd",
@@ -2617,6 +2618,121 @@
    "evidence": "benchmarks/minimal_top_2026-09-13.md; served-audit and gallery-render refusal",
    "date": "2026-09-14",
    "fix_path": "Repair nonfinite attribution and establish full scalar/map parity before using this model for steering."
+  },
+  {
+   "id": "aic4-sdr25-per-ref-declared-orientation-REPAIRED-2026-09-22",
+   "kind": "invalidated",
+   "fields": [
+    "rank.aic4.per_ref_mean",
+    "rank.aic4.frac_negative",
+    "rank.sdr25.per_ref_mean",
+    "rank.sdr25.frac_negative"
+   ],
+   "scope": {
+    "manual": {
+     "note": "330 board cells (rank.aic4) and 253 (rank.sdr25, the 5-reference q_jnd table) repaired in place; roster /mnt/v/output/zensim/board-orientation-fix-2026-09-22/apply.tsv, fresh verdicts /mnt/v/output/zensim/board-orientation-fix-2026-09-22/verdicts/, pre-repair copies + sha256 /mnt/v/output/zensim/board-orientation-fix-2026-09-22/board_before/"
+    }
+   },
+   "reason": "Every aic4/sdr25 per_ref_mean/frac_negative verdicted with the 730a386e quality pin (2026-08-04 .. 2026-09-22) was computed in the WRONG orientation for these distortion-oriented q_jnd corpora, so a correct bake read as ~100% of references backwards. BOARD FILES ARE REPAIRED IN PLACE with the sha-gated promote_fulleval --repair-rank-orientation (tag declared-orientation-2026-09-22): a fresh verdict with the fixed binary reproduced every orientation-independent field and per_ref_mean was an exact negation (|d|<=1e-9). Any COPY of an aic4/sdr25 per-ref number or %-backwards published from a verdict of that window is the negated value.",
+   "evidence": "benchmarks/board_orientation_fix_2026-09-22.md; zensim-validate bake_verdict test distortion_oriented_jnd_corpus_is_not_marked_inverted_for_a_correct_bake",
+   "date": "2026-09-22",
+   "fix_path": "repaired 2026-09-22; unrepairable remainder registered as hya-w084-per-ref-stale-orientation-2026-09-22"
+  },
+  {
+   "id": "hya-w084-per-ref-stale-orientation-2026-09-22",
+   "kind": "invalidated",
+   "fields": [
+    "rank.aic4.per_ref_mean",
+    "rank.aic4.frac_negative",
+    "rank.sdr25.per_ref_mean",
+    "rank.sdr25.frac_negative"
+   ],
+   "scope": {
+    "names": [
+     "HYA_w084"
+    ]
+   },
+   "reason": "HYA_w084 (0.84 W10L9PH_s4004 + 0.16 Q7b) still carries the pre-2026-09-22 quality-pinned aic4/sdr25 per-ref values (aic4 -0.9392 / 100%, sdr25 -1.0 / 100%): its Q7b member is not recorded in the cell and was not locatable, so no fresh verdict reproduced the stored block and the gated repair refused. Read its per_ref_mean with the sign flipped and its %-backwards as 100% minus the stored value; the pooled numbers are unaffected.",
+   "evidence": "benchmarks/board_orientation_fix_2026-09-22.md \u00a71.4",
+   "date": "2026-09-22",
+   "fix_path": "locate the Q7b member bake, re-verdict aic4,sdr25 with the fixed bake_verdict, promote_fulleval --repair-rank-orientation --repair-tag declared-orientation-2026-09-22"
+  },
+  {
+   "id": "sdr25-372-root-table-orientation-unverified-2026-09-22",
+   "kind": "annotated",
+   "fields": [
+    "rank.sdr25"
+   ],
+   "scope": {
+    "names": [
+     "b_sdr_linear_cid80_inclwinsor_dense_dial",
+     "b_sdr_linear_cid80_inclwinsor_dense_dial@cur372",
+     "mlp_2L_diverse_H128@cur372",
+     "cl_tfm_corruption_LQ_MLP_s13@cur372",
+     "v02_bvls_NO_shaping@cur372",
+     "v02_bvls_shaped@cur372",
+     "v47_strict_QAT_native@cur372",
+     "T_appT_b372_lam1e-3@cur372",
+     "bhdr_linear_shaped_cvvdpmix@cur372",
+     "ADD156_safesyn_only_raw_lasso@cur372",
+     "Ebothg_scr0_5_dial@cur372",
+     "winner_dial_Ebothg_hfgain_winsor_dial@cur372",
+     "B_safesyn_curera@im26lane",
+     "B_im26anchor@im26lane",
+     "B_im26top@im26lane",
+     "B_oldanchor_full@im26lane",
+     "B_im26topdense@im26lane",
+     "B_konctl@im26lane",
+     "B_konim26@im26lane",
+     "B_konim26_anchim26@im26lane",
+     "d_id100@did100lane",
+     "d_id100_negrich@did100lane",
+     "D_shipped_ctl@did100lane",
+     "Dpeaks_lam1em3",
+     "Dpeaks_lam1em3_minus_f162",
+     "fc2_372_S228_H128_s4004",
+     "fc2_372_S156_H32_s4004",
+     "fc2_372_S228_H128_s4005",
+     "fc2_372_S228_H128_s4006",
+     "fc2_372_S156_H32_s4006",
+     "D_shipped@dguard2",
+     "D_guard12_p999@dguard2",
+     "BOA_A_plain_s4004",
+     "BOA_A_plain_s4005",
+     "BOA_A_plain_s4006",
+     "BOA_B_nonneg_s4004",
+     "BOA_B_nonneg_s4005",
+     "BOA_B_nonneg_s4006",
+     "BOA_C_lad05_s4004",
+     "BOA_C_lad05_s4005",
+     "BOA_C_lad05_s4006",
+     "BOA_D_lad20m_s4004",
+     "BOA_D_lad20m_s4005",
+     "BOA_D_lad20m_s4006",
+     "BOA_D_lad20_s4004",
+     "BOA_D_lad20_s4005",
+     "BOA_D_lad20_s4006",
+     "BOA_E_plainlad_s4004",
+     "BOA_E_plainlad_s4005",
+     "BOA_E_plainlad_s4006",
+     "BOA_F_nonneg32_s4004",
+     "BOA_F_nonneg32_s4005",
+     "BOA_F_nonneg32_s4006",
+     "BOA_G_anchorlad_s4004",
+     "BOA_G_anchorlad_s4005",
+     "BOA_G_anchorlad_s4006",
+     "BOA_H_anchorlad_s4004",
+     "BOA_H_anchorlad_s4005",
+     "BOA_H_anchorlad_s4006",
+     "cleanup_H_plus_rav1e_s4004",
+     "cleanup_H_plus_rav1e_s4005",
+     "cleanup_H_plus_rav1e_s4006"
+    ]
+   },
+   "reason": "These cells read sdr25 from the 372 roots' ext_sdr25.parquet (sha256 4f567646..., 50 rows = 10 references x 5 rows, human_score in {2,6,7,9,10} on every reference) \u2014 a DIFFERENT table from the 944/924 ext_sdr25 (5 JPEG-AI references x 10 q_jnd levels) that EXPECTED_ORIENTATION's sdr25 declaration describes. No builder or provenance for it is recorded (both 372 manifests say \"stored\"/\"copied\"), so its label orientation is UNVERIFIED. Their stored per-ref values (quality pin) were left as stored, not repaired. bake_verdict now pins the declared distortion orientation for every sdr25 read, so a fresh 372-root verdict prints the opposite per-ref sign from these stored cells \u2014 do not compare the two, and do not read either as evidence until the table is identified.",
+   "evidence": "benchmarks/board_orientation_fix_2026-09-22.md \u00a71.4",
+   "date": "2026-09-22",
+   "fix_path": "identify the table's source and target semantics; if distortion-oriented, repair these cells with the gated repair; if quality-oriented, declare it separately from the q_jnd sdr25"
   }
  ]
 }
