@@ -3856,26 +3856,22 @@ function failures(b){
   Object.keys(R).forEach(c=>{
     const r=R[c];if(!r||r.frac_negative==null||r.per_ref_n==null)return;
     if(r.frac_negative<=0.02)return;
-    // aic4/sdr25 are inverted for essentially EVERY board cell — a corpus
-    // property, not a model finding (registry aic4-corpus-wide-per-ref-inversion).
-    // Report it, but never as this model's defect.
-    const corpusWide=(c==='aic4'||c==='sdr25');
+    // per_ref_mean / frac_negative are stored in each corpus's DECLARED
+    // orientation (bake_verdict pins it from EXPECTED_ORIENTATION), so a
+    // negative per-reference mean is a genuine within-image inversion on every
+    // corpus, aic4/sdr25 included (board_orientation_fix_2026-09-22).
     // A POSITIVE pooled SROCC sitting on a NEGATIVE per-reference mean is the
     // most misleading shape the board can show: the model separates images and
     // orders encodes of one image backwards, and only the pooled number is on
     // the scoreboard. Always a blocker.
-    const flipped=(r.per_ref_mean!=null&&r.per_ref_mean<0&&!corpusWide);
-    const sev=corpusWide?'watch':(flipped?'blocker':(r.frac_negative>=0.15?'serious':'watch'));
-    bad.push(F(sev,corpusWide?11:(flipped?0:1),
+    const flipped=(r.per_ref_mean!=null&&r.per_ref_mean<0);
+    const sev=flipped?'blocker':(r.frac_negative>=0.15?'serious':'watch');
+    bad.push(F(sev,flipped?0:1,
       (flipped?'INVERTED per image on '+c+' while its pooled score looks healthy'
              :'Ranks whole reference ladders backwards on '+c),
       pc(r.frac_negative)+' of '+r.per_ref_n+' references (within-image mean SROCC '
         +f3(r.per_ref_mean)+' vs pooled '+f3(rs(b,c))+')',
-      corpusWide?('a CORPUS-WIDE inversion, not evidence about this model: measured board-wide, '
-        +(c==='aic4'?'median 60% of aic4 references are backwards across 373 cells'
-                    :'median 20% of sdr25 references are backwards across 356 cells (sdr25 is a '
-                     +'subset of aic4)'))
-        :(flipped?('a per-image tuning loop on '+situ(c)+' — and the scoreboard’s pooled '
+      (flipped?('a per-image tuning loop on '+situ(c)+' — and the scoreboard’s pooled '
           +f3(rs(b,c))+' does not show it')
         :('a per-image tuning loop on '+situ(c))),
       'rank.'+c+'.frac_negative / per_ref_mean'));
