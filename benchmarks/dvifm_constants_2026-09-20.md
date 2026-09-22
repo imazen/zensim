@@ -68,23 +68,23 @@ Each stage refits and is accepted only if the paired dev-bootstrap delta clears 
 
 ## Per-cell constants (canonical arm)
 
-| cell | mode | g | P | c0 | c0 interval | β | σ | β profile interval | identified | domains agreeing |
-|---|---|---|---|---|---|---|---|---|---|---|
-| ycbcr_cb_l0 | off | 0.35 | 0.0082 | 0.000237 | (1e-06, 10) | 1.01 | 2.54 | (0.05, 20) | False | 4 |
-| ycbcr_cb_l1 | off | 1.63 | 0.165 | 0.000452 | [2.05e-05, 10) | 0.3 | 6.86 | (0.05, 20) | False | 5 |
-| ycbcr_cb_l2 | off | 0.802 | 0.831 | 0.0159 | (1e-06, 10) | 0.993 | 10.1 | (0.05, 20) | False | 9 |
-| ycbcr_cb_l3 | gate | 0.458 | 0.103 | 0.00062 | (1e-06, 10) | 9.34 | 3.11 | (0.05, 20) | False | 4 |
-| ycbcr_cb_l4 | off | 0.265 | 3.29 | 0.0318 | [0.0143, 10) | 23 | 11.7 | (0.05, 20) | False | 0 |
-| ycbcr_cr_l0 | off | 0.35 | 0.0082 | 0.000237 | (1e-06, 10) | 1.01 | 2.54 | (0.05, 20) | False | 4 |
-| ycbcr_cr_l1 | off | 1.63 | 0.165 | 0.000452 | [2.05e-05, 10) | 0.3 | 6.86 | (0.05, 20) | False | 5 |
-| ycbcr_cr_l2 | off | 0.802 | 0.831 | 0.0159 | (1e-06, 10) | 0.993 | 10.1 | (0.05, 20) | False | 9 |
-| ycbcr_cr_l3 | off | 0.458 | 0.103 | 0.00062 | (1e-06, 10) | 9.34 | 3.11 | (0.05, 20) | False | 4 |
-| ycbcr_cr_l4 | off | 0.265 | 3.29 | 0.0318 | [0.0143, 10) | 23 | 11.7 | (0.05, 20) | False | 0 |
-| ycbcr_y_l0 | curve | 1.45 | 1.77 | 0.000683 | [5.62e-05, 0.00316] | 0.635 | 7.22 | [0.287, 1.65] | True | 10 |
-| ycbcr_y_l1 | curve | 0.615 | 0.589 | 0.111 | [0.0143, 2.21] | 0.203 | 1.32 | (0.05, 0.473] | False | 3 |
-| ycbcr_y_l2 | off | 1.99 | 0.516 | 0.0558 | [0.00523, 10) | 1.11 | 1.96 | (0.05, 20) | False | 4 |
-| ycbcr_y_l3 | off | 1.73 | 3.92 | 0.026 | (1e-06, 10) | 5.06 | 10.3 | (0.05, 20) | False | 4 |
-| ycbcr_y_l4 | off | 0.234 | 9.11 | 0.662 | [2.05e-05, 10) | 1.24 | 7.46 | (0.05, 20) | False | 5 |
+| cell | mode | g | P | c0 | c0 interval | β | σ | β profile interval | identified | domains agreeing | closed axes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| ycbcr_cb_l0 | off | 0.35 | 0.0082 | 0.000237 | (1e-06, 10) | 1.01 | 2.54 | (0.05, 20) | False | 4 | — |
+| ycbcr_cb_l1 | off | 1.63 | 0.165 | 0.000452 | [2.05e-05, 10) | 0.3 | 6.86 | (0.05, 20) | False | 5 | p |
+| ycbcr_cb_l2 | off | 0.802 | 0.831 | 0.0159 | (1e-06, 10) | 0.993 | 10.1 | (0.05, 20) | False | 9 | — |
+| ycbcr_cb_l3 | gate | 0.458 | 0.103 | 0.00062 | (1e-06, 10) | 9.34 | 3.11 | (0.05, 20) | False | 4 | — |
+| ycbcr_cb_l4 | off | 0.265 | 3.29 | 0.0318 | [0.0143, 10) | 23 | 11.7 | (0.05, 20) | False | 0 | — |
+| ycbcr_cr_l0 | off | 0.35 | 0.0082 | 0.000237 | (1e-06, 10) | 1.01 | 2.54 | (0.05, 20) | False | 4 | — |
+| ycbcr_cr_l1 | off | 1.63 | 0.165 | 0.000452 | [2.05e-05, 10) | 0.3 | 6.86 | (0.05, 20) | False | 5 | p |
+| ycbcr_cr_l2 | off | 0.802 | 0.831 | 0.0159 | (1e-06, 10) | 0.993 | 10.1 | (0.05, 20) | False | 9 | — |
+| ycbcr_cr_l3 | off | 0.458 | 0.103 | 0.00062 | (1e-06, 10) | 9.34 | 3.11 | (0.05, 20) | False | 4 | — |
+| ycbcr_cr_l4 | off | 0.265 | 3.29 | 0.0318 | [0.0143, 10) | 23 | 11.7 | (0.05, 20) | False | 0 | — |
+| ycbcr_y_l0 | curve | 1.45 | 1.77 | 0.000683 | [5.62e-05, 0.00316] | 0.635 | 7.22 | [0.287, 1.65] | True | 10 | c0,beta,p |
+| ycbcr_y_l1 | curve | 0.615 | 0.589 | 0.111 | [0.0143, 2.21] | 0.203 | 1.32 | (0.05, 0.473] | False | 3 | c0,p |
+| ycbcr_y_l2 | off | 1.99 | 0.516 | 0.0558 | [0.00523, 10) | 1.11 | 1.96 | (0.05, 20) | False | 4 | p |
+| ycbcr_y_l3 | off | 1.73 | 3.92 | 0.026 | (1e-06, 10) | 5.06 | 10.3 | (0.05, 20) | False | 4 | — |
+| ycbcr_y_l4 | off | 0.234 | 9.11 | 0.662 | [2.05e-05, 10) | 1.24 | 7.46 | (0.05, 20) | False | 5 | — |
 
 ## Identifiability detail
 
@@ -114,6 +114,6 @@ Each stage refits and is accepted only if the paired dev-bootstrap delta clears 
 ## Provenance
 
 - Artefacts: cid22a, cid22a_weber, kadid_train, kadid_train_weber, majority, safesyn, safesyn_weber, tid_jp2kjpeg, tid_jp2kjpeg_weber, tidkadid, tidkadid_weber
-- Fitter: `/mnt/v/output/zensim/dvifm-loss-2026-09-20/tools/fit_loss.py` (sha f803214e328f)
+- Fitter: `/mnt/v/output/zensim/dvifm-loss-2026-09-20/tools/fit_loss.py` (sha 186fa0243872)
 - Objective: within-reference pairwise logistic ranking loss, reference-normalized; tied-first untie ladder with paired-dev-bootstrap acceptance; prior sweep λ∈{0,0.003,0.01,0.03,0.1,0.3} toward β=0.65.
 - Detector globals: {"channel_min": 0.14074729098215757, "mixture_collapse": true, "level_weight_min": 0.00010663456496415709, "map": {"A": 225.52596701040648, "B": -123.1329716818716, "lambda": 39.45969950667347, "mse": 173.99321966419436}, "map_lambda_medE": 0.17681322249527415, "map_degenerate": false, "y_min": -743.8610103164912, "y_max": 99.15995927546757, "frac_at_min": 7.089483460235087e-06, "frac_at_max": 7.089483460235087e-06, "frac_negative": 0.05809831695662654, "target_clamped": false, "saturation": false}
