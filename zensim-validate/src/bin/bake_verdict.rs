@@ -2004,18 +2004,67 @@ fn sign_is_meaningful(name: &str) -> bool {
     !matches!(name, "konjnd")
 }
 
-/// Rendered SROCC cell: the SIGNED value on quality-oriented corpora (with a loud
-/// inversion marker when negative), `|SROCC|` on `konjnd` where the sign carries no
-/// meaning. The JSON keeps both `srocc` and `srocc_signed` unchanged — this is the
-/// human-facing surface only.
+// ── Corpus label ORIENTATION (2026-09-22) ──────────────────────────────────
+// THE OWNER is `EXPECTED_ORIENTATION` in
+// `scripts/canonical_corpus/check_target_orientation.py` (campaign REGISTERED
+// APPENDIX I). Three eval corpora carry DISTORTION-oriented JND-family labels —
+// aic4 and sdr25 store `q_jnd`, a JND distance from the pristine original that
+// RISES with distortion; konjnd stores a PJND threshold — so a correct
+// quality-shaped bake anti-correlates with them by construction.
+//
+// Until 2026-09-22 this binary treated every corpus except konjnd as
+// quality-oriented, so on aic4/sdr25 it pinned the per-reference statistic
+// higher-is-better and printed ⛔INVERTED beside every correctly-ranked bake
+// (the four frozen controls: aic4 per-ref mean −0.91…−0.95, 100% of references
+// "backwards", while the organisers' own CVVDP column is negative within every
+// aic4 reference too). See `benchmarks/board_orientation_fix_2026-09-22.md`.
+//
+// A GATED MIRROR of the Python registry (a bin can't import Python), identical
+// to `freeze_check`'s: `distortion_oriented_mirror_matches_python_registry`
+// parses the owner and fails the test run on any drift. Orientation is always
+// the DECLARED value — never inferred from the data being scored.
+const DISTORTION_ORIENTED: [&str; 3] = ["aic4", "konjnd", "sdr25"];
+
+fn is_distortion_oriented(name: &str) -> bool {
+    DISTORTION_ORIENTED.contains(&name)
+}
+
+/// +1 on a quality-oriented corpus, −1 on a distortion-oriented one: multiplying a
+/// signed SROCC by this gives the rank agreement IN THE DECLARED DIRECTION, so a
+/// negative product is a genuine inversion on every corpus alike.
+fn declared_sign(name: &str) -> f64 {
+    if is_distortion_oriented(name) {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+/// The per-reference statistic's polarity, pinned from the declaration (never
+/// `Orientation::Auto`, which re-points the stat at a globally inverted bake and
+/// prints "every ladder correct" — 2026-08-04 APPENDIX F).
+fn per_ref_orientation(name: &str) -> Orientation {
+    if is_distortion_oriented(name) {
+        Orientation::LowerIsBetter
+    } else {
+        Orientation::HigherIsBetter
+    }
+}
+
+/// Rendered SROCC cell: the orientation-ALIGNED signed value (`declared_sign ×
+/// signed SROCC`, so the raw value on quality-oriented corpora and its negation on
+/// aic4/sdr25) with a loud inversion marker when it is negative, and `|SROCC|` on
+/// `konjnd` where the sign carries no meaning. The JSON keeps both `srocc` and
+/// `srocc_signed` unchanged — this is the human-facing surface only.
 fn srocc_cell(name: &str, srocc: f64, srocc_signed: f64) -> String {
     if !sign_is_meaningful(name) {
         return format!("{srocc:.4}");
     }
-    if srocc_signed < 0.0 {
-        format!("**{srocc_signed:+.4} ⛔INVERTED**")
+    let aligned = declared_sign(name) * srocc_signed;
+    if aligned < 0.0 {
+        format!("**{aligned:+.4} ⛔INVERTED**")
     } else {
-        format!("{srocc_signed:+.4}")
+        format!("{aligned:+.4}")
     }
 }
 
@@ -3821,18 +3870,19 @@ fn render_corpus(
         // Orientation::Auto infers polarity from the POOLED sign, so on a corpus
         // where the bake is globally inverted it silently re-points the per-ref
         // stat at the inversion and prints "+0.95 / 0% backwards" — which reads as
-        // "every ladder correct" when every ladder is backwards. On a
-        // quality-oriented corpus the truth direction is KNOWN, so pin it: an
-        // inverted bake then shows a negative per-ref mean and a high %bwd, which
-        // is the whole point of the stat. `konjnd` keeps Auto — its validation
-        // target is a PJND threshold whose sign is structurally negative.
-        // (2026-08-04, benchmarks/sota944_campaign_2026-08-03.md APPENDIX F.)
-        let orient = if sign_is_meaningful(corpus.name) {
-            Orientation::HigherIsBetter
-        } else {
-            Orientation::Auto
-        };
-        per_group_srocc(&scores, &humans, r, PER_REF_MIN_ROWS, orient)
+        // "every ladder correct" when every ladder is backwards. The truth
+        // direction of every corpus is DECLARED, so pin it: an inverted bake then
+        // shows a negative per-ref mean and a high %bwd, which is the whole point
+        // of the stat. (2026-08-04, benchmarks/sota944_campaign_2026-08-03.md
+        // APPENDIX F; the distortion-oriented JND corpora were pinned the wrong
+        // way until 2026-09-22 — see `DISTORTION_ORIENTED`.)
+        per_group_srocc(
+            &scores,
+            &humans,
+            r,
+            PER_REF_MIN_ROWS,
+            per_ref_orientation(corpus.name),
+        )
     });
     // Signed SROCC (polarity-preserving) + marginal bootstrap CI. `aggregate_panel`
     // returns `|SROCC|`; a globally-inverted bake would hide behind that abs, so
@@ -5314,7 +5364,7 @@ fn main() -> ExitCode {
         } else {
             r.display.to_string()
         };
-        if sign_is_meaningful(r.name) && r.srocc_signed < 0.0 {
+        if sign_is_meaningful(r.name) && declared_sign(r.name) * r.srocc_signed < 0.0 {
             disp.push_str(" ⛔INV");
         }
         buf.push_str(&format!(
@@ -5340,10 +5390,13 @@ whose distortion ladder is ranked BACKWARDS. Read them against the pooled SROCC:
 gap means the pooled number is carried by cross-image scale rather than ranking (the \
 AIC-3 0.79-pooled / 0.93-per-ref confound). A high `%bwd` next to a healthy SROCC is the \
 failure §8.39 found and no pooled or per-band stat can see. `—` = corpus carries no ref \
-identity. The SROCC column is **SIGNED** on every quality-oriented corpus and \
-**⛔INVERTED** marks a bake that is ANTI-CORRELATED with that corpus's human labels — a \
-backwards ranker, never a high scorer (`konjnd` alone prints |SROCC|, whose sign is \
-structurally negative on at-PJND pairs). **⚠t=v** marks KADID/TID, whose 100% train==val pair-overlap makes their SROCC \
+identity. The SROCC column is **SIGNED and orientation-aligned**: the raw \
+signed value on quality-oriented corpora, its negation on the distortion-oriented JND \
+corpora (aic4, sdr25 — their `q_jnd` target rises with distortion, per the declared \
+`EXPECTED_ORIENTATION` registry), so **⛔INVERTED** marks a bake that is ANTI-CORRELATED \
+with that corpus's human labels in the declared direction — a backwards ranker, never a \
+high scorer (`konjnd` alone prints |SROCC|, whose sign is structurally negative on \
+at-PJND pairs). `per-ref`/`%bwd` use the same declared orientation. **⚠t=v** marks KADID/TID, whose 100% train==val pair-overlap makes their SROCC \
 a memorization number — not held-out generalization; do not rank a bake by them._\n",
     );
     // Per-corpus SROCC at a glance (inline-SVG; renders in the HTML report).
@@ -5354,7 +5407,7 @@ a memorization number — not held-out generalization; do not rank a bake by the
             .map(|r| {
                 100.0
                     * if sign_is_meaningful(r.name) {
-                        r.srocc_signed
+                        declared_sign(r.name) * r.srocc_signed
                     } else {
                         r.srocc
                     }
@@ -5362,7 +5415,7 @@ a memorization number — not held-out generalization; do not rank a bake by the
             .collect();
         buf.push('\n');
         buf.push_str(&eval_report::svg_bars(
-            "Per-corpus SIGNED SROCC ×100 (rank agreement with human MOS; negative = INVERTED)",
+            "Per-corpus SIGNED SROCC ×100, orientation-aligned (rank agreement with human labels; negative = INVERTED)",
             &labels,
             &sroccs,
             0.0,
@@ -7015,6 +7068,182 @@ mod tests {
         assert!(!sign_is_meaningful("konjnd"));
         assert!(sign_is_meaningful("kadid") && sign_is_meaningful("tid"));
         assert!(sign_is_meaningful("cid22") && sign_is_meaningful("csiq"));
+    }
+
+    /// A correctly-ranking bake must NOT render as inverted on a DISTORTION-oriented
+    /// JND corpus, and a genuinely backwards one must — through both the pooled cell
+    /// and the per-reference statistic.
+    ///
+    /// Regression gate for the 2026-09-22 board fix
+    /// (`benchmarks/board_orientation_fix_2026-09-22.md`): aic4/sdr25 store `q_jnd`,
+    /// which RISES with distortion, but this binary pinned their per-reference stat
+    /// higher-is-better and printed ⛔INVERTED beside every frozen control (aic4
+    /// per-ref −0.91…−0.95, 100% of references "backwards"). The synthetic ladders
+    /// below are shaped like aic4: five references, each a monotone JND ladder, and a
+    /// quality-shaped bake whose score FALLS as the JND distance rises.
+    #[test]
+    fn distortion_oriented_jnd_corpus_is_not_marked_inverted_for_a_correct_bake() {
+        // 5 refs x 6 rungs; target = JND distance (rises), score = quality (falls).
+        let mut refs = Vec::new();
+        let mut jnd = Vec::new();
+        let mut quality = Vec::new();
+        for r in 0..5u32 {
+            for k in 0..6 {
+                refs.push(r);
+                jnd.push(0.3 * k as f64 + 0.05 * r as f64);
+                quality.push(95.0 - 7.0 * k as f64 - r as f64);
+            }
+        }
+        let backwards: Vec<f64> = quality.iter().map(|q| -q).collect();
+
+        // ---- the distortion-oriented corpora: the fix ----
+        for c in ["aic4", "sdr25"] {
+            let pr = per_group_srocc(
+                &quality,
+                &jnd,
+                &refs,
+                PER_REF_MIN_ROWS,
+                per_ref_orientation(c),
+            )
+            .expect("five rankable ladders");
+            assert!(
+                pr.mean > 0.99 && pr.frac_negative == 0.0,
+                "{c}: a correct bake must read per-ref +1 / 0% backwards, got mean {} / {}",
+                pr.mean,
+                pr.frac_negative
+            );
+            // The OLD behaviour (quality pin on every corpus but konjnd) reads the
+            // same ladders as 100% backwards — this is what the test must reject.
+            let old = per_group_srocc(
+                &quality,
+                &jnd,
+                &refs,
+                PER_REF_MIN_ROWS,
+                Orientation::HigherIsBetter,
+            )
+            .expect("five rankable ladders");
+            assert!(old.mean < -0.99 && old.frac_negative == 1.0);
+            assert_ne!(old.mean.signum(), pr.mean.signum());
+
+            let signed = spearman(&quality, &jnd);
+            assert!(signed < 0.0, "a correct bake anti-correlates with q_jnd");
+            let cell = srocc_cell(c, signed.abs(), signed);
+            assert!(
+                !cell.contains("INVERTED"),
+                "{c}: correct bake rendered {cell}"
+            );
+            assert!(
+                cell.starts_with('+'),
+                "{c}: aligned value is positive, got {cell}"
+            );
+
+            // A genuinely backwards bake on the same corpus is still caught.
+            let bs = spearman(&backwards, &jnd);
+            assert!(srocc_cell(c, bs.abs(), bs).contains("INVERTED"));
+            let bpr = per_group_srocc(
+                &backwards,
+                &jnd,
+                &refs,
+                PER_REF_MIN_ROWS,
+                per_ref_orientation(c),
+            )
+            .expect("five rankable ladders");
+            assert!(bpr.mean < -0.99 && bpr.frac_negative == 1.0);
+        }
+
+        // ---- KonJND: declared distortion-oriented; cell keeps |SROCC| ----
+        let kpr = per_group_srocc(
+            &quality,
+            &jnd,
+            &refs,
+            PER_REF_MIN_ROWS,
+            per_ref_orientation("konjnd"),
+        )
+        .expect("five rankable ladders");
+        assert!(kpr.mean > 0.99 && kpr.frac_negative == 0.0);
+        let ks = spearman(&quality, &jnd);
+        assert_eq!(
+            srocc_cell("konjnd", ks.abs(), ks),
+            format!("{:.4}", ks.abs())
+        );
+
+        // ---- a quality-oriented corpus is unchanged: pinned higher-is-better ----
+        let mos = &jnd; // now read as a MOS: the quality-shaped bake must RISE with it
+        for c in ["cid22", "aic3", "kadid"] {
+            assert!(matches!(
+                per_ref_orientation(c),
+                Orientation::HigherIsBetter
+            ));
+            let good = per_group_srocc(
+                &backwards,
+                mos,
+                &refs,
+                PER_REF_MIN_ROWS,
+                per_ref_orientation(c),
+            )
+            .expect("five rankable ladders");
+            assert!(good.mean > 0.99 && good.frac_negative == 0.0);
+            let bad = per_group_srocc(
+                &quality,
+                mos,
+                &refs,
+                PER_REF_MIN_ROWS,
+                per_ref_orientation(c),
+            )
+            .expect("five rankable ladders");
+            assert!(
+                bad.mean < -0.99 && bad.frac_negative == 1.0,
+                "{c}: inversion must stay visible"
+            );
+            let s = spearman(&quality, mos);
+            assert!(srocc_cell(c, s.abs(), s).contains("INVERTED"));
+        }
+    }
+
+    /// `DISTORTION_ORIENTED` is a gated mirror of the Python owner
+    /// (`EXPECTED_ORIENTATION` in `check_target_orientation.py`) — the same gate
+    /// `freeze_check` carries for its own copy.
+    #[test]
+    fn distortion_oriented_mirror_matches_python_registry() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../scripts/canonical_corpus/check_target_orientation.py"
+        );
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("owner registry {path} must exist in-repo: {e}"));
+        let start = text
+            .find("EXPECTED_ORIENTATION = {")
+            .expect("EXPECTED_ORIENTATION dict literal not found in the owner file");
+        let block = &text[start..];
+        let block = &block[..block.find('}').expect("registry dict literal never closes")];
+        let mut dist: Vec<String> = Vec::new();
+        let mut n_quality = 0usize;
+        for line in block.lines() {
+            let line = line.split('#').next().unwrap_or("");
+            if let Some((k, val)) = line.split_once(':') {
+                let key = k.trim().trim_matches('"').trim_matches('\'');
+                if key.is_empty() {
+                    continue;
+                }
+                match val.trim().trim_end_matches(',').trim() {
+                    "DISTORTION" => dist.push(key.to_string()),
+                    "QUALITY" => n_quality += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert!(
+            n_quality >= 5,
+            "parse sanity: parsed {n_quality} QUALITY entries"
+        );
+        dist.sort();
+        let mut mirror: Vec<String> = DISTORTION_ORIENTED.iter().map(|s| s.to_string()).collect();
+        mirror.sort();
+        assert_eq!(
+            mirror, dist,
+            "bake_verdict's DISTORTION_ORIENTED mirror drifted from the Python \
+             EXPECTED_ORIENTATION registry — update the mirror (the registry is the owner)"
+        );
     }
 
     use super::*;
