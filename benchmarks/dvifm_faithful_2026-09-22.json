@@ -1,0 +1,454 @@
+{
+ "lane": "faithful",
+ "date": "2026-09-22",
+ "question": "does DVIFM in the author's own configuration reproduce his published luma-only numbers, and which of our deviations costs what?",
+ "author_numbers": {
+  "tid2013": {
+   "srocc": 0.95185,
+   "krocc": 0.80667
+  },
+  "kadid10k": {
+   "srocc": 0.93746,
+   "krocc": null
+  },
+  "cid22": {
+   "srocc": 0.88289,
+   "krocc": 0.69446
+  },
+  "aic4_trn": {
+   "srocc": 0.91609,
+   "krocc": null
+  },
+  "nncd": {
+   "srocc": 0.88659,
+   "krocc": null
+  }
+ },
+ "author_fit_domain": "CID22 human pairs + TID/KADID JPEG-JP2K subsets + NLCD + AIC-4 (~4.3-4.9k pairs)",
+ "our_fit_domain": "cid22a (2192) + tid JPEG/JP2K (250) + kadid JPEG/JP2K non-terminal (650) = 3092 rows; NLCD unavailable, AIC-4 is holdout (T0) \u2014 fit budget comparable, ~0.65x theirs",
+ "exposure": {
+  "author": {
+   "cid22": "IN-SAMPLE \u2014 the ~4.3-4.9k-pair fit domain was the CID22 human pairs themselves",
+   "tid2013": "mostly held-out: only the JPEG/JP2K subset (~250/3000 rows) was in the fit mix",
+   "kadid10k": "mostly held-out: only the JPEG/JP2K subset (~650/10125 rows) was in the fit mix"
+  },
+  "ours": {
+   "cid22a": "IN-SAMPLE for human-mix arms (fit domain); held-out for the fitmix/ours_full arms",
+   "tid2013_full": "250/3000 rows (JPEG/JP2K subset) in the human-mix fit domain; 91.7% held-out",
+   "kadid10k_nt": "650/8125 rows (JPEG/JP2K, non-terminal refs) in the fit domain; 92.0% held-out; the 16 terminal refs (2000 rows) stay untouched"
+  }
+ },
+ "surfaces": {
+  "tid2013_full": {
+   "rows": 3000,
+   "role": "T2 train-only"
+  },
+  "kadid10k_nt": {
+   "rows": 8125,
+   "role": "T1; 16 terminal refs excluded"
+  },
+  "cid22a": {
+   "rows": 2192,
+   "role": "fit-domain half"
+  },
+  "tid2013_heldout": {
+   "rows": 2750,
+   "role": "fit-mix rows excluded"
+  },
+  "kadid10k_heldout": {
+   "rows": 7475,
+   "role": "fit-mix rows excluded"
+  }
+ },
+ "label_orientations": {
+  "kadid_nt.tsv": "raw DMOS (higher=worse) \u2014 inverted to 1-y at segment load via invert_label; verified complement of verdict-lane kadid_dev labels (SROCC -1.0, 1-dmos=mos)",
+  "tid_full.tsv": "MOS (higher=better; label-vs-level SROCC -1.0 within ref+type)",
+  "cid22a.tsv": "quality-oriented (consistent with prior in-sample fits)",
+  "cid22_dev.tsv": "signed fast-ssim2/100 pseudo-labels"
+ },
+ "probes": {
+  "tid_insample_ceiling": {
+   "srocc": 0.7922,
+   "krocc": 0.6226,
+   "note": "faithful arm fitted ON all 3000 TID rows"
+  }
+ },
+ "arms": {
+  "faithful": {
+   "desc": "talk config: Laplacian band, plain block range, smooth curve, per-band Lp (free L), human-mix fit",
+   "fit_rows": 3092,
+   "eval": {
+    "tid2013_full": {
+     "srocc": 0.7008072069845906,
+     "krocc": 0.5286363949717164,
+     "n": 3000
+    },
+    "kadid10k_nt": {
+     "srocc": 0.6361362048457584,
+     "krocc": 0.4579563860345068,
+     "n": 8125
+    },
+    "cid22a": {
+     "srocc": 0.8631559162200515,
+     "krocc": 0.6716769363036739,
+     "n": 2192
+    },
+    "tid2013_heldout": {
+     "srocc": 0.6728508678671417,
+     "krocc": 0.5036340967160569,
+     "n": 2750
+    },
+    "kadid10k_heldout": {
+     "srocc": 0.6044285279877152,
+     "krocc": 0.4324931180682965,
+     "n": 7475
+    }
+   },
+   "delta_vs_author": {
+    "tid2013_full": -0.2510427930154093,
+    "kadid10k_nt": -0.30132379515424157,
+    "cid22a": -0.019734083779948453,
+    "tid2013_heldout": -0.2789991321328583,
+    "kadid10k_heldout": -0.3330314720122848
+   },
+   "fit": {
+    "mse": 0.009406920073412569,
+    "var_y": 0.04549201270774152,
+    "srocc": 0.7956656858103582,
+    "krocc": 0.6240145504253755,
+    "sanity_init_mse": 0.011232598430938807,
+    "sanity_init_srocc": 0.7372014404800512,
+    "sane": true
+   }
+  },
+  "band_local": {
+   "desc": "deviation 1 \u2014 LOCAL band G-B^2G instead of Laplacian",
+   "fit_rows": 3092,
+   "eval": {
+    "tid2013_full": {
+     "srocc": 0.7006025196126622,
+     "krocc": 0.526343129464332,
+     "n": 3000
+    },
+    "kadid10k_nt": {
+     "srocc": 0.6591551977798545,
+     "krocc": 0.4757504321592222,
+     "n": 8125
+    },
+    "cid22a": {
+     "srocc": 0.8116535472963599,
+     "krocc": 0.6130653601155055,
+     "n": 2192
+    },
+    "tid2013_heldout": {
+     "srocc": 0.6730626881496072,
+     "krocc": 0.5030391183546733,
+     "n": 2750
+    },
+    "kadid10k_heldout": {
+     "srocc": 0.6349900932550332,
+     "krocc": 0.456397499882173,
+     "n": 7475
+    }
+   },
+   "delta_vs_author": {
+    "tid2013_full": -0.2512474803873378,
+    "kadid10k_nt": -0.2783048022201454,
+    "cid22a": -0.0712364527036401,
+    "tid2013_heldout": -0.27878731185039274,
+    "kadid10k_heldout": -0.30246990674496677
+   },
+   "fit": {
+    "mse": 0.01003569493973044,
+    "var_y": 0.04549201270774152,
+    "srocc": 0.7749028257289754,
+    "krocc": 0.5968646531388923,
+    "sanity_init_mse": 0.011255786120184826,
+    "sanity_init_srocc": 0.7327321604229408,
+    "sane": true
+   }
+  },
+  "edge_disc": {
+   "desc": "deviation 2 \u2014 3x3-corner edge-discount contrast instead of plain block range",
+   "fit_rows": 3092,
+   "eval": {
+    "tid2013_full": {
+     "srocc": 0.7043016027705631,
+     "krocc": 0.5221382163326773,
+     "n": 3000
+    },
+    "kadid10k_nt": {
+     "srocc": 0.6909368973548862,
+     "krocc": 0.5159935416254416,
+     "n": 8125
+    },
+    "cid22a": {
+     "srocc": 0.9005702798714138,
+     "krocc": 0.720934547019725,
+     "n": 2192
+    },
+    "tid2013_heldout": {
+     "srocc": 0.6795275970937908,
+     "krocc": 0.4981506618000675,
+     "n": 2750
+    },
+    "kadid10k_heldout": {
+     "srocc": 0.6733134277801001,
+     "krocc": 0.5007157214056299,
+     "n": 7475
+    }
+   },
+   "delta_vs_author": {
+    "tid2013_full": -0.2475483972294369,
+    "kadid10k_nt": -0.2465231026451138,
+    "cid22a": 0.01768027987141385,
+    "tid2013_heldout": -0.2723224029062091,
+    "kadid10k_heldout": -0.2641465722198999
+   },
+   "fit": {
+    "mse": 0.008475078451788725,
+    "var_y": 0.04549201270774152,
+    "srocc": 0.8274470762574065,
+    "krocc": 0.6600794705749264,
+    "sanity_init_mse": 0.01044767789407394,
+    "sanity_init_srocc": 0.7543688287324684,
+    "sane": true
+   }
+  },
+  "gate": {
+   "desc": "deviation 3 \u2014 two-state visibility gate instead of smooth curve",
+   "fit_rows": 3092,
+   "eval": {
+    "tid2013_full": {
+     "srocc": 0.7199581038315465,
+     "krocc": 0.5519680141960885,
+     "n": 3000
+    },
+    "kadid10k_nt": {
+     "srocc": 0.7128307518156324,
+     "krocc": 0.5284915427847762,
+     "n": 8125
+    },
+    "cid22a": {
+     "srocc": 0.8567670775472779,
+     "krocc": 0.6621563967869991,
+     "n": 2192
+    },
+    "tid2013_heldout": {
+     "srocc": 0.6950625797974294,
+     "krocc": 0.5288899753444655,
+     "n": 2750
+    },
+    "kadid10k_heldout": {
+     "srocc": 0.6886033018576608,
+     "krocc": 0.5080993695264422,
+     "n": 7475
+    }
+   },
+   "delta_vs_author": {
+    "tid2013_full": -0.23189189616845352,
+    "kadid10k_nt": -0.22462924818436758,
+    "cid22a": -0.026122922452722075,
+    "tid2013_heldout": -0.2567874202025706,
+    "kadid10k_heldout": -0.24885669814233913
+   },
+   "fit": {
+    "mse": 0.009118683195331751,
+    "var_y": 0.04549201270774152,
+    "srocc": 0.8021551791035475,
+    "krocc": 0.6262777396058283,
+    "sanity_init_mse": 0.02849686107282938,
+    "sanity_init_srocc": 0.3843773359637044,
+    "sane": true
+   }
+  },
+  "tied_pool": {
+   "desc": "deviation 4 \u2014 Lp exponent folded into error power (E=s^{1/P}) instead of free per-band L",
+   "fit_rows": 3092,
+   "eval": {
+    "tid2013_full": {
+     "srocc": 0.718945889208426,
+     "krocc": 0.5414699642017531,
+     "n": 3000
+    },
+    "kadid10k_nt": {
+     "srocc": 0.6857789059997829,
+     "krocc": 0.4984743086696629,
+     "n": 8125
+    },
+    "cid22a": {
+     "srocc": 0.8582185358719211,
+     "krocc": 0.6645300769219413,
+     "n": 2192
+    },
+    "tid2013_heldout": {
+     "srocc": 0.693022029897862,
+     "krocc": 0.5172736051126491,
+     "n": 2750
+    },
+    "kadid10k_heldout": {
+     "srocc": 0.6603721628206906,
+     "krocc": 0.47756890803353463,
+     "n": 7475
+    }
+   },
+   "delta_vs_author": {
+    "tid2013_full": -0.23290411079157403,
+    "kadid10k_nt": -0.2516810940002171,
+    "cid22a": -0.024671464128078857,
+    "tid2013_heldout": -0.258827970102138,
+    "kadid10k_heldout": -0.2770878371793094
+   },
+   "fit": {
+    "mse": 0.009297120146610688,
+    "var_y": 0.04549201270774152,
+    "srocc": 0.7954557576609008,
+    "krocc": 0.6215629714685252,
+    "sanity_init_mse": 0.011232598430938807,
+    "sanity_init_srocc": 0.7372014404800512,
+    "sane": true
+   }
+  },
+  "fitmix": {
+   "desc": "deviation 5 \u2014 fitted on cid22_dev ssim2/100 pseudo-labels instead of the human-label mix",
+   "fit_rows": 3785,
+   "eval": {
+    "tid2013_full": {
+     "srocc": 0.7257945788240721,
+     "krocc": 0.5577976943755469,
+     "n": 3000
+    },
+    "kadid10k_nt": {
+     "srocc": 0.7003067213143427,
+     "krocc": 0.5219743360002381,
+     "n": 8125
+    },
+    "cid22a": {
+     "srocc": 0.8077451882904754,
+     "krocc": 0.6163427044421711,
+     "n": 2192
+    },
+    "tid2013_heldout": {
+     "srocc": 0.7008585402217368,
+     "krocc": 0.5351150158514676,
+     "n": 2750
+    },
+    "kadid10k_heldout": {
+     "srocc": 0.6851485391103755,
+     "krocc": 0.5102779633956315,
+     "n": 7475
+    }
+   },
+   "delta_vs_author": {
+    "tid2013_full": -0.22605542117592792,
+    "kadid10k_nt": -0.23715327868565728,
+    "cid22a": -0.07514481170952458,
+    "tid2013_heldout": -0.2509914597782632,
+    "kadid10k_heldout": -0.2523114608896244
+   },
+   "fit": {
+    "mse": 0.0027818900424515813,
+    "var_y": 0.016007899682001007,
+    "srocc": 0.917607055117095,
+    "krocc": 0.7588246136831435,
+    "sanity_init_mse": 0.004736435750479353,
+    "sanity_init_srocc": 0.8606792392823346,
+    "sane": true
+   }
+  },
+  "all_ours": {
+   "desc": "all four structural deviations together (local+edge+gate+tied), human-mix fit",
+   "fit_rows": 3092,
+   "eval": {
+    "tid2013_full": {
+     "srocc": 0.7310589357542584,
+     "krocc": 0.5509396918816835,
+     "n": 3000
+    },
+    "kadid10k_nt": {
+     "srocc": 0.7039496588173703,
+     "krocc": 0.5155218591954429,
+     "n": 8125
+    },
+    "cid22a": {
+     "srocc": 0.8686670167554518,
+     "krocc": 0.6758196327918151,
+     "n": 2192
+    },
+    "tid2013_heldout": {
+     "srocc": 0.7071401580158179,
+     "krocc": 0.5284770900047154,
+     "n": 2750
+    },
+    "kadid10k_heldout": {
+     "srocc": 0.677740670983797,
+     "krocc": 0.4934276237540631,
+     "n": 7475
+    }
+   },
+   "delta_vs_author": {
+    "tid2013_full": -0.22079106424574158,
+    "kadid10k_nt": -0.2335103411826297,
+    "cid22a": -0.014222983244548182,
+    "tid2013_heldout": -0.2447098419841821,
+    "kadid10k_heldout": -0.259719329016203
+   },
+   "fit": {
+    "mse": 0.008738022048718708,
+    "var_y": 0.04549201270774152,
+    "srocc": 0.809836024864484,
+    "krocc": 0.6360819622134912,
+    "sanity_init_mse": 0.02739813585266706,
+    "sanity_init_srocc": 0.3884314439757892,
+    "sane": true
+   }
+  },
+  "ours_full": {
+   "desc": "production configuration: all deviations + pseudo-label fit (the verdict-lane setup)",
+   "fit_rows": 3785,
+   "eval": {
+    "tid2013_full": {
+     "srocc": 0.7344711767688806,
+     "krocc": 0.5629330790823467,
+     "n": 3000
+    },
+    "kadid10k_nt": {
+     "srocc": 0.7214501227928526,
+     "krocc": 0.5422875535849384,
+     "n": 8125
+    },
+    "cid22a": {
+     "srocc": 0.8298921832309735,
+     "krocc": 0.6345284257567188,
+     "n": 2192
+    },
+    "tid2013_heldout": {
+     "srocc": 0.7097458698370858,
+     "krocc": 0.5403591890064735,
+     "n": 2750
+    },
+    "kadid10k_heldout": {
+     "srocc": 0.7023139527737332,
+     "krocc": 0.5264702423506644,
+     "n": 7475
+    }
+   },
+   "delta_vs_author": {
+    "tid2013_full": -0.21737882323111934,
+    "kadid10k_nt": -0.21600987720714737,
+    "cid22a": -0.052997816769026485,
+    "tid2013_heldout": -0.2421041301629142,
+    "kadid10k_heldout": -0.23514604722626675
+   },
+   "fit": {
+    "mse": 0.002291290918590827,
+    "var_y": 0.016007899682001007,
+    "srocc": 0.9275005286773266,
+    "krocc": 0.7745886874024259,
+    "sanity_init_mse": 0.015194816644383513,
+    "sanity_init_srocc": 0.13235866917319483,
+    "sane": true
+   }
+  }
+ }
+}
