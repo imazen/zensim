@@ -190,7 +190,60 @@ non-negative head, the ladder hinge and floor-reaching data for the dial contrac
 flag) stay in force regardless of these outcomes; they are supported by earlier measurements. Speed and
 qualification gates cover 512² and up.
 
-## Status
+## Step 1 results (2026-09-23, audited, landed at `c7355525`)
 
-Nothing in this program has run yet. The paper is held until the program reports and a Rev4 candidate
-qualifies.
+Three Opus lanes ran E1, E2a and E4 on existing data only. Each was preregistered and shows its work. The
+coordinator re-ran their recompute commands, and E1's key cell reproduced exactly.
+
+- **E1 — REFUTED.** zensim's deficit is *not* concentrated near threshold, for either the served default B
+  or the best candidate (the 944 flagship C). Records: `benchmarks/rev4_e1_regime_2026-09-23.{md,json}`.
+  - **B's deficits on JPEG-AIC are uniform across quality bands.** AIC-3 near-threshold / mid / low:
+    −0.047 / −0.076 / −0.042, all with CIs excluding zero. B also collapses on the most distorted CSIQ band
+    (−0.191 [−0.244, −0.137]; old bake era, to be rechecked on the served bytes).
+  - **C shows no near-threshold deficit anywhere.** It trails SSIMULACRA2 in CID22-A's middle and lower
+    bands (−0.012 to −0.019, CI excluding zero), and CVVDP at `standard_fhd` in the lowest AIC-4 band.
+  - **Exploratory lead:** the losing cells are **cross-codec** ordering errors; same-codec ladder order ties
+    in every band. E3 therefore drops to a side experiment, and the cross-codec lead gets its own
+    confirmatory test (E1b).
+- **E2a — facts established.**
+  - Every CVVDP teacher and evaluation column used `standard_4k` (75.4 ppd). The CLI hard-coded it before
+    zenmetrics `088f4bf5` (2026-05-25), and all the falsified CVVDP-teacher recipes drew on data scored
+    before that commit.
+  - Exceptions:
+    - the `A_Phone` bake's teacher was CVVDP at `modern_oled_phone_indoor` (110 ppd, never
+      conformance-checked);
+    - the HDR teachers used a 1,000 cd/m² linear display at 4K geometry until 2026-08-06;
+    - the AIC-4 row rescored at `standard_fhd` is unmerged.
+  - **No human study we use sits at 75 ppd.** Stated or derivable human geometries are KonJND 24.3, LIVE
+    26.8–33.5, CID22 46.9 and UPIQ-SDR about 51–57 ppd. KADID, TID, CSIQ, KonFiG, AIC-3/4 and SDR25 do not
+    state a geometry.
+  - The E2b design is proposed in `benchmarks/rev4_e2a_cvvdp_display_2026-09-23.md`:
+    - **arms:** seven displays, including `sdr_fhd_24`, which separates geometry from peak luminance;
+    - **selection:** on KADID/TID/KonFiG TRAIN only;
+    - **margin:** pooled SROCC +0.010, with a Bonferroni 99% reference-clustered CI excluding zero on both
+      KADID-train and TID-train;
+    - **prerequisites:** landing the CVVDP display fix, rebuilding the pycvvdp environment, and pinning which
+      AIC-3 study our labels come from.
+- **E4 — NEGATIVE.** Agreement with the two-reference rule adds no held-out prediction beyond the registered
+  composite on CID22-A, AIC-3, KonJND or CSIQ: every Bonferroni CI spans zero, over 19 lineages. Adding it
+  *worsens* CID22-A prediction (−0.229 [−0.401, −0.012]). It predicts only the TRAIN-side A7r floors, which
+  is SSIMULACRA2 consistency measured twice. **Agreement is not adopted as a gate.**
+  - *Exploratory lead, not evidence:* butteraugli-only disagreement caught 45 of 46 measured contract
+    failures, at a cost of 131 of 313 false rejects.
+  - Record: `benchmarks/rev4_e4_agreement_gate_2026-09-23.{md,json}`.
+
+## Step 2
+
+- **E1b — cross-codec confirmation (analysis only, next).** Preregistered. On references scored under more
+  than one codec (CID22-A, AIC-3, the AIC-4 sample, the forced-choice cross-codec questions), split
+  same-reference pairs into same-codec and cross-codec. Compare pairwise ordering accuracy per metric, with
+  reference-clustered CIs.
+  - **Confirmed** if zensim's deficit to the best peer is CI-excluding-zero on cross-codec pairs, and ties
+    or wins on same-codec pairs, on at least two corpora.
+  - **What it changes:** if confirmed, cross-codec supervision becomes the core Rev4 codec-metric
+    experiment (E7, to be designed): matched-quality cross-codec TRAIN pairs, plus E2b's teacher.
+- **E2b** runs after its prerequisites land (the CVVDP display fix belongs to another lane's unmerged
+  workspace).
+- **E5a** (rendering corruptions and the testing metric) is independent and can start any time.
+
+The paper is held until the program reports and a Rev4 candidate qualifies.
