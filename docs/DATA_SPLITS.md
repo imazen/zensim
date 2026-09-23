@@ -716,3 +716,7 @@ These rulings answer the decisions in `docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md
   - it keeps the dial contract under the non-negative-distance head.
 - **D3 (MCL-JCI's role)** is pending the datasets-lane proposal. The default is confirmation-only, as the natural
   test set for the JPEG response-shape question.
+
+## Exposure ledger — 2026-09-23: MCL-JCI datasets-lane orientation and DSSIM panel
+
+The datasets lane parsed **all 5,000 MCL-JCI JND labels** at about 06:42 UTC and read them for per-source label/QF orientation checks. It then compared DSSIM(QF100 JPEG → QFq JPEG) with the human `jnd_dist` label on the full 4,950-pair QF1–99 grid (`zen_stats.panel`: SROCC 0.8664, PLCC 0.9048, KROCC 0.7144, PWRC 0.9880; signed SROCC +0.8664). No zensim candidate was scored, fitted or selected on these labels. This read was authorized for orientation in the datasets brief, but the lane did **not** commit the required preregistration before reading labels; that process defect is recorded in `benchmarks/datasets_WORKLOG.md` and `benchmarks/rev4_datasets_inventory_2026-09-23.md`. No preregistration was backdated. MCL-JCI remains confirmation-only pending D3; this exposure must accompany future confirmation claims.
