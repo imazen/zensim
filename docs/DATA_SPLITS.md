@@ -617,6 +617,23 @@ these reads. Held-out reads, evaluation only:
 
 No secret holdout is read.
 
+## Exposure ledger — 2026-09-23: rev4 step-1 e1b (cross-codec split, read-only)
+
+Purpose "rev4 step-1 e1b". Registered before the read in
+`benchmarks/rev4_e1b_prereg_2026-09-23.md`. Existing per-stimulus scores of frozen models and
+peers only (E1's assembled tables); nothing is fitted, calibrated, selected or tuned.
+
+- **Populations read (labels, evaluation only):** CID22-A(25) rows only (CID22-B(24) sealed;
+  dropped by `ref_path` in E1's assembler before any target is extracted); CSIQ (JPEG and
+  JPEG2000 stimuli); AIC-3 CTC (600); AIC-4 sample crops and full resolution (300 each); the
+  JPEG-AIC BTC responses (AIC-3 BTC, SDR25 BTC) as scored by `hfhuman_2026-09-01`.
+- **TRAIN-role, description only:** TID2013 JPEG/JPEG2000 stimuli.
+- **Not read:** CID22-B, LIVE, KADID, any secret holdout.
+- **Models:** B, C (`W10L9PH_s4004`), D, R915 fast/rich, PreviewV0_2; all frozen, all with prior
+  exposure to these populations (not a fresh holdout).
+- **Statistics:** same-codec vs cross-codec within-reference pairwise ordering accuracy,
+  reference-clustered bootstrap, from the `panel` owner.
+
 ## Addendum — 2026-09-20: `joint-core-v1` registered as a TRAIN-role view
 
 `joint-core-v1` (`/mnt/v/output/zensim/joint-core-v1/`, 52,963 pairs,
