@@ -258,6 +258,29 @@ coordinator re-ran their recompute commands, and E1's key cell reproduced exactl
       are faint and too lenient when they are strong. One JPEG offset cannot fix that.
     - This points at the *shape* of the response to block and ringing artefacts, a transducer or masking
       question, not at codec identity. It needs its own preregistered test before anything is built on it.
+- **Peer measurements (the six paper-* lanes).** Devin-executed and Opus-reviewed 2026-09-23. Every number below
+  was independently recomputed by the reviewer. The records sit on the `quarantine/devin/paper-*` branches and are
+  pending text corrections before landing.
+  - **GMSD is the surprise:**
+    - On CSIQ it scores 0.9570 against fast-ssim2's 0.9047 (Δ CI ≈ [+0.044, +0.060]).
+    - On KonJND-504 its |SROCC| is **0.7842**, against fast-ssim2 at 0.5272 and served zensim B at 0.5194.
+    - On CID22-A(25) it scores 0.8148, against B at 0.8794 and fast-ssim2 at 0.8736.
+    - It is a luma gradient-deviation metric with no training. Its near-threshold result is the strongest measured
+      evidence that deviation-pooled gradient similarity carries the signal zensim lacks. The feature-bank potential
+      run must test GMSD-style statistics against **human** labels. The earlier "width cost" rejection was judged
+      under an SSIMULACRA2-dominated fit.
+  - **CVVDP at each study's own display** (instead of `standard_4k`):
+    - AIC-4 crop: 0.8906 → 0.9609;
+    - AIC-3: 0.7918 → 0.8246;
+    - **KonJND: 0.0562 → 0.4193** at 24.29 ppd;
+    - CID22-A: 0.8197 → 0.8173 (unchanged).
+
+    The display choice explains most of CVVDP's poor showing on JND data.
+  - **Corruption tripwire** (canonical packet, validate): butteraugli-max passes at q20 0.6596, fast-ssim2 0.4235,
+    zensim D 0.3633 and zensim B 0.2793. Detection at 1% false alarm: butteraugli-max 0.3831, zensim B 0.0065.
+  - **Memory, 16 MP at 8 threads:** zensim D has a heap share of 134.6 MB, against 3.63 GB for butteraugli and
+    3.56 GB for CVVDP.
+  - **Throughput, 1 MP with 16 processes (CONTENDED):** GMSD 13,757 pairs/s, zensim B 252 pairs/s.
 - **E2b** runs after its prerequisites land (the CVVDP display fix belongs to another lane's unmerged
   workspace).
 - **E5a** (rendering corruptions and the testing metric) is independent and can start any time.
