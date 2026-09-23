@@ -117,7 +117,7 @@ Every data difference, by bake name:
 | `rank.sdr25.per_ref_mean` / `frac_negative` | 253 | sign flip |
 | `rank.aic4.or`, `rank.sdr25.or` | 43 / 42 | `0` → `0.0` |
 | `rank.*.band_scheme` | 90 / 89 | absent → `null` (fresh block carries the key) |
-| annotations | all | `aic4-corpus-wide…` no longer applied; `sdr25-372…` on 62 cells; `hya-w084…` on 1 |
+| annotations | all | `aic4-corpus-wide…` removed from all 548 shared cells; `sdr25-372…` added on 63; `hya-w084…` on 1 |
 | `colorIndex` | 234 | another lane added `peer_cvvdp_aicfhd` meanwhile (index shift) |
 | `train_date` | 1 | bake-file mtime, resolved relative to the rendering workspace |
 
