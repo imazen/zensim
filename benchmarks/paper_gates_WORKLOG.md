@@ -100,7 +100,7 @@ python3 scripts/paper_gates/render.py --summary /var/tmp/paper-gates/bv/summary.
 
 ## Landing correction (2026-09-23 UTC)
 
-Opus review accepted the measured values and identified two committed files above 30 KB. Their original bytes were copied to `/var/tmp/paper-gates/landing/` and SHA-pinned in the committed pointer. The compact record quotes C1 from the fair s100 reading. The `run_gates.py` float formatting and `bake_verdict.rs` qualified BTreeMap changes were copied from the reviewed quarantine head.
+Opus review accepted the measured values and identified two committed files above 30 KB. Their original bytes were copied to `/var/tmp/paper-gates/landing/` and SHA-pinned in the committed pointer. The compact record quotes C1 from the fair s100 reading. This landing commit also brought over the entire new 266-line `scripts/paper_gates/run_gates.py` and the Opus hand-off's 79-line `bake_verdict.rs` per-codec scale-free step table and unit test, along with the qualified `BTreeMap` fix. These additions report step counts; they do not change a gate statistic. The Opus landing reviewer ran `cargo test -p zensim-validate --bin bake_verdict per_codec_strict` (1 passed, exit 0) and independently confirmed strict-backwards 0.2415 = 2,273/9,411.
 
 ### Landing compile check, 2026-09-23 17:59:05–17:59:28 UTC
 
