@@ -174,8 +174,8 @@ must see the contract. On Sept 6 it picked the control because it could not [bes
 2. **Within-ladder hinge, weight about 0.5.** This setting buys reproducibility (seed spread 6× smaller)
    [§5.9].
 3. **Floor-reaching anchor ladders for every codec**, AVIF rav1e and AVIF SVT included. This is the only lever
-   that moved A7r. It is subject to the standing AVIF hold on new AVIF encodes: until that hold lifts, use
-   only the ladder data that already exists.
+   that moved A7r. It is subject to the AVIF hold on new AVIF encodes (2026-09-04), if it is still in force: until it
+   lifts, use only the ladder data that already exists.
 4. **Cross-codec matched pairs**: the same source, different codecs, labelled by teacher agreement. These
    target the one question type where metrics separate on human forced choice.
 5. **Human legs** wherever the roles allow (D3). **Squintly** near-threshold data when the study is ready.

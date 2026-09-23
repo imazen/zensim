@@ -78,6 +78,6 @@ Each step gets a preregistration, a fresh result directory, and a DONE report wi
 - **D2.** Allow the public-API change for identity certification on prepared references (W13)?
 - **D3.** W4 label mix: which human legs may enter TRAIN beyond today's roles? The current rules keep CID22-49,
   AIC and KonJND out.
-- **D4.** Paper timing: publish the methodology companion now (it stands on the recorded evidence) and a
-  short model paper when the unified model qualifies, or hold the whole paper for the unified model?
+- **D4. Decided (user, 2026-09-23):** the whole paper is held for zensim Rev4. The Rev4 design brief is
+  [ZENSIM_REV4_REPORT_2026-09-23.md](ZENSIM_REV4_REPORT_2026-09-23.md).
 - **D5.** AGPL headers on five files in the MIT/Apache crate (open since September 18).
