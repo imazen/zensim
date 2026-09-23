@@ -309,7 +309,7 @@ pub(super) fn f05_geometry(src: &Rgb8) -> Res<Vec<Twin>> {
             .build()
     };
     let rgba = rgb_to_rgba_opaque(src);
-    let mut strip = |cfg: &zenresize::ResizeConfig| -> Rgb8 {
+    let strip = |cfg: &zenresize::ResizeConfig| -> Rgb8 {
         let out = Resizer::new(cfg).resize(&rgba.px);
         let mut px = Vec::with_capacity((tw * th * 3) as usize);
         for p in out.as_chunks::<4>().0 {
@@ -825,6 +825,24 @@ pub(super) fn benign_items(src256: &Rgb8, src512: &Rgb8) -> Res<Vec<Twin>> {
             src256.w / 2,
             src256.h / 2,
         ),
+        (
+            "expand_half".into(),
+            expand_u16(&src256_half),
+            src256_half.w,
+            src256_half.h,
+        ),
+        (
+            "expand_half_quad".into(),
+            expand_u16(&crop(
+                &src256_half,
+                0,
+                0,
+                src256_half.w / 2,
+                src256_half.h / 2,
+            )?),
+            src256_half.w / 2,
+            src256_half.h / 2,
+        ),
     ];
     for (name, v16, w, h) in &q_contexts {
         let a: Vec<u8> = v16.iter().map(|&v| quantize_u16_round(v)).collect();
@@ -960,8 +978,8 @@ mod tests {
         let mut rng = Mulberry::new(0xE5A);
         for y in 0..h {
             for x in 0..w {
-                let edge = if (x / 4 + y / 4) % 2 == 0 { 230u16 } else { 25 };
-                let n = (rng.next_u64() % 37) as u16;
+                let edge = if (x / 4 + y / 4) % 2 == 0 { 230u32 } else { 25 };
+                let n = (rng.next_u64() % 37) as u32;
                 px.extend_from_slice(&[
                     ((x * 3 + n) % 256) as u8,
                     ((y * 5 + edge) % 256) as u8,
@@ -985,11 +1003,7 @@ mod tests {
         let twins_o = all_twins(&s256o, &s512o, "testsrc").unwrap();
         assert_eq!(twins_o.len(), 43, "odd-dim twins = {}", twins_o.len());
         for t in twins.iter().chain(&twins_o) {
-            let same = match (&t.correct, &t.broken) {
-                (OutImg::Rgb(a), OutImg::Rgb(b)) => a.px == b.px,
-                (OutImg::Rgba(a), OutImg::Rgba(b)) => a.px == b.px,
-                _ => false,
-            };
+            let same = t.correct.as_rgb().px == t.broken.as_rgb().px;
             assert!(!same, "inert twin {}/{}", t.family, t.variant);
             assert_eq!(
                 t.correct.dims(),
@@ -1005,9 +1019,7 @@ mod tests {
     fn gamma_downsample_correct_is_zenresize_linear() {
         let img = busy(64, 48);
         let twins = f01_gamma_downsample(&img).unwrap();
-        let OutImg::Rgb(c) = &twins[0].correct else {
-            panic!()
-        };
+        let c = twins[0].correct.as_rgb();
         let direct = resize_rgb8(&img, 32, 24, MITCHELL, true).unwrap();
         assert_eq!(c.px, direct.px);
     }
@@ -1016,9 +1028,7 @@ mod tests {
     fn p3_roundtrip_close() {
         let img = busy(31, 17);
         let twins = f08_primaries_dropped(&img).unwrap();
-        let OutImg::Rgb(c) = &twins[0].correct else {
-            panic!()
-        };
+        let c = twins[0].correct.as_rgb();
         let maxd = img
             .px
             .iter()
@@ -1034,9 +1044,7 @@ mod tests {
         let img = busy(64, 64);
         let twins = f05_geometry(&img).unwrap();
         for t in &twins {
-            let (OutImg::Rgb(a), OutImg::Rgb(b)) = (&t.correct, &t.broken) else {
-                panic!()
-            };
+            let (a, b) = (t.correct.as_rgb(), t.broken.as_rgb());
             assert_eq!(a.w, b.w);
             let diff: usize =
                 a.px.iter()
@@ -1063,9 +1071,7 @@ mod tests {
         let items = benign_items(&s256, &s512).unwrap();
         assert!(items.len() >= 30, "benign items = {}", items.len());
         for t in &items {
-            let (OutImg::Rgb(a), OutImg::Rgb(b)) = (&t.correct, &t.broken) else {
-                continue;
-            };
+            let (a, b) = (t.correct.as_rgb(), t.broken.as_rgb());
             assert_eq!((a.w, a.h), (b.w, b.h), "{} dims", t.family);
             // correct implementations of the same op must be CLOSE:
             // max |diff| stays small (bounding drift, not bugs)

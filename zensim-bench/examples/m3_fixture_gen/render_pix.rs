@@ -14,16 +14,24 @@ pub(super) struct Rgba8 {
     pub px: Vec<u8>,
 }
 
+/// Emitted output image — always composited opaque RGB by the time it wraps
+/// a twin (RGBA items are composited over the declared backgrounds inside the
+/// family code, so the scorer never sees alpha).
 pub(super) enum OutImg {
     Rgb(Rgb8),
-    Rgba(Rgba8),
 }
 
 impl OutImg {
+    pub fn as_rgb(&self) -> &Rgb8 {
+        match self {
+            OutImg::Rgb(i) => i,
+        }
+    }
+
+    #[cfg(test)]
     pub fn dims(&self) -> (u32, u32) {
         match self {
             OutImg::Rgb(i) => (i.w, i.h),
-            OutImg::Rgba(i) => (i.w, i.h),
         }
     }
 }

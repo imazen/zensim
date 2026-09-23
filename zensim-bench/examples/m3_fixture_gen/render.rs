@@ -37,13 +37,9 @@ fn emit_item(
         )
     };
     let write = |name: &str, img: &OutImg| -> Res<(String, String, u32, u32)> {
-        match img {
-            OutImg::Rgb(i) => {
-                let png_sha = write_verified_png(&out.join(name), i)?;
-                Ok((png_sha, sha(&i.px), i.w, i.h))
-            }
-            OutImg::Rgba(_) => Err("RGBA items must be composited before emission".into()),
-        }
+        let i = img.as_rgb();
+        let png_sha = write_verified_png(&out.join(name), i)?;
+        Ok((png_sha, sha(&i.px), i.w, i.h))
     };
     let (a_png, a_px, aw, ah) = write(&a_name, &t.correct)?;
     let (b_png, b_px, bw, bh) = write(&b_name, &t.broken)?;

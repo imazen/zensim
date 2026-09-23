@@ -39,6 +39,7 @@ use butteraugli::ButteraugliParams;
 use imgref::Img;
 use rayon::prelude::*;
 use rgb::RGB8;
+use sha2::{Digest, Sha256};
 
 #[path = "shared/zen_decode.rs"]
 mod zen_decode;
@@ -90,9 +91,7 @@ fn main() {
             "--pairs" => pairs = Some(args.next().expect("--pairs VALUE").into()),
             "--output" => output = Some(args.next().expect("--output VALUE").into()),
             "--threads" => threads = Some(args.next().expect("--threads VALUE").parse().unwrap()),
-            "--diffmaps" => {
-                diffmaps = Some(args.next().expect("--diffmaps VALUE").into())
-            }
+            "--diffmaps" => diffmaps = Some(args.next().expect("--diffmaps VALUE").into()),
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -135,7 +134,10 @@ fn main() {
                 keys: key_idx.iter().map(|k| p[*k].to_string()).collect(),
                 ref_path: p[ref_idx].to_string(),
                 dist_path: p[dist_idx].to_string(),
-                key: key_col.map(|k| p[k].to_string()).unwrap_or_else(|| i.to_string()),
+                key: key_col
+                    .map(|k| p[k].to_string())
+                    .filter(|k| !k.is_empty())
+                    .unwrap_or_else(|| format!("row{i:04}")),
             }
         })
         .collect();
@@ -147,9 +149,16 @@ fn main() {
         let mut w = writer.lock().unwrap();
         let mut cols: Vec<String> = key_idx.iter().map(|k| header[*k].to_string()).collect();
         cols.extend(
-            ["ssim2", "butter_max", "butter_p1", "butter_p2", "butter_p3"]
-                .iter()
-                .map(|s| (*s).to_string()),
+            [
+                "ssim2",
+                "butter_max",
+                "butter_p1",
+                "butter_p2",
+                "butter_p3",
+                "butter_map_sha256",
+            ]
+            .iter()
+            .map(|s| (*s).to_string()),
         );
         writeln!(w, "{}", cols.join("\t")).unwrap();
     }
@@ -200,31 +209,33 @@ fn main() {
         let src_rgb8: &[RGB8] = bytemuck::cast_slice(src);
         let dst_rgb8: &[RGB8] = bytemuck::cast_slice(dst);
         let bp = ButteraugliParams::default().with_compute_diffmap(true);
-        let (bmax, p1, p2, p3) = match butteraugli::butteraugli(
+        let (bmax, p1, p2, p3, bmap_sha) = match butteraugli::butteraugli(
             Img::new(src_rgb8, w_us, h_us),
             Img::new(dst_rgb8, w_us, h_us),
             &bp,
         ) {
             Ok(b) => {
                 let dm = b.diffmap.as_ref().map(|m| m.buf().to_vec());
+                let mut sha = String::new();
                 if let (Some(dir), Some(map)) = (&diffmaps, &dm) {
                     let bytes: Vec<u8> = map.iter().flat_map(|v| v.to_le_bytes()).collect();
+                    sha = format!("{:x}", Sha256::digest(&bytes));
                     std::fs::write(dir.join(format!("{}__butter.f32", row.key)), &bytes)
                         .expect("write butter diffmap");
                 }
                 let f = |p: f64| dm.as_ref().map_or(f64::NAN, |m| libjxl_pnorm(m, p));
-                (b.score, f(1.0), f(2.0), f(3.0))
+                (b.score, f(1.0), f(2.0), f(3.0), sha)
             }
             Err(e) => {
                 eprintln!("BUTTERAUGLI FAIL {}: {e:?}", row.dist_path);
                 failures.fetch_add(1, Ordering::Relaxed);
-                (f64::NAN, f64::NAN, f64::NAN, f64::NAN)
+                (f64::NAN, f64::NAN, f64::NAN, f64::NAN, String::new())
             }
         };
         let mut w = writer.lock().unwrap();
         writeln!(
             w,
-            "{}\t{ssim2:.17e}\t{bmax:.17e}\t{p1:.17e}\t{p2:.17e}\t{p3:.17e}",
+            "{}\t{ssim2:.17e}\t{bmax:.17e}\t{p1:.17e}\t{p2:.17e}\t{p3:.17e}\t{bmap_sha}",
             row.keys.join("\t")
         )
         .unwrap();

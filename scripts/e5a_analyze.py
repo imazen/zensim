@@ -435,6 +435,8 @@ def main():
         "n_items": len(df),
         "n_corruption": len(corrupt),
         "n_benign": n_benign,
+        "n_corruption_inert": int((corrupt.inert == 1).sum()) if "inert" in df.columns else -1,
+        "n_benign_inert": int((benign.inert == 1).sum()) if "inert" in df.columns else -1,
         "testlin": {
             "winner": winner,
             "train_t99_rates": sel,

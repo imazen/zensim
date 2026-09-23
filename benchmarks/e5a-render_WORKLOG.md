@@ -130,3 +130,21 @@ cf76d47ce45ab9f03e8a8f99d7d1abaa13685d10cbf16cf27ad204b3beae9a28  R915_y60_h32_s
   PixelSlice/apply_orientation, RowConverter::convert_rows, Orientation
   variants, linear-srgb default/precise, zenblend blend_row SrcOver, gmsd
   map contract, zensim compute_with_diffmap/RgbSlice/DiffmapWeighting).
+
+## 2026-09-23 compile attempt 2
+
+- UTC ~13:50. First queued `cargo check` finally won the lock and failed
+  instantly: "cannot specify features for packages outside of workspace".
+  Root cause: `zensim-bench` is `exclude`d from the root workspace (own
+  `[workspace]` table — see zensim-bench/Cargo.toml comment, imazen/
+  zensim#43). Cargo commands must run from `zensim-bench/` or use
+  `--manifest-path`; `-p zensim-bench` from the root cannot work.
+- Re-queued a combined build: check+test+release-build of the three
+  examples from `zensim-bench/`, then root-workspace
+  `score_pairs_tuner`+`panel` — all in ONE lock hold so subsequent steps
+  don't re-queue. Logs: /var/tmp/e5a-render/{check1,test1,build1,build2}.log
+- Meanwhile: `e5a_pairs.py` emits the manifest's `inert` flag through to
+  pairs.tsv; `e5a_analyze.py` reports inert counts (prereg: counted and
+  reported, never silently kept); `scripts/e5a_record.py` added — wraps
+  results.json with lane provenance + input sha256s into the committed
+  benchmark JSON.

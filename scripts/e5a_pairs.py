@@ -4,12 +4,13 @@
 Reads `/var/tmp/e5a-render/fixtures/<origin>/_MANIFEST.json` for each origin
 dir under FIXDIR and writes a tab-separated file:
 
-    key  origin  kind  family  variant  severity  index  width  height  ref_path  dist_path
+    key  origin  kind  family  variant  severity  index  width  height  inert  ref_path  dist_path
 
 - kind = corruption | benign
 - ref_path = correct output (a_file); dist_path = broken/alternative (b_file)
 - key = <origin>_<index:04d> — stable join key and map filename stem.
-- width/height come from the manifest (a and b dims are verified equal).
+- width/height/inert come from the manifest (a and b dims verified equal;
+  inert = a and b byte-identical — still scored, counted in analysis).
 """
 import json
 import sys
@@ -24,7 +25,9 @@ for d in sorted(FIXDIR.iterdir()):
     if not mfile.exists():
         continue
     origin = d.name
-    for it in json.loads(mfile.read_text()):
+    man = json.loads(mfile.read_text())
+    items = man["records"] if isinstance(man, dict) else man
+    for it in items:
         key = f"{origin}_{it['index']:04d}"
         rows.append(
             [
@@ -37,6 +40,7 @@ for d in sorted(FIXDIR.iterdir()):
                 str(it["index"]),
                 str(it["width"]),
                 str(it["height"]),
+                "1" if it.get("inert") else "0",
                 str(d / it["a_file"]),
                 str(d / it["b_file"]),
             ]
@@ -45,7 +49,7 @@ for d in sorted(FIXDIR.iterdir()):
 OUT.parent.mkdir(parents=True, exist_ok=True)
 with OUT.open("w") as f:
     f.write(
-        "key\torigin\tkind\tfamily\tvariant\tseverity\tindex\twidth\theight\tref_path\tdist_path\n"
+        "key\torigin\tkind\tfamily\tvariant\tseverity\tindex\twidth\theight\tinert\tref_path\tdist_path\n"
     )
     for r in rows:
         f.write("\t".join(r) + "\n")

@@ -20,7 +20,7 @@ ZMB=/var/tmp/cvvdp-safesyn/target-zenmetrics/release/zenmetrics
 PANEL=/home/lilith/work/zen/zensim/target/release/panel
 TUNER=/home/lilith/work/zen/zensim/target/release/score_pairs_tuner
 
-M3=$TARGET/debug/examples/m3_fixture_gen
+M3=$TARGET/release/examples/m3_fixture_gen
 SCORER=$TARGET/release/examples/e5a_render_score
 PEER=$TARGET/release/examples/peer_metric_pairs
 
@@ -61,7 +61,7 @@ score() {
     "$PEER" --pairs "$WORK/pairs.tsv" --output "$WORK/peer.tsv" \
         --diffmaps "$WORK/maps_peer" --threads "${E5A_THREADS:-8}"
     "$ZMB" batch --metric dssim --pairs "$WORK/pairs.tsv" \
-        --output "$WORK/dssim.tsv" --gpu-runtime cpu
+        --output "$WORK/dssim.tsv"
     "$TUNER" --pairs "$WORK/pairs.tsv" --output "$WORK/tuner.parquet" \
         --profile d \
         --ensemble "r915_fast=$CAL/R915_y60_h32_s17101.bin,$CAL/R915_y60_h32_s17103.bin,$CAL/R915_y60_h32_s17107.bin,$CAL/R915_y60_h32_s17111.bin,$CAL/R915_y60_h32_s17113.bin" \

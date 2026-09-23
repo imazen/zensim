@@ -171,13 +171,17 @@ fn main() {
     let key_col = header.iter().position(|c| *c == "key");
 
     let rows: Vec<Row> = lines
-        .map(|ln| {
+        .enumerate()
+        .map(|(i, ln)| {
             let p: Vec<&str> = ln.split('\t').collect();
             Row {
                 keys: key_idx.iter().map(|k| p[*k].to_string()).collect(),
                 ref_path: p[ref_idx].to_string(),
                 dist_path: p[dist_idx].to_string(),
-                key: key_col.map(|i| p[i].to_string()).unwrap_or_default(),
+                key: key_col
+                    .map(|ci| p[ci].to_string())
+                    .filter(|k| !k.is_empty())
+                    .unwrap_or_else(|| format!("row{i:04}")),
             }
         })
         .collect();
@@ -301,10 +305,10 @@ fn main() {
                 let d = gmsd::GrayImage::packed(&gd, wu, hu).ok()?;
                 gmsd::gmsd_with_map(r, d, &mut gmap).ok()
             });
-        let (gmsd_v, gmsd_mean_v) = gscore
-            .map(|s| (s.gmsd, s.mean_gms))
-            .unwrap_or((f64::NAN, f64::NAN));
-        let gmsd_map_sha = dump("__gmsd.f32", &gmap);
+        let (gmsd_v, gmsd_mean_v, gmsd_map_sha) = match gscore {
+            Some(s) => (s.gmsd, s.mean_gms, dump("__gmsd.f32", &gmap)),
+            None => (f64::NAN, f64::NAN, String::new()),
+        };
         // zensim B + diffmap.
         let rs = RgbSlice::new(a.as_chunks::<3>().0, wu, hu);
         let ds = RgbSlice::new(b.as_chunks::<3>().0, wu, hu);
@@ -329,7 +333,10 @@ fn main() {
         .unwrap();
     });
     let f = failures.load(Ordering::Relaxed);
-    eprintln!("e5a_render_score: done in {:.1}s, {f} failures", started.elapsed().as_secs_f64());
+    eprintln!(
+        "e5a_render_score: done in {:.1}s, {f} failures",
+        started.elapsed().as_secs_f64()
+    );
     if f > 0 {
         std::process::exit(1);
     }
