@@ -242,6 +242,22 @@ coordinator re-ran their recompute commands, and E1's key cell reproduced exactl
     or wins on same-codec pairs, on at least two corpora.
   - **What it changes:** if confirmed, cross-codec supervision becomes the core Rev4 codec-metric
     experiment (E7, to be designed): matched-quality cross-codec TRAIN pairs, plus E2b's teacher.
+- **E1b result (landed `e8a37928`).** The cross-codec lead was re-tested under a preregistered rule, on the
+  same data that generated it, so this is not an independent replication.
+  - **B: REFUTED.** B's losses are not cross-codec-specific. On CSIQ it loses as much on same-codec ladders
+    as across codecs (−0.062 each), and on CID22-A its only deficit is same-codec. On the JPEG-AIC family
+    its deficit *is* cross-codec: AIC-3 −0.041, AIC-4 crop −0.054, forced choice −0.016.
+  - **C (944 flagship): UNRESOLVED.** It shows a solid cross-codec deficit on CID22-A only (−0.0089
+    [−0.0130, −0.0049], ties on same-codec), concentrated in small-gap pairs involving JPEG. It just misses
+    against CVVDP at `standard_fhd` on the AIC-4 crop (−0.020 [−0.042, +0.002], 5 references).
+  - **Exploratory, the lead worth chasing:** the JPEG error flips sign between corpora.
+    - On CID22-A (mozjpeg at web qualities, visible artefacts), C *over*-rates JPEG in 484 of 510 wrong pairs.
+    - On AIC-3/AIC-4 (JPEG-1 near threshold), every zensim model *under*-rates JPEG: C in 85 of 94 AIC-3
+      pairs and 162 of 162 AIC-4 crop pairs.
+    - So zensim's response to JPEG artefacts is too flat relative to other codecs. It is too harsh when they
+      are faint and too lenient when they are strong. One JPEG offset cannot fix that.
+    - This points at the *shape* of the response to block and ringing artefacts, a transducer or masking
+      question, not at codec identity. It needs its own preregistered test before anything is built on it.
 - **E2b** runs after its prerequisites land (the CVVDP display fix belongs to another lane's unmerged
   workspace).
 - **E5a** (rendering corruptions and the testing metric) is independent and can start any time.
