@@ -579,6 +579,25 @@ as `CID22-B(24)`) are recorded in
 row above is otherwise unchanged: the 49-ref set remains holdout-only for
 every other purpose, and no zensim model fit consumes these labels.
 
+## Exposure ledger — 2026-09-23: Rev4 step-1 E1 regime analysis (read-only)
+
+Purpose "rev4 step-1 e1". Registered before the read in
+`benchmarks/rev4_e1_prereg_2026-09-23.md`. Existing per-pair predictions of frozen
+models and peers only; nothing is fitted, calibrated, selected or tuned on these reads.
+
+- **Populations read (labels, evaluation only):** CID22-A(25) rows only (CID22-B(24)
+  sealed and not read; its rows are dropped by `ref_path` before any target value is
+  extracted); CSIQ (866); KonJND JPEG SELECT (404; TERMINAL-100 not read); AIC-3 CTC (600);
+  AIC-4 sample crops and full resolution (300 each); SDR25 q_jnd table (50); the JPEG-AIC
+  forced-choice responses (AIC-3 BTC, AIC-3 IPTC, SDR25 BTC/PTC) as already scored by
+  `hfhuman_2026-09-01`.
+- **Not read:** LIVE (target defect §8.2), KADID/TID (TRAIN-role), any secret holdout.
+- **Models:** B, C (`W10L9PH_s4004`), D, R915 fast/rich, PreviewV0_2 and the context arms
+  already scored in the forced-choice tables; all frozen before this read, all with prior
+  exposure to these populations (disclosed; not a fresh holdout confirmation).
+- **Statistics:** within-band pairwise ordering accuracy and band SROCC by quality band,
+  reference-clustered bootstrap, all from the `panel` owner.
+
 ## Addendum — 2026-09-20: `joint-core-v1` registered as a TRAIN-role view
 
 `joint-core-v1` (`/mnt/v/output/zensim/joint-core-v1/`, 52,963 pairs,
