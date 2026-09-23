@@ -16326,10 +16326,10 @@ pub(crate) mod tests {
         );
     }
 
-    /// C1 sanity band: blur-only and noise-only distortions carry no
-    /// lattice, so the on/off |ẽ| contrast must sit near 1 — stated band
-    /// [0.5, 2.0] on every scale-0 channel (the argmax phase itself is
-    /// meaningless without a lattice, only the ratio is asserted).
+    /// C1 broad sanity bound: blur-only and noise-only distortions carry
+    /// no planted lattice. The [0.5, 2.0] range catches gross numerical
+    /// faults; it does not discriminate JPEG blocking (whose measured
+    /// on/off range, 1.01–1.24, falls inside this interval).
     #[test]
     fn rev4_gridblk_blur_noise_band() {
         let (w, h) = (96usize, 80usize);
@@ -16615,23 +16615,22 @@ pub(crate) mod tests {
         }
     }
 
-    /// C1 monotone-on-JPEG gate: on-grid excess (the emitted signed
-    /// on-grid mean `on_mean`, Y scale 0) must be non-decreasing as
-    /// zenjpeg quality descends 95 → 10 (step 5, 4:2:0 — the natural
-    /// JPEG lattice C1 targets) on ≥ 4 imazen-26 TRAIN references.
-    /// Corpus-gated: runs only where `/mnt/v/imazen-26-pristine` exists.
+    /// C1 JPEG ladder: the internal winning-phase Σ|ẽ|, which is not an
+    /// emitted slot, must be non-decreasing as zenjpeg quality descends
+    /// 95 → 10 on four imazen-26 TRAIN references. Signed `on_mean`
+    /// and on/off ratio are logged only; neither is claimed monotone.
+    /// Caller opts in with `ZENSIM_REV4_CORPUS_ROOT` and `--ignored`.
     #[test]
-    #[ignore = "corpus fixture — run with --ignored where /mnt/v is mounted"]
+    #[ignore = "explicit corpus gate: use just rev4-corpus-tests"]
     fn rev4_gridblk_zenjpeg_ladder() {
         use enough::Unstoppable;
         use zenjpeg::decoder::Decoder;
         use zenjpeg::encoder::{ChromaSubsampling, EncoderConfig, PixelLayout};
 
-        let root = std::path::Path::new("/mnt/v/imazen-26-pristine/lilith");
-        if !root.is_dir() {
-            eprintln!("skip: {root:?} not mounted");
-            return;
-        }
+        let root_path = std::env::var("ZENSIM_REV4_CORPUS_ROOT")
+            .expect("caller must set ZENSIM_REV4_CORPUS_ROOT");
+        let root = std::path::Path::new(&root_path);
+        assert!(root.is_dir(), "corpus root {root:?} is missing");
         // TRAIN refs: leading numeric stem ends in {0,2,4,6,8}.
         const REFS: [&str; 4] = [
             "20210608_123424__pristine2x.png",
@@ -16702,8 +16701,8 @@ pub(crate) mod tests {
                 let (m, r) = (f[REV4_BASE + 8 + 6], f[REV4_BASE + 8 + 7]);
                 series.push((q, on_abs, m, r, pv, ph));
                 assert!(
-                    on_abs >= prev * 0.98,
-                    "{name}: on-grid |excess| not monotone at q{q}: {on_abs:e} < {prev:e}"
+                    on_abs >= prev,
+                    "{name}: internal on-grid |excess| decreased at q{q}: {on_abs:e} < {prev:e}"
                 );
                 prev = on_abs;
             }

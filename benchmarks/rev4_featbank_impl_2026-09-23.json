@@ -94,14 +94,15 @@
   "codec": "zenjpeg 4:2:0",
   "qualities": "95..10 step 5",
   "refs": 4,
-  "signal": "winning-phase Sigma|e~| (V+H)",
+  "signal": "internal winning-phase Sigma|e~| (V+H), not emitted",
   "growth_q95_to_q10": [
-   2.8,
-   3.9,
-   4.2,
-   3.9
+   2.82,
+   3.86,
+   4.16,
+   3.91
   ],
-  "monotone": true
+  "monotone": "internal magnitude only; no emitted C1 slot shown monotone",
+  "phase_lock": "not established in reviewer rerun"
  },
  "cost_st": {
   "machine_note": "contended box, loadavg ~10/32; 40 noisy rounds flagged by zenbench",

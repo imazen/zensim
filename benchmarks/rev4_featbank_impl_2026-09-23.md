@@ -237,16 +237,17 @@ era entry marking introduction.
 ### C1 zenjpeg ladder (corpus-gated `rev4_gridblk_zenjpeg_ladder`)
 
 zenjpeg 4:2:0, q 95→10 step 5, 4 imazen-26 TRAIN refs (lilith/,
-leading-stem LSD even). On-grid excess `Σ|ẽ|` at the winning phase
-(V+H) is non-decreasing at every rung on every ref — growth factors
-2.8×/3.9×/4.2×/3.9× q95→q10. Phase lock: at q≥75 the argmax sits on
-content phases ({5,5},{4,4},{6,2},{2,2}); by q≤45 it locks onto the
-true JPEG lattice (phases 0/1 — these refs are 2×-upscaled so block
-edges land on even phases). Signed `on_mean` is suppression-dominated
-(jpegli flattens within blocks more than it adds edge steps) — the
-magnitude profile, not the sign, is the blocking signal. The on/off
-ratio peaks mid-ladder (~q35) and is NOT asserted monotone: JPEG noise
-raises off-grid |ẽ| faster than on-grid at very low q.
+leading-stem LSD even). The **internal, non-emitted** winning-phase
+`Σ|ẽ|` (V+H) did not decrease at any rung in the reviewer's rerun;
+growth factors were 2.82×/3.86×/4.16×/3.91× q95→q10. The test now
+asserts strict non-decrease without its former 2% slack. No emitted
+C1 slot has been shown monotone on JPEG. In particular, signed
+`on_mean` changes sign or is negative, while `onoff_ratio` peaks
+mid-ladder and falls at low quality. The reviewer's phase series did
+not establish JPEG-lattice lock; phases `(1,1)` and `(1,0)` persisted
+down the two named ladders, while the unshifted lattice would be phase
+0. The [0.5,2.0] blur/noise test cannot distinguish these ratios from
+its no-lattice fixtures.
 
 ### f0–f985 bit-identity matrix (2026-09-23, this workspace)
 
