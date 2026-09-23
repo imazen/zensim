@@ -42,3 +42,64 @@ in this lane (E2a Deliverable 4 verbatim + operational bindings). Label columns 
 not been read at the time of that commit.
 
 (Further entries appended chronologically.)
+
+## Coordinator update ~10:30Z — rebase onto new master (b02812ae)
+
+`master@origin` advanced to `b02812ae` ("bench(cvvdp): video_vs_ssim2"): now
+contains the cvvdpfix trio natively plus V5 SIMD/rayon CVVDP, conformance-v2 vs
+pycvvdp 0.5.7 (four new HDR PQ displays), and video scoring. Instruction: drop
+the trio copies, keep only lane jobexec work, rebuild, redo Part 0.
+
+- `jj rebase -s @ -d master@origin`: my change `a544a65b` → `b373b48a` on
+  `b02812ae`; the trio copies (`6b81258e`/`72a7f309`/`5375d523`) left behind —
+  upstream ancestors verified (`git merge-base --is-ancestor` for 27c69beb,
+  d71922bd, dc1fca78 → all true). Lane diff vs base: `job.rs` +34 (test only),
+  `jobexec.rs` +~330 (`cvvdp@<display>` arms + `ZEN_JOBEXEC_PIXEL_HASH`
+  stamping + tests). `jj bookmark set` refused the sideways move (guard); the
+  lane-local bookmark was repointed via forget+create.
+- Part 0 stored-score check (panel via `ZEN_PANEL_BIN=~/work/zen/zensim/target/
+  release/panel`): stored `aic4_cvvdp_standard_fhd.tsv` column vs its
+  `human_score` → **SROCC 0.9608955655 ≈ 0.9609** ✓; board `aic4_cvvdp.tsv`
+  (`cvvdp_cpu_imazen_v0_1_0`) → SROCC 0.8905597718 ≈ 0.8906. No AIC labels
+  re-read — scores only.
+- Tests on rebased tree (`--features jobexec`, dev profile):
+  `cargo test -p cvvdp` → 227 pass/0 fail; `-p zenmetrics-cli cvvdp` → 13 pass;
+  `jobexec` filter → 18 pass (incl. new `cvvdp_display_of_parses_only_the_at_
+  form`, `cvvdp_at_unknown_display_is_refused`, `cvvdp_at_standard_4k_matches_
+  the_plain_cvvdp_row`, `cvvdp_at_standard_fhd_emits_the_display_column`);
+  `-p zenfleet-core` → 144 pass (incl. new
+  `cvvdp_display_metric_string_is_distinct_work_and_cpu_routed` — plain `cvvdp`
+  JobId differs from `cvvdp@standard_fhd`, CpuHeavy routing, empty caps).
+- Executor pixel-hash integration completed: `mk_row_px` stamps
+  `reference_pixels_sha256`/`distorted_pixels_sha256` (flat RGB8 sha256) into
+  every per-variant SDR ScoreFile row once the variant decoded (feature rows,
+  `cvvdp@` rows, generic score rows, post-decode error rows); fetch/decode
+  error rows stay unstamped (no buffer). HDR `run_score_file_hdr` untouched —
+  nits decode, not RGB8. Env gate `ZEN_JOBEXEC_PIXEL_HASH=1`, off by default.
+- Release rebuild queued on `heavy.lock` (~23 min behind other lanes so far):
+  same `cargo build --release -p zenmetrics-cli --features jobexec` command;
+  binary lands at `/var/tmp/cvvdp-safesyn/target-zenmetrics/release/zenmetrics`.
+
+## Post-rebase Part 0 on fresh binary (b373b48a / base b02812ae) — ~05:0xZ
+
+- Fresh release binary `/var/tmp/cvvdp-safesyn/target-zenmetrics/release/zenmetrics`
+  (64,428,664 B): sha256 `ebffd5b8e3843d8e1b4987262904a6f43b5789f34fa019e3af799fb1b73b9d45`.
+- `batch --metric cvvdp` (no flag) over `aic4_pairs.tsv` (300 pairs, `--jobs 8`):
+  all 300 scores **bit-identical** to board `aic4_cvvdp.tsv` `cvvdp_cpu_imazen_v0_1_0`
+  (identical=300 differ=0). Column name unchanged → no V5 drift on default path.
+- `batch --metric cvvdp --display-model standard_fhd`: all 300 **bit-identical** to
+  stored `aic4_cvvdp_standard_fhd.tsv` (`cvvdp_cpu_imazen_v0_1_0_standard_fhd`) →
+  zero drift vs the cvvdpfix-era scores. SROCC from stored scores stays 0.9609.
+- Throughput smoke: ~15.2s wall / 300 pairs @ 8 jobs ≈ 19.7 pairs/s (default),
+  15.5s ≈ 19.3 pairs/s (fhd). vs historical ~1-4 pairs/s — V5 SIMD/rayon landed.
+- Blob plan DONE: `s3://codec-corpus/safesyn-rev2-2026-09-06/` already held
+  199,304 objects covering 196,030/196,086 pairs; uploaded the 57 missing
+  objects (ref `Verkehrstote Deutschland 1953-2012_512sq.png` + its 56 admitted
+  variants; the space-named ref was skipped by the rev2 uploader). Coverage now
+  100%; spot-check sha256 byte-identical to `SAFESYN_VERIFIED.json` audit
+  (`q5.jpg` = c49189b0…). URI scheme: `sources/<ref>.png`,
+  `images/<src>/<codec>/<file>` — the `declare-scorefiles --full-uri` route.
+- `modern_oled_phone_indoor` parity vs pycvvdp 0.5.7 (config_paths injection of the
+  imazen preset, merged display_models.json in /var/tmp/cvvdp-safesyn/pycfg/):
+  8 KADID pairs, max |Δ| = 0.0001 JOD (pycvvdp torch/cu130 vs our CPU V5).
+  Display is CHECKED, not unchecked — upgrades the lane's weakest preset.
