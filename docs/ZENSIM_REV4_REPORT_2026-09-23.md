@@ -1,5 +1,12 @@
 # What zensim Rev4 should be — design report, September 23, 2026
 
+> **Superseded 2026-09-23.** The user judged that this brief fails its mission. Its conclusions are replaced
+> by the experiment program in [REV4_EXPERIMENTS_2026-09-23.md](REV4_EXPERIMENTS_2026-09-23.md). §1, the
+> evidence, remains valid background. Corrections from the user: zensim is a platform, so fast and rich variants
+> are fine; a separate testing metric is fine if it earns its place; speed below 512² does not matter;
+> multimetric agreement belongs in a gate, not the training signal; and CVVDP's teacher display is
+> unexamined.
+
 Written by the coordinating Opus session at the user's request, after the evidence audit for the zensim-2026
 companion paper. The paper is **held until Rev4 qualifies** (user, 2026-09-23). This report is the design
 brief for Rev4. It sits under the [controlling production plan](PRODUCTION_PRIORITIES_2026-09-15.md) and
