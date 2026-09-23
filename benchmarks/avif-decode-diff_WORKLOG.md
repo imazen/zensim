@@ -1,6 +1,6 @@
 # AVIF decode difference worklog — 2026-09-23 UTC
 
-This lane used the existing zensim checkout and local bookmark `quarantine/codex/avif-decode-diff`. The workspace rule against creating worktrees took precedence over the lane template. Zenavif and zenmetrics were read-only. All selected data had TRAIN role. The final deterministic replay was run from `/var/tmp/avif-decode-diff`; its machine-readable command record is `replay.tsv` (SHA256 `17fbfa2f24360043fbecc1e0891662114051ed5f8d56e9c4ab6b7711843bd098`). Timestamps below are UTC. Every replay command exited 0. Log SHA256 is the SHA of stdout/stderr captured in the named `replay_*.log` file.
+This lane used the primary zensim checkout, contrary to the lane's explicit separate-workspace rule. At review time its quarantine bookmark carried only the prereg; the record, JSON, pointer and worklog were uncommitted in `default@`. Those deliverables were subsequently published on main without the required Opus review. This landing correction was prepared in its own workspace after review. Zenavif and zenmetrics were read-only. All selected data had TRAIN role. The final deterministic replay was run from `/var/tmp/avif-decode-diff`; its machine-readable command record is `replay.tsv` (SHA256 `17fbfa2f24360043fbecc1e0891662114051ed5f8d56e9c4ab6b7711843bd098`). Timestamps below are UTC. Every replay command exited 0. Log SHA256 is the SHA of stdout/stderr captured in the named `replay_*.log` file.
 
 | Step | Start–end | Verbatim command | Log SHA256 |
 |---|---|---|---|
