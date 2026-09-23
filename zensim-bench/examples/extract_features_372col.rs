@@ -586,6 +586,7 @@ fn main() {
             research_fsid.lock().unwrap().as_deref(),
             spec_sha.as_deref(),
             dvifm_blocks.as_deref(),
+            force_tier.as_deref().unwrap_or("native"),
         );
     }
 }
@@ -1025,6 +1026,7 @@ fn write_research_manifest(
     feature_set_id: Option<&str>,
     spec_sha256: Option<&str>,
     block_stats: Option<&str>,
+    tier: &str,
 ) {
     let revision = std::env::var("ZENSIM_FORMULA_REV")
         .expect("diagnostic extraction requires explicit ZENSIM_FORMULA_REV");
@@ -1039,6 +1041,11 @@ fn write_research_manifest(
         "layout": format!("w{}", req.layout_width()),
         "populated_feature_ids": emit,
         "feature_set_id": feature_set_id,
+        "simd_tier_request": tier,
+        "rayon_num_threads": std::env::var("RAYON_NUM_THREADS").ok(),
+        "producer_binary_sha256": sha256_hex_of(
+            &std::env::current_exe().expect("extractor binary path")
+        ),
         "dvifm_spec_sha256": spec_sha256,
         "dvifm_block_stats": block_stats,
         "dvifm_block_record": {

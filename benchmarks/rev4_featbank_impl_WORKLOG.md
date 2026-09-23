@@ -43,6 +43,35 @@ the following recomputation is authoritative.
   raw_pct=5.805992`. The other fit lines are retained verbatim in the
   hashed output. C4 ST is **borderline: fitted +2.9% passes, raw +5.8% misses**.
 
+### Correction 10 — moved evidence and target audit
+
+- The target directories were moved before takeover, without deletion:
+  `/var/tmp/featbank-impl/target-zensim` is 10G (rounded `du -sh`),
+  `target-zensim-bench` 1.5G, and moved evidence 63M. Workspace-local
+  target symlinks point to these locations. The `zensim-bench/target`
+  symlink was accidentally tracked in the handover change; it is now
+  untracked and `/zensim-bench/target` is ignored in `.gitignore`.
+- UTC start/end `2026-09-23T23:57:23Z` / `2026-09-23T23:57:23Z`;
+  cwd `/var/tmp/featbank-impl/evidence/gate`; command
+  `sha256sum -c SHA256SUMS`; exit `0`; 58 `: OK` lines in
+  `/var/tmp/featbank-impl/footprint_sha_check.txt` (sha256
+  `1af9185d37d39c51c3afc7ec948aa9b13face32f62ff8303e502836ae48b65ba`).
+  The `SHA256SUMS` file itself is
+  `b8c70ae45afbb148ea7db192073ee54a6f46fb25fbf0b5fb16bdc7842272a4ba`.
+- All top-level evidence shas match
+  `benchmarks/rev4_cost_2026-09-23.pointer.md`; no new `/mnt/v`
+  outputs were written. The manifest records the move and corrected
+  `CARGO_TARGET_DIR` under `/var/tmp/featbank-impl/`.
+- UTC start/end `2026-09-23T23:39:40Z` / `2026-09-23T23:54:37Z`
+  (queued for the shared lock, actual build 27.62 s); cwd this
+  workspace; command `~/tmp/devin/heavy --mem 16G --jobs 8 -- env
+  CARGO_TARGET_DIR=/var/tmp/featbank-impl/target-zensim-bench cargo build
+  --release --manifest-path zensim-bench/Cargo.toml --example
+  extract_features_372col --features 'training zen-decode'`; exit `0`;
+  `/var/tmp/featbank-impl/build_diag.log` sha256
+  `668b5cdbdec277f66e066c7107c75cc69120e9f7cc62789654aaa5e27b9fc46c`.
+  Exact result line: `Finished release profile [optimized] target(s) in 27.62s`.
+
 Lane `rev4-featbank` (implementation), workspace `../zensim--rev4-featbank`,
 parent `main@origin` `e6ce1565` ("docs: Rev4 feature bank plan (featbank design lane)").
 Scratch: `/var/tmp/featbank-impl/rev4-gate/`. Design/qualification record:
