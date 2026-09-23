@@ -222,10 +222,14 @@ era entry marking introduction.
 - `rev4_thread_and_strip_invariance` — serial vs pools {1,2,8,16} on
   128+72 mixed strip heights and `H_TILE_WIDTH`-crossing widths: all 336
   slots bit-identical.
-- `rev4_gridblk_phase_shift_three` — planted 8-px lattice shifted 5 px
-  recovers phase 3 (argmax exact); response within ±40% of unshifted.
+- `rev4_gridblk_phase_shift_three` — a synthetic planted 8-px lattice
+  shifted 5 px recovers phase 3 (argmax exact); response within ±40% of
+  unshifted. **Deviation from the implementation brief:** this does not
+  shift a reference by 3 px and then encode with zenjpeg; that encoded
+  phase-recovery claim remains untested.
 - `rev4_gridblk_blur_noise_band` — blur-only and noise-only on/off ratio
-  inside [0.5, 2.0] on all scale-0 channels.
+  inside [0.5, 2.0] on all scale-0 channels. This is a broad sanity
+  bound only: measured JPEG ladder ratios 1.01–1.24 lie inside it.
 - `rev4_tailhist_quantile_semantics` — max exact vs sorted reference;
   p95/p99 within one bin; integer counts.
 - `rev4_arttype_bleed_luma_vs_chroma` — bleed ≡ 0 on luma-only
