@@ -224,3 +224,17 @@ tid2013 sidecar -> `tid joined rows: 3000 mismatched cells: 0 missing keys: 0`.
   _sealed/raw/csiq.feats.csv.producer.bin 915cc4c9….
 - DONE file updated: MISSING (c)(d)(e) marked CLOSED; (a) Part B, (b)
   measure-first run, (f) recompute lines remain open.
+
+## 2026-09-24 ~00:0xZ — MISSING (f) recompute lines (coordinator instruction)
+
+- New `scripts/rev4_featbank/verify_bank_f32.py`: standalone re-verifier —
+  rebuilds every source stimulus's (pair_key, f64 row) from original inputs
+  (parquets+audits for converted sets; pairs+audit+feats for extracted) and
+  bit-compares np.float32(src) vs sidecar row at its pair_key. ~21 s.
+  Result: `TOTAL stimuli=249227 cells=225550435 bad=0`.
+- Ceiling parity re-run verbatim: `TOTAL 13872080 bad 0 missing 0`.
+- bank_report re-run rewrote bank/_MANIFEST.json created_utc (sha
+  813cd920->b208bc08); remote copy verified identical modulo timestamp and
+  re-synced; mirror spot-check re-verified 3/3 (b208bc08/d9ce0601/915cc4c9).
+- DONE file: MISSING (f) CLOSED; "Recompute" section holds one-line
+  commands + verbatim outputs for every headline number.
