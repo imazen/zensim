@@ -1,0 +1,973 @@
+{
+  "schema": "rev4-avif-decode-diff-v1",
+  "population": "SafeSyn TRAIN",
+  "arms": {
+    "baseline": "zenavif AvifDecoderConfig zencodec path, default threads; CICP-tagged RGB16 -> RGB8",
+    "managed": "zenavif ManagedAvifDecoder decode_full, threads=1; untagged RGB16 -> RGB8"
+  },
+  "input_manifest_sha256": "9ced0f04adecfcabebf05c136c05f1c4849bfbc9f798734af642c4d4ee70fd4b",
+  "selected_tsv_sha256": "cbb2081f7c5e2f94d46bc6adc3577d34da9a0d231d5be7d02740699da5c4c435",
+  "rows": [
+    {
+      "id": 0,
+      "input_sha256": "4ebd3c26111d6351af537c8e5812d8bd393240ee4cfae96cbfedff6c8de3861f",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "1073b577a14097a0195e02d005c034686d258095e35090bec456e7711ada9a22",
+      "baseline_rgb_sha256": "93016b1b3c1694d6e2bea95a5a64d862ea6880dc63b35c26e2fc7fd313dbe0bf",
+      "managed_rgb_sha256": "4881d8563c0b2211a8e12a6859591a0277c772f08f433f167a620bb1206455b6",
+      "pixel_changed": 1863,
+      "channel_changed_rgb": [
+        123,
+        474,
+        1329
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        46,
+        1021,
+        817
+      ],
+      "edge2_changed": 27,
+      "ssim2_baseline": -44.92500644015996,
+      "ssim2_managed": -44.924444254101665,
+      "zensim_b_baseline": 4.05973922776069,
+      "zensim_b_managed": 4.059249737017753
+    },
+    {
+      "id": 1,
+      "input_sha256": "b49cabd217658d91ee79748eb3139ee5ae5e6ee9d1559ba78d5182d0a135a988",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "5eb530784b64899186b9260b1412d6b7d90108162de2452978b6785f96c914c9",
+      "baseline_rgb_sha256": "c9b6ccaf27b0efb75dc97e441cdaee27251586a7b06256999467bec32b06aec8",
+      "managed_rgb_sha256": "eca15c625abdbbc3f3c6f77e6b049c167cf770b2f509a3fda3738ed958230bbd",
+      "pixel_changed": 2291,
+      "channel_changed_rgb": [
+        167,
+        589,
+        1611
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        1,
+        17,
+        1021,
+        817
+      ],
+      "edge2_changed": 30,
+      "ssim2_baseline": -40.672107719746805,
+      "ssim2_managed": -40.67483144962034,
+      "zensim_b_baseline": 4.678428258753529,
+      "zensim_b_managed": 4.67821061023673
+    },
+    {
+      "id": 2,
+      "input_sha256": "ee56776331b75d349dbc74d2cf925108eb85fff99183d01a2dbe9fe9e6d06d5c",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "370504593417d018c32b93cb30c030118b715e3b49aa293de4a643fec897d076",
+      "baseline_rgb_sha256": "fe66e0c1156080f93af9315b1589d78c36a33f71223adaf256e6ba9afcdd037f",
+      "managed_rgb_sha256": "bc6f8332a1f452b4031524d2fe0c3ead6572a9818a3f19aeb3f25f300c7ccbe1",
+      "pixel_changed": 1933,
+      "channel_changed_rgb": [
+        169,
+        509,
+        1302
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        0,
+        1020,
+        817
+      ],
+      "edge2_changed": 32,
+      "ssim2_baseline": -30.026131295384193,
+      "ssim2_managed": -30.028447823158437,
+      "zensim_b_baseline": 5.421492271167622,
+      "zensim_b_managed": 5.422407323178033
+    },
+    {
+      "id": 3,
+      "input_sha256": "7b3d3222044ba11b7c775661e82c2e9f180d417e598c01df60759dbf89b65347",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "648314b81cac95d7da43444f8dbb5ee2b96e999bdac47d66a524707e152dee1f",
+      "baseline_rgb_sha256": "7a2493b3b4153effe18a070d9e08eff3d1afb82dcbaf1726cf471e7dcc9f1e3b",
+      "managed_rgb_sha256": "58c91c6639af06c460b3cfaa052227baf97a0f66ff415f98c5b10a8be1a19e8c",
+      "pixel_changed": 2068,
+      "channel_changed_rgb": [
+        213,
+        626,
+        1283
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        29,
+        1021,
+        817
+      ],
+      "edge2_changed": 40,
+      "ssim2_baseline": -16.730656457287143,
+      "ssim2_managed": -16.734529723607032,
+      "zensim_b_baseline": 6.806748320553218,
+      "zensim_b_managed": 6.8061125054592715
+    },
+    {
+      "id": 4,
+      "input_sha256": "c5c22001ccfc042b070990f85d69a6c853d3c7f349ad6312ae6ef02b17d7085c",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "ba971ea4c97fd86ca73e43ec3cb8370c4a68387a328f1aaf4e22d0e2abad2b81",
+      "baseline_rgb_sha256": "c3fd76e289d8d3d5b263daa8b706840bd52806f827d770377e238d5eff3dc11f",
+      "managed_rgb_sha256": "3e23da3b2ad2caf0d7df82b108bab7ebf63ddad876878f1a8177a57bf3609f19",
+      "pixel_changed": 1909,
+      "channel_changed_rgb": [
+        214,
+        647,
+        1088
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        4,
+        1021,
+        817
+      ],
+      "edge2_changed": 35,
+      "ssim2_baseline": -5.531620226259548,
+      "ssim2_managed": -5.5269049396383,
+      "zensim_b_baseline": 8.907875928820856,
+      "zensim_b_managed": 8.908314252321968
+    },
+    {
+      "id": 5,
+      "input_sha256": "9feb597e3b395b44df09f4610869f54fc808f669b0559d653ef4378bcaa7a89d",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "0917031dc04bcd06593b4f5e8dbe19672a31473bfd0ae554d9655f48c53a7179",
+      "baseline_rgb_sha256": "b76182156c86c281942749bd559d270cd3e6ab3b3f2a25120aabb49b9d781e0e",
+      "managed_rgb_sha256": "b937fa957e1dec12890a837fdc7de7d64ad3273adec22f27663c4f6ca89d0a50",
+      "pixel_changed": 1891,
+      "channel_changed_rgb": [
+        313,
+        701,
+        881
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        2,
+        1021,
+        817
+      ],
+      "edge2_changed": 24,
+      "ssim2_baseline": 63.117555317862106,
+      "ssim2_managed": 63.08996799820616,
+      "zensim_b_baseline": 61.30408713404659,
+      "zensim_b_managed": 61.31710823065265
+    },
+    {
+      "id": 6,
+      "input_sha256": "9102828a3ee179eab3d6c6d58c8c63c5a510c0f25a0590aa32ccde5809227794",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "f7b69e40e1340c26c9cea1fda3b0f521f9d7bf1365619c8bc49f2741fda5de67",
+      "baseline_rgb_sha256": "a88c8a0228bad6743549998179aeed61f3e3e8136c39e8c551b495886b83c4a8",
+      "managed_rgb_sha256": "d621611e5cf8d1f0a5e0e3de408c61cd3cf99f4c03eaf3d46cd756abd3cf400a",
+      "pixel_changed": 1958,
+      "channel_changed_rgb": [
+        333,
+        704,
+        929
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        0,
+        1021,
+        817
+      ],
+      "edge2_changed": 27,
+      "ssim2_baseline": 79.61453148748005,
+      "ssim2_managed": 79.60098842138817,
+      "zensim_b_baseline": 78.02561594155296,
+      "zensim_b_managed": 78.0291210594314
+    },
+    {
+      "id": 7,
+      "input_sha256": "804cd74fc5472c683f26e0413c1e8d32719a31533c8087bd0adc43ae0db3f16d",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "024a90a475850d06ce066332f162331776150c2679f8f6461f03fc2292d400bd",
+      "baseline_rgb_sha256": "a85de005a40a27ea00b86262661d791e825934dde79a4d23530f6a9976c2f1d1",
+      "managed_rgb_sha256": "89f7f1496d1f3526bf056ccf099dda6d51b9bdeee657534d36cf58afce82a56e",
+      "pixel_changed": 1957,
+      "channel_changed_rgb": [
+        314,
+        718,
+        930
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        1,
+        1021,
+        817
+      ],
+      "edge2_changed": 35,
+      "ssim2_baseline": 83.52839988398313,
+      "ssim2_managed": 83.57078700984971,
+      "zensim_b_baseline": 82.10482913663034,
+      "zensim_b_managed": 82.13257540563454
+    },
+    {
+      "id": 8,
+      "input_sha256": "3d7d4687f38cb968bfa31dae0eb3827511f1733dcd07ca801c31d2486ac4e740",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "5532b6357b3edb5d812ab842ee445838119b6ab1bed6a6e76bfb9646c11b0887",
+      "baseline_rgb_sha256": "17ed1df57b36f3623906e906af5f2bce7bd867d5231b87327e36af21d8d536ce",
+      "managed_rgb_sha256": "4c392d097a1e5bd8712d445acf8f778309cdcdc8218e34d6bd3355e32d40f000",
+      "pixel_changed": 1947,
+      "channel_changed_rgb": [
+        359,
+        721,
+        872
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        15,
+        1021,
+        817
+      ],
+      "edge2_changed": 33,
+      "ssim2_baseline": 88.62015102537161,
+      "ssim2_managed": 88.62638577905301,
+      "zensim_b_baseline": 87.80082066801361,
+      "zensim_b_managed": 87.7820569677313
+    },
+    {
+      "id": 9,
+      "input_sha256": "92ac6d43394a6087d61f4ab1ef5da872649999da24cb1cd871325583dcc692ab",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "5e296a3b01bfc5980fe1cf4a2c855dc0d1d72ae95b02ce7c0e6672489fed3b5e",
+      "baseline_rgb_sha256": "a5d1e91de978854272a645455408b20ededa3a0e4200d2b51908202aab7acc7a",
+      "managed_rgb_sha256": "5edb70bbbdd4d384ed3b3450001896980ca6724fa2c3dc33fc77ae822868b6f9",
+      "pixel_changed": 1974,
+      "channel_changed_rgb": [
+        400,
+        739,
+        846
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        1,
+        1021,
+        817
+      ],
+      "edge2_changed": 28,
+      "ssim2_baseline": 93.26053991053729,
+      "ssim2_managed": 93.19507964458903,
+      "zensim_b_baseline": 92.41748308392793,
+      "zensim_b_managed": 92.4699974505191
+    },
+    {
+      "id": 10,
+      "input_sha256": "059458a46db1304761379b21c6aecaffa67feba5c093e711022ff104e52669dc",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "5c629d2835a33f6c4f21387609ae2b88009bfca296eeb38796fe6db08f2e2a9d",
+      "baseline_rgb_sha256": "f961316e0b4cb3399eeb9ba44e38f0bb57c57e751de3d041ccd7d3f4940e0827",
+      "managed_rgb_sha256": "0eb123cc921a513fecf99c7501f5d589b946236d89d2a973ae0c1fbed7cfc293",
+      "pixel_changed": 713,
+      "channel_changed_rgb": [
+        191,
+        109,
+        417
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        0,
+        1020,
+        817
+      ],
+      "edge2_changed": 12,
+      "ssim2_baseline": 95.19474348149933,
+      "ssim2_managed": 95.27146668040953,
+      "zensim_b_baseline": 95.92867370580142,
+      "zensim_b_managed": 95.92859893721503
+    },
+    {
+      "id": 11,
+      "input_sha256": "7d6bcf6e88688f2433fa0730de4cac1a397296fe4acb478073a72e497fa72233",
+      "width": 513,
+      "height": 769,
+      "native_sha256": "ef03d42d0ce9fb25703631b0948b5784d268949d182785f58427ca75dace6935",
+      "baseline_rgb_sha256": "e4287929be4fac7d40559cfe8004ff833665b408e842c1cbe6e0ca2aa96af23f",
+      "managed_rgb_sha256": "f7efc3ea6ce9d8c62e8f1a8f0a1b08c312368eabb3be2cafacf02adf24a638af",
+      "pixel_changed": 85,
+      "channel_changed_rgb": [
+        85,
+        85,
+        85
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        57,
+        34,
+        512,
+        763
+      ],
+      "edge2_changed": 1,
+      "ssim2_baseline": 58.001636122175746,
+      "ssim2_managed": 58.010966379858075,
+      "zensim_b_baseline": 59.5098006697188,
+      "zensim_b_managed": 59.5074129129473
+    },
+    {
+      "id": 12,
+      "input_sha256": "0504dadc51f7af698f0e9c65b0bf2605fe60a7430cebfd5bba1c8698509c2635",
+      "width": 1024,
+      "height": 1024,
+      "native_sha256": "e9719e54afe6914a9497b37ab78e20fdbdcbb7585fe9139bbc8084a81e4e6e3d",
+      "baseline_rgb_sha256": "3d6f66d509a4ba3af7e4d6284ef8fec1dec96c929b296b5c9dd37b0f6a267e07",
+      "managed_rgb_sha256": "dac34162b7ff37068e77e0ede8d2048768ef7ceab0dbfe4aa69fc4509955b901",
+      "pixel_changed": 19181,
+      "channel_changed_rgb": [
+        4347,
+        6670,
+        8472
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        0,
+        1023,
+        1023
+      ],
+      "edge2_changed": 157,
+      "ssim2_baseline": 88.47212960688506,
+      "ssim2_managed": 88.55719493162601,
+      "zensim_b_baseline": 86.00720184379243,
+      "zensim_b_managed": 85.94901340938092
+    },
+    {
+      "id": 13,
+      "input_sha256": "3b27c12a0bd46a1b91a3270e3bb74a25f9bb23acacaa48303052b52245424154",
+      "width": 512,
+      "height": 512,
+      "native_sha256": "2495e89b8e04451a01b65bbf07a10e43c18461267646c7eca86a6c0d46867191",
+      "baseline_rgb_sha256": "478de1cd71acee6fa8148b52d0a69cbc9367f8bbd068974b57cce22b48cd7af1",
+      "managed_rgb_sha256": "25eae8a35c7aba65d34fece15b03242e92f5d519f30fcb4bc308b152a068fe35",
+      "pixel_changed": 135,
+      "channel_changed_rgb": [
+        38,
+        68,
+        29
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        3,
+        0,
+        368,
+        248
+      ],
+      "edge2_changed": 4,
+      "ssim2_baseline": 11.86421566283931,
+      "ssim2_managed": 11.867855000176757,
+      "zensim_b_baseline": 11.890872105044481,
+      "zensim_b_managed": 11.89099297612184
+    },
+    {
+      "id": 14,
+      "input_sha256": "ac721c9919e44d58e8754cdff56669c04dabc5463b164d3d94b14512574e85a0",
+      "width": 769,
+      "height": 513,
+      "native_sha256": "918f1eb6a5101ba8375578fbfdc40a83b6766bc4eff581386833290a2a7f6e89",
+      "baseline_rgb_sha256": "5be24eecddea31830fd33dc0e22b3faff4b65f9db413f1100ad23efb78f10ec5",
+      "managed_rgb_sha256": "cf8e006b96e790536bae6de99f0ec7a3fac5223692832305ce00d55761e75eab",
+      "pixel_changed": 414,
+      "channel_changed_rgb": [
+        51,
+        149,
+        214
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        3,
+        16,
+        766,
+        476
+      ],
+      "edge2_changed": 0,
+      "ssim2_baseline": 15.645117447151122,
+      "ssim2_managed": 15.630844592729343,
+      "zensim_b_baseline": 14.116976176769528,
+      "zensim_b_managed": 14.117166236768425
+    },
+    {
+      "id": 15,
+      "input_sha256": "12828fd66497eb6c2e29af77eb1124ccadf6af3e06922c5018b6bacad1f3ee25",
+      "width": 818,
+      "height": 1022,
+      "native_sha256": "511e5a0fc1a7758e5d785175db62c3311d773a914beb6587f77deb2bb6101aa7",
+      "baseline_rgb_sha256": "e2be08499a6264865def9ef327674288153a8769c7519a0fbcbcf59bc5c9eae5",
+      "managed_rgb_sha256": "bf971d3aab1bcc842781919605206ecf2bf1e88592ebf948f3b13646babf3424",
+      "pixel_changed": 282,
+      "channel_changed_rgb": [
+        282,
+        282,
+        282
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        0,
+        814,
+        1015
+      ],
+      "edge2_changed": 12,
+      "ssim2_baseline": 88.91892719768586,
+      "ssim2_managed": 88.87141874009616,
+      "zensim_b_baseline": 88.97754910808474,
+      "zensim_b_managed": 88.97670453997075
+    },
+    {
+      "id": 16,
+      "input_sha256": "7aaa844008a0d7c420efdd71327f2861dbc07d36fe51f8fd5707c66731170484",
+      "width": 769,
+      "height": 513,
+      "native_sha256": "20945d845fe6520abac70a4ea544ee973d86a135126fa33bd3e93350954035f9",
+      "baseline_rgb_sha256": "25b8e301c7fc72fe11f29816efdc1ae57bb1d6b197985bacd804f49b1d74ebc2",
+      "managed_rgb_sha256": "687b41f3c3b581718fb8984d6b3ba703604441d3c37461d7ba3607c3ce745dcb",
+      "pixel_changed": 1020,
+      "channel_changed_rgb": [
+        506,
+        510,
+        67
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        270,
+        143,
+        768,
+        511
+      ],
+      "edge2_changed": 9,
+      "ssim2_baseline": 94.67181210227412,
+      "ssim2_managed": 94.66319353127793,
+      "zensim_b_baseline": 92.21606098409667,
+      "zensim_b_managed": 92.23626558432876
+    },
+    {
+      "id": 17,
+      "input_sha256": "41376dfb93035f0afc81db6203c2ce1dfa6c290adba5b613a632fb4f18714eec",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "262340f42a0412c2649d73db06b7d7b7d72bb09b25882082ef1f1900262a22cb",
+      "baseline_rgb_sha256": "70c12bdbb1838fd9e2ba754bb76318db6b05a13a67157fd578a5f1b31b3d3bb8",
+      "managed_rgb_sha256": "1d101a3d5bde40825eafe078bf1ea6a917ea2371c1763b861c1118fceca69ae4",
+      "pixel_changed": 1215,
+      "channel_changed_rgb": [
+        494,
+        350,
+        371
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        33,
+        1020,
+        817
+      ],
+      "edge2_changed": 17,
+      "ssim2_baseline": 40.335768519515504,
+      "ssim2_managed": 40.34024255639946,
+      "zensim_b_baseline": 28.376657097305014,
+      "zensim_b_managed": 28.375499770938013
+    },
+    {
+      "id": 18,
+      "input_sha256": "1e1291f7b4649ac1c1a3f099979f9706a09e5136333f62af5fa67b7a89b0b471",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "2845fe46364f20f487dc3a166e67dfc54a679c8655b72daff8007a0199525c5b",
+      "baseline_rgb_sha256": "6f892f0a47f3f12d61380c19ae1b46d3f8429654701ea030836ec01ec8782512",
+      "managed_rgb_sha256": "26d15373fa7d90ceabb83696a35f5b44826a7f6d74e7f4c49e6e3f66c3806bd6",
+      "pixel_changed": 2795,
+      "channel_changed_rgb": [
+        846,
+        1162,
+        818
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        124,
+        0,
+        944,
+        817
+      ],
+      "edge2_changed": 14,
+      "ssim2_baseline": 65.81127527298769,
+      "ssim2_managed": 65.81632094568741,
+      "zensim_b_baseline": 60.82875564777548,
+      "zensim_b_managed": 60.833043380026716
+    },
+    {
+      "id": 19,
+      "input_sha256": "323c8383de57fdcf1ff2f0c9cf2fbaf3749256cffecdf9b233817ee6e1576194",
+      "width": 1024,
+      "height": 1024,
+      "native_sha256": "b8483719d1fd98bcdf95293381d081e2320e8ea8c412cdb4a038eed96efa75d4",
+      "baseline_rgb_sha256": "7489d13236a91974f05e54a4814507bc178264588a3baf9053cc89f8c7f68933",
+      "managed_rgb_sha256": "b1f0905a351a1dac35612f85a286ec37296513d8d2f85085c4f6504bcfeef2dc",
+      "pixel_changed": 561,
+      "channel_changed_rgb": [
+        167,
+        158,
+        240
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        1,
+        0,
+        1010,
+        1022
+      ],
+      "edge2_changed": 5,
+      "ssim2_baseline": 90.65369942088378,
+      "ssim2_managed": 90.68311328749587,
+      "zensim_b_baseline": 88.54717275433694,
+      "zensim_b_managed": 88.54781648929496
+    },
+    {
+      "id": 20,
+      "input_sha256": "271e4351453cdeecc0c615d340e4aa61af046620f6a3a3fa0f54d3ea94898442",
+      "width": 512,
+      "height": 512,
+      "native_sha256": "5878ab81e7f49e34320d90e40fad79b76d1f678693d585eb5f473b23ba565515",
+      "baseline_rgb_sha256": "a26c6d94c1598cb73dc5f79c2ca45200e053c370a2d3e3ffc9a962c38cb9bf2b",
+      "managed_rgb_sha256": "fd208e48a41336d3d30b79b36d518039500a4cd5183f9a4bfb6cdc110678aca3",
+      "pixel_changed": 622,
+      "channel_changed_rgb": [
+        448,
+        74,
+        100
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        5,
+        0,
+        511,
+        511
+      ],
+      "edge2_changed": 6,
+      "ssim2_baseline": 95.34497792680975,
+      "ssim2_managed": 95.32842374156861,
+      "zensim_b_baseline": 92.91990253138593,
+      "zensim_b_managed": 92.92149206139194
+    },
+    {
+      "id": 21,
+      "input_sha256": "39b330a3c3f487cb09d65bfd0f9b82630b734649ffa60482e0fb8a98996d13cb",
+      "width": 512,
+      "height": 512,
+      "native_sha256": "1ae411073a706b533799fc0712b1bc0770e0095ff06f71b3e3811217e23d6185",
+      "baseline_rgb_sha256": "a908b3276855e97d4fc5664d6766ce4b944e0b9b6fd258d3e796905c9650195a",
+      "managed_rgb_sha256": "aa06d4c1d673b8186283344f95ebd0b3dabdc97b049e8669283a14eb32c19f95",
+      "pixel_changed": 395,
+      "channel_changed_rgb": [
+        70,
+        325,
+        0
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        0
+      ],
+      "bbox_xyxy": [
+        0,
+        0,
+        509,
+        506
+      ],
+      "edge2_changed": 13,
+      "ssim2_baseline": 19.678138581449716,
+      "ssim2_managed": 19.68080092148714,
+      "zensim_b_baseline": 19.617168008182194,
+      "zensim_b_managed": 19.61900515883188
+    },
+    {
+      "id": 22,
+      "input_sha256": "d3757f1d724e68b27a8ad5540890bb47659596cbce311e4b81b86e5c42d63026",
+      "width": 513,
+      "height": 769,
+      "native_sha256": "f081a5603b51c8eba88518a2a833ecc4a1058fa61a969702278ebba953911633",
+      "baseline_rgb_sha256": "f9ecdbf6f3c30c67c9d292a1eb525136ca0bf2006dd1b011e97354f4008542d7",
+      "managed_rgb_sha256": "247ed5c4b07a14469d08652c66d80776614080502fc537d47189ce0c5fc024e1",
+      "pixel_changed": 871,
+      "channel_changed_rgb": [
+        133,
+        449,
+        299
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        0,
+        511,
+        768
+      ],
+      "edge2_changed": 11,
+      "ssim2_baseline": 13.99711179454373,
+      "ssim2_managed": 13.986186821968243,
+      "zensim_b_baseline": 15.958421352672215,
+      "zensim_b_managed": 15.957900603092549
+    },
+    {
+      "id": 23,
+      "input_sha256": "9847989e931bd48cd1a45ef3ba46b06f365f5efc2d9f34a596981af7890e1634",
+      "width": 818,
+      "height": 1022,
+      "native_sha256": "f17e980ad8ae1d5193f40ba850da759bda3cb3e9492d1057eb7336c563daf468",
+      "baseline_rgb_sha256": "3b560652366aa867cb65616ad6f90aa7e101e2cd36a2454a86966d87b7c19d0d",
+      "managed_rgb_sha256": "f6f84ee438bca92cb9cf5c971c6704ca5fd631f5a1ad4af841dbe895920d11d0",
+      "pixel_changed": 2924,
+      "channel_changed_rgb": [
+        1381,
+        811,
+        744
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        17,
+        817,
+        1011
+      ],
+      "edge2_changed": 9,
+      "ssim2_baseline": -14.998107719593392,
+      "ssim2_managed": -14.996743725878954,
+      "zensim_b_baseline": 6.127070540845978,
+      "zensim_b_managed": 6.127777404752226
+    },
+    {
+      "id": 24,
+      "input_sha256": "95712876d0cc359d4e74b50591d12c8d17ee938e7117c93205783a7d77cf56c1",
+      "width": 512,
+      "height": 512,
+      "native_sha256": "258010e8c4a0d008a064ac84ba08ce106c6b038cae3bbc326a3aa7eeba4a4f4f",
+      "baseline_rgb_sha256": "097919e34be1f865b30ad82fe88899e94f5f8a4cdc8c7ca66363d4f7254e9b05",
+      "managed_rgb_sha256": "8b68dcfa0c787e8721ec80c3430430813b535d1ac936a66a643b895cdcb41d26",
+      "pixel_changed": 666,
+      "channel_changed_rgb": [
+        405,
+        206,
+        58
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        9,
+        507,
+        510
+      ],
+      "edge2_changed": 11,
+      "ssim2_baseline": 92.38919757724022,
+      "ssim2_managed": 92.37403301927164,
+      "zensim_b_baseline": 90.25098026941326,
+      "zensim_b_managed": 90.22583544477716
+    },
+    {
+      "id": 25,
+      "input_sha256": "09ec9cc857427b9893ef0bf9535e2ee23922bda9fce6c867c36a24e05aa66bd6",
+      "width": 512,
+      "height": 512,
+      "native_sha256": "d40f7c6011e0a34aa61d87d30ca7a466836a7ad2643837496b5fae7d8aa32adf",
+      "baseline_rgb_sha256": "d99e02577d25d86415cdd80baaf36f964f97f684347e5353b8e07e2ff18b2681",
+      "managed_rgb_sha256": "a7a7c5582cd5827cc2dc31e0f46ca0e0184f61f2517491a371b4309389bd80fb",
+      "pixel_changed": 36017,
+      "channel_changed_rgb": [
+        23489,
+        2873,
+        11459
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        0,
+        511,
+        511
+      ],
+      "edge2_changed": 540,
+      "ssim2_baseline": 83.25019925546214,
+      "ssim2_managed": 83.24359480971764,
+      "zensim_b_baseline": 75.0600381334072,
+      "zensim_b_managed": 75.04178722375687
+    },
+    {
+      "id": 26,
+      "input_sha256": "7dbdd8593bd59f301803ffae56cc84f996e6088128975152491b91a2e44a15c9",
+      "width": 512,
+      "height": 512,
+      "native_sha256": "aff226975b35a47b5b73b3a7ef573b36c3a193cb456d06f9429adb60c85ab445",
+      "baseline_rgb_sha256": "f56d232f173d293dfa6843559cf61c8389866e670c53eb7e52ece8b8e287f651",
+      "managed_rgb_sha256": "ca896294c98cdad6b0166e6c887c9e44b818572e7b169c8833461136d041a7f3",
+      "pixel_changed": 76,
+      "channel_changed_rgb": [
+        49,
+        9,
+        18
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        112,
+        486,
+        481
+      ],
+      "edge2_changed": 2,
+      "ssim2_baseline": 97.3634438857916,
+      "ssim2_managed": 97.38990231542151,
+      "zensim_b_baseline": 95.94064589760625,
+      "zensim_b_managed": 95.94206178908678
+    },
+    {
+      "id": 27,
+      "input_sha256": "4e69ec5349321d03b98f0f700bd9f20150d421a1bbd8f7851eda85f2a4035d3c",
+      "width": 818,
+      "height": 1022,
+      "native_sha256": "8b40427ff5157dba4f834262e8835adff5fed3572ea2b106b2e9e2b4d236647c",
+      "baseline_rgb_sha256": "300ede60a8bd9f8993e93c9aeeefe7f09d8073ff2d0d4d0cd2d96e919b97dec6",
+      "managed_rgb_sha256": "3fcd454feb721e9ed40ea7c3d7d8a3515f4b00c48f2792d42843e07af17a4ca3",
+      "pixel_changed": 886,
+      "channel_changed_rgb": [
+        310,
+        235,
+        341
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        3,
+        817,
+        1021
+      ],
+      "edge2_changed": 6,
+      "ssim2_baseline": 56.245058963800446,
+      "ssim2_managed": 56.25592851654217,
+      "zensim_b_baseline": 55.36350365026162,
+      "zensim_b_managed": 55.337419166309104
+    },
+    {
+      "id": 28,
+      "input_sha256": "159a51e86a7093d44b40f8f720c06ff0b22c118d2fc4d15c35b35ba31ac10a56",
+      "width": 513,
+      "height": 769,
+      "native_sha256": "7cbe0139231c8801029bbc87f9d85ce62fb0dd355c98b7616825422dc37222f1",
+      "baseline_rgb_sha256": "0ffc4c11ddd42f2647b8d7d26830efef8004bef547329a429c9ab48ffbcdb62c",
+      "managed_rgb_sha256": "53ed38e20bcbc6f0d11a04ccab7fc02088833272cd9e0d5f01c79dc15f851e20",
+      "pixel_changed": 3625,
+      "channel_changed_rgb": [
+        1443,
+        1256,
+        956
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        0,
+        512,
+        768
+      ],
+      "edge2_changed": 43,
+      "ssim2_baseline": 2.61566459796299,
+      "ssim2_managed": 2.620123011509712,
+      "zensim_b_baseline": 14.291502166257585,
+      "zensim_b_managed": 14.293275283983318
+    },
+    {
+      "id": 29,
+      "input_sha256": "41a592d263cd1c844deb3110be177f72488790f27c1339e27109ba745998791e",
+      "width": 512,
+      "height": 512,
+      "native_sha256": "f486bef17994131c679e6f8a7cb19c852d770a626466b9e7dd3c581fe83ad147",
+      "baseline_rgb_sha256": "38e57adb26ba677450c7a9530f1fb6329d56c57bd51c5ad5d02060202035a9f1",
+      "managed_rgb_sha256": "85c4021766d74d58f7db804eaa84cc84cf2b01aad9d895e2312f81bc07393c0d",
+      "pixel_changed": 90,
+      "channel_changed_rgb": [
+        90,
+        90,
+        90
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        0,
+        5,
+        503,
+        475
+      ],
+      "edge2_changed": 1,
+      "ssim2_baseline": 56.056835820983714,
+      "ssim2_managed": 56.05042451303747,
+      "zensim_b_baseline": 48.9862818328898,
+      "zensim_b_managed": 48.98676011519116
+    },
+    {
+      "id": 30,
+      "input_sha256": "d566851ace20ffc45b560fe066ad8fea4c88e9514b99a84796cfe7e5f9f69c28",
+      "width": 1022,
+      "height": 818,
+      "native_sha256": "eab589e57e9c3b4717e144941ee90fac3650f1afe322f3ea316c3339a1d2d031",
+      "baseline_rgb_sha256": "13ceaf3297dac25c568aebaa2738760fa6842b2e1ad05a8524904d6ab26d39e8",
+      "managed_rgb_sha256": "cc36008d95d8e3afce9ef7f4baef928ffcfe646503d4d5192502ac0fe5361dc2",
+      "pixel_changed": 100,
+      "channel_changed_rgb": [
+        100,
+        100,
+        100
+      ],
+      "channel_max_abs_rgb": [
+        1,
+        1,
+        1
+      ],
+      "bbox_xyxy": [
+        60,
+        27,
+        1021,
+        812
+      ],
+      "edge2_changed": 1,
+      "ssim2_baseline": 5.964894158689891,
+      "ssim2_managed": 5.963871970404089,
+      "zensim_b_baseline": 16.687392873757958,
+      "zensim_b_managed": 16.68755810199772
+    }
+  ]
+}
