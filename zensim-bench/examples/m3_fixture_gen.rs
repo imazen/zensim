@@ -69,6 +69,12 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 #[path = "m3_fixture_gen/corruption.rs"]
 mod corruption;
+#[path = "m3_fixture_gen/render.rs"]
+mod render;
+#[path = "m3_fixture_gen/render_families.rs"]
+mod render_families;
+#[path = "m3_fixture_gen/render_pix.rs"]
+mod render_pix;
 
 #[cfg(feature = "zen-decode")]
 #[path = "shared/score_input.rs"]

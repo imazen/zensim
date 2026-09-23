@@ -8,14 +8,14 @@ use std::fs;
 use std::time::Instant;
 use zenpixels_convert::PixelBufferConvertTypedExt;
 
-fn sha(bytes: &[u8]) -> String {
+pub(super) fn sha(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
 }
 
-fn write_verified_png(path: &PathBuf, img: &Rgb8) -> Res<String> {
+pub(super) fn write_verified_png(path: &PathBuf, img: &Rgb8) -> Res<String> {
     write_png_rgb8(path, img)?;
     let roundtrip = read_png_rgb8(path)?;
     if (roundtrip.w, roundtrip.h) != (img.w, img.h) || roundtrip.px != img.px {
@@ -25,6 +25,11 @@ fn write_verified_png(path: &PathBuf, img: &Rgb8) -> Res<String> {
 }
 
 pub(super) fn run(args: &[String]) -> Res<()> {
+    // E5A render lane: `corruption render ...` dispatches to the render twin
+    // generator before the canonical-catalog parser sees its arguments.
+    if args.get(1).map(String::as_str) == Some("render") {
+        return super::render::run(&args[1..]);
+    }
     let mut flags = BTreeSet::new();
     for pair in args[1..].chunks(2) {
         if pair.len() != 2

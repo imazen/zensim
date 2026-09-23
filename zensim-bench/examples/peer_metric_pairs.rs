@@ -73,6 +73,8 @@ struct Row {
     keys: Vec<String>,
     ref_path: String,
     dist_path: String,
+    /// `key` column value (or row index) — used to name `--diffmaps` files.
+    key: String,
 }
 
 fn main() {
@@ -80,11 +82,17 @@ fn main() {
     let mut pairs: Option<PathBuf> = None;
     let mut output: Option<PathBuf> = None;
     let mut threads: Option<usize> = None;
+    // E5A: optional per-item butteraugli diffmap dump (raw LE f32, named
+    // `<key>__butter.f32` when the row carries a `key` column, else row index).
+    let mut diffmaps: Option<PathBuf> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--pairs" => pairs = Some(args.next().expect("--pairs VALUE").into()),
             "--output" => output = Some(args.next().expect("--output VALUE").into()),
             "--threads" => threads = Some(args.next().expect("--threads VALUE").parse().unwrap()),
+            "--diffmaps" => {
+                diffmaps = Some(args.next().expect("--diffmaps VALUE").into())
+            }
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -93,6 +101,9 @@ fn main() {
     }
     let pairs = pairs.expect("--pairs is required");
     let output = output.expect("--output is required");
+    if let Some(d) = &diffmaps {
+        std::fs::create_dir_all(d).expect("create --diffmaps dir");
+    }
     if let Some(t) = threads {
         rayon::ThreadPoolBuilder::new()
             .num_threads(t)
@@ -114,14 +125,17 @@ fn main() {
     let key_idx: Vec<usize> = (0..header.len())
         .filter(|i| *i != ref_idx && *i != dist_idx)
         .collect();
+    let key_col = header.iter().position(|c| *c == "key");
 
     let rows: Vec<Row> = lines
-        .map(|ln| {
+        .enumerate()
+        .map(|(i, ln)| {
             let p: Vec<&str> = ln.split('\t').collect();
             Row {
                 keys: key_idx.iter().map(|k| p[*k].to_string()).collect(),
                 ref_path: p[ref_idx].to_string(),
                 dist_path: p[dist_idx].to_string(),
+                key: key_col.map(|k| p[k].to_string()).unwrap_or_else(|| i.to_string()),
             }
         })
         .collect();
@@ -193,6 +207,11 @@ fn main() {
         ) {
             Ok(b) => {
                 let dm = b.diffmap.as_ref().map(|m| m.buf().to_vec());
+                if let (Some(dir), Some(map)) = (&diffmaps, &dm) {
+                    let bytes: Vec<u8> = map.iter().flat_map(|v| v.to_le_bytes()).collect();
+                    std::fs::write(dir.join(format!("{}__butter.f32", row.key)), &bytes)
+                        .expect("write butter diffmap");
+                }
                 let f = |p: f64| dm.as_ref().map_or(f64::NAN, |m| libjxl_pnorm(m, p));
                 (b.score, f(1.0), f(2.0), f(3.0))
             }

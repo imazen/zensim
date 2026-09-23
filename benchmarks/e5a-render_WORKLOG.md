@@ -60,3 +60,73 @@ cf76d47ce45ab9f03e8a8f99d7d1abaa13685d10cbf16cf27ad204b3beae9a28  R915_y60_h32_s
 - `sha256sum /mnt/v/output/zensim/canonical-corruption-2026-09-08/train-sources.json`
   → `4f7ee719520d2e71a672ddc5b83aba9aa24960c0684c8361d306aea119c03a71`
   (12 train sources; the 256-longest-side hashes live inside that file).
+
+## 2026-09-23 implementation session (generator)
+
+- UTC 11:15-11:55, cwd `/home/lilith/work/zen/zensim--e5a-render`
+- Created `zensim-bench/examples/m3_fixture_gen/render_pix.rs` (pixel helpers:
+  swizzle/quantize/edge-fill/parity-decimate/alpha-masks/dither + linear-light
+  composite via linear-srgb + zenblend SrcOver), `render_families.rs` (10
+  corruption families F01-F10 + benign-drift set, 44 corruption + ~35 benign
+  items per source), `render.rs` (driver: `corruption render --in256 --in512
+  --out --ref-id --seed --set`, hashed `_MANIFEST.json` + `COMPLETE.json`).
+- Wired: `m3_fixture_gen.rs` gains three `#[path]` mods; `corruption::run`
+  dispatches `render` subcommand before the catalog parser; `sha` and
+  `write_verified_png` promoted to `pub(super)`; `zensim-bench/Cargo.toml`
+  adds `dep:zenblend` to `m3-fixtures` (linear-srgb was already a direct dep).
+- Deviations applied while matching prereg table: F02 emits 4 defs x 3
+  backgrounds = 12 composited RGB items (alpha protocol); F03 6; F05a uses
+  `zenresize .crop` for the off-by-one; F10(b) +4096 u16 gain; benign names
+  follow prereg (`resize_streaming_vs_fullframe`, `resize_f32_vs_i16`,
+  `resize_u16_vs_f32_lin`, `srgb_lut_vs_poly`,
+  `quantize_round_half_even_vs_away` [expected inert: 65535=255*257 admits no
+  exact ties -> counted per drop rule], `quantize_dithered_vs_plain`,
+  `dither_phase`, `composite_f32_vs_u16`, `route_u8_vs_u8f32`,
+  `route_u8_vs_u8u16_lin`).
+- Generation script: `/home/lilith/tmp/devin/e5a_gen_all.sh` (12 TRAIN
+  sources, 256+512 rendition paths verified present on /mnt/v).
+- Build: `cargo check -p zensim-bench --features m3-fixtures --example
+  m3_fixture_gen` under `~/tmp/devin/heavy --mem 16G --jobs 8`, CARGO_TARGET_DIR
+  `/home/lilith/tmp/devin/target-e5a` — queued on heavy.lock behind sibling
+  lanes (cvvdp-safesyn zenmetrics build, gmsd_batch8, dvifmish).
+
+## 2026-09-23 implementation session (scorer + analysis)
+
+- UTC 12:40-13:00, same workspace.
+- `zensim-bench/examples/e5a_render_score.rs`: per-item scorer emitting
+  maxabs, psnr, testlin candidates t1..t5 (linear-light and u8 maps via
+  `linear_srgb::precise`), gmsd + GMS map (`gmsd` crate, zenmetrics
+  workspace path-dep), zensim-B score + diffmap
+  (`Zensim::compute_with_diffmap`, codec_target profile), severity anchor
+  (`anchor_lin_mean` = mean linear-light max-channel |Δ|), sha256 of every
+  dumped map. CLI: `--pairs/--output/--maps/--threads`.
+- `peer_metric_pairs.rs`: added `--diffmaps <dir>` — dumps the
+  already-computed butteraugli diffmap per row as raw LE f32 named
+  `<key>__butter.f32` (key column or row index).
+- `Cargo.toml`: `e5a-render` feature = `m3-fixtures` + `dep:gmsd`;
+  `gmsd` optional path dep `../../zenmetrics/crates/gmsd` (same
+  cross-workspace path-dep pattern as the existing `zenstats` entry);
+  `[[example]] e5a_render_score` gated on it.
+- `scripts/e5a_pairs.py`: builds `pairs.tsv` (key/origin/kind/family/
+  variant/severity/index/width/height/ref/dist) from `_MANIFEST.json`s.
+- `scripts/e5a_analyze.py`: full prereg analysis — benign-pooled t99/t999
+  thresholds per arm, testlin selection on TRAIN families ONLY (frozen
+  before TEST evaluation), detection at both FA points (per family,
+  family×variant, pooled), `panel --batch --stats srocc` severity ordering
+  (srocc_signed column; verified output shape on a smoke manifest),
+  localisation lift + top-decile coverage for the 5 map arms (gmsd's
+  w/2×h/2 map aligned via 2×2 max-pool of the changed mask), paired
+  origin-cluster bootstrap B=2000 seed 20260923 via
+  `np.random.default_rng`, prereg decision rule.
+- `scripts/e5a_pipeline.sh`: driver (gen/pairs/score/analyze). R915 bins =
+  `recovery/calibrated/` set — all 10 sha256s verified byte-identical to
+  prereg §11 (the `recovery/fits/` copies differ and were rejected).
+  zenmetrics binary `/var/tmp/cvvdp-safesyn/target-zenmetrics/release/
+  zenmetrics` (`batch --metric dssim` = dssim-core CPU, the prereg arm);
+  `panel` + `score_pairs_tuner` release binaries in the main checkout.
+- heavy.lock still held by paper_memory_acq2.sh (3h+); my cargo check is
+  queued with ~9 other lanes. API review of every new callsite done
+  against source while queued (zenresize Resizer/StreamingResize/.crop,
+  PixelSlice/apply_orientation, RowConverter::convert_rows, Orientation
+  variants, linear-srgb default/precise, zenblend blend_row SrcOver, gmsd
+  map contract, zensim compute_with_diffmap/RgbSlice/DiffmapWeighting).
