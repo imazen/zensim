@@ -124,7 +124,23 @@ PEERS = {
         "aic3": ("aic3_iwssim_heldout.tsv", None, None),
         "konjnd": ("konjnd_iwssim_heldout.tsv", None, None),
     }),
+    # CVVDP under the JPEG AIC evaluation's display (2026-09-22). `peer_cvvdp`
+    # is scored at pycvvdp's default `standard_4k` (75.40 px/deg); the AIC CTC
+    # (v2.0, wg1n101246 §4) runs `cvvdp -d standard_fhd` (37.84 px/deg), which
+    # is what the organisers' CVVDP column is. On AIC-4 that difference alone is
+    # SROCC 0.8906 (4k) vs 0.9609 (fhd); the fhd table below reproduces the
+    # organisers' per-pair values to 0.0003 JOD. Only AIC-4 is scored at fhd so
+    # far (AIC-3 / SDR25 are listed for re-scoring, not read here).
+    # zenmetrics benchmarks/cvvdp_aic_discrepancy_2026-09-22.md.
+    "cvvdp_aicfhd": (+1, {
+        "aic4": ("aic4_cvvdp_standard_fhd.tsv", None, None),
+    }),
 }
+
+# Peers whose stored tables are listed explicitly above and must NOT pick up the
+# csiq/live/aic4/sdr25 auto-discovery below (it would attach the default-display
+# tables to the AIC-display row).
+NO_AUTODISCOVER = {"cvvdp_aicfhd"}
 
 # 2026-08-28 completion (user: "don't skip any"): csiq/live/aic4/sdr25 —
 # cvvdp scored CPU locally (the CPU rung is sanctioned for cvvdp); ssim2/
@@ -135,6 +151,8 @@ PEERS = {
 # (|SROCC| convention — srocc_signed may read negative by design); sdr25 =
 # q_jnd (the 50-pair instrument = the board axis population exactly).
 for peer in list(PEERS):
+    if peer in NO_AUTODISCOVER:
+        continue
     sign, corp = PEERS[peer]
     stems = {"ssim2": ["ssim2"], "butteraugli": ["butteraugli", "butter"],
              "cvvdp": ["cvvdp"], "iwssim": ["iwssim"]}[peer]
@@ -192,8 +210,10 @@ def load_pairs(path, corpus=None):
         xs.append(m); ys.append(h)
     return xs, ys, hcol, mcol
 
-def main():
+def main(only=None):
     for peer, (sign, corpora) in PEERS.items():
+        if only and peer not in only:
+            continue
         rank = {}
         prov = {}
         per_pair_all = {}
@@ -330,9 +350,11 @@ if __name__ == "__main__":
     ap.add_argument("--admitted-manifest", type=Path,
                     help="explicit hash-bound eval peer TSVs; bypass all legacy corpus reads")
     ap.add_argument("--out-dir", type=Path, default=Path(OUT))
+    ap.add_argument("--peer", action="append", choices=sorted(PEERS),
+                    help="build only these peer rows (repeatable); default: all")
     args = ap.parse_args()
     if args.admitted_manifest:
         build_admitted(args.admitted_manifest, args.out_dir)
     else:
         OUT = str(args.out_dir)
-        main()
+        main(set(args.peer or ()))
