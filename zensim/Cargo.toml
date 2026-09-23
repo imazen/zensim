@@ -224,6 +224,7 @@ imgref = { workspace = true }
 image = { workspace = true }
 archmage = { workspace = true, features = ["testable_dispatch"] }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 # Synthetic wide-bake fixtures for `ComputeSet::from_block_profile`'s
 # free-set-vs-genuine-v2-era gate tests (feature_v2.rs) — the mandated JSON
 # pipeline (CLAUDE.md "JSON pipeline mandate for ZNPR v3 bakes"), not a

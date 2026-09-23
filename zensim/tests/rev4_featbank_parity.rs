@@ -15,12 +15,14 @@
 //!   synthetic geometry matrix: odd sizes, sub-64 dims (reflect-padded),
 //!   non-tight strides, multi-strip heights, `H_TILE_WIDTH`-crossing
 //!   widths.
-//! * **R4-B (cross-tier rev4 determinism)** — the era-2 design contract
-//!   is bit-identical results across SIMD tiers; the rev4 segments are
-//!   held to the same bar.
+//! * **R4-B (rev4 tier determinism)** — rev4 segments are bit-identical
+//!   across permutations within a SIMD tier. Cross-tier drift is measured
+//!   and reported, following the existing era-2 contract.
 //! * **R4-C (corpus toggle identity)** — corpus-gated: 64 CID22 TRAIN +
 //!   64 SafeSyn + 16 KADID TRAIN pairs, f0..f985 identical with rev4 on
 //!   vs off, serial and MT8.
+//! * **R4-D (CI smoke)** — 16 deterministic generated pairs run without
+//!   external mounts; every existing slot remains bit-identical.
 
 #![cfg(all(feature = "training", feature = "feature-regime-v2"))]
 
@@ -259,15 +261,67 @@ fn rev4_identity_and_segments_across_all_tiers() {
     }
 }
 
+/// **R4-D** — mount-free 16-pair CI tier. The corpus gate below covers real
+/// TRAIN paths; this catches accidental skips and old-slot regressions in CI.
+#[test]
+fn rev4_synthetic_16_pair_identity() {
+    for n in 0..16usize {
+        let (w, h) = (64 + n, 65 + (n * 3) % 17);
+        let (src, dst) = pair(w, h);
+        let on = extract(&src, &dst, w, h, toggles_on(), false);
+        let off = extract(&src, &dst, w, h, toggles_off(), false);
+        for i in 0..REV4_BASE {
+            assert_eq!(on[i].to_bits(), off[i].to_bits(), "pair {n} f{i}");
+        }
+    }
+}
+
 /// **R4-C** — corpus toggle identity. Loads pairs-tsv rows (PATH COLUMNS
 /// ONLY — the lane's no-human-label rule; score columns are never
 /// parsed), decodes via `image` (PNG) / `zenjpeg` (JPEG), and asserts
 /// f0..f985 `to_bits` equality between the all-on and all-off walks,
-/// serial and MT8. Runs only where the corpora are mounted.
+/// serial and MT8. The caller supplies corpus access and the expected
+/// unsupported SafeSyn count via `just rev4-corpus-tests`; missing files,
+/// malformed roles and unexpected decode omissions fail the test.
 #[test]
-#[ignore = "corpus gate — run with --ignored where /mnt/v is mounted"]
+#[ignore = "explicit corpus gate: use just rev4-corpus-tests"]
 fn rev4_corpus_toggle_identity() {
     use std::path::Path;
+
+    // Deserialize only role-bearing metadata. Unknown fields, including
+    // human targets, are discarded by serde and never materialized here.
+    #[derive(serde::Deserialize)]
+    struct RoleRow {
+        corpus: String,
+        reference: String,
+        role: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct RoleManifest {
+        rows: Vec<RoleRow>,
+    }
+
+    let inputs_path = std::env::var("ZENSIM_REV4_KADID_INPUTS")
+        .expect("caller must set ZENSIM_REV4_KADID_INPUTS");
+    let expected_unsupported: usize = std::env::var("ZENSIM_REV4_EXPECT_UNSUPPORTED_SAFESYN")
+        .expect("caller must set ZENSIM_REV4_EXPECT_UNSUPPORTED_SAFESYN")
+        .parse()
+        .expect("expected unsupported count must be an integer");
+    let input_text = std::fs::read_to_string(&inputs_path).expect("read KADID INPUTS.json");
+    let input_json: RoleManifest = serde_json::from_str(&input_text).expect("parse INPUTS.json");
+    let mut kadid_role = std::collections::HashMap::<String, String>::new();
+    for row in input_json.rows {
+        if row.corpus != "kadid" {
+            continue;
+        }
+        let old = kadid_role.insert(row.reference.clone(), row.role.clone());
+        assert!(
+            old.as_deref().is_none_or(|v| v == row.role),
+            "conflicting role for {}",
+            row.reference
+        );
+    }
+    assert!(!kadid_role.is_empty(), "INPUTS has no KADID roles");
 
     struct Spec {
         name: &'static str,
@@ -345,35 +399,24 @@ fn rev4_corpus_toggle_identity() {
     let mut checked = 0usize;
     let mut skipped_fmt = 0usize;
     for spec in &specs {
-        let text = match std::fs::read_to_string(spec.tsv) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("skip {}: {} ({e})", spec.name, spec.tsv);
-                continue;
-            }
-        };
+        let text = std::fs::read_to_string(spec.tsv)
+            .unwrap_or_else(|e| panic!("{} corpus TSV {} unavailable: {e}", spec.name, spec.tsv));
         // PATH COLUMNS ONLY: split each line at its first two tabs and
         // never touch column 3 (human labels are outside this lane).
         let mut rows: Vec<(String, String)> = Vec::new();
         for line in text.lines().skip(1) {
             let mut it = line.split('\t');
             let (r, d) = (it.next().unwrap_or(""), it.next().unwrap_or(""));
-            if r.is_empty() || d.is_empty() {
-                continue;
-            }
+            assert!(
+                !r.is_empty() && !d.is_empty(),
+                "{} malformed path row",
+                spec.name
+            );
             if spec.kadid_train_refs {
-                // KADID TRAIN: ref's numeric stem ends in {0,2,4,6,8}
-                // (`origin_split.py::split_of`; 40 of 81 refs).
-                let stem = Path::new(r)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("");
-                let digits: String = stem.chars().skip_while(|c| !c.is_ascii_digit()).collect();
-                let ok = digits
-                    .chars()
-                    .last()
-                    .is_some_and(|c| matches!(c, '0' | '2' | '4' | '6' | '8'));
-                if !ok {
+                let role = kadid_role
+                    .get(r)
+                    .unwrap_or_else(|| panic!("missing role for {r}"));
+                if role != "train" && role != "fit" {
                     continue;
                 }
             }
@@ -382,6 +425,12 @@ fn rev4_corpus_toggle_identity() {
                 break;
             }
         }
+        assert_eq!(
+            rows.len(),
+            spec.n,
+            "{}: insufficient admitted TRAIN rows",
+            spec.name
+        );
         let mut spec_checked = 0usize;
         let mut spec_skipped = 0usize;
         for (r, d) in &rows {
@@ -433,6 +482,16 @@ fn rev4_corpus_toggle_identity() {
                 spec_checked += 1;
             }
         }
+        let expected = if spec.name == "safesyn" {
+            expected_unsupported
+        } else {
+            0
+        };
+        assert_eq!(
+            spec_skipped, expected,
+            "{}: unexpected unsupported formats",
+            spec.name
+        );
         skipped_fmt += spec_skipped;
         eprintln!(
             "{}: {} pairs checked (serial + MT8), {spec_skipped} skipped (undecodable format)",
@@ -443,5 +502,5 @@ fn rev4_corpus_toggle_identity() {
         "rev4 corpus toggle identity: {checked} pair-mode extractions, \
          {skipped_fmt} pairs skipped (format gate — covered by the omni extractor matrix)"
     );
-    assert!(checked > 0, "no corpus pairs were checked");
+    assert_eq!(checked, 2 * (64 + 64 + 16 - expected_unsupported));
 }

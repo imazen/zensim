@@ -26,6 +26,21 @@ api-doc:
 api-doc-check:
     ZEN_API_DOC=check ZEN_API_DOC_TOOLCHAIN={{apidoc_toolchain}} cargo test --manifest-path apidoc/Cargo.toml
 
+# Explicit opt-in for mounted Rev4 TRAIN corpora. The two ignored tests fail
+# on absent inputs or unexpected unsupported formats. The unignored 16-pair
+# synthetic parity gate runs in the ordinary all-features CI test job.
+# Run this recipe through the local heavy lock when building on the lab host.
+[positional-arguments]
+rev4-corpus-tests root kadid_inputs expected_unsupported_safesyn:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export ZENSIM_REV4_CORPUS_ROOT="$1"
+    export ZENSIM_REV4_KADID_INPUTS="$2"
+    export ZENSIM_REV4_EXPECT_UNSUPPORTED_SAFESYN="$3"
+    cargo test -p zensim --release --all-features --test rev4_featbank_parity rev4_synthetic_16_pair_identity -- --nocapture
+    cargo test -p zensim --release --all-features --lib rev4_gridblk_zenjpeg_ladder -- --ignored --nocapture
+    cargo test -p zensim --release --all-features --test rev4_featbank_parity rev4_corpus_toggle_identity -- --ignored --nocapture
+
 # CI-exact clippy
 clippy:
     cargo clippy --workspace --all-targets --all-features --exclude zensim-wasm-tests -- -D warnings

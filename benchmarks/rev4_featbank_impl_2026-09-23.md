@@ -230,6 +230,12 @@ era entry marking introduction.
 - `rev4_gridblk_blur_noise_band` — blur-only and noise-only on/off ratio
   inside [0.5, 2.0] on all scale-0 channels. This is a broad sanity
   bound only: measured JPEG ladder ratios 1.01–1.24 lie inside it.
+- Real corpus gates require explicit `just rev4-corpus-tests <root>
+  <KADID INPUTS.json> <expected unsupported SafeSyn count>`; missing
+  assets, malformed roles and unexpected unsupported formats fail.
+  KADID admission is keyed on `INPUTS.json` `role` (`train`/`fit`). The
+  unignored 16-pair generated identity tier runs in the all-features CI
+  suite without external corpus mounts.
 - `rev4_tailhist_quantile_semantics` — max exact vs sorted reference;
   p95/p99 within one bin; integer counts.
 - `rev4_arttype_bleed_luma_vs_chroma` — bleed ≡ 0 on luma-only
