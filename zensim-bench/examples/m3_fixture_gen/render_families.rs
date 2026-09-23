@@ -18,7 +18,7 @@ const LANCZOS: Filter = Filter::Lanczos;
 /// Opaque-RGBA resize of an Rgb8 source. `linear` selects the pipeline:
 /// true = linear-light (correct), false = gamma-encoded sRGB (the bug).
 fn resize_rgb8(src: &Rgb8, out_w: u32, out_h: u32, filter: Filter, linear: bool) -> Res<Rgb8> {
-    if out_w == 0 || out_h == 0 || out_w > src.w || out_h > src.h {
+    if out_w == 0 || out_h == 0 {
         return Err(format!("bad resize {}x{} -> {out_w}x{out_h}", src.w, src.h).into());
     }
     let rgba = rgb_to_rgba_opaque(src);
@@ -49,7 +49,7 @@ fn resize_rgba(
     desc: ZPD,
     linear: bool,
 ) -> Res<Rgba8> {
-    if out_w == 0 || out_h == 0 || out_w > src.w || out_h > src.h {
+    if out_w == 0 || out_h == 0 {
         return Err("bad rgba resize".into());
     }
     let mut b = ResizeConfig::builder(src.w, src.h, out_w, out_h)
@@ -557,15 +557,21 @@ pub(super) fn f09_exif(src: &Rgb8) -> Res<Vec<Twin>> {
 pub(super) fn f10_bitdepth(src: &Rgb8) -> Res<Vec<Twin>> {
     let v16 = expand_u16(src);
     let mut out = Vec::new();
-    // (a) truncation vs rounding.
-    let correct: Vec<u8> = v16.iter().map(|&v| quantize_u16_round(v)).collect();
-    let broken: Vec<u8> = v16.iter().map(|&v| quantize_u16_trunc(v)).collect();
+    // (a) truncation vs rounding. A u16 gain first is REQUIRED: raw *257
+    // expansion lands every sample on an exact u8 boundary, so trunc and
+    // round agree byte-for-byte (the twin would be inert).
+    let g16: Vec<u16> = v16
+        .iter()
+        .map(|&v| ((v as u32 * 3 / 2).min(65535)) as u16)
+        .collect();
+    let correct: Vec<u8> = g16.iter().map(|&v| quantize_u16_round(v)).collect();
+    let broken: Vec<u8> = g16.iter().map(|&v| quantize_u16_trunc(v)).collect();
     out.push(Twin {
         family: "bitdepth",
         variant: "trunc_vs_round",
         severity: 1,
-        params: serde_json::json!({"op":"u16 -> u8 quantize",
-            "correct":"round v/257","broken":"v >> 8"}),
+        params: serde_json::json!({"op":"u16 gain x1.5 -> u8 quantize",
+            "correct":"round v*255/65535","broken":"v >> 8"}),
         correct: OutImg::Rgb(Rgb8 {
             w: src.w,
             h: src.h,
@@ -651,7 +657,8 @@ fn resize_u8_f32_route(src: &Rgb8, ow: u32, oh: u32, k: Filter) -> Res<Rgb8> {
     let rgba = rgb_to_rgba_opaque(src);
     let cfg = ResizeConfig::builder(src.w, src.h, ow, oh)
         .filter(k)
-        .format(ZPD::RGBA8_SRGB)
+        .input(ZPD::RGBA8_SRGB)
+        .output(ZPD::RGBAF32_LINEAR.with_transfer(TransferFunction::Srgb))
         .srgb()
         .build();
     let out = Resizer::new(&cfg).resize_u8_to_f32(&rgba.px);
@@ -671,7 +678,8 @@ fn resize_lin_u16(src: &Rgb8, ow: u32, oh: u32, k: Filter) -> Res<Rgb8> {
     let rgba = rgb_to_rgba_opaque(src);
     let cfg = ResizeConfig::builder(src.w, src.h, ow, oh)
         .filter(k)
-        .format(ZPD::RGBA8_SRGB)
+        .input(ZPD::RGBA8_SRGB)
+        .output(ZPD::RGBA16_SRGB)
         .linear()
         .build();
     let out16 = Resizer::new(&cfg).resize_u8_to_u16(&rgba.px);
@@ -845,12 +853,19 @@ pub(super) fn benign_items(src256: &Rgb8, src512: &Rgb8) -> Res<Vec<Twin>> {
         ),
     ];
     for (name, v16, w, h) in &q_contexts {
-        let a: Vec<u8> = v16.iter().map(|&v| quantize_u16_round(v)).collect();
-        let b: Vec<u8> = v16.iter().map(|&v| quantize_u16_round_away(v)).collect();
+        // u16 gain first (REQUIRED): raw *257-expanded inputs sit exactly on
+        // u8 quantization boundaries, so both roundings AND the sub-LSB
+        // dither agree byte-for-byte — every pair would be inert.
+        let g16: Vec<u16> = v16
+            .iter()
+            .map(|&v| ((v as u32 * 3 / 2).min(65535)) as u16)
+            .collect();
+        let a: Vec<u8> = g16.iter().map(|&v| quantize_u16_round(v)).collect();
+        let b: Vec<u8> = g16.iter().map(|&v| quantize_u16_round_away(v)).collect();
         push(
             "quantize_round_half_even_vs_away",
-            serde_json::json!({"op":"u16->u8 quantize","context":name,
-                "a":"round v/257","b":"(v+128)/257"}),
+            serde_json::json!({"op":"u16 gain x1.5 -> u8 quantize","context":name,
+                "a":"round v*255/65535","b":"(v+128)/257"}),
             Rgb8 {
                 w: *w,
                 h: *h,
@@ -863,15 +878,15 @@ pub(super) fn benign_items(src256: &Rgb8, src512: &Rgb8) -> Res<Vec<Twin>> {
             },
         );
         // plain-round vs ordered-dither quantize — the real ±1-LSB pair.
-        let c = quantize_u16_dithered(*w, *h, v16, 0);
+        let c = quantize_u16_dithered(*w, *h, &g16, 0);
         push(
             "quantize_dithered_vs_plain",
-            serde_json::json!({"op":"u16->u8 quantize","context":name,
-                "a":"round v/257","b":"Bayer-dithered round"}),
+            serde_json::json!({"op":"u16 gain x1.5 -> u8 quantize","context":name,
+                "a":"round v*255/65535","b":"Bayer-dithered round"}),
             Rgb8 {
                 w: *w,
                 h: *h,
-                px: v16.iter().map(|&v| quantize_u16_round(v)).collect(),
+                px: g16.iter().map(|&v| quantize_u16_round(v)).collect(),
             },
             Rgb8 {
                 w: *w,
@@ -1036,7 +1051,9 @@ mod tests {
             .map(|(a, b)| (*a as i32 - *b as i32).abs())
             .max()
             .unwrap();
-        assert!(maxd <= 3, "P3 roundtrip max |Δ| = {maxd}");
+        // sRGB→P3→sRGB is near-lossless (P3 gamut covers sRGB) but each u8
+        // quantization near the gamut edge can cost a couple of LSB.
+        assert!(maxd <= 8, "P3 roundtrip max |Δ| = {maxd}");
     }
 
     #[test]

@@ -164,9 +164,9 @@ pub(super) fn composite_over(fg: &Rgba8, bg: &Rgb8) -> Res<Rgb8> {
     })
 }
 
-/// Same composite as `composite_over` but routed through a u16 premultiplied
-/// intermediate — the second CORRECT implementation for benign drift
-/// (fixed-point vs float rounding of the identical operation).
+/// Same composite as `composite_over` — the identical LINEAR-light SrcOver
+/// operation — but routed through a u16 premultiplied intermediate instead of
+/// f32. Fixed-point vs float rounding of the same op: the benign-drift twin.
 pub(super) fn composite_over_u16(fg: &Rgba8, bg: &Rgb8) -> Res<Rgb8> {
     if (fg.w, fg.h) != (bg.w, bg.h) {
         return Err("composite dims differ".into());
@@ -179,12 +179,22 @@ pub(super) fn composite_over_u16(fg: &Rgba8, bg: &Rgb8) -> Res<Rgb8> {
         .iter()
         .zip(bg.px.as_chunks::<3>().0)
     {
-        let a = fp[3] as u32; // 0..255
-        let ia = 255 - a;
+        let a16 = fp[3] as u32 * 257; // u8 alpha -> u16, exact
+        let ia16 = 65535 - a16;
+        let af = fp[3] as f64 / 255.0;
         for c in 0..3 {
-            // premul in u16 domain: fg*a + bg*(255-a), all /255, +0.5 round.
-            let v = (fp[c] as u32 * a + bp[c] as u32 * ia + 127) / 255;
-            out.push(v.min(255) as u8);
+            // premultiplied linear u16 channels.
+            let fg16 = (linear_srgb::precise::srgb_to_linear_f64(fp[c] as f64 / 255.0)
+                * af
+                * 65535.0)
+                .round() as u32;
+            let bg16 = (linear_srgb::precise::srgb_to_linear_f64(bp[c] as f64 / 255.0)
+                * 65535.0)
+                .round() as u32;
+            // SrcOver on premultiplied u16: fg + bg*(1-a), +0.5 round.
+            let o16 = (fg16 * 65535 + bg16 * ia16 + 32767) / 65535;
+            let s = linear_srgb::precise::linear_to_srgb_f64(o16.min(65535) as f64 / 65535.0);
+            out.push((s * 255.0).round().clamp(0.0, 255.0) as u8);
         }
     }
     Ok(Rgb8 {
@@ -398,11 +408,14 @@ fn edge_idx(i: i32, n: u32, mode: EdgeFill) -> u32 {
         EdgeFill::Clamp => i.clamp(0, n - 1) as u32,
         EdgeFill::Wrap => i.rem_euclid(n) as u32,
         EdgeFill::Mirror => {
-            // reflect: -1 -> 1, n -> n-2 (classic mirror extension)
-            let period = 2 * n;
+            // reflect101 (edge pixel not repeated): -1 -> 1, n -> n-2
+            if n <= 1 {
+                return 0;
+            }
+            let period = 2 * (n - 1);
             let mut j = i.rem_euclid(period);
             if j >= n {
-                j = period - 1 - j;
+                j = period - j;
             }
             j as u32
         }

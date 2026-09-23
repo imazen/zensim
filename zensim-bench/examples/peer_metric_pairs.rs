@@ -219,7 +219,10 @@ fn main() {
                 let mut sha = String::new();
                 if let (Some(dir), Some(map)) = (&diffmaps, &dm) {
                     let bytes: Vec<u8> = map.iter().flat_map(|v| v.to_le_bytes()).collect();
-                    sha = format!("{:x}", Sha256::digest(&bytes));
+                    sha = Sha256::digest(&bytes)
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect();
                     std::fs::write(dir.join(format!("{}__butter.f32", row.key)), &bytes)
                         .expect("write butter diffmap");
                 }
