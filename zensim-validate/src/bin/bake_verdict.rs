@@ -2275,6 +2275,54 @@ fn zone_of(q_mid: f64) -> &'static str {
 /// The three zone labels in report order.
 const ZONE_LABELS: [&str; 3] = ["q<50", "q50-85", "q>=85"];
 
+/// Markdown for the per-codec SCALE-FREE step counts
+/// (`[strict forward, strict backwards, exact tie]` per codec), plus an `all`
+/// row. The fractions depend only on the ORDER of the scores along each
+/// ladder, so a reference metric in its own units (0..1, JOD, a distance
+/// negated to quality orientation) reads the same as it would on a 0..100
+/// dial. `correct (non-decreasing)` = forward + tie, the convention of the
+/// AIC2026 ladder panel (`scripts/aic2026_agreement.py`).
+fn per_codec_strict_markdown(counts: &std::collections::BTreeMap<String, [usize; 3]>) -> String {
+    let mut s = String::from(
+        "\nPer-codec scale-free steps (order only, \\|Δ\\| > 1e-9; reported, not gated):\n\n\
+         | codec | rung pairs | forward | backwards | tie | strict forward | strict backwards | exact tie | correct (non-decreasing) |\n\
+         |---|--:|--:|--:|--:|--:|--:|--:|--:|\n",
+    );
+    let mut all = [0usize; 3];
+    let row = |name: &str, c: &[usize; 3]| {
+        let n = c[0] + c[1] + c[2];
+        let f = |k: usize| {
+            if n > 0 {
+                c[k] as f64 / n as f64
+            } else {
+                f64::NAN
+            }
+        };
+        format!(
+            "| {name} | {n} | {} | {} | {} | {:.5} | {:.5} | {:.5} | {:.5} |\n",
+            c[0],
+            c[1],
+            c[2],
+            f(0),
+            f(1),
+            f(2),
+            if n > 0 {
+                (c[0] + c[2]) as f64 / n as f64
+            } else {
+                f64::NAN
+            }
+        )
+    };
+    for (codec, c) in counts {
+        for (a, v) in all.iter_mut().zip(c) {
+            *a += v;
+        }
+        s.push_str(&row(codec, c));
+    }
+    s.push_str(&row("all", &all));
+    s
+}
+
 /// Adjacent-rung outcome counts for one (split-key, zone) cell of the ladder
 /// grid. The six buckets are the SAME five mutually-exclusive outcomes the
 /// pooled G3 gate uses (plus the strict-inversion diagnostic), so a cell's
@@ -2760,6 +2808,13 @@ fn dial_panel(
     let mut tot_subres = 0usize; // 1e-9 < |Δ| ≤ MATERIAL_INV — expected oversampling
     let mut inv_mags: Vec<f64> = Vec::new(); // magnitudes of strict inversions
     let mut per_codec: BTreeMap<String, [usize; 4]> = BTreeMap::new();
+    // Per-codec SCALE-FREE step counts (2026-09-22, paper gates lane):
+    // [strict forward (Δ > 1e-9), strict backwards (Δ < −1e-9), exact tie].
+    // Every other count here is in the scorer's own units (the 0.5-pt
+    // materiality), which is meaningless for a reference metric on a 0..1 or
+    // JOD scale; these three are not, so peers and dials can be compared on
+    // the same ladders. Reported only; nothing gates on them.
+    let mut per_codec_strict: BTreeMap<String, [usize; 3]> = BTreeMap::new();
     // Ladder-inversion split (2026-08-31): the same five outcomes, bucketed by
     // (codec, zone) and (content class, zone). Nothing above changes — these
     // accumulate alongside so the split ALWAYS reconciles with the pooled gate.
@@ -2855,6 +2910,16 @@ fn dial_panel(
             let delta = s1 - s0;
             let zone = zone_of(0.5 * (q0 + q1));
             let strict = delta < -1e-9;
+            {
+                let sc = per_codec_strict.entry(codec.clone()).or_default();
+                if delta > 1e-9 {
+                    sc[0] += 1;
+                } else if strict {
+                    sc[1] += 1;
+                } else {
+                    sc[2] += 1;
+                }
+            }
             // five mutually-exclusive buckets summing to tot_pairs:
             //   0 forward | 1 material inversion | 2 codec-saturated
             //   3 flat/clamp dead-zone | 4 sub-resolution
@@ -3273,6 +3338,7 @@ fn dial_panel(
          zone + jxl-in-butteraugli-distance (0→0.3 step .025, 0.3→1 step .05, 1→3 step .2, \
          13→25 step 2; q-equiv = 100 − 4·distance)._\n",
     );
+    s.push_str(&per_codec_strict_markdown(&per_codec_strict));
     // The bake-independent census, if asked for. Written even when EMPTY: a
     // zero-row file with a header is the honest record that the rule ran and
     // found nothing, which an absent file cannot say.
@@ -6834,6 +6900,19 @@ mod tests {
         let v = load_peer_dial_scores(&f, &tiny_grid()).expect("join");
         assert_eq!(v, vec![1.5, 2.5, 3.5]);
         let _ = std::fs::remove_file(&f);
+    }
+
+    /// The scale-free per-codec table counts every rung pair exactly once and
+    /// its `correct` column is forward + tie (the AIC2026 panel's convention).
+    #[test]
+    fn per_codec_strict_table_counts_every_pair_once() {
+        let mut m = std::collections::BTreeMap::new();
+        m.insert("jpeg".to_string(), [6usize, 2, 2]);
+        m.insert("webp".to_string(), [3usize, 0, 1]);
+        let md = super::per_codec_strict_markdown(&m);
+        assert!(md.contains("| jpeg | 10 | 6 | 2 | 2 | 0.60000 | 0.20000 | 0.20000 | 0.80000 |"));
+        assert!(md.contains("| webp | 4 | 3 | 0 | 1 | 0.75000 | 0.00000 | 0.25000 | 1.00000 |"));
+        assert!(md.contains("| all | 14 | 9 | 2 | 3 | "));
     }
 
     /// Zone edges are a PRODUCT statement (aggressive / ordinary / near-lossless),
