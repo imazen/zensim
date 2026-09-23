@@ -1,5 +1,48 @@
 # Rev4 feature-bank implementation — worklog (2026-09-23)
 
+## Codex takeover audit (2026-09-23 UTC; supersedes stale numbers below)
+
+Lane `featbank-impl-fix` resumed Devin change `nwnuzsut` in this existing
+workspace. `jj diff --from 1881409d --to @` showed only a moved-evidence
+pointer, an env-gated C1/C3 diagnostic, and a tracked cargo-target symlink.
+The symlink is untracked and ignored; the two targets and evidence already
+reside under `/var/tmp/featbank-impl/`. No new workspace was created.
+
+| Review correction | Handover state verified from source/evidence |
+|---|---|
+| 1 ST table | Untouched; old medians and fits contradicted `st1.zenbench`. Corrected below. |
+| 2 bleed test | Untouched; textured/noisy fixture could fill the mask. |
+| 3 ladder | Untouched; docstring promises emitted monotonicity, code uses hidden magnitude with 2% slack. |
+| 4 encoded phase | Untouched; synthetic fixture only. |
+| 5 corpus gate | Untouched; ignored tests returned on missing assets and filtered KADID by digit. |
+| 6 C3 edges | Untouched; `TailEdges::build` used runtime `powf`. |
+| 7 definition revision | Partial diagnostic logging added, no calibrated definitions or corpus numbers. |
+| 8 API | Untouched; API snapshot mixed new variants with pre-existing `research::Dvifm*` rows. |
+| 9 commit pin | Placeholder remains by coordinator ruling. |
+| 10 footprint | Target/evidence moves done; one target symlink was tracked, worklog and manifest incomplete. |
+
+The calibration was preregistered in
+`benchmarks/rev4_featbank_impl_fix_prereg_2026-09-23.md` before reading the
+diagnostic histograms (sha256
+`ee2b9e2fbaabff338dae2e7b8696b8b74633ae339890b87627f652bfb6efd5c2`).
+The old ST claims and verdicts later in this file are historical and invalid;
+the following recomputation is authoritative.
+
+### Correction 1 — ST raw recomputation
+
+- UTC start/end: `2026-09-23T23:41:40Z` / `2026-09-23T23:41:40Z`; cwd:
+  `/home/lilith/work/zen/zensim--rev4-featbank`; command:
+  `python3 benchmarks/rev4_featbank_st_cost_recompute.py > /var/tmp/featbank-impl/st_recompute.txt`;
+  exit `0`; output sha256 `43b7435ad2faa623ca96ee04f346bb1a97aa06f60b492b085f135a7fb7a50e83`.
+  Input `st1.zenbench` sha256
+  `8ee4e59b1c033a582aefa0bf14552818ef9ca437d777603120fc01ba0f5197ec`.
+- Exact source lines: `MEDIAN 1024 fold944_full=63.02167 fold986_dvifm=101.87249
+  gridblk=117.25398 ringbasis=134.00389 tailhist=184.55656
+  arttype=105.53152 rev4_all=230.52894`; `FIT arttype
+  alpha_ms=-0.601293 beta_ns_px=2.320346 r2=0.986581 fit_pct=2.906565
+  raw_pct=5.805992`. The other fit lines are retained verbatim in the
+  hashed output. C4 ST is **borderline: fitted +2.9% passes, raw +5.8% misses**.
+
 Lane `rev4-featbank` (implementation), workspace `../zensim--rev4-featbank`,
 parent `main@origin` `e6ce1565` ("docs: Rev4 feature bank plan (featbank design lane)").
 Scratch: `/var/tmp/featbank-impl/rev4-gate/`. Design/qualification record:

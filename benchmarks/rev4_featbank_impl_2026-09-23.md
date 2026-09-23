@@ -307,38 +307,42 @@ noisy rounds and several drift-correlated arms — recorded, not hidden.
 20 rounds/size (8 at the larger sizes), raw rounds saved to
 `/var/tmp/featbank-impl/evidence/st1.zenbench`
 (sha256 `8ee4e59b`; see `rev4_cost_2026-09-23.pointer.md`).
+These rounds predate the C1/C3 definition revision above. The table
+recomputes the recorded rounds; no post-revision cost rerun is claimed.
 
 Medians (ms), sizes 256/1024/2048/4096²:
 
 | arm | 256² | 1024² | 2048² | 4096² |
 |---|---|---|---|---|
-| fold944_full | 3.34 | 63.07 | 271.05 | 1127.9 |
-| fold986_dvifm (OFF) | 6.38 | 101.93 | 422.41 | 1706.7 |
-| +C1 gridblk | 6.68 | 116.66 | 472.46 | 1926.6 |
-| +C2 ringbasis | 8.09 | 133.13 | 540.20 | 2161.5 |
-| +C3 tailhist | 11.05 | 184.10 | 739.55 | 2971.0 |
-| +C4 arttype | 6.40 | 105.66 | 429.25 | 1761.8 |
-| +all four (f1322) | 14.13 | 231.54 | 923.89 | 3735.3 |
+| fold944_full | 3.10 | 63.02 | 271.00 | 1113.96 |
+| fold986_dvifm (OFF) | 5.92 | 101.87 | 422.85 | 1714.06 |
+| +C1 gridblk | 6.38 | 117.25 | 472.15 | 1925.50 |
+| +C2 ringbasis | 7.75 | 134.00 | 540.42 | 2153.89 |
+| +C3 tailhist | 10.48 | 184.56 | 739.21 | 2974.86 |
+| +C4 arttype | 6.01 | 105.53 | 428.98 | 1753.03 |
+| +all four (f1322) | 13.20 | 230.53 | 925.48 | 3716.31 |
 
 `α + β·px` fits on the marginal family cost (arm − fold986_dvifm),
-r² = 1.0000 — strictly O(px):
+from the four raw medians per arm in `st1.zenbench` (recompute with
+`python3 benchmarks/rev4_featbank_st_cost_recompute.py`):
 
 | family | α (ms) | β (ns/px) | 1024² marginal | vs fold944_full | budget | verdict |
 |---|---|---|---|---|---|---|
-| C1 gridblk | −1.28 | 13.1 | +14.7 ms | **+23.4 %** | ≤ +5 % | MISS (4.7×) |
-| C2 ringbasis | +2.24 | 27.0 | +31.2 ms | **+49.5 %** | ≤ +2 % | MISS (25×) |
-| C3 tailhist | +1.42 | 75.3 | +82.2 ms | **+130.3 %** | ≤ +8 % | MISS (16×) |
-| C4 arttype | −1.99 | 3.3 | +3.7 ms | **+5.9 %** | ≤ +3 % | MISS (2×) |
-| all four | −0.63 | 120.9 | +129.6 ms | **+205.5 %** | ≤ +15 % | MISS (14×) |
+| C1 gridblk | −0.345 | 12.6 | +12.9 ms | **+20.4 %** (raw +24.4 %) | ≤ +5 % | MISS |
+| C2 ringbasis | +4.070 | 26.0 | +31.4 ms | **+49.8 %** (raw +51.0 %) | ≤ +2 % | MISS |
+| C3 tailhist | +1.696 | 75.1 | +80.4 ms | **+127.6 %** (raw +131.2 %) | ≤ +8 % | MISS |
+| C4 arttype | −0.601 | 2.3 | +1.8 ms | **+2.9 %** (raw +5.8 %) | ≤ +3 % | borderline: fitted value passes, raw median misses |
+| all four | +1.742 | 119.3 | +126.8 ms | **+201.2 %** (raw +204.1 %) | ≤ +15 % | MISS |
 
-Every family misses its registered budget — recorded plainly per the
-brief, no definition tuning. The β decomposition is consistent with
+The C4 ST result is borderline: the fitted value passes, the raw median
+misses. C1, C2, C3 and all-four miss. C4's fit has r² = 0.9866; the other
+fits have r² ≥ 0.9994. The β decomposition is consistent with
 the mechanism: C3 pays ~16M `partition_point`+increment scatters per
 1024²-image (4 maps × 12 cells' worth of pixels ≈ 75 ns/px); C2 pays
 six hat evals on every gradient pixel (27 ns/px); C1 pays a full
 extra V8 pass over every boundary plus the on-grid hat rescan
-(13 ns/px); C4 is nearly free (3 ns/px) but still outside its 3 %
-band. Sum of family βs (118.8) ≈ the all-four fit (120.9) — no
+(13 ns/px); C4 is the smallest marginal (2.3 ns/px). Sum of family
+βs (116.0) ≈ the all-four fit (119.3) — no
 interaction term worth reporting.
 
 ### Peak memory (`/usr/bin/time -v` + heaptrack, serial)
@@ -389,7 +393,7 @@ Medians (ms), sizes 256/1024/2048/4096²:
 | C4 arttype | +0.47 | 1.3 | +1.9 ms | **+7.5 %** (median +4.3 %) | ≤ +3 % | MISS |
 | all four | −0.71 | 46.8 | +48.4 ms | **+193.4 %** | ≤ +15 % | MISS |
 
-The marginal work parallelizes (β drops ~2.6× ST→MT8: 120.9 → 46.8
+The marginal work parallelizes (β drops ~2.6× ST→MT8: 119.3 → 46.8
 ns/px all-four) but `fold944_full` speeds up too, so the budget ratios
 move only modestly and every family still misses at MT8. C4 is the
 nearest to its band (+4.3 % raw median marginal vs a +3 % budget).

@@ -109,89 +109,99 @@
   "raw": "/var/tmp/featbank-impl/evidence/st1.zenbench",
   "medians_ms": {
    "256": {
-    "fold944_full": 3.34,
-    "fold986_dvifm": 6.38,
-    "gridblk": 6.68,
-    "ringbasis": 8.09,
-    "tailhist": 11.05,
-    "arttype": 6.4,
-    "rev4_all": 14.13
+    "fold944_full": 3.1,
+    "fold986_dvifm": 5.92,
+    "gridblk": 6.38,
+    "ringbasis": 7.75,
+    "tailhist": 10.48,
+    "arttype": 6.01,
+    "rev4_all": 13.2
    },
    "1024": {
-    "fold944_full": 63.07,
-    "fold986_dvifm": 101.93,
-    "gridblk": 116.66,
-    "ringbasis": 133.13,
-    "tailhist": 184.1,
-    "arttype": 105.66,
-    "rev4_all": 231.54
+    "fold944_full": 63.02,
+    "fold986_dvifm": 101.87,
+    "gridblk": 117.25,
+    "ringbasis": 134.0,
+    "tailhist": 184.56,
+    "arttype": 105.53,
+    "rev4_all": 230.53
    },
    "2048": {
-    "fold944_full": 271.05,
-    "fold986_dvifm": 422.41,
-    "gridblk": 472.46,
-    "ringbasis": 540.2,
-    "tailhist": 739.55,
-    "arttype": 429.25,
-    "rev4_all": 923.89
+    "fold944_full": 271.0,
+    "fold986_dvifm": 422.85,
+    "gridblk": 472.15,
+    "ringbasis": 540.42,
+    "tailhist": 739.21,
+    "arttype": 428.98,
+    "rev4_all": 925.48
    },
    "4096": {
-    "fold944_full": 1127.9,
-    "fold986_dvifm": 1706.7,
-    "gridblk": 1926.6,
-    "ringbasis": 2161.5,
-    "tailhist": 2971.0,
-    "arttype": 1761.8,
-    "rev4_all": 3735.3
+    "fold944_full": 1113.96,
+    "fold986_dvifm": 1714.06,
+    "gridblk": 1925.5,
+    "ringbasis": 2153.89,
+    "tailhist": 2974.86,
+    "arttype": 1753.03,
+    "rev4_all": 3716.31
    }
   },
   "marginal_fit_alpha_beta_ns_per_px": {
    "gridblk": {
-    "alpha_ms": -1.28,
-    "beta_ns_px": 13.1
+    "alpha_ms": -0.345,
+    "beta_ns_px": 12.6,
+    "r2": 0.9994
    },
    "ringbasis": {
-    "alpha_ms": 2.24,
-    "beta_ns_px": 27.0
+    "alpha_ms": 4.07,
+    "beta_ns_px": 26.0,
+    "r2": 0.9997
    },
    "tailhist": {
-    "alpha_ms": 1.42,
-    "beta_ns_px": 75.3
+    "alpha_ms": 1.696,
+    "beta_ns_px": 75.1,
+    "r2": 1.0
    },
    "arttype": {
-    "alpha_ms": -1.99,
-    "beta_ns_px": 3.3
+    "alpha_ms": -0.601,
+    "beta_ns_px": 2.3,
+    "r2": 0.9866
    },
    "all_four": {
-    "alpha_ms": -0.63,
-    "beta_ns_px": 120.9
+    "alpha_ms": 1.742,
+    "beta_ns_px": 119.3,
+    "r2": 1.0
    }
   },
   "budget_1024_marginal_pct_of_fold944_full": {
    "gridblk": {
-    "measured": 23.4,
+    "measured": 20.4,
     "budget": 5,
-    "verdict": "MISS"
+    "verdict": "MISS",
+    "raw_median": 24.4
    },
    "ringbasis": {
-    "measured": 49.5,
+    "measured": 49.8,
     "budget": 2,
-    "verdict": "MISS"
+    "verdict": "MISS",
+    "raw_median": 51.0
    },
    "tailhist": {
-    "measured": 130.3,
+    "measured": 127.6,
     "budget": 8,
-    "verdict": "MISS"
+    "verdict": "MISS",
+    "raw_median": 131.2
    },
    "arttype": {
-    "measured": 5.9,
+    "measured": 2.9,
     "budget": 3,
-    "verdict": "MISS"
+    "verdict": "borderline: fitted value passes, raw median misses",
+    "raw_median": 5.8
    },
    "all_four": {
-    "measured": 205.5,
+    "measured": 201.2,
     "budget": 15,
-    "verdict": "MISS"
+    "verdict": "MISS",
+    "raw_median": 204.1
    }
   }
  },
@@ -312,6 +322,6 @@
     "verdict": "MISS"
    }
   },
-  "note": "marginal beta drops ~2.6x ST->MT8 (120.9 -> 46.8 ns/px all-four) but fold944_full speeds up too; all budget verdicts remain MISS"
+  "note": "marginal beta drops ~2.6x ST->MT8 (119.3 -> 46.8 ns/px all-four) but fold944_full speeds up too; all budget verdicts remain MISS"
  }
 }
