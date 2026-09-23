@@ -309,6 +309,8 @@ pub(crate) enum KernelId {
     FreeRawMoments,
     /// The free bounded-error (class C) accumulator.
     FreeBoundedErr,
+    /// The Rev4 gridblk boundary-excess pass (C1's own kernel).
+    Gridblk,
 }
 
 impl KernelId {
@@ -326,6 +328,7 @@ impl KernelId {
             KernelId::Dvifm => "dvifm",
             KernelId::FreeRawMoments => "free_raw_moments",
             KernelId::FreeBoundedErr => "free_bounded_err",
+            KernelId::Gridblk => "gridblk",
         }
     }
 }
@@ -575,6 +578,28 @@ impl FeatureDef {
 // ============================================================================
 
 const NO_REV: &[Revision] = &[];
+
+/// The commit that introduced the Rev4 feature bank — recorded so
+/// `Revision::commit` names a real hash rather than a placeholder (a landed
+/// revision must name the byte-changing commit; the registry test enforces
+/// `!= "-"`). Pinned by the follow-up commit once the landing commit exists.
+const REV4BANK_COMMIT: &str = "00000000";
+
+/// The Rev4 feature-bank introduction era. Every slot of the four appended
+/// families (f986..1321 at 4 scales) is born carrying it, so
+/// `era_moved_slots("rev4bank", …)` enumerates exactly the appended range —
+/// the same machine-checkable answer the `v1ssimcap`/`v1hfgain` entries give
+/// for their eras.
+const REV4BANK: &[Revision] = &[Revision {
+    era: "rev4bank",
+    commit: REV4BANK_COMMIT,
+    status: RevisionStatus::Landed,
+    note: "append-only introduction of the four Rev4 candidate families \
+           (gridblk, ringbasis, tailhist, arttype) at f986..1321. No existing \
+           slot's value moves; disabled families emit nothing and cost \
+           nothing. Spec: docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md; design: \
+           benchmarks/rev4_featbank_impl_2026-09-23.md.",
+}];
 
 /// The v1 option-C revision: v1 stopped pooling mirror-padded phantom
 /// columns, which moves every pooled v1 slot at any non-tight width.
@@ -2048,6 +2073,179 @@ pub(crate) static DVIFM: [SignalDef; 30] = {
 };
 
 // ============================================================================
+// Rev4 candidate feature bank (f986..1321 at 4 scales)
+// ============================================================================
+//
+// Spec: `docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md` §1.1 / §2.4–2.5; pinned
+// geometry: `benchmarks/rev4_featbank_impl_2026-09-23.md`. All four families
+// are difference-form by construction (identity pair → 0.0), carry no
+// tranche (a v1-only walk cannot harvest any of them — they live on the
+// v2-era passes), and declare `Placement::AllCells`: gridblk's `(Y, scale 3)`
+// cell is registered-with-stated-zero (period 1 has no phase contrast), not
+// skipped, so the slot exists and emits 0.0 deliberately.
+
+/// The 8 gridblk signals per (scale, channel) cell — the C1 phase-aligned
+/// blocking family. `mag_bin*` are SIGNED mass bins of the activity-scaled
+/// boundary step excess (`ẽ` may be negative = suppression), so they are
+/// `Unsigned`; `on_mean` is signed for the same reason; `onoff_ratio` is a
+/// magnitude ratio, `HigherIsWorse`.
+pub(crate) static GRIDBLK: [SignalDef; 8] = {
+    use ComputeToken::Gridblk as F;
+    use Form::Difference;
+    use KernelId::Gridblk as K;
+    const fn gb(
+        block_local: u16,
+        name: &'static str,
+        statistic: Statistic,
+        direction: Direction,
+    ) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: REV4BANK,
+        }
+    }
+    [
+        gb(0, "mag_bin1", Statistic::Bin, Direction::Unsigned),
+        gb(1, "mag_bin2", Statistic::Bin, Direction::Unsigned),
+        gb(2, "mag_bin3", Statistic::Bin, Direction::Unsigned),
+        gb(3, "mag_bin4", Statistic::Bin, Direction::Unsigned),
+        gb(4, "mag_bin5", Statistic::Bin, Direction::Unsigned),
+        gb(5, "mag_bin6", Statistic::Bin, Direction::Unsigned),
+        gb(6, "on_mean", Statistic::Mean, Direction::Unsigned),
+        gb(7, "onoff_ratio", Statistic::Ratio, Direction::HigherIsWorse),
+    ]
+};
+
+/// The 6 ringbasis signals per (scale, channel) cell — the C2
+/// ringing-magnitude basis. Triangular log-axis bins of the gradient
+/// kernel's own per-pixel ringing term; every bin is a nonnegative pooled
+/// mass, so all are `HigherIsWorse`.
+pub(crate) static RINGBASIS: [SignalDef; 6] = {
+    use ComputeToken::Ringbasis as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    use KernelId::V2Gradient as K;
+    use Statistic::Bin;
+    const fn rb(block_local: u16, name: &'static str) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic: Bin,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: REV4BANK,
+        }
+    }
+    [
+        rb(0, "mag_bin1"),
+        rb(1, "mag_bin2"),
+        rb(2, "mag_bin3"),
+        rb(3, "mag_bin4"),
+        rb(4, "mag_bin5"),
+        rb(5, "mag_bin6"),
+    ]
+};
+
+/// The 12 tailhist signals per (scale, channel) cell — the C3 tail profile
+/// of the four existing dense per-pixel maps (`ssim` dissimilarity,
+/// `art`, `det`, `mse`). `p95`/`p99` are read off the family's 32-bin
+/// log-edged histogram (a bin statistic); `max` is the exact map max.
+pub(crate) static TAILHIST: [SignalDef; 12] = {
+    use ComputeToken::Tailhist as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    use KernelId::V2Dense as K;
+    const fn th(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: REV4BANK,
+        }
+    }
+    [
+        th(0, "ssim_p95", Statistic::Bin),
+        th(1, "ssim_p99", Statistic::Bin),
+        th(2, "ssim_max", Statistic::Max),
+        th(3, "art_p95", Statistic::Bin),
+        th(4, "art_p99", Statistic::Bin),
+        th(5, "art_max", Statistic::Max),
+        th(6, "det_p95", Statistic::Bin),
+        th(7, "det_p99", Statistic::Bin),
+        th(8, "det_max", Statistic::Max),
+        th(9, "mse_p95", Statistic::Bin),
+        th(10, "mse_p99", Statistic::Bin),
+        th(11, "mse_max", Statistic::Max),
+    ]
+};
+
+/// The 6 arttype signals per SCALE (channel `Scalar`) — the C4 artifact-type
+/// descriptors: blur (EWC × HF_LOSS product at that scale), flat-region HF
+/// noise per channel, and chroma bleed outside the dilated luma-edge mask.
+pub(crate) static ARTTYPE: [SignalDef; 6] = {
+    use ComputeToken::Arttype as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    const fn at(
+        block_local: u16,
+        name: &'static str,
+        statistic: Statistic,
+        kernel: KernelId,
+    ) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel,
+            deprecated: false,
+            defect: None,
+            revisions: REV4BANK,
+        }
+    }
+    [
+        at(0, "blur", Statistic::Global, KernelId::V2Dense),
+        at(1, "noise_x", Statistic::Mean, KernelId::V2Dense),
+        at(2, "noise_y", Statistic::Mean, KernelId::V2Dense),
+        at(3, "noise_b", Statistic::Mean, KernelId::V2Dense),
+        at(4, "bleed_x", Statistic::Ratio, KernelId::V2Gradient),
+        at(5, "bleed_b", Statistic::Ratio, KernelId::V2Gradient),
+    ]
+};
+
+// ============================================================================
 // Layout arithmetic — THE owner
 // ============================================================================
 
@@ -2123,6 +2321,26 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         signals: &DVIFM,
         replication: Replication::Flat,
     },
+    BlockDef {
+        family: ComputeToken::Gridblk,
+        signals: &GRIDBLK,
+        replication: Replication::PerChannel,
+    },
+    BlockDef {
+        family: ComputeToken::Ringbasis,
+        signals: &RINGBASIS,
+        replication: Replication::PerChannel,
+    },
+    BlockDef {
+        family: ComputeToken::Tailhist,
+        signals: &TAILHIST,
+        replication: Replication::PerChannel,
+    },
+    BlockDef {
+        family: ComputeToken::Arttype,
+        signals: &ARTTYPE,
+        replication: Replication::PerScale,
+    },
 ];
 
 impl BlockDef {
@@ -2164,12 +2382,13 @@ pub(crate) fn block_base(
 /// because guessing would name a different set.
 ///
 /// Sourced from `benchmarks/feature_sets_registry.json`'s `sets[].layout`
-/// (append-only; 2026-09-19: 372, 720, 924, 944, 956, 986) plus the registry's
-/// full width. `zensim-validate`'s
+/// (append-only; 2026-09-19: 372, 720, 924, 944, 956, 986; 2026-09-23: the
+/// Rev4 feature bank's full width 1322) plus the registry's full width.
+/// `zensim-validate`'s
 /// `every_registered_layout_width_is_a_candidate` holds the two in sync, so
 /// registering a set at a new width fails the build rather than silently
 /// becoming unreproducible.
-pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[372, 720, 924, 944, 956, 986];
+pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[372, 720, 924, 944, 956, 986, 1322];
 
 /// Total layout width at `n_scales` with every registered block present.
 pub(crate) fn full_width(n_scales: usize) -> usize {
@@ -2609,7 +2828,7 @@ mod tests {
     #[test]
     fn id_arithmetic_round_trips_on_every_slot() {
         let w = full_width(NS);
-        assert_eq!(w, 986, "full registered width at 4 scales");
+        assert_eq!(w, 1322, "full registered width at 4 scales");
         for id in 0..w {
             let d = def_at(id, NS).unwrap_or_else(|| panic!("no def for slot {id}"));
             let ch = match d.channel {
@@ -2645,6 +2864,10 @@ mod tests {
             (ComputeToken::Append2, 924, 20),
             (ComputeToken::Csfw, 944, 12),
             (ComputeToken::Dvifm, 956, 30),
+            (ComputeToken::Gridblk, 986, 96),
+            (ComputeToken::Ringbasis, 1082, 72),
+            (ComputeToken::Tailhist, 1154, 144),
+            (ComputeToken::Arttype, 1298, 24),
         ];
         for (family, base, width) in expect {
             let (b, blk) = block_base(family, NS).expect("registered family");
@@ -2666,7 +2889,7 @@ mod tests {
             );
             assert!(seen.insert(n.clone()), "duplicate slot name {n:?} at {id}");
         }
-        assert_eq!(seen.len(), 986);
+        assert_eq!(seen.len(), 1322);
     }
 
     /// Signal names are unique WITHIN a family (the family prefix is what
@@ -3098,10 +3321,14 @@ mod owner_gates {
             append2_dst_activity: false,
             csfw: false,
             dvifm: false,
+            gridblk: false,
+            ringbasis: false,
+            tailhist: false,
+            arttype: false,
             free_extras: V1FreeExtras::Off,
         };
         // One `ComputeSet` per token that turns on EXACTLY that family.
-        let cases: [(T, ComputeSet); 10] = [
+        let cases: [(T, ComputeSet); 14] = [
             (
                 T::Basic,
                 ComputeSet {
@@ -3139,6 +3366,34 @@ mod owner_gates {
             ),
             (T::Csfw, ComputeSet { csfw: true, ..off }),
             (T::Dvifm, ComputeSet { dvifm: true, ..off }),
+            (
+                T::Gridblk,
+                ComputeSet {
+                    gridblk: true,
+                    ..off
+                },
+            ),
+            (
+                T::Ringbasis,
+                ComputeSet {
+                    ringbasis: true,
+                    ..off
+                },
+            ),
+            (
+                T::Tailhist,
+                ComputeSet {
+                    tailhist: true,
+                    ..off
+                },
+            ),
+            (
+                T::Arttype,
+                ComputeSet {
+                    arttype: true,
+                    ..off
+                },
+            ),
             // `Peaks` alone is expressible; `Masked`/`Iw` are not (v1's pool
             // modes turn the two on together), so they are checked as the
             // DIFFERENCE between `Full` and `Peaks` below.

@@ -169,14 +169,23 @@ impl Plan {
         let append = append || append2;
         let csfw = touches(ComputeToken::Csfw);
         let dvifm = touches(ComputeToken::Dvifm);
+        let gridblk = touches(ComputeToken::Gridblk);
+        let ringbasis = touches(ComputeToken::Ringbasis);
+        let tailhist = touches(ComputeToken::Tailhist);
+        let arttype = touches(ComputeToken::Arttype);
         // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
         // request implies the v2-era pass regardless of what else is asked.
         // DVIFM is the same shape (`dvifm_block && v2_blocks`), one block up.
+        // The four Rev4 feature-bank families are `rev4_* && v2_blocks` too.
         let v2_blocks = (touches(ComputeToken::V2) && outside_tranche(ComputeToken::V2))
             || append
             || append2
             || csfw
-            || dvifm;
+            || dvifm
+            || gridblk
+            || ringbasis
+            || tailhist
+            || arttype;
 
         // Free extras: only meaningful when the owning block is NOT running.
         let free_extras = if touches(ComputeToken::ClassC) && !append {
@@ -215,12 +224,17 @@ impl Plan {
                 .iter_slots()
                 .filter_map(|id| {
                     let d = crate::feature_defs::def_at(id, ns)?;
-                    (id >= 372).then_some((d.scale, d.signal.name))
+                    (id >= 372).then_some(d)
                 })
-                .fold(0, |mask, (scale, name)| {
-                    let bit = 1 << scale;
-                    if name == "edge_width_change" {
-                        let s = usize::from(scale).min(ns - 2);
+                .fold(0, |mask, d| {
+                    let bit = 1 << d.scale;
+                    // `edge_width_change` at scale s reads the gradient sums
+                    // of s and s+1 — and arttype's `blur` multiplies that
+                    // same finished slot, so it inherits the dependency.
+                    if d.signal.name == "edge_width_change"
+                        || (d.signal.family == ComputeToken::Arttype && d.signal.name == "blur")
+                    {
+                        let s = usize::from(d.scale).min(ns - 2);
                         mask | (1 << s) | (1 << (s + 1))
                     } else {
                         mask | bit
@@ -236,6 +250,10 @@ impl Plan {
             append2_dst_activity: false,
             csfw,
             dvifm,
+            gridblk,
+            ringbasis,
+            tailhist,
+            arttype,
             free_extras,
         };
         let mut requested = requested;
@@ -428,6 +446,10 @@ impl Plan {
             append2_dst_activity: false,
             csfw: false,
             dvifm: false,
+            gridblk: false,
+            ringbasis: false,
+            tailhist: false,
+            arttype: false,
             free_extras: V1FreeExtras::Off,
         };
         Plan::normalized(compute, Layout::identity(layout_width))
@@ -483,6 +505,12 @@ impl Plan {
             append2_block: layout.append2,
             csfw_block: layout.csfw,
             dvifm_block: layout.dvifm,
+            // The Rev4 feature bank extends the nested chain: each family's
+            // layout flag is on when the declared width reaches its base.
+            rev4_gridblk: layout.gridblk,
+            rev4_ringbasis: layout.ringbasis,
+            rev4_tailhist: layout.tailhist,
+            rev4_arttype: layout.arttype,
             // A sub-toggle that REFINES a block cannot outlive it: the walk
             // asserts `append2_dst_activity => append2_block`. `everything`
             // (the fallback compute set for a wide bake) turns it on
@@ -562,6 +590,10 @@ impl Plan {
             append2_dst_activity: a.append2_dst_activity || b.append2_dst_activity,
             csfw: a.csfw || b.csfw,
             dvifm: a.dvifm || b.dvifm,
+            gridblk: a.gridblk || b.gridblk,
+            ringbasis: a.ringbasis || b.ringbasis,
+            tailhist: a.tailhist || b.tailhist,
+            arttype: a.arttype || b.arttype,
             free_extras: free_union(a.free_extras, b.free_extras),
         };
         let _ = ns;
@@ -583,6 +615,10 @@ struct LayoutBlocks {
     append2: bool,
     csfw: bool,
     dvifm: bool,
+    gridblk: bool,
+    ringbasis: bool,
+    tailhist: bool,
+    arttype: bool,
 }
 
 impl LayoutBlocks {
@@ -591,11 +627,19 @@ impl LayoutBlocks {
         let append2 = append && width > base_of(ComputeToken::Append2, ns);
         let csfw = append2 && width > base_of(ComputeToken::Csfw, ns);
         let dvifm = csfw && width > base_of(ComputeToken::Dvifm, ns);
+        let gridblk = dvifm && width > base_of(ComputeToken::Gridblk, ns);
+        let ringbasis = gridblk && width > base_of(ComputeToken::Ringbasis, ns);
+        let tailhist = ringbasis && width > base_of(ComputeToken::Tailhist, ns);
+        let arttype = tailhist && width > base_of(ComputeToken::Arttype, ns);
         Self {
             append,
             append2,
             csfw,
             dvifm,
+            gridblk,
+            ringbasis,
+            tailhist,
+            arttype,
         }
     }
 }

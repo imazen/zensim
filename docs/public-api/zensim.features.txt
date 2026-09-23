@@ -16,7 +16,7 @@
 #   inherent methods                           60
 #   struct fields                              50
 #   enum variants                              14
-#   trait roster entries (type × trait)        51
+#   trait roster entries (type × trait)        53
 #   auto-trait-complete types                  18
 #   auto-trait exceptions                       1
 #
@@ -193,9 +193,10 @@ pub const WEIGHTS: &[f64; 228]
 pub fn compute_iw_weights(&[f32], usize, usize, usize, IwWeightConfig) -> alloc::vec::Vec<f32>
 pub fn try_score_from_features(&[f64], &[f64]) -> core::result::Result<(f64, f64), ZensimError>
 
-## trait impls (16 types)
+## trait impls (17 types)
 
 AlphaStratifiedStats: Clone, Debug
+AttributionResult: Clone, Debug
 AttributionSession: Default
 BlurKernel: Clone, Copy, Debug, Default, Eq, PartialEq
 ClassifiedResult: Clone, Debug

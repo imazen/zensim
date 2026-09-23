@@ -10,14 +10,14 @@
 ## summary
 #
 #   pub modules                                 7
-#   pub types (struct/enum/trait/alias)        23
+#   pub types (struct/enum/trait/alias)        26
 #   pub consts/statics                          7
 #   free functions                             36
-#   inherent methods                          141
-#   struct fields                             104
-#   enum variants                              28
-#   trait roster entries (type × trait)       110
-#   auto-trait-complete types                  21
+#   inherent methods                          169
+#   struct fields                             109
+#   enum variants                              32
+#   trait roster entries (type × trait)       121
+#   auto-trait-complete types                  24
 #
 # per-module pub lines:
 #   (root)                           34
@@ -27,15 +27,17 @@
 #   det_math                         13
 #   f64                               3
 #   feature_set_id                    5
-#   feature_v2                       22
+#   feature_v2                       26
 #   fold_engine                       8
 #   profile                           1
-#   research                        107
+#   research                        143
 #   score_math                       26
 #   source                            4
 
-## items (346 lines)
+## items (386 lines)
 
+#[non_exhaustive] pub struct research::DvifmFieldMap
+#[non_exhaustive] pub struct research::DvifmLevelField
 pub const fn det_math::PowForm::for_revision(feature_v2::FormulaRevision) -> Self
 pub const ZENTRAIN_FEATURE_IDS_KEY: &str
 pub const corruption_head::FORMAT_VERSION: u16
@@ -48,6 +50,7 @@ pub enum det_math::PowForm
 pub enum feature_v2::FormulaRevision
 pub enum fold_engine::ScoringEngine
 pub enum research::DvifmBand
+pub enum research::DvifmInputPlane
 pub enum research::ResearchError
 pub enum research::RevisionRef
 pub fn f64::det_exp(self, det_math::PowForm) -> Self
@@ -165,6 +168,31 @@ pub fn research::DvifmBand::eq(&self, &research::DvifmBand) -> bool
 pub fn research::DvifmBand::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn research::DvifmBlockStats::clone(&self) -> research::DvifmBlockStats
 pub fn research::DvifmBlockStats::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::DvifmFieldMap::clone(&self) -> research::DvifmFieldMap
+pub fn research::DvifmFieldMap::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::DvifmFieldMap::levels(&self) -> &[research::DvifmLevelField]
+pub fn research::DvifmFieldMap::plane(&self) -> research::DvifmInputPlane
+pub fn research::DvifmInputPlane::assert_fields_are_eq(&self)
+pub fn research::DvifmInputPlane::clone(&self) -> research::DvifmInputPlane
+pub fn research::DvifmInputPlane::default() -> research::DvifmInputPlane
+pub fn research::DvifmInputPlane::eq(&self, &research::DvifmInputPlane) -> bool
+pub fn research::DvifmInputPlane::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::DvifmLevelField::block_grid(&self) -> (u32, u32)
+pub fn research::DvifmLevelField::clone(&self) -> research::DvifmLevelField
+pub fn research::DvifmLevelField::dims(&self) -> (u32, u32)
+pub fn research::DvifmLevelField::eps_blocks(&self) -> &[f64]
+pub fn research::DvifmLevelField::eps_map(&self) -> &AttributionResult
+pub fn research::DvifmLevelField::err_blocks(&self) -> &[f64]
+pub fn research::DvifmLevelField::err_plane(&self) -> &[f32]
+pub fn research::DvifmLevelField::f1(&self) -> f64
+pub fn research::DvifmLevelField::f1_sum(&self) -> f64
+pub fn research::DvifmLevelField::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn research::DvifmLevelField::level(&self) -> usize
+pub fn research::DvifmLevelField::n_blocks(&self) -> usize
+pub fn research::DvifmLevelField::query_eps(&self, f64, f64, f64, f64) -> f64
+pub fn research::DvifmLevelField::query_eps_scale0(&self, u32, u32, u32, u32) -> f64
+pub fn research::DvifmLevelField::vis_blocks(&self) -> &[f64]
+pub fn research::DvifmLevelField::vis_plane(&self) -> &[f32]
 pub fn research::DvifmLevelSpec::clone(&self) -> research::DvifmLevelSpec
 pub fn research::DvifmLevelSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn research::DvifmSpec::clone(&self) -> research::DvifmSpec
@@ -172,6 +200,7 @@ pub fn research::DvifmSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::f
 pub fn research::Extraction::build_commit(&self) -> &str
 pub fn research::Extraction::clone(&self) -> research::Extraction
 pub fn research::Extraction::dvifm_blocks(&self) -> core::option::Option<&research::DvifmBlockStats>
+pub fn research::Extraction::dvifm_fields(&self) -> core::option::Option<&research::DvifmFieldMap>
 pub fn research::Extraction::emitted(&self) -> &feature_set_id::SlotSet
 pub fn research::Extraction::feature_set_id(&self) -> core::option::Option<&feature_set_id::FeatureSetId>
 pub fn research::Extraction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -191,7 +220,9 @@ pub fn research::FeatureProvenance::fmt(&self, &mut core::fmt::Formatter<'_>) ->
 pub fn research::Request::at_revision(self, research::RevisionRef) -> research::Request
 pub fn research::Request::clone(&self) -> research::Request
 pub fn research::Request::collect_dvifm_blocks(self, bool) -> research::Request
+pub fn research::Request::collect_dvifm_fields(self, bool) -> research::Request
 pub fn research::Request::dense(self) -> research::Request
+pub fn research::Request::dvifm_spec(&self) -> core::option::Option<&research::DvifmSpec>
 pub fn research::Request::everything() -> research::Request
 pub fn research::Request::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn research::Request::for_bake_bytes(&[u8]) -> core::result::Result<research::Request, research::ResearchError>
@@ -323,6 +354,10 @@ pub feature_v2::FormulaRevision::Rev2
 pub feature_v2::FormulaRevision::Rev3
 pub feature_v2::V2NewFeatureToggles::formula_revision: feature_v2::FormulaRevision
 pub feature_v2::V2NewFeatureToggles::free_extras: feature_v2::V1FreeExtras
+pub feature_v2::V2NewFeatureToggles::rev4_arttype: bool
+pub feature_v2::V2NewFeatureToggles::rev4_gridblk: bool
+pub feature_v2::V2NewFeatureToggles::rev4_ringbasis: bool
+pub feature_v2::V2NewFeatureToggles::rev4_tailhist: bool
 pub feature_v2::V2NewFeatureToggles::v1_only: bool
 pub fold_engine::ScoringEngine::Buffered
 pub fold_engine::ScoringEngine::Fold
@@ -331,6 +366,10 @@ pub research::DvifmBand::Laplacian
 pub research::DvifmBand::Local
 pub research::DvifmBlockStats::grid: [(u32, u32); 5]
 pub research::DvifmBlockStats::records: alloc::vec::Vec<alloc::vec::Vec<f32>>
+pub research::DvifmInputPlane::XybY
+pub research::DvifmInputPlane::YcbcrCb
+pub research::DvifmInputPlane::YcbcrCr
+pub research::DvifmInputPlane::YcbcrY
 pub research::DvifmLevelSpec::band: research::DvifmBand
 pub research::DvifmLevelSpec::beta: f64
 pub research::DvifmLevelSpec::c0: f64
@@ -340,6 +379,7 @@ pub research::DvifmLevelSpec::f2_centers: [f64; 5]
 pub research::DvifmLevelSpec::g: f64
 pub research::DvifmLevelSpec::p: f64
 pub research::DvifmLevelSpec::sharp: f64
+pub research::DvifmSpec::input_plane: research::DvifmInputPlane
 pub research::DvifmSpec::levels: alloc::vec::Vec<research::DvifmLevelSpec>
 pub research::FeatureProvenance::channel: &'static str
 pub research::FeatureProvenance::cost: &'static str
@@ -383,7 +423,7 @@ pub score_math::PerSampleAlphaParams::reducer_b: f32
 pub score_math::PerSampleAlphaParams::reducer_w: [f32; 4]
 pub score_math::PerSampleAlphaParams::w_alpha: &'a [f32]
 
-## trait impls (49 types)
+## trait impls (52 types)
 
 BlurKernel: TrivialClone
 DiffmapOptions: TrivialClone
@@ -418,6 +458,9 @@ fold_engine::ScoringEngine: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialC
 profile::ZensimProfile: TrivialClone
 research::DvifmBand: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
 research::DvifmBlockStats: Clone, Debug
+research::DvifmFieldMap: Clone, Debug
+research::DvifmInputPlane: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+research::DvifmLevelField: Clone, Debug
 research::DvifmLevelSpec: Clone, Debug
 research::DvifmSpec: Clone, Debug
 research::Extraction: Clone, Debug
@@ -437,4 +480,4 @@ source::StridedBytes<'a>: TrivialClone
 
 ## auto traits
 
-21 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+24 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

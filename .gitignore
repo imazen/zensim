@@ -109,6 +109,7 @@ apidoc/target/
 
 # workspace-local target symlink (CARGO_TARGET_DIR redirect)
 /target
+/zensim-bench/target
 # Sibling CARGO_TARGET_DIRs. `target/` above only matches a dir named exactly
 # `target`, so a per-purpose dir (`target-cg` for the no-avx512 build valgrind
 # can run, per-agent dirs, ...) is NOT covered by it and WILL be snapshotted.

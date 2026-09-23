@@ -574,6 +574,808 @@ pub mod idx_csfw {
     pub const W_GLOBAL_CLOSS: usize = 2;
 }
 
+// ============================================================================
+// REV4 candidate bank (2026-09-23 lane — `benchmarks/rev4_featbank_impl_
+// 2026-09-23.md`, spec `docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md` §1.1).
+// Four append-only families at f986+; every slot is difference-form and
+// every flag is independent (the emit tail is absolute-positioned, so any
+// subset stays index-stable). Layouts mirror `feature_defs::BLOCKS`:
+// gridblk/ringbasis/tailhist are PerChannel (`(scale*3 + ch)*per_cell +
+// local`), arttype is PerScale (`scale*ARTTYPE_PER_SCALE + local`).
+// ============================================================================
+
+/// Registered base of the rev4 candidate bank (`feature_defs::BLOCKS`
+/// derives the same number — asserted in `rev4_base_matches_registry`).
+#[cfg_attr(not(test), allow(dead_code))] // the registered rev4 base — read by the parity/layout gates
+pub(crate) const REV4_BASE: usize = 986;
+/// gridblk slots per (scale, channel) cell: 6 signed log-magnitude bins
+/// of the on-grid boundary step excess + on-grid mean + on/off ratio.
+pub(crate) const GRIDBLK_PER_CELL: usize = 8;
+/// ringbasis slots per (scale, channel) cell: 6 triangular
+/// log-magnitude bins of the RINGING per-pixel term.
+pub(crate) const RINGBASIS_PER_CELL: usize = 6;
+/// tailhist slots per (scale, channel) cell: p95/p99/max for each of the
+/// SSIM/ART/DET/MSE per-pixel maps (4 maps × 3).
+pub(crate) const TAILHIST_PER_CELL: usize = 12;
+/// arttype slots per scale (no channel axis — like append2/CSFW, each
+/// signal names its channel): blur(Y), noise_x/y/b, bleed_x/b.
+pub(crate) const ARTTYPE_PER_SCALE: usize = 6;
+/// Tail histogram bin count per map (31 true-log interior edges
+/// `10^(-6 + k*6/32)`, k = 1..31 → 32 partition cells).
+pub(crate) const TAILHIST_BINS: usize = 32;
+/// Flat-reference activity ceiling for the C4 noise descriptors — the
+/// plan's `C4_FLAT_ACT`, pinned equal to [`C_ACTIVITY`] (design note
+/// §C4): "flat" is the same saturator scale the masking/ringing
+/// formulas already use.
+pub(crate) const C4_FLAT_ACT: f64 = C_ACTIVITY;
+
+/// Named local offsets within one scale's arttype block.
+pub(crate) mod idx_arttype {
+    /// Y-channel blur descriptor: `EDGE_WIDTH_CHANGE × HF_LOSS`, both
+    /// already-emitted v2 slots at the Y cell.
+    pub const BLUR: usize = 0;
+    /// Flat-reference HF_GAIN mean on the X channel (`act ≤ C4_FLAT_ACT`).
+    pub const NOISE_X: usize = 1;
+    /// Flat-reference HF_GAIN mean on the Y channel.
+    pub const NOISE_Y: usize = 2;
+    /// Flat-reference HF_GAIN mean on the B channel.
+    pub const NOISE_B: usize = 3;
+    /// X-channel colour bleed: `bounded_excess(Σ_out g_dst, Σ_out g_src,
+    /// C_GMS)` outside the ±1-px dilated dst-luma-edge mask.
+    pub const BLEED_X: usize = 4;
+    /// B-channel colour bleed (same form as [`BLEED_X`]).
+    pub const BLEED_B: usize = 5;
+}
+
+/// Triangular-hat bin count shared by gridblk and ringbasis.
+pub(crate) const REV4_HATS: usize = 6;
+/// Largest lattice period any rev4 cell can take (chroma at scale 0).
+pub(crate) const GRIDBLK_MAX_PERIOD: usize = 16;
+/// C1 magnitude-hat centres, as the `u()` bit-domain coordinates of
+/// `[1e-3, 1e-2, 1e-1, 1, 10, 100]` (design note §C1).
+const GRIDBLK_LEVELS: [f64; REV4_HATS] = [1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0];
+/// C2 magnitude-hat centres, as the `u()` coordinates of
+/// `[1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]` (design note §C2).
+const RINGBASIS_LEVELS: [f64; REV4_HATS] = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0];
+
+/// The shared rev4 log-magnitude coordinate: the IEEE-754 bit pattern of
+/// the positive value, read as an f64 (design note "shared log-magnitude
+/// coordinate" — monotone in `v` for `v > 0`, transcendental-free,
+/// tier/libc-invariant).
+#[inline(always)]
+fn rev4_u(v: f64) -> f64 {
+    v.to_bits() as f64
+}
+
+/// `u(level)` per hat centre — const-computed through `to_bits`/`as`
+/// (the same map `rev4_u` applies per pixel).
+const fn u_centres(levels: [f64; REV4_HATS]) -> [f64; REV4_HATS] {
+    let mut c = [0.0f64; REV4_HATS];
+    let mut i = 0;
+    while i < REV4_HATS {
+        c[i] = levels[i].to_bits() as f64;
+        i += 1;
+    }
+    c
+}
+
+/// C1's six u-domain hat centres.
+const GRIDBLK_UC: [f64; REV4_HATS] = u_centres(GRIDBLK_LEVELS);
+/// C2's six u-domain hat centres.
+const RINGBASIS_UC: [f64; REV4_HATS] = u_centres(RINGBASIS_LEVELS);
+
+/// Evaluate all six triangular memberships at `u` — `hat_memberships`
+/// (`dvifm.rs`) exactly, at six bins: clamp to `[c0, c5]`, `searchsorted`
+/// side="left" picks the adjacent pair, `1−t`/`t` weights with
+/// `t = (u − c_j)/(c_{j+1} − c_j)`. Exactly two entries of the result
+/// are nonzero.
+fn rev4_hats(c: &[f64; REV4_HATS], u: f64) -> [f64; REV4_HATS] {
+    let mut h = [0.0f64; REV4_HATS];
+    let uc = u.clamp(c[0], c[REV4_HATS - 1]);
+    let i = c.partition_point(|&x| x < uc);
+    let j = i.saturating_sub(1).min(REV4_HATS - 2);
+    let t = (uc - c[j]) / (c[j + 1] - c[j]);
+    h[j] = 1.0 - t;
+    h[j + 1] = t;
+    h
+}
+
+/// The C3 true-log interior edges `10^(-6 + k*6/32)` (k = 1..31) plus the
+/// binade LUT used to bin them in ~5 ops. `edges` are stored as bit
+/// patterns — histogram comparisons are bit-domain, no per-pixel `ln`
+/// (design note §C3).
+struct TailEdges {
+    /// 31 ascending interior-edge bit patterns.
+    edges: [u64; 31],
+    /// `base[e]` = #edges strictly below binade `e`'s low end;
+    /// `inner[e]` = #edges inside binade `e` (≤ 2: edge spacing
+    /// 6/32 decade > binade width 0.301... i.e. at most `ceil(0.301/
+    /// 0.1875) = 2` — asserted at build).
+    base: Box<[u8; 1024]>,
+    inner: Box<[u8; 1024]>,
+}
+
+impl TailEdges {
+    fn build() -> Self {
+        let mut edges = [0u64; 31];
+        for (k, e) in edges.iter_mut().enumerate() {
+            *e = 10f64.powf(-6.0 + (k as f64 + 1.0) * (6.0 / 32.0)).to_bits();
+        }
+        let mut base = Box::new([0u8; 1024]);
+        let mut inner = Box::new([0u8; 1024]);
+        for e in 0..=1023usize {
+            let lo = (e as u64) << 52;
+            let hi = ((e as u64) + 1) << 52;
+            let b = edges.partition_point(|&x| x < lo);
+            let n_in = edges[b..].partition_point(|&x| x < hi);
+            debug_assert!(
+                n_in <= 2,
+                "edge spacing admits at most two edges per binade"
+            );
+            base[e] = b as u8;
+            inner[e] = n_in as u8;
+        }
+        Self { edges, base, inner }
+    }
+
+    /// Bin index `#{edges strictly below v}` — the C3 cell convention
+    /// (an exact edge hit lands in the cell below it).
+    /// `v >= 0` by construction; `v >= 2` clamps to the top cell.
+    #[inline(always)]
+    fn bin(&self, v: f64) -> usize {
+        let ub = v.to_bits();
+        let e = ((ub >> 52) as usize).min(1023);
+        let b = self.base[e] as usize;
+        let inner = self.inner[e];
+        let mut bin = b;
+        if inner > 0 && ub > self.edges[b] {
+            bin += 1;
+            if inner > 1 && ub > self.edges[b + 1] {
+                bin += 1;
+            }
+        }
+        bin
+    }
+}
+
+fn tail_edges() -> &'static TailEdges {
+    use std::sync::OnceLock;
+    static E: OnceLock<TailEdges> = OnceLock::new();
+    E.get_or_init(TailEdges::build)
+}
+
+// ---------------------------------------------------------------------------
+// Calibration diagnostics (registry-revision tooling, 2026-09-24).
+// `ZENSIM_REV4_DIAG` set at process start enables per-cell fine-grained
+// histogram dumps on stderr at finalize — used only for the C3 top-edge
+// and C1 hat-centre calibration over TRAIN corpora. Default off; the
+// `Option` check is one predictable branch per scatter/rescan pass.
+// ---------------------------------------------------------------------------
+
+/// 64 log bins per diagnostic histogram.
+const DIAG_BINS: usize = 64;
+
+fn rev4_diag_enabled() -> bool {
+    use std::sync::OnceLock;
+    static D: OnceLock<bool> = OnceLock::new();
+    *D.get_or_init(|| std::env::var_os("ZENSIM_REV4_DIAG").is_some())
+}
+
+/// Diag bin for the C3 maps (range [0, 1]): 16 log bins per decade over
+/// [1e-4, 1]. `v <= 0` folds into bin 0, `v >= 1` into the last bin.
+/// Diagnostic-only — a `log10` per pixel is fine on the gated path.
+fn diag_bin01(v: f64) -> usize {
+    if !(v > 0.0) {
+        return 0;
+    }
+    ((v.log10() + 4.0) * 16.0).floor().clamp(0.0, (DIAG_BINS - 1) as f64) as usize
+}
+
+/// Diag bin for C1 `|ẽ|` (unbounded, observed ≪ 100): 8 log bins per
+/// decade over [1e-5, 1e3]. `v <= 0` folds into bin 0.
+fn diag_bin_abs(v: f64) -> usize {
+    if !(v > 0.0) {
+        return 0;
+    }
+    ((v.log10() + 5.0) * 8.0).floor().clamp(0.0, (DIAG_BINS - 1) as f64) as usize
+}
+
+// ---------------------------------------------------------------------------
+// REV4 per-(scale, channel) accumulator cell
+//
+// Merge-free by construction: the streaming and materialized walks both run
+// the SAME kernel strips in the SAME order and write into the cell directly
+// (the `blockiness_sparse_strip_wide` running-total pattern — "a per-strip
+// partial would reassociate"), so serial, parallel-channel and
+// streaming-vs-materialized paths all produce identical f64 op sequences.
+// ---------------------------------------------------------------------------
+
+/// C3: 32-bin log histograms + exact maxima of the four dense per-pixel
+/// maps (`d`, `art`, `det`, `mse` — in emitted order). Integer counts are
+/// merge- and order-invariant; the max is order-free.
+#[derive(Clone)]
+struct TailAccum {
+    hist: [[u32; TAILHIST_BINS]; 4],
+    max: [f64; 4],
+    /// Env-gated fine histogram for the top-edge calibration dump
+    /// (`ZENSIM_REV4_DIAG`); `None` in every production/test path.
+    diag: Option<Box<[[u32; DIAG_BINS]; 4]>>,
+}
+
+impl Default for TailAccum {
+    fn default() -> Self {
+        Self {
+            hist: [[0; TAILHIST_BINS]; 4],
+            max: [0.0; 4],
+            diag: rev4_diag_enabled().then(|| Box::new([[0; DIAG_BINS]; 4])),
+        }
+    }
+}
+
+impl TailAccum {
+    /// One map value into its bin + running max. `v >= 0` by construction.
+    #[inline(always)]
+    fn scatter(&mut self, edges: &TailEdges, v: f64, map: usize) {
+        self.hist[map][edges.bin(v)] += 1;
+        self.max[map] = self.max[map].max(v);
+        if let Some(d) = self.diag.as_deref_mut() {
+            d[map][diag_bin01(v)] += 1;
+        }
+    }
+}
+
+/// C4-noise: flat-reference-region HF-gain mass for one cell.
+#[derive(Clone, Copy, Default)]
+struct FlatAccum {
+    /// Σ `hf_gain_i` over pixels with `act ≤ C4_FLAT_ACT` (scan order).
+    hfg: f64,
+    /// Count of flat pixels.
+    n: u64,
+}
+
+/// C2: the 6 triangular `u`-domain bins of the per-pixel RINGING term —
+/// `bins[k] = Σ_px ring·m_k(u(ring))` in scan order.
+#[derive(Clone, Copy, Default)]
+struct RingAccum {
+    bins: [f64; REV4_HATS],
+}
+
+/// C4-bleed: gradient magnitudes summed OUTSIDE the dilated dst-luma-edge
+/// mask (scan order).
+#[derive(Clone, Copy, Default)]
+struct BleedAccum {
+    out_src: f64,
+    out_dst: f64,
+}
+
+/// C1: the stored `ẽ` boundary planes plus the per-phase profiles that
+/// pick the winning phase at finalize (design note §C1 "Accumulation" —
+/// the winning phase gates the emitted bins but is only known after the
+/// whole plane is walked, so the kernel stores `ẽ` per boundary and the
+/// rescan touches only on-grid positions: `2n/P` hat evaluations instead
+/// of membership work on all `2n` boundaries).
+///
+/// `plane_v[y*w + x]` holds `ẽ` of the vertical boundary between columns
+/// `x−1` and `x` (x ∈ 1..w); `plane_h[y*w + x]` holds the horizontal
+/// boundary between rows `y−1` and `y` (y ∈ 1..h). Both are written by
+/// `gridblk_strip_wide` in the SAME f32 arithmetic on every engine, so
+/// the rescan reads bitwise-identical values in the streaming and
+/// materialized walks. `abs_*`/`signed_*` are the per-phase `Σ|ẽ|`/`Σẽ`
+/// profiles — f64 running totals fed by the kernel's lane-folded V8
+/// accumulators (the lane map `(x−1, chunk parity) → phase` is fixed by
+/// construction, so the accumulation order is identical on every tier,
+/// engine and thread count — this family's determinism contract).
+struct GridblkAccum {
+    plane_v: Vec<f32>,
+    plane_h: Vec<f32>,
+    abs_v: [f64; GRIDBLK_MAX_PERIOD],
+    signed_v: [f64; GRIDBLK_MAX_PERIOD],
+    abs_h: [f64; GRIDBLK_MAX_PERIOD],
+    signed_h: [f64; GRIDBLK_MAX_PERIOD],
+}
+
+impl Default for GridblkAccum {
+    fn default() -> Self {
+        Self {
+            plane_v: Vec::new(),
+            plane_h: Vec::new(),
+            abs_v: [0.0; GRIDBLK_MAX_PERIOD],
+            signed_v: [0.0; GRIDBLK_MAX_PERIOD],
+            abs_h: [0.0; GRIDBLK_MAX_PERIOD],
+            signed_h: [0.0; GRIDBLK_MAX_PERIOD],
+        }
+    }
+}
+
+/// All rev4 state for one (scale, channel) cell. Untouched when every
+/// rev4 compute flag is off.
+#[derive(Default)]
+struct Rev4CellAccum {
+    grid: GridblkAccum,
+    ring: RingAccum,
+    tail: TailAccum,
+    flat: FlatAccum,
+    bleed: BleedAccum,
+}
+
+/// REV4 hook bundle for the dense kernel — carries C3 (`tail`) and C4's
+/// noise descriptor (`flat`) for ONE cell. `None` on every non-rev4 call:
+/// inside the kernel the Option is one loop-invariant branch (the same
+/// shape `transducer_bank` already carries here).
+struct Rev4Dense<'a> {
+    /// C3 target when `tailhist` is on.
+    tail: Option<&'a mut TailAccum>,
+    /// C4-noise target when `arttype` is on.
+    flat: Option<&'a mut FlatAccum>,
+    /// Resolved once by the caller (a `OnceLock` hit per strip, not per
+    /// pixel).
+    edges: &'static TailEdges,
+}
+
+/// One pixel's contribution to the C3/C4 dense targets — the single code
+/// path shared by the era-1 SIMD chunk lanes, the era-1 scalar tail, and
+/// the era-2 V8 lanes so the three cannot drift.
+#[inline(always)]
+fn rev4_dense_pixel(
+    r4: &mut Rev4Dense<'_>,
+    d: f64,
+    art: f64,
+    det: f64,
+    mse: f64,
+    hfg: f64,
+    act: f64,
+) {
+    if let Some(t) = r4.tail.as_deref_mut() {
+        t.scatter(r4.edges, d, 0);
+        t.scatter(r4.edges, art, 1);
+        t.scatter(r4.edges, det, 2);
+        t.scatter(r4.edges, mse, 3);
+    }
+    if let Some(f) = r4.flat.as_deref_mut()
+        && act <= C4_FLAT_ACT
+    {
+        f.hfg += hfg;
+        f.n += 1;
+    }
+}
+
+/// REV4 hook bundle for the gradient kernel — C2's ring bins on every
+/// channel and C4's bleed sums on the chroma channels (`mask` present).
+struct Rev4Grad<'a> {
+    /// C2 target when `ringbasis` is on.
+    ring: Option<&'a mut RingAccum>,
+    /// C4 bleed: `(outside-weight mask slice, target)` — `None` on the Y
+    /// channel (and whenever `arttype` is off).
+    bleed: Option<(&'a [f32], &'a mut BleedAccum)>,
+}
+
+/// One pixel's contribution to the C2/C4 gradient targets — shared by the
+/// scalar border path and the SIMD chunk lanes. `i` is the pixel's
+/// strip-local index (`y*width + x`) — the C4 outside-mask weight is
+/// `1 − mask[i]`, read inside so the slice borrow never leaves `r4`.
+#[inline(always)]
+fn rev4_grad_pixel(
+    r4: &mut Rev4Grad<'_>,
+    centres: &[f64; REV4_HATS],
+    ring: f64,
+    g_src: f64,
+    g_dst: f64,
+    i: usize,
+) {
+    if let Some(bins) = r4.ring.as_deref_mut()
+        && ring > 0.0
+    {
+        let h = rev4_hats(centres, rev4_u(ring));
+        for (b, h) in bins.bins.iter_mut().zip(h.iter()) {
+            *b += ring * h;
+        }
+    }
+    if let Some((m, b)) = r4.bleed.as_mut() {
+        let out_w = 1.0 - m[i] as f64;
+        b.out_src += g_src * out_w;
+        b.out_dst += g_dst * out_w;
+    }
+}
+
+/// One (strip, channel)'s rev4 work order — the at-scale [`ComputeSet`]
+/// flags resolved against the channel, handed to [`stream_phase_b`] (and
+/// the materialized [`compute_channel_scale_v2`]). `gridblk_period == 0`
+/// is the C1-off marker (a period can never legitimately be 0), and
+/// `bleed_mask` is `Some` only on the two chroma channels.
+#[derive(Clone, Copy)]
+struct Rev4Work<'a> {
+    /// C1 lattice period for this (channel, scale) — `8 >> s` on Y,
+    /// `16 >> s` on X/B — or 0 when `gridblk` is off or degenerate (`< 2`).
+    gridblk_period: usize,
+    /// C2 ring bins run in the gradient kernel.
+    ringbasis: bool,
+    /// C3 tail histograms run in the dense kernel.
+    tailhist: bool,
+    /// C4 flat-region HF-gain noise runs in the dense kernel.
+    flat: bool,
+    /// C4 dilated dst-luma-edge mask (strip_n bytes of 0.0/1.0), `Some`
+    /// only when `arttype` is on AND this is a chroma channel.
+    bleed_mask: Option<&'a [f32]>,
+}
+
+/// Materialized-path REV4 work order for one (scale, channel) — the
+/// [`ComputeSet::rev4_work`] analogue for [`compute_channel_scale_v2`],
+/// which resolves flags itself and owns the strip loop the bleed mask is
+/// built inside. `bleed_y` is the same-scale dst LUMA plane (full
+/// `width*height`), `Some` only on the chroma channels when `arttype` is
+/// on; the mask is gathered + built per strip from it.
+struct Rev4CellArgs<'a> {
+    /// The (scale, channel)'s accumulator — every enabled hook writes here.
+    cell: &'a mut Rev4CellAccum,
+    /// Same semantics as [`Rev4Work::gridblk_period`].
+    gridblk_period: usize,
+    /// Same semantics as [`Rev4Work::ringbasis`].
+    ringbasis: bool,
+    /// Same semantics as [`Rev4Work::tailhist`].
+    tailhist: bool,
+    /// Same semantics as [`Rev4Work::flat`].
+    flat: bool,
+    /// Same-scale dst-Y plane for the C4 mask — see the struct doc.
+    bleed_y: Option<&'a [f32]>,
+}
+
+/// Resolve one (scale, channel)'s [`Rev4CellArgs`] from the at-scale
+/// [`ComputeSet`] — the [`ComputeSet::rev4_work`] flag logic verbatim,
+/// `bleed_mask` replaced by `bleed_y` (the materialized strip loop builds
+/// the mask itself). Single owner of "which hooks this cell needs" on the
+/// materialized side.
+fn rev4_cell_args<'a>(
+    cell: &'a mut Rev4CellAccum,
+    local: &ComputeSet,
+    scale: usize,
+    ch: usize,
+    dst_planes: &'a [Vec<f32>],
+) -> Rev4CellArgs<'a> {
+    let period = (if ch == 1 {
+        BLOCK_LATTICE
+    } else {
+        2 * BLOCK_LATTICE
+    }) >> scale;
+    Rev4CellArgs {
+        cell,
+        gridblk_period: if local.gridblk && period >= 2 {
+            period
+        } else {
+            0
+        },
+        ringbasis: local.ringbasis,
+        tailhist: local.tailhist,
+        flat: local.arttype,
+        bleed_y: (local.arttype && ch != 1).then(|| &dst_planes[1][..]),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// REV4 emission: one PerChannel cell = gridblk(8) + ringbasis(6) +
+// tailhist(12) = 26 slots in that order; arttype is emitted per scale by
+// `finish_arttype_scale` (its blur term needs the cross-scale EWC value,
+// which only exists at finalize).
+// ---------------------------------------------------------------------------
+
+/// `#{x ∈ [1, n) : x mod P == φ}` — the per-phase boundary count of one
+/// row (V) or column (H) of the lattice. Closed form: the positions are
+/// the lattice, not the data.
+fn gridblk_phase_count(n: usize, phi: usize, period: usize) -> usize {
+    debug_assert!(phi < period);
+    if phi == 0 {
+        (n - 1) / period
+    } else if phi < n {
+        (n - 1 - phi) / period + 1
+    } else {
+        0
+    }
+}
+
+/// Strict-`>` argmax over the per-phase `Σ|ẽ|` profile (ties resolve to
+/// the lowest phase — `Rev4` spec §C1). Returns `None` when no phase has
+/// a boundary (degenerate plane).
+fn gridblk_winner(
+    abs: &[f64; GRIDBLK_MAX_PERIOD],
+    cnt: &[usize; GRIDBLK_MAX_PERIOD],
+    period: usize,
+) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    let mut best_sum = 0.0f64;
+    for p in 0..period {
+        if cnt[p] != 0 && abs[p] > best_sum {
+            best_sum = abs[p];
+            best = Some(p);
+        }
+    }
+    best
+}
+
+/// Emit the 8 `gridblk` slots for one cell. `period < 2` (Y at scale 3)
+/// or a degenerate side emits zeros — the cell is still fully registered.
+/// The magnitude bins rescan the stored `ẽ` planes at the winning phase's
+/// positions only (V: `x ≡ pv`, H: `y ≡ ph`, both in y-major scan order —
+/// the fixed rescan order every engine replays).
+fn finish_gridblk_cell(
+    grid: &GridblkAccum,
+    period: usize,
+    width: usize,
+    height: usize,
+    out: &mut [f64; GRIDBLK_PER_CELL],
+) -> Option<[u32; DIAG_BINS]> {
+    *out = [0.0; GRIDBLK_PER_CELL];
+    if period < 2 || grid.plane_v.is_empty() {
+        return None;
+    }
+    debug_assert_eq!(grid.plane_v.len(), width * height);
+    debug_assert_eq!(grid.plane_h.len(), width * height);
+    let mut cnt_v = [0usize; GRIDBLK_MAX_PERIOD];
+    let mut cnt_h = [0usize; GRIDBLK_MAX_PERIOD];
+    for p in 0..period {
+        cnt_v[p] = gridblk_phase_count(width, p, period) * height;
+        cnt_h[p] = gridblk_phase_count(height, p, period) * width;
+    }
+    let (Some(pv), Some(ph)) = (
+        gridblk_winner(&grid.abs_v, &cnt_v, period),
+        gridblk_winner(&grid.abs_h, &cnt_h, period),
+    ) else {
+        return None;
+    };
+    // On-grid = the winning phase of each orientation, V and H pooled.
+    let n_on = (cnt_v[pv] + cnt_h[ph]) as f64;
+    let (mut off_abs, mut n_off) = (0.0f64, 0.0f64);
+    for p in 0..period {
+        if p != pv {
+            off_abs += grid.abs_v[p];
+            n_off += cnt_v[p] as f64;
+        }
+        if p != ph {
+            off_abs += grid.abs_h[p];
+            n_off += cnt_h[p] as f64;
+        }
+    }
+    if n_off == 0.0 {
+        return None;
+    }
+    // On-grid rescan: 6 triangular-hat memberships of `u(|ẽ|)`, weighted
+    // by the SIGNED `ẽ` — ~2n/P evaluations, the store-then-rescan shape
+    // the design note's C1 "Accumulation" paragraph commits.
+    let mut bins = [0.0f64; REV4_HATS];
+    let mut diag = rev4_diag_enabled().then_some([0u32; DIAG_BINS]);
+    let xv0 = if pv == 0 { period } else { pv };
+    for y in 0..height {
+        let row = y * width;
+        let mut x = xv0;
+        while x < width {
+            let v = grid.plane_v[row + x] as f64;
+            if v != 0.0 {
+                let a = v.abs();
+                let h = rev4_hats(&GRIDBLK_UC, rev4_u(a));
+                for k in 0..REV4_HATS {
+                    bins[k] += v * h[k];
+                }
+                if let Some(d) = diag.as_mut() {
+                    d[diag_bin_abs(a)] += 1;
+                }
+            }
+            x += period;
+        }
+    }
+    let yh0 = if ph == 0 { period } else { ph };
+    for y in (yh0..height).step_by(period) {
+        let row = y * width;
+        for x in 0..width {
+            let v = grid.plane_h[row + x] as f64;
+            if v != 0.0 {
+                let a = v.abs();
+                let h = rev4_hats(&GRIDBLK_UC, rev4_u(a));
+                for k in 0..REV4_HATS {
+                    bins[k] += v * h[k];
+                }
+                if let Some(d) = diag.as_mut() {
+                    d[diag_bin_abs(a)] += 1;
+                }
+            }
+        }
+    }
+    for k in 0..REV4_HATS {
+        out[k] = bins[k] / n_on;
+    }
+    // `on_mean` is the SIGNED mean (design note §C1 — a suppression reads
+    // negative); `onoff_ratio` is the abs-mean contrast with the C_BLOCK
+    // denominator guard, not a bare ratio.
+    out[6] = (grid.signed_v[pv] + grid.signed_h[ph]) / n_on;
+    out[7] = (grid.abs_v[pv] + grid.abs_h[ph]) / n_on / (off_abs / n_off + C_BLOCK);
+    diag
+}
+
+/// Emit the 6 `ringbasis` slots for one cell: `bins[k]/n_px`.
+fn finish_ringbasis_cell(ring: &RingAccum, n_px: usize, out: &mut [f64; RINGBASIS_PER_CELL]) {
+    *out = [0.0; RINGBASIS_PER_CELL];
+    if n_px == 0 {
+        return;
+    }
+    let inv = 1.0 / n_px as f64;
+    for (o, b) in out.iter_mut().zip(ring.bins.iter()) {
+        *o = b * inv;
+    }
+}
+
+/// Emit the 12 `tailhist` slots for one cell: p95/p99/max over SSIM-d,
+/// ART, DET, MSE in that order. `p_q` is the LOWER EDGE of the first bin
+/// whose cumulative count reaches `ceil(q·n)`; bin 0 emits 0.0.
+fn finish_tailhist_cell(tail: &TailAccum, n_px: usize, out: &mut [f64; TAILHIST_PER_CELL]) {
+    *out = [0.0; TAILHIST_PER_CELL];
+    if n_px == 0 {
+        return;
+    }
+    let edges = tail_edges();
+    for m in 0..4 {
+        let h = &tail.hist[m];
+        let p95 = tail_quantile_edge(h, n_px, 0.95, edges);
+        let p99 = tail_quantile_edge(h, n_px, 0.99, edges);
+        out[m * 3] = p95;
+        out[m * 3 + 1] = p99;
+        out[m * 3 + 2] = tail.max[m];
+    }
+}
+
+/// Lower edge (as the true-log value, not bits) of the first bin whose
+/// cumulative count reaches `ceil(q·n)`. Bin 0's lower edge is 0.0 (the
+/// exact-identity cell). Only called with `n > 0`.
+fn tail_quantile_edge(h: &[u32; TAILHIST_BINS], n: usize, q: f64, edges: &TailEdges) -> f64 {
+    let target = (q * n as f64).ceil() as u64;
+    let mut cum = 0u64;
+    for (i, &c) in h.iter().enumerate() {
+        cum += c as u64;
+        if cum >= target {
+            return if i == 0 {
+                0.0
+            } else {
+                f64::from_bits(edges.edges[i - 1])
+            };
+        }
+    }
+    // Unreachable given target <= n, but keep the function total.
+    f64::from_bits(edges.edges[TAILHIST_BINS - 2])
+}
+
+/// Emit the 6 `arttype` slots for one scale. `ewc_y`/`hfl_y` are the
+/// already-finished Y EDGE_WIDTH_CHANGE and HF_LOSS values for this scale
+/// (the blur term multiplies finished feature values — design note §C4).
+/// `flat`/`bleed` are the three channels' accumulator cells in the walk's
+/// `accums` order (`[X=0, Y=1, B=2]`).
+fn finish_arttype_scale(
+    ewc_y: f64,
+    hfl_y: f64,
+    flat: &[FlatAccum; 3],
+    bleed: &[BleedAccum; 3],
+    out: &mut [f64; ARTTYPE_PER_SCALE],
+) {
+    out[idx_arttype::BLUR] = ewc_y * hfl_y;
+    // `flat`/`bleed` are indexed by CHANNEL (0 = X, 1 = Y, 2 = B — the
+    // walk's `accums` order); the registry's NOISE_* order is X, Y, B.
+    out[idx_arttype::NOISE_X] = if flat[0].n == 0 {
+        0.0
+    } else {
+        flat[0].hfg / flat[0].n as f64
+    };
+    out[idx_arttype::NOISE_Y] = if flat[1].n == 0 {
+        0.0
+    } else {
+        flat[1].hfg / flat[1].n as f64
+    };
+    out[idx_arttype::NOISE_B] = if flat[2].n == 0 {
+        0.0
+    } else {
+        flat[2].hfg / flat[2].n as f64
+    };
+    out[idx_arttype::BLEED_X] = bounded_excess(bleed[0].out_dst, bleed[0].out_src, C_GMS);
+    out[idx_arttype::BLEED_B] = bounded_excess(bleed[2].out_dst, bleed[2].out_src, C_GMS);
+}
+
+/// Emit all four rev4 families for one scale into their feature slices.
+/// `cells` are the channels' `Rev4CellAccum`s in channel order (0 = X,
+/// 1 = Y, 2 = B — the walk's `accums` order); `out_*`
+/// are the family slices for this scale (`None` when the family is off —
+/// emission is skipped, the slots still exist in the vector as zeros
+/// only when the layout declared them).
+#[allow(clippy::too_many_arguments)]
+fn finish_rev4_scale(
+    cs: &ComputeSet,
+    scale: usize,
+    cells: [&Rev4CellAccum; 3],
+    width: usize,
+    height: usize,
+    ewc_y: f64,
+    hfl_y: f64,
+    out_grid: Option<&mut [f64]>,
+    out_ring: Option<&mut [f64]>,
+    out_tail: Option<&mut [f64]>,
+    out_art: Option<&mut [f64]>,
+) {
+    let n_px = width * height;
+    let period_y = BLOCK_LATTICE >> scale;
+    let period_c = (BLOCK_LATTICE * 2) >> scale;
+    if let Some(o) = out_grid {
+        debug_assert_eq!(o.len(), 3 * GRIDBLK_PER_CELL);
+        if cs.gridblk {
+            for ch in 0..3 {
+                // `cells`/`o` are channel-ordered [X, Y, B]: only Y is luma.
+                let period = if ch == 1 { period_y } else { period_c };
+                let diag = finish_gridblk_cell(
+                    &cells[ch].grid,
+                    period,
+                    width,
+                    height,
+                    (&mut o[ch * GRIDBLK_PER_CELL..(ch + 1) * GRIDBLK_PER_CELL])
+                        .try_into()
+                        .unwrap(),
+                );
+                if let Some(d) = diag {
+                    eprintln!(
+                        "REV4DIAGABS s{scale} c{ch} {}",
+                        d.iter()
+                            .map(u32::to_string)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    );
+                }
+            }
+        }
+    }
+    if let Some(o) = out_ring {
+        debug_assert_eq!(o.len(), 3 * RINGBASIS_PER_CELL);
+        if cs.ringbasis {
+            for ch in 0..3 {
+                finish_ringbasis_cell(
+                    &cells[ch].ring,
+                    n_px,
+                    (&mut o[ch * RINGBASIS_PER_CELL..(ch + 1) * RINGBASIS_PER_CELL])
+                        .try_into()
+                        .unwrap(),
+                );
+            }
+        }
+    }
+    if let Some(o) = out_tail {
+        debug_assert_eq!(o.len(), 3 * TAILHIST_PER_CELL);
+        if cs.tailhist {
+            for ch in 0..3 {
+                finish_tailhist_cell(
+                    &cells[ch].tail,
+                    n_px,
+                    (&mut o[ch * TAILHIST_PER_CELL..(ch + 1) * TAILHIST_PER_CELL])
+                        .try_into()
+                        .unwrap(),
+                );
+                if let Some(d) = cells[ch].tail.diag.as_deref() {
+                    for (m, h) in d.iter().enumerate() {
+                        eprintln!(
+                            "REV4DIAGTAIL s{scale} c{ch} m{m} {}",
+                            h.iter()
+                                .map(u32::to_string)
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        );
+                    }
+                }
+            }
+        }
+    }
+    if let Some(o) = out_art {
+        debug_assert_eq!(o.len(), ARTTYPE_PER_SCALE);
+        if cs.arttype {
+            finish_arttype_scale(
+                ewc_y,
+                hfl_y,
+                &[cells[0].flat, cells[1].flat, cells[2].flat],
+                &[cells[0].bleed, cells[1].bleed, cells[2].bleed],
+                o.try_into().unwrap(),
+            );
+        }
+    }
+}
+
 /// Box blur radius at scale 0 — matches v1's `ZensimConfig::default()`.
 pub(crate) const BLUR_RADIUS: usize = 5;
 /// Oriented-blockiness lattice period (JPEG's 8x8 MCU grid).
@@ -1126,6 +1928,14 @@ pub enum FeatureRegime {
     /// and default-OFF — a pre-screen qualification regime; never mixed
     /// into 956- or narrower-regime tables.
     Folded720Dvifm,
+    /// [`Folded720Dvifm`](Self::Folded720Dvifm) plus the four REV4
+    /// feature-bank families (f986..f1321: `gridblk` 96, `ringbasis` 72,
+    /// `tailhist` 144, `arttype` 24 — see `docs/REV4_FEATURE_BANK_PLAN_*
+    /// .md`). Assigned only when ALL FOUR rev4 layout flags are on
+    /// (the full 1322 row); a rev4-subset request keeps the regime of
+    /// its widest fully-registered block — the slot provenance still
+    /// disambiguates exactly which tail cells are populated.
+    Folded720Rev4,
 }
 
 /// Result of [`compute_v2_features_impl`]/[`crate::Zensim::compute_v2_features`].
@@ -1640,6 +2450,37 @@ pub struct V2NewFeatureToggles {
     /// to be visible.
     #[doc(hidden)]
     pub free_extras: V1FreeExtras,
+    /// REV4 CANDIDATE BANK (2026-09-23, `benchmarks/rev4_featbank_impl_
+    /// 2026-09-23.md`): the f986+ grid-phase blocking block
+    /// ([`crate::feature_defs::BLOCKS`] `gridblk` — 8 signals per
+    /// (scale, channel): 6 signed log-magnitude bins of the
+    /// activity-normalised lattice-boundary step excess at the estimated
+    /// grid phase, plus on-grid mean and on/off ratio). Default OFF: with
+    /// this false every existing path, layout, and byte is unchanged.
+    /// Independent of the other rev4 families — the emit tail is
+    /// absolute-positioned, so any subset stays index-stable; requires
+    /// `dvifm_block` (asserted) since the family's base sits at f986.
+    #[doc(hidden)]
+    pub rev4_gridblk: bool,
+    /// REV4 C2 ringing-magnitude basis (f1082+ — 6 triangular
+    /// log-magnitude bins of the gradient kernel's own per-pixel RINGING
+    /// term, per (scale, channel)). Independent of the other rev4
+    /// families; requires `dvifm_block` (asserted). Default OFF.
+    #[doc(hidden)]
+    pub rev4_ringbasis: bool,
+    /// REV4 C3 tail pooling (f1154+ — per (scale, channel): p95/p99/max
+    /// of the SSIM/ART/DET/MSE per-pixel maps from the family's fixed
+    /// 32-bin log-edged histogram). Independent of the other rev4
+    /// families; requires `dvifm_block` (asserted). Default OFF.
+    #[doc(hidden)]
+    pub rev4_tailhist: bool,
+    /// REV4 C4 artifact-type descriptors (f1298+ — per scale: Y
+    /// EDGE_WIDTH_CHANGE×HF_LOSS blur, flat-region HF_GAIN noise per
+    /// channel, dst-chroma gradient excess outside a ±1-px dilated
+    /// dst-luma-edge mask for X/B bleeding). Independent of the other
+    /// rev4 families; requires `dvifm_block` (asserted). Default OFF.
+    #[doc(hidden)]
+    pub rev4_arttype: bool,
 }
 
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
@@ -1868,6 +2709,10 @@ impl Default for V2NewFeatureToggles {
             v1_pools: V1PoolsMode::Off,
             v1_only: false,
             free_extras: V1FreeExtras::Off,
+            rev4_gridblk: false,
+            rev4_ringbasis: false,
+            rev4_tailhist: false,
+            rev4_arttype: false,
         }
     }
 }
@@ -2022,6 +2867,21 @@ pub(crate) struct ComputeSet {
     /// The DVIFM block-visibility pump (f956+; the family's own pyramid off
     /// the scale-0 Y rows — NOT replicated per walk scale).
     pub dvifm: bool,
+    /// REV4 C1 grid-phase blocking (f986+, `gridblk`): the strip kernel
+    /// over the wide src/dst/activity windows. Independent compute gate —
+    /// the emit tail is absolute-positioned, so each family can run alone.
+    pub gridblk: bool,
+    /// REV4 C2 ringing-magnitude bins (f1082+): the gradient kernel's
+    /// per-pixel RINGING term folded into 6 triangular log-magnitude bins.
+    pub ringbasis: bool,
+    /// REV4 C3 tail pooling (f1154+): the dense kernel's d/art/det/mse
+    /// per-pixel values folded into the family's 32-bin log histograms.
+    pub tailhist: bool,
+    /// REV4 C4 artifact-type descriptors (f1298+): flat-region HF_GAIN
+    /// noise in the dense kernel, dst-chroma bleed outside the dilated
+    /// dst-luma-edge mask in the gradient kernel, and the finalize-time
+    /// EWC×HF_LOSS blur product.
+    pub arttype: bool,
     /// The free v2-era slots a v1-only walk emits ([`V1FreeExtras`]). Held
     /// here rather than re-read from the toggles at each site, so
     /// `raw_moments` has ONE derivation.
@@ -2086,6 +2946,10 @@ impl ComputeSet {
             // ever be live at scale 0 — and `def_at` reports its flat slots
             // as scale 0, which is the same attribution.
             dvifm: self.dvifm && live,
+            gridblk: self.gridblk && live,
+            ringbasis: self.ringbasis && live,
+            tailhist: self.tailhist && live,
+            arttype: self.arttype && live,
             ..self
         }
     }
@@ -2138,6 +3002,10 @@ impl ComputeSet {
             append2_dst_activity: t.append2_dst_activity && append2,
             csfw: t.csfw_block && v2_blocks,
             dvifm: t.dvifm_block && v2_blocks,
+            gridblk: t.rev4_gridblk && v2_blocks,
+            ringbasis: t.rev4_ringbasis && v2_blocks,
+            tailhist: t.rev4_tailhist && v2_blocks,
+            arttype: t.rev4_arttype && v2_blocks,
             free_extras: t.free_extras,
         }
     }
@@ -2258,6 +3126,18 @@ impl ComputeSet {
         if self.dvifm {
             p = p.with(T::Dvifm);
         }
+        if self.gridblk {
+            p = p.with(T::Gridblk);
+        }
+        if self.ringbasis {
+            p = p.with(T::Ringbasis);
+        }
+        if self.tailhist {
+            p = p.with(T::Tailhist);
+        }
+        if self.arttype {
+            p = p.with(T::Arttype);
+        }
         if self.raw_moments() {
             p = p.with(T::Moments);
         }
@@ -2310,6 +3190,13 @@ impl ComputeSet {
         // Flat block: 30 slots at `csfw_end` regardless of `n_scales`
         // (`feature_defs::Replication::Flat` owns the same arithmetic).
         let dvifm_end = csfw_end + crate::dvifm::DVIFM_FEATURES;
+        // REV4 families: registered (absolute) bases — the emit tail is
+        // absolute-positioned, so each family's range lands at its
+        // registered slots whether or not the families before it ran.
+        let gridblk_end = dvifm_end + n_scales * 3 * GRIDBLK_PER_CELL;
+        let ringbasis_end = gridblk_end + n_scales * 3 * RINGBASIS_PER_CELL;
+        let tailhist_end = ringbasis_end + n_scales * 3 * TAILHIST_PER_CELL;
+        let arttype_end = tailhist_end + n_scales * ARTTYPE_PER_SCALE;
 
         let mut ranges: Vec<(usize, usize)> = Vec::new();
         let mut scattered: Vec<usize> = Vec::new();
@@ -2336,6 +3223,18 @@ impl ComputeSet {
         }
         if self.dvifm {
             ranges.push((csfw_end, dvifm_end));
+        }
+        if self.gridblk {
+            ranges.push((dvifm_end, gridblk_end));
+        }
+        if self.ringbasis {
+            ranges.push((gridblk_end, ringbasis_end));
+        }
+        if self.tailhist {
+            ranges.push((ringbasis_end, tailhist_end));
+        }
+        if self.arttype {
+            ranges.push((tailhist_end, arttype_end));
         }
         if self.raw_moments() {
             scattered.extend(free_slot_indices(n_scales));
@@ -2386,6 +3285,32 @@ impl ComputeSet {
             } else {
                 self.coarse_y_only_scales & (1 << scale) == 0
             }
+    }
+
+    /// The REV4 work order for one (scale, channel) phase-B call — the
+    /// SINGLE owner of the channel-dependent parts (C1's luma-vs-chroma
+    /// lattice period, C4 bleed's chroma-only mask). `mask` is the strip's
+    /// dilated dst-luma-edge mask built by the caller; it is forwarded
+    /// only when `arttype` is on and `ch` is chroma (0 or 2), so the Y
+    /// channel can be handed the same slice and still take the `None`
+    /// path.
+    fn rev4_work<'m>(&self, scale: usize, ch: usize, mask: Option<&'m [f32]>) -> Rev4Work<'m> {
+        let period = (if ch == 1 {
+            BLOCK_LATTICE
+        } else {
+            2 * BLOCK_LATTICE
+        }) >> scale;
+        Rev4Work {
+            gridblk_period: if self.gridblk && period >= 2 {
+                period
+            } else {
+                0
+            },
+            ringbasis: self.ringbasis,
+            tailhist: self.tailhist,
+            flat: self.arttype,
+            bleed_mask: mask.filter(|_| self.arttype && ch != 1),
+        }
     }
 
     pub(crate) fn is_full_res_xb(id: usize, n_scales: usize) -> bool {
@@ -3189,6 +4114,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    mut r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
     // the v2 SSIM signal must read it as such. Hoisted once per call;
@@ -3332,6 +4258,28 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
                 p_sal_artv += sal_art * art_i;
                 p_sal_det += sal_det;
                 p_sal_detv += sal_det * det_i;
+                // REV4 (POOL_SIMD arm): the lane arrays this arm skips are
+                // extracted only when the hook is live — one Option check
+                // per chunk, identical op sequence when None.
+                if let Some(r4) = r4.as_mut() {
+                    let d_arr = d.to_array();
+                    let art_arr = art_i.to_array();
+                    let det_arr = det_i.to_array();
+                    let mse_arr = mse_i.to_array();
+                    let hfg_arr = hfg_i.to_array();
+                    let act_arr = act.to_array();
+                    for lane in 0..8 {
+                        rev4_dense_pixel(
+                            r4,
+                            d_arr[lane] as f64,
+                            art_arr[lane] as f64,
+                            det_arr[lane] as f64,
+                            mse_arr[lane] as f64,
+                            hfg_arr[lane] as f64,
+                            act_arr[lane] as f64,
+                        );
+                    }
+                }
             } else {
                 // §A.14 register-pressure fix (see the row-header comment
                 // above): extract this chunk's d/art_i/det_i/mse_i/act lanes
@@ -3352,6 +4300,22 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
                         mse_arr[lane] as f64,
                         act_arr[lane] as f64,
                     );
+                }
+                // REV4: same six lanes plus `hfg_i` — the C3 histogram
+                // scatters every pixel, C4-noise counts only the flat.
+                if let Some(r4) = r4.as_mut() {
+                    let hfg_arr = hfg_i.to_array();
+                    for lane in 0..8 {
+                        rev4_dense_pixel(
+                            r4,
+                            d_arr[lane] as f64,
+                            art_arr[lane] as f64,
+                            det_arr[lane] as f64,
+                            mse_arr[lane] as f64,
+                            hfg_arr[lane] as f64,
+                            act_arr[lane] as f64,
+                        );
+                    }
                 }
             }
 
@@ -3459,6 +4423,11 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
             }
 
             weighted_pool_accumulate_scalar(&mut acc, d, art_i, det_i, mse_i, act);
+            // REV4: the tail's f64 values go through the same per-pixel
+            // helper — no re-derivation.
+            if let Some(r4) = r4.as_mut() {
+                rev4_dense_pixel(r4, d, art_i, det_i, mse_i, hf_gain_i, act);
+            }
         }
     }
 
@@ -3485,6 +4454,7 @@ fn dense_block_kernel_entry(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_generic::<_, true>(
         token,
@@ -3498,6 +4468,7 @@ fn dense_block_kernel_entry(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -3515,6 +4486,7 @@ fn dense_block_kernel_entry(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_generic::<_, false>(
         token,
@@ -3528,6 +4500,7 @@ fn dense_block_kernel_entry(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -3548,6 +4521,7 @@ fn dense_block_kernel_entry_pools_scalar(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_generic::<_, false>(
         token,
@@ -3561,6 +4535,7 @@ fn dense_block_kernel_entry_pools_scalar(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -3578,6 +4553,7 @@ fn dense_block_kernel_pools_scalar(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     incant!(
         dense_block_kernel_entry_pools_scalar(
@@ -3590,7 +4566,8 @@ fn dense_block_kernel_pools_scalar(
             activity,
             width,
             height,
-            transducer_bank
+            transducer_bank,
+            r4
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -3627,6 +4604,9 @@ fn era2_dense_enabled() -> bool {
 }
 
 /// The production dense entry: dispatches on [`era2_dense_enabled`].
+/// `r4`: REV4's C3 tail-histogram / C4 flat-HF-gain hook bundle — `None`
+/// on every non-rev4 call (one loop-invariant Option check per chunk,
+/// the `transducer_bank` shape).
 #[allow(clippy::too_many_arguments)]
 fn dense_block_kernel(
     src: &[f32],
@@ -3639,6 +4619,7 @@ fn dense_block_kernel(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     if era2_dense_enabled() {
         return dense_block_kernel_era2(
@@ -3652,6 +4633,7 @@ fn dense_block_kernel(
             width,
             height,
             transducer_bank,
+            r4,
         );
     }
     dense_block_kernel_era1(
@@ -3665,6 +4647,7 @@ fn dense_block_kernel(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -3682,6 +4665,7 @@ fn dense_block_kernel_era1(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     incant!(
         dense_block_kernel_entry(
@@ -3694,7 +4678,8 @@ fn dense_block_kernel_era1(
             activity,
             width,
             height,
-            transducer_bank
+            transducer_bank,
+            r4
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -3790,10 +4775,14 @@ fn gradient_block_kernel_generic<
     height: usize,
     bv_delta_lo: f32,
     bv_delta_hi: f32,
+    mut r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
     debug_assert_eq!(src_h.len(), width * (height + 2));
     debug_assert_eq!(dst_h.len(), width * (height + 2));
     debug_assert_eq!(activity.len(), width * height);
+    if let Some((m, _)) = r4.as_ref().and_then(|r| r.bleed.as_ref()) {
+        debug_assert_eq!(m.len(), width * height);
+    }
     if BV_DSTACT {
         debug_assert!(BANDVIS, "BV_DSTACT is a BANDVIS refinement");
         debug_assert_eq!(act_dst.len(), width * height);
@@ -3820,102 +4809,116 @@ fn gradient_block_kernel_generic<
     // contract — every row `y` has valid `row_u`/`row_d` neighbor data
     // in `src_h`/`dst_h` by construction, either real interior-strip
     // rows or a caller-supplied reflected true-edge row).
-    let scalar_pixel = |x: usize, y: usize, acc: &mut GradientAccum| {
-        let xl = x.saturating_sub(1);
-        let xr = (x + 1).min(width - 1);
-        let row = (y + 1) * width; // +1: src_h/dst_h carry 1 halo row up front
-        let row_u = y * width; // y-1, in halo-relative terms
-        let row_d = (y + 2) * width; // y+1, in halo-relative terms
-        let i = row + x;
-        let s = src_h[i] as f64;
-        let dd = dst_h[i] as f64;
-        let act = activity[y * width + x] as f64;
-        let sxl = src_h[row + xl] as f64;
-        let sxr = src_h[row + xr] as f64;
-        let syu = src_h[row_u + x] as f64;
-        let syd = src_h[row_d + x] as f64;
-        let dxl = dst_h[row + xl] as f64;
-        let dxr = dst_h[row + xr] as f64;
-        let dyu = dst_h[row_u + x] as f64;
-        let dyd = dst_h[row_d + x] as f64;
+    let scalar_pixel =
+        |x: usize, y: usize, acc: &mut GradientAccum, r4: &mut Option<Rev4Grad<'_>>| {
+            let xl = x.saturating_sub(1);
+            let xr = (x + 1).min(width - 1);
+            let row = (y + 1) * width; // +1: src_h/dst_h carry 1 halo row up front
+            let row_u = y * width; // y-1, in halo-relative terms
+            let row_d = (y + 2) * width; // y+1, in halo-relative terms
+            let i = row + x;
+            let s = src_h[i] as f64;
+            let dd = dst_h[i] as f64;
+            let act = activity[y * width + x] as f64;
+            let sxl = src_h[row + xl] as f64;
+            let sxr = src_h[row + xr] as f64;
+            let syu = src_h[row_u + x] as f64;
+            let syd = src_h[row_d + x] as f64;
+            let dxl = dst_h[row + xl] as f64;
+            let dxr = dst_h[row + xr] as f64;
+            let dyu = dst_h[row_u + x] as f64;
+            let dyd = dst_h[row_d + x] as f64;
 
-        let gx_src = sxr - sxl;
-        let gy_src = syd - syu;
-        let grad_src_mag = (gx_src * gx_src + gy_src * gy_src).sqrt();
-        let gx_dst = dxr - dxl;
-        let gy_dst = dyd - dyu;
-        let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
+            let gx_src = sxr - sxl;
+            let gy_src = syd - syu;
+            let grad_src_mag = (gx_src * gx_src + gy_src * gy_src).sqrt();
+            let gx_dst = dxr - dxl;
+            let gy_dst = dyd - dyu;
+            let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
 
-        acc.sum_grad_src += grad_src_mag;
-        acc.sum_grad_dst += grad_dst_mag;
-        let g = 1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS);
-        acc.sum_gms += g;
-        acc.sum_gms2 += g * g;
+            acc.sum_grad_src += grad_src_mag;
+            acc.sum_grad_dst += grad_dst_mag;
+            let g = 1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS);
+            acc.sum_gms += g;
+            acc.sum_gms2 += g * g;
 
-        let raw_abs_err = (s - dd).abs();
-        let err_b = saturate(raw_abs_err, C_RING_ERR);
-        let act_b = saturate(act, C_ACTIVITY);
-        let edge_r = saturate(grad_src_mag, C_RING_EDGE);
-        acc.sum_ringing += err_b * act_b * (1.0 - edge_r);
-
-        let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
-        let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
-        acc.sum_banding += edge_excess * src_smooth_b;
-
-        if BANDVIS {
-            // Soft CURVATURE band-pass × flatness mask, FR excess pair
-            // (see `idx_append2::BANDVIS_GAIN`). Second differences, not
-            // first: a linear gradient of ANY steepness has |∇²| = 0, so
-            // smooth ramps never enter the band (measured to be the
-            // load-bearing property — a first-difference band could not
-            // separate sub-step smooth gradients from steps; both
-            // polarities mis-fired on ramp fixtures). A plateau step
-            // reports the FULL step in |∇²| at its flanking pixels, so
-            // the one-code-step δ derivation carries verbatim. Scalar
-            // mirrors the SIMD formula exactly.
-            let d2x_src = sxl + sxr - 2.0 * s;
-            let d2y_src = syu + syd - 2.0 * s;
-            let curv_src = (d2x_src * d2x_src + d2y_src * d2y_src).sqrt();
-            let d2x_dst = dxl + dxr - 2.0 * dd;
-            let d2y_dst = dyu + dyd - 2.0 * dd;
-            let curv_dst = (d2x_dst * d2x_dst + d2y_dst * d2y_dst).sqrt();
-            let flat = 1.0 - act_b;
-            let band = |g: f64| -> f64 {
-                saturate(g, bv_delta_lo as f64) * (1.0 - saturate(g, bv_delta_hi as f64))
-            };
-            if BV_DSTACT {
-                // `append2_dst_activity` SHIPPED combine (adjudication:
-                // `benchmarks/bandvis_dst_activity_2026-08-02.md`).
-                // GAIN = arm-2 visibility-weighted POOLING: the FR excess
-                // on the PURE band terms, weighted by the DST's own
-                // flatness OUTSIDE the ratio — the only place a flatness
-                // mask survives `bounded_excess`'s scale-invariance
-                // (arm 1, flat multiplied INSIDE the pair, measured
-                // ratio-cancelled: it suppressed real banding MORE than
-                // dither). Measured: lattice cross-fire 0.33×, deband
-                // margin 2.2× the OFF margin.
-                // LOSS = the OFF math BIT-EXACTLY (identical expressions,
-                // identical order): the arm-2 weight measured
-                // direction-INVERTING on the deband credit (the banded
-                // src's own contours zero the very pixels whose removal
-                // should be credited), and LOSS is the LYB-validated
-                // workhorse — it must not move.
-                let flat_d = 1.0 - saturate(act_dst[y * width + x] as f64, C_ACTIVITY);
-                let b_src = band(curv_src) * flat;
-                let b_dst = band(curv_dst) * flat;
-                let (_, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
-                let (g0, _) = bounded_excess_pair(band(curv_dst), band(curv_src), C_BV);
-                acc.sum_bv_gain += g0 * flat_d;
-                acc.sum_bv_loss += loss;
-            } else {
-                let b_src = band(curv_src) * flat;
-                let b_dst = band(curv_dst) * flat;
-                let (gain, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
-                acc.sum_bv_gain += gain;
-                acc.sum_bv_loss += loss;
+            let raw_abs_err = (s - dd).abs();
+            let err_b = saturate(raw_abs_err, C_RING_ERR);
+            let act_b = saturate(act, C_ACTIVITY);
+            let edge_r = saturate(grad_src_mag, C_RING_EDGE);
+            let ring_i = err_b * act_b * (1.0 - edge_r);
+            acc.sum_ringing += ring_i;
+            // REV4: C2's ring bins + C4's outside-mask bleed — same values,
+            // scalar per lane like the SIMD arm's `to_array()` tail.
+            if let Some(r4) = r4.as_mut() {
+                rev4_grad_pixel(
+                    r4,
+                    &RINGBASIS_UC,
+                    ring_i,
+                    grad_src_mag,
+                    grad_dst_mag,
+                    y * width + x,
+                );
             }
-        }
-    };
+
+            let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
+            let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
+            acc.sum_banding += edge_excess * src_smooth_b;
+
+            if BANDVIS {
+                // Soft CURVATURE band-pass × flatness mask, FR excess pair
+                // (see `idx_append2::BANDVIS_GAIN`). Second differences, not
+                // first: a linear gradient of ANY steepness has |∇²| = 0, so
+                // smooth ramps never enter the band (measured to be the
+                // load-bearing property — a first-difference band could not
+                // separate sub-step smooth gradients from steps; both
+                // polarities mis-fired on ramp fixtures). A plateau step
+                // reports the FULL step in |∇²| at its flanking pixels, so
+                // the one-code-step δ derivation carries verbatim. Scalar
+                // mirrors the SIMD formula exactly.
+                let d2x_src = sxl + sxr - 2.0 * s;
+                let d2y_src = syu + syd - 2.0 * s;
+                let curv_src = (d2x_src * d2x_src + d2y_src * d2y_src).sqrt();
+                let d2x_dst = dxl + dxr - 2.0 * dd;
+                let d2y_dst = dyu + dyd - 2.0 * dd;
+                let curv_dst = (d2x_dst * d2x_dst + d2y_dst * d2y_dst).sqrt();
+                let flat = 1.0 - act_b;
+                let band = |g: f64| -> f64 {
+                    saturate(g, bv_delta_lo as f64) * (1.0 - saturate(g, bv_delta_hi as f64))
+                };
+                if BV_DSTACT {
+                    // `append2_dst_activity` SHIPPED combine (adjudication:
+                    // `benchmarks/bandvis_dst_activity_2026-08-02.md`).
+                    // GAIN = arm-2 visibility-weighted POOLING: the FR excess
+                    // on the PURE band terms, weighted by the DST's own
+                    // flatness OUTSIDE the ratio — the only place a flatness
+                    // mask survives `bounded_excess`'s scale-invariance
+                    // (arm 1, flat multiplied INSIDE the pair, measured
+                    // ratio-cancelled: it suppressed real banding MORE than
+                    // dither). Measured: lattice cross-fire 0.33×, deband
+                    // margin 2.2× the OFF margin.
+                    // LOSS = the OFF math BIT-EXACTLY (identical expressions,
+                    // identical order): the arm-2 weight measured
+                    // direction-INVERTING on the deband credit (the banded
+                    // src's own contours zero the very pixels whose removal
+                    // should be credited), and LOSS is the LYB-validated
+                    // workhorse — it must not move.
+                    let flat_d = 1.0 - saturate(act_dst[y * width + x] as f64, C_ACTIVITY);
+                    let b_src = band(curv_src) * flat;
+                    let b_dst = band(curv_dst) * flat;
+                    let (_, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
+                    let (g0, _) = bounded_excess_pair(band(curv_dst), band(curv_src), C_BV);
+                    acc.sum_bv_gain += g0 * flat_d;
+                    acc.sum_bv_loss += loss;
+                } else {
+                    let b_src = band(curv_src) * flat;
+                    let b_dst = band(curv_dst) * flat;
+                    let (gain, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
+                    acc.sum_bv_gain += gain;
+                    acc.sum_bv_loss += loss;
+                }
+            }
+        };
 
     for y in 0..height {
         let row = (y + 1) * width;
@@ -3923,7 +4926,7 @@ fn gradient_block_kernel_generic<
         let row_d = (y + 2) * width;
         let act_row = y * width;
 
-        scalar_pixel(0, y, &mut acc);
+        scalar_pixel(0, y, &mut acc, &mut r4);
         if width > 2 {
             let interior_end = width - 1;
             let interior_w = interior_end - 1; // pixels [1, width-2]
@@ -3969,7 +4972,26 @@ fn gradient_block_kernel_generic<
                 let err_b = saturate_v(token, raw_abs_err, c_ring_err);
                 let act_b = saturate_v(token, act, c_activity);
                 let edge_r = saturate_v(token, grad_src_mag, c_ring_edge);
-                r_ring += err_b * act_b * (one - edge_r);
+                let ring_i = err_b * act_b * (one - edge_r);
+                r_ring += ring_i;
+                // REV4: C2 ring bins + C4 outside-mask bleed — scalarized
+                // per lane (the §A.14 register-pressure pattern; the
+                // u-domain bit lookup cannot vectorize anyway).
+                if let Some(r4) = r4.as_mut() {
+                    let ring_a = ring_i.to_array();
+                    let gs_a = grad_src_mag.to_array();
+                    let gd_a = grad_dst_mag.to_array();
+                    for lane in 0..8 {
+                        rev4_grad_pixel(
+                            r4,
+                            &RINGBASIS_UC,
+                            ring_a[lane] as f64,
+                            gs_a[lane] as f64,
+                            gd_a[lane] as f64,
+                            act_row + x + lane,
+                        );
+                    }
+                }
 
                 let edge_excess = bounded_excess_v(token, grad_dst_mag, grad_src_mag, c_band_dst);
                 let src_smooth_b = one - saturate_v(token, grad_src_mag, c_band_src);
@@ -4025,10 +5047,10 @@ fn gradient_block_kernel_generic<
             }
 
             for x in chunk_end..=interior_end - 1 {
-                scalar_pixel(x, y, &mut acc);
+                scalar_pixel(x, y, &mut acc, &mut r4);
             }
         }
-        scalar_pixel(width - 1, y, &mut acc);
+        scalar_pixel(width - 1, y, &mut acc, &mut r4);
     }
 
     acc
@@ -4042,6 +5064,7 @@ fn gradient_block_kernel_entry(
     activity: &[f32],
     width: usize,
     height: usize,
+    r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
     gradient_block_kernel_generic::<_, false, false>(
         token,
@@ -4053,6 +5076,7 @@ fn gradient_block_kernel_entry(
         height,
         0.0,
         0.0,
+        r4,
     )
 }
 
@@ -4066,6 +5090,7 @@ fn gradient_block_kernel_entry_bandvis(
     height: usize,
     bv_delta_lo: f32,
     bv_delta_hi: f32,
+    r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
     gradient_block_kernel_generic::<_, true, false>(
         token,
@@ -4077,6 +5102,7 @@ fn gradient_block_kernel_entry_bandvis(
         height,
         bv_delta_lo,
         bv_delta_hi,
+        r4,
     )
 }
 
@@ -4091,6 +5117,7 @@ fn gradient_block_kernel_entry_bandvis_dstact(
     height: usize,
     bv_delta_lo: f32,
     bv_delta_hi: f32,
+    r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
     gradient_block_kernel_generic::<_, true, true>(
         token,
@@ -4102,6 +5129,7 @@ fn gradient_block_kernel_entry_bandvis_dstact(
         height,
         bv_delta_lo,
         bv_delta_hi,
+        r4,
     )
 }
 
@@ -4111,7 +5139,10 @@ fn gradient_block_kernel_entry_bandvis_dstact(
 /// `Some(dst-activity strip)` switches the BANDVIS dst band term to the
 /// dst self-mask (`append2_dst_activity` — a third const-split
 /// instantiation; `None` runs the pre-fix bytes exactly). Ignored without
-/// `bandvis`.
+/// `bandvis`. `r4`: REV4's C2 ring-bin / C4 bleed hook bundle — `None`
+/// on every non-rev4 call, and the `Option` check is one loop-invariant
+/// branch (the `transducer_bank` shape), so the OFF path's op sequence
+/// is the pre-REV4 one bit for bit.
 fn gradient_block_kernel(
     src: &[f32],
     dst: &[f32],
@@ -4120,19 +5151,20 @@ fn gradient_block_kernel(
     height: usize,
     bandvis: Option<(f32, f32)>,
     bv_act_dst: Option<&[f32]>,
+    r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
     match (bandvis, bv_act_dst) {
         (None, _) => incant!(
-            gradient_block_kernel_entry(src, dst, activity, width, height),
+            gradient_block_kernel_entry(src, dst, activity, width, height, r4),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
         (Some((lo, hi)), None) => incant!(
-            gradient_block_kernel_entry_bandvis(src, dst, activity, width, height, lo, hi),
+            gradient_block_kernel_entry_bandvis(src, dst, activity, width, height, lo, hi, r4),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
         (Some((lo, hi)), Some(act_dst)) => incant!(
             gradient_block_kernel_entry_bandvis_dstact(
-                src, dst, activity, act_dst, width, height, lo, hi
+                src, dst, activity, act_dst, width, height, lo, hi, r4
             ),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
@@ -6317,6 +7349,7 @@ fn compute_channel_scale_v2(
     moments: Option<(&[f32], &[f32])>,
     scratch: &mut ScratchV2Strip,
     out: &mut [f64],
+    mut r4a: Option<Rev4CellArgs<'_>>,
 ) -> (f64, f64) {
     let n = width * height;
     assert_eq!(src.len(), n, "src plane length must be width*height");
@@ -6341,8 +7374,11 @@ fn compute_channel_scale_v2(
     // doc) so this comparison is a permanent `false` today — written
     // generically (not as a dead-code-eliding special case) so a future
     // session re-enabling the lever only needs to change the constant.
+    // REV4: the whole-image path carries no rev4 hooks — if the lever is
+    // ever re-enabled, a rev4-enabled call must NOT take it (the cells
+    // would silently stay zero). `r4a.is_none()` keeps that honest.
     #[allow(clippy::absurd_extreme_comparisons)]
-    if height <= STRIP_BYPASS_HEIGHT {
+    if height <= STRIP_BYPASS_HEIGHT && r4a.is_none() {
         return compute_channel_scale_v2_whole(src, dst, width, height, toggles, scratch, out);
     }
 
@@ -6351,6 +7387,13 @@ fn compute_channel_scale_v2(
         width * max_wide_h <= scratch.mu1.len(),
         "scratch buffers must be sized for the largest strip+halo"
     );
+
+    // REV4: the bleed-mask workspace for this cell — allocated once,
+    // filled per strip (chroma cells only; `bleed_y` is `Some` exactly
+    // there).
+    let mut bleed_work = r4a
+        .as_ref()
+        .and_then(|a| a.bleed_y.map(|_| BleedMaskWork::sized(width, STRIP_ROWS)));
 
     let mut dense = DenseAccum::default();
     let mut grad = GradientAccum::default();
@@ -6388,8 +7431,17 @@ fn compute_channel_scale_v2(
         // --- Blur pass on the strip+halo buffer only (§A.15's actual
         //     memory-traffic reduction: `wide_h` is O(STRIP_ROWS), not
         //     O(height)). With cached reference moments the mu1 V-blur +
-        //     activity chain drop out of the per-pair cost entirely. ---
-        if moments.is_some() {
+        //     activity chain drop out of the per-pair cost entirely —
+        //     EXCEPT when Rev4 C1 is on: `gridblk_strip_wide` reads the
+        //     WIDE activity window including halo rows, and activity is
+        //     a sliding-window V-blur whose f32 running-sum history is
+        //     local to each strip geometry — `act_full` rows are
+        //     bit-identical only where that row was a STRIP row of the
+        //     replayed walk, so gathering it would feed divergent
+        //     values at halo positions. The full strip pass reproduces
+        //     the streaming path's wide window bitwise. ---
+        let need_wide_activity = r4a.as_ref().is_some_and(|a| a.gridblk_period >= 2);
+        if moments.is_some() && !need_wide_activity {
             run_blur_pass_strip_cached_ref(width, wide_h, scratch);
         } else {
             run_blur_pass_strip(width, wide_h, scratch);
@@ -6419,6 +7471,38 @@ fn compute_channel_scale_v2(
         let ssq_strip = &scratch.ssq[off..off + strip_n];
         let s12_strip = &scratch.s12[off..off + strip_n];
 
+        // REV4 C4: dst-Y dilated-edge mask for this strip — gathered with
+        // a ±2-row halo from the same-scale luma plane, built by the SAME
+        // `dst_y_edge_mask_strip` the streaming walk uses (parity input).
+        let bleed_mask: Option<&[f32]> =
+            match (r4a.as_ref().and_then(|a| a.bleed_y), bleed_work.as_mut()) {
+                (Some(dy), Some(mw)) => {
+                    gather_strip_halo(
+                        dy,
+                        width,
+                        height,
+                        y0,
+                        strip_h + 4,
+                        2,
+                        &mut mw.dh[..width * (strip_h + 4)],
+                    );
+                    dst_y_edge_mask_strip(width, y0, strip_h, height, mw);
+                    Some(&mw.mask[..strip_n])
+                }
+                _ => None,
+            };
+
+        // REV4 hook bundle — identical construction to `stream_phase_b`'s
+        // (`Rev4Dense`/`Rev4Grad` feed the same `rev4_*_pixel` helpers),
+        // so a cell's accumulator is bitwise-identical across walks.
+        let r4d = match r4a.as_mut() {
+            Some(a) if a.tailhist || a.flat => Some(Rev4Dense {
+                tail: a.tailhist.then_some(&mut a.cell.tail),
+                flat: a.flat.then_some(&mut a.cell.flat),
+                edges: tail_edges(),
+            }),
+            _ => None,
+        };
         let strip_dense = dense_block_kernel(
             src_strip,
             dst_strip,
@@ -6430,6 +7514,7 @@ fn compute_channel_scale_v2(
             width,
             strip_h,
             toggles.transducer_bank,
+            r4d,
         );
         dense.accumulate(&strip_dense);
 
@@ -6441,9 +7526,44 @@ fn compute_channel_scale_v2(
             let g_n = width * (strip_h + 2);
             let src_g = &scratch.src_wide[g_off..g_off + g_n];
             let dst_g = &scratch.dst_wide[g_off..g_off + g_n];
-            let strip_grad =
-                gradient_block_kernel(src_g, dst_g, activity_strip, width, strip_h, None, None);
+            let r4g = match r4a.as_mut() {
+                Some(a) if a.ringbasis || bleed_mask.is_some() => Some(Rev4Grad {
+                    ring: a.ringbasis.then_some(&mut a.cell.ring),
+                    bleed: bleed_mask.map(|m| (m, &mut a.cell.bleed)),
+                }),
+                _ => None,
+            };
+            let strip_grad = gradient_block_kernel(
+                src_g,
+                dst_g,
+                activity_strip,
+                width,
+                strip_h,
+                None,
+                None,
+                r4g,
+            );
             grad.accumulate(&strip_grad);
+        }
+
+        // REV4 C1: boundary `ẽ` planes off the just-gathered wide buffers.
+        // `scratch.activity` is strip-computed over the same wide window
+        // in every blur path that can reach this point (the cached-moments
+        // branch is gated off above when C1 is on).
+        if let Some(a) = r4a.as_mut()
+            && a.gridblk_period >= 2
+        {
+            gridblk_strip_wide(
+                &scratch.src_wide[..n_wide],
+                &scratch.dst_wide[..n_wide],
+                &scratch.activity[..n_wide],
+                width,
+                y0,
+                strip_h,
+                height,
+                a.gridblk_period,
+                &mut a.cell.grid,
+            );
         }
 
         y0 += strip_h;
@@ -6508,6 +7628,7 @@ fn compute_channel_scale_v2_whole(
         width,
         height,
         toggles.transducer_bank,
+        None,
     );
 
     let grad = if toggles.gradient_features {
@@ -6520,7 +7641,7 @@ fn compute_channel_scale_v2_whole(
         let mut dst_g = vec![0.0f32; width * (height + 2)];
         gather_strip_halo(src, width, height, 0, height + 2, 1, &mut src_g);
         gather_strip_halo(dst, width, height, 0, height + 2, 1, &mut dst_g);
-        gradient_block_kernel(&src_g, &dst_g, activity, width, height, None, None)
+        gradient_block_kernel(&src_g, &dst_g, activity, width, height, None, None, None)
     } else {
         GradientAccum::default()
     };
@@ -7328,7 +8449,7 @@ pub(crate) fn compute_v2_features_with_ref_impl(
     scratch: &mut V2Scratch,
 ) -> Result<ZensimV2Result, ZensimError> {
     compute_v2_features_with_ref_impl_inner(
-        prepared, distorted, max_pixels, parallel, toggles, scratch,
+        prepared, distorted, max_pixels, parallel, toggles, scratch, None,
     )
 }
 
@@ -7415,6 +8536,11 @@ struct StreamChannelAccums {
     /// CSFW weighted-pool partials (Y channel + `csfw_block` only —
     /// untouched zeros otherwise).
     csfw: Vec<CsfwAccum>,
+    /// REV4 per-scale cells (`gridblk`/`ringbasis`/`tailhist` plus this
+    /// channel's share of `arttype`) — written by the dense/gradient hook
+    /// bundles and the gridblk strip kernel, all inside `stream_phase_b`.
+    /// Untouched zeros when every rev4 compute flag is off.
+    rev4: Vec<Rev4CellAccum>,
     /// Band-local planes for the v1 pool replay (`v1_pools`); empty
     /// (never allocated) when the toggle is off.
     /// One scratch per band SLOT within a strip (`STRIP_ROWS /
@@ -7437,6 +8563,7 @@ impl StreamChannelAccums {
             v1: vec![V1BasicSums::default(); n_scales],
             block: vec![(0.0, 0.0); n_scales],
             csfw: vec![CsfwAccum::default(); n_scales],
+            rev4: (0..n_scales).map(|_| Rev4CellAccum::default()).collect(),
             pool_scratch: (0..n_band_slots.clamp(1, V1_BANDS_PER_STRIP))
                 .map(|_| FoldPoolScratch::default())
                 .collect(),
@@ -7808,6 +8935,10 @@ fn stream_phase_b(
     // The resolved per-channel work order. Do not reconstruct it from public
     // toggles: that loses private subset restrictions and runs dead reductions.
     free: crate::fused::FreeExtrasWork,
+    // REV4's resolved per-(strip, channel) work order — `Rev4Work::OFF`
+    // on every non-rev4 call (loop-invariant Option branches inside the
+    // kernels, same shape as `transducer_bank`).
+    r4w: Rev4Work<'_>,
     acc: &mut StreamChannelAccums,
 ) {
     let width = info.plane_w;
@@ -7833,6 +8964,22 @@ fn stream_phase_b(
         let act_strip = &scr.activity[off..off + strip_n];
 
         let __t_dense = crate::fold_timing::start();
+        // REV4 C3/C4-noise hook — `None` when both are off (the
+        // `transducer_bank`-shaped invariant branch inside the kernel).
+        let cell = &mut acc.rev4[scale];
+        let r4d = if r4w.tailhist || r4w.flat {
+            Some(Rev4Dense {
+                tail: if r4w.tailhist {
+                    Some(&mut cell.tail)
+                } else {
+                    None
+                },
+                flat: if r4w.flat { Some(&mut cell.flat) } else { None },
+                edges: tail_edges(),
+            })
+        } else {
+            None
+        };
         let d = dense_block_kernel(
             src_strip,
             dst_strip,
@@ -7844,11 +8991,16 @@ fn stream_phase_b(
             width,
             strip_h,
             toggles.transducer_bank,
+            r4d,
         );
         crate::fold_timing::stop(__t_dense, crate::fold_timing::Phase::DenseKernel, scale);
         acc.dense[scale].accumulate(&d);
 
-        if toggles.gradient_features {
+        // REV4 C2/C4-bleed ride the gradient kernel too — it must run
+        // whenever either hook has work, even with `gradient_features`
+        // off (the hook's `Option` gates keep the rev4-off call
+        // byte-identical to the pre-rev4 signature).
+        if toggles.gradient_features || r4w.ringbasis || r4w.bleed_mask.is_some() {
             let g_off = (HALO_P - 1) * width;
             let g_n = width * (strip_h + 2);
             // BANDVIS accumulates only on (Y, append2 on) — the const-split
@@ -7861,6 +9013,19 @@ fn stream_phase_b(
             let bv_act_dst = append2
                 .filter(|p| cross.is_some() && p.dst_activity)
                 .map(|_| &scr.activity_dst[off..off + strip_n]);
+            let cell = &mut acc.rev4[scale];
+            let r4g = if r4w.ringbasis || r4w.bleed_mask.is_some() {
+                Some(Rev4Grad {
+                    ring: if r4w.ringbasis {
+                        Some(&mut cell.ring)
+                    } else {
+                        None
+                    },
+                    bleed: r4w.bleed_mask.map(|m| (m, &mut cell.bleed)),
+                })
+            } else {
+                None
+            };
             let __t_grad = crate::fold_timing::start();
             let g = gradient_block_kernel(
                 &src_win[g_off..g_off + g_n],
@@ -7870,9 +9035,29 @@ fn stream_phase_b(
                 strip_h,
                 bandvis,
                 bv_act_dst,
+                r4g,
             );
             crate::fold_timing::stop(__t_grad, crate::fold_timing::Phase::GradKernel, scale);
             acc.grad[scale].accumulate(&g);
+        }
+
+        // REV4 C1 — the full-boundary pass over the wide window (the
+        // phase-A activity plane covers the halo rows, which is exactly
+        // what `gridblk_strip_wide`'s contract requires).
+        if r4w.gridblk_period >= 2 {
+            let __t_r4 = crate::fold_timing::start();
+            gridblk_strip_wide(
+                &src_win[..n_wide],
+                &dst_win[..n_wide],
+                &scr.activity[..n_wide],
+                width,
+                y0,
+                strip_h,
+                info.plane_h,
+                r4w.gridblk_period,
+                &mut acc.rev4[scale].grid,
+            );
+            crate::fold_timing::stop(__t_r4, crate::fold_timing::Phase::Rev4Kernel, scale);
         }
     }
 
@@ -8024,6 +9209,424 @@ fn blockiness_sparse_strip_wide(
                 let step_src = (src_wide[i] as f64 - src_wide[i_up] as f64).abs();
                 *sum_h += bounded_excess(step_dst, step_src, C_BLOCK);
             }
+        }
+    }
+}
+
+// ============================================================================
+// REV4 C1 `gridblk` strip kernel (design note §C1).
+//
+// `ẽ = (|Δdst| − |Δsrc|) / ((act_a + act_b)/2 + C_ACTIVITY)` is computed
+// for EVERY vertical boundary (x ∈ 1..w) and horizontal boundary
+// (y ∈ 1..h) — not the sparse lattice-only subset `blockiness` visits,
+// because the winning phase is data-dependent and the profile needs all
+// `2n` boundaries. The winning phase is only known after the whole plane
+// is walked, so the kernel STORES `ẽ` into the cell's `plane_v`/`plane_h`
+// f32 buffers and `finish_gridblk_cell` rescans the on-grid positions
+// only (~2n/P hat evaluations — the store-then-rescan shape).
+//
+// Wide-window contract (same as `blockiness_sparse_strip_wide`, extended
+// by the activity plane): `*_wide` are `width * (strip_h + 2*HALO_P)`,
+// buffer row `HALO_P + k` = plane row `y0 + k`. `act_wide` covers the
+// identical wide window including halo rows (phase A fills all of
+// `scratch.activity`), so the H boundary at plane row `y0` reads the REAL
+// plane row `y0 − 1` from the halo, and the scalar/V8 paths index the
+// same offsets.
+//
+// PROFILE DETERMINISM: the emitted values are defined by THIS kernel —
+// per-phase `Σ|ẽ|`/`Σẽ` accumulate as: (a) two V8 lane pairs for the
+// chunked V span (chunks start at x = 1 + 8c, so lane k of parity-j
+// chunks covers positions ≡ (1 + 8j + k) mod period — the fold happens
+// once per strip into the f64 phase totals); (b) per-row V8 accumulators
+// for H (a row's boundaries share phase `y mod period`), lane-summed in
+// fixed f32 order then added to f64; (c) scalar tails fold into the f64
+// phase totals in row order. Every engine, tier and thread count replays
+// the identical sequence, so the feature is bit-deterministic while its
+// values carry f32-lane accumulation precision — the documented
+// exception to the row-ordered-f64 convention, chosen because a
+// per-boundary scalar scatter cannot meet the family's runtime budget.
+// ============================================================================
+
+/// Per-cell C1 accumulation entry — lazily sizes the `ẽ` planes and runs
+/// the dispatched strip kernel. `plane_h` is the FULL plane height.
+#[allow(clippy::too_many_arguments)]
+fn gridblk_strip_wide(
+    src_wide: &[f32],
+    dst_wide: &[f32],
+    act_wide: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    period: usize,
+    acc: &mut GridblkAccum,
+) {
+    incant!(
+        gridblk_strip_wide_entry(
+            src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn gridblk_strip_wide_entry(
+    token: Token,
+    src_wide: &[f32],
+    dst_wide: &[f32],
+    act_wide: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    period: usize,
+    acc: &mut GridblkAccum,
+) {
+    gridblk_strip_wide_generic::<_>(
+        token, src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn gridblk_strip_wide_generic<T: F32x8Backend + Copy>(
+    token: T,
+    src_wide: &[f32],
+    dst_wide: &[f32],
+    act_wide: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    period: usize,
+    acc: &mut GridblkAccum,
+) {
+    debug_assert!((2..=GRIDBLK_MAX_PERIOD).contains(&period));
+    debug_assert!(period.is_power_of_two());
+    debug_assert_eq!(src_wide.len(), width * (strip_h + 2 * HALO_P));
+    debug_assert_eq!(dst_wide.len(), src_wide.len());
+    debug_assert_eq!(act_wide.len(), src_wide.len());
+    let n_plane = width * plane_h;
+    if acc.plane_v.len() != n_plane {
+        acc.plane_v.resize(n_plane, 0.0);
+        acc.plane_h.resize(n_plane, 0.0);
+    }
+    let half = V8::<T>::splat(token, 0.5);
+    let c_act = V8::<T>::splat(token, C_ACTIVITY as f32);
+    // Lane-phase accumulators for the chunked V span — folded to f64 once
+    // per strip (see module doc above for the lane→phase map).
+    let mut acc_v_abs = [V8::<T>::zero(token), V8::<T>::zero(token)];
+    let mut acc_v_sgn = [V8::<T>::zero(token), V8::<T>::zero(token)];
+    macro_rules! ld_at {
+        ($plane:expr, $off:expr) => {
+            V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+        };
+    }
+    for k in 0..strip_h {
+        let y = y0 + k;
+        let row = (HALO_P + k) * width;
+        let prow = y * width;
+
+        // ---- Vertical boundaries (x ∈ 1..width), phase `x mod period`.
+        // Full chunks from x = 1 step 8 keep a fixed lane→phase map.
+        let interior_w = width - 1;
+        let chunk_end = 1 + interior_w - (interior_w % 8);
+        let mut x = 1usize;
+        let mut c = 0usize;
+        while x < chunk_end {
+            let i = row + x;
+            let e = (ld_at!(dst_wide, i) - ld_at!(dst_wide, i - 1)).abs()
+                - (ld_at!(src_wide, i) - ld_at!(src_wide, i - 1)).abs();
+            let norm = (ld_at!(act_wide, i - 1) + ld_at!(act_wide, i)) * half + c_act;
+            let et = e / norm;
+            et.store(
+                (&mut acc.plane_v[prow + x..prow + x + 8])
+                    .try_into()
+                    .unwrap(),
+            );
+            let j = c & 1;
+            acc_v_abs[j] += et.abs();
+            acc_v_sgn[j] += et;
+            x += 8;
+            c += 1;
+        }
+        while x < width {
+            let i = row + x;
+            let e = (dst_wide[i] - dst_wide[i - 1]).abs() - (src_wide[i] - src_wide[i - 1]).abs();
+            let et = e / ((act_wide[i - 1] + act_wide[i]) * 0.5 + C_ACTIVITY as f32);
+            acc.plane_v[prow + x] = et;
+            let p = x % period;
+            acc.abs_v[p] += et.abs() as f64;
+            acc.signed_v[p] += et as f64;
+            x += 1;
+        }
+
+        // ---- Horizontal boundaries (row y vs y−1), phase `y mod period`.
+        // `y == 0` never fires: the lattice has no boundary above the
+        // plane. For interior strips the halo row is the real `y − 1`.
+        if y > 0 {
+            let ph = y % period;
+            let row_u = row - width;
+            let mut acc_h_abs = V8::<T>::zero(token);
+            let mut acc_h_sgn = V8::<T>::zero(token);
+            let chunk_end_h = width - (width % 8);
+            let mut x = 0usize;
+            while x < chunk_end_h {
+                let i = row + x;
+                let e = (ld_at!(dst_wide, i) - ld_at!(dst_wide, row_u + x)).abs()
+                    - (ld_at!(src_wide, i) - ld_at!(src_wide, row_u + x)).abs();
+                let norm = (ld_at!(act_wide, row_u + x) + ld_at!(act_wide, i)) * half + c_act;
+                let et = e / norm;
+                et.store(
+                    (&mut acc.plane_h[prow + x..prow + x + 8])
+                        .try_into()
+                        .unwrap(),
+                );
+                acc_h_abs += et.abs();
+                acc_h_sgn += et;
+                x += 8;
+            }
+            let mut t_abs = 0.0f32;
+            let mut t_sgn = 0.0f32;
+            while x < width {
+                let i = row + x;
+                let iu = row_u + x;
+                let e = (dst_wide[i] - dst_wide[iu]).abs() - (src_wide[i] - src_wide[iu]).abs();
+                let et = e / ((act_wide[iu] + act_wide[i]) * 0.5 + C_ACTIVITY as f32);
+                acc.plane_h[prow + x] = et;
+                t_abs += et.abs();
+                t_sgn += et;
+                x += 1;
+            }
+            let a = acc_h_abs.to_array();
+            let s = acc_h_sgn.to_array();
+            let row_abs = a[0] + a[1] + a[2] + a[3] + a[4] + a[5] + a[6] + a[7] + t_abs;
+            let row_sgn = s[0] + s[1] + s[2] + s[3] + s[4] + s[5] + s[6] + s[7] + t_sgn;
+            acc.abs_h[ph] += row_abs as f64;
+            acc.signed_h[ph] += row_sgn as f64;
+        }
+    }
+    // Strip-end lane fold — phase (1 + 8j + k) mod period per doc above.
+    for (j, (av, sv)) in acc_v_abs.iter().zip(acc_v_sgn.iter()).enumerate() {
+        let a = av.to_array();
+        let s = sv.to_array();
+        for k in 0..8 {
+            let p = (1 + 8 * j + k) % period;
+            acc.abs_v[p] += a[k] as f64;
+            acc.signed_v[p] += s[k] as f64;
+        }
+    }
+}
+
+// ============================================================================
+// REV4 C4 `arttype` bleed mask builder (design note §C4).
+//
+// The mask marks every pixel within Chebyshev distance 1 of a dst-Y
+// edge — where "edge" is the gradient kernel's own test
+// (`(gx² + gy²).sqrt() >= C_RING_EDGE`, x-neighbours column-clamped,
+// y-neighbours the caller-supplied rows). Built once per strip before
+// the channel fan-out so the serial path (X/B processed before Y) has it
+// ready for the chroma gradient hooks.
+//
+// `dh` holds the dst-Y plane rows `reflect_101(y0 − 2 + r, plane_h)` for
+// `r ∈ 0..strip_h + 4`, fetched by the caller (producer `rows` in the
+// streaming walk, `gather_strip_halo` in the materialized path). The
+// edge formula is evaluated in V8 f32 uniformly at every position —
+// the deterministic definition; scalar tails use the identical f32 op
+// sequence. `mul_add` is deliberately NOT used (its FMA fusion is
+// tier-dependent — the same reason the production kernels spell
+// `a*b + c` out).
+// ============================================================================
+
+/// Per-strip C4 mask scratch (sized by the caller once per walk).
+#[derive(Default)]
+struct BleedMaskWork {
+    /// Dst-Y rows for `reflect_101(y0 − 2 + r)`, r ∈ 0..strip_h+4.
+    dh: Vec<f32>,
+    /// One raw edge-flag row (width f32, {0,1}).
+    e_row: Vec<f32>,
+    /// Horizontally-dilated edge rows j ∈ 0..strip_h+2 (E at plane row
+    /// `y0 − 1 + j`, zero when that row is out of plane).
+    ehd: Vec<f32>,
+    /// The finished mask, `width * strip_h`, {0.0, 1.0}.
+    mask: Vec<f32>,
+}
+
+impl BleedMaskWork {
+    /// Size all buffers for `width` × strips of at most `max_strip_h`.
+    fn sized(width: usize, max_strip_h: usize) -> Self {
+        Self {
+            dh: vec![0.0; width * (max_strip_h + 4)],
+            e_row: vec![0.0; width],
+            ehd: vec![0.0; width * (max_strip_h + 2)],
+            mask: vec![0.0; width * max_strip_h],
+        }
+    }
+}
+
+/// Build the strip's dilated dst-Y edge mask into `mw.mask[..n_strip]`.
+#[allow(clippy::too_many_arguments)]
+fn dst_y_edge_mask_strip(
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    mw: &mut BleedMaskWork,
+) {
+    incant!(
+        dst_y_edge_mask_entry(
+            &mw.dh[..width * (strip_h + 4)],
+            width,
+            y0,
+            strip_h,
+            plane_h,
+            &mut mw.e_row[..width],
+            &mut mw.ehd[..width * (strip_h + 2)],
+            &mut mw.mask[..width * strip_h]
+        ),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn dst_y_edge_mask_entry(
+    token: Token,
+    dh: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    e_row: &mut [f32],
+    ehd: &mut [f32],
+    mask: &mut [f32],
+) {
+    dst_y_edge_mask_generic::<_>(token, dh, width, y0, strip_h, plane_h, e_row, ehd, mask)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dst_y_edge_mask_generic<T: F32x8Backend + Copy>(
+    token: T,
+    dh: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    e_row: &mut [f32],
+    ehd: &mut [f32],
+    mask: &mut [f32],
+) {
+    debug_assert_eq!(dh.len(), width * (strip_h + 4));
+    debug_assert_eq!(ehd.len(), width * (strip_h + 2));
+    debug_assert_eq!(mask.len(), width * strip_h);
+    let zero = V8::<T>::zero(token);
+    let one = V8::<T>::splat(token, 1.0);
+    let c_edge = V8::<T>::splat(token, C_RING_EDGE as f32);
+    macro_rules! ld_at {
+        ($plane:expr, $off:expr) => {
+            V8::<T>::from_array(token, $plane[$off..$off + 8].try_into().unwrap())
+        };
+    }
+    // Scalar edge flag at plane row py = y0−1+j, column x — x-neighbours
+    // clamped, f32 arithmetic identical to the V8 lanes.
+    let edge_at = |j: usize, x: usize| -> f32 {
+        let xl = x.saturating_sub(1);
+        let xr = (x + 1).min(width - 1);
+        let (ru, rc, rd) = (j * width, (j + 1) * width, (j + 2) * width);
+        let gx = dh[rc + xr] - dh[rc + xl];
+        let gy = dh[rd + x] - dh[ru + x];
+        if (gx * gx + gy * gy).sqrt() >= C_RING_EDGE as f32 {
+            1.0
+        } else {
+            0.0
+        }
+    };
+    // Pass 1: edge rows (hdilated) into `ehd`. Row j is E at plane row
+    // `y0 − 1 + j`; rows outside the plane stay zero — the plane-clamped
+    // dilation of the spec falls out for free.
+    for j in 0..strip_h + 2 {
+        let py = y0 as isize + j as isize - 1;
+        let ehd_row = &mut ehd[j * width..(j + 1) * width];
+        if py < 0 || py >= plane_h as isize {
+            ehd_row.fill(0.0);
+            continue;
+        }
+        let (ru, rc, rd) = (j * width, (j + 1) * width, (j + 2) * width);
+        let mut x = 0usize;
+        if width > 2 {
+            e_row[0] = edge_at(j, 0);
+            let interior_end = width - 1;
+            let interior_w = interior_end - 1;
+            let chunk_end = 1 + interior_w - (interior_w % 8);
+            x = 1;
+            while x < chunk_end {
+                let gx = ld_at!(dh, rc + x + 1) - ld_at!(dh, rc + x - 1);
+                let gy = ld_at!(dh, rd + x) - ld_at!(dh, ru + x);
+                let m = (gx * gx + gy * gy).sqrt();
+                let flag = V8::<T>::blend(m.simd_ge(c_edge), one, zero);
+                flag.store((&mut e_row[x..x + 8]).try_into().unwrap());
+                x += 8;
+            }
+            while x < interior_end {
+                e_row[x] = edge_at(j, x);
+                x += 1;
+            }
+            e_row[width - 1] = edge_at(j, width - 1);
+        } else {
+            while x < width {
+                e_row[x] = edge_at(j, x);
+                x += 1;
+            }
+        }
+        // Horizontal 3-tap dilation, column-clamped — pure max ops, so
+        // the V8 and scalar shapes emit identical bits.
+        if width == 1 {
+            ehd_row[0] = e_row[0];
+        } else if width == 2 {
+            let m = e_row[0].max(e_row[1]);
+            ehd_row[0] = m;
+            ehd_row[1] = m;
+        } else {
+            ehd_row[0] = e_row[0].max(e_row[1]);
+            let interior_w = width - 2;
+            let chunk_end = 1 + interior_w - (interior_w % 8);
+            let mut x = 1usize;
+            while x < chunk_end {
+                let m = V8::<T>::from_array(token, e_row[x - 1..x + 7].try_into().unwrap())
+                    .max(V8::<T>::from_array(
+                        token,
+                        e_row[x..x + 8].try_into().unwrap(),
+                    ))
+                    .max(V8::<T>::from_array(
+                        token,
+                        e_row[x + 1..x + 9].try_into().unwrap(),
+                    ));
+                m.store((&mut ehd_row[x..x + 8]).try_into().unwrap());
+                x += 8;
+            }
+            while x < width - 1 {
+                ehd_row[x] = e_row[x - 1].max(e_row[x]).max(e_row[x + 1]);
+                x += 1;
+            }
+            ehd_row[width - 1] = e_row[width - 2].max(e_row[width - 1]);
+        }
+    }
+    // Pass 2: vertical 3-tap dilation — mask row k = max(ehd[k..k+3]),
+    // the ±1-row neighbourhood (out-of-plane ehd rows are already zero).
+    for k in 0..strip_h {
+        let (a, b, c) = (k * width, (k + 1) * width, (k + 2) * width);
+        let mrow = &mut mask[k * width..(k + 1) * width];
+        let mut x = 0usize;
+        while x + 8 <= width {
+            let m = ld_at!(ehd, a + x)
+                .max(ld_at!(ehd, b + x))
+                .max(ld_at!(ehd, c + x));
+            m.store((&mut mrow[x..x + 8]).try_into().unwrap());
+            x += 8;
+        }
+        while x < width {
+            mrow[x] = ehd[a + x].max(ehd[b + x]).max(ehd[c + x]);
+            x += 1;
         }
     }
 }
@@ -9146,6 +10749,12 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let layout_append2 = toggles.append2_block;
     let layout_csfw = toggles.csfw_block;
     let layout_dvifm = toggles.dvifm_block;
+    // REV4 family layout flags — independent (each family emits iff its
+    // own layout flag, so a rev4-subset request keeps its exact width).
+    let layout_gridblk = toggles.rev4_gridblk;
+    let layout_ringbasis = toggles.rev4_ringbasis;
+    let layout_tailhist = toggles.rev4_tailhist;
+    let layout_arttype = toggles.rev4_arttype;
     // Only read below under `threads` (the `fuse_channels` derivation a few
     // lines down); the `not(threads)` arm hardcodes `fuse_channels = false`
     // without it, so `--no-default-features --features feature-regime-v2`
@@ -9265,6 +10874,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
 
     let mut accums: [StreamChannelAccums; 3] =
         std::array::from_fn(|_| StreamChannelAccums::new(n_scales, band_slots_for(band_parallel)));
+    // REV4 C4's strip scratch — sized for the largest plane width; the
+    // per-strip build slices it down to `info.plane_w`.
+    let mut bleed_work = compute
+        .arttype
+        .then(|| BleedMaskWork::sized(dims[0].0, STRIP_ROWS));
     if let Some(ret) = retention.as_deref_mut() {
         ret.ensure(&dims);
     }
@@ -9407,6 +11021,38 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             crate::fold_timing::stop(__t_dv, crate::fold_timing::Phase::DvifmKernel, scale);
         }
 
+        // REV4 C4: the strip's ±1-px dilated dst-Y edge mask — built once
+        // per strip, serially before the channel fan-out (the DVIFM
+        // pump's slot), so the serial order's X/B phase B has it ready.
+        // Only a live chroma channel consumes it (the mask is dst-LUMA
+        // edges read by the chroma gradient hooks).
+        let bleed_mask: Option<&[f32]> = if local.arttype
+            && (ALL_CHANNELS
+                || compute.channel_active(scale, 0)
+                || compute.channel_active(scale, 2))
+        {
+            let __t_m = crate::fold_timing::start();
+            let mw = bleed_work.as_mut().expect("arttype implies mask work");
+            let w = info.plane_w;
+            for r in 0..info.strip_h + 4 {
+                let gy = info.y0 as isize - 2 + r as isize;
+                let gr = reflect_101(gy, info.plane_h);
+                let row = producer.rows(
+                    crate::feature_v2_stream::Side::Distorted,
+                    1,
+                    scale,
+                    gr,
+                    gr + 1,
+                );
+                mw.dh[r * w..(r + 1) * w].copy_from_slice(row);
+            }
+            dst_y_edge_mask_strip(w, info.y0, info.strip_h, info.plane_h, mw);
+            crate::fold_timing::stop(__t_m, crate::fold_timing::Phase::Rev4Kernel, scale);
+            Some(&mw.mask[..w * info.strip_h])
+        } else {
+            None
+        };
+
         // ref_y strip rows straight from the producer's rolling plane
         // (valid until the next `next_strip` call).
         let need_refy = append_on;
@@ -9517,6 +11163,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         append2,
                         csfw,
                         local.free_work(ch),
+                        local.rev4_work(scale, ch, bleed_mask),
                         acc,
                     );
                     crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
@@ -9611,6 +11258,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     append2,
                     csfw,
                     local.free_work(ch),
+                    local.rev4_work(scale, ch, bleed_mask),
                     acc,
                 );
                 crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
@@ -9686,6 +11334,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     append2,
                     csfw,
                     local.free_work(ch),
+                    local.rev4_work(scale, ch, bleed_mask),
                     &mut accums[ch],
                 );
             }
@@ -9729,6 +11378,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     append2,
                     csfw,
                     local.free_work(1),
+                    local.rev4_work(scale, 1, bleed_mask),
                     &mut accums[1],
                 );
             }
@@ -9765,12 +11415,49 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     } else {
         0
     };
-    let mut features =
-        vec![0.0f64; v12_total + append_total + append2_total + csfw_total + dvifm_total];
+    // REV4 tail blocks — emit order `gridblk | ringbasis | tailhist |
+    // arttype` after DVIFM (design note §Wiring); each is 3×per-cell
+    // except PerScale `arttype`.
+    let gridblk_total = if layout_gridblk {
+        n_scales * 3 * GRIDBLK_PER_CELL
+    } else {
+        0
+    };
+    let ringbasis_total = if layout_ringbasis {
+        n_scales * 3 * RINGBASIS_PER_CELL
+    } else {
+        0
+    };
+    let tailhist_total = if layout_tailhist {
+        n_scales * 3 * TAILHIST_PER_CELL
+    } else {
+        0
+    };
+    let arttype_total = if layout_arttype {
+        n_scales * ARTTYPE_PER_SCALE
+    } else {
+        0
+    };
+    let mut features = vec![
+        0.0f64;
+        v12_total
+            + append_total
+            + append2_total
+            + csfw_total
+            + dvifm_total
+            + gridblk_total
+            + ringbasis_total
+            + tailhist_total
+            + arttype_total
+    ];
     let (features_v12, features_tail) = features.split_at_mut(v12_total);
     let (features_app, features_tail2) = features_tail.split_at_mut(append_total);
     let (features_app2, features_tail3) = features_tail2.split_at_mut(append2_total);
-    let (features_csfw, features_dvifm) = features_tail3.split_at_mut(csfw_total);
+    let (features_csfw, features_tail4) = features_tail3.split_at_mut(csfw_total);
+    let (features_dvifm, features_tail5) = features_tail4.split_at_mut(dvifm_total);
+    let (features_gridblk, features_tail6) = features_tail5.split_at_mut(gridblk_total);
+    let (features_ring, features_tail7) = features_tail6.split_at_mut(ringbasis_total);
+    let (features_thist, features_art) = features_tail7.split_at_mut(tailhist_total);
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
     #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
@@ -10055,6 +11742,78 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         }
     }
 
+    // --- REV4 finalize (per scale): C1 cells rescan their stored `ẽ`
+    //     planes; C2/C3 fold their accumulators; C4's blur reads the
+    //     already-emitted EWC_Y × HF_LOSS_Y — final only after the scale
+    //     loop's cross-scale EWC fill, which is why this sits after it.
+    if layout_gridblk || layout_ringbasis || layout_tailhist || layout_arttype {
+        #[allow(clippy::needless_range_loop)] // scale derives offsets across distinct arrays
+        for scale in 0..n_scales {
+            let local = compute.at_scale(scale);
+            if !local.gridblk && !local.ringbasis && !local.tailhist && !local.arttype {
+                continue;
+            }
+            let (width, height) = dims[scale];
+            let cells = [
+                &accums[0].rev4[scale],
+                &accums[1].rev4[scale],
+                &accums[2].rev4[scale],
+            ];
+            let (ewc_y, hfl_y) = if local.arttype {
+                let yb = v1_total
+                    + scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL
+                    + FEATURES_PER_CHANNEL_V2_TOTAL;
+                (
+                    features_v12[yb + idx::EDGE_WIDTH_CHANGE],
+                    features_v12[yb + idx::HF_LOSS],
+                )
+            } else {
+                (0.0, 0.0)
+            };
+            finish_rev4_scale(
+                &local,
+                scale,
+                cells,
+                width,
+                height,
+                ewc_y,
+                hfl_y,
+                if layout_gridblk {
+                    Some(
+                        &mut features_gridblk
+                            [scale * 3 * GRIDBLK_PER_CELL..(scale + 1) * 3 * GRIDBLK_PER_CELL],
+                    )
+                } else {
+                    None
+                },
+                if layout_ringbasis {
+                    Some(
+                        &mut features_ring
+                            [scale * 3 * RINGBASIS_PER_CELL..(scale + 1) * 3 * RINGBASIS_PER_CELL],
+                    )
+                } else {
+                    None
+                },
+                if layout_tailhist {
+                    Some(
+                        &mut features_thist
+                            [scale * 3 * TAILHIST_PER_CELL..(scale + 1) * 3 * TAILHIST_PER_CELL],
+                    )
+                } else {
+                    None
+                },
+                if layout_arttype {
+                    Some(
+                        &mut features_art
+                            [scale * ARTTYPE_PER_SCALE..(scale + 1) * ARTTYPE_PER_SCALE],
+                    )
+                } else {
+                    None
+                },
+            );
+        }
+    }
+
     ZensimV2Result {
         features,
         n_scales,
@@ -10063,12 +11822,19 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         } else {
             V1PoolsMode::Off
         },
-        regime: match (layout_append, layout_append2, layout_csfw, layout_dvifm) {
-            (true, true, true, true) => FeatureRegime::Folded720Dvifm,
-            (true, true, true, false) => FeatureRegime::Folded720Csfw,
-            (true, true, false, _) => FeatureRegime::Folded720Append2,
-            (true, false, _, _) => FeatureRegime::Folded720Append,
-            (false, _, _, _) => FeatureRegime::Folded720,
+        regime: match (
+            layout_append,
+            layout_append2,
+            layout_csfw,
+            layout_dvifm,
+            layout_gridblk && layout_ringbasis && layout_tailhist && layout_arttype,
+        ) {
+            (true, true, true, true, true) => FeatureRegime::Folded720Rev4,
+            (true, true, true, true, false) => FeatureRegime::Folded720Dvifm,
+            (true, true, true, false, _) => FeatureRegime::Folded720Csfw,
+            (true, true, false, _, _) => FeatureRegime::Folded720Append2,
+            (true, false, _, _, _) => FeatureRegime::Folded720Append,
+            (false, _, _, _, _) => FeatureRegime::Folded720,
         },
     }
 }
@@ -10080,6 +11846,13 @@ fn compute_v2_features_with_ref_impl_inner(
     parallel: bool,
     toggles: V2NewFeatureToggles,
     scratch: &mut V2Scratch,
+    // REV4 cell out-param — `None` on every production call (the
+    // materialized walk never emits rev4 slots; the streaming walk owns
+    // that tail). `Some(&mut [n_scales * 3 cells])` — flat `(scale*3+ch)`
+    // order — turns the same strip walk into the materialized half of the
+    // streaming-vs-materialized parity gate: identical hook math into
+    // caller-visible accumulators.
+    mut rev4_cells: Option<&mut [Rev4CellAccum]>,
 ) -> Result<ZensimV2Result, ZensimError> {
     if distorted.width() != prepared.orig_width || distorted.height() != prepared.orig_height {
         return Err(ZensimError::DimensionMismatch);
@@ -10110,6 +11883,20 @@ fn compute_v2_features_with_ref_impl_inner(
     );
 
     let n_scales = prepared.scales.len();
+    if let Some(c) = rev4_cells.as_ref() {
+        assert_eq!(
+            c.len(),
+            n_scales * 3,
+            "rev4 cell slice must carry one cell per (scale, channel)"
+        );
+    }
+    // REV4's resolved compute flags for this call — the same
+    // `ComputeSet::at_scale`/`rev4_work` gating the streaming walk uses
+    // (minus `bleed_mask`, which `compute_channel_scale_v2`'s strip loop
+    // builds from `bleed_y`).
+    let rev4_compute = rev4_cells
+        .is_some()
+        .then(|| ComputeSet::from_toggles(toggles));
     let mut features = vec![0.0f64; n_scales * 3 * FEATURES_PER_CHANNEL_V2_TOTAL];
     // Per-channel (mean_grad_src, mean_grad_dst) from the previous
     // (finer) scale, for the edge-width-change cross-scale comparison.
@@ -10163,16 +11950,25 @@ fn compute_v2_features_with_ref_impl_inner(
         let mut grads: [(f64, f64); 3] = [(0.0, 0.0); 3];
         let out_region = &mut features[scale_base..][..3 * FEATURES_PER_CHANNEL_V2_TOTAL];
 
+        // REV4's at-scale flags for this scale — resolved once, handed to
+        // `rev4_cell_args` per channel (mirrors `rev4_work` minus the mask).
+        let local = rev4_compute.as_ref().map(|cs| cs.at_scale(scale));
+
         #[cfg(feature = "threads")]
         let ran_parallel = if parallel {
             use rayon::prelude::*;
+            let cell_opts: Vec<Option<&mut Rev4CellAccum>> = match rev4_cells.as_deref_mut() {
+                Some(c) => c[scale * 3..scale * 3 + 3].iter_mut().map(Some).collect(),
+                None => vec![None, None, None],
+            };
             let results: Vec<(f64, f64)> = out_region
                 .chunks_mut(FEATURES_PER_CHANNEL_V2_TOTAL)
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .zip(scratch.par_iter_mut())
+                .zip(cell_opts)
                 .enumerate()
-                .map(|(ch, (out, scr))| {
+                .map(|(ch, ((out, scr), cell))| {
                     let g = compute_channel_scale_v2(
                         &src_planes[ch],
                         &dst_planes[ch],
@@ -10182,6 +11978,9 @@ fn compute_v2_features_with_ref_impl_inner(
                         moments_for(ch),
                         scr,
                         out,
+                        cell.map(|c| {
+                            rev4_cell_args(c, local.as_ref().unwrap(), scale, ch, &dst_planes)
+                        }),
                     );
                     apply_transducer_luma_gate(out, ch, toggles);
                     g
@@ -10200,6 +11999,15 @@ fn compute_v2_features_with_ref_impl_inner(
                 .chunks_mut(FEATURES_PER_CHANNEL_V2_TOTAL)
                 .enumerate()
             {
+                let r4a = rev4_cells.as_deref_mut().map(|c| {
+                    rev4_cell_args(
+                        &mut c[scale * 3 + ch],
+                        local.as_ref().unwrap(),
+                        scale,
+                        ch,
+                        &dst_planes,
+                    )
+                });
                 grads[ch] = compute_channel_scale_v2(
                     &src_planes[ch],
                     &dst_planes[ch],
@@ -10209,6 +12017,7 @@ fn compute_v2_features_with_ref_impl_inner(
                     moments_for(ch),
                     &mut scratch[ch],
                     out,
+                    r4a,
                 );
                 apply_transducer_luma_gate(out, ch, toggles);
             }
@@ -10493,6 +12302,7 @@ fn attr_pass_a_kernels(
             width,
             strip_h,
             true, // transducer_bank (V2NewFeatureToggles::default())
+            None,
         );
         cell.dense.accumulate(&d);
         // Gradient needs a 1-row halo; gather from the full planes (real
@@ -10509,6 +12319,7 @@ fn attr_pass_a_kernels(
             &planes.act[base..base + strip_n],
             width,
             strip_h,
+            None,
             None,
             None,
         );
@@ -12824,7 +14635,8 @@ fn compute_v2_append_attribution_impl(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::source::RgbSlice;
+    use crate::PixelFormat;
+    use crate::source::{RgbSlice, StridedBytes};
 
     /// imazen/zensim#56 regression gate: the MSCN divisive normalizer must
     /// be the CORRECTLY-ROUNDED IEEE `resid / sqrt(var + c)` on every SIMD
@@ -13801,6 +15613,7 @@ pub(crate) mod tests {
             None,
             &mut scratch,
             &mut feat,
+            None,
         );
 
         // --- Diffmap under test: weight 1.0 on every spatialized family,
@@ -13969,6 +15782,7 @@ pub(crate) mod tests {
                     None,
                     &mut scratch,
                     &mut feat,
+                    None,
                 );
                 let base = scale * per_scale + ch * FEATURES_PER_CHANNEL_V2_TOTAL;
                 for &local in &supported {
@@ -14140,6 +15954,853 @@ pub(crate) mod tests {
         }
     }
 
+    /// REV4 streaming-vs-materialized parity: the materialized walk's
+    /// `Rev4CellAccum` cells, finalized by [`finish_rev4_scale`], must
+    /// equal the streaming walk's emitted rev4 segments bit-for-bit.
+    /// Both engines run the same kernel strips in the same order into
+    /// merge-free accumulators (the `blockiness_sparse_strip_wide`
+    /// running-total contract), so serial-vs-streaming differences are
+    /// storage, not arithmetic. Covers both activity routes: the
+    /// strip-computed `scratch.activity` plane and the cached full-plane
+    /// `moments` (whose per-strip gather must reproduce it exactly).
+    #[test]
+    fn rev4_streaming_materialized_parity() {
+        let toggles = V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            rev4_gridblk: true,
+            rev4_ringbasis: true,
+            rev4_tailhist: true,
+            rev4_arttype: true,
+            v1_pools: V1PoolsMode::Full,
+            ..Default::default()
+        };
+        let compute = ComputeSet::from_toggles(toggles);
+        for &(w, h) in &[(96usize, 80usize), (200, 136), (65, 129)] {
+            let src = textured_image(w, h, 0xBEEF);
+            let dst = quantize_distort(&src, w, h);
+            let source = RgbSlice::new(&src, w, h);
+            let distorted = RgbSlice::new(&dst, w, h);
+
+            let mut scratch = V2Scratch::new();
+            let streamed = compute_folded720_streaming_impl(
+                &source,
+                &distorted,
+                None,
+                false,
+                toggles,
+                &mut scratch,
+                None,
+            )
+            .expect("streaming walk computes");
+            assert_eq!(
+                streamed.features.len(),
+                REV4_BASE + 96 + 72 + 144 + 24,
+                "all-rev4 layout must emit the full 1322"
+            );
+
+            // The rev4 tail is thread-invariant too: the parallel channel
+            // fan-out changes only which thread runs a cell's strips, not
+            // their order (the merge-free-accumulator contract).
+            #[cfg(feature = "threads")]
+            {
+                let mut pscratch = V2Scratch::new();
+                let par = compute_folded720_streaming_impl(
+                    &source,
+                    &distorted,
+                    None,
+                    true,
+                    toggles,
+                    &mut pscratch,
+                    None,
+                )
+                .expect("parallel streaming computes");
+                assert_eq!(
+                    &par.features[REV4_BASE..],
+                    &streamed.features[REV4_BASE..],
+                    "parallel-vs-serial streaming rev4 tail {w}x{h}"
+                );
+            }
+
+            for cache_moments in [false, true] {
+                let prep = prepare_v2_reference_impl(&source, None, false, cache_moments)
+                    .expect("prepare computes");
+                let ns = prep.scales.len();
+                let mut cells: Vec<Rev4CellAccum> =
+                    (0..ns * 3).map(|_| Rev4CellAccum::default()).collect();
+                let mat = compute_v2_features_with_ref_impl_inner(
+                    &prep,
+                    &distorted,
+                    None,
+                    false,
+                    toggles,
+                    &mut scratch,
+                    Some(&mut cells[..]),
+                )
+                .expect("materialized walk computes");
+
+                for scale in 0..ns {
+                    let local = compute.at_scale(scale);
+                    let (sw, sh) = (prep.scales[scale].1, prep.scales[scale].2);
+                    // Y channel is index 1 of the [X, Y, B] channel blocks.
+                    let yb =
+                        scale * 3 * FEATURES_PER_CHANNEL_V2_TOTAL + FEATURES_PER_CHANNEL_V2_TOTAL;
+                    let ewc = mat.features[yb + idx::EDGE_WIDTH_CHANGE];
+                    let hfl = mat.features[yb + idx::HF_LOSS];
+                    let mut og = [0.0f64; 3 * GRIDBLK_PER_CELL];
+                    let mut or_ = [0.0f64; 3 * RINGBASIS_PER_CELL];
+                    let mut ot = [0.0f64; 3 * TAILHIST_PER_CELL];
+                    let mut oa = [0.0f64; ARTTYPE_PER_SCALE];
+                    finish_rev4_scale(
+                        &local,
+                        scale,
+                        [
+                            &cells[scale * 3],
+                            &cells[scale * 3 + 1],
+                            &cells[scale * 3 + 2],
+                        ],
+                        sw,
+                        sh,
+                        ewc,
+                        hfl,
+                        Some(&mut og),
+                        Some(&mut or_),
+                        Some(&mut ot),
+                        Some(&mut oa),
+                    );
+                    let tag = format!("{w}x{h} s{scale} moments={cache_moments}");
+                    let gb = REV4_BASE + scale * 3 * GRIDBLK_PER_CELL;
+                    assert_eq!(
+                        &og[..],
+                        &streamed.features[gb..gb + og.len()],
+                        "gridblk {tag}"
+                    );
+                    let rb = REV4_BASE + 96 + scale * 3 * RINGBASIS_PER_CELL;
+                    assert_eq!(
+                        &or_[..],
+                        &streamed.features[rb..rb + or_.len()],
+                        "ringbasis {tag}"
+                    );
+                    let tb = REV4_BASE + 96 + 72 + scale * 3 * TAILHIST_PER_CELL;
+                    assert_eq!(
+                        &ot[..],
+                        &streamed.features[tb..tb + ot.len()],
+                        "tailhist {tag}"
+                    );
+                    let ab = REV4_BASE + 96 + 72 + 144 + scale * ARTTYPE_PER_SCALE;
+                    assert_eq!(
+                        &oa[..],
+                        &streamed.features[ab..ab + oa.len()],
+                        "arttype {tag}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// All-rev4 toggles for the family unit tests (the same literal the
+    /// parity test uses — every block on, v1 pools full).
+    fn rev4_all_toggles() -> V2NewFeatureToggles {
+        V2NewFeatureToggles {
+            append_block: true,
+            append2_block: true,
+            csfw_block: true,
+            dvifm_block: true,
+            rev4_gridblk: true,
+            rev4_ringbasis: true,
+            rev4_tailhist: true,
+            rev4_arttype: true,
+            v1_pools: V1PoolsMode::Full,
+            ..Default::default()
+        }
+    }
+
+    /// Extract the full 1322-slot vector for a pair through the streaming
+    /// walk (the served engine).
+    fn rev4_extract(src: &[[u8; 3]], dst: &[[u8; 3]], w: usize, h: usize) -> Vec<f64> {
+        let source = RgbSlice::new(src, w, h);
+        let distorted = RgbSlice::new(dst, w, h);
+        let mut scratch = V2Scratch::new();
+        compute_folded720_streaming_impl(
+            &source,
+            &distorted,
+            None,
+            false,
+            rev4_all_toggles(),
+            &mut scratch,
+            None,
+        )
+        .expect("streaming walk computes")
+        .features
+    }
+
+    /// REV4 is difference-form end to end: an identical pair emits exact
+    /// 0.0 in C1 (`ẽ ≡ 0` → no winning phase), C2 (`ring` factors
+    /// `|s − dd|` ≡ 0) and C4 (`hfg`/`bleed`/`ewc·hfl` all factor a
+    /// dst−src difference). C3 alone is not exact-0: it histograms the
+    /// existing `d` map, whose direct-form `ssim_d_local` carries the
+    /// REGISTERED identity floating-point residue shared with the parent
+    /// v2 slots (`feature_invariants.rs` class 3, bar 2e-3 — the design
+    /// note's stated justification for C3's non-difference form). The
+    /// tailhist quantiles on identity must therefore sit under the same
+    /// bar, not at zero.
+    #[test]
+    fn rev4_identity_emits_zero() {
+        let (w, h) = (96usize, 80usize);
+        let src = textured_image(w, h, 0xF00D);
+        let f = rev4_extract(&src, &src, w, h);
+        assert_eq!(f.len(), 1322);
+        let tail_base = REV4_BASE + 96 + 72;
+        let art_base = tail_base + 144;
+        let mut bad = Vec::new();
+        for (i, &v) in f[REV4_BASE..].iter().enumerate() {
+            let abs_i = REV4_BASE + i;
+            if abs_i < tail_base || abs_i >= art_base {
+                // C1 / C2 / C4: exact zero on identity.
+                if v.to_bits() != 0.0f64.to_bits() {
+                    bad.push((abs_i, v));
+                }
+            } else {
+                // C3: registered fp-residue bound, same bar as the
+                // parent identity gate.
+                assert!(
+                    v.abs() <= 2e-3,
+                    "tailhist slot {abs_i} = {v:e} exceeds the registered \
+                     2e-3 identity-residue bar"
+                );
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "nonzero identity rev4 slots (C1/C2/C4): {bad:?}"
+        );
+    }
+
+    /// A strided (padded-row) source must produce the same rev4 tail as
+    /// the tight buffer — the front end's row reads are stride-aware and
+    /// nothing downstream may observe the padding.
+    #[test]
+    fn rev4_strided_equals_tight() {
+        let (w, h) = (96usize, 80usize);
+        let src = textured_image(w, h, 0xBEEF);
+        let dst = quantize_distort(&src, w, h);
+        // Padded copy: stride = w*3 + 13 (odd byte pad, deliberately not
+        // a multiple of anything the kernels could silently consume).
+        let stride = w * 3 + 13;
+        let mut pad_src = vec![0u8; stride * h];
+        let mut pad_dst = vec![0u8; stride * h];
+        for y in 0..h {
+            for x in 0..w {
+                let o = y * stride + x * 3;
+                pad_src[o..o + 3].copy_from_slice(&src[y * w + x]);
+                pad_dst[o..o + 3].copy_from_slice(&dst[y * w + x]);
+            }
+        }
+        let tight = rev4_extract(&src, &dst, w, h);
+        let s_src = StridedBytes::try_new(&pad_src, w, h, stride, PixelFormat::Srgb8Rgb)
+            .expect("strided src");
+        let s_dst = StridedBytes::try_new(&pad_dst, w, h, stride, PixelFormat::Srgb8Rgb)
+            .expect("strided dst");
+        let mut scratch = V2Scratch::new();
+        let strided = compute_folded720_streaming_impl(
+            &s_src,
+            &s_dst,
+            None,
+            false,
+            rev4_all_toggles(),
+            &mut scratch,
+            None,
+        )
+        .expect("strided walk computes")
+        .features;
+        for (i, (a, b)) in tight[REV4_BASE..]
+            .iter()
+            .zip(strided[REV4_BASE..].iter())
+            .enumerate()
+        {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "rev4 slot {} strided != tight",
+                REV4_BASE + i
+            );
+        }
+    }
+
+    /// Low-contrast content (gentle gradient + ±3 LCG noise) — content
+    /// steps stay ≪ block-flatten steps so a planted 8-px lattice
+    /// dominates the phase profile (the phase test's fixture).
+    fn smooth_image(w: usize, h: usize, seed: u32) -> Vec<[u8; 3]> {
+        let mut state = seed | 1;
+        let mut px = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                let noise = ((state >> 24) as i32 % 7) - 3;
+                let base = 96 + ((x * 48) / w.max(1)) as i32 + ((y * 32) / h.max(1)) as i32;
+                let v = (base + noise).clamp(0, 255) as u8;
+                px.push([v, (v as i32 + (noise >> 1)).clamp(0, 255) as u8, v]);
+            }
+        }
+        px
+    }
+
+    /// Alternating ±shift per 8-px column block: steps appear ONLY at
+    /// `x ≡ 0 mod 8` boundaries (the two sides inside a block share the
+    /// shift), planting a pure phase-0 lattice of added edges.
+    fn block_shift_distort(src: &[[u8; 3]], w: usize, h: usize) -> Vec<[u8; 3]> {
+        let mut out = src.to_vec();
+        for y in 0..h {
+            for x in 0..w {
+                let delta = if (x / 8) % 2 == 0 { 24i32 } else { -24i32 };
+                for c in out[y * w + x].iter_mut() {
+                    *c = (*c as i32 + delta).clamp(0, 255) as u8;
+                }
+            }
+        }
+        out
+    }
+
+    /// C1 phase recovery: shift a reference's 8-px block columns and crop
+    /// the DISTORTED image 5 columns left against a matching crop of the
+    /// reference — the planted lattice then sits at phase `(8−5) mod 8
+    /// = 3` in the compared frame with content still aligned. The
+    /// per-phase `Σ|ẽ|` argmax must be exactly 3, and its magnitude must
+    /// match the unshifted pair's phase-0 response within the stated
+    /// tolerance (±40% — the crop removes the leftmost content and the
+    /// off-lattice content steps re-partition, but the on-grid excess is
+    /// the same physical boundary set).
+    #[test]
+    fn rev4_gridblk_phase_shift_three() {
+        let (w, h) = (128usize, 96usize);
+        let src = smooth_image(w, h, 0xC1);
+        let dst_full = block_shift_distort(&src, w, h);
+        // Unshifted pair (phase 0 expected).
+        let f0 = rev4_extract(&src, &dst_full, w, h);
+        // Cropped pair: dst's lattice lands at phase 3, content aligned.
+        let wc = w - 5;
+        let src_c: Vec<[u8; 3]> = (0..h)
+            .flat_map(|y| src[y * w + 5..y * w + w].iter().copied())
+            .collect();
+        let dst_c: Vec<[u8; 3]> = (0..h)
+            .flat_map(|y| dst_full[y * w + 5..y * w + w].iter().copied())
+            .collect();
+        let source_c = RgbSlice::new(&src_c, wc, h);
+        let distorted_c = RgbSlice::new(&dst_c, wc, h);
+        let prep = prepare_v2_reference_impl(&source_c, None, false, false).expect("prepare");
+        let mut cells: Vec<Rev4CellAccum> = (0..prep.scales.len() * 3)
+            .map(|_| Rev4CellAccum::default())
+            .collect();
+        let mut scratch = V2Scratch::new();
+        let _ = compute_v2_features_with_ref_impl_inner(
+            &prep,
+            &distorted_c,
+            None,
+            false,
+            rev4_all_toggles(),
+            &mut scratch,
+            Some(&mut cells[..]),
+        )
+        .expect("materialized computes");
+        // Scale 0, Y channel (index 1): V-phase argmax must be 3.
+        let g = &cells[1].grid;
+        let pv = gridblk_winner(&g.abs_v, &[usize::MAX; GRIDBLK_MAX_PERIOD], 8)
+            .expect("a winning V phase");
+        assert_eq!(
+            pv,
+            3,
+            "V lattice phase must be 3, abs_v={:?}",
+            &g.abs_v[..8]
+        );
+        // Response magnitude vs the unshifted phase-0 profile: use the
+        // emitted on-grid mean as the stated response (blocking ADDS
+        // steps → positive signed ẽ on-grid).
+        let on_mean0 = f0[REV4_BASE + 8 + 6];
+        let f3 = rev4_extract(&src_c, &dst_c, wc, h);
+        let on_mean3 = f3[REV4_BASE + 8 + 6];
+        assert!(
+            on_mean3 > 0.4 * on_mean0 && on_mean3 < 1.6 * on_mean0,
+            "phase-3 response {on_mean3} vs unshifted {on_mean0} outside ±40%"
+        );
+    }
+
+    /// C1 sanity band: blur-only and noise-only distortions carry no
+    /// lattice, so the on/off |ẽ| contrast must sit near 1 — stated band
+    /// [0.5, 2.0] on every scale-0 channel (the argmax phase itself is
+    /// meaningless without a lattice, only the ratio is asserted).
+    #[test]
+    fn rev4_gridblk_blur_noise_band() {
+        let (w, h) = (96usize, 80usize);
+        let src = textured_image(w, h, 0xBEEF);
+        // 3x3 box blur.
+        let mut blur = src.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = [0u32; 3];
+                let mut n = 0u32;
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        let yy = (y as i32 + dy).clamp(0, h as i32 - 1) as usize;
+                        let xx = (x as i32 + dx).clamp(0, w as i32 - 1) as usize;
+                        for c in 0..3 {
+                            acc[c] += src[yy * w + xx][c] as u32;
+                        }
+                        n += 1;
+                    }
+                }
+                for c in 0..3 {
+                    blur[y * w + x][c] = (acc[c] / n) as u8;
+                }
+            }
+        }
+        // ±6 LCG noise.
+        let mut noise = src.clone();
+        let mut st = 0x9E3779B9u32;
+        for p in noise.iter_mut() {
+            for c in p.iter_mut() {
+                st = st.wrapping_mul(1664525).wrapping_add(1013904223);
+                let d = ((st >> 24) as i32 % 13) - 6;
+                *c = (*c as i32 + d).clamp(0, 255) as u8;
+            }
+        }
+        for (name, dst) in [("blur", &blur), ("noise", &noise)] {
+            let f = rev4_extract(&src, dst, w, h);
+            for ch in 0..3 {
+                let r = f[REV4_BASE + ch * 8 + 7];
+                assert!(
+                    (0.5..=2.0).contains(&r),
+                    "{name}: s0 ch{ch} on/off ratio {r} outside [0.5, 2.0]"
+                );
+            }
+        }
+    }
+
+    /// C3 machinery: `TailAccum`/`finish_tailhist_cell` against a
+    /// sorted-array reference on a controlled multiset — max exact,
+    /// p95/p99 equal to the lower edge of the true quantile's bin (the
+    /// "within one bin" contract), counts partition-invariant.
+    #[test]
+    fn rev4_tailhist_quantile_semantics() {
+        let edges = tail_edges();
+        // Deterministic multiset: 1000 values spanning [1e-6, 1e-1]
+        // plus 200 exact zeros (bin-0 mass) and 40 saturating values.
+        let mut vals: Vec<f64> = (0..1000)
+            .map(|i| 10f64.powf(-6.0 + (i as f64 / 999.0) * 5.0))
+            .collect();
+        vals.extend(std::iter::repeat_n(0.0, 200));
+        vals.extend(std::iter::repeat_n(2.5, 40));
+        let n = vals.len();
+        let mut acc = TailAccum::default();
+        for &v in &vals {
+            acc.scatter(edges, v, 0);
+        }
+        let mut out = [0.0f64; TAILHIST_PER_CELL];
+        finish_tailhist_cell(&acc, n, &mut out);
+        // max = true max exactly.
+        let sorted_max = vals.iter().copied().fold(0.0f64, f64::max);
+        assert_eq!(out[2].to_bits(), sorted_max.to_bits(), "max must be exact");
+        // p95/p99 within one bin of the sorted-array quantile: the
+        // emitted lower edge must equal the lower edge of the bin that
+        // contains the true order statistic (or be the adjacent bin
+        // when the cumulative target lands mid-bin — at most one bin of
+        // slack, asserted as: true value's bin lower edge <= emitted <=
+        // next edge above true value's bin).
+        let mut sorted = vals.clone();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+        for (k, q) in [(0usize, 0.95f64), (1, 0.99)] {
+            let idx = ((q * n as f64).ceil() as usize)
+                .saturating_sub(1)
+                .min(n - 1);
+            let tv = sorted[idx];
+            let emitted = out[k];
+            let tv_bin = edges.bin(tv);
+            let lo = if tv_bin == 0 {
+                0.0
+            } else {
+                f64::from_bits(edges.edges[tv_bin - 1])
+            };
+            let hi = f64::from_bits(edges.edges[tv_bin.min(TAILHIST_BINS - 2)]);
+            assert!(
+                emitted >= lo && emitted <= hi.max(lo),
+                "q={q}: emitted {emitted} not within one bin of {tv} (bin {tv_bin} edges [{lo}, {hi}])"
+            );
+        }
+        // Partition invariance: three different strip partitionings of
+        // the same sequence produce identical count arrays.
+        for split in [vec![0usize, n], vec![0, 400, 800, n], vec![0, 1, 999, n]] {
+            let mut h = [[0u32; TAILHIST_BINS]; 4];
+            for w in split.windows(2) {
+                for &v in &vals[w[0]..w[1]] {
+                    h[0][edges.bin(v)] += 1;
+                }
+            }
+            assert_eq!(h, acc.hist, "counts must be partition-invariant");
+        }
+    }
+
+    /// C4 bleed: a luma-only distortion (same per-pixel delta added to
+    /// R, G and B — chroma differences cancel exactly) must emit 0 in
+    /// both bleed slots; a chroma-only shift (R channel shifted left by
+    /// one column — new chroma edges everywhere) must emit positive.
+    #[test]
+    fn rev4_arttype_bleed_luma_vs_chroma() {
+        let (w, h) = (96usize, 80usize);
+        let src = textured_image(w, h, 0xBEEF);
+        // Luma-only: spatially-varying delta added to all three channels.
+        let mut luma = src.clone();
+        for (i, p) in luma.iter_mut().enumerate() {
+            let d = ((i * 2654435761usize) >> 20) as i32 % 31 - 15;
+            for c in p.iter_mut() {
+                *c = (*c as i32 + d).clamp(0, 255) as u8;
+            }
+        }
+        let fl = rev4_extract(&src, &luma, w, h);
+        let ab = REV4_BASE + 96 + 72 + 144; // arttype s0
+        assert_eq!(
+            fl[ab + idx_arttype::BLEED_X].to_bits(),
+            0.0f64.to_bits(),
+            "luma-only bleed X must be exactly 0"
+        );
+        assert_eq!(
+            fl[ab + idx_arttype::BLEED_B].to_bits(),
+            0.0f64.to_bits(),
+            "luma-only bleed B must be exactly 0"
+        );
+        // Chroma shift: rotate the R channel one column right — chroma
+        // content changes but luma barely moves.
+        let mut chroma = src.clone();
+        for y in 0..h {
+            for x in 0..w {
+                chroma[y * w + x][0] = src[y * w + ((x + 1) % w)][0];
+            }
+        }
+        let fc = rev4_extract(&src, &chroma, w, h);
+        assert!(
+            fc[ab + idx_arttype::BLEED_X] > 0.0,
+            "chroma shift must produce positive bleed X, got {}",
+            fc[ab + idx_arttype::BLEED_X]
+        );
+    }
+
+    /// f64 accumulation shows no cancellation on flat high-value inputs:
+    /// scatter one large constant into the f64 accumulators and compare
+    /// against the n·v algebraic reference — the running sums must stay
+    /// within a tiny relative bound (1e-12), i.e. no catastrophic
+    /// cancellation or drift, not merely "approximately" right.
+    #[test]
+    fn rev4_accumulators_flat_no_cancellation() {
+        const N: usize = 200_000;
+        let big = 0.75f64; // high-value flat term
+        // RingAccum: Σ ring·h_k — constant ring ⇒ fixed hat weights.
+        let mut ring = RingAccum::default();
+        let h = rev4_hats(&RINGBASIS_UC, rev4_u(big));
+        for _ in 0..N {
+            for (b, h) in ring.bins.iter_mut().zip(h.iter()) {
+                *b += big * h;
+            }
+        }
+        for (k, (&b, &h)) in ring.bins.iter().zip(h.iter()).enumerate() {
+            let expect = N as f64 * big * h;
+            let rel = ((b - expect) / expect).abs();
+            assert!(
+                rel < 1e-10 || expect == 0.0 && b == 0.0,
+                "ring bin {k} drifted on flat input: {b} vs {expect} (rel {rel:e})",
+            );
+        }
+        // FlatAccum: Σ hfg over flat pixels ≈ N · hfg.
+        let mut flat = FlatAccum::default();
+        for _ in 0..N {
+            flat.hfg += big;
+            flat.n += 1;
+        }
+        let expect = N as f64 * big;
+        assert!(
+            ((flat.hfg - expect) / expect).abs() < 1e-10,
+            "flat hfg drifted: {} vs {expect}",
+            flat.hfg
+        );
+        // GridblkAccum signed sums over an alternating ±big pattern: the
+        // equal-magnitude pairs cancel EXACTLY (same-bits add/sub), and
+        // |ẽ| stays on the algebraic bound.
+        let mut g = GridblkAccum::default();
+        for i in 0..N {
+            g.signed_v[0] += if i % 2 == 0 { big } else { -big };
+            g.abs_v[0] += big;
+        }
+        assert_eq!(g.signed_v[0].to_bits(), 0.0f64.to_bits());
+        assert!(
+            ((g.abs_v[0] - expect) / expect).abs() < 1e-10,
+            "gridblk abs drifted: {} vs {expect}",
+            g.abs_v[0]
+        );
+    }
+
+    /// C3 (and every rev4 slot) is merge-order free: serial walk and the
+    /// band-parallel walk at pool sizes {1,2,8,16} must emit BIT-IDENTICAL
+    /// rev4 segments. Height 200 forces a 128+72 strip decomposition —
+    /// mixed strip heights inside one image — and widths crossing
+    /// `H_TILE_WIDTH` exercise the horizontal tile split.
+    #[cfg(all(feature = "training", feature = "threads"))]
+    #[test]
+    fn rev4_thread_and_strip_invariance() {
+        for &(w, h) in &[(200usize, 200usize), (300, 200), (96, 320)] {
+            let src = textured_image(w, h, 0xC3);
+            let dst = quantize_distort(&src, w, h);
+            let mut reference: Option<Vec<f64>> = None;
+            for &parallel in &[false, true] {
+                for threads in [1usize, 2, 8, 16] {
+                    if !parallel && threads != 1 {
+                        continue;
+                    }
+                    let pool = rayon::ThreadPoolBuilder::new()
+                        .num_threads(threads)
+                        .build()
+                        .expect("build rayon pool");
+                    let got = pool.install(|| {
+                        let mut scratch = V2Scratch::new();
+                        compute_folded720_streaming_impl(
+                            &RgbSlice::new(&src, w, h),
+                            &RgbSlice::new(&dst, w, h),
+                            None,
+                            parallel,
+                            rev4_all_toggles(),
+                            &mut scratch,
+                            None,
+                        )
+                        .unwrap()
+                        .features
+                    });
+                    match &reference {
+                        None => reference = Some(got),
+                        Some(first) => {
+                            for i in 0..first.len().min(got.len()) {
+                                assert_eq!(
+                                    first[i].to_bits(),
+                                    got[i].to_bits(),
+                                    "{w}x{h}: slot {i} moved at par={parallel} t={threads} \
+                                     ({:e} -> {:e})",
+                                    first[i],
+                                    got[i]
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// C1 monotone-on-JPEG gate: on-grid excess (the emitted signed
+    /// on-grid mean `on_mean`, Y scale 0) must be non-decreasing as
+    /// zenjpeg quality descends 95 → 10 (step 5, 4:2:0 — the natural
+    /// JPEG lattice C1 targets) on ≥ 4 imazen-26 TRAIN references.
+    /// Corpus-gated: runs only where `/mnt/v/imazen-26-pristine` exists.
+    #[test]
+    #[ignore = "corpus fixture — run with --ignored where /mnt/v is mounted"]
+    fn rev4_gridblk_zenjpeg_ladder() {
+        use enough::Unstoppable;
+        use zenjpeg::decoder::Decoder;
+        use zenjpeg::encoder::{ChromaSubsampling, EncoderConfig, PixelLayout};
+
+        let root = std::path::Path::new("/mnt/v/imazen-26-pristine/lilith");
+        if !root.is_dir() {
+            eprintln!("skip: {root:?} not mounted");
+            return;
+        }
+        // TRAIN refs: leading numeric stem ends in {0,2,4,6,8}.
+        const REFS: [&str; 4] = [
+            "20210608_123424__pristine2x.png",
+            "20220616_102219__pristine2x.png",
+            "20230704_121114__pristine2x.png",
+            "20240424_123020__pristine2x.png",
+        ];
+        let jpeg_roundtrip = |px: &[[u8; 3]], w: usize, h: usize, q: u8| -> Vec<[u8; 3]> {
+            let flat: Vec<u8> = px.iter().flat_map(|p| p.iter().copied()).collect();
+            let config = EncoderConfig::ycbcr(q, ChromaSubsampling::Quarter);
+            let mut enc = config
+                .encode_from_bytes(w as u32, h as u32, PixelLayout::Rgb8Srgb)
+                .expect("zenjpeg encoder init");
+            enc.push_packed(&flat, Unstoppable).expect("zenjpeg push");
+            let bytes = enc.finish().expect("zenjpeg finish");
+            let dec = Decoder::new()
+                .decode(&bytes, Unstoppable)
+                .expect("zenjpeg decode");
+            let out = dec.pixels_u8().expect("u8 jpeg output");
+            out.as_chunks::<3>()
+                .0
+                .iter()
+                .map(|c| [c[0], c[1], c[2]])
+                .collect()
+        };
+        for name in REFS {
+            let img = image::open(root.join(name))
+                .unwrap_or_else(|e| panic!("decode {name}: {e}"))
+                .to_rgb8();
+            let (w, h) = (img.width() as usize, img.height() as usize);
+            let src: Vec<[u8; 3]> = img
+                .as_raw()
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|c| [c[0], c[1], c[2]])
+                .collect();
+            let prep = prepare_v2_reference_impl(&RgbSlice::new(&src, w, h), None, false, false)
+                .expect("prepare");
+            let mut prev = f64::NEG_INFINITY;
+            let mut series = Vec::new();
+            for q in (10u8..=95).rev().step_by(5) {
+                let dst = jpeg_roundtrip(&src, w, h, q);
+                let mut cells: Vec<Rev4CellAccum> = (0..prep.scales.len() * 3)
+                    .map(|_| Rev4CellAccum::default())
+                    .collect();
+                let mut scratch = V2Scratch::new();
+                let _ = compute_v2_features_with_ref_impl_inner(
+                    &prep,
+                    &RgbSlice::new(&dst, w, h),
+                    None,
+                    false,
+                    rev4_all_toggles(),
+                    &mut scratch,
+                    Some(&mut cells[..]),
+                )
+                .expect("materialized computes");
+                let f = rev4_extract(&src, &dst, w, h);
+                // Scale-0 Y cell: on-grid excess = Σ|ẽ| at the winning
+                // phase (V + H), the raw magnitude the phase argmax
+                // selects; signed on_mean + on/off recorded alongside.
+                let g = &cells[1].grid;
+                let pv = gridblk_winner(&g.abs_v, &[usize::MAX; GRIDBLK_MAX_PERIOD], 8)
+                    .expect("V winner");
+                let ph = gridblk_winner(&g.abs_h, &[usize::MAX; GRIDBLK_MAX_PERIOD], 8)
+                    .expect("H winner");
+                let on_abs = g.abs_v[pv] + g.abs_h[ph];
+                let (m, r) = (f[REV4_BASE + 8 + 6], f[REV4_BASE + 8 + 7]);
+                series.push((q, on_abs, m, r, pv, ph));
+                assert!(
+                    on_abs >= prev * 0.98,
+                    "{name}: on-grid |excess| not monotone at q{q}: {on_abs:e} < {prev:e}"
+                );
+                prev = on_abs;
+            }
+            let first = series.first().unwrap().1;
+            let last = series.last().unwrap().1;
+            assert!(
+                last > first,
+                "{name}: q10 on-grid |excess| not above q95: {series:?}"
+            );
+            eprintln!("{name} C1 ladder (q, Σon|ẽ|, on_mean, onoff, pv, ph): {series:?}");
+        }
+    }
+
+    /// Existing-slot bit-identity gate: the shared dense/gradient kernels
+    /// carry rev4 hooks, so an all-rev4-ON extraction must emit the SAME
+    /// f0..f985 bits as the all-rev4-OFF one (the hooks write only the
+    /// rev4 accumulators; `Option::None` skips them entirely). Geometries
+    /// include multi-strip heights, sub-64 dims (reflect-padded),
+    /// non-tight strides and `H_TILE_WIDTH`-crossing widths. The
+    /// SIMD-tier matrix for this same property lives in
+    /// `tests/rev4_featbank_parity.rs` — token permutation is
+    /// process-wide and cannot run inside the parallel unit-test
+    /// process.
+    #[test]
+    fn rev4_existing_slots_unmoved_by_toggles() {
+        for &(w, h, strided) in &[
+            (200usize, 200usize, false),
+            (96, 80, false),
+            (300, 200, false),
+            (127, 288, true),
+            (50, 300, false),
+            (300, 50, false),
+            (40, 40, false),
+        ] {
+            let src = textured_image(w, h, 0xE0 + w as u32);
+            let dst = quantize_distort(&src, w, h);
+            // Optional padded copy (non-tight stride + 13 bytes).
+            let stride = w * 3 + 13;
+            let (pad_src, pad_dst) = if strided {
+                let mut ps = vec![0u8; stride * h];
+                let mut pd = vec![0u8; stride * h];
+                for y in 0..h {
+                    for x in 0..w {
+                        let o = y * stride + x * 3;
+                        ps[o..o + 3].copy_from_slice(&src[y * w + x]);
+                        pd[o..o + 3].copy_from_slice(&dst[y * w + x]);
+                    }
+                }
+                (ps, pd)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            let toggles_on = rev4_all_toggles();
+            // Same request minus ONLY the rev4 flags — identical work
+            // everywhere except the rev4 hooks.
+            let toggles_off = V2NewFeatureToggles {
+                rev4_gridblk: false,
+                rev4_ringbasis: false,
+                rev4_tailhist: false,
+                rev4_arttype: false,
+                ..rev4_all_toggles()
+            };
+            let run_once = || {
+                let mut scratch = V2Scratch::new();
+                let mut run = |toggles: V2NewFeatureToggles| -> Vec<f64> {
+                    if strided {
+                        let s =
+                            StridedBytes::try_new(&pad_src, w, h, stride, PixelFormat::Srgb8Rgb)
+                                .expect("strided src");
+                        let d =
+                            StridedBytes::try_new(&pad_dst, w, h, stride, PixelFormat::Srgb8Rgb)
+                                .expect("strided dst");
+                        compute_folded720_streaming_impl(
+                            &s,
+                            &d,
+                            None,
+                            false,
+                            toggles,
+                            &mut scratch,
+                            None,
+                        )
+                        .expect("streaming computes")
+                        .features
+                    } else {
+                        compute_folded720_streaming_impl(
+                            &RgbSlice::new(&src, w, h),
+                            &RgbSlice::new(&dst, w, h),
+                            None,
+                            false,
+                            toggles,
+                            &mut scratch,
+                            None,
+                        )
+                        .expect("streaming computes")
+                        .features
+                    }
+                };
+                let on = run(toggles_on);
+                let off = run(toggles_off);
+                assert!(
+                    on.len() >= REV4_BASE && off.len() >= REV4_BASE,
+                    "unexpected width on={} off={}",
+                    on.len(),
+                    off.len()
+                );
+                for i in 0..REV4_BASE {
+                    assert_eq!(
+                        on[i].to_bits(),
+                        off[i].to_bits(),
+                        "{w}x{h} strided={strided}: existing slot {i} moved \
+                         with rev4 toggles ({:e} -> {:e})",
+                        off[i],
+                        on[i]
+                    );
+                }
+            };
+            run_once();
+        }
+    }
+
     /// One `V2Scratch` reused across pairs of DIFFERENT sizes and content
     /// must produce the same bits as a fresh scratch per pair — i.e. no
     /// stale-buffer leakage between pairs (buffers are fully written
@@ -14262,7 +16923,7 @@ pub(crate) mod tests {
                 let ssq: Vec<f32> = src.iter().zip(&dst).map(|(&s, &d)| s * s + d * d).collect();
                 let cross: Vec<f32> = src.iter().zip(&dst).map(|(&s, &d)| s * d).collect();
                 let actual = dense_block_kernel(
-                    &src, &dst, &src, &dst, &ssq, &cross, &act, width, height, true,
+                    &src, &dst, &src, &dst, &ssq, &cross, &act, width, height, true, None,
                 );
                 let signal: Vec<f64> = src
                     .iter()
@@ -14324,6 +16985,7 @@ pub(crate) mod tests {
                     width,
                     height,
                     true,
+                    None,
                 );
                 assert_eq!(identity.ws_mask_mse.finish(), 0.0);
                 assert_eq!(identity.ws_iw_mse.finish(), 0.0);
@@ -14384,6 +17046,7 @@ pub(crate) mod tests {
                     w,
                     h,
                     true,
+                    None,
                 );
                 let t = super::dense_block_kernel_era2_generic::<_, false>(
                     tok,
@@ -14397,6 +17060,7 @@ pub(crate) mod tests {
                     w,
                     h,
                     true,
+                    None,
                 );
                 let (fs, ts) = (oracle::dense_accum_slots(&f), oracle::dense_accum_slots(&t));
                 for i in 0..fs.len() {
@@ -14559,6 +17223,12 @@ pub(crate) mod tests {
                     // (`free_extras_*`); this one holds the LEGACY derivation,
                     // which predates it.
                     free_extras: super::V1FreeExtras::Off,
+                    // The rev4 families likewise postdate the 8-bit space;
+                    // their own gates cover the rev4 toggles directly.
+                    rev4_gridblk: false,
+                    rev4_ringbasis: false,
+                    rev4_tailhist: false,
+                    rev4_arttype: false,
                 };
                 let cs = ComputeSet::from_toggles(t);
                 // --- the legacy derivation, verbatim ---
@@ -15319,6 +17989,7 @@ pub(crate) mod tests {
                     w,
                     h,
                     true,
+                    None,
                 );
                 let scalar_pool = dense_block_kernel_pools_scalar(
                     &src_planes[ch],
@@ -15331,6 +18002,7 @@ pub(crate) mod tests {
                     w,
                     h,
                     true,
+                    None,
                 );
 
                 let era2 = dense_block_kernel_era2(
@@ -15344,6 +18016,7 @@ pub(crate) mod tests {
                     w,
                     h,
                     true,
+                    None,
                 );
                 for (variant, accum) in [
                     ("dispatched", &lane_pool),
@@ -15506,6 +18179,7 @@ pub(crate) mod tests {
                 w,
                 h,
                 true,
+                None,
             );
             let b = dense_block_kernel_pools_scalar(
                 &src_planes[ch],
@@ -15518,6 +18192,7 @@ pub(crate) mod tests {
                 w,
                 h,
                 true,
+                None,
             );
             let pools = [
                 ("mask_ssim", a.ws_mask_ssim, b.ws_mask_ssim),
@@ -21047,6 +23722,7 @@ pub fn harness_dense_slots(
             width,
             height,
             transducer_bank,
+            None,
         )
     } else {
         dense_block_kernel_era1(
@@ -21060,6 +23736,7 @@ pub fn harness_dense_slots(
             width,
             height,
             transducer_bank,
+            None,
         )
     };
     oracle::dense_accum_slots(&a)
@@ -21121,6 +23798,7 @@ pub fn bench_dense_era1(
         width,
         height,
         transducer_bank,
+        None,
     );
     a.sum_d + a.ws_iw_mse.num
 }
@@ -21151,6 +23829,7 @@ pub fn bench_dense_era2(
         width,
         height,
         transducer_bank,
+        None,
     );
     a.sum_d + a.ws_iw_mse.num
 }
@@ -21178,6 +23857,7 @@ fn dense_block_kernel_era2(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     incant!(
         dense_block_kernel_era2_entry(
@@ -21190,7 +23870,8 @@ fn dense_block_kernel_era2(
             activity,
             width,
             height,
-            transducer_bank
+            transducer_bank,
+            r4
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -21225,6 +23906,7 @@ fn dense_block_kernel_era2_entry(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_era2_generic::<_, false>(
         token,
@@ -21238,6 +23920,7 @@ fn dense_block_kernel_era2_entry(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -21255,6 +23938,7 @@ fn dense_block_kernel_era2_entry(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     dense_block_kernel_era2_generic::<_, false>(
         token,
@@ -21268,6 +23952,7 @@ fn dense_block_kernel_era2_entry(
         width,
         height,
         transducer_bank,
+        r4,
     )
 }
 
@@ -21317,6 +24002,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
     width: usize,
     height: usize,
     transducer_bank: bool,
+    mut r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
     // the v2 SSIM signal must read it as such. Hoisted once per call;
@@ -21470,6 +24156,29 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
                     p_kn[j] += kn[j];
                     p_kd[j] += kd[j];
                 }
+                // REV4: C3 histogram + C4 flat-HF — scalarized per lane
+                // (the §A.14 pattern; the bit-domain edges cannot
+                // vectorize). `t[7]` is `hfg`. One Option check per
+                // chunk; `None` is the pre-REV4 op sequence bit for bit.
+                if let Some(r4) = r4.as_mut() {
+                    let d_a = d.to_array();
+                    let art_a = art_i.to_array();
+                    let det_a = det_i.to_array();
+                    let mse_a = mse_i.to_array();
+                    let hfg_a = t[7].to_array();
+                    let act_a = act.to_array();
+                    for lane in 0..8 {
+                        rev4_dense_pixel(
+                            r4,
+                            d_a[lane] as f64,
+                            art_a[lane] as f64,
+                            det_a[lane] as f64,
+                            mse_a[lane] as f64,
+                            hfg_a[lane] as f64,
+                            act_a[lane] as f64,
+                        );
+                    }
+                }
                 x += 8;
             }
             // TAIL: masked, never zero-padded (see `v8_add_first`).
@@ -21502,6 +24211,28 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
                 for j in 0..3 {
                     p_kn[j] = v8_add_first(token, p_kn[j], &kn[j].to_array(), rem);
                     p_kd[j] = v8_add_first(token, p_kd[j], &kd[j].to_array(), rem);
+                }
+                // REV4 tail: only the first `rem` lanes are real pixels
+                // (the padded lanes' values are discarded, matching the
+                // masked-fold convention).
+                if let Some(r4) = r4.as_mut() {
+                    let d_a = d.to_array();
+                    let art_a = art_i.to_array();
+                    let det_a = det_i.to_array();
+                    let mse_a = mse_i.to_array();
+                    let hfg_a = t[7].to_array();
+                    let act_a = act.to_array();
+                    for lane in 0..rem {
+                        rev4_dense_pixel(
+                            r4,
+                            d_a[lane] as f64,
+                            art_a[lane] as f64,
+                            det_a[lane] as f64,
+                            mse_a[lane] as f64,
+                            hfg_a[lane] as f64,
+                            act_a[lane] as f64,
+                        );
+                    }
                 }
             }
 

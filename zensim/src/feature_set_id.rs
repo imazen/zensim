@@ -109,6 +109,17 @@ pub enum ComputeToken {
     /// Declared after `Hdr` so every existing variant's `bit()` stays put;
     /// `ALL` renders it in slot order (between `csfw` and `moments`).
     Dvifm,
+    /// Rev4 grid-aligned blocking phase profile, `f986..1081`.
+    ///
+    /// Declared after `Dvifm` so every existing variant's `bit()` stays put;
+    /// `ALL` renders it in slot order (between `dvifm` and `moments`).
+    Gridblk,
+    /// Rev4 ringing-magnitude basis histogram, `f1082..1153`.
+    Ringbasis,
+    /// Rev4 tail histograms of the dense per-pixel maps, `f1154..1297`.
+    Tailhist,
+    /// Rev4 artifact-type descriptors, `f1298..1321`.
+    Arttype,
 }
 
 impl ComputeToken {
@@ -124,6 +135,10 @@ impl ComputeToken {
         ComputeToken::Append2,
         ComputeToken::Csfw,
         ComputeToken::Dvifm,
+        ComputeToken::Gridblk,
+        ComputeToken::Ringbasis,
+        ComputeToken::Tailhist,
+        ComputeToken::Arttype,
         ComputeToken::Moments,
         ComputeToken::ClassC,
         ComputeToken::Hdr,
@@ -144,6 +159,10 @@ impl ComputeToken {
             ComputeToken::Append2 => "append2",
             ComputeToken::Csfw => "csfw",
             ComputeToken::Dvifm => "dvifm",
+            ComputeToken::Gridblk => "gridblk",
+            ComputeToken::Ringbasis => "ringbasis",
+            ComputeToken::Tailhist => "tailhist",
+            ComputeToken::Arttype => "arttype",
             ComputeToken::Moments => "moments",
             ComputeToken::ClassC => "classc",
             ComputeToken::Hdr => "hdr",
@@ -157,8 +176,8 @@ impl ComputeToken {
         Self::ALL.iter().copied().find(|t| t.as_str() == s)
     }
 
-    const fn bit(self) -> u16 {
-        1u16 << (self as u16)
+    const fn bit(self) -> u32 {
+        1u32 << (self as u32)
     }
 }
 
@@ -171,7 +190,7 @@ impl fmt::Display for ComputeToken {
 /// A set of [`ComputeToken`]s. Renders in registry order regardless of
 /// insertion order; the empty set renders `none`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
-pub struct ComputeParts(u16);
+pub struct ComputeParts(u32);
 
 impl ComputeParts {
     /// No families at all.

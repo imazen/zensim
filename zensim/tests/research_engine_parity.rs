@@ -120,8 +120,9 @@ fn research_and_production_agree_bit_exactly_at_the_944_layout() {
 
 /// **G2.1, the COMPLETE half** — the full registered width agrees
 /// bit-exactly with the production walk at the widest registered regime
-/// (986 = folded720 + append + append2 + CSFW + DVIFM; the DVIFM tail is
-/// itself bit-identical to the whole-plane oracle per the dvifm gates).
+/// (1322 = folded720 + append + append2 + CSFW + DVIFM + the four REV4
+/// feature-bank families; the DVIFM tail is itself bit-identical to the
+/// whole-plane oracle per the dvifm gates).
 #[test]
 fn research_everything_agrees_with_the_production_walk() {
     use zensim::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
@@ -139,6 +140,10 @@ fn research_everything_agrees_with_the_production_walk() {
                     append2_block: true,
                     csfw_block: true,
                     dvifm_block: true,
+                    rev4_gridblk: true,
+                    rev4_ringbasis: true,
+                    rev4_tailhist: true,
+                    rev4_arttype: true,
                     v1_pools: V1PoolsMode::Full,
                     ..V2NewFeatureToggles::default()
                 },
@@ -214,6 +219,14 @@ fn dropping_a_family_perturbs_only_its_own_slots() {
             ComputeToken::Append,
             ComputeToken::Masked,
             ComputeToken::Iw,
+            // REV4: each family independently droppable — dropping one
+            // must leave every still-populated slot (including the other
+            // three rev4 families' AND the whole f0..985 prefix)
+            // bit-identical.
+            ComputeToken::Gridblk,
+            ComputeToken::Ringbasis,
+            ComputeToken::Tailhist,
+            ComputeToken::Arttype,
         ] {
             let fam_slots = research::family_slots(fam);
             let want = SlotSet::from_slots(all.iter_slots().filter(|s| !fam_slots.contains(*s)));

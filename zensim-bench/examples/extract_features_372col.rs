@@ -99,8 +99,10 @@ fn main() {
     let mut audit_weights = None;
     let mut audit_ssim2 = false;
     let mut sampling = None;
+    let mut force_tier = None;
     let mut full_944 = false;
     let mut full_986 = false;
+    let mut full_rev4 = false;
     let mut dvifm_spec = None;
     let mut dvifm_blocks = None;
     let mut dvifm_cap = 0usize;
@@ -113,6 +115,7 @@ fn main() {
             "--sampling" => sampling = Some(args.next().expect("--sampling value")),
             "--full-944" => full_944 = true,
             "--full-986" => full_986 = true,
+            "--full-rev4" => full_rev4 = true,
             "--dvifm-spec" => dvifm_spec = Some(args.next().expect("--dvifm-spec value")),
             "--dvifm-block-stats" => {
                 dvifm_blocks = Some(args.next().expect("--dvifm-block-stats value"))
@@ -130,6 +133,7 @@ fn main() {
             "--dvifm-hist" => {
                 dvifm_hist = Some(args.next().expect("--dvifm-hist value"))
             }
+            "--force-tier" => force_tier = Some(args.next().unwrap()),
             "--corpus" => corpus = Some(args.next().unwrap()),
             "--path" => path = Some(args.next().unwrap().into()),
             "--out" => out = Some(args.next().unwrap().into()),
@@ -152,14 +156,34 @@ fn main() {
     let corpus = corpus.expect("--corpus REQUIRED (konjnd or aic3)");
     let path = path.expect("--path REQUIRED");
     let out = out.expect("--out REQUIRED");
+    // Forced SIMD tier for bit-identity matrices (rev4 acceptance):
+    // disabling a parent token cascades to its descendants, so `v3` =
+    // v4 off, `scalar` = v2 off (v3/v4/v4x all cascade away; the
+    // compile-time v1 SSE2 baseline always remains — zensim's `scalar`
+    // incant arm is what runs below v3). `native` = no forcing.
+    match force_tier.as_deref() {
+        None | Some("native") => {}
+        Some("v3") => {
+            archmage::X64V4Token::dangerously_disable_token_process_wide(true)
+                .expect("disable x86-64-v4");
+            eprintln!("[tier] forced v3 (x86-64-v4/v4x/avx512 disabled)");
+        }
+        Some("scalar") => {
+            archmage::X64V2Token::dangerously_disable_token_process_wide(true)
+                .expect("disable x86-64-v2");
+            eprintln!("[tier] forced scalar (x86-64-v2 and up disabled)");
+        }
+        Some(other) => panic!("unknown --force-tier {other:?} (native|v3|scalar)"),
+    }
     assert!(
-        !(full_944 && full_986),
-        "--full-944 and --full-986 are mutually exclusive"
+        [full_944, full_986, full_rev4].iter().filter(|b| **b).count() <= 1,
+        "--full-944/--full-986/--full-rev4 are mutually exclusive"
     );
     assert!(
         (dvifm_spec.is_none() && dvifm_blocks.is_none() && dvifm_hist.is_none())
-            || full_986,
-        "--dvifm-spec/--dvifm-block-stats/--dvifm-hist require --full-986 (the research path)"
+            || full_986
+            || full_rev4,
+        "--dvifm-spec/--dvifm-block-stats/--dvifm-hist require the research path (--full-986/--full-rev4)"
     );
     assert!(
         dvifm_hist.is_none() || dvifm_spec.is_some(),
@@ -170,8 +194,8 @@ fn main() {
         "--dvifm-hist accompanies --dvifm-block-stats"
     );
     assert!(
-        !full_986 || sampling.is_none(),
-        "--full-986 does not take a sampling contract"
+        !(full_986 || full_rev4) || sampling.is_none(),
+        "the research path (--full-986/--full-rev4) does not take a sampling contract"
     );
     assert!(
         !full_944 || sampling.as_deref().is_none_or(|s| s.starts_with("v2:")),
@@ -203,15 +227,17 @@ fn main() {
             );
         }
     }
-    // The w986 request goes through `research::extract` (the plan-driven
-    // owner) — `--dvifm-spec`/`--dvifm-block-stats` exist only there. The
-    // request is built once and shared by every pair.
-    let research_req = full_986.then(|| {
+    // The w986/w1322 request goes through `research::extract` (the
+    // plan-driven owner) — `--dvifm-spec`/`--dvifm-block-stats` exist only
+    // there. The request is built once and shared by every pair.
+    // `--full-rev4` is the same request at the rev4 bank's full width.
+    let research_req = (full_986 || full_rev4).then(|| {
+        let w = if full_rev4 { 1322 } else { 986 };
         let spec = dvifm_spec.as_deref().map(|p| dvifm_spec_load(Path::new(p)));
         let spec_sha = dvifm_spec.as_deref().map(|p| sha256_hex_of(Path::new(p)));
         let mut req = zensim::research::Request::for_slots(
-            zensim::feature_set_id::SlotSet::from_ranges([(0, 986)]),
-            986,
+            zensim::feature_set_id::SlotSet::from_ranges([(0, w)]),
+            w,
         );
         if let Some(spec) = spec {
             req = req.with_dvifm_spec(spec);
@@ -221,7 +247,7 @@ fn main() {
         }
         (req, spec_sha)
     });
-    let producer = if full_986 {
+    let producer = if full_986 || full_rev4 {
         None
     } else if full_944 {
         Some(diagnostic_producer(
@@ -304,7 +330,9 @@ fn main() {
 
     if let Some(audit) = &audit {
         audit
-            .validate_feature_width(if full_944 {
+            .validate_feature_width(if full_rev4 {
+                1322
+            } else if full_944 {
                 944
             } else if full_986 {
                 986
@@ -437,7 +465,9 @@ fn main() {
     }
 
     let n_feat = rows.first().map(|r| r.3.len()).unwrap_or(0);
-    let expected_width = if full_944 {
+    let expected_width = if full_rev4 {
+        1322
+    } else if full_944 {
         944
     } else if full_986 {
         986
