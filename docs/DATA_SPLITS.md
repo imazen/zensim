@@ -598,6 +598,25 @@ models and peers only; nothing is fitted, calibrated, selected or tuned on these
 - **Statistics:** within-band pairwise ordering accuracy and band SROCC by quality band,
   reference-clustered bootstrap, all from the `panel` owner.
 
+## Exposure ledger — 2026-09-23: rev4 step-1 e4
+
+Purpose: "rev4 step-1 e4" (`docs/REV4_EXPERIMENTS_2026-09-23.md` §E4; prereg
+`benchmarks/rev4_e4_prereg_2026-09-23.md`). Frozen existing board candidates
+only (ladder-board 2026-09-06: 359 width-944 cells, 67 width-372 cells); no
+fitting, calibration, feature/hyperparameter or checkpoint selection consumes
+these reads. Held-out reads, evaluation only:
+
+- **CID22-A(25)** human MCOS — per-candidate SROCC from A-only rows (rows
+  filtered by `ref_basename` membership before any label is loaded). CID22-B(24)
+  is not scored and not read.
+- **AIC-3, KonJND-504, CSIQ** — the stored per-candidate `rank.<corpus>` SROCCs
+  already in each fulleval (no re-scoring).
+- **LIVE, AIC-4, imazen26, nonphoto** — stored per-candidate SROCCs, read only
+  as terms of the registered composite.
+- KADID (TRAIN-role) is re-scored only as a features-root identity check.
+
+No secret holdout is read.
+
 ## Addendum — 2026-09-20: `joint-core-v1` registered as a TRAIN-role view
 
 `joint-core-v1` (`/mnt/v/output/zensim/joint-core-v1/`, 52,963 pairs,
