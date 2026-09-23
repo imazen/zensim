@@ -680,10 +680,25 @@ fn rev4_hats(c: &[f64; REV4_HATS], u: f64) -> [f64; REV4_HATS] {
     h
 }
 
-/// The C3 true-log interior edges `10^(-6 + k*6/32)` (k = 1..31) plus the
-/// binade LUT used to bin them in ~5 ops. `edges` are stored as bit
-/// patterns — histogram comparisons are bit-domain, no per-pixel `ln`
-/// (design note §C3).
+/// Pinned IEEE-754 bit patterns for C3's 31 true-log interior edges
+/// `10^(-6 + k*6/32)` (k = 1..31). The bits were generated once from
+/// the registered formula; runtime binning and quantile emission use only
+/// this table, so they cannot vary with a platform's `powf`.
+const TAIL_EDGE_BITS: [u64; 31] = [
+    0x3eb9d5ef1f0f0812, 0x3ec3e47c7b496466, 0x3ecea20dfed26b2d,
+    0x3ed7961810874a9f, 0x3ee2291c4db002bc, 0x3eebf749e693a057,
+    0x3ef58863a71f7be2, 0x3f009456549be1bd, 0x3f0987f7ad03ecfa,
+    0x3f13a874711aec6c, 0x3f1e459c57e28a47, 0x3f274eea61c12623,
+    0x3f31f24e46f5db3e, 0x3f3ba2e4b0e98677, 0x3f4547686f641ef6,
+    0x3f50624dd2f1a9fc, 0x3f593aeb8454ade2, 0x3f636d219065ac0c,
+    0x3f6dea41aad97caa, 0x3f77089380241edf, 0x3f81bc25a3dde2ac,
+    0x3f8b4f7e2b2c2a95, 0x3f9507315134befa, 0x3fa030dc4ea03a72,
+    0x3fa8eec7def5d56c, 0x3fb33281b6744ae1, 0x3fbd8ffaadd33b09,
+    0x3fc6c310e3769f3f, 0x3fd186a0714c181b, 0x3fdafd1354c40d50,
+    0x3fe4c7bbfcc7c63c,
+];
+
+/// Binade LUT for the pinned C3 edges, used to bin in ~5 ops.
 struct TailEdges {
     /// 31 ascending interior-edge bit patterns.
     edges: [u64; 31],
@@ -697,10 +712,7 @@ struct TailEdges {
 
 impl TailEdges {
     fn build() -> Self {
-        let mut edges = [0u64; 31];
-        for (k, e) in edges.iter_mut().enumerate() {
-            *e = 10f64.powf(-6.0 + (k as f64 + 1.0) * (6.0 / 32.0)).to_bits();
-        }
+        let edges = TAIL_EDGE_BITS;
         let mut base = Box::new([0u8; 1024]);
         let mut inner = Box::new([0u8; 1024]);
         for e in 0..=1023usize {
