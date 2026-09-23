@@ -4540,3 +4540,42 @@ comparators; prereg `benchmarks/dvifm_screen2d_prereg_2026-09-19.md` §5.4).
 No iteration after that read. This entry was committed before any MCOS
 value was read for fitting (membership columns only were used to build
 the split).
+
+## 2026-09-23: Rev4 existing-family feature bank — content-addressed f32 sidecars, promoted with corrections
+
+**What was built.** `/var/tmp/rev4-featbank/bank/` — the Rev4 feature bank,
+existing-family Rev3 rows only: 18 sets, 249,227 source stimuli → 248,983
+unique content-addressed `pair_key`s (244 pixel-identical stimuli collapsed,
+features verified bit-identical before collapse), ≈696 MB of
+`zstd-3/BYTE_STREAM_SPLIT` parquets. Feature set
+`basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3#b782e349`
+(producer); the bank's populated-905 storage form is registered as consumer
+`…/ceiling_rev3#e3db6aab` in `benchmarks/feature_sets_registry.json`.
+Extractor: pinned `extract-native-admission`, sha256
+`7c7ffbbfa033e8ca1a8f103d472b61ccde061c2394b03d519af2852ee8eeda87`,
+`ZENSIM_FORMULA_REV=3`, `ZENSIM_ROOT_FORM=sqrt`. Report + per-file hashes:
+`benchmarks/rev4_featbank_extract_2026-09-23.{md,json,pointer.md}`.
+
+**The actual why / corrections worth remembering.**
+
+- The ext944 caches were a *different era* (same decode, different formula
+  revision) — proven by bit-compare, not assumed. Only baseline-recovery
+  (cid22_train, safesyn) and the ceiling parquets were true Rev3 caches;
+  everything else was fresh-extracted. Fresh re-extraction of all 11,125
+  ceiling rows is bit-exact vs the ceiling parquets on all 13,872,080 cells.
+- The extractor's `feats.csv` comes out sorted by `ref_basename`, NOT pairs
+  order — positional joins silently corrupt. Every fresh pairs TSV carries a
+  dense `row_id` echoed into audit JSONL and CSV; all joins are keyed.
+- KADID no-op level-1 distortions decode to identical pixels: distinct
+  source stimuli collapse onto shared `pair_key`s (train 5,000→4,880,
+  SELECT 3,125→3,050, TERMINAL 2,000→1,952; CSIQ 866→865). Labels retain
+  every stimulus (`source_row_id`); `keys.n_stimuli` is the multiplicity.
+- `cid22_a25`'s `human_score` is **CID22 human MCOS/100**, not an SSIM2
+  oracle — caught at review; `label_scale` is now a per-set manifest field.
+- Held-out `human_score` replicas in extraction `pairs/`+`raw/` were moved
+  (not deleted/regenerated) under `/var/tmp/rev4-featbank/_sealed/` per
+  review correction 4a; the bank emits no labels for confirmation sets.
+- **No feature here is shown to help.** Nothing was fitted, selected, or
+  claimed; the bank is a storage/provenance artifact. Part B (new-family
+  sidecars C1–C4 + C8 gmsbank) is gated on `featbank-impl` and
+  `codex-gmsbank` reviews plus explicit user go.

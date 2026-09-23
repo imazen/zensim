@@ -848,6 +848,19 @@
    "kind": "set",
    "evidence": "benchmarks/feature_ceiling_2026-09-13.md; extract_features_372col --full-944"
   },
+  "basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3#e3db6aab": {
+   "compute": "basic+peaks+masked+iw+v2+append+append2",
+   "layout": 944,
+   "era": "ceiling_rev3",
+   "slots": "0-719,722-753,773-804,807-821,824-855,858-872,875-906,909-926,929-931,934-936,939-941",
+   "slots_hash8": "e3db6aab",
+   "n_slots": 905,
+   "role": "consumer",
+   "kind": "set",
+   "producer_id": "basic+peaks+masked+iw+v2+append+append2@w944/ceiling_rev3",
+   "evidence": "benchmarks/rev4_featbank_extract_2026-09-23.md — the Rev4 existing-family feature bank at /var/tmp/rev4-featbank/bank/ stores exactly the producer's 905 POPULATED slots as f32; the 39 structural-zero ids (720,721,754-772,805,806,822,823,856,857,873,874,907,908,927,928,932,933,937,938,942,943) are recorded per-set _MANIFEST.json and omitted from sidecars",
+   "note": "bank storage form keyed by content-addressed pair_key, not a model read-set; same handle as the producer and a different hash by construction"
+  },
   "basic+peaks+masked+iw+v2+append+append2@w944/sampling_v2_xyb_triangle_1_2_4_8": {
    "compute": "basic+peaks+masked+iw+v2+append+append2",
    "layout": 944,
