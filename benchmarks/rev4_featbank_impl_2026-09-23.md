@@ -175,6 +175,14 @@ values taken as each era computes them):
   ringbasis | tailhist | arttype`, present iff the corresponding layout
   flag — a `any-rev4` layout is always 1322 wide.
 - `FeatureRegime::Folded720Rev4` appended to the enum.
+- **Exact supported public API delta (2026-09-23 ruling):**
+  `feature_set_id::ComputeToken::{Gridblk,Ringbasis,Tailhist,Arttype}`
+  and `feature_v2::FeatureRegime::Folded720Rev4`. Both enums are
+  `#[non_exhaustive]`; these are additive variants under the existing
+  `Dvifm` precedent. The four `#[doc(hidden)]` public toggle fields
+  `V2NewFeatureToggles::rev4_{gridblk,ringbasis,tailhist,arttype}` are
+  research controls, recorded separately from the supported snapshot.
+  No new public function, trait, type or re-export was introduced.
 - The materialized walk (`compute_channel_scale_v2` path) gets the same
   hooks so rev4-on requests agree bitwise with the streaming walk.
 - `extract_features_372col --full-rev4` emits f0..1321.

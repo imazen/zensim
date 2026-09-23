@@ -4,6 +4,14 @@
 
 ### Added
 
+- The Rev4 research feature bank appends f986–f1321 (C1 `gridblk`, C2
+  `ringbasis`, C3 `tailhist`, C4 `arttype`; width 1322). Its exact new
+  supported public API items are the additive, `#[non_exhaustive]` enum
+  variants `ComputeToken::{Gridblk,Ringbasis,Tailhist,Arttype}` and
+  `FeatureRegime::Folded720Rev4`. The four doc-hidden
+  `V2NewFeatureToggles::rev4_{gridblk,ringbasis,tailhist,arttype}` fields
+  select the independent compute families for research extraction.
+
 - `diffmap_heatmap` example renders `Zensim::compute_with_diffmap`'s spatial map
   as a colour heatmap and as an overlay on the distorted image, and prints the
   score plus map percentiles as one JSON line. Normalization defaults to a fixed
