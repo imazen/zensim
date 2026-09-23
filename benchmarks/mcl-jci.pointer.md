@@ -17,6 +17,6 @@ The 5,000-row `pairs_mcljci_src.tsv` has `ref_path` pointing to each **pristine 
 | `dssim_scores.tsv` | `ca3229a6ede6e147808fda019089350cd33787dc0b2e442b9e0b2e2adcb39b8a` |
 | `dssim_scores_sub.tsv` | `b62b605d3eaa85da6a004fc4e520c98dd8f515e7b75d802fca2892cb92832cad` |
 
-The labels were read before preregistration, at about 06:42 UTC. The exposure is recorded in `docs/DATA_SPLITS.md`. The full-grid DSSIM-vs-label result is n=4,950, SROCC 0.8664, PLCC 0.9048, KROCC 0.7144, PWRC 0.9880 (Opus review, `zen_stats.panel`). No zensim candidate was scored on this set.
+The labels were read before preregistration, at about 12:42 UTC (06:42 -06:00). The exposure is recorded in `docs/DATA_SPLITS.md`. The full-grid DSSIM-vs-label result is n=4,950, SROCC 0.8664, PLCC 0.9048, KROCC 0.7144, PWRC 0.9880 (Opus review, `zen_stats.panel`). No zensim candidate was scored on this set.
 
 The `build_pairs.py` file in this scratch directory still contains the original incorrect hand-rolled `signed_srocc` diagnostic (mixed ddof conventions). Do not use its printed correlations. The label table itself was reproduced independently by the reviewer; all correlation values in the committed record are the reviewer's corrected values from the statistics owner.

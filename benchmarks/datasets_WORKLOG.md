@@ -6,7 +6,7 @@ Heavy commands via `~/tmp/devin/heavy` (lock heavily contended by sibling lanes 
 
 ## MCL-JCI acquisition
 
-- `scp durable WSL `/mnt/v/datasets/MCL-JCI.zip` /var/tmp/datasets/mcl-jci/` — 1,601,678,334 B.
+- `scp [redacted-host]:/mnt/v/datasets/MCL-JCI.zip /var/tmp/datasets/mcl-jci/` — 1,601,678,334 B (source hostname redacted in this copy).
   - `sha256sum` BOTH sides: `3d67a2a823b54e2102e89146a7c92837535b0e246a8e0531150434f35a604f7b`
     (matches `zenpapers/datasets/MCL-JCI.pointer.md` pulled 2026-05-27).
 - 3 PDFs (sha256): `0001070.pdf 566e9d61…` `2015_SPIE.pdf 333be2fc…` `2016_HVEI_paper_final_v5.pdf 3eeb85c3…`
@@ -46,27 +46,25 @@ Heavy commands via `~/tmp/devin/heavy` (lock heavily contended by sibling lanes 
   ORIENTATION: DISTORTION (higher = worse). Sidecar `mcljci_labels.csv` carries
   src/qf/jnd_dist/p_notice/n_subjects/median_jnd1/n_jnd_mean.
 - `pairs_mcljci_src.tsv`: `ref_path(BMP) \t dist_path(JPEG) \t human_score` — 5,000 rows.
-- Checks run (original hand-rolled signed correlations corrected from Opus `zen_stats`/scipy review; structural outputs retained):
+- Checks run (printed lines retained; hand-rolled signed correlations marked invalid with reviewer corrections beside them):
   - `rows=5000 (expect 5000)`
   - `monotone-nonincreasing violations per (src,qf): 0` (by construction, not independent orientation evidence)
   - `jnd_dist @ QF=100: min=0.0 max=0.0 (expect all 0)` (by construction)
   - `jnd_dist @ QF=1:   min=2.833 max=7.600 mean=4.926`
-  - `signed SROCC(jnd_dist, QF) per src: min=-0.9967 max=-0.8516 mean=-0.9339`
-    (the original out-of-range value came from an invalid ddof mix; the original signed-SROCC helper must not be reused)
-  - `signed SROCC(median per-subject JND#1, paper Table-2 JND#1 L) = 0.7572`
-  - `p_notice at paper JND#1 L: mean=0.173`; the earlier GMM-pooling explanation is a hypothesis, not verified. The median per-subject JND#1 sits 13 QF below the published location. Ordering agreement is 0.7572.
+  - `signed SROCC(jnd_dist, QF) per src: min=-1.0067 max=-0.8602 mean=-0.9433` — **INVALID (ddof bug)**. Reviewer-corrected min/max/mean: −0.9967 / −0.8516 / −0.9339.
+  - `signed SROCC(median per-subject JND#1, paper Table-2 JND#1 L) = 0.7727` — **INVALID (ddof bug)**. Reviewer-corrected: 0.7572.
+  - `p_notice at paper JND#1 L: mean=0.173` — printed value valid; the earlier GMM-pooling explanation is a hypothesis, not verified. The median per-subject JND#1 sits 13 QF below the published location.
 - Independent check B (zenmetrics `batch --metric dssim`, QF100→QFq JPEGs, the label anchor is the QF=100 JPEG per the paper; the pairs-table `ref_path` remains the pristine BMP):
   - FULL 4,950-pair run (via `~/tmp/devin/heavy --mem 8G --jobs 8`, completed after lock wait):
     `panel(dssim, jnd_dist): n=4950 srocc=0.8664 plcc=0.9048 krocc=0.7144 pwrc=0.9880`
-    `signed SROCC(dssim, jnd_dist) = +0.8664` (positive = both distortion-oriented)
-    `signed SROCC(dssim, -QF) = +0.9785`
-    `per-src signed SROCC: n=50 min=+0.8542 max=+0.9969` (all 50 positive)
-  - 247-pair decimated interim run agreed: signed SROCC +0.8639 — subsample vs full-grid
-    difference <0.001.
+    `signed SROCC(dssim, jnd_dist) = +0.8666` — **INVALID (ddof bug)**. Reviewer-corrected: +0.8664 (positive = both distortion-oriented).
+    `signed SROCC(dssim, -QF) = +0.9787` — **INVALID (ddof bug)**. Reviewer-corrected: +0.9785.
+    `per-src signed SROCC: n=50 min=+0.863 med=+0.939 max=+1.007` — **INVALID (ddof bug)**. Reviewer-corrected min/max: +0.8542 / +0.9969; all 50 signs positive. No corrected median was supplied.
+  - 247-pair decimated interim printed `signed SROCC +0.8674` — **INVALID (ddof bug)**. Reviewer-corrected subset: +0.8639; both subset and full grid have positive signs.
 - VERDICT: label is DISTORTION-oriented, consistent with the KonJND/SDR25/AIC-4 JND family.
   Do NOT negate for eval; negate only if ever used as a training quality target.
 - Label exposure: JND_samples parsed for registration + these two checks (read-only);
-  recorded in `docs/DATA_SPLITS.md` by the landing correction; no prereg existed before the 06:42Z label read.
+  recorded in `docs/DATA_SPLITS.md` by the landing correction; no prereg existed before labels were read at about 12:42 UTC (06:42 -06:00).
 
 ## SDR25 verification (official repo)
 
@@ -102,7 +100,7 @@ Heavy commands via `~/tmp/devin/heavy` (lock heavily contended by sibling lanes 
 
 ## Landing review correction (2026-09-23 UTC)
 
-The original lane omitted its required preregistration before reading MCL-JCI labels at about 06:42Z. No prereg was backdated. A hand-rolled signed-SROCC helper mixed covariance ddof=1 with standard deviations ddof=0 and produced an impossible value below -1; all affected signed values above are replaced with the Opus reviewer's corrected values. Check A is by construction. The full-grid DSSIM panel is n=4,950, SROCC 0.8664, PLCC 0.9048, KROCC 0.7144, PWRC 0.9880. The original bulk data remain in `/var/tmp/datasets/mcl-jci/`; the durable original zip is separately identified in the pointer. The local HVEI PDF at `/mnt/v/input/papers/15/15d661f193886f043fc0aeae36463636eb074aeba8b0391855482f8a27777540.pdf` is an orphan with no seed record; zenpapers owner must resolve it, and it was not deleted.
+The original lane omitted its required preregistration before reading MCL-JCI labels at about 12:42 UTC (06:42 -06:00). No prereg was backdated. A hand-rolled signed-SROCC helper mixed covariance ddof=1 with standard deviations ddof=0 and produced an impossible value below -1; its printed lines remain above, explicitly marked invalid and paired with the Opus reviewer's corrected values. Check A is by construction. The full-grid DSSIM panel is n=4,950, SROCC 0.8664, PLCC 0.9048, KROCC 0.7144, PWRC 0.9880. The original bulk data remain in `/var/tmp/datasets/mcl-jci/`; the durable original zip is separately identified in the pointer. The local HVEI PDF at `/mnt/v/input/papers/15/15d661f193886f043fc0aeae36463636eb074aeba8b0391855482f8a27777540.pdf` is an orphan with no seed record; zenpapers owner must resolve it, and it was not deleted.
 
 ### Landing footprint completion, 2026-09-23 UTC
 
