@@ -12,4 +12,6 @@ The compact result is `rev4_avif_decode_diff_2026-09-23.json`. All bulky outputs
 | `probe` | `cf4d86d507ae9d096122b5cdfa11cc9331b3e151bcd66941057b69a4c6761f1a` |
 | `zenmetrics-avif-cicp-test.patch` | `5f22a9011878b5ae2974897ce3c12217baa1bf1e5528849979c1024f35b8e2eb` |
 
+Do not apply `zenmetrics-avif-cicp-test.patch`: its expected RGB8 hash pins the inexact tagged route. Use the corrected test specification in `rev4_avif_decode_diff_2026-09-23.md`.
+
 `cell*.rgb` and `cell*.native` are packed per-cell RGB8 and native RGB16 blobs; their individual SHA256 values are in `pixels.json` and `native.json`. `replay.tsv` records the final command timestamps and log hashes. Raw outputs occupy about 808 MB, mostly those pixel blobs.
