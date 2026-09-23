@@ -16440,22 +16440,37 @@ pub(crate) mod tests {
         }
     }
 
-    /// C4 bleed: a luma-only distortion (same per-pixel delta added to
-    /// R, G and B — chroma differences cancel exactly) must emit 0 in
-    /// both bleed slots; a chroma-only shift (R channel shifted left by
-    /// one column — new chroma edges everywhere) must emit positive.
+    /// C4 bleed on a mostly flat grey source: a localized equal-RGB
+    /// luma step leaves an unmasked area and emits zero bleed. Adding a
+    /// chroma texture outside that step must produce positive bleed.
     #[test]
     fn rev4_arttype_bleed_luma_vs_chroma() {
         let (w, h) = (96usize, 80usize);
-        let src = textured_image(w, h, 0xBEEF);
-        // Luma-only: spatially-varying delta added to all three channels.
+        let src = vec![[128u8; 3]; w * h];
+        // Localized equal-RGB change, without clipping or per-pixel noise.
         let mut luma = src.clone();
-        for (i, p) in luma.iter_mut().enumerate() {
-            let d = ((i * 2654435761usize) >> 20) as i32 % 31 - 15;
-            for c in p.iter_mut() {
-                *c = (*c as i32 + d).clamp(0, 255) as u8;
+        for y in 12..32 {
+            for x in 12..32 {
+                luma[y * w + x] = [152; 3];
             }
         }
+        // Compute the same scale-0 dst-Y mask as the production strip.
+        // Its coverage is part of this test: an all-masked plane makes a
+        // zero bleed value vacuous.
+        let prepared = prepare_v2_reference_impl(&RgbSlice::new(&luma, w, h), None, false, false)
+            .expect("prepare luma-only dst");
+        let dst_y = &prepared.scales[0].0[1];
+        let mut mask_work = BleedMaskWork::sized(w, h);
+        for r in 0..h + 4 {
+            let row = reflect_101(r as isize - 2, h);
+            mask_work.dh[r * w..(r + 1) * w].copy_from_slice(&dst_y[row * w..(row + 1) * w]);
+        }
+        dst_y_edge_mask_strip(w, 0, h, h, &mut mask_work);
+        let covered = mask_work.mask[..w * h]
+            .iter()
+            .filter(|&&v| v != 0.0)
+            .count();
+        assert!(covered < w * h, "luma mask covered all {covered} pixels");
         let fl = rev4_extract(&src, &luma, w, h);
         let ab = REV4_BASE + 96 + 72 + 144; // arttype s0
         assert_eq!(
@@ -16468,19 +16483,27 @@ pub(crate) mod tests {
             0.0f64.to_bits(),
             "luma-only bleed B must be exactly 0"
         );
-        // Chroma shift: rotate the R channel one column right — chroma
-        // content changes but luma barely moves.
-        let mut chroma = src.clone();
-        for y in 0..h {
-            for x in 0..w {
-                chroma[y * w + x][0] = src[y * w + ((x + 1) % w)][0];
+        // Negative control: retain the luma step and add opponent-colour
+        // stripes in a separate patch. Both RGB colours have nearly the
+        // same converted XYB Y as [128; 3] (<0.001 difference), but their
+        // X/B values differ strongly. Thus the chroma edges remain outside
+        // the dst-Y mask instead of filling it vacuously.
+        let mut luma_chroma = luma.clone();
+        for y in 44..68 {
+            for x in 48..80 {
+                luma_chroma[y * w + x] = if (x + y) % 4 < 2 {
+                    [80, 142, 128]
+                } else {
+                    [176, 100, 128]
+                };
             }
         }
-        let fc = rev4_extract(&src, &chroma, w, h);
+        let fc = rev4_extract(&src, &luma_chroma, w, h);
         assert!(
-            fc[ab + idx_arttype::BLEED_X] > 0.0,
-            "chroma shift must produce positive bleed X, got {}",
-            fc[ab + idx_arttype::BLEED_X]
+            fc[ab + idx_arttype::BLEED_X] > 0.0 || fc[ab + idx_arttype::BLEED_B] > 0.0,
+            "luma+chroma must produce positive bleed, got X={} B={}",
+            fc[ab + idx_arttype::BLEED_X],
+            fc[ab + idx_arttype::BLEED_B]
         );
     }
 
