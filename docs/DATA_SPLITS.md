@@ -665,3 +665,31 @@ plain Mitchell `sharpen=0`; cid22/human/konfig are native (no resample);
 hdr is Mitchell `resize_sharpen=10` on linear PQ; the earlier PIL-Lanczos
 picker renditions were rejected and re-rendered. A per-leg
 `kernel` column is carried in `pairs/pairs_core.tsv`.
+
+## Ruling — 2026-09-23: Rev4 feature-bank potential and leave-one-dataset-out roles (user decision)
+
+These rulings answer the decisions in `docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md`.
+
+- **D2, leave-one-dataset-out (LODO).** The user accepted the design's proposal.
+  - **Withheld from every fold** (untouched Rev4 confirmation): CID22-B(24), the AIC-4 sample, KonJND JPEG
+    (SELECT and TERMINAL), CSIQ, KADID TERMINAL, LIVE (target defect) and every secret holdout.
+  - **Fold sets:** KADID, TID, KonFiG, KonJND-BPG, CID22-A(25), AIC-3 and KADID SELECT. Each is recorded
+    here as **LODO-exposed** when its fold runs.
+  - **MCL-JCI** joins the folds only if D3 gives it a fitting role. Until then it is confirmation-only.
+  - **Quarantine:** fold models live under `/var/tmp/rev4-featpot/lodo/` with the prefix `LODO_`. They are never
+    packed, never on the board, and never used to select a shipped recipe.
+- **D1, in-sample potential.**
+  - **Fitted in-sample for potential estimates:** CID22-A(25), AIC-3 CTC, KADID SELECT and KonFiG originsplit
+    val. They become **potential-exposed** and can never again be quoted as held out for any choice the potential
+    run informs.
+  - **Untouched for Rev4 confirmation:** CID22-B, the AIC-4 sample, KonJND JPEG, CSIQ and secret holdouts.
+- **D4, feature extraction of held-out pixels.** Allowed now, pixels only. Features may be extracted for every
+  set, including CID22-B, the AIC-4 sample, KonJND, CSIQ and MCL-JCI. **No label is read** until confirmation,
+  and every extraction is logged. This relaxes the 2026-09-13 no-extraction ruling for these sets only.
+- **D5, adoption bar for a candidate feature family.** All of these must hold:
+  - stability-selection frequency ≥ 0.6;
+  - nested-CV gain ≥ +0.005 SROCC, with the CI excluding zero on ≥ 2 human sets;
+  - it pays its measured runtime cost;
+  - it keeps the dial contract under the non-negative-distance head.
+- **D3 (MCL-JCI's role)** is pending the datasets-lane proposal. The default is confirmation-only, as the natural
+  test set for the JPEG response-shape question.
