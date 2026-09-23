@@ -336,3 +336,50 @@ safesyn_pairs_uri.parquet baa8c53f
   `{"paused":false}`. Input coverage re-sampled 16/16 pre-declare.
 - `FLEET_RUN.md` written → coordinator enrolls allowed workers
   (i134, r5600g, r3500, tower-docker capped). Monitoring + heartbeats next.
+
+## Fleet run live (heartbeats ~15 min)
+
+- 23:04Z worker probes enrolled: r5600g (5), r3500 (6), Tower (7) — allowed
+  nodes only. First claims 23:07Z (`r5600g-cvvdp` lease holder).
+- First blob verified 23:08Z: 212 rows, all 4 metric arms, 212/212 pixel-hash
+  stamps present, 0 error rows. (Blob files are unterminated-JSONL — harvest
+  parses per line, no concat.)
+- 23:23Z blobs=310/3218 (9.6%) active-claims=13
+
+## HANDOFF (23:2xZ) — coordinator owns fleet monitoring; GPT-6 lane harvests
+
+**State.** Run `cvvdp-safesyn-20260923` declared 23:00:39Z: 3,218 ScoreFile
+jobs / 196,086 pairs / 4 metric arms (`cvvdp@standard_fhd`,
+`cvvdp@sdr_fhd_24`, `cvvdp`, `ssim2`) on image
+`ghcr.io/imazen/zenfleet-worker:exec-cvvdp-safesyn-9f36f88b`
+(digest `d110a3a7…`, pushed + registry-verified, == FLEET_GO). At handoff:
+~310/3,218 blobs (~10%), claims on allowed nodes only (r5600g, r3500,
+Tower). Incremental verification so far: 290 blobs / 70,220 rows /
+0 error rows / 0 px_missing / 0 px_bad (see
+`/var/tmp/cvvdp-safesyn/verify_progress.log`).
+
+**Left running (do not kill):** `verify_blobs_loop.sh` — downloads + audit-
+verifies new blobs every ~10 min, appends to `verify_progress.log`, ALERT
+lines on any mismatch/error. Stop with
+`touch /var/tmp/cvvdp-safesyn/STOP_VERIFY`. My heartbeat appender is
+stopped (STOP_HEARTBEAT set).
+
+**Remaining steps.**
+1. Monitor run to 3,218/3,218 blobs (coordinator).
+2. Harvest:
+   `cd /var/tmp/cvvdp-safesyn && source ~/.config/zen/lanstore.env &&
+    export AWS_ACCESS_KEY_ID=$ZEN_S3_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY=$ZEN_S3_SECRET_ACCESS_KEY &&
+    python3 harvest_safesyn.py --run cvvdp-safesyn-20260923
+    --out /var/tmp/cvvdp-safesyn/safesyn_cvvdp_sidecar.parquet
+    --manifest-out /var/tmp/cvvdp-safesyn/safesyn_cvvdp_sidecar_MANIFEST.json
+    --build-meta /var/tmp/cvvdp-safesyn/build_meta.json`
+   Gates (all loud): 196,086 unique row_ids, all 4 metric cols non-null,
+   per-row ref+dist pixel-hash == Sept-14 audit, duplicate lease rows
+   bit-identical, codec_family from encode_sha path.
+3. `python3 safesyn_compare.py --sidecar safesyn_cvvdp_sidecar.parquet
+   --out-md benchmarks/rev4_cvvdp_safesyn_2026-09-23.md
+   --out-json benchmarks/rev4_cvvdp_safesyn_2026-09-23.json`
+   (descriptive rank agreement vs stored labels/oracle, by family + band).
+4. Fill `/var/tmp/cvvdp-safesyn/DONE.draft.md` (already at r3 artifact ids)
+   → `/home/lilith/tmp/zensim-paper/rev4/CVVDP_SAFESYN_DONE.md`.
