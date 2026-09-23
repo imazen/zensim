@@ -11,7 +11,7 @@
 set -euo pipefail
 
 LANE=/home/lilith/work/zen/zensim--e5a-render
-TARGET=${CARGO_TARGET_DIR:-/home/lilith/tmp/devin/target-e5a}
+TARGET=${CARGO_TARGET_DIR:-/var/tmp/e5a-render/target}
 WORK=/var/tmp/e5a-render
 SRC=/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23
 FIXTURES=$WORK/fixtures

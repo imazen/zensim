@@ -196,10 +196,18 @@ def main():
     args = ap.parse_args()
 
     df = load_tables(args)
-    corrupt = df[df.kind == "corruption"]
-    benign = df[df.kind == "benign"]
+    # Prereg: inert items (a/b byte-identical) are DROPPED and counted —
+    # excluded from thresholds, detection denominators, and the bootstrap.
+    n_corr_inert = int(((df.kind == "corruption") & (df.inert == 1)).sum())
+    n_bn_inert = int(((df.kind == "benign") & (df.inert == 1)).sum())
+    corrupt = df[(df.kind == "corruption") & (df.inert == 0)]
+    benign = df[(df.kind == "benign") & (df.inert == 0)]
     n_benign = len(benign)
-    print(f"items: {len(df)} total, {len(corrupt)} corruption, {n_benign} benign")
+    print(
+        f"items: {len(df)} total, {len(corrupt)} corruption "
+        f"(+{n_corr_inert} inert dropped), {n_benign} benign "
+        f"(+{n_bn_inert} inert dropped)"
+    )
 
     # ---- thresholds on pooled benign -------------------------------------
     thr: dict[str, dict[str, float]] = {}
@@ -226,11 +234,10 @@ def main():
         }
 
     # ---- testlin selection on TRAIN families ONLY -------------------------
-    tr = corrupt[corrupt.family.isin(TRAIN_FAMS)]
-    te = corrupt[corrupt.family.isin(TEST_FAMS)]
+    tr0 = corrupt[corrupt.family.isin(TRAIN_FAMS)]
     sel = {}
     for cand in TESTLIN_CANDS:
-        sv = tr[cand].to_numpy(float)
+        sv = tr0[cand].to_numpy(float)
         sel[cand] = float(np.nanmean(flagged(sv, thr[cand]["t99"], "+")))
     winner = max(TESTLIN_CANDS, key=lambda c: (sel[c], -TESTLIN_CANDS.index(c)))
     df["testlin"] = df[winner]
@@ -238,6 +245,11 @@ def main():
     testlin_map = {"t1_lin_max": "lin", "t2_lin_q999": "lin", "t3_lin_q99": "lin",
                    "t4_enc_max": "u8", "t5_enc_q999": "u8"}[winner]
     print(f"testlin := {winner} (TRAIN rate {sel[winner]:.4f}); map={testlin_map}")
+    # Re-slice now that `testlin` exists — earlier subframes lack the column.
+    corrupt = df[(df.kind == "corruption") & (df.inert == 0)]
+    benign = df[(df.kind == "benign") & (df.inert == 0)]
+    tr = corrupt[corrupt.family.isin(TRAIN_FAMS)]
+    te = corrupt[corrupt.family.isin(TEST_FAMS)]
 
     # ---- detection --------------------------------------------------------
     def rates(sub: pd.DataFrame, level: str) -> dict:
@@ -338,9 +350,11 @@ def main():
                 cov = float((m2[chg] >= t90).mean())
                 lifts.append(lift)
                 covs.append(cov)
+            finite_lifts = [x for x in lifts if np.isfinite(x)]
             loc[f"{fam}|{arm}"] = {
-                "lift_mean": float(np.nanmean(lifts)) if lifts else float("nan"),
-                "coverage_mean": float(np.nanmean(covs)) if covs else float("nan"),
+                "lift_mean": float(np.mean(finite_lifts)) if finite_lifts else float("nan"),
+                "n_lift_defined": len(finite_lifts),
+                "coverage_mean": float(np.mean(covs)) if covs else float("nan"),
                 "n_items": n,
                 "n_degenerate": degen,
             }
@@ -435,8 +449,8 @@ def main():
         "n_items": len(df),
         "n_corruption": len(corrupt),
         "n_benign": n_benign,
-        "n_corruption_inert": int((corrupt.inert == 1).sum()) if "inert" in df.columns else -1,
-        "n_benign_inert": int((benign.inert == 1).sum()) if "inert" in df.columns else -1,
+        "n_corruption_inert": n_corr_inert,
+        "n_benign_inert": n_bn_inert,
         "testlin": {
             "winner": winner,
             "train_t99_rates": sel,

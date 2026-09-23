@@ -26,7 +26,7 @@ def main():
     results = json.loads(Path(args.results).read_text())
 
     head = subprocess.run(
-        ["jj", "log", "-r", "@-", "--no-pager", "-T", "commit_id"],
+        ["jj", "log", "-r", "@-", "--no-graph", "--no-pager", "-T", "commit_id"],
         cwd=lane,
         capture_output=True,
         text=True,

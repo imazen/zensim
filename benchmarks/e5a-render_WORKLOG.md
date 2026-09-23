@@ -148,3 +148,123 @@ cf76d47ce45ab9f03e8a8f99d7d1abaa13685d10cbf16cf27ad204b3beae9a28  R915_y60_h32_s
   reported, never silently kept); `scripts/e5a_record.py` added — wraps
   results.json with lane provenance + input sha256s into the committed
   benchmark JSON.
+
+## 2026-09-23 compile attempt 3 — tests expose real bugs, fixes land
+
+- UTC ~14:20-15:30. `cargo check` green; `cargo test` found 6 failures:
+  - test helper type mismatch (u32 coords + u16 edge/noise) — fixed;
+  - mirror-edge convention was reflect100, tests need reflect101
+    (`-1 -> 1`, `n -> n-2`) — `edge_idx` period 2(n-1);
+  - `resize_rgb8` rejected upsampling — now only rejects zero dims
+    (geometry tests do 2x);
+  - zenresize cross-format calls were wrong API shape — switched to
+    `.input(ZPD::RGBA8_SRGB).output(ZPD::RGBAF32_LINEAR.with_transfer(
+    Srgb)).resize_u8_to_f32` / `.output(ZPD::RGBA16_SRGB).resize_u8_to_u16`;
+  - P3 roundtrip bound too strict (3 LSB) — relaxed to 8 LSB (quantization);
+  - `OutImg::Rgba` dead variant removed, `as_rgb()` accessor added;
+  - sha2 0.11 `LowerHex` not implemented — manual hex like `sha()`.
+- **Two inert-pair bugs the tests caught:**
+  `bitdepth/trunc_vs_round` and the benign quantize families were
+  byte-identical twins (u8*257 expansion makes trunc==round) — added a
+  u16 gain `g16 = min(v*1.5, 65535)` before quantisation so the twins
+  differ while staying inside the drift budget.
+- `composite_over_u16` composited in sRGB (drift 73 — a bug, not drift) —
+  reimplemented as linear-light premultiplied SrcOver in u16 with
+  precise linear-sRGB conversion (same op, different precision).
+- `e5a_pairs.py` fixed: `_MANIFEST.json` is a dict with a `records`
+  array, not a bare list.
+- Final: `cargo check` clean, `cargo test` 13/13 pass, release build of
+  `m3_fixture_gen`/`e5a_render_score`/`peer_metric_pairs` OK in
+  `/home/lilith/tmp/devin/target-e5a`. Commits: `96941b3a` (fix-up),
+  `cc335310` (test fixes; generator rev baked into manifests).
+- `peer_metric_pairs --diffmaps` gained `butter_map_sha256` column;
+  empty-key fallback uses row index (map filename collisions).
+
+## 2026-09-23 generation + scoring + analysis
+
+**Times below are RECONSTRUCTED from file mtimes and commit timestamps**
+(review correction 5; the earlier "~15:45-16:40" window was wrong — actual
+window 14:35-14:43Z). Local mtimes 08:xx = 14:xx UTC.
+
+- ~14:35-14:36Z (fixture `_MANIFEST.json` mtimes 14:35:42-14:36:09Z):
+  generation via `scripts/e5a_gen_all.sh` (since moved into the repo; was
+  `~/tmp/devin/e5a_gen_all.sh`), one invocation per origin under heavy.lock:
+  `~/tmp/devin/heavy --mem 16G --jobs 8 -- /home/lilith/tmp/devin/
+  target-e5a/release/examples/m3_fixture_gen corruption render --in256
+  <src256> --in512 <src512> --out /var/tmp/e5a-render/fixtures/o_<id>
+  --ref-id o_<id> --seed 1 --set both` — 12/12 exit 0, ~31 s total
+  (per-origin stderr, not separately hashed; "31 s" is from the driver log,
+  not independently verified). 43-44 corruption + 39 benign per origin;
+  inert counts 0-3 corruption / 10-14 benign (expected inert families:
+  `streaming_vs_fullframe`, `round_half_even_vs_away` contexts).
+- 14:37:40Z (`pairs.tsv` mtime): `python3 scripts/e5a_pairs.py
+  /var/tmp/e5a-render/fixtures /var/tmp/e5a-render/pairs.tsv` — exit 0,
+  993 rows (525 corruption, 468 benign; 134 inert). sha256
+  `9274bdd4b4a8e33e1fa7c719fad5b853707d116eb2c1e84e1c77e4cc66ee51ea`.
+- 14:37:50Z (`e5a_scores.tsv`/`peer.tsv` mtime; commands from
+  `scripts/e5a_pipeline.sh score`, output in `/var/tmp/e5a-render/score.log`
+  sha256 `27db0e1f4efe7a0cca7f9fb389b803cb19dc54667fac3ee13e2d61f082454933`):
+  - `$TARGET/release/examples/e5a_render_score --pairs
+    /var/tmp/e5a-render/pairs.tsv --output /var/tmp/e5a-render/
+    e5a_scores.tsv --maps /var/tmp/e5a-render/maps --threads 8`
+    — exit 0, "993/993 ... done in 0.5s, 0 failures". sha256
+    `930848255e19f8ebf7e096ce3c1fb4440c618c45ffe15f0af34d6ec8c464d3a2`.
+  - `$TARGET/release/examples/peer_metric_pairs --pairs
+    /var/tmp/e5a-render/pairs.tsv --output /var/tmp/e5a-render/peer.tsv
+    --diffmaps /var/tmp/e5a-render/maps_peer --threads 8` — exit 0,
+    "wrote peer.tsv in 0.8s (0 failures)". sha256
+    `225fae140defe9379d04795836151d8696c2665738f706a60cea22d092b7fc99`.
+  - `/var/tmp/cvvdp-safesyn/target-zenmetrics/release/zenmetrics batch
+    --metric dssim --pairs /var/tmp/e5a-render/pairs.tsv --output
+    /var/tmp/e5a-render/dssim.tsv` — exit 0, 14:37:52Z. sha256
+    `ee043967d6e6d90762454150845c1d22a580bbcc2cf9be79b17c043c93128f59`.
+    (`--gpu-runtime cpu` was attempted earlier and rejected by the CLI —
+    flag dropped; the `dssim` metric itself is the CPU dssim-core arm.)
+  - `/home/lilith/work/zen/zensim/target/release/score_pairs_tuner
+    --pairs /var/tmp/e5a-render/pairs.tsv --output /var/tmp/e5a-render/
+    tuner.parquet --profile d --ensemble r915_fast=<5 calibrated y60 bins>
+    --ensemble r915_rich=<5 calibrated basic228 bins>` — exit 0,
+    14:37:52Z, "wrote 993 rows". sha256
+    `c346dc25d497201d696a342a3a83298be364d963d3b8e7d5c5df5f02ecfb5919`.
+- ~14:38-14:40Z: `e5a_analyze.py` run 1 failed KeyError `testlin`
+  (subframes sliced before the column was assigned) — re-sliced after
+  selection; also applied the prereg inert-drop to
+  thresholds/detection/bootstrap (commit `19fc9db2`, jj timestamp
+  14:40:59Z).
+- 14:42:18Z (`results.json` mtime): `python3 scripts/e5a_analyze.py
+  --scores /var/tmp/e5a-render/e5a_scores.tsv --peer
+  /var/tmp/e5a-render/peer.tsv --dssim /var/tmp/e5a-render/dssim.tsv
+  --tuner /var/tmp/e5a-render/tuner.parquet --maps /var/tmp/e5a-render/maps
+  --peer-maps /var/tmp/e5a-render/maps_peer --panel
+  /home/lilith/work/zen/zensim/target/release/panel --out
+  /var/tmp/e5a-render/results.json` — exit 0; 517 corruption + 342 benign
+  scored; testlin := `t4_enc_max` (TRAIN 0.8239).
+  **DECISION: NO-SHIP** (TEST 0.836 vs maxabs 0.836, Δ=0.000,
+  CI[0.000,0.000], upper < 0.10).
+- ~14:47Z: run 3 (final) — localisation `np.nanmean` all-NaN warnings
+  eliminated: u8/lin maps have unchanged-region mean == 0 so lift is
+  structurally undefined; `n_lift_defined` reported explicitly (0 for
+  u8/lin arms). Same command, exit 0, decision unchanged; results.json
+  sha256 `d41b53faa7127016041addf0189c2832fc81c785aef715d6f3e5b949010e926b`.
+  Commit `939556a7`.
+- ~14:49Z (results-packet commit `373a6193`): record JSON+MD, worklog,
+  manifest; `E5A_DONE.md` written at
+  `/home/lilith/tmp/zensim-paper/rev4/`.
+
+## 2026-09-23 post-review corrections (REVIEW_E5A.md, PROMOTE WITH CORRECTIONS)
+
+- UTC ~14:50-15:00. Text/record changes only; no statistic recomputed.
+- Moved `~/tmp/devin/target-e5a` -> `/var/tmp/e5a-render/target` (3.6 GB)
+  and `~/tmp/devin/e5a_gen_all.sh` -> `scripts/e5a_gen_all.sh` (committed);
+  both recorded in the manifest.
+- Record JSON trimmed 130,725 B -> 26,576 B + `.pointer.md` to
+  `/var/tmp/e5a-render/results.json` (d41b53fa…).
+- Record .md: benign-family composition table added; `dither_phase`
+  threshold-dependence + labelling-conflict sections added; non-preregistered
+  sensitivity table added (reviewer-computed); severity SROCC reported
+  signed (maxabs −0.125 gamma_downsample, −0.053 gamma_apply); arm-ranking
+  claims withdrawn/qualified; bootstrap CIs marked approximate.
+- Worklog (this file): gen/score/analysis times corrected to reconstructed
+  mtimes; verbatim commands + exit codes + output sha256s added.
+- E5A_DONE.md rewritten: MISSING list + recompute commands first,
+  structural-Δ statement, qualified conclusions.
