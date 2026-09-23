@@ -874,3 +874,30 @@ made: `benchmarks/fleet-fits_WORKLOG.md` lives in the separate zenmetrics fleet-
 this record is the zensim-side copy. Timing: this entry's commit time is 05:37:50 (-06:00) and the archive's file mtime
 is 05:38:23 (-06:00), 33 s later; the timestamps are consistent with the entry preceding the archive's completion but do
 not demonstrate it, so treat 'prerecord' as unproven for this archive.
+
+## Exposure ledger — 2026-09-23: rev4 E2b cvvdp-safesyn (TRAIN-role selection read)
+
+Purpose "rev4 e2b cvvdp display" (lane `cvvdp-safesyn`; prereg
+`benchmarks/cvvdp-safesyn_prereg_2026-09-23.md`, registered before the read).
+Frozen metric predictions only — CVVDP is a fixed scorer, nothing is fitted,
+calibrated or tuned on these reads; the registered selection rule consumes
+them.
+
+- **Populations read (TRAIN-role labels, selection per prereg):** KADID-train
+  (5,000 pairs / 40 refs, `kadid_train_pairs.tsv`), TID-train (1,440 / 12,
+  `tid_train_pairs.tsv`), KonFiG-train (327 / 6, `konfig_train_pairs.tsv`,
+  q_jnd consumed only as triplet ordering). These corpora are TRAIN-role;
+  using them for the registered display selection is their registered role.
+- **Not read:** CID22-A/B, LIVE, AIC-3/AIC-4 labels (Part 0 reproduced stored
+  score TSVs only, never labels), any secret holdout, any eval-role corpus.
+- **Scorer:** CVVDP `cvvdp_cpu_imazen_v0_1_0` at 7 named display presets via
+  `--display-model` (zenmetrics `19d6dd8e`, binary sha256 `f8c352ee…`);
+  `modern_oled_phone_indoor` parity-checked vs pycvvdp 0.5.7 (max |Δ| 0.0001
+  JOD, 8-pair probe).
+- **Statistics:** pooled + per-reference SROCC and KonFiG triplet accuracy,
+  reference-clustered bootstrap B=2000 seed 20260923, all from the `panel`
+  owner (`zensim-validate`). Deliverables:
+  `benchmarks/rev4_e2b_cvvdp_display_2026-09-23.{md,json}`.
+- **SafeSyn (Part 2):** codec-variant pixels only, no human labels exist;
+  descriptive rank agreement vs stored features/labels per brief — pending
+  the fleet gate (FLEET_READY.md; not yet run).

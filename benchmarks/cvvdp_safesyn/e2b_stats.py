@@ -123,7 +123,7 @@ def perref_srocc(leg):
              "--col-band", "ref_path", "--per-group"],
             capture_output=True, text=True, check=True)
         j = json.loads(p.stdout)
-        out[d] = j.get("per_group_srocc")
+        out[d] = (j.get("per_group") or {}).get("mean")
     return out
 
 
