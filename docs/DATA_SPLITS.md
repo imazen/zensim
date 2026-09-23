@@ -634,6 +634,29 @@ peers only (E1's assembled tables); nothing is fitted, calibrated, selected or t
 - **Statistics:** same-codec vs cross-codec within-reference pairwise ordering accuracy,
   reference-clustered bootstrap, from the `panel` owner.
 
+## Exposure ledger — 2026-09-23: rev4 E5a rendering-regression corruptions (e5a-render)
+
+Purpose "rev4 e5a-render" (`docs/REV4_EXPERIMENTS_2026-09-23.md` §E5; prereg
+`benchmarks/e5a-render_prereg_2026-09-23.md`). The lane synthesizes
+correct/broken rendering-implementation pairs and a benign-drift set, then
+scores fixed metric arms. **No human labels exist or are read anywhere in this
+lane** — every ground truth is the generator's own twin pair.
+
+- **Read (pixels, generation only):** the 12 canonical TRAIN imazen-26 sources of
+  `canonical-corruption-2026-09-08` (`train-sources.json` sha256
+  `4f7ee719520d2e71a672ddc5b83aba9aa24960c0684c8361d306aea119c03a71`), at the
+  canonical longest-side-256 rendition plus the longest-side-512 cleanpicker
+  rendition of the same 12 origins (per-file sha256 in the prereg §2).
+- **Not read:** CID22-B (sealed), CID22-A labels, AIC-3/4, AIC2026, KonJND
+  validation, KonFiG test, KADID terminal references, SDR25, LIVE, any secret
+  holdout, and the 8 canonical validation sources.
+- **Models scored:** frozen profiles B and D and the frozen Rev3 ensembles
+  `R915_y60_h32_ens5` / `R915_basic228_h128_ens5` (member sha256s in prereg
+  §11), plus ssim2/butteraugli/DSSIM/GMSD peers and a TRAIN-calibrated testing
+  arm. No model is trained, refit or selected on held-out data.
+- **Statistics:** origin-clustered bootstrap (B=2000, seed 20260923) and
+  `panel --batch` SROCC; thresholds from the benign-drift set only.
+
 ## Addendum — 2026-09-20: `joint-core-v1` registered as a TRAIN-role view
 
 `joint-core-v1` (`/mnt/v/output/zensim/joint-core-v1/`, 52,963 pairs,
