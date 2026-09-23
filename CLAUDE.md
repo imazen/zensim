@@ -158,6 +158,21 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-09-23 — AVIF RGB16→RGB8 in zenmetrics' sRGB-tagged decode route rounds down at near-half levels. OPEN
+  (upstream).**
+  - The Opus review (`REVIEW_AVIF_DECODE.md`, recorded in `benchmarks/rev4_avif_decode_diff_2026-09-23.md` after its
+    correction) measured it on the same zenavif source.
+  - The native RGB16 output is identical on both routes.
+  - The **untagged route** equals exact `round(v10·255/1023)` on 60,349,731 of 60,349,731 channel values.
+  - The **sRGB-tagged `RowConverter` route** (zenpixels-convert, used by the Sept-14 SafeSyn extraction) is −1 on
+    96,160 values (0.16%), at near-half levels such as 169.5015→169.
+  - **Consequence:** the stored Sept-14 SafeSyn AVIF features and labels sit on the inexact side. Measured on 31
+    pairs: SSIMULACRA2 mean +0.0023 (max ±0.085), zensim B mean −0.0007.
+  - Separately, zenmetrics drops the signalled transfer tag (a metadata defect).
+  - Rescoring or re-extracting AVIF therefore changes values. Pin the decode route per data era, and never mix routes
+    in one table.
+  - The fix belongs to zenpixels-convert and zenmetrics, not this repo.
+
 * **2026-09-18 — identity disagrees between scoring paths. FIXED** (this
   commit). On a byte-identical pair `Zensim::compute` returned exactly 100
   (identity short-circuit) while `Zensim::compute_with_diffmap` returned
