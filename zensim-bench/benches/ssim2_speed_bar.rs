@@ -582,6 +582,23 @@ fn main() {
                         })
                     });
                 }
+                // GMSD (zenmetrics `gmsd`, a port of libgmsd): u8 sRGB in,
+                // BT.601 luma + 2x decimation + Prewitt GMS + std pooling
+                // inside — the same whole-call contract as `butteraugli` and
+                // `fast_ssim2`. Its only downscale is GMSD's own fixed 2x step.
+                // Built only with `--features gmsd-arm`.
+                #[cfg(feature = "gmsd-arm")]
+                if arm_enabled("gmsd") {
+                    let src_b: &'static [u8] = bytemuck::cast_slice(src_s);
+                    let dst_b: &'static [u8] = bytemuck::cast_slice(dst_s);
+                    group.bench("gmsd", move |b| {
+                        b.iter(move || {
+                            zenbench::black_box(
+                                gmsd::gmsd_rgb8(src_b, dst_b, n, n, n * 3).unwrap().gmsd,
+                            )
+                        })
+                    });
+                }
                 // `ssimulacra2` (rust-av) takes PLANAR-ish owned `Vec<[f32; 3]>`
                 // sRGB, not u8, so its timed region is NOT the same contract:
                 // the u8 -> f32 sRGB widening is hoisted OUT (done once, here),

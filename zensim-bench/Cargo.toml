@@ -29,6 +29,12 @@ crates-io-0-2-7 = ["dep:zensim027", "training"]
 # against its unchanged `zensim_B` anchor arm.
 ssim2-rayon = ["fast-ssim2/rayon"]
 
+# `benches/ssim2_speed_bar.rs` `gmsd` peer arm (gmsd lane, 2026-09-22): the
+# zenmetrics libgmsd port, u8 sRGB in, whole call timed like `fast_ssim2`.
+# `parallel` = rayon bands (RAYON_NUM_THREADS governs it as it does zensim);
+# `avx512` enables its v4 tier. Record: benchmarks/gmsd_2026-09-22.md.
+gmsd-arm = ["dep:gmsd", "gmsd/std", "gmsd/parallel", "gmsd/avx512"]
+
 # `examples/m3_fixture_gen.rs`: the IMAZEN owner for the M3/M3a coherence
 # fixture grid — zenpng decode/encode + zenresize Mitchell downscale + zenjpeg
 # encode. Replaces the ImageMagick shell-out `run_full_eval.sh` used for both
