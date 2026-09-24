@@ -727,3 +727,13 @@ The datasets lane parsed **all 5,000 MCL-JCI JND labels** at about 12:42 UTC (06
 ## Exposure ledger — 2026-09-23: Rev4 feature-bank pixels-only extraction of held-out sets (ruling D4)
 
 The featbank-extract lane ran the pinned extractor (`extract-native-admission`, sha256 `7c7ffbbf…`, formula revision 3, root form sqrt, `--full-944`) over the **pixels only** of the held-out sets that ruling D4 allows: CID22-B (24 references, 2,100 pairs), the AIC-4 sample (300), KonJND JPEG SELECT (404) and TERMINAL (100), CSIQ (866), MCL-JCI (5,000) and KADID TERMINAL (2,000). Outputs are `keys.parquet` plus feature parquets under `/var/tmp/rev4-featbank/bank/<set>/`; **no labels file exists for these sets.** The source pair, audit and feature CSVs that replicated these sets' `human_score` columns were sealed under `/var/tmp/rev4-featbank/_sealed/` the same day (review correction 4, option a). The assembler only copied and equality-bound those columns; **no label was analysed, and no statistic was computed on them.** Record: `benchmarks/rev4_featbank_extract_2026-09-23.md`; worklog `benchmarks/featbank-extract_WORKLOG.md`. These sets keep their confirmation-only roles.
+
+## Exposure ledger — 2026-09-24: C8 gmsbank peer GMSD scoring, pixels only, all 18 bank sets
+
+The gmsbank lane scored exact GMSD/GMSM (zenmetrics `gmsd` crate, scorer sha256 `2ed8f676…`) on the **pixels only** of
+all 18 Rev4 bank sets (248,983 pixel keys, 249,227 stimulus rows). That includes the held-out and confirmation sets:
+CID22-B (authorised pixel-only under ruling D4), the AIC-4 sample, KonJND JPEG SELECT/TERMINAL, CSIQ, MCL-JCI and
+KADID TERMINAL. Output: `/var/tmp/gmsbank/peer_gmsd/<set>.parquet`, keyed by `pair_key` and verified against the
+bank's decoded-pixel hashes. **No label file was opened and no statistic was computed on held-out labels.** The
+columns feed the preregistered P2 arm only on its admitted D1/D2 sets. The C8 chroma calibration used TRAIN pixels
+only and needs no entry.
