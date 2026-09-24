@@ -348,18 +348,17 @@ fn gmsbank_prefix_identity_and_tier_consistency() {
     }
 }
 
-/// A uniform destination has zero gradient magnitude at every pixel.
-/// Wherever the textured reference has a gradient, m_d < m_r; at its flat
-/// pixels both magnitudes are zero and the similarity loss is also zero.
-/// Every nonzero C8 contribution must therefore enter loss, never gain.
+/// A monotone grayscale ramp has a positive reference gradient, including
+/// reflected image borders; the uniform destination has zero gradient.
+/// Thus m_d < m_r at every pixel, and every C8 contribution enters loss.
 #[test]
 fn gmsbank_contrast_reduction_has_exact_zero_gain_in_every_tier() {
-    let (w, h) = (127, 288);
+    let (w, h) = (127, 128);
     let src: Vec<[u8; 3]> = (0..w * h)
         .map(|i| {
             let x = i % w;
             let y = i / w;
-            let gray = (48 + (x * 3 + y * 5 + (x * y) % 11) % 160) as u8;
+            let gray = (1 + x + y) as u8;
             [gray; 3]
         })
         .collect();
@@ -370,8 +369,9 @@ fn gmsbank_contrast_reduction_has_exact_zero_gain_in_every_tier() {
     };
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
         let values = extract(&src, &dst, w, h, toggles, false);
+        assert_eq!(values.len(), GMSBANK_BASE + 180);
         let mut total_loss = 0.0;
-        for cell in values[GMSBANK_BASE..].chunks_exact(15) {
+        for cell in values[GMSBANK_BASE..].as_chunks::<15>().0 {
             for k in 0..5 {
                 let loss = cell[k * 3];
                 let gain = cell[k * 3 + 1];

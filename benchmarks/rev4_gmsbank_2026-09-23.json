@@ -65,5 +65,52 @@
     "full_prefix_identity": {"cells": 2644000, "differing": 0, "log_sha256": "d16bcfa3fd509dfc8afd8610d2a9d44e867e5afd7ca61e170fa3e0c3eb89ed82"},
     "heaptrack_peak_mb_reported": 613.80,
     "parity_report_sha256": "ae490d60ee25389077f520c73228d4a7178c9448e62ce74bd62a750a5d5fba10"
+  },
+  "review_corrections": {
+    "calibration_instrument": {
+      "source": "zensim/src/gmsbank_calibration_instrument.rs",
+      "runner": "scripts/gmsbank/calibration_instrument.sh",
+      "replay_exit_code": 0,
+      "replay_pairs": 652,
+      "replay_ratios_sha256": "767197dfae605bb05eb078fa27b064dc456cbcb7a1e645531f0ee30fb1338c40",
+      "replay_xyb8_sha256": "5898620078ecc4c64e7f50bcaa5637f399fa1c80ed546cea0bce3e0a3fd53376",
+      "original_outputs_byte_equal": true,
+      "empty_strata": 20,
+      "total_strata": 32,
+      "tiny_small_empty_strata": 16
+    },
+    "orientation": {
+      "strict_mr_gt_md_samples": 257,
+      "unit_passed": 1,
+      "unit_failed": 0,
+      "all_tier_test_passed": 1,
+      "all_tier_test_failed": 0,
+      "gain_nonzero_cells": 0,
+      "unit_log_sha256": "721564ade1cc63c6e28cbecc5567523570a8ccaa07be605a4327120326285a88",
+      "tier_log_sha256": "56fbec73a456d6f43138151decd69f58322b80612b6ba9455292a1a7ebe949b5"
+    },
+    "polarity": {
+      "graphics_fixture_ids": [
+        5012,
+        7000,
+        8416,
+        9012
+      ],
+      "selection_rule_recorded": false,
+      "original_gate_passes": 4,
+      "original_gate_cases": 8,
+      "review_photo_not_preregistered": true,
+      "review_photo_blur_loss_dominant": 4,
+      "review_photo_noise_gain_dominant": 4,
+      "review_proxy_not_preregistered": true,
+      "review_proxy_photo_blur_loss_dominant": "5/5",
+      "review_proxy_mixed_blur_loss_dominant": "5/5",
+      "review_proxy_line_art_blur_loss_dominant": "2/5",
+      "review_proxy_screen_blur_loss_dominant": "3/5",
+      "review_source": "/home/lilith/tmp/zensim-paper/rev4/REVIEW_GMSBANK.md"
+    },
+    "servability_registered_producer_sets_refused": 0,
+    "first_numpy_all_f64_max_relative_error": 2.2695334219725836e-06,
+    "first_numpy_all_f64_gate_passed": false
   }
 }
