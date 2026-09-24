@@ -583,7 +583,7 @@ const NO_REV: &[Revision] = &[];
 /// `Revision::commit` names a real hash rather than a placeholder (a landed
 /// revision must name the byte-changing commit; the registry test enforces
 /// `!= "-"`). Pinned by the follow-up commit once the landing commit exists.
-const REV4BANK_COMMIT: &str = "00000000";
+const REV4BANK_COMMIT: &str = "adef35be";
 
 /// The Rev4 feature-bank introduction era. Every slot of the four appended
 /// families (f986..1321 at 4 scales) is born carrying it, so
