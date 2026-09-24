@@ -4579,3 +4579,29 @@ Extractor: pinned `extract-native-admission`, sha256
   claimed; the bank is a storage/provenance artifact. Part B (new-family
   sidecars C1–C4 + C8 gmsbank) is gated on `featbank-impl` and
   `codex-gmsbank` reviews plus explicit user go.
+
+
+## 2026-09-24 — quarantined C8 chroma calibration (gmsd-chroma)
+
+C8's unconsumed f1322+ definition is revised in this lane. Width1502 alone
+cannot identify it: native Y plus coarse XYZ/CS replaces the prior all-scale
+XYZ gradient bank. Source prereg9016272c and implementationf38befae, design
+`benchmarks/rev4_gmsbank_design_2026-09-23.md`, calibration
+`benchmarks/gmsd-chroma_calibration_2026-09-24.md`. No f0–f1321 definition changes.
+No human labels entered the pixel calibration or Part B gates.
+
+The 652 previously frozen CID22 TRAIN/SafeSyn TRAIN records yield1520
+native/box-derived pair/geometry records under the committed size/content
+selection and inherited source groups. Original RGB8 decode snapshot
+3306465d56d279a512b02c3a63de701e9b634d6aebda5e12fb164817ba491122;
+this preserves the parent's legacy RGB8 decode era, including its recorded
+AVIF route limitations. Do not mix with a changed decoder era by width.
+Source manifests, exact commands, producer sources and resolved dependency
+locks are retained under `/var/tmp/gmsd-chroma/`; large derivative/XYB planes
+are in `/var/tmp/gmsd-chroma/remote-r5600g/` (14,566 files, 4.4 GB, copied from the former remote tree, which has since been removed) and its mirror on the tower at `output/zensim/gmsd-chroma-2026-09-24/remote-r5600g/` (sha256 spot-checked). Calibration report SHA256
+`a6aecdf036d89b7afef10e9c8aaa6c935836fbc69ed12950e56f41eabcf9c633`.
+
+Author MDSI maps are differential oracles only and enter no dataset/model.
+The potential proposal updates P1 and proposes optional P2b (MDSI peer scalar);
+its admission requires the coordinator's pre-label decision. No potential
+fit, sidecar promotion, registry adoption or push is authorized by this record.

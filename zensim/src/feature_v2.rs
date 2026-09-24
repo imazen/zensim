@@ -197,7 +197,7 @@ pub const K_PJND_MASK_HIGH: f64 = 16.0;
 /// in unit-XYB scale, not blur residuals, but the dynamic range is
 /// comparable).
 pub const C_GMS: f64 = 1e-4;
-use crate::gmsbank_constants::GMSBANK_C;
+use crate::gmsbank_constants::{GMSBANK_B_C, GMSBANK_C, GMSBANK_CS_C, GMSBANK_X_C};
 /// Saturating half-point for the reference-edge indicator used by ringing
 /// (`edge_r` in the A.10 table's `err · dilate(edge_r) · (1−edge_r)` form).
 pub const C_RING_EDGE: f64 = 0.02;
@@ -592,6 +592,14 @@ pub(crate) const REV4_BASE: usize = 986;
 #[cfg(test)]
 pub(crate) const GMSBANK_BASE: usize = 1322;
 pub(crate) const GMSBANK_PER_CELL: usize = 15;
+
+fn gmsbank_width(n_scales: usize) -> usize {
+    crate::feature_defs::block_base(crate::feature_set_id::ComputeToken::Gmsbank, n_scales)
+        .expect("registered C8")
+        .1
+        .width(n_scales)
+}
+
 /// gridblk slots per (scale, channel) cell: 6 signed log-magnitude bins
 /// of the on-grid boundary step excess + on-grid mean + on/off ratio.
 pub(crate) const GRIDBLK_PER_CELL: usize = 8;
@@ -940,6 +948,7 @@ struct Rev4CellAccum {
     flat: FlatAccum,
     bleed: BleedAccum,
     bank: [GmsBankCell; 5],
+    chroma: [GmsBankCell; 5],
 }
 
 /// REV4 hook bundle for the dense kernel — carries C3 (`tail`) and C4's
@@ -991,6 +1000,7 @@ struct Rev4Grad<'a> {
     /// C4 bleed: `(outside-weight mask slice, target)` — `None` on the Y
     /// channel (and whenever `arttype` is off).
     bleed: Option<(&'a [f32], &'a mut BleedAccum)>,
+    bank: GmsBankWork<'a>,
 }
 
 /// One pixel's contribution to the C2/C4 gradient targets — shared by the
@@ -1042,6 +1052,7 @@ struct Rev4Work<'a> {
     bleed_mask: Option<&'a [f32]>,
     /// C8 gradient-similarity bank runs in the same gradient pass.
     gmsbank: bool,
+    bank: GmsBankWork<'a>,
 }
 
 /// Materialized-path REV4 work order for one (scale, channel) — the
@@ -1064,6 +1075,7 @@ struct Rev4CellArgs<'a> {
     /// Same-scale dst-Y plane for the C4 mask — see the struct doc.
     bleed_y: Option<&'a [f32]>,
     gmsbank: bool,
+    bank: GmsBankWork<'a>,
 }
 
 /// Resolve one (scale, channel)'s [`Rev4CellArgs`] from the at-scale
@@ -1076,6 +1088,7 @@ fn rev4_cell_args<'a>(
     local: &ComputeSet,
     scale: usize,
     ch: usize,
+    src_planes: &'a [Vec<f32>],
     dst_planes: &'a [Vec<f32>],
 ) -> Rev4CellArgs<'a> {
     let period = (if ch == 1 {
@@ -1094,7 +1107,14 @@ fn rev4_cell_args<'a>(
         tailhist: local.tailhist,
         flat: local.arttype,
         bleed_y: (local.arttype && ch != 1).then(|| &dst_planes[1][..]),
-        gmsbank: local.gmsbank,
+        gmsbank: local.gmsbank && (scale > 0 || ch == 1),
+        bank: GmsBankWork::new(
+            ch,
+            (local.gmsbank && scale > 0 && ch == 0).then(|| ChromaStrip {
+                reference: &src_planes[2],
+                distorted: &dst_planes[2],
+            }),
+        ),
     }
 }
 
@@ -2525,10 +2545,11 @@ pub struct V2NewFeatureToggles {
     /// rev4 families; requires `dvifm_block` (asserted). Default OFF.
     #[doc(hidden)]
     pub rev4_arttype: bool,
-    /// Experimental C8 GMSBANK f1322..f1501, default off. Its five pinned
-    /// stabilisers split gradient-similarity loss/gain and deviation on each
-    /// XYB scale/channel. The 1502-slot layout requires DVIFM and the four
-    /// preceding Rev4 layout blocks.
+    /// Experimental C8 GMSBANK f1322..f1501, default off. The 2026-09-24
+    /// revision carries native Y and coarse X/Y/B gradient loss/gain/deviation,
+    /// plus coarse joint X/B chromaticity loss/deviation, each at five pinned
+    /// stabilizers. Earlier C8 sidecars are incompatible despite equal width.
+    /// The 1502-slot layout requires DVIFM and the four preceding Rev4 blocks.
     #[doc(hidden)]
     pub gmsbank: bool,
 }
@@ -3254,7 +3275,7 @@ impl ComputeSet {
         let ringbasis_end = gridblk_end + n_scales * 3 * RINGBASIS_PER_CELL;
         let tailhist_end = ringbasis_end + n_scales * 3 * TAILHIST_PER_CELL;
         let arttype_end = tailhist_end + n_scales * ARTTYPE_PER_SCALE;
-        let gmsbank_end = arttype_end + n_scales * 3 * GMSBANK_PER_CELL;
+        let gmsbank_end = arttype_end + gmsbank_width(n_scales);
 
         let mut ranges: Vec<(usize, usize)> = Vec::new();
         let mut scattered: Vec<usize> = Vec::new();
@@ -3355,7 +3376,13 @@ impl ComputeSet {
     /// only when `arttype` is on and `ch` is chroma (0 or 2), so the Y
     /// channel can be handed the same slice and still take the `None`
     /// path.
-    fn rev4_work<'m>(&self, scale: usize, ch: usize, mask: Option<&'m [f32]>) -> Rev4Work<'m> {
+    fn rev4_work<'m>(
+        &self,
+        scale: usize,
+        ch: usize,
+        mask: Option<&'m [f32]>,
+        chroma: Option<ChromaStrip<'m>>,
+    ) -> Rev4Work<'m> {
         let period = (if ch == 1 {
             BLOCK_LATTICE
         } else {
@@ -3371,7 +3398,8 @@ impl ComputeSet {
             tailhist: self.tailhist,
             flat: self.arttype,
             bleed_mask: mask.filter(|_| self.arttype && ch != 1),
-            gmsbank: self.gmsbank,
+            gmsbank: self.gmsbank && (scale > 0 || ch == 1),
+            bank: GmsBankWork::new(ch, chroma.filter(|_| self.gmsbank && scale > 0 && ch == 0)),
         }
     }
 
@@ -4747,6 +4775,59 @@ fn dense_block_kernel_era1(
     )
 }
 
+/// Co-sited B samples for the X gradient walk. Packed f32 XYB B, one sample
+/// per pixel, with the same width/height as the current strip (no halo).
+#[derive(Clone, Copy)]
+struct ChromaStrip<'a> {
+    reference: &'a [f32],
+    distorted: &'a [f32],
+}
+
+#[derive(Clone, Copy)]
+struct GmsBankWork<'a> {
+    gradient: &'static [f64; 5],
+    chroma: Option<ChromaStrip<'a>>,
+}
+
+impl<'a> GmsBankWork<'a> {
+    fn new(channel: usize, chroma: Option<ChromaStrip<'a>>) -> Self {
+        Self {
+            gradient: match channel {
+                0 => &GMSBANK_X_C,
+                1 => &GMSBANK_C,
+                2 => &GMSBANK_B_C,
+                _ => unreachable!(),
+            },
+            chroma,
+        }
+    }
+
+    fn rows(self, start: usize, end: usize) -> Self {
+        Self {
+            chroma: self.chroma.map(|p| ChromaStrip {
+                reference: &p.reference[start..end],
+                distorted: &p.distorted[start..end],
+            }),
+            ..self
+        }
+    }
+}
+
+/// Difference-form joint opponent loss. Equal constants reproduce 1-MDSI CS
+/// on the author's unshifted H/M coordinates. XYB uses its declared centering.
+/// Called inside the existing magetypes/arcane gradient entries; the generic
+/// backend cannot carry a standalone rite token attribute.
+#[inline(always)]
+fn chromaticity_loss(reference: [f64; 2], distorted: [f64; 2], constants: [f64; 2]) -> f64 {
+    let [xr, br] = reference;
+    let [xd, bd] = distorted;
+    let [cx, cb] = constants;
+    let dx = xr - xd;
+    let db = br - bd;
+    (dx * dx / cx + db * db / cb)
+        / (xr * xr / cx + xd * xd / cx + br * br / cb + bd * bd / cb + 1.0)
+}
+
 /// C8 per-constant pair of signed gradient-change means and a Welford
 /// population variance of `1-GMS`. Variance is unchanged by the translation
 /// `GMS = 1 - delta`, while this form makes identity exactly zero.
@@ -4797,11 +4878,11 @@ impl GmsBankCell {
 }
 
 #[inline(always)]
-fn gmsbank_pixel(cells: &mut [GmsBankCell; 5], mr: f64, md: f64) {
+fn gmsbank_pixel(cells: &mut [GmsBankCell; 5], mr: f64, md: f64, constants: &[f64; 5]) {
     let diff = mr - md;
     let numer = diff * diff;
     let denom_base = mr * mr + md * md;
-    for (cell, c) in cells.iter_mut().zip(GMSBANK_C) {
+    for (cell, c) in cells.iter_mut().zip(constants) {
         cell.push(numer / (denom_base + c), md < mr);
     }
 }
@@ -4829,6 +4910,7 @@ struct GradientAccum {
     sum_bv_gain: f64,
     sum_bv_loss: f64,
     bank: [GmsBankCell; 5],
+    chroma: [GmsBankCell; 5],
 }
 
 impl GradientAccum {
@@ -4847,6 +4929,9 @@ impl GradientAccum {
         for (mine, next) in self.bank.iter_mut().zip(&other.bank) {
             mine.merge(next);
         }
+        for (mine, next) in self.chroma.iter_mut().zip(&other.chroma) {
+            mine.merge(next);
+        }
     }
 }
 
@@ -4858,6 +4943,15 @@ fn finish_gmsbank_cell(bank: &[GmsBankCell; 5], n_px: usize, out: &mut [f64]) {
         out[base] = cell.loss / n_px as f64;
         out[base + 1] = cell.gain / n_px as f64;
         out[base + 2] = (cell.m2.max(0.0) / n_px as f64).sqrt();
+    }
+}
+
+fn finish_chroma_cell(cells: &[GmsBankCell; 5], n: usize, out: &mut [f64]) {
+    assert_eq!(out.len(), 10);
+    for (k, cell) in cells.iter().enumerate() {
+        assert_eq!(cell.n as usize, n, "C8 chromaticity sample count");
+        out[2 * k] = cell.loss / n as f64;
+        out[2 * k + 1] = (cell.m2.max(0.0) / n as f64).sqrt();
     }
 }
 
@@ -4940,6 +5034,31 @@ fn gradient_block_kernel_generic<
 
     let mut acc = GradientAccum::default();
 
+    let bank = r4
+        .as_ref()
+        .map_or_else(|| GmsBankWork::new(1, None), |r| r.bank);
+    if let Some(chroma) = bank.chroma {
+        debug_assert_eq!(chroma.reference.len(), width * height);
+        debug_assert_eq!(chroma.distorted.len(), width * height);
+    }
+    let chroma_pixel = |x: usize, y: usize, cells: &mut [GmsBankCell; 5]| {
+        if let Some(chroma) = bank.chroma {
+            let i = y * width + x;
+            let h = i + width;
+            let reference = [
+                f64::from(src_h[h]) - f64::from(0.42_f32),
+                f64::from(chroma.reference[i]) - f64::from(0.55_f32),
+            ];
+            let distorted = [
+                f64::from(dst_h[h]) - f64::from(0.42_f32),
+                f64::from(chroma.distorted[i]) - f64::from(0.55_f32),
+            ];
+            for (cell, constants) in cells.iter_mut().zip(GMSBANK_CS_C) {
+                cell.push(chromaticity_loss(reference, distorted, constants), true);
+            }
+        }
+    };
+
     // Scalar helper for one pixel — used for the first/last COLUMN of
     // every row (x-axis boundary only; the y-axis "first/last row"
     // special case from phase 4 is GONE, per this function's new halo
@@ -4950,7 +5069,8 @@ fn gradient_block_kernel_generic<
                         y: usize,
                         acc: &mut GradientAccum,
                         r4: &mut Option<Rev4Grad<'_>>,
-                        bank_row: &mut [GmsBankCell; 5]| {
+                        bank_row: &mut [GmsBankCell; 5],
+                        chroma_row: &mut [GmsBankCell; 5]| {
         let xl = x.saturating_sub(1);
         let xr = (x + 1).min(width - 1);
         let row = (y + 1) * width; // +1: src_h/dst_h carry 1 halo row up front
@@ -4977,7 +5097,8 @@ fn gradient_block_kernel_generic<
         let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
 
         if BANK {
-            gmsbank_pixel(bank_row, grad_src_mag, grad_dst_mag);
+            gmsbank_pixel(bank_row, grad_src_mag, grad_dst_mag, bank.gradient);
+            chroma_pixel(x, y, chroma_row);
         }
 
         acc.sum_grad_src += grad_src_mag;
@@ -5066,12 +5187,13 @@ fn gradient_block_kernel_generic<
 
     for y in 0..height {
         let mut bank_row = [GmsBankCell::default(); 5];
+        let mut chroma_row = [GmsBankCell::default(); 5];
         let row = (y + 1) * width;
         let row_u = y * width;
         let row_d = (y + 2) * width;
         let act_row = y * width;
 
-        scalar_pixel(0, y, &mut acc, &mut r4, &mut bank_row);
+        scalar_pixel(0, y, &mut acc, &mut r4, &mut bank_row, &mut chroma_row);
         if width > 2 {
             let interior_end = width - 1;
             let interior_w = interior_end - 1; // pixels [1, width-2]
@@ -5115,7 +5237,9 @@ fn gradient_block_kernel_generic<
                             &mut bank_row,
                             f64::from(src_mag[lane]),
                             f64::from(dst_mag[lane]),
+                            bank.gradient,
                         );
+                        chroma_pixel(x + lane, y, &mut chroma_row);
                     }
                 }
 
@@ -5204,12 +5328,22 @@ fn gradient_block_kernel_generic<
             }
 
             for x in chunk_end..=interior_end - 1 {
-                scalar_pixel(x, y, &mut acc, &mut r4, &mut bank_row);
+                scalar_pixel(x, y, &mut acc, &mut r4, &mut bank_row, &mut chroma_row);
             }
         }
-        scalar_pixel(width - 1, y, &mut acc, &mut r4, &mut bank_row);
+        scalar_pixel(
+            width - 1,
+            y,
+            &mut acc,
+            &mut r4,
+            &mut bank_row,
+            &mut chroma_row,
+        );
         if BANK {
             for (sum, row) in acc.bank.iter_mut().zip(&bank_row) {
+                sum.merge(row);
+            }
+            for (sum, row) in acc.chroma.iter_mut().zip(&chroma_row) {
                 sum.merge(row);
             }
         }
@@ -7784,9 +7918,10 @@ fn compute_channel_scale_v2(
             let src_g = &scratch.src_wide[g_off..g_off + g_n];
             let dst_g = &scratch.dst_wide[g_off..g_off + g_n];
             let r4g = match r4a.as_mut() {
-                Some(a) if a.ringbasis || bleed_mask.is_some() => Some(Rev4Grad {
+                Some(a) if a.ringbasis || bleed_mask.is_some() || a.gmsbank => Some(Rev4Grad {
                     ring: a.ringbasis.then_some(&mut a.cell.ring),
                     bleed: bleed_mask.map(|m| (m, &mut a.cell.bleed)),
+                    bank: a.bank.rows(y0 * width, (y0 + strip_h) * width),
                 }),
                 _ => None,
             };
@@ -7837,6 +7972,7 @@ fn compute_channel_scale_v2(
         && a.gmsbank
     {
         a.cell.bank = grad.bank;
+        a.cell.chroma = grad.chroma;
     }
     finish_channel_scale(&dense, &grad, sum_blockiness, n, out)
 }
@@ -9279,7 +9415,7 @@ fn stream_phase_b(
                 .filter(|p| cross.is_some() && p.dst_activity)
                 .map(|_| &scr.activity_dst[off..off + strip_n]);
             let cell = &mut acc.rev4[scale];
-            let r4g = if r4w.ringbasis || r4w.bleed_mask.is_some() {
+            let r4g = if r4w.ringbasis || r4w.bleed_mask.is_some() || r4w.gmsbank {
                 Some(Rev4Grad {
                     ring: if r4w.ringbasis {
                         Some(&mut cell.ring)
@@ -9287,6 +9423,7 @@ fn stream_phase_b(
                         None
                     },
                     bleed: r4w.bleed_mask.map(|m| (m, &mut cell.bleed)),
+                    bank: r4w.bank,
                 })
             } else {
                 None
@@ -11325,6 +11462,25 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             None
         };
 
+        // C8 reads the co-sited B rows directly from the existing producer.
+        // These immutable strip views stay live across the channel fan-out.
+        let chroma_strip = (local.gmsbank && scale > 0).then(|| ChromaStrip {
+            reference: producer.rows(
+                crate::feature_v2_stream::Side::Source,
+                2,
+                scale,
+                info.y0,
+                info.y0 + info.strip_h,
+            ),
+            distorted: producer.rows(
+                crate::feature_v2_stream::Side::Distorted,
+                2,
+                scale,
+                info.y0,
+                info.y0 + info.strip_h,
+            ),
+        });
+
         // ref_y strip rows straight from the producer's rolling plane
         // (valid until the next `next_strip` call).
         let need_refy = append_on;
@@ -11435,7 +11591,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                         append2,
                         csfw,
                         local.free_work(ch),
-                        local.rev4_work(scale, ch, bleed_mask),
+                        local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                         acc,
                     );
                     crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
@@ -11530,7 +11686,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     append2,
                     csfw,
                     local.free_work(ch),
-                    local.rev4_work(scale, ch, bleed_mask),
+                    local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                     acc,
                 );
                 crate::fold_timing::stop(__t, crate::fold_timing::Phase::BBusy, scale);
@@ -11606,7 +11762,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     append2,
                     csfw,
                     local.free_work(ch),
-                    local.rev4_work(scale, ch, bleed_mask),
+                    local.rev4_work(scale, ch, bleed_mask, chroma_strip),
                     &mut accums[ch],
                 );
             }
@@ -11650,7 +11806,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     append2,
                     csfw,
                     local.free_work(1),
-                    local.rev4_work(scale, 1, bleed_mask),
+                    local.rev4_work(scale, 1, bleed_mask, chroma_strip),
                     &mut accums[1],
                 );
             }
@@ -11711,7 +11867,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         0
     };
     let gmsbank_total = if layout_gmsbank {
-        n_scales * 3 * GMSBANK_PER_CELL
+        gmsbank_width(n_scales)
     } else {
         0
     };
@@ -12099,11 +12255,26 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 continue;
             }
             for (ch, channel) in accums.iter().enumerate() {
-                let base = (scale * 3 + ch) * GMSBANK_PER_CELL;
+                if scale == 0 && ch != 1 {
+                    continue;
+                }
+                let base = if scale == 0 {
+                    0
+                } else {
+                    15 + (scale - 1) * 55 + ch * 15
+                };
                 finish_gmsbank_cell(
                     &channel.grad[scale].bank,
                     width * height,
                     &mut features_gmsbank[base..base + GMSBANK_PER_CELL],
+                );
+            }
+            if scale > 0 {
+                let base = 15 + (scale - 1) * 55 + 45;
+                finish_chroma_cell(
+                    &accums[0].grad[scale].chroma,
+                    width * height,
+                    &mut features_gmsbank[base..base + 10],
                 );
             }
         }
@@ -12274,7 +12445,14 @@ fn compute_v2_features_with_ref_impl_inner(
                         scr,
                         out,
                         cell.map(|c| {
-                            rev4_cell_args(c, local.as_ref().unwrap(), scale, ch, &dst_planes)
+                            rev4_cell_args(
+                                c,
+                                local.as_ref().unwrap(),
+                                scale,
+                                ch,
+                                src_planes,
+                                &dst_planes,
+                            )
                         }),
                     );
                     apply_transducer_luma_gate(out, ch, toggles);
@@ -12300,6 +12478,7 @@ fn compute_v2_features_with_ref_impl_inner(
                         local.as_ref().unwrap(),
                         scale,
                         ch,
+                        src_planes,
                         &dst_planes,
                     )
                 });
@@ -16448,11 +16627,39 @@ pub(crate) mod tests {
             let mr = i as f64 / 257.0;
             let md = mr * 0.5;
             assert!(md < mr);
-            gmsbank_pixel(&mut cells, mr, md);
+            gmsbank_pixel(&mut cells, mr, md, &GMSBANK_C);
         }
         for cell in cells {
             assert!(cell.loss > 0.0);
             assert_eq!(cell.gain.to_bits(), 0.0f64.to_bits());
+        }
+    }
+
+    #[test]
+    fn gmsbank_constant_chroma_shift_is_visible_without_gradients() {
+        let (w, h) = (97, 161);
+        let reference = vec![[120, 100, 60]; w * h];
+        let distorted = vec![[100, 120, 60]; w * h];
+        let values = gmsbank_extract(&reference, &distorted, w, h, false);
+        assert!(
+            values[GMSBANK_BASE..GMSBANK_BASE + 15]
+                .iter()
+                .all(|v| v.to_bits() == 0)
+        );
+        for scale in 1..4 {
+            let base = GMSBANK_BASE + 15 + (scale - 1) * 55;
+            assert!(values[base..base + 45].iter().all(|v| v.to_bits() == 0));
+            for k in 0..5 {
+                assert!(
+                    values[base + 45 + 2 * k] > 0.0,
+                    "flat colour shift must register CS loss"
+                );
+                assert_eq!(
+                    values[base + 46 + 2 * k].to_bits(),
+                    0,
+                    "constant loss map has zero deviation"
+                );
+            }
         }
     }
 
@@ -16490,11 +16697,29 @@ pub(crate) mod tests {
         let serial = gmsbank_extract(&src, &dst, w, h, false);
         let parallel = gmsbank_extract(&src, &dst, w, h, true);
         assert_eq!(serial, parallel, "C8 row order must survive MT extraction");
-        for cell in serial[GMSBANK_BASE..].as_chunks::<GMSBANK_PER_CELL>().0 {
-            for k in 0..4 {
-                let now = cell[k * 3] + cell[k * 3 + 1];
-                let next = cell[(k + 1) * 3] + cell[(k + 1) * 3 + 1];
-                assert!(now + 1e-14 >= next, "loss+gain must fall as c grows");
+        for scale in 0..4 {
+            for ch in 0..3 {
+                if scale == 0 && ch != 1 {
+                    continue;
+                }
+                let base = GMSBANK_BASE
+                    + if scale == 0 {
+                        0
+                    } else {
+                        15 + (scale - 1) * 55 + ch * 15
+                    };
+                let cell = &serial[base..base + 15];
+                for k in 0..4 {
+                    let now = cell[k * 3] + cell[k * 3 + 1];
+                    let next = cell[(k + 1) * 3] + cell[(k + 1) * 3 + 1];
+                    assert!(now + 1e-14 >= next, "loss+gain must fall as c grows");
+                }
+            }
+            if scale > 0 {
+                let base = GMSBANK_BASE + 15 + (scale - 1) * 55 + 45;
+                for k in 0..4 {
+                    assert!(serial[base + 2 * k] >= serial[base + 2 * (k + 1)]);
+                }
             }
         }
     }
@@ -16529,14 +16754,32 @@ pub(crate) mod tests {
             for scale in 0..ns {
                 let n = prep.scales[scale].1 * prep.scales[scale].2;
                 for ch in 0..3 {
+                    if scale == 0 && ch != 1 {
+                        continue;
+                    }
                     let cell = &cells[scale * 3 + ch];
                     let mut out = [0.0; GMSBANK_PER_CELL];
                     finish_gmsbank_cell(&cell.bank, n, &mut out);
-                    let base = GMSBANK_BASE + (scale * 3 + ch) * GMSBANK_PER_CELL;
+                    let base = GMSBANK_BASE
+                        + if scale == 0 {
+                            0
+                        } else {
+                            15 + (scale - 1) * 55 + ch * 15
+                        };
                     assert_eq!(
                         out,
                         streamed[base..base + GMSBANK_PER_CELL],
                         "C8 materialized vs streamed {w}x{h} scale={scale} ch={ch}"
+                    );
+                }
+                if scale > 0 {
+                    let mut out = [0.0; 10];
+                    finish_chroma_cell(&cells[scale * 3].chroma, n, &mut out);
+                    let base = GMSBANK_BASE + 15 + (scale - 1) * 55 + 45;
+                    assert_eq!(
+                        out,
+                        streamed[base..base + 10],
+                        "C8 materialized CS scale {scale}"
                     );
                 }
             }

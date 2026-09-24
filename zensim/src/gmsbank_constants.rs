@@ -22,3 +22,29 @@ pub(crate) const GMSBANK_C: [f64; 5] = [
     0.008525864043142388,
     0.03410345617256955,
 ];
+
+// C8 chroma revision, 2026-09-24. Preregistered TRAIN pixels only.
+// 1,520 native/box-derived records; quartiles/empty counts retained.
+// Raw report SHA256 a6aecdf036d89b7afef10e9c8aaa6c935836fbc69ed12950e56f41eabcf9c633
+// X/B gradient C1=140 and chromaticity C3=550 mapped independently.
+pub(crate) const GMSBANK_X_C: [f64; 5] = [
+    6.341568337543687e-05,
+    0.0002536627335017475,
+    0.00101465093400699,
+    0.00405860373602796,
+    0.01623441494411184,
+];
+pub(crate) const GMSBANK_B_C: [f64; 5] = [
+    8.239404165903782e-05,
+    0.00032957616663615127,
+    0.001318304666544605,
+    0.00527321866617842,
+    0.02109287466471368,
+];
+pub(crate) const GMSBANK_CS_C: [[f64; 2]; 5] = [
+    [9.29736082289899e-05, 0.04837252392816359],
+    [0.0003718944329159596, 0.19349009571265435],
+    [0.0014875777316638384, 0.7739603828506174],
+    [0.0059503109266553535, 3.0958415314024696],
+    [0.023801243706621414, 12.383366125609879],
+];

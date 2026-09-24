@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- Revise the unconsumed experimental C8 GMSBANK definition (2026-09-24):
+  native Y gradients, coarse X/Y/B gradients with separately calibrated
+  chroma stabilizers, and coarse joint X/B chromaticity loss/deviation.
+  The 180-slot block remains opt-in and ends at f1501, but its previous
+  sidecars are incompatible with this dated revision. f0–f1321 are unchanged.
+  Qualification records are quarantined in `benchmarks/gmsd-chroma_*`.
+
 ### Added
 
 - Experimental C8 GMSBANK adds 180 gradient-similarity slots at f1322–f1501.

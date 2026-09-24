@@ -86,6 +86,42 @@ def compare(a, b):
 
 
 def main():
+    if len(sys.argv) >= 4 and sys.argv[1] == 'compare-existing':
+        options = sys.argv[4:]
+        assert all(s == '--stdout' or s.startswith('--base-attempt=') for s in options)
+        stdout_only = '--stdout' in options
+        root, attempt = Path(sys.argv[2]), sys.argv[3]
+        base_attempt = next((s.split('=',1)[1] for s in options if s.startswith('--base-attempt=')), attempt)
+        result = dict(schema='gmsbank-prefix-identity-v2', modes=[],
+                      compared_cells=0, differing_cells=0)
+        if base_attempt != attempt:
+            baseline = root.parent/'binaries'/f'matrix_{base_attempt}_base'
+            candidate = root.parent/'binaries'/f'matrix_{attempt}_on'
+            result.update(baseline_binary_sha256=sha(baseline), candidate_binary_sha256=sha(candidate))
+            assert result['baseline_binary_sha256'] != result['candidate_binary_sha256'], 'artifact collision'
+        for tier in ('native', 'v3', 'scalar'):
+            for threads in (1, 8):
+                dirs = {arm: root/f'{attempt}_{arm}_{tier}_mt{threads}' for arm in ('base','off','on')}
+                dirs['base'] = root/f'{base_attempt}_base_{tier}_mt{threads}'
+                pixels = {arm: json.loads((path/'pixels.json').read_text()) for arm,path in dirs.items()}
+                assert pixels['base'] == pixels['off'] == pixels['on'], 'decoded input changed'
+                assert len(pixels['base']) == 144
+                for set_name, _, n in SETS:
+                    paths = {arm: path/f'{set_name}.csv' for arm,path in dirs.items()}
+                    rows = {arm: load(path,n) for arm,path in paths.items()}
+                    for left,right in [('base','off'),('off','on'),('base','on')]:
+                        diff,first = compare(rows[left],rows[right])
+                        result['compared_cells'] += n*WIDTH
+                        result['differing_cells'] += diff
+                        result['modes'].append(dict(set=set_name,tier=tier,threads=threads,
+                            left=left,right=right,rows=n,cells=n*WIDTH,differing=diff,first=first,
+                            left_sha256=sha(paths[left]),right_sha256=sha(paths[right])))
+        if not stdout_only:
+            with (root/f'report_{attempt}.json').open('x') as f:
+                f.write(json.dumps(result,indent=2,sort_keys=True)+'\n')
+        print(json.dumps({k:result[k] for k in ('compared_cells','differing_cells')},sort_keys=True))
+        assert result['differing_cells'] == 0
+        return
     if len(sys.argv) != 3:
         raise SystemExit('identity_matrix.py <candidate-extractor> <corrected-base-extractor>')
     candidate, base = map(Path, sys.argv[1:])

@@ -57,8 +57,10 @@ def main():
                 f.write(f'{row[3]}\t{row[4]}\t{i}\n')
         print('prepared 8 TRAIN pairs')
         return
-    index, features, const_path = map(Path, sys.argv[1:])
-    constants = json.loads(const_path.read_text())['constants']
+    chroma = sys.argv[1] == '--chroma'
+    index, features, const_path = map(Path, sys.argv[2:] if chroma else sys.argv[1:])
+    report = json.loads(const_path.read_text())
+    constants = report['ratios'] if chroma else report['constants']
     root = index.parent
     planes = {}
     with index.open() as f:
@@ -83,10 +85,26 @@ def main():
         wrong = []
         for scale in range(4):
             for ch in range(3):
+                if chroma and scale == 0 and ch != 1:
+                    continue
                 ref = planes[(key, 0, scale, ch)]
                 dist = planes[(key, 1, scale, ch)]
-                values.extend(one(ref, dist, constants))
-                wrong.extend(one(ref, dist, [c * 16 for c in constants]))
+                bank = constants if not chroma else (
+                    # Frozen Y literals, byte-for-byte from its original calibration.
+                    [0.00013321662567409982, 0.0005328665026963993,
+                     0.002131466010785597, 0.008525864043142388,
+                     0.03410345617256955]
+                    if ch == 1 else constants['x_gradient' if ch == 0 else 'b_gradient']['constants'])
+                values.extend(one(ref, dist, bank))
+                wrong.extend(one(ref, dist, [c * 16 for c in bank]))
+            if chroma and scale > 0:
+                xr, xd = [planes[(key, side, scale, 0)].astype(np.float64) - float(np.float32(.42)) for side in (0, 1)]
+                br, bd = [planes[(key, side, scale, 2)].astype(np.float64) - float(np.float32(.55)) for side in (0, 1)]
+                for cx, cb in zip(constants['x_value']['constants'], constants['b_value']['constants']):
+                    for target, multiplier in [(values, 1), (wrong, 16)]:
+                        loss = ((xr-xd)**2/(cx*multiplier) + (br-bd)**2/(cb*multiplier)) / (
+                            (xr*xr+xd*xd)/(cx*multiplier) + (br*br+bd*bd)/(cb*multiplier) + 1)
+                        target.extend((float(np.mean(loss)), float(np.std(loss, ddof=0))))
         for local, want in enumerate(values):
             got = float(rows[ri][f'f{1322 + local}'])
             rel = abs(got - want) / max(abs(want), 1e-12)

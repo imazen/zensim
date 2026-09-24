@@ -604,14 +604,26 @@ const REV4BANK: &[Revision] = &[Revision {
 /// Pinned to the byte-changing implementation commit in the qualification
 /// follow-up after the local quarantine commit has a stable hash.
 const GMSBANK_COMMIT: &str = "c1a61c4c8e324cb8764ebb8b188728c29817049b";
-const GMSBANK: &[Revision] = &[Revision {
-    era: "gmsbank",
-    commit: GMSBANK_COMMIT,
-    status: RevisionStatus::Landed,
-    note: "append-only introduction of the five-constant GMS similarity bank, \
+const GMSBANK: &[Revision] = &[
+    Revision {
+        era: "gmsbank",
+        commit: GMSBANK_COMMIT,
+        status: RevisionStatus::Landed,
+        note: "append-only introduction of the five-constant GMS similarity bank, \
            loss/gain/population-deviation at f1322..1501. No earlier slot moves. \
            Design: benchmarks/rev4_gmsbank_design_2026-09-23.md.",
-}];
+    },
+    Revision {
+        era: "gmsbank-chroma-2026-09-24",
+        commit: "f38befaefc524d5aeb3585cef81d81902a47bfb9",
+        status: RevisionStatus::Landed,
+        note: "Quarantined implementation revision: native Y gradients, coarse X/Y/B \
+           gradients with per-channel TRAIN stabilisers, and coarse joint X/B \
+           chromaticity mean-loss/Welford deviation. Width 180 at four scales. \
+           No f0..f1321 change; no consumer or promotion. \
+           Preregistration: benchmarks/gmsd-chroma_prereg_2026-09-24.md.",
+    },
+];
 
 /// The v1 option-C revision: v1 stopped pooling mirror-padded phantom
 /// columns, which moves every pooled v1 slot at any non-tight width.
@@ -2257,8 +2269,8 @@ pub(crate) static ARTTYPE: [SignalDef; 6] = {
     ]
 };
 
-/// C8: five fixed stabilisers × loss/gain/deviation for each XYB pyramid cell.
-pub(crate) static GMSBANK_SIGNALS: [SignalDef; 15] = {
+/// C8: sparse native-Y/coarse-chroma gradient and chromaticity signals.
+pub(crate) static GMSBANK_SIGNALS: [SignalDef; 25] = {
     use ComputeToken::Gmsbank as F;
     use Direction::HigherIsWorse;
     use Form::Difference;
@@ -2296,6 +2308,16 @@ pub(crate) static GMSBANK_SIGNALS: [SignalDef; 15] = {
         gb(12, "loss4", Statistic::Mean),
         gb(13, "gain4", Statistic::Mean),
         gb(14, "dev4", Statistic::Global),
+        gb(15, "cs_loss0", Statistic::Mean),
+        gb(16, "cs_dev0", Statistic::Global),
+        gb(17, "cs_loss1", Statistic::Mean),
+        gb(18, "cs_dev1", Statistic::Global),
+        gb(19, "cs_loss2", Statistic::Mean),
+        gb(20, "cs_dev2", Statistic::Global),
+        gb(21, "cs_loss3", Statistic::Mean),
+        gb(22, "cs_dev3", Statistic::Global),
+        gb(23, "cs_loss4", Statistic::Mean),
+        gb(24, "cs_dev4", Statistic::Global),
     ]
 };
 
@@ -2317,6 +2339,8 @@ pub(crate) enum Replication {
     /// `ComputeSet::at_scale` narrowing needs: a flat family's slots live
     /// and die with the scale-0 walk rows that feed them.
     Flat,
+    /// Native Y gradients, then coarse X/Y/B gradients and joint chroma CS.
+    GmsbankChroma,
 }
 
 /// A registered block: a signal table plus where it sits in the layout.
@@ -2398,7 +2422,7 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
     BlockDef {
         family: ComputeToken::Gmsbank,
         signals: &GMSBANK_SIGNALS,
-        replication: Replication::PerChannel,
+        replication: Replication::GmsbankChroma,
     },
 ];
 
@@ -2409,6 +2433,13 @@ impl BlockDef {
             Replication::PerChannel => n_scales * 3,
             Replication::PerScale => n_scales,
             Replication::Flat => 1,
+            Replication::GmsbankChroma => {
+                return if n_scales == 0 {
+                    0
+                } else {
+                    15 + (n_scales - 1) * 55
+                };
+            }
         };
         cells * self.signals.len()
     }
@@ -2472,6 +2503,24 @@ pub(crate) fn slot_id(
     }
     let per = block.signals.len();
     Some(match block.replication {
+        Replication::GmsbankChroma => {
+            if scale >= n_scales {
+                return None;
+            }
+            if scale == 0 {
+                if channel != 1 || block_local >= 15 {
+                    return None;
+                }
+                base + block_local
+            } else if block_local < 15 {
+                if channel >= 3 {
+                    return None;
+                }
+                base + 15 + (scale - 1) * 55 + channel * 15 + block_local
+            } else {
+                base + 15 + (scale - 1) * 55 + 45 + block_local - 15
+            }
+        }
         Replication::PerChannel => {
             if scale >= n_scales || channel >= 3 {
                 return None;
@@ -2508,6 +2557,19 @@ pub(crate) fn def_at(id: usize, n_scales: usize) -> Option<FeatureDef> {
             let off = id - base;
             let per = block.signals.len();
             let (scale, channel, local) = match block.replication {
+                Replication::GmsbankChroma => {
+                    if off < 15 {
+                        (0, Channel::Y, off)
+                    } else {
+                        let scale = 1 + (off - 15) / 55;
+                        let within = (off - 15) % 55;
+                        if within < 45 {
+                            (scale, Channel::TRIPLE[within / 15], within % 15)
+                        } else {
+                            (scale, Channel::Scalar, 15 + within - 45)
+                        }
+                    }
+                }
                 Replication::PerChannel => {
                     let cell = off / per;
                     (cell / 3, Channel::TRIPLE[cell % 3], off % per)
@@ -2907,6 +2969,45 @@ mod tests {
             assert_eq!(back, id, "round-trip for slot {id} ({})", d.name());
         }
         assert!(def_at(w, NS).is_none(), "past the full width");
+    }
+
+    #[test]
+    fn gmsbank_sparse_chroma_placement_at_every_scale_count() {
+        for ns in 1..=4 {
+            let (base, block) = block_base(ComputeToken::Gmsbank, ns).unwrap();
+            assert_eq!(block.width(ns), [15, 70, 125, 180][ns - 1]);
+            for local in 0..25 {
+                assert!(slot_id(ComputeToken::Gmsbank, local, 0, 0, ns).is_none());
+                assert!(slot_id(ComputeToken::Gmsbank, local, 0, 2, ns).is_none());
+                assert_eq!(
+                    slot_id(ComputeToken::Gmsbank, local, 0, 1, ns).is_some(),
+                    local < 15
+                );
+            }
+            for id in base..base + block.width(ns) {
+                let d = def_at(id, ns).unwrap();
+                let channel = match d.channel {
+                    Channel::X | Channel::Scalar => 0,
+                    Channel::Y => 1,
+                    Channel::B => 2,
+                };
+                assert_eq!(
+                    slot_id(
+                        ComputeToken::Gmsbank,
+                        usize::from(d.signal.block_local),
+                        usize::from(d.scale),
+                        channel,
+                        ns
+                    ),
+                    Some(id)
+                );
+                assert!(usize::from(d.scale) < ns);
+                if d.signal.block_local >= 15 {
+                    assert!(d.scale > 0);
+                    assert_eq!(d.channel, Channel::Scalar);
+                }
+            }
+        }
     }
 
     /// The block bases are the numbers every emit site in `feature_v2` writes

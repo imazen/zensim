@@ -1,5 +1,7 @@
 # GMSBANK C8 design (2026-09-23)
 
+**Historical initial definition below; superseded for C8 only by the dated chroma revision appended at the end.**
+
 Initial base `1881409d`, width 1322. The featbank correction review revises C1's magnitude hats and C3's histogram range; this lane rebases onto that corrected tip before final qualification. This note fixes the C8 definition before feature implementation and before the pixel-only constant calibration. No human labels or fit results are inputs.
 
 ## Why this form
@@ -29,3 +31,50 @@ Every new slot is exactly zero for an identical pair. Use a difference-form simi
 ## Frozen checks
 
 The preregistered gates, controls and data roles are in `benchmarks/gmsbank_prereg_2026-09-23.md`. The potential arm proposal is separate because the potential owner performs the fit. This design makes no claim that a five-point bank will beat the exact GMSD peer; P1/P2/P3 test that question.
+
+
+## C8 chroma revision — 2026-09-24 (quarantined)
+
+Preregistration `9016272c`, implementation `f38befaefc524d5aeb3585cef81d81902a47bfb9`;
+corrected parent `620a384e06e49422d501bdddc9c0439afc846a98`. This definition
+supersedes the earlier unconsumed C8 block only. f0–f1321 keep their definitions.
+The same total width 1502 does **not** imply compatibility with prior C8
+features: old sidecars must not join or train as this revised era.
+
+Native scale carries the five Y loss/gain/deviation triples (15 slots).
+Each of scales1,2,3 carries X/Y/B gradient triples (45 slots), followed by
+five joint chromaticity loss/deviation pairs (10 slots). Thus C8 widths for
+1/2/3/4 scales are 15/70/125/180. The registry records sparse placement and
+round-trips every slot; native X/B and native CS placements are refused.
+Chroma begins at half resolution to reflect its lower spatial sensitivity;
+Mullen1985 DOI10.1113/jphysiol.1985.sp015591 motivates the coarse placement,
+without asserting that image scales equal calibrated retinal frequencies.
+
+X/B gradient stabilizers and X/B value stabilizers were mapped separately
+from MDSI's opponent units using TRAIN pixels under the committed prereg.
+Y literals remain unchanged. The constants, ratio quartiles, stratum gaps,
+empty counts and input hashes are in `gmsd-chroma_calibration_2026-09-24.md`.
+The opponent-to-XYB mapping is an empirical unit conversion, not an exact
+colour transform identity or a learned performance optimum.
+
+At each retained scale set x=X-f64(0.42f32), b=B-f64(0.55f32), retaining X's
+existing factor14. For each literal pair (Cx,Cb), define
+L=((xr-xd)^2/Cx+(br-bd)^2/Cb)/(xr²/Cx+xd²/Cx+br²/Cb+bd²/Cb+1).
+Emit mean(L) and population std(L), accumulated per row with f64 Welford,
+then ordered Chan merges. Identity is exactly zero. For unshifted MDSI H/M
+planes and equal constants550 this is 1-CS; equal constants55 are the
+negative control. This does not reproduce MDSI's final nonlinear pooling.
+
+The X gradient walk reads co-sited B rows from the existing strip producer.
+It computes both chromaticity statistics inside the existing magetypes/arcane
+loop, including scalar borders and tails, with no extra image traversal.
+The materialized reference path uses the same co-sited rows. Default OFF.
+The generic inline helper uses the same established token limitation noted
+above. No public API change accompanies this revision.
+
+Differential results: author CS116 cases pass, maximum absolute error
+7.771561172376096e-16 and relative5.509513936691231e-12; wrong550/10
+constant rejected110 cases. Independent NumPy XYB mirror:8 TRAIN pairs,
+1440 C8 cells, maximum relative error1.860909581448716e-15; wrong×16
+constants rejected1440 cells. Behavior and registry gates passed; remaining
+prefix/cost/full-build status is reported in the lane worklog and DONE file.
