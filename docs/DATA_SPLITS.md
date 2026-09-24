@@ -802,3 +802,15 @@ honest false-positive rate); nothing was fitted, calibrated or selected on it. P
 the extractor's reference-sorted row order first (a positional join had been wrong). Record:
 `benchmarks/dvifmish_eval_2026-09-22.md` §6.
 
+## Exposure ledger — 2026-09-24: fleet transport of Rev4 potential-fit inputs (ruling D1)
+
+The `fleet-fits` lane is preparing a content-addressed input archive for the 960 preregistered P0 feature-potential MLP
+cells. Under D1, the archive will copy the admitted feature/label bytes for CID22-A(25) (2,192 rows), AIC-3 CTC (600),
+KADID SELECT (3,125), and KonFiG originsplit val (436), along with the four TRAIN-role sets. This entry precedes that
+archive's creation. The transport step verifies source receipts and copies bytes without decoding label columns,
+computing statistics, or changing the potential lane's fit procedure. The potential lane's fit script subsequently reads
+these labels for the already-authorized in-sample potential estimates; these four populations remain potential-exposed,
+never Rev4 confirmation holdouts for choices informed by these fits. CID22-B, the AIC-4 sample, KonJND JPEG, CSIQ, and
+secret holdouts are outside the archive. The exact archive SHA-256, source manifest hashes, and fleet program identity
+will be recorded in `benchmarks/fleet-fits_WORKLOG.md` in the quarantine zenmetrics workspace before the fleet
+declaration.
