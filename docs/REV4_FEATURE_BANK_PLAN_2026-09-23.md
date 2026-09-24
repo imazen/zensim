@@ -248,7 +248,9 @@ Measure before optimising. The IMPL lane measures every new family on the same b
 `fold944_full`, with zenbench and heaptrack at 256², 1024², 2048² and 4096²; it fits `α + β·px` and reports
 ST and MT8.
 
-**Budgets at 1024²** (full944 = 58.726 ms ST / 19.160 ms MT8 [SS]):
+**Budgets at 1024²** (full944 = 58.726 ms ST / 19.160 ms MT8 [SS]). *2026-09-24 user ruling: these are
+optimisation targets, not gates. Cost is reported, never used to reject a family; costly families stay optional
+(default off) and get optimised.*
 - C1 ≤ +5%, C2 ≤ +2%, C3 ≤ +8%, C4 ≤ +3%;
 - all four together ≤ +15% ST;
 - speed below 512² does not gate (REV4 user direction).
@@ -356,7 +358,7 @@ B = 2,000, seed 20260923, through `panel --batch` resample manifests.
 1. its nested-CV potential gain (R0 + C vs R0, or R0 vs R0 − F for existing families) has a paired
    reference-clustered 95% CI excluding zero on **≥ 2 human sets**, and a point gain ≥ +0.005 SROCC;
 2. stability-selection frequency ≥ **0.6** (preregistered) on those sets;
-3. it is within its §2.4 budget, measured;
+3. ~~it is within its §2.4 budget, measured;~~ removed 2026-09-24 (user): cost is measured and reported, never a gate;
 4. under the non-negative-distance MLP head, the dial-contract gates (monotone ladders, identity 100) do
    not regress.
 

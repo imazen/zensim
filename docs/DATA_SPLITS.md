@@ -712,7 +712,10 @@ These rulings answer the decisions in `docs/REV4_FEATURE_BANK_PLAN_2026-09-23.md
 - **D5, adoption bar for a candidate feature family.** All of these must hold:
   - stability-selection frequency ≥ 0.6;
   - nested-CV gain ≥ +0.005 SROCC, with the CI excluding zero on ≥ 2 human sets;
-  - it pays its measured runtime cost;
+  - ~~it pays its measured runtime cost;~~ **Removed 2026-09-24 by the user:** "remember not to reject things for
+    the cost budget, and track all things and code and results of those you have. we can optimize and make things
+    optional". Cost is measured and reported for every family. It never accepts or rejects one. Every candidate
+    stays in the evaluation, its code stays landed (default off), and its results stay recorded.
   - it keeps the dial contract under the non-negative-distance head.
 - **D3 (MCL-JCI's role)** is pending the datasets-lane proposal. The default is confirmation-only, as the natural
   test set for the JPEG response-shape question.
