@@ -63,3 +63,9 @@ safesyn_avif_files=34001
 ```
 
 AVIF ladder counts in the report are read from `docs/DATA_SPLITS.md`, not measured by this replay. No human labels were opened. The companion JSON retains all 31 paired rows so an auditor can inspect skew and outliers without rerunning decoding.
+
+## HANDOFF — quota stop
+
+Codex weekly usage reached 28.0%; the user directed a stop at the next safe point. The investigation, preregistration, 31-pair replay, compact record, report, pointer, and `AVIF_DECODE_DONE.md` are complete. The work is quarantined on `quarantine/codex/avif-decode-diff`; no push or sibling-repository edit was made. No command is in flight. The zenmetrics failing-test proposal remains unapplied at `/var/tmp/avif-decode-diff/zenmetrics-avif-cicp-test.patch` (SHA256 `5f22a9011878b5ae2974897ce3c12217baa1bf1e5528849979c1024f35b8e2eb`). The shared heavy-check gate was unavailable, as noted above.
+
+Next steps for an independent reviewer: read `AVIF_DECODE_DONE.md` and the report, verify the source/bitstream joins and sign of paired deltas, then run `bash replay.sh` from `/var/tmp/avif-decode-diff/` against the pinned inputs and compare its logs and JSON SHA256s with this worklog. Review the proposed zenmetrics test patch before applying it in that repository. Keep this branch quarantined until the required audit promotes it.
