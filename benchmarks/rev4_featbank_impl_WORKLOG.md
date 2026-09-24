@@ -473,3 +473,16 @@ Exact invocations, raw `.zenbench` rounds, RSS `.time` files and heaptrack
 `benchmarks/rev4_cost_2026-09-23.pointer.md`); `.time`/rss.tsv stay in
 `benchmarks/rev4-cost-2026-09-23/` and are cited
 from `rev4_featbank_impl_2026-09-23.md` §Cost/§Peak memory.
+
+## HANDOFF — quota stop, 2026-09-24 UTC
+
+The user stopped Codex lanes at 28.0% weekly usage. All ten review
+corrections were completed before the stop in correction commit
+`87db7d77319817a685ef4bf715180f7367d0df77`. The final revised
+identity gate found 0/851,904 old-slot differences; all 11 family
+tests, mounted corpus gate, Clippy, API snapshot, script lint and fmt
+checks passed. The working copy was clean at the stop. The canonical
+`FEATBANK_IMPL_DONE.md` has the CORRECTIONS table and the completion
+marker is in the same rev4 directory. No command is in flight and no
+work remains for this lane. Coordinator next step: short Opus review,
+then pin `REV4BANK_COMMIT` at landing. No push was performed.
