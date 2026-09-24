@@ -257,7 +257,7 @@ too_many_arguments = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom", "custom-profiles", "feature-regime-v2"))']
+check-cfg = ['cfg(feature, values("training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom", "custom-profiles", "feature-regime-v2"))', 'cfg(gmsbank_calibration_instrument)']
 
 [dev-dependencies.zenbench]
 workspace = true

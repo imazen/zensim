@@ -348,6 +348,51 @@ fn gmsbank_prefix_identity_and_tier_consistency() {
     }
 }
 
+/// A uniform destination has zero gradient magnitude at every pixel.
+/// Wherever the textured reference has a gradient, m_d < m_r; at its flat
+/// pixels both magnitudes are zero and the similarity loss is also zero.
+/// Every nonzero C8 contribution must therefore enter loss, never gain.
+#[test]
+fn gmsbank_contrast_reduction_has_exact_zero_gain_in_every_tier() {
+    let (w, h) = (127, 288);
+    let src: Vec<[u8; 3]> = (0..w * h)
+        .map(|i| {
+            let x = i % w;
+            let y = i / w;
+            let gray = (48 + (x * 3 + y * 5 + (x * y) % 11) % 160) as u8;
+            [gray; 3]
+        })
+        .collect();
+    let dst = vec![[128u8; 3]; w * h];
+    let toggles = V2NewFeatureToggles {
+        gmsbank: true,
+        ..toggles_on()
+    };
+    let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
+        let values = extract(&src, &dst, w, h, toggles, false);
+        let mut total_loss = 0.0;
+        for cell in values[GMSBANK_BASE..].chunks_exact(15) {
+            for k in 0..5 {
+                let loss = cell[k * 3];
+                let gain = cell[k * 3 + 1];
+                total_loss += loss;
+                assert_eq!(
+                    gain.to_bits(),
+                    0.0f64.to_bits(),
+                    "{}: contrast reduction contributed to gain at k={k}",
+                    perm.label
+                );
+            }
+        }
+        assert!(
+            total_loss > 0.0,
+            "{}: test pair had no gradients",
+            perm.label
+        );
+    });
+    assert!(report.permutations_run >= 3, "tier coverage too thin");
+}
+
 /// **R4-D** — mount-free 16-pair CI tier. The corpus gate below covers real
 /// TRAIN paths; this catches accidental skips and old-slot regressions in CI.
 #[test]

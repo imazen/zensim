@@ -14934,6 +14934,10 @@ pub(crate) mod tests {
     use crate::PixelFormat;
     use crate::source::{RgbSlice, StridedBytes};
 
+    // Explicit calibration tool; compiled only by calibration_instrument.sh.
+    #[cfg(gmsbank_calibration_instrument)]
+    include!("gmsbank_calibration_instrument.rs");
+
     /// imazen/zensim#56 regression gate: the MSCN divisive normalizer must
     /// be the CORRECTLY-ROUNDED IEEE `resid / sqrt(var + c)` on every SIMD
     /// tier, lane for lane, bit for bit. That is what makes the
@@ -16435,6 +16439,21 @@ pub(crate) mod tests {
         )
         .expect("C8 extraction")
         .into_features()
+    }
+
+    #[test]
+    fn gmsbank_strict_contrast_reduction_routes_only_to_loss() {
+        let mut cells = [GmsBankCell::default(); 5];
+        for i in 1..=257 {
+            let mr = i as f64 / 257.0;
+            let md = mr * 0.5;
+            assert!(md < mr);
+            gmsbank_pixel(&mut cells, mr, md);
+        }
+        for cell in cells {
+            assert!(cell.loss > 0.0);
+            assert_eq!(cell.gain.to_bits(), 0.0f64.to_bits());
+        }
     }
 
     #[test]
