@@ -120,6 +120,8 @@ pub enum ComputeToken {
     Tailhist,
     /// Rev4 artifact-type descriptors, `f1298..1321`.
     Arttype,
+    /// Experimental GMSBANK gradient similarity basis, `f1322..1501`.
+    Gmsbank,
 }
 
 impl ComputeToken {
@@ -139,6 +141,7 @@ impl ComputeToken {
         ComputeToken::Ringbasis,
         ComputeToken::Tailhist,
         ComputeToken::Arttype,
+        ComputeToken::Gmsbank,
         ComputeToken::Moments,
         ComputeToken::ClassC,
         ComputeToken::Hdr,
@@ -163,6 +166,7 @@ impl ComputeToken {
             ComputeToken::Ringbasis => "ringbasis",
             ComputeToken::Tailhist => "tailhist",
             ComputeToken::Arttype => "arttype",
+            ComputeToken::Gmsbank => "gmsbank",
             ComputeToken::Moments => "moments",
             ComputeToken::ClassC => "classc",
             ComputeToken::Hdr => "hdr",

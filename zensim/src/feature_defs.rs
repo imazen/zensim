@@ -601,6 +601,18 @@ const REV4BANK: &[Revision] = &[Revision {
            benchmarks/rev4_featbank_impl_2026-09-23.md.",
 }];
 
+/// Pinned to the byte-changing implementation commit in the qualification
+/// follow-up after the local quarantine commit has a stable hash.
+const GMSBANK_COMMIT: &str = "00000000";
+const GMSBANK: &[Revision] = &[Revision {
+    era: "gmsbank",
+    commit: GMSBANK_COMMIT,
+    status: RevisionStatus::Landed,
+    note: "append-only introduction of the five-constant GMS similarity bank, \
+           loss/gain/population-deviation at f1322..1501. No earlier slot moves. \
+           Design: benchmarks/rev4_gmsbank_design_2026-09-23.md.",
+}];
+
 /// The v1 option-C revision: v1 stopped pooling mirror-padded phantom
 /// columns, which moves every pooled v1 slot at any non-tight width.
 const REV_OPTION_C: &[Revision] = &[Revision {
@@ -2245,6 +2257,48 @@ pub(crate) static ARTTYPE: [SignalDef; 6] = {
     ]
 };
 
+/// C8: five fixed stabilisers × loss/gain/deviation for each XYB pyramid cell.
+pub(crate) static GMSBANK_SIGNALS: [SignalDef; 15] = {
+    use ComputeToken::Gmsbank as F;
+    use Direction::HigherIsWorse;
+    use Form::Difference;
+    use KernelId::V2Gradient as K;
+    const fn gb(block_local: u16, name: &'static str, statistic: Statistic) -> SignalDef {
+        SignalDef {
+            family: F,
+            block_local,
+            name,
+            statistic,
+            cost: CostClass::Expensive,
+            tranche: Tranche::None,
+            placement: Placement::AllCells,
+            form: Difference,
+            direction: HigherIsWorse,
+            kernel: K,
+            deprecated: false,
+            defect: None,
+            revisions: GMSBANK,
+        }
+    }
+    [
+        gb(0, "loss0", Statistic::Mean),
+        gb(1, "gain0", Statistic::Mean),
+        gb(2, "dev0", Statistic::Global),
+        gb(3, "loss1", Statistic::Mean),
+        gb(4, "gain1", Statistic::Mean),
+        gb(5, "dev1", Statistic::Global),
+        gb(6, "loss2", Statistic::Mean),
+        gb(7, "gain2", Statistic::Mean),
+        gb(8, "dev2", Statistic::Global),
+        gb(9, "loss3", Statistic::Mean),
+        gb(10, "gain3", Statistic::Mean),
+        gb(11, "dev3", Statistic::Global),
+        gb(12, "loss4", Statistic::Mean),
+        gb(13, "gain4", Statistic::Mean),
+        gb(14, "dev4", Statistic::Global),
+    ]
+};
+
 // ============================================================================
 // Layout arithmetic — THE owner
 // ============================================================================
@@ -2341,6 +2395,11 @@ pub(crate) static BLOCKS: &[BlockDef] = &[
         signals: &ARTTYPE,
         replication: Replication::PerScale,
     },
+    BlockDef {
+        family: ComputeToken::Gmsbank,
+        signals: &GMSBANK_SIGNALS,
+        replication: Replication::PerChannel,
+    },
 ];
 
 impl BlockDef {
@@ -2383,12 +2442,12 @@ pub(crate) fn block_base(
 ///
 /// Sourced from `benchmarks/feature_sets_registry.json`'s `sets[].layout`
 /// (append-only; 2026-09-19: 372, 720, 924, 944, 956, 986; 2026-09-23: the
-/// Rev4 feature bank's full width 1322) plus the registry's full width.
+/// Rev4 feature bank's full width 1322) plus C8's width 1502.
 /// `zensim-validate`'s
 /// `every_registered_layout_width_is_a_candidate` holds the two in sync, so
 /// registering a set at a new width fails the build rather than silently
 /// becoming unreproducible.
-pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[372, 720, 924, 944, 956, 986, 1322];
+pub(crate) const REGISTERED_LAYOUT_WIDTHS: &[usize] = &[372, 720, 924, 944, 956, 986, 1322, 1502];
 
 /// Total layout width at `n_scales` with every registered block present.
 pub(crate) fn full_width(n_scales: usize) -> usize {
@@ -2828,7 +2887,7 @@ mod tests {
     #[test]
     fn id_arithmetic_round_trips_on_every_slot() {
         let w = full_width(NS);
-        assert_eq!(w, 1322, "full registered width at 4 scales");
+        assert_eq!(w, 1502, "full registered width at 4 scales");
         for id in 0..w {
             let d = def_at(id, NS).unwrap_or_else(|| panic!("no def for slot {id}"));
             let ch = match d.channel {
@@ -2868,6 +2927,7 @@ mod tests {
             (ComputeToken::Ringbasis, 1082, 72),
             (ComputeToken::Tailhist, 1154, 144),
             (ComputeToken::Arttype, 1298, 24),
+            (ComputeToken::Gmsbank, 1322, 180),
         ];
         for (family, base, width) in expect {
             let (b, blk) = block_base(family, NS).expect("registered family");
@@ -2889,7 +2949,7 @@ mod tests {
             );
             assert!(seen.insert(n.clone()), "duplicate slot name {n:?} at {id}");
         }
-        assert_eq!(seen.len(), 1322);
+        assert_eq!(seen.len(), 1502);
     }
 
     /// Signal names are unique WITHIN a family (the family prefix is what
@@ -3325,10 +3385,11 @@ mod owner_gates {
             ringbasis: false,
             tailhist: false,
             arttype: false,
+            gmsbank: false,
             free_extras: V1FreeExtras::Off,
         };
         // One `ComputeSet` per token that turns on EXACTLY that family.
-        let cases: [(T, ComputeSet); 14] = [
+        let cases: [(T, ComputeSet); 15] = [
             (
                 T::Basic,
                 ComputeSet {
@@ -3391,6 +3452,13 @@ mod owner_gates {
                 T::Arttype,
                 ComputeSet {
                     arttype: true,
+                    ..off
+                },
+            ),
+            (
+                T::Gmsbank,
+                ComputeSet {
+                    gmsbank: true,
                     ..off
                 },
             ),

@@ -173,6 +173,7 @@ impl Plan {
         let ringbasis = touches(ComputeToken::Ringbasis);
         let tailhist = touches(ComputeToken::Tailhist);
         let arttype = touches(ComputeToken::Arttype);
+        let gmsbank = touches(ComputeToken::Gmsbank);
         // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
         // request implies the v2-era pass regardless of what else is asked.
         // DVIFM is the same shape (`dvifm_block && v2_blocks`), one block up.
@@ -185,7 +186,8 @@ impl Plan {
             || gridblk
             || ringbasis
             || tailhist
-            || arttype;
+            || arttype
+            || gmsbank;
 
         // Free extras: only meaningful when the owning block is NOT running.
         let free_extras = if touches(ComputeToken::ClassC) && !append {
@@ -254,6 +256,7 @@ impl Plan {
             ringbasis,
             tailhist,
             arttype,
+            gmsbank,
             free_extras,
         };
         let mut requested = requested;
@@ -450,6 +453,7 @@ impl Plan {
             ringbasis: false,
             tailhist: false,
             arttype: false,
+            gmsbank: false,
             free_extras: V1FreeExtras::Off,
         };
         Plan::normalized(compute, Layout::identity(layout_width))
@@ -511,6 +515,7 @@ impl Plan {
             rev4_ringbasis: layout.ringbasis,
             rev4_tailhist: layout.tailhist,
             rev4_arttype: layout.arttype,
+            gmsbank: layout.gmsbank,
             // A sub-toggle that REFINES a block cannot outlive it: the walk
             // asserts `append2_dst_activity => append2_block`. `everything`
             // (the fallback compute set for a wide bake) turns it on
@@ -594,6 +599,7 @@ impl Plan {
             ringbasis: a.ringbasis || b.ringbasis,
             tailhist: a.tailhist || b.tailhist,
             arttype: a.arttype || b.arttype,
+            gmsbank: a.gmsbank || b.gmsbank,
             free_extras: free_union(a.free_extras, b.free_extras),
         };
         let _ = ns;
@@ -619,6 +625,7 @@ struct LayoutBlocks {
     ringbasis: bool,
     tailhist: bool,
     arttype: bool,
+    gmsbank: bool,
 }
 
 impl LayoutBlocks {
@@ -631,6 +638,7 @@ impl LayoutBlocks {
         let ringbasis = gridblk && width > base_of(ComputeToken::Ringbasis, ns);
         let tailhist = ringbasis && width > base_of(ComputeToken::Tailhist, ns);
         let arttype = tailhist && width > base_of(ComputeToken::Arttype, ns);
+        let gmsbank = arttype && width > base_of(ComputeToken::Gmsbank, ns);
         Self {
             append,
             append2,
@@ -640,6 +648,7 @@ impl LayoutBlocks {
             ringbasis,
             tailhist,
             arttype,
+            gmsbank,
         }
     }
 }
@@ -1072,6 +1081,15 @@ mod tests {
         assert_eq!(p.compute.free_extras, V1FreeExtras::Off);
         assert_eq!(p.layout_width(), 372);
         assert_eq!(p.emit, slots([(0, 372)]));
+    }
+
+    #[test]
+    fn gmsbank_full_width_plan_populates_all_registered_slots() {
+        let want = slots([(0, 1502)]);
+        let plan = Plan::derive(&want, 1502).expect("C8 plan");
+        assert!(plan.compute.gmsbank);
+        assert!(plan.toggles().gmsbank);
+        assert_eq!(plan.emit, want);
     }
 
     /// A basic-only request skips the pool block entirely.

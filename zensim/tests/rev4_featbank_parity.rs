@@ -36,6 +36,7 @@ use zensim::{PixelFormat, RgbSlice, Zensim, ZensimProfile};
 /// First rev4 slot — f986 (the registry's `REV4_BASE`; re-stated here so
 /// the gate text survives registry refactors).
 const REV4_BASE: usize = 986;
+const GMSBANK_BASE: usize = 1322;
 
 fn toggles_on() -> V2NewFeatureToggles {
     V2NewFeatureToggles {
@@ -258,6 +259,92 @@ fn rev4_identity_and_segments_across_all_tiers() {
             tier_first.len()
         );
         assert!(report.permutations_run >= 3, "tier coverage too thin");
+    }
+}
+
+/// C8 reuses the rev4 tier harness. The existing 1322 slots must be exact
+/// within each tier with C8 on/off; C8 itself is exact on identity and
+/// repeatable within a tier. Cross-tier drift follows the rev4 gate's
+/// measured-and-reported policy rather than an invented ULP limit.
+#[test]
+fn gmsbank_prefix_identity_and_tier_consistency() {
+    for (w, h) in [(200, 200), (127, 288)] {
+        let (src, dst) = pair(w, h);
+        let mut first_by_tier: std::collections::BTreeMap<&'static str, Vec<f64>> =
+            std::collections::BTreeMap::new();
+        let mut scalar: Option<Vec<f64>> = None;
+        let mut maximum_relative_drift = 0.0f64;
+        let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
+            let off = extract(&src, &dst, w, h, toggles_on(), false);
+            let on_toggles = V2NewFeatureToggles {
+                gmsbank: true,
+                ..toggles_on()
+            };
+            let on = extract(&src, &dst, w, h, on_toggles, false);
+            assert_eq!(off.len(), GMSBANK_BASE);
+            assert_eq!(on.len(), 1502);
+            for i in 0..GMSBANK_BASE {
+                assert_eq!(
+                    off[i].to_bits(),
+                    on[i].to_bits(),
+                    "{w}x{h} {}: C8 moved prefix f{i}",
+                    perm.label
+                );
+            }
+            let same = extract(&src, &src, w, h, on_toggles, false);
+            for (i, value) in same[GMSBANK_BASE..].iter().enumerate() {
+                assert_eq!(
+                    *value,
+                    0.0,
+                    "{w}x{h} {} identity f{}",
+                    perm.label,
+                    GMSBANK_BASE + i
+                );
+            }
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(8)
+                .build()
+                .expect("MT8");
+            let mt8 = pool.install(|| extract(&src, &dst, w, h, on_toggles, true));
+            for i in GMSBANK_BASE..1502 {
+                assert_eq!(
+                    on[i].to_bits(),
+                    mt8[i].to_bits(),
+                    "{w}x{h} {} MT8 changed f{i}",
+                    perm.label
+                );
+            }
+            let tier = classify_tier(&perm.disabled);
+            if let Some(first) = first_by_tier.get(tier) {
+                for i in GMSBANK_BASE..1502 {
+                    assert_eq!(
+                        first[i].to_bits(),
+                        on[i].to_bits(),
+                        "{w}x{h} {} same-tier f{i}",
+                        perm.label
+                    );
+                }
+            } else {
+                first_by_tier.insert(tier, on.clone());
+            }
+            if tier == "scalar/SSE2" || tier == "scalar" {
+                scalar = Some(on);
+            }
+        });
+        let scalar = scalar.expect("scalar tier");
+        for values in first_by_tier.values() {
+            for i in GMSBANK_BASE..1502 {
+                let scale = scalar[i].abs().max(1e-12);
+                maximum_relative_drift =
+                    maximum_relative_drift.max((values[i] - scalar[i]).abs() / scale);
+            }
+        }
+        eprintln!(
+            "C8 {w}x{h}: {} tier permutations, {} tiers, max relative drift vs scalar={maximum_relative_drift:.3e}",
+            report.permutations_run,
+            first_by_tier.len()
+        );
+        assert!(report.permutations_run >= 3);
     }
 }
 

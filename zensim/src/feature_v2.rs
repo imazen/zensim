@@ -197,6 +197,7 @@ pub const K_PJND_MASK_HIGH: f64 = 16.0;
 /// in unit-XYB scale, not blur residuals, but the dynamic range is
 /// comparable).
 pub const C_GMS: f64 = 1e-4;
+use crate::gmsbank_constants::GMSBANK_C;
 /// Saturating half-point for the reference-edge indicator used by ringing
 /// (`edge_r` in the A.10 table's `err · dilate(edge_r) · (1−edge_r)` form).
 pub const C_RING_EDGE: f64 = 0.02;
@@ -588,6 +589,9 @@ pub mod idx_csfw {
 /// derives the same number — asserted in `rev4_base_matches_registry`).
 #[cfg_attr(not(test), allow(dead_code))] // the registered rev4 base — read by the parity/layout gates
 pub(crate) const REV4_BASE: usize = 986;
+#[cfg(test)]
+pub(crate) const GMSBANK_BASE: usize = 1322;
+pub(crate) const GMSBANK_PER_CELL: usize = 15;
 /// gridblk slots per (scale, channel) cell: 6 signed log-magnitude bins
 /// of the on-grid boundary step excess + on-grid mean + on/off ratio.
 pub(crate) const GRIDBLK_PER_CELL: usize = 8;
@@ -935,6 +939,7 @@ struct Rev4CellAccum {
     tail: TailAccum,
     flat: FlatAccum,
     bleed: BleedAccum,
+    bank: [GmsBankCell; 5],
 }
 
 /// REV4 hook bundle for the dense kernel — carries C3 (`tail`) and C4's
@@ -1035,6 +1040,8 @@ struct Rev4Work<'a> {
     /// C4 dilated dst-luma-edge mask (strip_n bytes of 0.0/1.0), `Some`
     /// only when `arttype` is on AND this is a chroma channel.
     bleed_mask: Option<&'a [f32]>,
+    /// C8 gradient-similarity bank runs in the same gradient pass.
+    gmsbank: bool,
 }
 
 /// Materialized-path REV4 work order for one (scale, channel) — the
@@ -1056,6 +1063,7 @@ struct Rev4CellArgs<'a> {
     flat: bool,
     /// Same-scale dst-Y plane for the C4 mask — see the struct doc.
     bleed_y: Option<&'a [f32]>,
+    gmsbank: bool,
 }
 
 /// Resolve one (scale, channel)'s [`Rev4CellArgs`] from the at-scale
@@ -1086,6 +1094,7 @@ fn rev4_cell_args<'a>(
         tailhist: local.tailhist,
         flat: local.arttype,
         bleed_y: (local.arttype && ch != 1).then(|| &dst_planes[1][..]),
+        gmsbank: local.gmsbank,
     }
 }
 
@@ -1965,7 +1974,7 @@ pub enum FeatureRegime {
     /// feature-bank families (f986..f1321: `gridblk` 96, `ringbasis` 72,
     /// `tailhist` 144, `arttype` 24 — see `docs/REV4_FEATURE_BANK_PLAN_*
     /// .md`). Assigned only when ALL FOUR rev4 layout flags are on
-    /// (the full 1322 row); a rev4-subset request keeps the regime of
+    /// (the full 1322 row, also used by the additive C8 1502 row); a rev4-subset request keeps the regime of
     /// its widest fully-registered block — the slot provenance still
     /// disambiguates exactly which tail cells are populated.
     Folded720Rev4,
@@ -2039,6 +2048,8 @@ impl ZensimV2Result {
                 let end = self.features.len() - tail;
                 &self.features[end - v2_len..end]
             }
+            // Both 1322 and 1502 retain the same fixed v2 block at f372.
+            FeatureRegime::Folded720Rev4 => &self.features[372..372 + v2_len],
             _ => &self.features[..],
         };
         FeatureViewV2::new(v2_block, self.n_scales)
@@ -2514,6 +2525,12 @@ pub struct V2NewFeatureToggles {
     /// rev4 families; requires `dvifm_block` (asserted). Default OFF.
     #[doc(hidden)]
     pub rev4_arttype: bool,
+    /// Experimental C8 GMSBANK f1322..f1501, default off. Its five pinned
+    /// stabilisers split gradient-similarity loss/gain and deviation on each
+    /// XYB scale/channel. The 1502-slot layout requires DVIFM and the four
+    /// preceding Rev4 layout blocks.
+    #[doc(hidden)]
+    pub gmsbank: bool,
 }
 
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
@@ -2746,6 +2763,7 @@ impl Default for V2NewFeatureToggles {
             rev4_ringbasis: false,
             rev4_tailhist: false,
             rev4_arttype: false,
+            gmsbank: false,
         }
     }
 }
@@ -2915,6 +2933,7 @@ pub(crate) struct ComputeSet {
     /// dst-luma-edge mask in the gradient kernel, and the finalize-time
     /// EWC×HF_LOSS blur product.
     pub arttype: bool,
+    pub gmsbank: bool,
     /// The free v2-era slots a v1-only walk emits ([`V1FreeExtras`]). Held
     /// here rather than re-read from the toggles at each site, so
     /// `raw_moments` has ONE derivation.
@@ -2983,6 +3002,7 @@ impl ComputeSet {
             ringbasis: self.ringbasis && live,
             tailhist: self.tailhist && live,
             arttype: self.arttype && live,
+            gmsbank: self.gmsbank && live,
             ..self
         }
     }
@@ -3039,6 +3059,7 @@ impl ComputeSet {
             ringbasis: t.rev4_ringbasis && v2_blocks,
             tailhist: t.rev4_tailhist && v2_blocks,
             arttype: t.rev4_arttype && v2_blocks,
+            gmsbank: t.gmsbank && v2_blocks,
             free_extras: t.free_extras,
         }
     }
@@ -3171,6 +3192,9 @@ impl ComputeSet {
         if self.arttype {
             p = p.with(T::Arttype);
         }
+        if self.gmsbank {
+            p = p.with(T::Gmsbank);
+        }
         if self.raw_moments() {
             p = p.with(T::Moments);
         }
@@ -3230,6 +3254,7 @@ impl ComputeSet {
         let ringbasis_end = gridblk_end + n_scales * 3 * RINGBASIS_PER_CELL;
         let tailhist_end = ringbasis_end + n_scales * 3 * TAILHIST_PER_CELL;
         let arttype_end = tailhist_end + n_scales * ARTTYPE_PER_SCALE;
+        let gmsbank_end = arttype_end + n_scales * 3 * GMSBANK_PER_CELL;
 
         let mut ranges: Vec<(usize, usize)> = Vec::new();
         let mut scattered: Vec<usize> = Vec::new();
@@ -3268,6 +3293,9 @@ impl ComputeSet {
         }
         if self.arttype {
             ranges.push((tailhist_end, arttype_end));
+        }
+        if self.gmsbank {
+            ranges.push((arttype_end, gmsbank_end));
         }
         if self.raw_moments() {
             scattered.extend(free_slot_indices(n_scales));
@@ -3343,6 +3371,7 @@ impl ComputeSet {
             tailhist: self.tailhist,
             flat: self.arttype,
             bleed_mask: mask.filter(|_| self.arttype && ch != 1),
+            gmsbank: self.gmsbank,
         }
     }
 
@@ -4718,6 +4747,65 @@ fn dense_block_kernel_era1(
     )
 }
 
+/// C8 per-constant pair of signed gradient-change means and a Welford
+/// population variance of `1-GMS`. Variance is unchanged by the translation
+/// `GMS = 1 - delta`, while this form makes identity exactly zero.
+#[derive(Default, Clone, Copy)]
+struct GmsBankCell {
+    loss: f64,
+    gain: f64,
+    n: u64,
+    mean: f64,
+    m2: f64,
+}
+
+impl GmsBankCell {
+    #[inline]
+    fn push(&mut self, delta: f64, loss: bool) {
+        if loss {
+            self.loss += delta;
+        } else {
+            self.gain += delta;
+        }
+        self.n += 1;
+        // std(GMS) == std(1-GMS) exactly. Welford on delta=1-GMS
+        // preserves small deviations that would round away in 1-delta.
+        let change = delta - self.mean;
+        self.mean += change / self.n as f64;
+        self.m2 += change * (delta - self.mean);
+    }
+
+    #[inline]
+    fn merge(&mut self, other: &Self) {
+        if other.n == 0 {
+            return;
+        }
+        self.loss += other.loss;
+        self.gain += other.gain;
+        if self.n == 0 {
+            self.n = other.n;
+            self.mean = other.mean;
+            self.m2 = other.m2;
+            return;
+        }
+        let total = self.n + other.n;
+        let shift = other.mean - self.mean;
+        self.m2 += other.m2 + shift * shift * (self.n as f64 * other.n as f64 / total as f64);
+        self.mean += shift * (other.n as f64 / total as f64);
+        self.n = total;
+    }
+}
+
+#[inline(always)]
+fn gmsbank_pixel(cells: &mut [GmsBankCell; 5], mr: f64, md: f64) {
+    let diff = mr - md;
+    let numer = diff * diff;
+    let denom_base = mr * mr + md * md;
+    for (cell, c) in cells.iter_mut().zip(GMSBANK_C) {
+        cell.push(numer / (denom_base + c), md < mr);
+    }
+}
+
 /// Per-row-reduced f64 accumulator for the gradient block.
 #[derive(Default, Clone, Copy)]
 struct GradientAccum {
@@ -4740,6 +4828,7 @@ struct GradientAccum {
     /// bit-identical when append2 is off.
     sum_bv_gain: f64,
     sum_bv_loss: f64,
+    bank: [GmsBankCell; 5],
 }
 
 impl GradientAccum {
@@ -4755,6 +4844,20 @@ impl GradientAccum {
         self.sum_grad_dst += other.sum_grad_dst;
         self.sum_bv_gain += other.sum_bv_gain;
         self.sum_bv_loss += other.sum_bv_loss;
+        for (mine, next) in self.bank.iter_mut().zip(&other.bank) {
+            mine.merge(next);
+        }
+    }
+}
+
+fn finish_gmsbank_cell(bank: &[GmsBankCell; 5], n_px: usize, out: &mut [f64]) {
+    debug_assert_eq!(out.len(), GMSBANK_PER_CELL);
+    for (k, cell) in bank.iter().enumerate() {
+        assert_eq!(cell.n as usize, n_px, "C8 gradient sample count");
+        let base = k * 3;
+        out[base] = cell.loss / n_px as f64;
+        out[base + 1] = cell.gain / n_px as f64;
+        out[base + 2] = (cell.m2.max(0.0) / n_px as f64).sqrt();
     }
 }
 
@@ -4798,6 +4901,7 @@ fn gradient_block_kernel_generic<
     T: F32x8Backend + Copy,
     const BANDVIS: bool,
     const BV_DSTACT: bool,
+    const BANK: bool,
 >(
     token: T,
     src_h: &[f32],
@@ -4842,124 +4946,132 @@ fn gradient_block_kernel_generic<
     // contract — every row `y` has valid `row_u`/`row_d` neighbor data
     // in `src_h`/`dst_h` by construction, either real interior-strip
     // rows or a caller-supplied reflected true-edge row).
-    let scalar_pixel =
-        |x: usize, y: usize, acc: &mut GradientAccum, r4: &mut Option<Rev4Grad<'_>>| {
-            let xl = x.saturating_sub(1);
-            let xr = (x + 1).min(width - 1);
-            let row = (y + 1) * width; // +1: src_h/dst_h carry 1 halo row up front
-            let row_u = y * width; // y-1, in halo-relative terms
-            let row_d = (y + 2) * width; // y+1, in halo-relative terms
-            let i = row + x;
-            let s = src_h[i] as f64;
-            let dd = dst_h[i] as f64;
-            let act = activity[y * width + x] as f64;
-            let sxl = src_h[row + xl] as f64;
-            let sxr = src_h[row + xr] as f64;
-            let syu = src_h[row_u + x] as f64;
-            let syd = src_h[row_d + x] as f64;
-            let dxl = dst_h[row + xl] as f64;
-            let dxr = dst_h[row + xr] as f64;
-            let dyu = dst_h[row_u + x] as f64;
-            let dyd = dst_h[row_d + x] as f64;
+    let scalar_pixel = |x: usize,
+                        y: usize,
+                        acc: &mut GradientAccum,
+                        r4: &mut Option<Rev4Grad<'_>>,
+                        bank_row: &mut [GmsBankCell; 5]| {
+        let xl = x.saturating_sub(1);
+        let xr = (x + 1).min(width - 1);
+        let row = (y + 1) * width; // +1: src_h/dst_h carry 1 halo row up front
+        let row_u = y * width; // y-1, in halo-relative terms
+        let row_d = (y + 2) * width; // y+1, in halo-relative terms
+        let i = row + x;
+        let s = src_h[i] as f64;
+        let dd = dst_h[i] as f64;
+        let act = activity[y * width + x] as f64;
+        let sxl = src_h[row + xl] as f64;
+        let sxr = src_h[row + xr] as f64;
+        let syu = src_h[row_u + x] as f64;
+        let syd = src_h[row_d + x] as f64;
+        let dxl = dst_h[row + xl] as f64;
+        let dxr = dst_h[row + xr] as f64;
+        let dyu = dst_h[row_u + x] as f64;
+        let dyd = dst_h[row_d + x] as f64;
 
-            let gx_src = sxr - sxl;
-            let gy_src = syd - syu;
-            let grad_src_mag = (gx_src * gx_src + gy_src * gy_src).sqrt();
-            let gx_dst = dxr - dxl;
-            let gy_dst = dyd - dyu;
-            let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
+        let gx_src = sxr - sxl;
+        let gy_src = syd - syu;
+        let grad_src_mag = (gx_src * gx_src + gy_src * gy_src).sqrt();
+        let gx_dst = dxr - dxl;
+        let gy_dst = dyd - dyu;
+        let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
 
-            acc.sum_grad_src += grad_src_mag;
-            acc.sum_grad_dst += grad_dst_mag;
-            let g = 1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS);
-            acc.sum_gms += g;
-            acc.sum_gms2 += g * g;
+        if BANK {
+            gmsbank_pixel(bank_row, grad_src_mag, grad_dst_mag);
+        }
 
-            let raw_abs_err = (s - dd).abs();
-            let err_b = saturate(raw_abs_err, C_RING_ERR);
-            let act_b = saturate(act, C_ACTIVITY);
-            let edge_r = saturate(grad_src_mag, C_RING_EDGE);
-            let ring_i = err_b * act_b * (1.0 - edge_r);
-            acc.sum_ringing += ring_i;
-            // REV4: C2's ring bins + C4's outside-mask bleed — same values,
-            // scalar per lane like the SIMD arm's `to_array()` tail.
-            if let Some(r4) = r4.as_mut() {
-                rev4_grad_pixel(
-                    r4,
-                    &RINGBASIS_UC,
-                    ring_i,
-                    grad_src_mag,
-                    grad_dst_mag,
-                    y * width + x,
-                );
+        acc.sum_grad_src += grad_src_mag;
+        acc.sum_grad_dst += grad_dst_mag;
+        let g = 1.0 - bounded_sim(grad_src_mag, grad_dst_mag, C_GMS);
+        acc.sum_gms += g;
+        acc.sum_gms2 += g * g;
+
+        let raw_abs_err = (s - dd).abs();
+        let err_b = saturate(raw_abs_err, C_RING_ERR);
+        let act_b = saturate(act, C_ACTIVITY);
+        let edge_r = saturate(grad_src_mag, C_RING_EDGE);
+        let ring_i = err_b * act_b * (1.0 - edge_r);
+        acc.sum_ringing += ring_i;
+        // REV4: C2's ring bins + C4's outside-mask bleed — same values,
+        // scalar per lane like the SIMD arm's `to_array()` tail.
+        if let Some(r4) = r4.as_mut() {
+            rev4_grad_pixel(
+                r4,
+                &RINGBASIS_UC,
+                ring_i,
+                grad_src_mag,
+                grad_dst_mag,
+                y * width + x,
+            );
+        }
+
+        let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
+        let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
+        acc.sum_banding += edge_excess * src_smooth_b;
+
+        if BANDVIS {
+            // Soft CURVATURE band-pass × flatness mask, FR excess pair
+            // (see `idx_append2::BANDVIS_GAIN`). Second differences, not
+            // first: a linear gradient of ANY steepness has |∇²| = 0, so
+            // smooth ramps never enter the band (measured to be the
+            // load-bearing property — a first-difference band could not
+            // separate sub-step smooth gradients from steps; both
+            // polarities mis-fired on ramp fixtures). A plateau step
+            // reports the FULL step in |∇²| at its flanking pixels, so
+            // the one-code-step δ derivation carries verbatim. Scalar
+            // mirrors the SIMD formula exactly.
+            let d2x_src = sxl + sxr - 2.0 * s;
+            let d2y_src = syu + syd - 2.0 * s;
+            let curv_src = (d2x_src * d2x_src + d2y_src * d2y_src).sqrt();
+            let d2x_dst = dxl + dxr - 2.0 * dd;
+            let d2y_dst = dyu + dyd - 2.0 * dd;
+            let curv_dst = (d2x_dst * d2x_dst + d2y_dst * d2y_dst).sqrt();
+            let flat = 1.0 - act_b;
+            let band = |g: f64| -> f64 {
+                saturate(g, bv_delta_lo as f64) * (1.0 - saturate(g, bv_delta_hi as f64))
+            };
+            if BV_DSTACT {
+                // `append2_dst_activity` SHIPPED combine (adjudication:
+                // `benchmarks/bandvis_dst_activity_2026-08-02.md`).
+                // GAIN = arm-2 visibility-weighted POOLING: the FR excess
+                // on the PURE band terms, weighted by the DST's own
+                // flatness OUTSIDE the ratio — the only place a flatness
+                // mask survives `bounded_excess`'s scale-invariance
+                // (arm 1, flat multiplied INSIDE the pair, measured
+                // ratio-cancelled: it suppressed real banding MORE than
+                // dither). Measured: lattice cross-fire 0.33×, deband
+                // margin 2.2× the OFF margin.
+                // LOSS = the OFF math BIT-EXACTLY (identical expressions,
+                // identical order): the arm-2 weight measured
+                // direction-INVERTING on the deband credit (the banded
+                // src's own contours zero the very pixels whose removal
+                // should be credited), and LOSS is the LYB-validated
+                // workhorse — it must not move.
+                let flat_d = 1.0 - saturate(act_dst[y * width + x] as f64, C_ACTIVITY);
+                let b_src = band(curv_src) * flat;
+                let b_dst = band(curv_dst) * flat;
+                let (_, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
+                let (g0, _) = bounded_excess_pair(band(curv_dst), band(curv_src), C_BV);
+                acc.sum_bv_gain += g0 * flat_d;
+                acc.sum_bv_loss += loss;
+            } else {
+                let b_src = band(curv_src) * flat;
+                let b_dst = band(curv_dst) * flat;
+                let (gain, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
+                acc.sum_bv_gain += gain;
+                acc.sum_bv_loss += loss;
             }
-
-            let edge_excess = bounded_excess(grad_dst_mag, grad_src_mag, C_BAND_DST);
-            let src_smooth_b = 1.0 - saturate(grad_src_mag, C_BAND_SRC);
-            acc.sum_banding += edge_excess * src_smooth_b;
-
-            if BANDVIS {
-                // Soft CURVATURE band-pass × flatness mask, FR excess pair
-                // (see `idx_append2::BANDVIS_GAIN`). Second differences, not
-                // first: a linear gradient of ANY steepness has |∇²| = 0, so
-                // smooth ramps never enter the band (measured to be the
-                // load-bearing property — a first-difference band could not
-                // separate sub-step smooth gradients from steps; both
-                // polarities mis-fired on ramp fixtures). A plateau step
-                // reports the FULL step in |∇²| at its flanking pixels, so
-                // the one-code-step δ derivation carries verbatim. Scalar
-                // mirrors the SIMD formula exactly.
-                let d2x_src = sxl + sxr - 2.0 * s;
-                let d2y_src = syu + syd - 2.0 * s;
-                let curv_src = (d2x_src * d2x_src + d2y_src * d2y_src).sqrt();
-                let d2x_dst = dxl + dxr - 2.0 * dd;
-                let d2y_dst = dyu + dyd - 2.0 * dd;
-                let curv_dst = (d2x_dst * d2x_dst + d2y_dst * d2y_dst).sqrt();
-                let flat = 1.0 - act_b;
-                let band = |g: f64| -> f64 {
-                    saturate(g, bv_delta_lo as f64) * (1.0 - saturate(g, bv_delta_hi as f64))
-                };
-                if BV_DSTACT {
-                    // `append2_dst_activity` SHIPPED combine (adjudication:
-                    // `benchmarks/bandvis_dst_activity_2026-08-02.md`).
-                    // GAIN = arm-2 visibility-weighted POOLING: the FR excess
-                    // on the PURE band terms, weighted by the DST's own
-                    // flatness OUTSIDE the ratio — the only place a flatness
-                    // mask survives `bounded_excess`'s scale-invariance
-                    // (arm 1, flat multiplied INSIDE the pair, measured
-                    // ratio-cancelled: it suppressed real banding MORE than
-                    // dither). Measured: lattice cross-fire 0.33×, deband
-                    // margin 2.2× the OFF margin.
-                    // LOSS = the OFF math BIT-EXACTLY (identical expressions,
-                    // identical order): the arm-2 weight measured
-                    // direction-INVERTING on the deband credit (the banded
-                    // src's own contours zero the very pixels whose removal
-                    // should be credited), and LOSS is the LYB-validated
-                    // workhorse — it must not move.
-                    let flat_d = 1.0 - saturate(act_dst[y * width + x] as f64, C_ACTIVITY);
-                    let b_src = band(curv_src) * flat;
-                    let b_dst = band(curv_dst) * flat;
-                    let (_, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
-                    let (g0, _) = bounded_excess_pair(band(curv_dst), band(curv_src), C_BV);
-                    acc.sum_bv_gain += g0 * flat_d;
-                    acc.sum_bv_loss += loss;
-                } else {
-                    let b_src = band(curv_src) * flat;
-                    let b_dst = band(curv_dst) * flat;
-                    let (gain, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
-                    acc.sum_bv_gain += gain;
-                    acc.sum_bv_loss += loss;
-                }
-            }
-        };
+        }
+    };
 
     for y in 0..height {
+        let mut bank_row = [GmsBankCell::default(); 5];
         let row = (y + 1) * width;
         let row_u = y * width;
         let row_d = (y + 2) * width;
         let act_row = y * width;
 
-        scalar_pixel(0, y, &mut acc, &mut r4);
+        scalar_pixel(0, y, &mut acc, &mut r4, &mut bank_row);
         if width > 2 {
             let interior_end = width - 1;
             let interior_w = interior_end - 1; // pixels [1, width-2]
@@ -4994,6 +5106,18 @@ fn gradient_block_kernel_generic<
                 let gx_dst = dxr - dxl;
                 let gy_dst = dyd - dyu;
                 let grad_dst_mag = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
+
+                if BANK {
+                    let src_mag = grad_src_mag.to_array();
+                    let dst_mag = grad_dst_mag.to_array();
+                    for lane in 0..8 {
+                        gmsbank_pixel(
+                            &mut bank_row,
+                            f64::from(src_mag[lane]),
+                            f64::from(dst_mag[lane]),
+                        );
+                    }
+                }
 
                 r_gsrc += grad_src_mag;
                 r_gdst += grad_dst_mag;
@@ -5080,10 +5204,15 @@ fn gradient_block_kernel_generic<
             }
 
             for x in chunk_end..=interior_end - 1 {
-                scalar_pixel(x, y, &mut acc, &mut r4);
+                scalar_pixel(x, y, &mut acc, &mut r4, &mut bank_row);
             }
         }
-        scalar_pixel(width - 1, y, &mut acc, &mut r4);
+        scalar_pixel(width - 1, y, &mut acc, &mut r4, &mut bank_row);
+        if BANK {
+            for (sum, row) in acc.bank.iter_mut().zip(&bank_row) {
+                sum.merge(row);
+            }
+        }
     }
 
     acc
@@ -5099,7 +5228,7 @@ fn gradient_block_kernel_entry(
     height: usize,
     r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
-    gradient_block_kernel_generic::<_, false, false>(
+    gradient_block_kernel_generic::<_, false, false, false>(
         token,
         src,
         dst,
@@ -5125,7 +5254,7 @@ fn gradient_block_kernel_entry_bandvis(
     bv_delta_hi: f32,
     r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
-    gradient_block_kernel_generic::<_, true, false>(
+    gradient_block_kernel_generic::<_, true, false, false>(
         token,
         src,
         dst,
@@ -5152,7 +5281,84 @@ fn gradient_block_kernel_entry_bandvis_dstact(
     bv_delta_hi: f32,
     r4: Option<Rev4Grad<'_>>,
 ) -> GradientAccum {
-    gradient_block_kernel_generic::<_, true, true>(
+    gradient_block_kernel_generic::<_, true, true, false>(
+        token,
+        src,
+        dst,
+        activity,
+        act_dst,
+        width,
+        height,
+        bv_delta_lo,
+        bv_delta_hi,
+        r4,
+    )
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn gradient_block_kernel_entry_gmsbank(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    r4: Option<Rev4Grad<'_>>,
+) -> GradientAccum {
+    gradient_block_kernel_generic::<_, false, false, true>(
+        token,
+        src,
+        dst,
+        activity,
+        &[],
+        width,
+        height,
+        0.0,
+        0.0,
+        r4,
+    )
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn gradient_block_kernel_entry_bandvis_gmsbank(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    bv_delta_lo: f32,
+    bv_delta_hi: f32,
+    r4: Option<Rev4Grad<'_>>,
+) -> GradientAccum {
+    gradient_block_kernel_generic::<_, true, false, true>(
+        token,
+        src,
+        dst,
+        activity,
+        &[],
+        width,
+        height,
+        bv_delta_lo,
+        bv_delta_hi,
+        r4,
+    )
+}
+
+#[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
+fn gradient_block_kernel_entry_bandvis_dstact_gmsbank(
+    token: Token,
+    src: &[f32],
+    dst: &[f32],
+    activity: &[f32],
+    act_dst: &[f32],
+    width: usize,
+    height: usize,
+    bv_delta_lo: f32,
+    bv_delta_hi: f32,
+    r4: Option<Rev4Grad<'_>>,
+) -> GradientAccum {
+    gradient_block_kernel_generic::<_, true, true, true>(
         token,
         src,
         dst,
@@ -5185,18 +5391,35 @@ fn gradient_block_kernel(
     bandvis: Option<(f32, f32)>,
     bv_act_dst: Option<&[f32]>,
     r4: Option<Rev4Grad<'_>>,
+    gmsbank: bool,
 ) -> GradientAccum {
-    match (bandvis, bv_act_dst) {
-        (None, _) => incant!(
+    match (bandvis, bv_act_dst, gmsbank) {
+        (None, _, false) => incant!(
             gradient_block_kernel_entry(src, dst, activity, width, height, r4),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
-        (Some((lo, hi)), None) => incant!(
+        (None, _, true) => incant!(
+            gradient_block_kernel_entry_gmsbank(src, dst, activity, width, height, r4),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        ),
+        (Some((lo, hi)), None, false) => incant!(
             gradient_block_kernel_entry_bandvis(src, dst, activity, width, height, lo, hi, r4),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
-        (Some((lo, hi)), Some(act_dst)) => incant!(
+        (Some((lo, hi)), None, true) => incant!(
+            gradient_block_kernel_entry_bandvis_gmsbank(
+                src, dst, activity, width, height, lo, hi, r4
+            ),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        ),
+        (Some((lo, hi)), Some(act_dst), false) => incant!(
             gradient_block_kernel_entry_bandvis_dstact(
+                src, dst, activity, act_dst, width, height, lo, hi, r4
+            ),
+            [v4x, v4, v3, neon, wasm128, scalar]
+        ),
+        (Some((lo, hi)), Some(act_dst), true) => incant!(
+            gradient_block_kernel_entry_bandvis_dstact_gmsbank(
                 src, dst, activity, act_dst, width, height, lo, hi, r4
             ),
             [v4x, v4, v3, neon, wasm128, scalar]
@@ -7551,7 +7774,8 @@ fn compute_channel_scale_v2(
         );
         dense.accumulate(&strip_dense);
 
-        if toggles.gradient_features {
+        let bank_on = r4a.as_ref().is_some_and(|a| a.gmsbank);
+        if toggles.gradient_features || bank_on {
             // Gradient needs src/dst at [y0-1, y0+strip_h+1) — 1-row
             // halo, comfortably inside the HALO_P(=10)-row buffer we
             // already gathered. Buffer-local offset HALO_P-1.
@@ -7575,6 +7799,7 @@ fn compute_channel_scale_v2(
                 None,
                 None,
                 r4g,
+                bank_on,
             );
             grad.accumulate(&strip_grad);
         }
@@ -7608,6 +7833,11 @@ fn compute_channel_scale_v2(
         0.0
     };
 
+    if let Some(a) = r4a.as_mut()
+        && a.gmsbank
+    {
+        a.cell.bank = grad.bank;
+    }
     finish_channel_scale(&dense, &grad, sum_blockiness, n, out)
 }
 
@@ -7674,7 +7904,9 @@ fn compute_channel_scale_v2_whole(
         let mut dst_g = vec![0.0f32; width * (height + 2)];
         gather_strip_halo(src, width, height, 0, height + 2, 1, &mut src_g);
         gather_strip_halo(dst, width, height, 0, height + 2, 1, &mut dst_g);
-        gradient_block_kernel(&src_g, &dst_g, activity, width, height, None, None, None)
+        gradient_block_kernel(
+            &src_g, &dst_g, activity, width, height, None, None, None, false,
+        )
     } else {
         GradientAccum::default()
     };
@@ -9033,7 +9265,7 @@ fn stream_phase_b(
         // whenever either hook has work, even with `gradient_features`
         // off (the hook's `Option` gates keep the rev4-off call
         // byte-identical to the pre-rev4 signature).
-        if toggles.gradient_features || r4w.ringbasis || r4w.bleed_mask.is_some() {
+        if toggles.gradient_features || r4w.ringbasis || r4w.bleed_mask.is_some() || r4w.gmsbank {
             let g_off = (HALO_P - 1) * width;
             let g_n = width * (strip_h + 2);
             // BANDVIS accumulates only on (Y, append2 on) — the const-split
@@ -9069,6 +9301,7 @@ fn stream_phase_b(
                 bandvis,
                 bv_act_dst,
                 r4g,
+                r4w.gmsbank,
             );
             crate::fold_timing::stop(__t_grad, crate::fold_timing::Phase::GradKernel, scale);
             acc.grad[scale].accumulate(&g);
@@ -10788,6 +11021,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let layout_ringbasis = toggles.rev4_ringbasis;
     let layout_tailhist = toggles.rev4_tailhist;
     let layout_arttype = toggles.rev4_arttype;
+    let layout_gmsbank = toggles.gmsbank;
     // Only read below under `threads` (the `fuse_channels` derivation a few
     // lines down); the `not(threads)` arm hardcodes `fuse_channels = false`
     // without it, so `--no-default-features --features feature-regime-v2`
@@ -10828,6 +11062,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     assert!(
         !layout_dvifm || layout_csfw,
         "dvifm_block requires csfw_block (f956+ sits after the CSFW block)"
+    );
+    assert!(
+        !layout_gmsbank
+            || (layout_gridblk && layout_ringbasis && layout_tailhist && layout_arttype),
+        "gmsbank requires the full f1322 prefix layout"
     );
     // Route-local derived φ: the SAME weighting mechanism on both routes,
     // pre-composed with each route's own encoding (design §6 — runtime
@@ -11471,6 +11710,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     } else {
         0
     };
+    let gmsbank_total = if layout_gmsbank {
+        n_scales * 3 * GMSBANK_PER_CELL
+    } else {
+        0
+    };
     let mut features = vec![
         0.0f64;
         v12_total
@@ -11482,6 +11726,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             + ringbasis_total
             + tailhist_total
             + arttype_total
+            + gmsbank_total
     ];
     let (features_v12, features_tail) = features.split_at_mut(v12_total);
     let (features_app, features_tail2) = features_tail.split_at_mut(append_total);
@@ -11490,7 +11735,8 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let (features_dvifm, features_tail5) = features_tail4.split_at_mut(dvifm_total);
     let (features_gridblk, features_tail6) = features_tail5.split_at_mut(gridblk_total);
     let (features_ring, features_tail7) = features_tail6.split_at_mut(ringbasis_total);
-    let (features_thist, features_art) = features_tail7.split_at_mut(tailhist_total);
+    let (features_thist, features_tail8) = features_tail7.split_at_mut(tailhist_total);
+    let (features_art, features_gmsbank) = features_tail8.split_at_mut(arttype_total);
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
     #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
@@ -11844,6 +12090,23 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     None
                 },
             );
+        }
+    }
+
+    if layout_gmsbank {
+        for scale in 0..n_scales {
+            if !compute.at_scale(scale).gmsbank {
+                continue;
+            }
+            let (width, height) = dims[scale];
+            for (ch, channel) in accums.iter().enumerate() {
+                let base = (scale * 3 + ch) * GMSBANK_PER_CELL;
+                finish_gmsbank_cell(
+                    &channel.grad[scale].bank,
+                    width * height,
+                    &mut features_gmsbank[base..base + GMSBANK_PER_CELL],
+                );
+            }
         }
     }
 
@@ -12355,6 +12618,7 @@ fn attr_pass_a_kernels(
             None,
             None,
             None,
+            false,
         );
         cell.grad.accumulate(&g);
         if want_append && append_active {
@@ -16150,6 +16414,155 @@ pub(crate) mod tests {
         }
     }
 
+    fn gmsbank_extract(
+        src: &[[u8; 3]],
+        dst: &[[u8; 3]],
+        w: usize,
+        h: usize,
+        parallel: bool,
+    ) -> Vec<f64> {
+        let mut scratch = V2Scratch::new();
+        compute_folded720_streaming_impl(
+            &RgbSlice::new(src, w, h),
+            &RgbSlice::new(dst, w, h),
+            None,
+            parallel,
+            V2NewFeatureToggles {
+                gmsbank: true,
+                ..rev4_all_toggles()
+            },
+            &mut scratch,
+            None,
+        )
+        .expect("C8 extraction")
+        .into_features()
+    }
+
+    #[test]
+    fn gmsbank_identity_and_constant_monotonicity() {
+        assert_eq!(
+            crate::feature_defs::block_base(
+                crate::feature_set_id::ComputeToken::Gmsbank,
+                crate::NUM_SCALES
+            )
+            .unwrap()
+            .0,
+            GMSBANK_BASE,
+        );
+        let (w, h) = (97usize, 161usize);
+        let src: Vec<[u8; 3]> = (0..w * h)
+            .map(|i| {
+                let x = i % w;
+                let y = i / w;
+                let a = ((x * 7 + y * 13 + (x * y) % 31) % 256) as u8;
+                [a, a.wrapping_add(37), a.wrapping_sub(41)]
+            })
+            .collect();
+        let identity = gmsbank_extract(&src, &src, w, h, false);
+        assert_eq!(identity.len(), 1502);
+        assert!(identity[GMSBANK_BASE..].iter().all(|v| v.to_bits() == 0));
+        let dst: Vec<[u8; 3]> = src
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let offset = if (i / w + i % w) % 2 == 0 { 9 } else { -9 };
+                p.map(|c| (i32::from(c) + offset).clamp(0, 255) as u8)
+            })
+            .collect();
+        let serial = gmsbank_extract(&src, &dst, w, h, false);
+        let parallel = gmsbank_extract(&src, &dst, w, h, true);
+        assert_eq!(serial, parallel, "C8 row order must survive MT extraction");
+        for cell in serial[GMSBANK_BASE..].chunks_exact(GMSBANK_PER_CELL) {
+            for k in 0..4 {
+                let now = cell[k * 3] + cell[k * 3 + 1];
+                let next = cell[(k + 1) * 3] + cell[(k + 1) * 3 + 1];
+                assert!(now + 1e-14 >= next, "loss+gain must fall as c grows");
+            }
+        }
+    }
+
+    #[test]
+    fn gmsbank_materialized_matches_streaming() {
+        for (w, h) in [(97usize, 161usize), (151, 83)] {
+            let src = textured_image(w, h, 0xC8B4);
+            let dst = quantize_distort(&src, w, h);
+            let source = RgbSlice::new(&src, w, h);
+            let distorted = RgbSlice::new(&dst, w, h);
+            let toggles = V2NewFeatureToggles {
+                gmsbank: true,
+                ..rev4_all_toggles()
+            };
+            let streamed = gmsbank_extract(&src, &dst, w, h, false);
+            let prep = prepare_v2_reference_impl(&source, None, false, false).unwrap();
+            let ns = prep.scales.len();
+            let mut cells: Vec<Rev4CellAccum> =
+                (0..ns * 3).map(|_| Rev4CellAccum::default()).collect();
+            let mut scratch = V2Scratch::new();
+            compute_v2_features_with_ref_impl_inner(
+                &prep,
+                &distorted,
+                None,
+                false,
+                toggles,
+                &mut scratch,
+                Some(&mut cells[..]),
+            )
+            .unwrap();
+            for scale in 0..ns {
+                let n = prep.scales[scale].1 * prep.scales[scale].2;
+                for ch in 0..3 {
+                    let cell = &cells[scale * 3 + ch];
+                    let mut out = [0.0; GMSBANK_PER_CELL];
+                    finish_gmsbank_cell(&cell.bank, n, &mut out);
+                    let base = GMSBANK_BASE + (scale * 3 + ch) * GMSBANK_PER_CELL;
+                    assert_eq!(
+                        out,
+                        streamed[base..base + GMSBANK_PER_CELL],
+                        "C8 materialized vs streamed {w}x{h} scale={scale} ch={ch}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gmsbank_stride_matches_tight() {
+        let (w, h) = (97usize, 161usize);
+        let src = textured_image(w, h, 0xC8C8);
+        let dst = quantize_distort(&src, w, h);
+        let stride = w * 3 + 13;
+        let mut padded_src = vec![0u8; stride * h];
+        let mut padded_dst = vec![0u8; stride * h];
+        for y in 0..h {
+            for x in 0..w {
+                let at = y * stride + x * 3;
+                padded_src[at..at + 3].copy_from_slice(&src[y * w + x]);
+                padded_dst[at..at + 3].copy_from_slice(&dst[y * w + x]);
+            }
+        }
+        let source = StridedBytes::try_new(&padded_src, w, h, stride, PixelFormat::Srgb8Rgb)
+            .expect("strided source");
+        let distorted = StridedBytes::try_new(&padded_dst, w, h, stride, PixelFormat::Srgb8Rgb)
+            .expect("strided distortion");
+        let mut scratch = V2Scratch::new();
+        let strided = compute_folded720_streaming_impl(
+            &source,
+            &distorted,
+            None,
+            false,
+            V2NewFeatureToggles {
+                gmsbank: true,
+                ..rev4_all_toggles()
+            },
+            &mut scratch,
+            None,
+        )
+        .unwrap()
+        .into_features();
+        let tight = gmsbank_extract(&src, &dst, w, h, false);
+        assert_eq!(tight[GMSBANK_BASE..], strided[GMSBANK_BASE..]);
+    }
+
     /// Extract the full 1322-slot vector for a pair through the streaming
     /// walk (the served engine).
     fn rev4_extract(src: &[[u8; 3]], dst: &[[u8; 3]], w: usize, h: usize) -> Vec<f64> {
@@ -17284,6 +17697,7 @@ pub(crate) mod tests {
                     rev4_ringbasis: false,
                     rev4_tailhist: false,
                     rev4_arttype: false,
+                    gmsbank: false,
                 };
                 let cs = ComputeSet::from_toggles(t);
                 // --- the legacy derivation, verbatim ---

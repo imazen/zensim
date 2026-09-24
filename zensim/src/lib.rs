@@ -327,6 +327,9 @@ pub mod feature_set_id;
 #[allow(dead_code)]
 pub(crate) mod feature_defs;
 
+#[cfg(feature = "feature-regime-v2")]
+mod gmsbank_constants;
+
 // V2 "bounded" feature extraction — opt-in, strictly additive. See
 // feature_v2.rs's module doc and docs/FEATURE_V2_SPEC_2026-07-18.md.
 #[cfg(feature = "feature-regime-v2")]

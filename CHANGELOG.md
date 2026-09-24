@@ -4,6 +4,12 @@
 
 ### Added
 
+- Experimental C8 GMSBANK adds 180 gradient-similarity slots at f1322–f1501.
+  The exact new public Rust items are `ComputeToken::Gmsbank`, an additive arm
+  of the existing `#[non_exhaustive]` enum, and
+  `V2NewFeatureToggles::gmsbank`, an opt-in field defaulting to false. No other
+  public Rust item is added.
+
 - The Rev4 research feature bank appends f986–f1321 (C1 `gridblk`, C2
   `ringbasis`, C3 `tailhist`, C4 `arttype`; width 1322). Its exact new
   supported public API items are the additive, `#[non_exhaustive]` enum

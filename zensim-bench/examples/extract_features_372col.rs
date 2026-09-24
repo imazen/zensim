@@ -103,6 +103,7 @@ fn main() {
     let mut full_944 = false;
     let mut full_986 = false;
     let mut full_rev4 = false;
+    let mut full_gmsbank = false;
     let mut dvifm_spec = None;
     let mut dvifm_blocks = None;
     let mut dvifm_cap = 0usize;
@@ -116,13 +117,12 @@ fn main() {
             "--full-944" => full_944 = true,
             "--full-986" => full_986 = true,
             "--full-rev4" => full_rev4 = true,
+            "--full-gmsbank" => full_gmsbank = true,
             "--dvifm-spec" => dvifm_spec = Some(args.next().expect("--dvifm-spec value")),
             "--dvifm-block-stats" => {
                 dvifm_blocks = Some(args.next().expect("--dvifm-block-stats value"))
             }
-            "--dvifm-cap" => {
-                dvifm_cap = args.next().expect("--dvifm-cap value").parse().unwrap()
-            }
+            "--dvifm-cap" => dvifm_cap = args.next().expect("--dvifm-cap value").parse().unwrap(),
             "--dvifm-quant" => {
                 dvifm_quant_f16 = match args.next().expect("--dvifm-quant value").as_str() {
                     "f16" => true,
@@ -130,9 +130,7 @@ fn main() {
                     other => panic!("--dvifm-quant must be f16|f32, got {other}"),
                 }
             }
-            "--dvifm-hist" => {
-                dvifm_hist = Some(args.next().expect("--dvifm-hist value"))
-            }
+            "--dvifm-hist" => dvifm_hist = Some(args.next().expect("--dvifm-hist value")),
             "--force-tier" => force_tier = Some(args.next().unwrap()),
             "--corpus" => corpus = Some(args.next().unwrap()),
             "--path" => path = Some(args.next().unwrap().into()),
@@ -176,14 +174,19 @@ fn main() {
         Some(other) => panic!("unknown --force-tier {other:?} (native|v3|scalar)"),
     }
     assert!(
-        [full_944, full_986, full_rev4].iter().filter(|b| **b).count() <= 1,
-        "--full-944/--full-986/--full-rev4 are mutually exclusive"
+        [full_944, full_986, full_rev4, full_gmsbank]
+            .iter()
+            .filter(|b| **b)
+            .count()
+            <= 1,
+        "--full-944/--full-986/--full-rev4/--full-gmsbank are mutually exclusive"
     );
     assert!(
         (dvifm_spec.is_none() && dvifm_blocks.is_none() && dvifm_hist.is_none())
             || full_986
-            || full_rev4,
-        "--dvifm-spec/--dvifm-block-stats/--dvifm-hist require the research path (--full-986/--full-rev4)"
+            || full_rev4
+            || full_gmsbank,
+        "--dvifm-spec/--dvifm-block-stats/--dvifm-hist require the research path (--full-986/--full-rev4/--full-gmsbank)"
     );
     assert!(
         dvifm_hist.is_none() || dvifm_spec.is_some(),
@@ -194,8 +197,8 @@ fn main() {
         "--dvifm-hist accompanies --dvifm-block-stats"
     );
     assert!(
-        !(full_986 || full_rev4) || sampling.is_none(),
-        "the research path (--full-986/--full-rev4) does not take a sampling contract"
+        !(full_986 || full_rev4 || full_gmsbank) || sampling.is_none(),
+        "the research path (--full-986/--full-rev4/--full-gmsbank) does not take a sampling contract"
     );
     assert!(
         !full_944 || sampling.as_deref().is_none_or(|s| s.starts_with("v2:")),
@@ -231,8 +234,14 @@ fn main() {
     // plan-driven owner) — `--dvifm-spec`/`--dvifm-block-stats` exist only
     // there. The request is built once and shared by every pair.
     // `--full-rev4` is the same request at the rev4 bank's full width.
-    let research_req = (full_986 || full_rev4).then(|| {
-        let w = if full_rev4 { 1322 } else { 986 };
+    let research_req = (full_986 || full_rev4 || full_gmsbank).then(|| {
+        let w = if full_gmsbank {
+            1502
+        } else if full_rev4 {
+            1322
+        } else {
+            986
+        };
         let spec = dvifm_spec.as_deref().map(|p| dvifm_spec_load(Path::new(p)));
         let spec_sha = dvifm_spec.as_deref().map(|p| sha256_hex_of(Path::new(p)));
         let mut req = zensim::research::Request::for_slots(
@@ -247,7 +256,7 @@ fn main() {
         }
         (req, spec_sha)
     });
-    let producer = if full_986 || full_rev4 {
+    let producer = if full_986 || full_rev4 || full_gmsbank {
         None
     } else if full_944 {
         Some(diagnostic_producer(
@@ -330,7 +339,9 @@ fn main() {
 
     if let Some(audit) = &audit {
         audit
-            .validate_feature_width(if full_rev4 {
+            .validate_feature_width(if full_gmsbank {
+                1502
+            } else if full_rev4 {
                 1322
             } else if full_944 {
                 944
@@ -465,7 +476,9 @@ fn main() {
     }
 
     let n_feat = rows.first().map(|r| r.3.len()).unwrap_or(0);
-    let expected_width = if full_rev4 {
+    let expected_width = if full_gmsbank {
+        1502
+    } else if full_rev4 {
         1322
     } else if full_944 {
         944
@@ -544,14 +557,11 @@ fn main() {
                 writeln!(iw, "{}", serde_json::to_string(e).unwrap()).unwrap();
             }
             std::io::Write::flush(&mut iw).unwrap();
-            if let (Some(hist), Some(hp)) =
-                (&sink.hist, dvifm_hist.as_ref())
-            {
+            if let (Some(hist), Some(hp)) = (&sink.hist, dvifm_hist.as_ref()) {
                 let h = hist.lock().unwrap();
                 // Layout: one JSON header line, then 5×256×256 u32 LE counts.
-                let mut hw = std::io::BufWriter::new(
-                    std::fs::File::create(hp).expect("create dvifm hist"),
-                );
+                let mut hw =
+                    std::io::BufWriter::new(std::fs::File::create(hp).expect("create dvifm hist"));
                 let header = serde_json::json!({
                     "schema": "dvifm-hist-v1",
                     "input_plane": sink.input_plane,
@@ -569,8 +579,7 @@ fn main() {
                     "quant": if sink.quant_f16 { "f16" } else { "f32" },
                 });
                 use std::io::Write as _;
-                writeln!(hw, "{}", serde_json::to_string(&header).unwrap())
-                    .unwrap();
+                writeln!(hw, "{}", serde_json::to_string(&header).unwrap()).unwrap();
                 for l in &h.levels {
                     for &c in &l.counts {
                         hw.write_all(&c.to_le_bytes()).unwrap();
@@ -849,7 +858,11 @@ impl DvifmSink {
         // `nby*nbx*REC_W` f32 (v2 = 20 with Weber means; v1 = 18).
         let recw = |l: usize| {
             let nb = (stats.grid[l].0 * stats.grid[l].1) as usize;
-            if nb == 0 { 20 } else { stats.records[l].len() / nb }
+            if nb == 0 {
+                20
+            } else {
+                stats.records[l].len() / nb
+            }
         };
         // Histogram pass over the FULL record set (before any cap) — the
         // pooled (C̃, m) census is the exact statistic the C₀×β grid reads.

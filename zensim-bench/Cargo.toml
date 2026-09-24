@@ -80,6 +80,7 @@ verify-all = ["verify-avif", "verify-jxl", "verify-webp"]
 # for `verify-all` rather than a parallel dep list, so the extractor and
 # `verify_bitstream_decode` are guaranteed to build the SAME decoders.
 zen-decode = ["verify-all", "dep:serde_json", "dep:sha2", "zenpixels-convert/cms-moxcms"]
+gmsbank-peer = ["zen-decode", "dep:gmsd"]
 
 # Test-only: the fixture ENCODERS for `tests/zen_decode_formats.rs`. The gates
 # synthesise their own AVIF / JXL / XYB-JPEG / WebP / PNG fixtures rather than
@@ -110,6 +111,7 @@ sdr944-extract = ["dep:png", "zensim/feature-regime-v2"]
 cc = "1"
 
 [dependencies]
+gmsd = { path = "../../zenmetrics/crates/gmsd", default-features = false, optional = true }
 corruption-corpus = { git = "https://github.com/imazen/codec-corpus", rev = "8e10d4d765667c1c49d74413878fc4bfb46dcf8d", optional = true, default-features = false }
 serde_json = { version = "1", optional = true }
 sha2 = { version = "0.11", optional = true }
@@ -309,6 +311,18 @@ required-features = ["extract-omni"]
 [[example]]
 name = "peer_metric_pairs"
 required-features = ["zen-decode"]
+
+[[example]]
+name = "gmsbank_decode_dump"
+required-features = ["zen-decode"]
+
+[[example]]
+name = "gmsbank_peer_gmsd"
+required-features = ["gmsbank-peer"]
+
+[[example]]
+name = "gmsbank_corpus_fixtures"
+required-features = ["zen-decode", "m3-fixtures"]
 
 # `dvifm_steer_study` uses the training-gated research API (DvifmFieldMap) and
 # decodes corpus pairs through the zen-decode owner; same gate as the extractor.

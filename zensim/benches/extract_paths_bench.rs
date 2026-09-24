@@ -289,6 +289,13 @@ fn toggles_rev4_all() -> zensim::feature_v2::V2NewFeatureToggles {
     }
 }
 
+fn toggles_gmsbank() -> zensim::feature_v2::V2NewFeatureToggles {
+    zensim::feature_v2::V2NewFeatureToggles {
+        gmsbank: true,
+        ..toggles_rev4_all()
+    }
+}
+
 /// One rev4 family over the f986 DVIFM layout — the per-family cost arms.
 fn toggles_rev4_family(family: &str) -> zensim::feature_v2::V2NewFeatureToggles {
     let mut t = toggles_dvifm();
@@ -496,8 +503,10 @@ fn rss_mode(arm: &str) {
                 sink += v2.features()[v2.features().len() - 1] as f64;
             }
             "fold986_gridblk" | "fold986_ringbasis" | "fold986_tailhist" | "fold986_arttype"
-            | "fold1322_rev4" => {
-                let t = if arm == "fold1322_rev4" {
+            | "fold1322_rev4" | "fold1502_gmsbank" => {
+                let t = if arm == "fold1502_gmsbank" {
+                    toggles_gmsbank()
+                } else if arm == "fold1322_rev4" {
                     toggles_rev4_all()
                 } else {
                     toggles_rev4_family(arm.strip_prefix("fold986_").unwrap())
@@ -1160,6 +1169,7 @@ fn main() {
                     ("fold986_tailhist", toggles_rev4_family("tailhist")),
                     ("fold986_arttype", toggles_rev4_family("arttype")),
                     ("fold1322_rev4", toggles_rev4_all()),
+                    ("fold1502_gmsbank", toggles_gmsbank()),
                 ] {
                     group.bench(name, move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();
