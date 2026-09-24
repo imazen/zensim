@@ -10,7 +10,7 @@
 # Heavy steps are run by the caller under ~/tmp/devin/heavy (the lock).
 set -euo pipefail
 
-LANE=/home/lilith/work/zen/zensim--e5a-render
+LANE=${LANE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 TARGET=${CARGO_TARGET_DIR:-/var/tmp/e5a-render/target}
 WORK=/var/tmp/e5a-render
 SRC=/mnt/v/output/imazen-26-variants/cleanpicker-ladder11@2026-08-23

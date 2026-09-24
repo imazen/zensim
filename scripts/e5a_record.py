@@ -20,7 +20,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--lane", default="/home/lilith/work/zen/zensim--e5a-render")
+    ap.add_argument("--lane", default=str(Path(__file__).resolve().parent.parent))
     args = ap.parse_args()
     lane = Path(args.lane)
     results = json.loads(Path(args.results).read_text())
