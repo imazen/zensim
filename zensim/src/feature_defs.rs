@@ -603,7 +603,7 @@ const REV4BANK: &[Revision] = &[Revision {
 
 /// Pinned to the byte-changing implementation commit in the qualification
 /// follow-up after the local quarantine commit has a stable hash.
-const GMSBANK_COMMIT: &str = "c1a61c4c8e324cb8764ebb8b188728c29817049b";
+const GMSBANK_COMMIT: &str = "5cdcf70a";
 const GMSBANK: &[Revision] = &[
     Revision {
         era: "gmsbank",
@@ -615,7 +615,7 @@ const GMSBANK: &[Revision] = &[
     },
     Revision {
         era: "gmsbank-chroma-2026-09-24",
-        commit: "f38befaefc524d5aeb3585cef81d81902a47bfb9",
+        commit: "7b8e8a4f",
         status: RevisionStatus::Landed,
         note: "Quarantined implementation revision: native Y gradients, coarse X/Y/B \
            gradients with per-channel TRAIN stabilisers, and coarse joint X/B \
