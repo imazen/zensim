@@ -632,8 +632,9 @@ pub(crate) const REV4_HATS: usize = 6;
 /// Largest lattice period any rev4 cell can take (chroma at scale 0).
 pub(crate) const GRIDBLK_MAX_PERIOD: usize = 16;
 /// C1 magnitude-hat centres, as the `u()` bit-domain coordinates of
-/// `[1e-3, 1e-2, 1e-1, 1, 10, 100]` (design note §C1).
-const GRIDBLK_LEVELS: [f64; REV4_HATS] = [1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0];
+/// TRAIN on-grid |ẽ| quantiles near 5/20/40/60/80/95% (2026-09-23
+/// registry revision; design note §C1).
+const GRIDBLK_LEVELS: [f64; REV4_HATS] = [1e-3, 4e-2, 1e-1, 2e-1, 5e-1, 1.0];
 /// C2 magnitude-hat centres, as the `u()` coordinates of
 /// `[1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]` (design note §C2).
 const RINGBASIS_LEVELS: [f64; REV4_HATS] = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0];
@@ -681,21 +682,42 @@ fn rev4_hats(c: &[f64; REV4_HATS], u: f64) -> [f64; REV4_HATS] {
 }
 
 /// Pinned IEEE-754 bit patterns for C3's 31 true-log interior edges
-/// `10^(-6 + k*6/32)` (k = 1..31). The bits were generated once from
-/// the registered formula; runtime binning and quantile emission use only
-/// this table, so they cannot vary with a platform's `powf`.
+/// `10^(-6 + k*log10(2e6)/32)` (k = 1..31). The 2026-09-23 TRAIN-only
+/// registry revision extended the top endpoint from 1 to 2; the final
+/// interior edge is 1.2709334445868168. Runtime binning and quantile
+/// emission use only this table, independent of platform `powf`.
 const TAIL_EDGE_BITS: [u64; 31] = [
-    0x3eb9d5ef1f0f0812, 0x3ec3e47c7b496466, 0x3ecea20dfed26b2d,
-    0x3ed7961810874a9f, 0x3ee2291c4db002bc, 0x3eebf749e693a057,
-    0x3ef58863a71f7be2, 0x3f009456549be1bd, 0x3f0987f7ad03ecfa,
-    0x3f13a874711aec6c, 0x3f1e459c57e28a47, 0x3f274eea61c12623,
-    0x3f31f24e46f5db3e, 0x3f3ba2e4b0e98677, 0x3f4547686f641ef6,
-    0x3f50624dd2f1a9fc, 0x3f593aeb8454ade2, 0x3f636d219065ac0c,
-    0x3f6dea41aad97caa, 0x3f77089380241edf, 0x3f81bc25a3dde2ac,
-    0x3f8b4f7e2b2c2a95, 0x3f9507315134befa, 0x3fa030dc4ea03a72,
-    0x3fa8eec7def5d56c, 0x3fb33281b6744ae1, 0x3fbd8ffaadd33b09,
-    0x3fc6c310e3769f3f, 0x3fd186a0714c181b, 0x3fdafd1354c40d50,
-    0x3fe4c7bbfcc7c63c,
+    0x3eba66c2a74a2306,
+    0x3ec4c5f32ba53f33,
+    0x3ed0584963ee7360,
+    0x3ed9b8969445d847,
+    0x3ee43ce83c83f32c,
+    0x3eefd8eaa4b1df44,
+    0x3ef90ee7884af44e,
+    0x3f03b76562438fa3,
+    0x3f0f06d135f4b230,
+    0x3f186997e71fea72,
+    0x3f2335535097fe64,
+    0x3f2e3a21d1f34d40,
+    0x3f37c88ad7e2850b,
+    0x3f42b69b54e81970,
+    0x3f4d72b8c0d9ca6c,
+    0x3f572ba43fff3718,
+    0x3f623b275257b423,
+    0x3f6cb0733676d0d9,
+    0x3f7692c8be49a365,
+    0x3f81c2e1bdebc593,
+    0x3f8bf32f4c29143a,
+    0x3f95fddda6357e33,
+    0x3fa14db59ac807b4,
+    0x3fab3acbfaf4e35d,
+    0x3fb56cc8fb2ef3d0,
+    0x3fc0db8e76856372,
+    0x3fca872915c0bda2,
+    0x3fd4df716c11c450,
+    0x3fe06c5865a085fb,
+    0x3fe9d82743b7eddb,
+    0x3ff455be4ebe49c1,
 ];
 
 /// Binade LUT for the pinned C3 edges, used to bin in ~5 ops.
@@ -732,7 +754,8 @@ impl TailEdges {
 
     /// Bin index `#{edges strictly below v}` — the C3 cell convention
     /// (an exact edge hit lands in the cell below it).
-    /// `v >= 0` by construction; `v >= 2` clamps to the top cell.
+    /// `v >= 0` by construction; values above the last edge enter the
+    /// top cell.
     #[inline(always)]
     fn bin(&self, v: f64) -> usize {
         let ub = v.to_bits();
@@ -777,19 +800,23 @@ fn rev4_diag_enabled() -> bool {
 /// [1e-4, 1]. `v <= 0` folds into bin 0, `v >= 1` into the last bin.
 /// Diagnostic-only — a `log10` per pixel is fine on the gated path.
 fn diag_bin01(v: f64) -> usize {
-    if !(v > 0.0) {
+    if v <= 0.0 || v.is_nan() {
         return 0;
     }
-    ((v.log10() + 4.0) * 16.0).floor().clamp(0.0, (DIAG_BINS - 1) as f64) as usize
+    ((v.log10() + 4.0) * 16.0)
+        .floor()
+        .clamp(0.0, (DIAG_BINS - 1) as f64) as usize
 }
 
 /// Diag bin for C1 `|ẽ|` (unbounded, observed ≪ 100): 8 log bins per
 /// decade over [1e-5, 1e3]. `v <= 0` folds into bin 0.
 fn diag_bin_abs(v: f64) -> usize {
-    if !(v > 0.0) {
+    if v <= 0.0 || v.is_nan() {
         return 0;
     }
-    ((v.log10() + 5.0) * 8.0).floor().clamp(0.0, (DIAG_BINS - 1) as f64) as usize
+    ((v.log10() + 5.0) * 8.0)
+        .floor()
+        .clamp(0.0, (DIAG_BINS - 1) as f64) as usize
 }
 
 // ---------------------------------------------------------------------------
@@ -1326,10 +1353,7 @@ fn finish_rev4_scale(
                 if let Some(d) = diag {
                     eprintln!(
                         "REV4DIAGABS s{scale} c{ch} {}",
-                        d.iter()
-                            .map(u32::to_string)
-                            .collect::<Vec<_>>()
-                            .join(",")
+                        d.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
                     );
                 }
             }
@@ -1364,10 +1388,7 @@ fn finish_rev4_scale(
                     for (m, h) in d.iter().enumerate() {
                         eprintln!(
                             "REV4DIAGTAIL s{scale} c{ch} m{m} {}",
-                            h.iter()
-                                .map(u32::to_string)
-                                .collect::<Vec<_>>()
-                                .join(",")
+                            h.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
                         );
                     }
                 }

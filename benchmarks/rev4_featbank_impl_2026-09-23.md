@@ -61,8 +61,12 @@ warp relative to true `log2`, far inside a bin width). It is:
 
 For C3 the histogram edges are stated in the same domain as the emitted
 values: the 32 bins are the `partition_point` cells of 31 true-log interior
-edges `e_k = 10^(-6 + k*6/32)` (k = 1..31) — comparisons only, no `ln` per
-pixel. For C1/C2 the triangular hats are over `u`-domain centres
+edges `e_k = 10^(-6 + k*log10(2e6)/32)` (k = 1..31) after the
+2026-09-23 registry revision; the top endpoint is 2 and the last
+interior edge is 1.2709334445868168. All 31 edges are literal
+IEEE-754 bit patterns in the implementation; no `powf` or `ln` runs
+while constructing or using the histogram. For C1/C2 the triangular
+hats are over `u`-domain centres
 `u(level)` for the level sets below; "triangular, as in DVIFM's 5 bins"
 holds exactly in the declared axis.
 
@@ -98,7 +102,7 @@ Per plane (scale `s`, channel `c`): lattice period `P = 8 >> s` on Y,
   all `2n` boundaries.
 - **Emission (V+H pooled per cell):**
   - `mag_bin_k` = `Σ_on ẽ·m_k(u(|ẽ|)) / n_on` over the 6 triangular hats
-    centred on `u([1e-3, 1e-2, 1e-1, 1, 10, 100])`, ends clamped (DVIFM
+    centred on `u([0.001, 0.04, 0.1, 0.2, 0.5, 1.0])`, ends clamped (DVIFM
     `hat_memberships` shape). Signed: the bins carry the signed excess, so
     a suppression (blur) reads negative in the same bin a block reads
     positive.
@@ -160,6 +164,46 @@ values taken as each era computes them):
   `Σ_out g_dst == Σ_out g_src` → 0.
 
 ## Wiring
+
+### Dated registry revision — 2026-09-23 UTC (TRAIN pixels, no labels)
+
+Before the C1/C3 slots were landed or used for downstream training,
+the reviewer found the C1 sixth hat dead and the old C3 p99 clipped
+at its last edge.
+The selection rule was frozen in
+`rev4_featbank_impl_fix_prereg_2026-09-23.md`. The source feature CSVs are
+the native serial old-definition gate on 64 SafeSyn, 64 CID22 TRAIN and
+16 KADID TRAIN pairs; `rev4_featbank_registry_calibrate.py` reads only
+f986–f1297. No human labels or held-out pixels were used for the revision.
+
+- **C3:** old top interior edge 0.6493816315762113, with p99 saturation
+  counts by map `{d,art,det,mse}` of `{8,78,234,14}/768` SafeSyn and
+  `{0,20,94,0}/768` CID22. The smallest registered candidate endpoint
+  meeting the ≤1% rule is 2. Its last interior edge is
+  1.2709334445868168; the per-cell `max` values prove an upper bound
+  of `{2,0,0,0}/768` SafeSyn and `{0,0,0,0}/768` CID22 on p99 top-bin
+  saturation. All 31 new edges are pinned as bit-pattern literals.
+- **C1:** old emitted nonzero-cell counts for hats 1–6 were
+  `{1562,1562,1562,1552,1274,0}` of 1728 cells. The env-gated native
+  serial diagnostic collected 62,577,517 positive on-grid `|ẽ|`
+  samples across 1,562 nonzero channel-scale cells. Its log-bin quantile
+  intervals at 5/20/40/60/80/95% were respectively
+  `[0.001,0.00133352)`, `[0.0316228,0.0421697)`, `[0.1,0.133352)`,
+  `[0.177828,0.237137)`, `[0.421697,0.562341)`, `[1,1.33352)`.
+  The six simple centres selected from those intervals are
+  `[0.001,0.04,0.1,0.2,0.5,1.0]`; values outside the ends clamp to
+  the corresponding end hat. The revised native-serial extractor emits
+  nonzero values in `{1562,1562,1560,1552,1535,1470}` of 1728 cells
+  across all 144 TRAIN pairs, so all six hats are live. The sixth hat
+  is nonzero in 692/768 CID22, 649/768 SafeSyn and 129/192 KADID cells.
+  On the revised SafeSyn and CID22 CSVs, all four C3 p99 maps have
+  **0/768 top-bin saturations in each corpus** (the preregistered
+  limit was at most 1%). These counts come from
+  `/var/tmp/featbank-impl/post_census.txt` (sha256 `d7e279db8645...`).
+
+The feature IDs, cell layout and 1322 width stay fixed. This revises the
+first unconsumed registry definitions; `REV4BANK_COMMIT` remains the
+coordinator's landing placeholder.
 
 - `V2NewFeatureToggles`: `rev4_gridblk`, `rev4_ringbasis`, `rev4_tailhist`,
   `rev4_arttype` — `#[doc(hidden)]`, default OFF, independent (not the
@@ -269,7 +313,19 @@ its no-lattice fixtures.
 
 ### f0–f985 bit-identity matrix (2026-09-23, this workspace)
 
-Two independent measurements, both zero-diff:
+The synthetic tier test, corpus extractor matrix and canonical-parquet
+check below all reported zero differences:
+
+The **2026-09-24 post-definition-revision rerun** of the production
+extractor matrix used the rebuilt binary (sha256 `18743b0391c0...`)
+on the same 144 TRAIN path pairs. Its 18 comparisons (three corpora ×
+two thread counts × three tiers) checked 851,904 old-slot cells and
+found **0 bit differences**. The complete command ledger, per-run
+timestamps, binary/tier/thread manifests, CSV hashes and summary are
+under `/var/tmp/featbank-impl/identity_revision/`; the summary sha256
+is `eec8f2c18fd8...` and the wrapper log sha256 is
+`b76649592594...`. The earlier gate below was run against the initial
+definitions and remains historical evidence.
 
 1. **In-process toggle matrix** (`rev4_featbank_parity.rs`, synthetic
    geometry): `rev4_identity_and_segments_across_all_tiers` — 8

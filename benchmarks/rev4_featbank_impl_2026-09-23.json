@@ -324,5 +324,26 @@
    }
   },
   "note": "marginal beta drops ~2.6x ST->MT8 (119.3 -> 46.8 ns/px all-four) but fold944_full speeds up too; all budget verdicts remain MISS"
+ },
+ "registry_revision": {
+  "date_utc": "2026-09-23",
+  "selection_data": "SafeSyn and CID22 TRAIN pixels for C3; SafeSyn, CID22 TRAIN and KADID TRAIN pixels for C1; no labels",
+  "c1_hat_centres": [0.001, 0.04, 0.1, 0.2, 0.5, 1.0],
+  "c1_emitted_nonzero_cells_old": [1562, 1562, 1562, 1552, 1274, 0],
+  "c1_emitted_nonzero_cells_revised": [1562, 1562, 1560, 1552, 1535, 1470],
+  "c1_cells": 1728,
+  "c3_endpoint_revised": 2.0,
+  "c3_last_interior_edge_revised": 1.2709334445868168,
+  "c3_p99_top_bin_revised": {
+   "cid22": [0, 0, 0, 0],
+   "safesyn": [0, 0, 0, 0]
+  },
+  "c3_cells_per_corpus": 768,
+  "post_revision_gate": {
+   "comparisons": 18,
+   "old_slot_cells": 851904,
+   "bit_differences": 0,
+   "summary_sha256": "eec8f2c18fd818d140b82acb7f6c139eae2d5ef66797cd9abf2612ee13644099"
+  }
  }
 }
