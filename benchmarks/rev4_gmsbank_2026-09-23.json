@@ -1,0 +1,53 @@
+{
+  "schema": "rev4-gmsbank-qualification-v1",
+  "record_date_utc": "2026-09-24",
+  "base_commit": "87db7d773198",
+  "implementation_commit": "c1a61c4c8e324cb8764ebb8b188728c29817049b",
+  "label_reads": 0,
+  "model_fits": 0,
+  "calibration": {
+    "eligible_sites": 175324296,
+    "pairs": 652,
+    "pooled_ratio_median": 1.104453582332472,
+    "c_mid": 0.002131466010785597,
+    "report": "/var/tmp/gmsbank/calibration/report.json",
+    "report_sha256": "a0f0d183ce47f0f9cb46c15d3ee792b15cce029a9b6f8c11269ddae1dad2c5fb"
+  },
+  "prefix_identity": {
+    "train_pairs": 144,
+    "modes": 18,
+    "pairwise_comparisons": 54,
+    "cells": 3426624,
+    "differing": 0,
+    "report": "/var/tmp/gmsbank/identity/report.json",
+    "report_sha256": "3be23dd196762bf4b7be0303eb76eb3b96cb321bd4a014cadabdd7fe2e4ddeea",
+    "candidate_binary_sha256": "ca7dc5c170b70099cbbdd091109f11f50150d578c499d131d774749e61bfb853"
+  },
+  "dead_slots": {"slots": 180, "dead": 0, "nonzero_pairs_per_slot": 142},
+  "numpy_reference": {
+    "pairs": 8,
+    "cells": 1440,
+    "max_relative_error": 3.0291868626664007e-15,
+    "wrong_c_rejections": 1440,
+    "log_sha256": "352a9152c21b4aaf830962fd472b63939b29c8c0cf4506aca4f4182c2285417f"
+  },
+  "corpus_probe": {"pairs": 84, "algebra_cells": 336, "polarity_passes": 4, "polarity_cases": 8, "blur_loss_dominant": 0, "noise_gain_dominant": 4, "gate_exit_code": 1, "report_sha256": "95397c1d2eaae6400832e2fe0bee8f0ede89659b66323dfd5ec58eafd3e5aae8"},
+  "cost": {
+    "contention": true,
+    "st1": {"alpha_ns": -460175.2332050419, "beta_ns_per_px": 19.73267452490471, "r2": 0.9999689921155838, "fit_pct_at_1024": 8.818489294574702, "raw_median_pct_at_1024": 9.017241615141439, "gate_waits": 2, "raw_sha256": "ad10f74cf293397446a1f3df73c05458923550ecf0286adb191ec1c654e0f40d"},
+    "mt8": {"alpha_ns": 34857.09440798425, "beta_ns_per_px": 5.044109327383889, "r2": 0.9996115601451318, "fit_pct_at_1024": 4.460961869124463, "raw_median_pct_at_1024": 3.785523953803528, "gate_waits": 31, "raw_sha256": "4e3ee99274ee29a4e467c21209f4bdc3a1596412941115557cee2ea37c9fa943"}
+  },
+  "peer_gmsd": null,
+  "measure_first": {
+    "pairs": 2000,
+    "wall_seconds": 45.01,
+    "pairs_per_second": 44.43,
+    "stored_prefix_columns": 905,
+    "stored_prefix_cells": 1810000,
+    "stored_prefix_differing": 0,
+    "unstored_f0_f985_columns": 81,
+    "full_prefix_identity": {"cells": 2644000, "differing": 0, "log_sha256": "d16bcfa3fd509dfc8afd8610d2a9d44e867e5afd7ca61e170fa3e0c3eb89ed82"},
+    "heaptrack_peak_mb_reported": 613.80,
+    "parity_report_sha256": "ae490d60ee25389077f520c73228d4a7178c9448e62ce74bd62a750a5d5fba10"
+  }
+}

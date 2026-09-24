@@ -12094,11 +12094,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     }
 
     if layout_gmsbank {
-        for scale in 0..n_scales {
+        for (scale, &(width, height)) in dims.iter().enumerate().take(n_scales) {
             if !compute.at_scale(scale).gmsbank {
                 continue;
             }
-            let (width, height) = dims[scale];
             for (ch, channel) in accums.iter().enumerate() {
                 let base = (scale * 3 + ch) * GMSBANK_PER_CELL;
                 finish_gmsbank_cell(
@@ -16472,7 +16471,7 @@ pub(crate) mod tests {
         let serial = gmsbank_extract(&src, &dst, w, h, false);
         let parallel = gmsbank_extract(&src, &dst, w, h, true);
         assert_eq!(serial, parallel, "C8 row order must survive MT extraction");
-        for cell in serial[GMSBANK_BASE..].chunks_exact(GMSBANK_PER_CELL) {
+        for cell in serial[GMSBANK_BASE..].as_chunks::<GMSBANK_PER_CELL>().0 {
             for k in 0..4 {
                 let now = cell[k * 3] + cell[k * 3 + 1];
                 let next = cell[(k + 1) * 3] + cell[(k + 1) * 3 + 1];

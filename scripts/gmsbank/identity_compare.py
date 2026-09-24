@@ -29,6 +29,7 @@ def main():
     diffs = []
     for ri, (left, right) in enumerate(zip(a, b)):
         assert left['ref_basename'] == right['ref_basename'], f'ref row {ri}'
+        assert left['row_index'] == right['row_index'], f'input row {ri}'
         for i in range(WIDTH):
             name = f'f{i}'
             if bits(left[name]) != bits(right[name]):

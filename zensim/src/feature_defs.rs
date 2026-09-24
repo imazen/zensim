@@ -603,7 +603,7 @@ const REV4BANK: &[Revision] = &[Revision {
 
 /// Pinned to the byte-changing implementation commit in the qualification
 /// follow-up after the local quarantine commit has a stable hash.
-const GMSBANK_COMMIT: &str = "00000000";
+const GMSBANK_COMMIT: &str = "c1a61c4c8e324cb8764ebb8b188728c29817049b";
 const GMSBANK: &[Revision] = &[Revision {
     era: "gmsbank",
     commit: GMSBANK_COMMIT,
