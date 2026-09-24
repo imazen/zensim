@@ -286,6 +286,12 @@ A 16-pair tier runs in CI. Sources of truth:
 - a fresh re-extraction of 500 CID22 TRAIN rows compared against `cid22-train944.parquet`, which must match
   exactly.
 
+**Plan revision (2026-09-24 UTC, coordinator):** CI lacks TRAIN
+access. Its unignored 16-pair tier is synthetic
+(`rev4_synthetic_16_pair_identity`). TRAIN coverage runs via
+`just rev4-corpus-tests`; the 144-pair × 6-mode extractor matrix
+qualifies the corpus.
+
 ---
 
 ## 3. The in-sample potential protocol

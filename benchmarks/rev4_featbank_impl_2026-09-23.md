@@ -285,9 +285,18 @@ era entry marking introduction.
 - Real corpus gates require explicit `just rev4-corpus-tests <root>
   <KADID INPUTS.json> <expected unsupported SafeSyn count>`; missing
   assets, malformed roles and unexpected unsupported formats fail.
+  The first 64 SafeSyn TRAIN pairs have exactly 11 AVIF and 8 JXL
+  distortions; the direct-decoder gate asserts each count separately.
   KADID admission is keyed on `INPUTS.json` `role` (`train`/`fit`). The
   unignored 16-pair generated identity tier runs in the all-features CI
   suite without external corpus mounts.
+
+**CI plan revision — 2026-09-24 UTC (coordinator ruling):** CI has no
+TRAIN-corpus access. Its 16-pair tier is the unignored deterministic
+generated test above. The admitted TRAIN golden set remains gated by
+`just rev4-corpus-tests` for an explicit local run, plus the recorded
+144-pair × six-mode extractor qualification. The generated CI tier
+checks toggle regressions; it does not cover real corpus decoding.
 - `rev4_tailhist_quantile_semantics` — max exact vs sorted reference;
   p95/p99 within one bin; integer counts.
 - `rev4_arttype_bleed_luma_vs_chroma` — bleed ≡ 0 on luma-only
@@ -341,7 +350,7 @@ definitions and remains historical evidence.
 2. **Corpus toggle identity** — production extractor
    (`extract_features_372col --full-rev4` vs `--full-986`, the shipped
    omni-decode path; path columns only, no label column read):
-   144 pairs — CID22 64 + SafeSyn 64 (incl. AVIF via zenavif) + KADID
+   144 pairs — CID22 64 + SafeSyn 64 (incl. AVIF/JXL via omni decode) + KADID
    TRAIN 16 — × {serial, MT8} × {native v4, forced v3, forced scalar}
    → **0 diffs over 144 × 986 × 6 = 851,904 compared cells** (CSV
    substrate + `compare.py` + `SHA256SUMS` archived at
@@ -350,7 +359,7 @@ definitions and remains historical evidence.
    see the worklog repair note). The
    in-test gate `rev4_corpus_toggle_identity` re-covers the
    PNG/JPEG-decodable subset in-repo: 250 pair-mode extractions
-   (CID22 128, SafeSyn 90, KADID 32; 19 AVIF pairs skipped there,
+   (CID22 128, SafeSyn 90, KADID 32; 11 AVIF + 8 JXL pairs skipped there,
    covered by the extractor matrix above).
 3. **CID22 canonical-parquet check**: `--full-944` on CID22 rows
    0–499 vs `baseline-recovery/cid22-train944.parquet` (Sep-14):

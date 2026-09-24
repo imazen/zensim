@@ -199,7 +199,9 @@ the following recomputation is authoritative.
   32 pairs checked ... 0 skipped`, and `rev4 corpus toggle identity:
   250 pair-mode extractions, 19 pairs skipped`; final corpus test
   `1 passed; 0 failed`. KADID admission uses only `INPUTS.json` role
-  metadata; 19 SafeSyn AVIF pairs have separate omni-extractor coverage.
+  metadata; the 19 skipped SafeSyn distortions are 11 AVIF and 8 JXL,
+  with separate omni-extractor coverage. The original log reported only
+  the aggregate; the re-review verified the extension census.
 
 ### Correction 7 — post-revision corpus gate and occupancy
 
@@ -410,7 +412,7 @@ bring-up:
   independently proves all six modes — 18 comparisons, 851,904 cells,
   0 diffs (`python3 compare.py <986> <rev4>` per pair).
 - In-tree `rev4_corpus_toggle_identity`: 250 pair-mode extractions, 0 diffs;
-  19 SafeSyn AVIF pairs skipped (direct test decoder has no AVIF) — covered by
+  11 SafeSyn AVIF and 8 JXL pairs skipped (direct test decoder lacks both) — covered by
   the extractor matrix; limitation documented.
 - CID22 canonical parquet: `--full-944` rows 0–499 vs
   `baseline-recovery/cid22-train944.parquet` → 472,000 cells, 0 bit diffs.
@@ -486,3 +488,30 @@ checks passed. The working copy was clean at the stop. The canonical
 marker is in the same rev4 directory. No command is in flight and no
 work remains for this lane. Coordinator next step: short Opus review,
 then pin `REV4BANK_COMMIT` at landing. No push was performed.
+
+## Re-review corrections — 2026-09-24 UTC
+
+User resumed the lane after quota stop. First 64 SafeSyn
+TRAIN path rows (TSV sha256 `5a53976070a5e21b2bb7fe0d05f58b510b93e141dd9207dd3e2cd337fd15cd3b`)
+give JPEG 34, WebP 11, AVIF 11, JXL 8; refs are PNG. No labels read.
+Gate rejects other extensions or missing files and asserts 11/8.
+
+The coordinator ruled CI has no TRAIN access. Plan §2.5 and the design
+note now specify generated 16-pair CI and local `just rev4-corpus-tests`
+for TRAIN. At `04:28:22Z`, the local `zensim-bench/target` symlink
+was removed; its `/var/tmp/featbank-impl/target-zensim-bench` stays.
+`cargo fmt --all -- --check` ran `04:30:41Z`–`04:30:42Z`, exit 0,
+empty log sha256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+Validation rerun (cwd this workspace; shared-lock queue included):
+
+- `2026-09-24T04:30:13Z`–`04:38:18Z`, exit 0:
+  `~/tmp/devin/heavy --mem 16G --jobs 8 -- env CARGO_TARGET_DIR=/var/tmp/featbank-impl/target-zensim just rev4-corpus-tests /mnt/v/imazen-26-pristine/lilith /mnt/v/output/zensim/dvifm-screen2c-2026-09-19/q1-human/INPUTS.json 19`;
+  log `rereview_corpus.log` sha256
+  `1d7a23d4efafcd6782dc2a5ea6a2eb6c1d2c479c55897861d2fc5490149919c3`.
+  Exact counts: `safesyn: 90 pairs checked (serial + MT8), 19 skipped
+  (AVIF=11, JXL=8)`; total `250 pair-mode extractions`; all three tests passed.
+- `2026-09-24T04:30:53Z`–`04:38:21Z`, exit 0: same wrapper and
+  `CARGO_TARGET_DIR`, `just clippy`; `rereview_clippy.log` sha256
+  `98858c0246beaa1283df69d9c6e54c0388009fa2c38b7d1d3b5a245733bce4ec`;
+  `Finished dev profile ... in 0.58s`.

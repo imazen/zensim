@@ -69,6 +69,8 @@
   "corpus_in_test": {
    "pair_mode_extractions": 250,
    "skipped_undecodable": 19,
+   "skipped_avif": 11,
+   "skipped_jxl": 8,
    "diffs": 0
   },
   "cid22_parquet_944": {

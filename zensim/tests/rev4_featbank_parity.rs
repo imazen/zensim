@@ -281,8 +281,9 @@ fn rev4_synthetic_16_pair_identity() {
 /// parsed), decodes via `image` (PNG) / `zenjpeg` (JPEG), and asserts
 /// f0..f985 `to_bits` equality between the all-on and all-off walks,
 /// serial and MT8. The caller supplies corpus access and the expected
-/// unsupported SafeSyn count via `just rev4-corpus-tests`; missing files,
-/// malformed roles and unexpected decode omissions fail the test.
+/// unsupported SafeSyn count via `just rev4-corpus-tests`; the admitted
+/// TRAIN sample is pinned to 11 AVIF and 8 JXL omissions. Missing files,
+/// malformed roles and any other unsupported format fail the test.
 #[test]
 #[ignore = "explicit corpus gate: use just rev4-corpus-tests"]
 fn rev4_corpus_toggle_identity() {
@@ -307,6 +308,13 @@ fn rev4_corpus_toggle_identity() {
         .expect("caller must set ZENSIM_REV4_EXPECT_UNSUPPORTED_SAFESYN")
         .parse()
         .expect("expected unsupported count must be an integer");
+    const EXPECTED_SAFESYN_AVIF: usize = 11;
+    const EXPECTED_SAFESYN_JXL: usize = 8;
+    assert_eq!(
+        expected_unsupported,
+        EXPECTED_SAFESYN_AVIF + EXPECTED_SAFESYN_JXL,
+        "caller count must match the pinned SafeSyn AVIF/JXL census"
+    );
     let input_text = std::fs::read_to_string(&inputs_path).expect("read KADID INPUTS.json");
     let input_json: RoleManifest = serde_json::from_str(&input_text).expect("parse INPUTS.json");
     let mut kadid_role = std::collections::HashMap::<String, String>::new();
@@ -432,19 +440,31 @@ fn rev4_corpus_toggle_identity() {
             spec.name
         );
         let mut spec_checked = 0usize;
-        let mut spec_skipped = 0usize;
+        let mut skipped_avif = 0usize;
+        let mut skipped_jxl = 0usize;
         for (r, d) in &rows {
-            let (src, sw, sh) = match decode(Path::new(r)) {
-                Some(v) => v,
-                None => {
-                    spec_skipped += 1;
-                    continue;
-                }
-            };
+            let (src, sw, sh) = decode(Path::new(r))
+                .unwrap_or_else(|| panic!("{}: unsupported reference format: {r}", spec.name));
             let (dst, dw, dh) = match decode(Path::new(d)) {
                 Some(v) => v,
                 None => {
-                    spec_skipped += 1;
+                    assert_eq!(spec.name, "safesyn", "unsupported distortion: {d}");
+                    let ext = Path::new(d)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    match ext.as_str() {
+                        "avif" => skipped_avif += 1,
+                        "jxl" => skipped_jxl += 1,
+                        _ => panic!("unexpected unsupported distortion format: {d}"),
+                    }
+                    assert!(
+                        std::fs::metadata(d)
+                            .unwrap_or_else(|e| panic!("missing skipped distortion {d}: {e}"))
+                            .is_file(),
+                        "skipped distortion is not a file: {d}"
+                    );
                     continue;
                 }
             };
@@ -483,24 +503,28 @@ fn rev4_corpus_toggle_identity() {
             }
         }
         let expected = if spec.name == "safesyn" {
-            expected_unsupported
+            [EXPECTED_SAFESYN_AVIF, EXPECTED_SAFESYN_JXL]
         } else {
-            0
+            [0, 0]
         };
         assert_eq!(
-            spec_skipped, expected,
-            "{}: unexpected unsupported formats",
+            [skipped_avif, skipped_jxl],
+            expected,
+            "{}: unexpected AVIF/JXL omission counts",
             spec.name
         );
+        let spec_skipped = skipped_avif + skipped_jxl;
         skipped_fmt += spec_skipped;
         eprintln!(
-            "{}: {} pairs checked (serial + MT8), {spec_skipped} skipped (undecodable format)",
-            spec.name, spec_checked
+            "{}: {} pairs checked (serial + MT8), {spec_skipped} skipped \
+             (AVIF={skipped_avif}, JXL={skipped_jxl})",
+            spec.name, spec_checked,
         );
     }
     eprintln!(
         "rev4 corpus toggle identity: {checked} pair-mode extractions, \
-         {skipped_fmt} pairs skipped (format gate — covered by the omni extractor matrix)"
+         {skipped_fmt} pairs skipped (AVIF={EXPECTED_SAFESYN_AVIF}, \
+         JXL={EXPECTED_SAFESYN_JXL}; covered by the omni extractor matrix)"
     );
     assert_eq!(checked, 2 * (64 + 64 + 16 - expected_unsupported));
 }
