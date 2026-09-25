@@ -108,6 +108,10 @@ fn main() {
     // computes ONLY those families' slots (the plan skips everything else) at
     // the full registered layout width; every other column is a structural 0.
     let mut restore_cuts: Option<Vec<zensim::feature_set_id::ComputeToken>> = None;
+    // `--restore-cuts prefix,...`: ALSO request f0..f1501, so the identity gate can compare the
+    // whole existing surface with the families on (a plain `--restore-cuts` list leaves the v1
+    // pools f156..371 unrequested, hence structural zero).
+    let mut restore_prefix = false;
     let mut dvifm_spec = None;
     let mut dvifm_blocks = None;
     let mut dvifm_cap = 0usize;
@@ -126,6 +130,10 @@ fn main() {
                 let list = args.next().expect("--restore-cuts value");
                 restore_cuts = Some(
                     list.split(',')
+                        .filter(|t| {
+                            restore_prefix |= *t == "prefix";
+                            *t != "prefix"
+                        })
                         .map(|t| {
                             zensim::feature_set_id::ComputeToken::parse(t)
                                 .unwrap_or_else(|| panic!("--restore-cuts: unknown token {t:?}"))
@@ -266,11 +274,14 @@ fn main() {
         let spec = dvifm_spec.as_deref().map(|p| dvifm_spec_load(Path::new(p)));
         let spec_sha = dvifm_spec.as_deref().map(|p| sha256_hex_of(Path::new(p)));
         let want = match &restore_cuts {
-            Some(tokens) => tokens
-                .iter()
-                .fold(zensim::feature_set_id::SlotSet::default(), |acc, &t| {
-                    acc.union(&zensim::research::family_slots(t))
-                }),
+            Some(tokens) => tokens.iter().fold(
+                if restore_prefix {
+                    zensim::feature_set_id::SlotSet::from_ranges([(0, 1502)])
+                } else {
+                    zensim::feature_set_id::SlotSet::default()
+                },
+                |acc, &t| acc.union(&zensim::research::family_slots(t)),
+            ),
             None => zensim::feature_set_id::SlotSet::from_ranges([(0, w)]),
         };
         let mut req = zensim::research::Request::for_slots(want, w);

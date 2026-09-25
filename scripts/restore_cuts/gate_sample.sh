@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Measure-first gate: the first N SafeSyn pairs through (1) the baseline extractor at --full-gmsbank
 # (main@origin), (2) the candidate at --full-gmsbank (families off), (3) the candidate with all four
-# restored families. Reports wall time, pairs/s, and the f0..f1501 bit identity between all three.
+# restored families plus the whole existing surface requested (`prefix`). Reports wall time, pairs/s, and the f0..f1501 bit identity between all three.
 # Run through the shared lock. Usage: gate_sample.sh [N=2000]
 set -euo pipefail
 N=${1:-2000}
@@ -19,7 +19,7 @@ run() { # name binary extra-args...
 echo "GATE_START n=$N utc=$(date -u +%FT%TZ)"
 run base "$ROOT/bin/extract_base" --full-gmsbank
 run candoff "$ROOT/bin/extract_cand" --full-gmsbank
-run candall "$ROOT/bin/extract_cand" --restore-cuts mapdev,z1max,gmsnative,dvifmgate
+run candall "$ROOT/bin/extract_cand" --restore-cuts prefix,mapdev,z1max,gmsnative,dvifmgate
 python3 "$REPO/scripts/restore_cuts/compare_prefix.py" "$ROOT/raw/gate_base.csv" "$ROOT/raw/gate_candoff.csv" 1502
 python3 "$REPO/scripts/restore_cuts/compare_prefix.py" "$ROOT/raw/gate_base.csv" "$ROOT/raw/gate_candall.csv" 1502
 sha256sum "$pairs" "$ROOT"/raw/gate_{base,candoff,candall}.csv "$ROOT/bin/extract_base" "$ROOT/bin/extract_cand"
