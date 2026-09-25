@@ -19,8 +19,12 @@
 //!   [`V1BasicSums`]'s own finalizers.
 //!
 //! Both consume rows in plane order inside a serial band loop per (scale,
-//! channel) cell, so every result is independent of thread count, SIMD tier
-//! and input stride; cells run in parallel when asked. The pyramids are the
+//! channel) cell, so every result is independent of thread count and input
+//! stride, and repeatable within a SIMD tier; cells run in parallel when
+//! asked. Results are NOT bit-identical ACROSS SIMD tiers: the XYB planes and
+//! the tier-dispatched v1 blur/kernel stages they read differ at float
+//! precision between tiers (measured in `tests/restore_cuts_parity.rs`; the
+//! stage responsible was not isolated). The pyramids are the
 //! production materializer's (`build_v2_ref_scales`).
 
 use super::{

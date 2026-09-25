@@ -6,7 +6,7 @@
 set -euo pipefail
 N=${1:-2000}
 ROOT=/var/tmp/restore-cuts
-REPO=/home/lilith/work/zen/zensim--restore-cuts
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)  # repo root, derived at run time
 export ZENSIM_FORMULA_REV=3 ZENSIM_ROOT_FORM=sqrt RAYON_NUM_THREADS=8
 pairs=$ROOT/pairs/safesyn_gate$N.tsv
 head -n $((N + 1)) "$ROOT/pairs/safesyn.tsv" > "$pairs"

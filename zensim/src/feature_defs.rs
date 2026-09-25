@@ -230,8 +230,9 @@ pub(crate) enum Placement {
 /// benchmark doc; as a registry field it is a query.
 ///
 /// [`Form::Undeclared`] is an HONEST state, not a default to fill in later: a
-/// signal whose identity behaviour has not been established reports that,
-/// rather than claiming a form nobody measured. The declared ones are pinned
+/// signal whose identity behaviour has not been established (or, for the
+/// restored-cut slots, depends on the formula revision) reports that, rather
+/// than claiming a form nobody measured. The declared ones are pinned
 /// by [`tests::declared_difference_forms_are_zero_on_an_identity_pair`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Form {
@@ -243,10 +244,13 @@ pub(crate) enum Form {
     ReferenceOnly,
     /// Not yet established. Never treated as any of the above.
     ///
-    /// Reserved for the Phase-2 research engine's provenance output
-    /// (`docs/PLAN_FEATURE_SYSTEM_2026-09-05.md`); no signal in the committed
-    /// registry currently declares it, so nothing constructs it yet.
-    #[allow(dead_code)]
+    /// Declared by the restored-cut families (2026-09-25), the only committed
+    /// uses: the `mapdev` distorted-side deviations (`hfsq_dst_dev`,
+    /// `hfabs_dst_dev`: a property of one image, no reference/distorted
+    /// relation to zero) and the SSIM-derived `z1max` slots (block-locals 0, 1,
+    /// 2, 13, 16), whose identity value depends on the formula revision —
+    /// exactly 0 at Rev3 (direct-error form), nonzero at Rev1 — and which are
+    /// not attached to the F4 defect gate (see [`Statistic::BlockL4`]).
     Undeclared,
 }
 

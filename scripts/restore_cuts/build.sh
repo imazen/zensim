@@ -7,7 +7,7 @@
 set -euo pipefail
 which=${1:?usage: build.sh cand|base}
 ROOT=/var/tmp/restore-cuts
-WS=/home/lilith/work/zen/zensim--restore-cuts
+WS=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)  # repo root, derived at run time
 export CARGO_HOME=$ROOT/cargo-home CARGO_TARGET_DIR=$ROOT/target-rel
 mkdir -p "$ROOT/bin"
 overlay() {

@@ -32,6 +32,10 @@ api-doc-check:
 restore-cuts-build:
     /home/lilith/tmp/devin/heavy --mem 16G --jobs 8 -- bash scripts/restore_cuts/build.sh
 
+# The restored-cut parity test at the bank's revision (Rev3/sqrt); a plain `cargo test` runs it at the shipped Rev1.
+restore-cuts-parity-rev3:
+    ZENSIM_FORMULA_REV=3 ZENSIM_ROOT_FORM=sqrt cargo test -p zensim --features training --test restore_cuts_parity -- --nocapture
+
 # Independent NumPy mirror of mapdev/z1max/gmsnative from XYB plane dumps (needs the instrument build).
 #   RESTORE_CUTS_DUMP_DIR=/var/tmp/restore-cuts/mirror_dump just restore-cuts-mirror
 restore-cuts-mirror:

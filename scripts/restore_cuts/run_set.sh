@@ -6,7 +6,7 @@ set -euo pipefail
 set_name=$1
 limit=${2:-}
 ROOT=${RESTORE_ROOT:-/var/tmp/restore-cuts}
-REPO=/home/lilith/work/zen/zensim--restore-cuts
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)  # repo root, derived at run time
 bin=$ROOT/bin/extract_cand
 suffix=
 pairs=$ROOT/pairs/$set_name.tsv

@@ -88,3 +88,12 @@ This lane makes no scientific decision. Each family ships as an optional, defaul
 tested extractor arm plus a bank sidecar and an arm spec (R0+family with a size-matched permuted
 control) handed to the potential lane as a preregistration-amendment PROPOSAL. Whether any arm helps
 is decided there, on human-label bars, not here.
+
+## Amendment 2026-09-25 (after review; the text above is not rewritten)
+
+- The sentence "so results cannot depend on thread count, SIMD tier or stride" is corrected: results are independent of
+  thread count and stride and repeatable within a SIMD tier, but NOT bit-identical across tiers (measured, reported).
+  Gate 4 was "measured, then asserted" within tier only.
+- Gate 7 (cost) as run deviates from this text: sizes 256/1024/2048/4096 on synthetic content, no 64 px size and no real
+  TRAIN pair; contended; single thread and 8 threads.
+

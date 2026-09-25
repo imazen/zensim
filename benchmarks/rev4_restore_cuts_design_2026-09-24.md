@@ -79,7 +79,11 @@ layout that reaches it; its values do not depend on later families (asserted by 
 
 ## Tier policy
 
-Within a SIMD tier every new slot is bit-identical across serial, MT8, strided input and repeated runs. Across tiers
-the XYB planes come from tier-specific SIMD cube roots, so values agree to float precision, not bit for bit (the
-rev4/C8 policy: measured and reported). The largest relative differences sit on the smallest values (~1e-4 magnitude
-at the coarse scales) and on the SSIM-derived z1max slots, which read the near-identity-cancelling dissimilarity.
+Within a SIMD tier every new slot is bit-identical across serial, MT8, strided input and repeated runs (asserted at
+Rev1 and at Rev3). Across tiers the new slots are NOT bit-identical: the XYB planes come from tier-specific SIMD cube
+roots and the v1 blur/SSIM kernels the side pass calls are also tier-dispatched, so values agree to float precision
+only; the responsible stage was not isolated. Following the rev4/C8 policy the drift is measured and reported, with
+its revision: the lane's first run was at the shipped default **Rev1** (non-SSIM worst relative 5.7e-3, SSIM-derived
+z1max 6.8e-2); the bank is **Rev3**, where the review measured non-SSIM 7.8e-5..5.7e-3 and SSIM-derived
+7.6e-5..2.9e-4 (this lane's own Rev3 rerun is in the worklog). The largest relative differences sit on the smallest
+values (~1e-4 magnitude at the coarse scales). Rev3 invocation: `just restore-cuts-parity-rev3`.

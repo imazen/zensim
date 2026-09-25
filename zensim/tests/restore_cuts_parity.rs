@@ -293,6 +293,15 @@ fn restore_cuts_prefix_identity_families_and_invariances() {
                 C8_END..FULL,
                 &format!("{w}x{h} {} MT8", perm.label),
             );
+            // ...and the whole existing surface stays bit-identical with the families
+            // on when the walk runs parallel (base vs all, both MT8).
+            let base_mt8 = pool.install(|| extract(&src, &dst, w, h, c8(), true));
+            bits_eq(
+                &base_mt8,
+                &mt8,
+                0..C8_END,
+                &format!("{w}x{h} {} prefix MT8", perm.label),
+            );
 
             // Stride: a padded, non-tight buffer gives the same bits.
             let strided = extract_strided(&src, &dst, w, h, with(true, true, true, true));

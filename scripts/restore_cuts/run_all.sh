@@ -2,7 +2,7 @@
 # Run every bank set through the shared lock, one heavy call per set, appending each result
 # to the worklog. Usage: nohup bash scripts/restore_cuts/run_all.sh > /var/tmp/restore-cuts/logs/run_all.log 2>&1 &
 set -euo pipefail
-REPO=/home/lilith/work/zen/zensim--restore-cuts
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)  # repo root, derived at run time
 ROOT=/var/tmp/restore-cuts
 log=$REPO/benchmarks/restore-cuts_WORKLOG.md
 sets=(konjnd_jpeg_terminal aic4 konfig_train konfig_val aic3 konjnd_jpeg_select csiq cid22_b cid22_a25

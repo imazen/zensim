@@ -262,7 +262,7 @@ fn main() {
     // there. The request is built once and shared by every pair.
     // `--full-rev4` is the same request at the rev4 bank's full width.
     let research_req = research_path.then(|| {
-        let w = if let Some(_) = &restore_cuts {
+        let w = if restore_cuts.is_some() {
             zensim::research::full_width()
         } else if full_gmsbank {
             1502
