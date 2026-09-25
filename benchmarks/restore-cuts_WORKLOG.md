@@ -47,3 +47,10 @@ The shared heavy lock has been held for >30 min by the potential lane MLP batche
   (`a_wide_layout_computes_every_block_it_reaches`), so "family alone" is not a plan-level notion. The nested
   chain lets each family be requested at the narrowest layout that reaches it; its values do not depend on
   later families (asserted).
+
+HEARTBEAT 2026-09-25T02:05:02Z restore-cuts extraction
+
+### 2026-09-25 02:05Z gates and extraction start
+- Clean-snapshot builds: baseline `main@origin` 26494c8a (binary sha256 `169b49c6...`), candidate `ec5b1821` (`4ea8f333...`); `build_meta.json`: 15 repositories, 20 local packages, 220 registry, 0 git sources, 0 outside the snapshot. Defect found on main: zensim-bench manifest had two `gmsd` keys (commit 9e62cbc4 dedupes; notice in ~/tmp/devin/NOTICE_zensim_bench_duplicate_gmsd_key.md).
+- Measure-first gate (2,000 SafeSyn pairs, 8 threads, `gate_sample2.log`): baseline `--full-gmsbank` WALL 52.24 s (38.3 pairs/s, max RSS 750 MB); candidate `--full-gmsbank` (families off) WALL 51.04 s, CSV **byte-identical** to the baseline (both sha256 `dc3f98b1...`); candidate with the four families + `prefix` WALL 67.05 s (29.8 pairs/s, max RSS 888 MB), f0..f1501 `3004000 cells, 0 mismatches` vs the baseline.
+- Full extraction started under the shared lock: `scripts/restore_cuts/run_all.sh` (one heavy call per set).
