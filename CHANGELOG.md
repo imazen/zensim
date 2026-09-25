@@ -23,7 +23,7 @@
   the doc-hidden `V2NewFeatureToggles::{mapdev, z1max, gmsnative,
   dvifmgate}` fields defaulting to false. No other public Rust item is
   added. The extractor gains `--restore-cuts <tokens>` and its audit accepts
-  the registered widths 1322–1825 (2d7b33dd).
+  the registered widths 1322–1825; implementation commit 2d7b33dd.
 
 - Experimental C8 GMSBANK adds 180 gradient-similarity slots at f1322–f1501.
   The exact new public Rust items are `ComputeToken::Gmsbank`, an additive arm
