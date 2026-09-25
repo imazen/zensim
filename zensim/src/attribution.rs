@@ -412,6 +412,7 @@ impl AttributionResult {
     /// Unbinned maps integrate cell-wise at the stored `f32` density; binned
     /// maps keep their uniform-mass-within-bin semantics via the
     /// bilinear-SAT path.
+    #[cfg(feature = "feature-regime-v2")]
     pub(crate) fn query_rect_frac(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
         let (x0, x1) = (
             x0.clamp(0.0, self.width as f64),
@@ -453,6 +454,7 @@ impl AttributionResult {
     /// `f64` twin of [`grid_coord`](Self::grid_coord) for fractional-edge
     /// queries — same "fraction measured against the cell's REAL pixel
     /// extent" rule so edge-clamped queries stay exact.
+    #[cfg(feature = "feature-regime-v2")]
     fn grid_coord_f(&self, x: f64, limit: usize, grid: usize) -> (usize, f64) {
         if x >= limit as f64 {
             return (grid, 0.0);
