@@ -780,3 +780,25 @@ reads they govern:
   distortion-oriented, |SROCC| reported; prior zensim exposure disclosed (SDR25
   slice = seed-selection oracle). Nothing fitted, calibrated or selected on it.
 
+## Exposure ledger — 2026-09-23: NNCD-IQA first read by the frozen dvifmish presets and peers (reported 2026-09-25)
+
+The frozen peers (fast-ssim2, zensim B and D, R915 Rev3 ensembles) were scored on NNCD at 2026-09-23T03:50:26Z;
+another session's join audit saw their SROCCs around 05:10Z (before the dvifmish variant screen closed at
+06:19:34Z), and the dvifmish lane recomputed them at 05:14Z only to verify the corrected join. The 27 frozen
+dvifmish presets (frozen at dvifmish `f562c519`, 06:55:12Z) were first scored on NNCD at 09:50:17Z, inside the
+final repro run. Nothing was fitted, calibrated or selected on NNCD, and no preset changed after the read. NNCD is
+EVAL-only and **not content-disjoint from TID2013**: its 16 references contain the 16 TID2013 references as
+unscaled crops (NCC 1.0000), so a model fitted on TID2013 rows has seen NNCD's scenes. Detail: DATASET_HISTORY
+2026-09-22 NNCD entry and addenda; record `benchmarks/dvifmish_eval_2026-09-22.md`.
+
+## Exposure ledger — 2026-09-23: canonical corruption packet 2026-09-08 read by the dvifmish presets and peers (reported 2026-09-25)
+
+Both splits of the canonical corruption packet (validate 8 origins, train 12; imazen-26 origins at longest side
+256; 713 corruption attempts plus q10/q20 native JPEG anchors per origin and the accepted honest native supplement)
+were scored by the frozen dvifmish presets and the frozen peers with the owner protocol (`corruption_gate_eval.py`
+summarize, via `corruption_eval.py`). The packet carries no human labels; the only label read was its own
+`is_corruption` flag. Characterisation only (fraction below the honest q20/q10 anchors, detection at a matched
+honest false-positive rate); nothing was fitted, calibrated or selected on it. Peer scores were re-joined through
+the extractor's reference-sorted row order first (a positional join had been wrong). Record:
+`benchmarks/dvifmish_eval_2026-09-22.md` §6.
+

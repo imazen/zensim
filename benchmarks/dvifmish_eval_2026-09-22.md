@@ -115,6 +115,8 @@ The crate's own full-image numbers on all 49 references (fit-domain) are in §5.
 
 <!-- MAIN TABLES -->
 
+_Tables (not filled: the evaluating lane stopped before the record fill; the final numbers are in the private `imazen/dvifmish` repository docs, and nothing here was reconstructed)._
+
 ## §6 — canonical corruption packet
 
 Owner protocol (`scripts/v_next/corruption_gate_eval.py` summarize) applied to
@@ -127,6 +129,8 @@ reproduces its base-score counts exactly (below q20 1,945/5,353 and
 2,872/7,725; below q10 1,600/5,353 and 2,402/7,725).
 
 <!-- CORRUPTION TABLES -->
+
+_Tables (not filled: the evaluating lane stopped before the record fill; the final numbers are in the private `imazen/dvifmish` repository docs, and nothing here was reconstructed)._
 
 ## Incidents and deviations
 
