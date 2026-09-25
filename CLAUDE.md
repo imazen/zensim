@@ -158,6 +158,21 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-09-25 — two extraction paths disagree on pixel-identical pairs. OPEN.** `BakeScorer::compute` (the
+  `--full-944` extractor route, which built the Rev4 bank's old family) returns the identity short-circuit
+  (`metric.rs` `identical_result_at`: score 100 and an all-zero feature vector), while `research::extract`
+  (`--full-986`, `--full-rev4`, `--full-gmsbank`, restore-cuts) computes the walk. On the bank's 88 identical keys
+  that is 6,971 differing old-family cells (REVIEW_PARTB, 2026-09-25). By the registry, the zero is wrong on 27
+  ReferenceOnly slots (`grad_src_mean`, `luma_mean_ref`, `pjnd_fragility`; the computed value equals every
+  same-reference sibling, 2,376 cells) and right on 55 Difference slots (the research path emits FP residue).
+  Consequences: never mix the two conventions in one table (restore-cuts `mapdev` is nonzero on identity; the
+  feature-potential run zero-masks candidate families on identical keys in its adapter); for future Rev4 training
+  tables, excluding `pixels_identical` keys is the recommended rule (the runtime never scores them with a model).
+  Also open from the same review: `contrast_loss` identity residue reaches 3.64e-3 on real images at Rev3, above the
+  2e-3 bar of `feature_invariants::identity_nonzero_slots_are_reference_only_pjnd_or_fp_residue`, which only
+  exercises synthetic noise; and `PJND_FRAGILITY`'s F15 note ("should be 0") contradicts its ReferenceOnly Form and
+  its formula `1 - saturate(mean grad_src_mag)`.
+
 * **2026-09-25 — bulk sRGB→XYB gives different bits for the same colour in the vector chunks and in the remainder,
   SIMD tiers. OPEN; the fix needs a formula-revision decision.** (The scalar tier / i686 half is FIXED, next entry.)
   - `color::srgb_to_positive_xyb_planar_into` converts each band of `rows × width` pixels in one call. Full
