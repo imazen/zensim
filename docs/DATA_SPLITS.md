@@ -737,3 +737,14 @@ KADID TERMINAL. Output: `/var/tmp/gmsbank/peer_gmsd/<set>.parquet`, keyed by `pa
 bank's decoded-pixel hashes. **No label file was opened and no statistic was computed on held-out labels.** The
 columns feed the preregistered P2 arm only on its admitted D1/D2 sets. The C8 chroma calibration used TRAIN pixels
 only and needs no entry.
+
+## Exposure ledger — 2026-09-25: restore-cuts families, pixels-only extraction, all 18 bank sets
+
+The restore-cuts lane ran the extractor `extract_features_372col` (source landed as `f3f021f6`, quarantine id
+`ec5b1821`; binary sha256 `4ea8f333…`; formula revision 3, root form sqrt, legacy-rgb8, `--restore-cuts`) over the
+**pixels only** of all 18 Rev4 bank sets (248,983 pixel keys, 249,227 stimulus rows), producing the default-off
+families `mapdev`, `z1max`, `gmsnative` and `dvifmgate` (f1502..f1824). That includes the held-out and confirmation
+sets under ruling D4: CID22-B, the AIC-4 sample, KonJND JPEG SELECT/TERMINAL, CSIQ, MCL-JCI and KADID TERMINAL. The
+pair TSVs carry `human_score=0`; **no label or `_sealed` file was opened and no statistic was computed on held-out
+labels.** Output: `/var/tmp/restore-cuts/bank/<set>/features__restore_*.parquet`, keyed by `pair_key`. Record:
+`benchmarks/rev4_restore_cuts_2026-09-24.md`.

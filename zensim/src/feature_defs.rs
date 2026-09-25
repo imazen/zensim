@@ -648,7 +648,7 @@ const GMSBANK: &[Revision] = &[
 /// not to reject things for the cost budget ... we can optimize and make
 /// things optional"). Each is a default-off, append-only family. The commit
 /// is pinned to the byte-changing implementation commit once it exists.
-const RESTORE_COMMIT: &str = "2d7b33dd";
+const RESTORE_COMMIT: &str = "384d15e1";
 const MAPDEV: &[Revision] = &[Revision {
     era: "mapdev",
     commit: RESTORE_COMMIT,

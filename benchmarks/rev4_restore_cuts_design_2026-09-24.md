@@ -1,6 +1,6 @@
 # Restored-cut families: design (2026-09-24, quarantined)
 
-Lane `restore-cuts`. Preregistration: `benchmarks/restore-cuts_prereg_2026-09-24.md`. Implementation commit `2d7b33dd`
+Lane `restore-cuts`. Preregistration: `benchmarks/restore-cuts_prereg_2026-09-24.md`. Implementation commit `384d15e1` (quarantine id `2d7b33dd` before landing)
 (`RESTORE_COMMIT` in `feature_defs.rs`). Slots are append-only after f1501 and default off; f0..f1501 are unchanged.
 
 | token | slots (4 scales) | signals per cell | replication |
