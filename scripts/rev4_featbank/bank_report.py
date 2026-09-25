@@ -48,20 +48,29 @@ def main():
             if h != meta["sha256"]:
                 problems.append(f"{d.name}: {name} sha256 drift")
             entry["files"][name] = meta
-        # key/sidecar row agreement
+        # Check every sidecar, including later feature-family extensions.
         try:
             nk = pq.read_metadata(d / "keys.parquet").num_rows
-            sc = [f for f in d.glob("features__*.parquet")]
-            ns = pq.read_metadata(sc[0]).num_rows if sc else -1
-            if nk != ns or nk != m["unique_pair_keys"]:
-                problems.append(f"{d.name}: keys {nk} != sidecar {ns} != manifest {m['unique_pair_keys']}")
+            sc = sorted(d.glob("features__*.parquet"))
+            if not sc:
+                problems.append(f"{d.name}: no feature sidecar")
+            if nk != m["unique_pair_keys"]:
+                problems.append(f"{d.name}: keys {nk} != manifest {m['unique_pair_keys']}")
             entry["keys_rows"] = nk
-            # sidecar must not carry structural-zero columns
-            cols = set(pq.read_schema(sc[0]).names) if sc else set()
-            leaked = [c for c in cols if c.startswith("f") and int(c[1:]) in set(m["structural_zero_feature_ids"])]
-            if leaked:
-                problems.append(f"{d.name}: structural-zero cols in sidecar: {leaked}")
-            entry["sidecar_cols"] = len(cols) - 1
+            entry["sidecar_cols_by_file"] = {}
+            for sidecar in sc:
+                ns = pq.read_metadata(sidecar).num_rows
+                if nk != ns:
+                    problems.append(f"{d.name}: keys {nk} != {sidecar.name} {ns}")
+                cols = set(pq.read_schema(sidecar).names)
+                leaked = [c for c in cols if c.startswith("f") and c[1:].isdigit()
+                          and int(c[1:]) in set(m["structural_zero_feature_ids"])]
+                if leaked:
+                    problems.append(f"{d.name}: structural-zero cols in {sidecar.name}: {leaked}")
+                entry["sidecar_cols_by_file"][sidecar.name] = len(cols) - 1
+            original = next((p for p in sc if p.name != "features__rev4c1c4.parquet"), None)
+            entry["sidecar_cols"] = (entry["sidecar_cols_by_file"][original.name]
+                                     if original else 0)
         except Exception as e:
             problems.append(f"{d.name}: validation error {e}")
         sets[d.name] = entry

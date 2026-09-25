@@ -11,6 +11,7 @@ Path note (review correction 4): pairs/raw files that carry a held-out
 """
 import json
 import re
+from functools import cache
 from pathlib import Path
 
 BANK = Path("/var/tmp/rev4-featbank/bank")
@@ -139,6 +140,7 @@ def ceiling_meta(src, inputs_rows):
     return meta
 
 
+@cache
 def _ceiling_sets():
     inputs_rows = json.loads((CEILING / "INPUTS.json").read_text())["rows"]
     sel = {
@@ -159,8 +161,6 @@ def _ceiling_sets():
     }
     return inputs_rows, sel
 
-
-_INPUTS_ROWS, _CEIL_SEL = _ceiling_sets()
 
 _BIN_COMMIT = f"unknown(binary {EXTRACTOR_SHA256})"
 _CEIL_NOTE = "re-derived: extract-native-admission 7c7ffbbf… --audit-jsonl; verified 25/25 vs recorded probe audit; 11,125 rows bit-exact vs ceiling parquets"
@@ -228,8 +228,8 @@ SETS = {
         "labels": "human",
         "label_scale": "human (KADID dmos-derived, source units)",
         "label_note": "TRAIN-role human scores copied through unanalysed",
-        "row_meta": lambda src: ceiling_meta(src, _INPUTS_ROWS),
-        "select_row_ids": _CEIL_SEL["kadid_train"],
+        "row_meta": lambda src: ceiling_meta(src, _ceiling_sets()[0]),
+        "select_row_ids": lambda: _ceiling_sets()[1]["kadid_train"],
         **_SET_COMMON_CEILING,
     },
     "tid2013": {
@@ -239,8 +239,8 @@ SETS = {
         "labels": "human",
         "label_scale": "human (TID2013 mos, source units)",
         "label_note": "TRAIN-role human scores copied through unanalysed",
-        "row_meta": lambda src: ceiling_meta(src, _INPUTS_ROWS),
-        "select_row_ids": _CEIL_SEL["tid2013"],
+        "row_meta": lambda src: ceiling_meta(src, _ceiling_sets()[0]),
+        "select_row_ids": lambda: _ceiling_sets()[1]["tid2013"],
         **_SET_COMMON_CEILING,
     },
     "kadid_select": {
@@ -250,8 +250,8 @@ SETS = {
         "labels": "human",
         "label_scale": "human (KADID dmos-derived, source units)",
         "label_note": "KADID SELECT is potential-exposed (ruling D1): labels usable by fit lanes; copy-through only",
-        "row_meta": lambda src: ceiling_meta(src, _INPUTS_ROWS),
-        "select_row_ids": _CEIL_SEL["kadid_select"],
+        "row_meta": lambda src: ceiling_meta(src, _ceiling_sets()[0]),
+        "select_row_ids": lambda: _ceiling_sets()[1]["kadid_select"],
         **_SET_COMMON_CEILING,
     },
     # ---- fresh-extract ----
