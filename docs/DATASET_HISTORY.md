@@ -4605,3 +4605,17 @@ Author MDSI maps are differential oracles only and enter no dataset/model.
 The potential proposal updates P1 and proposes optional P2b (MDSI peer scalar);
 its admission requires the coordinator's pre-label decision. No potential
 fit, sidecar promotion, registry adoption or push is authorized by this record.
+
+
+## 2026-09-25 — restored-cut sidecars (restore-cuts, quarantined)
+
+Four default-off families appended after C8 (COST_CUTS_AUDIT A1, B2, Ambiguous 7, B1): `mapdev` f1502-1561,
+`z1max` f1562-1789, `gmsnative` f1790-1819, `dvifmgate` f1820-1824 (width 1825). f0-f1501 unchanged (2,000
+SafeSyn pairs: `--full-gmsbank` CSV byte-identical to main, all-on prefix 0/3,004,000 mismatches).
+Sidecars over the 18 promoted bank sets (248,983 keys; pixels only, no label read) at
+`/var/tmp/restore-cuts/bank/`; record `benchmarks/rev4_restore_cuts_2026-09-24.{md,json,pointer.md}`, design
+`benchmarks/rev4_restore_cuts_design_2026-09-24.md`, cost `benchmarks/restore-cuts_cost_2026-09-24.md`. Producer
+`ec5b1821`, Rev3/sqrt, `legacy-rgb8`. Sidecars from this era must not join stored sidecars of another era by
+width. No feature is shown to help; the potential lane decides (arm proposal
+`benchmarks/rev4_restore_cuts_potential_prereg_proposal_2026-09-24.md`).
+

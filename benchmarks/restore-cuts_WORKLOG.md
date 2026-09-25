@@ -48,8 +48,6 @@ The shared heavy lock has been held for >30 min by the potential lane MLP batche
   chain lets each family be requested at the narrowest layout that reaches it; its values do not depend on
   later families (asserted).
 
-HEARTBEAT 2026-09-25T02:05:02Z restore-cuts extraction
-
 ### 2026-09-25 02:05Z gates and extraction start
 - Clean-snapshot builds: baseline `main@origin` 26494c8a (binary sha256 `169b49c6...`), candidate `ec5b1821` (`4ea8f333...`); `build_meta.json`: 15 repositories, 20 local packages, 220 registry, 0 git sources, 0 outside the snapshot. Defect found on main: zensim-bench manifest had two `gmsd` keys (commit 9e62cbc4 dedupes; notice in ~/tmp/devin/NOTICE_zensim_bench_duplicate_gmsd_key.md).
 - Measure-first gate (2,000 SafeSyn pairs, 8 threads, `gate_sample2.log`): baseline `--full-gmsbank` WALL 52.24 s (38.3 pairs/s, max RSS 750 MB); candidate `--full-gmsbank` (families off) WALL 51.04 s, CSV **byte-identical** to the baseline (both sha256 `dc3f98b1...`); candidate with the four families + `prefix` WALL 67.05 s (29.8 pairs/s, max RSS 888 MB), f0..f1501 `3004000 cells, 0 mismatches` vs the baseline.
@@ -58,6 +56,12 @@ HEARTBEAT 2026-09-25T02:05:02Z restore-cuts extraction
 ### 2026-09-25 02:20Z pre-existing failing test on main (not touched)
 `cargo test -p zensim --features training --test rev4_featbank_parity`: 3 passed, 1 failed, 1 ignored (corpus gate) -- identically on the baseline snapshot main@origin 26494c8a and on this branch (baseline run: `/var/tmp/restore-cuts/target-base-test`). The failing test is `gmsbank_contrast_reduction_has_exact_zero_gain_in_every_tier` (`rev4_featbank_parity.rs:379`): it walks the whole 180-slot C8 block in chunks of 15 (`values[GMSBANK_BASE..].as_chunks::<15>()`), a layout that held before the 2026-09-24 chroma revision; after it the block is native Y 15, then per scale X/Y/B 15 each plus a 10-slot joint chromaticity cell, so every chunk after the first CS cell is misaligned and reads a deviation slot as `gain`. It is a test bug from the C8 chroma landing, not a feature defect, and is left alone (relaxing or re-deriving a test needs the owner). `zensim-validate --test feature_set_match`: 10 passed.
 
-HEARTBEAT 2026-09-25T02:20:02Z restore-cuts extraction
+### Per-set extraction results
+Moved verbatim to `benchmarks/restore-cuts_extraction_log_2026-09-25.md` (18 blocks: command, UTC, exit 0, result lines, log sha256).
 
-HEARTBEAT 2026-09-25T02:35:02Z restore-cuts extraction
+(The extraction driver appended 49 15-minute heartbeat lines between 2026-09-25T02:05:02Z and 2026-09-25T14:05:03Z; removed here to keep this file under 30 KB. Per-set results are the `### <set>` blocks above.)
+
+## 2026-09-25 14:15Z — extraction, cost, memory complete
+- 18/18 sets extracted and bound under the shared lock (`run_all.sh`, exit 0 each; blocks in `restore-cuts_extraction_log_2026-09-25{,b}.md`). `bank_sidecar.py verify`: `RESTORE_VERIFY sets=18 rows=248983`. Fresh re-extraction of 200 random rows: `RESTORE_REEXTRACT_VERIFY rows=200 new_f32_cells=64600 bit_mismatches=0`.
+- Cost (interleaved zenbench, contended) and peak heap (heaptrack) recorded in `restore-cuts_cost_2026-09-24.md`.
+- Records: `rev4_restore_cuts_2026-09-24.{md,json,pointer.md}`; DATASET_HISTORY entry added. Not done: tower mirror (`/mnt/tower` unmounted).
