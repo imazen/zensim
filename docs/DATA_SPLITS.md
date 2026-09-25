@@ -814,3 +814,27 @@ never Rev4 confirmation holdouts for choices informed by these fits. CID22-B, th
 secret holdouts are outside the archive. The exact archive SHA-256, source manifest hashes, and fleet program identity
 will be recorded in `benchmarks/fleet-fits_WORKLOG.md` in the quarantine zenmetrics workspace before the fleet
 declaration.
+
+## Exposure ledger — 2026-09-25: fleet transport of P2 and D2 potential-fit inputs (ruling D1)
+
+The `fleet-fits` lane, under the coordinator's GO of 2026-09-25, is preparing a second content-addressed input archive
+for the preregistered P2 MLP grid (960 cells) and the D2 source-held-out MLP replicate grid (210 cells). It is the P0
+archive's populations (the four TRAIN-role sets, CID22-A(25), AIC-3 CTC, KADID SELECT, KonFiG originsplit val) plus
+KonJND BPG val (2,020 rows, the D2 evaluation substitute for konjnd_bpg_train), the label-free reviewed peer GMSD/GMSM
+tables for exactly those nine populations, and the D2 fold tables with their receipts for the arms r0, p2 and p2_perm.
+The transport step verifies source receipts, table hashes and peer parquet hashes, and copies bytes without decoding
+label columns or computing statistics. The potential lane's fit scripts subsequently read these labels for the
+already-authorized in-sample potential and source-held-out estimates. All nine populations remain potential-exposed,
+never Rev4 confirmation holdouts for choices informed by these fits. CID22-B, the AIC-4 sample, CSIQ, KonJND JPEG, KADID
+terminal, the remaining peer-bank sets and secret holdouts are outside the archive; the packer refuses any file name
+naming them. The exact archive SHA-256 and source manifest hashes will be recorded in `benchmarks/fleet-fits_WORKLOG.md`
+in the quarantine zenmetrics workspace before the fleet declaration.
+
+Addendum, recorded at landing (2026-09-26), after the archive existed: the P2/D2 archive is
+`/var/tmp/fleet-fits/data-p2d2.tar.gz`, 703,345,489 bytes, SHA-256
+`4b2c0434c5eb7edf8fb0813677ccdb9867a5a4792f2d2f082fda59c26e6d8839` (the `data_sha` of every cell in
+`/var/tmp/fleet-fits/fit-manifest-p2.json`; recomputed with `sha256sum` at landing). The promised worklog entry was not
+made: `benchmarks/fleet-fits_WORKLOG.md` lives in the separate zenmetrics fleet-fits workspace and was not updated, so
+this record is the zensim-side copy. Timing: this entry's commit time is 05:37:50 (-06:00) and the archive's file mtime
+is 05:38:23 (-06:00), 33 s later; the timestamps are consistent with the entry preceding the archive's completion but do
+not demonstrate it, so treat 'prerecord' as unproven for this archive.
