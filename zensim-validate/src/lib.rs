@@ -33,4 +33,5 @@ pub mod parquet_loader;
 pub mod perf_trace;
 pub mod prune;
 pub mod simd_mlp;
+pub mod tier_cap;
 pub mod train_manifest;

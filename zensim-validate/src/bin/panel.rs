@@ -1225,6 +1225,7 @@ fn run_pairwise(path: &Path, resample: Option<&Path>) -> Result<String, String> 
 // ----------------------------------------------------------------------
 
 fn main() -> ExitCode {
+    zensim_validate::tier_cap::apply_from_env();
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {

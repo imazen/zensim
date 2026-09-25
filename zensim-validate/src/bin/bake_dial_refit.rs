@@ -4850,6 +4850,7 @@ fn cmd_refit_winsor(a: &RefitWinsorArgs) -> Result<(), String> {
 }
 
 fn main() -> ExitCode {
+    zensim_validate::tier_cap::apply_from_env();
     let cli = Cli::parse();
     let result: Result<bool, String> = match &cli.cmd {
         Cmd::AddSpline(a) => cmd_add_spline(a).map(|_| false),

@@ -70,7 +70,7 @@ pub fn forward(
 ) -> (f64, Vec<f64>, Vec<f64>) {
     #[cfg(target_arch = "x86_64")]
     {
-        if std::is_x86_feature_detected!("avx512f") {
+        if crate::tier_cap::avx512_allowed() && std::is_x86_feature_detected!("avx512f") {
             // SAFETY: dispatch gated by `is_x86_feature_detected`.
             return unsafe { forward_avx512(x, w1, b1, w2, b2, n_features, n_hidden, alpha) };
         }
@@ -103,7 +103,7 @@ pub fn backprop_step(
 ) {
     #[cfg(target_arch = "x86_64")]
     {
-        if std::is_x86_feature_detected!("avx512f") {
+        if crate::tier_cap::avx512_allowed() && std::is_x86_feature_detected!("avx512f") {
             // SAFETY: dispatch gated by `is_x86_feature_detected`.
             unsafe {
                 backprop_avx512(

@@ -2755,6 +2755,7 @@ fn preflight_cli_capabilities(args: &Args, matches: &clap::ArgMatches, want_gpu:
 }
 
 fn main() {
+    zensim_validate::tier_cap::apply_from_env();
     // We parse via ArgMatches (not Args::parse) so --manifest can apply
     // its recorded fields as DEFAULTS while letting explicit CLI flags
     // win. `value_source(id) == CommandLine` tells us which flags the
