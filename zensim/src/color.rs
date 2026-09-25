@@ -128,6 +128,7 @@ pub(crate) fn srgb_u16_to_linear(v: u16) -> f32 {
 /// the inverse of [`srgb_u8_to_linear`]'s transfer. Inputs outside [0, 1]
 /// are clamped — the gamma domain is the display signal, which is where
 /// the DVIFM Y′CbCr planes are defined.
+#[cfg(feature = "feature-regime-v2")]
 #[inline]
 pub(crate) fn linear_to_srgb_gamma(v: f32) -> f32 {
     linear_srgb::default::linear_to_srgb(v)
@@ -2398,6 +2399,7 @@ mod tests {
     /// across the linear/segmented knee, monotone, and the inverse of the
     /// u8→linear LUT up to that LUT's own quantization error.
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn linear_to_srgb_gamma_is_the_oetf() {
         assert_eq!(linear_to_srgb_gamma(0.0), 0.0);
         assert_eq!(linear_to_srgb_gamma(1.0), 1.0);

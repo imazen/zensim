@@ -1649,6 +1649,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
 }
 
 /// Which BT.709 Y′CbCr plane to emit — the DVIFM pump's native planes.
+#[cfg(feature = "feature-regime-v2")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum YcbcrPlane {
     /// `Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′` on the gamma-encoded
@@ -1661,6 +1662,7 @@ pub(crate) enum YcbcrPlane {
 }
 
 /// One pixel of the BT.709 Y′CbCr plane from a gamma-encoded sRGB triple.
+#[cfg(feature = "feature-regime-v2")]
 #[inline(always)]
 fn ycbcr_plane_value(rgb: [f32; 3], plane: YcbcrPlane) -> f32 {
     let [r, g, b] = rgb;
@@ -1683,6 +1685,7 @@ fn ycbcr_plane_value(rgb: [f32; 3], plane: YcbcrPlane) -> f32 {
 /// identical to the XYB converter's contract. Pad columns carry the same
 /// horizontal mirror. Serial row order — the DVIFM pump consumes strips
 /// serially, so there is nothing to parallelise across.
+#[cfg(feature = "feature-regime-v2")]
 pub(crate) fn convert_source_to_ycbcr_plane_into_slice(
     source: &impl ImageSource,
     out: &mut [f32],
@@ -8766,6 +8769,7 @@ mod tests {
     /// primaries → the documented extremes, and a mid-grey check that the
     /// gamma-domain signal is what the matrix consumes (not linear light).
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn ycbcr_plane_bt709_anchor_values() {
         let cases: [([f32; 3], f32, f32, f32); 5] = [
             // (rgb, expected Y′, Cb, Cr)
@@ -8804,6 +8808,7 @@ mod tests {
     /// The u8 fast path must be the gamma code itself, bit-identical to
     /// `v/255` fed through the matrix — no LUT round-trip error.
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn ycbcr_converter_srgb8_is_exact_gamma_domain() {
         let (w, h) = (9usize, 5usize);
         let px: Vec<[u8; 3]> = (0..w * h)
@@ -8838,6 +8843,7 @@ mod tests {
     /// ignored); translucent rows must still produce finite, in-range
     /// planes through the composite+encode fallback.
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn ycbcr_converter_rgba_alpha_contract() {
         let (w, h) = (7usize, 4usize);
         let rgb: Vec<[u8; 3]> = (0..w * h)
@@ -8883,6 +8889,7 @@ mod tests {
     /// Pad columns carry the horizontal mirror of the plane, matching the
     /// XYB converter's padding contract.
     #[test]
+    #[cfg(feature = "feature-regime-v2")]
     fn ycbcr_converter_mirror_pads_columns() {
         let (w, h, padded_w) = (5usize, 3usize, 9usize);
         let px: Vec<[u8; 3]> = (0..w * h)
