@@ -5409,7 +5409,8 @@ mod tests {
     /// The assertion is deliberately two-sided: chunk 64 must reproduce the
     /// default EXACTLY, and at least one other height must NOT — if the second
     /// half ever fails, the per-pixel kernels became length-invariant and this
-    /// whole constraint can be lifted.
+    /// whole constraint can be lifted. The scalar tier is the exception: it is
+    /// length-invariant since 2026-09-25, and there no height may move a byte.
     #[test]
     fn convert_chunk_rows_is_semantics_not_a_knob() {
         let mut diverged = 0usize;
@@ -5456,12 +5457,23 @@ mod tests {
                 }
             }
         }
-        assert!(
-            diverged > 0,
-            "no swept chunk height moved a byte — if the per-pixel conversion \
-             kernels became length-invariant, the producer's CONVERT_CHUNK_ROWS \
-             constraint (and this test's doc comment) can be lifted"
-        );
+        if crate::color::dispatches_scalar() {
+            // The scalar tier zero-pads its remainder through a full chunk
+            // (2026-09-25), so its conversion IS length-invariant: no chunk height
+            // may move a byte. The second half of the assertion above cannot hold
+            // here by construction; this is its stronger scalar-tier form.
+            assert_eq!(
+                diverged, 0,
+                "the scalar-tier conversion must give a pixel the same bits at any chunk height"
+            );
+        } else {
+            assert!(
+                diverged > 0,
+                "no swept chunk height moved a byte — if the per-pixel conversion \
+                 kernels became length-invariant, the producer's CONVERT_CHUNK_ROWS \
+                 constraint (and this test's doc comment) can be lifted"
+            );
+        }
     }
 
     /// Public-API end-to-end test: `compute_streaming_strips_default`

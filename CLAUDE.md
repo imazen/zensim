@@ -158,24 +158,58 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
-* **2026-09-25 — bulk sRGB→XYB gives different bits for the same colour in the vector chunks and in the scalar
-  remainder. OPEN; the fix needs a formula-revision decision.**
+* **2026-09-25 — bulk sRGB→XYB gives different bits for the same colour in the vector chunks and in the remainder,
+  SIMD tiers. OPEN; the fix needs a formula-revision decision.** (The scalar tier / i686 half is FIXED, next entry.)
   - `color::srgb_to_positive_xyb_planar_into` converts each band of `rows × width` pixels in one call. Full
     vector chunks (16- and 8-wide) use magetypes' `cbrt_midp` (seed `0x2a508c2d`, unfused Halley steps). The last
-    `rows × width mod 8` pixels use `color::cbrtf_fast` (seed `709_958_130`, fused Halley steps). On the scalar tier
-    the chunk matrix is also unfused, because magetypes' scalar `mul_add` is `a * b + c`.
+    `rows × width mod 8` pixels use `color::cbrtf_fast` (seed `709_958_130`, fused Halley steps).
   - Measured over all 2^24 sRGB8 colours with the real owner
-    (`cargo run --release -p zensim --example xyb_chunk_tail_parity`): the XYB output differs for **84.600 %** of
-    colours on x86_64 AVX-512 (per channel X/Y/B 10,857,190 / 8,584,754 / 9,519,698) and **85.766 %** on i686,
-    which runs the scalar tier (11,023,236 / 8,768,277 / 9,698,716), by up to **196 ULP**. At most 7 pixels per
-    converted band are affected.
-  - Consequence: a flat image is not flat after conversion. `feature_v2::tests::gmsbank_constant_chroma_shift_is_visible_without_gradients`
-    fails on i686, where the XYB conversion always runs the generic scalar variant because its v3/v4 variants are
-    compiled only for x86_64. It passes on x86_64 and aarch64 only because its two test colours shift by the same
-    1 ULP in Y, so the reference and distorted artefacts cancel.
+    (`cargo run --release -p zensim --example xyb_chunk_tail_parity`, one line per tier): the XYB output differs for
+    **84.600 %** of colours on x86_64 v4x, v4 and v3 alike (per channel X/Y/B 10,857,190 / 8,584,754 / 9,519,698), by
+    up to **196 ULP**. At most 7 pixels per converted band are affected.
+  - **wasm128** (wasmtime, simd128) has the same divergence: **85.766 %** (11,023,236 / 8,768,277 / 9,698,716,
+    max 196 ULP) — the numbers the scalar tier had before its fix, because magetypes' wasm128 `mul_add` is unfused
+    too. aarch64 NEON was not run (no aarch64 linker on the measuring box); it shares the code path, so expect the
+    same class of divergence, unmeasured.
+  - Consequence: on those tiers a flat image is not flat after conversion when its band pixel count is not a
+    multiple of 8. `feature_v2::tests::gmsbank_constant_chroma_shift_is_visible_without_gradients` passes on x86_64
+    and aarch64 only because its two test colours shift by the same 1 ULP in Y, so the reference and distorted
+    artefacts cancel.
   - Any fix (pad the remainder into one more vector chunk, or one cube-root and `mul_add` form on every path)
-    changes feature bits for images whose band pixel count is not a multiple of 8. So it is an arithmetic-revision
-    decision, not a silent patch.
+    changes feature bits for images whose band pixel count is not a multiple of 8. Every stored feature table was
+    produced on one of these tiers, so it is an arithmetic-revision decision, not a silent patch. The scalar-tier fix
+    below is the template: same conversion, remainder zero-padded through one more chunk.
+* **2026-09-25 — the same chunk-vs-remainder divergence on the scalar tier (i686, and any host with no vector
+  token). FIXED** (this commit; user decision 2026-09-25, verbatim: "You can change i686 values fine.").
+  - The decision covers the scalar tier only. It does not cover x86_64 v4x/v4/v3, aarch64 NEON or wasm128.
+  - Before: **85.766 %** of colours differed between a full chunk and the remainder on i686 (X/Y/B 11,023,236 /
+    8,768,277 / 9,698,716, max 196 ULP); the chunk matrix is unfused there because magetypes' scalar `mul_add` is
+    `a * b + c`, while the remainder used the fused `cbrtf_fast` form.
+  - Now the scalar tier zero-pads the last `n mod 8` pixels into one more 8-pixel array, runs the chunk arithmetic
+    (`color::OpsinChunk`, one shared definition for neon, wasm128 and scalar), and copies the first `n mod 8`
+    outputs back. Applied to every bulk conversion with the chunk-plus-`cbrtf_fast`-remainder shape:
+    `srgb_to_positive_xyb_planar_into`, `srgb_to_xyb_planar_into` and `linear_to_positive_xyb_planar_into`.
+    The x86_64 v4x/v4/v3 variants are not touched; neon and wasm128 keep their per-pixel remainder
+    (`PaddedTail::PAD_TAIL = false`).
+  - Measured after: `xyb_chunk_tail_parity` reports **0 differing colours** on native i686 and on the x86_64
+    forced-scalar permutations. `feature_v2::tests::gmsbank_constant_chroma_shift_is_visible_without_gradients`
+    now passes on the scalar tier because a flat image stays flat.
+  - Scalar-tier values move only for bands whose pixel count is not a multiple of 8, and only in the last
+    `n mod 8` pixels of a band. **i686 scalar and wasm128 were bit-identical (160/160,
+    `benchmarks/dense_serving_ungate_2026-09-06.md` §2d) and are no longer**, for such bands.
+  - The `GamutMapping::Preserve` converter (`linear_to_positive_xyb_planar_into_unclamped`) follows the same
+    tail policy: on the scalar tier it runs the same `OpsinChunk` arithmetic without the input clamp (full chunks plus a
+    zero-padded remainder chunk, `CLAMP = false`), so it matches the clamped entry bit for bit at every position
+    on in-gamut input. On every other tier it keeps its per-pixel form for every pixel, unchanged (dispatch is now
+    `incant!` `[v3, neon, wasm128, scalar]`; v4/v4x use the v3 variant). Preserve-mode values on v4x/v4/v3 were
+    verified bit-identical before and after over all 2^24 colours plus out-of-gamut linear input.
+  - Test changes: `unclamped_matches_clamped_scalar_for_in_gamut` keeps its original body and now holds on every
+    tier. `scalar_tier_unclamped_matches_clamped_at_every_position` adds bands of 1–40 pixels asserting unclamped ==
+    clamped bit for bit at every position (scalar variants called directly, so it runs on every host).
+    `streaming::tests::convert_chunk_rows_is_semantics_not_a_knob` asserts on the scalar tier that no chunk height
+    moves a byte (its old second half, "some height must move a byte", is exactly what the fix removes; unchanged on
+    every other tier; accepted in coordinator review). `color::tests::scalar_tier_remainder_matches_full_chunk_arithmetic`
+    fails on the pre-fix arithmetic (negative control run) and passes now.
 * **2026-09-25 — the C8 landing left `main` with an unparseable `zensim-bench/Cargo.toml` and two failing C8
   tests; a C1–C4 identity test was also racing. FIXED** (this commit).
   - The landing rebase kept both the E5A and the C8 `gmsd` entries in `[dependencies]`. TOML rejects a duplicate
