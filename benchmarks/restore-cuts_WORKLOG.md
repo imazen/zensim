@@ -73,3 +73,9 @@ Moved verbatim to `benchmarks/restore-cuts_extraction_log_2026-09-25.md` (18 blo
 - Tier-drift numbers are labelled with their revision (Rev1 first run, Rev3 rerun below); the "independent of SIMD tier" claim in `restore_cuts.rs`, the prereg (amendment appended, text not rewritten) and the design note is corrected.
 - B2m index set fixed (13 block-locals, 156 columns); f1574 dead on FOUR KonJND sets; `Form::Undeclared` doc names its uses; `--restore-cuts` `Some(_)` clippy nit; prefix-vs-all MT8 identity added to the parity test.
 - Not corrected by choice/left to the coordinator: `RESTORE_COMMIT` re-pin and the DATA_SPLITS ledger entry (at landing).
+
+### 2026-09-25 15:45Z review gates (through ~/tmp/devin/heavy, tip 3ea4e104; logs /var/tmp/restore-cuts/logs/review_*.log)
+- `cargo test -p zensim --all-features --no-fail-fast` at the default revision (Rev1): rc=0, every target ok, including `research_engine_parity` (width 1825) and `restore_cuts_parity`.
+- Same at `ZENSIM_FORMULA_REV=3 ZENSIM_ROOT_FORM=sqrt`: `research_engine_parity` and `restore_cuts_parity` pass; 6 targets fail (`--lib`, `attribution_cross_tier`, `cross_platform`, `fold_engine_parity`, `per_bake_revision`, `v1_golden_bytes`) because they assume the shipped Rev1 ("the active revision is not the shipped one", golden bytes). The IDENTICAL six targets fail on `main@origin` 424b8b02 at Rev3 (`review_main_test_rev3.log`), so they are not caused by this lane.
+- Rev3 tier drift (3 tiers x 4 sizes, `restore_cuts_parity`): non-SSIM worst 7.8e-5..5.7e-3, SSIM-derived z1max 7.6e-5..2.9e-4. Rev1 first run: non-SSIM 9.9e-5..5.7e-3, SSIM-derived up to 6.8e-2.
+- `cargo clippy --workspace --all-targets --all-features --exclude zensim-wasm-tests -- -D warnings`: rc=0. `ZEN_API_DOC=check` (nightly-2026-09-02): `1 passed`. `lint_scripts` from a clean export outside the workspace (`/var/tmp/restore-cuts-export`): `670 scripts checked, all runnable`.
