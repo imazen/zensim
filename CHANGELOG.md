@@ -130,10 +130,11 @@
 
 - `BakeScorer` no longer refuses a corruption companion whose feature ids a
   narrow (local-only basic) base plan does not populate; the extraction is the
-  union of both plans (277041e8).
-- Feature-permutation dead-code errors: the Y'CbCr plane helpers (bde56d19) and
-  `AttributionResult::query_rect_frac`/`grid_coord_f` (9e64eed3) are gated on
-  `feature-regime-v2`, the feature every caller sits behind.
+  union of both plans (2695ef5f).
+- Feature-permutation dead-code errors: the Y'CbCr plane helpers (0e78b76f) and
+  `AttributionResult::query_rect_frac`/`grid_coord_f` (e6c60486, narrowed in
+  ea6957e5 to `test` or `training` + `feature-regime-v2`) are gated on the
+  features their callers sit behind.
 
 - Scalar tier (the tier i686 always runs, and any host with no vector token): the bulk
   sRGB→XYB, sRGB→positive-XYB and linear→positive-XYB conversions gave a pixel different
