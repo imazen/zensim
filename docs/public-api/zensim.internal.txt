@@ -14,7 +14,7 @@
 #   pub consts/statics                          7
 #   free functions                             36
 #   inherent methods                          169
-#   struct fields                             110
+#   struct fields                             114
 #   enum variants                              32
 #   trait roster entries (type × trait)       121
 #   auto-trait-complete types                  24
@@ -27,14 +27,14 @@
 #   det_math                         13
 #   f64                               3
 #   feature_set_id                    5
-#   feature_v2                       27
+#   feature_v2                       31
 #   fold_engine                       8
 #   profile                           1
 #   research                        143
 #   score_math                       26
 #   source                            4
 
-## items (387 lines)
+## items (391 lines)
 
 #[non_exhaustive] pub struct research::DvifmFieldMap
 #[non_exhaustive] pub struct research::DvifmLevelField
@@ -352,14 +352,18 @@ pub det_math::PowForm::PureRust
 pub feature_v2::FormulaRevision::Rev1
 pub feature_v2::FormulaRevision::Rev2
 pub feature_v2::FormulaRevision::Rev3
+pub feature_v2::V2NewFeatureToggles::dvifmgate: bool
 pub feature_v2::V2NewFeatureToggles::formula_revision: feature_v2::FormulaRevision
 pub feature_v2::V2NewFeatureToggles::free_extras: feature_v2::V1FreeExtras
 pub feature_v2::V2NewFeatureToggles::gmsbank: bool
+pub feature_v2::V2NewFeatureToggles::gmsnative: bool
+pub feature_v2::V2NewFeatureToggles::mapdev: bool
 pub feature_v2::V2NewFeatureToggles::rev4_arttype: bool
 pub feature_v2::V2NewFeatureToggles::rev4_gridblk: bool
 pub feature_v2::V2NewFeatureToggles::rev4_ringbasis: bool
 pub feature_v2::V2NewFeatureToggles::rev4_tailhist: bool
 pub feature_v2::V2NewFeatureToggles::v1_only: bool
+pub feature_v2::V2NewFeatureToggles::z1max: bool
 pub fold_engine::ScoringEngine::Buffered
 pub fold_engine::ScoringEngine::Fold
 pub profile::ZensimProfile::LegacyLinearV0_2
