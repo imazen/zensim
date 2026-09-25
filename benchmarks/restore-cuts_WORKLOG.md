@@ -20,3 +20,6 @@ Brief: `~/tmp/zensim-paper/rev4/RESTORE_CUTS_brief.md`. Rules: `DEVIN_COMMON.md`
      the partb lane). Widened to the registered widths (1322, 1502, 1562, 1790, 1820, ...).
 - Base for builds: sibling repos re-archived from fetched mains (CODEX_NOTE crates-on-main rule); commit
   ids recorded below when the build is made.
+
+### 2026-09-25 01:35Z lock note
+The shared heavy lock has been held for >30 min by the potential lane MLP batches (8 replicates x many arms). Compile-only `cargo check -p zensim --lib` runs at `run-heavy --mem 6G --jobs 2` (cgroup-capped, nice/ionice, one at a time) OUTSIDE the lock so the first compile is not delayed by hours; every test, benchmark and extraction run stays under the lock.

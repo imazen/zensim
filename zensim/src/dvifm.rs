@@ -1118,11 +1118,25 @@ fn contrast_g_rec(rec: &BlockRec, side: usize, g: f64, edge: bool) -> f64 {
     }
 }
 
+/// Two-state visibility: `1` for `C <= c0`, `0` above the knee (a NaN contrast
+/// takes the `1` arm, like [`visibility`]'s `v = 1` arm). Non-increasing, so
+/// the max-merge across sides is the gate of the smaller contrast.
+#[inline]
+fn gate_visibility(c: f64, lp: &DvifmLevelParams) -> f64 {
+    if c > lp.c0 { 0.0 } else { 1.0 }
+}
+
 /// Per-level block sums — accumulated in one running order.
 #[derive(Default)]
 struct LevelSums {
     n: u64,
     f1: f64,
+    /// Restored cut `dvifmgate`: the same F1 with the TWO-STATE visibility
+    /// `v = 1 iff C <= c0` (merged across sides with `max`, as `f1` merges
+    /// the smooth curve). F2 does not depend on `v`, so this one sum is the
+    /// whole gate-form variant. Accumulated in the same order as `f1`; it
+    /// cannot move any existing value.
+    f1_gate: f64,
     f2: [f64; DVIFM_BINS],
 }
 
@@ -1144,6 +1158,7 @@ fn block_terms(rec: &BlockRec, lp: &DvifmLevelParams) -> (f64, f64, f64, f64) {
 fn pool_block(sums: &mut LevelSums, lp: &DvifmLevelParams, rec: &BlockRec) {
     let (cs, cd, vb, e) = block_terms(rec, lp);
     sums.f1 += vb * e;
+    sums.f1_gate += gate_visibility(cs, lp).max(gate_visibility(cd, lp)) * e;
     let ell = (cs.min(cd) + 1e-6).ln();
     let h = hat_memberships(ell, &lp.f2_centers);
     for (hj, f2) in h.iter().zip(sums.f2.iter_mut()) {
@@ -1430,6 +1445,19 @@ pub(crate) struct DvifmAccum {
 }
 
 impl DvifmAccum {
+    /// Restored cut `dvifmgate`: the per-level gate-form F1 (`Σ v_gate·m^P / n`,
+    /// exact zero for a level with no full block). Read after
+    /// [`dvifm_finish_walk`]/[`dvifm_finish`] has flushed every level.
+    pub(crate) fn gate_f1(&self) -> [f64; DVIFM_LEVELS] {
+        let mut out = [0.0; DVIFM_LEVELS];
+        for (o, pump) in out.iter_mut().zip(&self.levels) {
+            if pump.sums.n > 0 {
+                *o = pump.sums.f1_gate * (1.0 / pump.sums.n as f64);
+            }
+        }
+        out
+    }
+
     pub(crate) fn new(w: usize, h: usize, norm: DvifmNorm, params: &DvifmParams) -> Self {
         let mut levels = Vec::with_capacity(DVIFM_LEVELS);
         let (mut lw, mut lh) = (w, h);
@@ -2483,6 +2511,67 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Restored cut `dvifmgate`: the gate-form F1 is `Σ v_gate·m^P / n` over the
+    /// same blocks in the same order as the curve F1. Wide-open knee
+    /// (`c0 = +inf`) admits every block so it equals the plain mean of `m^P`
+    /// recomputed from the cached block records; a shut knee (`-inf`) is an
+    /// exact zero; the fitted knee lies between, level by level; and reading
+    /// it moves none of the 30 curve/F2 features.
+    #[test]
+    fn gate_f1_semantics() {
+        let (w, h) = (125usize, 130usize);
+        let s32 = f32_plane(41, w, h);
+        let d32 = f32_plane(43, w, h);
+        let norm = DVIFM_NORM_SDR;
+        let t = scalar();
+        let run = |params: &DvifmParams| {
+            let mut acc = DvifmAccum::new(w, h, norm, params);
+            acc.enable_block_cache();
+            dvifm_push_rows(t, &mut acc, &s32, &d32);
+            let out = dvifm_finish(t, &mut acc);
+            let gate = acc.gate_f1();
+            (out, gate, acc)
+        };
+        let base = DvifmParams::default();
+        let (out, gate, _) = run(&base);
+        let mut open = base;
+        let mut shut = base;
+        for l in 0..DVIFM_LEVELS {
+            open.levels[l].c0 = f64::INFINITY;
+            shut.levels[l].c0 = f64::NEG_INFINITY;
+        }
+        let (_, gate_open, acc_open) = run(&open);
+        let (_, gate_shut, _) = run(&shut);
+        let cache = acc_open.block_cache().expect("cache enabled");
+        for l in 0..DVIFM_LEVELS {
+            let recs = &cache[l];
+            assert!(!recs.is_empty(), "level {l} has full blocks at {w}x{h}");
+            let mut sum = 0.0f64;
+            for rec in recs {
+                sum += rec.m.powf(open.levels[l].p);
+            }
+            assert_eq!(
+                gate_open[l].to_bits(),
+                (sum * (1.0 / recs.len() as f64)).to_bits(),
+                "open gate == mean m^P, level {l}"
+            );
+            assert_eq!(gate_shut[l], 0.0, "shut gate level {l}");
+            assert!(
+                gate[l] >= 0.0 && gate[l] <= gate_open[l],
+                "fitted gate level {l}: {} outside [0, {}]",
+                gate[l],
+                gate_open[l]
+            );
+        }
+        // Reading the gate does not change any curve/F2 value: the same
+        // params without the gate read reproduce them bit for bit.
+        let plain = dvifm_features_stream(&s32, &d32, w, h, norm, &base);
+        for (i, (&a, &b)) in plain.iter().zip(&out).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "feature {i}");
+        }
+        assert!(gate.iter().any(|&v| v > 0.0), "some level admits blocks");
     }
 
     #[test]

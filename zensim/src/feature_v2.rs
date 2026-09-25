@@ -51,6 +51,8 @@ use crate::det_math::DetRoots;
 use crate::error::ZensimError;
 use crate::source::ImageSource;
 
+mod restore_cuts;
+
 use archmage::incant;
 use archmage::magetypes;
 use magetypes::simd::backends::F32x8Backend;
@@ -592,6 +594,14 @@ pub(crate) const REV4_BASE: usize = 986;
 #[cfg(test)]
 pub(crate) const GMSBANK_BASE: usize = 1322;
 pub(crate) const GMSBANK_PER_CELL: usize = 15;
+/// mapdev slots per (scale, channel) cell (`feature_defs::MAPDEV_SIGNALS`).
+pub(crate) const MAPDEV_PER_CELL: usize = 5;
+/// z1max slots per (scale, channel) cell: 13 basic + 6 peaks.
+pub(crate) const Z1MAX_PER_CELL: usize = 19;
+/// gmsnative slots in total: X then B, 15 each, at scale 0.
+pub(crate) const GMSNATIVE_WIDTH: usize = 30;
+/// dvifmgate slots in total: the gate F1 of each of DVIFM's five levels.
+pub(crate) const DVIFMGATE_WIDTH: usize = 5;
 
 fn gmsbank_width(n_scales: usize) -> usize {
     crate::feature_defs::block_base(crate::feature_set_id::ComputeToken::Gmsbank, n_scales)
@@ -1055,6 +1065,13 @@ struct Rev4Work<'a> {
     bank: GmsBankWork<'a>,
 }
 
+/// Does the C8 gradient bank run for this (scale, channel)? C8 proper: every
+/// coarse channel plus native Y. `gmsnative` (restored cut) adds the native X
+/// and B cells; they reuse the same per-channel stabilisers and accumulators.
+fn gmsbank_cell_live(local: &ComputeSet, scale: usize, ch: usize) -> bool {
+    (local.gmsbank && (scale > 0 || ch == 1)) || (local.gmsnative && scale == 0 && ch != 1)
+}
+
 /// Materialized-path REV4 work order for one (scale, channel) — the
 /// [`ComputeSet::rev4_work`] analogue for [`compute_channel_scale_v2`],
 /// which resolves flags itself and owns the strip loop the bleed mask is
@@ -1107,7 +1124,7 @@ fn rev4_cell_args<'a>(
         tailhist: local.tailhist,
         flat: local.arttype,
         bleed_y: (local.arttype && ch != 1).then(|| &dst_planes[1][..]),
-        gmsbank: local.gmsbank && (scale > 0 || ch == 1),
+        gmsbank: gmsbank_cell_live(local, scale, ch),
         bank: GmsBankWork::new(
             ch,
             (local.gmsbank && scale > 0 && ch == 0).then(|| ChromaStrip {
@@ -2552,6 +2569,23 @@ pub struct V2NewFeatureToggles {
     /// The 1502-slot layout requires DVIFM and the four preceding Rev4 blocks.
     #[doc(hidden)]
     pub gmsbank: bool,
+    /// Restored cut A1 `mapdev` f1502..1561: per-(scale, channel) population
+    /// std of the raw squared-error and the four HF maps. Default OFF. The
+    /// layout requires the full C8 prefix (f0..f1501).
+    #[doc(hidden)]
+    pub mapdev: bool,
+    /// Restored cut B2 `z1max` f1562..1789: the basic+peaks surface pooled
+    /// over ungated 5x5 block maxima. Default OFF. Requires `mapdev`'s layout.
+    #[doc(hidden)]
+    pub z1max: bool,
+    /// Restored cut `gmsnative` f1790..1819: C8's X/B gradient bank at native
+    /// scale. Default OFF. Requires `z1max`'s layout.
+    #[doc(hidden)]
+    pub gmsnative: bool,
+    /// Restored cut `dvifmgate` f1820..1824: C7's per-level F1 under the
+    /// two-state gate visibility. Default OFF. Requires `gmsnative`'s layout.
+    #[doc(hidden)]
+    pub dvifmgate: bool,
 }
 
 /// Which of v1's pool slots (`f156..372`) the folded walk emits live.
@@ -2785,6 +2819,10 @@ impl Default for V2NewFeatureToggles {
             rev4_tailhist: false,
             rev4_arttype: false,
             gmsbank: false,
+            mapdev: false,
+            z1max: false,
+            gmsnative: false,
+            dvifmgate: false,
         }
     }
 }
@@ -2955,6 +2993,14 @@ pub(crate) struct ComputeSet {
     /// EWC×HF_LOSS blur product.
     pub arttype: bool,
     pub gmsbank: bool,
+    /// Restored cut A1 (`mapdev`): the per-band map side pass runs.
+    pub mapdev: bool,
+    /// Restored cut B2 (`z1max`): the block-max pooled side pass runs.
+    pub z1max: bool,
+    /// Restored cut `gmsnative`: C8's native-scale X/B gradient bank runs.
+    pub gmsnative: bool,
+    /// Restored cut `dvifmgate`: the DVIFM pump also accumulates the gate F1.
+    pub dvifmgate: bool,
     /// The free v2-era slots a v1-only walk emits ([`V1FreeExtras`]). Held
     /// here rather than re-read from the toggles at each site, so
     /// `raw_moments` has ONE derivation.
@@ -3024,6 +3070,10 @@ impl ComputeSet {
             tailhist: self.tailhist && live,
             arttype: self.arttype && live,
             gmsbank: self.gmsbank && live,
+            mapdev: self.mapdev && live,
+            z1max: self.z1max && live,
+            gmsnative: self.gmsnative && live,
+            dvifmgate: self.dvifmgate && live,
             ..self
         }
     }
@@ -3081,6 +3131,10 @@ impl ComputeSet {
             tailhist: t.rev4_tailhist && v2_blocks,
             arttype: t.rev4_arttype && v2_blocks,
             gmsbank: t.gmsbank && v2_blocks,
+            mapdev: t.mapdev && v2_blocks,
+            z1max: t.z1max && v2_blocks,
+            gmsnative: t.gmsnative && v2_blocks,
+            dvifmgate: t.dvifmgate && v2_blocks,
             free_extras: t.free_extras,
         }
     }
@@ -3216,6 +3270,18 @@ impl ComputeSet {
         if self.gmsbank {
             p = p.with(T::Gmsbank);
         }
+        if self.mapdev {
+            p = p.with(T::Mapdev);
+        }
+        if self.z1max {
+            p = p.with(T::Z1max);
+        }
+        if self.gmsnative {
+            p = p.with(T::Gmsnative);
+        }
+        if self.dvifmgate {
+            p = p.with(T::Dvifmgate);
+        }
         if self.raw_moments() {
             p = p.with(T::Moments);
         }
@@ -3276,6 +3342,10 @@ impl ComputeSet {
         let tailhist_end = ringbasis_end + n_scales * 3 * TAILHIST_PER_CELL;
         let arttype_end = tailhist_end + n_scales * ARTTYPE_PER_SCALE;
         let gmsbank_end = arttype_end + gmsbank_width(n_scales);
+        let mapdev_end = gmsbank_end + n_scales * 3 * MAPDEV_PER_CELL;
+        let z1max_end = mapdev_end + n_scales * 3 * Z1MAX_PER_CELL;
+        let gmsnative_end = z1max_end + GMSNATIVE_WIDTH;
+        let dvifmgate_end = gmsnative_end + DVIFMGATE_WIDTH;
 
         let mut ranges: Vec<(usize, usize)> = Vec::new();
         let mut scattered: Vec<usize> = Vec::new();
@@ -3317,6 +3387,18 @@ impl ComputeSet {
         }
         if self.gmsbank {
             ranges.push((arttype_end, gmsbank_end));
+        }
+        if self.mapdev {
+            ranges.push((gmsbank_end, mapdev_end));
+        }
+        if self.z1max {
+            ranges.push((mapdev_end, z1max_end));
+        }
+        if self.gmsnative {
+            ranges.push((z1max_end, gmsnative_end));
+        }
+        if self.dvifmgate {
+            ranges.push((gmsnative_end, dvifmgate_end));
         }
         if self.raw_moments() {
             scattered.extend(free_slot_indices(n_scales));
@@ -3398,7 +3480,7 @@ impl ComputeSet {
             tailhist: self.tailhist,
             flat: self.arttype,
             bleed_mask: mask.filter(|_| self.arttype && ch != 1),
-            gmsbank: self.gmsbank && (scale > 0 || ch == 1),
+            gmsbank: gmsbank_cell_live(self, scale, ch),
             bank: GmsBankWork::new(ch, chroma.filter(|_| self.gmsbank && scale > 0 && ch == 0)),
         }
     }
@@ -11159,6 +11241,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let layout_tailhist = toggles.rev4_tailhist;
     let layout_arttype = toggles.rev4_arttype;
     let layout_gmsbank = toggles.gmsbank;
+    let layout_mapdev = toggles.mapdev;
+    let layout_z1max = toggles.z1max;
+    let layout_gmsnative = toggles.gmsnative;
+    let layout_dvifmgate = toggles.dvifmgate;
     // Only read below under `threads` (the `fuse_channels` derivation a few
     // lines down); the `not(threads)` arm hardcodes `fuse_channels = false`
     // without it, so `--no-default-features --features feature-regime-v2`
@@ -11204,6 +11290,22 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         !layout_gmsbank
             || (layout_gridblk && layout_ringbasis && layout_tailhist && layout_arttype),
         "gmsbank requires the full f1322 prefix layout"
+    );
+    assert!(
+        !layout_mapdev || layout_gmsbank,
+        "mapdev requires the C8 layout (f1502 sits after f1501)"
+    );
+    assert!(
+        !layout_z1max || layout_mapdev,
+        "z1max requires the mapdev layout (f1562 sits after f1561)"
+    );
+    assert!(
+        !layout_gmsnative || layout_z1max,
+        "gmsnative requires the z1max layout (f1790 sits after f1789)"
+    );
+    assert!(
+        !layout_dvifmgate || layout_gmsnative,
+        "dvifmgate requires the gmsnative layout (f1820 sits after f1819)"
     );
     // Route-local derived φ: the SAME weighting mechanism on both routes,
     // pre-composed with each route's own encoding (design §6 — runtime
@@ -11295,6 +11397,12 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     // channel's dst-activity plane (and ONLY the Y channel's — the block
     // is Y-only, so X/B never pay the chain).
     let act_dst_on = append2.map(|p| p.dst_activity).unwrap_or(false);
+    // The restored-cut side passes (mapdev / z1max) rebuild both pyramids from
+    // the pair, so they cannot serve a ref-fed walk (no source pixels), a
+    // sampled walk, or the HDR front end.
+    let restore_side_ok = ref_planes.is_none()
+        && compute.sampling.is_none()
+        && matches!(front_end, crate::feature_v2_stream::FrontEnd::Sdr);
     let mut producer = StripPlaneProducer::new_with_ref_feed(
         source,
         distorted,
@@ -11361,7 +11469,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         // once, serially, before the channel fan-out. `local.dvifm` is the
         // compute-set flag (dvifm && scale-0 live in `v2_scales`), matching
         // `populated_slots`' attribution of the flat slots to scale 0.
-        if scale == 0 && local.dvifm {
+        if scale == 0 && (local.dvifm || local.dvifmgate) {
             let __t_dv = crate::fold_timing::start();
             let y1 = info.y0 + info.strip_h;
             let acc = dvifm_acc.get_or_insert_with(|| {
@@ -11871,6 +11979,18 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     } else {
         0
     };
+    let mapdev_total = if layout_mapdev {
+        n_scales * 3 * MAPDEV_PER_CELL
+    } else {
+        0
+    };
+    let z1max_total = if layout_z1max {
+        n_scales * 3 * Z1MAX_PER_CELL
+    } else {
+        0
+    };
+    let gmsnative_total = if layout_gmsnative { GMSNATIVE_WIDTH } else { 0 };
+    let dvifmgate_total = if layout_dvifmgate { DVIFMGATE_WIDTH } else { 0 };
     let mut features = vec![
         0.0f64;
         v12_total
@@ -11883,6 +12003,10 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             + tailhist_total
             + arttype_total
             + gmsbank_total
+            + mapdev_total
+            + z1max_total
+            + gmsnative_total
+            + dvifmgate_total
     ];
     let (features_v12, features_tail) = features.split_at_mut(v12_total);
     let (features_app, features_tail2) = features_tail.split_at_mut(append_total);
@@ -11892,7 +12016,11 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
     let (features_gridblk, features_tail6) = features_tail5.split_at_mut(gridblk_total);
     let (features_ring, features_tail7) = features_tail6.split_at_mut(ringbasis_total);
     let (features_thist, features_tail8) = features_tail7.split_at_mut(tailhist_total);
-    let (features_art, features_gmsbank) = features_tail8.split_at_mut(arttype_total);
+    let (features_art, features_tail9) = features_tail8.split_at_mut(arttype_total);
+    let (features_gmsbank, features_tail10) = features_tail9.split_at_mut(gmsbank_total);
+    let (features_mapdev, features_tail11) = features_tail10.split_at_mut(mapdev_total);
+    let (features_z1max, features_tail12) = features_tail11.split_at_mut(z1max_total);
+    let (features_gmsnative, features_dvifmgate) = features_tail12.split_at_mut(gmsnative_total);
     let mut prev_grad: [Option<(f64, f64)>; 3] = [None; 3];
 
     #[allow(clippy::needless_range_loop)] // scale derives 3+ offsets across distinct arrays
@@ -12162,7 +12290,15 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
             "dvifm ran without dvifm_block — the tail has nowhere to land"
         );
         let out = crate::dvifm::dvifm_finish_walk(&mut acc);
-        features_dvifm[..crate::dvifm::DVIFM_FEATURES].copy_from_slice(&out);
+        // The pump also runs for `dvifmgate` alone; C7's own 30 slots are
+        // written only when C7 itself was requested, so a gate-only request
+        // leaves them structural zero like every other unrequested family.
+        if compute.at_scale(0).dvifm {
+            features_dvifm[..crate::dvifm::DVIFM_FEATURES].copy_from_slice(&out);
+        }
+        if layout_dvifmgate && compute.at_scale(0).dvifmgate {
+            features_dvifmgate.copy_from_slice(&acc.gate_f1());
+        }
         // Training side output: take AFTER the finish flush — the flush
         // emits the tail's block records, so an earlier take would
         // truncate them.
@@ -12280,6 +12416,40 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         }
     }
 
+    if layout_gmsnative && compute.at_scale(0).gmsnative {
+        assert!(
+            compute.full_res_xb,
+            "gmsnative needs the native-scale X/B strips (full_res_xb)"
+        );
+        let (width, height) = dims[0];
+        for (cell, ch) in [0usize, 2].into_iter().enumerate() {
+            finish_gmsbank_cell(
+                &accums[ch].grad[0].bank,
+                width * height,
+                &mut features_gmsnative[cell * GMSBANK_PER_CELL..(cell + 1) * GMSBANK_PER_CELL],
+            );
+        }
+    }
+
+    let restore_work = restore_cuts::Work {
+        mapdev: layout_mapdev && compute.mapdev,
+        z1max: layout_z1max && compute.z1max,
+    };
+    if restore_work.any() {
+        assert!(
+            restore_side_ok,
+            "mapdev/z1max need the SDR pair path (no ref-fed, sampled or HDR walk)"
+        );
+        restore_cuts::run(
+            source,
+            distorted,
+            parallel,
+            compute.formula_revision,
+            restore_work,
+            features_mapdev,
+            features_z1max,
+        );
+    }
     ZensimV2Result {
         features,
         n_scales,
@@ -17965,6 +18135,10 @@ pub(crate) mod tests {
                     rev4_tailhist: false,
                     rev4_arttype: false,
                     gmsbank: false,
+                    mapdev: false,
+                    z1max: false,
+                    gmsnative: false,
+                    dvifmgate: false,
                 };
                 let cs = ComputeSet::from_toggles(t);
                 // --- the legacy derivation, verbatim ---

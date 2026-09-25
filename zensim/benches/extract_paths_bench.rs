@@ -296,6 +296,51 @@ fn toggles_gmsbank() -> zensim::feature_v2::V2NewFeatureToggles {
     }
 }
 
+/// `ZEN_XP_ARMS=a,b,c` restricts the interleaved groups to the named arms
+/// (unset = every arm, so an unqualified run is unchanged). A full-zoo group
+/// at 4096^2 holds the exclusive zenbench lock for hours; a cost comparison of
+/// a handful of arms does not need the rest.
+fn arm_on(name: &str) -> bool {
+    match std::env::var("ZEN_XP_ARMS") {
+        Ok(list) => list.split(',').any(|a| a == name),
+        Err(_) => true,
+    }
+}
+
+fn bench_arm<F>(group: &mut zenbench::BenchGroup, name: impl Into<String>, f: F)
+where
+    F: FnMut(&mut zenbench::Bencher) + Send + 'static,
+{
+    let name = name.into();
+    if arm_on(&name) {
+        group.bench(name, f);
+    }
+}
+
+/// Restored cuts (COST_CUTS_AUDIT): the layout chain is nested, so each arm
+/// carries every earlier restored family; a family's marginal cost is the
+/// difference to the arm before it (the C8-on `fold1502_gmsbank` arm is the
+/// baseline of the first).
+fn toggles_restore(upto: usize) -> zensim::feature_v2::V2NewFeatureToggles {
+    zensim::feature_v2::V2NewFeatureToggles {
+        mapdev: upto >= 1,
+        z1max: upto >= 2,
+        gmsnative: upto >= 3,
+        dvifmgate: upto >= 4,
+        ..toggles_gmsbank()
+    }
+}
+
+fn restore_arm(name: &str) -> Option<usize> {
+    match name {
+        "fold1562_mapdev" => Some(1),
+        "fold1790_z1max" => Some(2),
+        "fold1820_gmsnative" => Some(3),
+        "fold1825_dvifmgate" => Some(4),
+        _ => None,
+    }
+}
+
 /// One rev4 family over the f986 DVIFM layout — the per-family cost arms.
 fn toggles_rev4_family(family: &str) -> zensim::feature_v2::V2NewFeatureToggles {
     let mut t = toggles_dvifm();
@@ -518,6 +563,15 @@ fn rss_mode(arm: &str) {
                     .expect("fold rev4");
                 sink += v2.features()[v2.features().len() - 1] as f64;
             }
+            other if restore_arm(other).is_some() => {
+                let t = toggles_restore(restore_arm(other).unwrap());
+                let rsv = RgbSlice::new(&src, w, h);
+                let dsv = RgbSlice::new(&dst, w, h);
+                let v2 = z
+                    .compute_folded720_features_streaming(&rsv, &dsv, t, &mut scratch)
+                    .expect("fold restore");
+                sink += v2.features()[v2.features().len() - 1] as f64;
+            }
             other => panic!("unknown ZEN_XP_RSS arm: {other}"),
         }
     }
@@ -569,7 +623,7 @@ fn subset_bench(sizes: &[usize]) {
                     .min_rounds(min_r)
                     .max_wall_time(std::time::Duration::from_secs(wall_s));
                 for (name, model) in [("bake228_full", &*full), ("bake190_y", &*subset)] {
-                    group.bench(name, move |b| {
+                    bench_arm(group, name, move |b| {
                         let mut scorer = zensim::BakeScorer::new(model).unwrap();
                         b.iter(move || {
                             let r = scorer
@@ -579,7 +633,7 @@ fn subset_bench(sizes: &[usize]) {
                         });
                     });
                 }
-                group.bench("fold228_reused_scratch", move |b| {
+                bench_arm(group, "fold228_reused_scratch", move |b| {
                     let mut scratch = zensim::feature_v2::V2Scratch::new();
                     b.iter(move || {
                         let r = z
@@ -781,14 +835,14 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
 
                     if std::env::var_os("ZEN_XP_CONTROLS").is_some() && !spatial {
                         #[cfg(feature = "candidate-profiles")]
-                        group.bench("D_current_revision", move |b| {
+                        bench_arm(group, "D_current_revision", move |b| {
                             let z = Zensim::new(ZensimProfile::D).with_parallel(parallel);
                             let (rs, ds) = (RgbSlice::new(src, w, h), RgbSlice::new(dst, w, h));
                             b.iter(move || {
                                 zenbench::black_box(z.compute(&rs, &ds).unwrap().score())
                             });
                         });
-                        group.bench("fast_ssim2_st", move |b| {
+                        bench_arm(group, "fast_ssim2_st", move |b| {
                             let (rs, ds) =
                                 (imgref::Img::new(src, w, h), imgref::Img::new(dst, w, h));
                             b.iter(move || {
@@ -801,7 +855,7 @@ fn sampling_models_bench(sizes: &[usize], manifest: &str) {
                     for case in &models {
                         let (model, weights) = (case.models, case.weights);
                         let finite_moments = case.finite_moments;
-                        group.bench(case.name.clone(), move |b| {
+                        bench_arm(group, case.name.clone(), move |b| {
                             let mut scorer = zensim::BakeScorer::ensemble(model, weights)
                                 .unwrap()
                                 .with_parallel(parallel)
@@ -983,7 +1037,7 @@ fn resize_filter_bench(sizes: &[usize]) {
                             .format(PixelDescriptor::GRAYF32_LINEAR)
                             .filter(filter)
                             .build();
-                        group.bench(format!("{}_{}x", filter.name(), d), move |b| {
+                        bench_arm(group, format!("{}_{}x", filter.name(), d), move |b| {
                             let mut resizer = Resizer::new(&cfg);
                             let mut output = vec![0.0; m * m];
                             b.iter(move || {
@@ -1060,7 +1114,7 @@ fn main() {
                     .max_rounds(max_r)
                     .min_rounds(min_r)
                     .max_wall_time(std::time::Duration::from_secs(wall_s));
-                group.bench("buf_v1_228", move |b| {
+                bench_arm(group, "buf_v1_228", move |b| {
                     b.iter(move || {
                         let r =
                             compute_zensim_with_config(src_s, dst_s, n, n, v1_cfg(false, false))
@@ -1068,7 +1122,7 @@ fn main() {
                         zenbench::black_box(r.features()[0]);
                     })
                 });
-                group.bench("buf_v1_372", move |b| {
+                bench_arm(group, "buf_v1_372", move |b| {
                     b.iter(move || {
                         let r = compute_zensim_with_config(src_s, dst_s, n, n, v1_cfg(true, true))
                             .unwrap();
@@ -1081,7 +1135,7 @@ fn main() {
                     ("fold372_full", zensim::feature_v2::V1PoolsMode::Full),
                 ] {
                     let t = toggles_v1_only(pools);
-                    group.bench(name, move |b| {
+                    bench_arm(group, name, move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();
                         b.iter(move || {
                             let rsv = RgbSlice::new(src_s, n, n);
@@ -1095,7 +1149,7 @@ fn main() {
                 }
                 for name in ["fold228_moments", "fold228_classc"] {
                     let t = free_toggles(name);
-                    group.bench(name, move |b| {
+                    bench_arm(group, name, move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();
                         b.iter(move || {
                             let v = z
@@ -1110,7 +1164,7 @@ fn main() {
                         })
                     });
                 }
-                group.bench("fold944_off", move |b| {
+                bench_arm(group, "fold944_off", move |b| {
                     let mut scratch = zensim::feature_v2::V2Scratch::new();
                     b.iter(move || {
                         let rsv = RgbSlice::new(src_s, n, n);
@@ -1121,7 +1175,7 @@ fn main() {
                         zenbench::black_box(v2.features()[943]);
                     })
                 });
-                group.bench("fold944_full", move |b| {
+                bench_arm(group, "fold944_full", move |b| {
                     let mut scratch = zensim::feature_v2::V2Scratch::new();
                     b.iter(move || {
                         let rsv = RgbSlice::new(src_s, n, n);
@@ -1135,7 +1189,7 @@ fn main() {
                 // DVIFM cost gate (2026-09-19): the OFF arm is the widest
                 // pre-DVIFM folded layout (956), the ON arm adds the flat
                 // 30-slot block (986). Same pixels, same process, paired.
-                group.bench("fold956_csfw", move |b| {
+                bench_arm(group, "fold956_csfw", move |b| {
                     let mut scratch = zensim::feature_v2::V2Scratch::new();
                     let t = toggles_csfw();
                     b.iter(move || {
@@ -1147,7 +1201,7 @@ fn main() {
                         zenbench::black_box(v2.features()[955]);
                     })
                 });
-                group.bench("fold986_dvifm", move |b| {
+                bench_arm(group, "fold986_dvifm", move |b| {
                     let mut scratch = zensim::feature_v2::V2Scratch::new();
                     let t = toggles_dvifm();
                     b.iter(move || {
@@ -1170,8 +1224,12 @@ fn main() {
                     ("fold986_arttype", toggles_rev4_family("arttype")),
                     ("fold1322_rev4", toggles_rev4_all()),
                     ("fold1502_gmsbank", toggles_gmsbank()),
+                    ("fold1562_mapdev", toggles_restore(1)),
+                    ("fold1790_z1max", toggles_restore(2)),
+                    ("fold1820_gmsnative", toggles_restore(3)),
+                    ("fold1825_dvifmgate", toggles_restore(4)),
                 ] {
-                    group.bench(name, move |b| {
+                    bench_arm(group, name, move |b| {
                         let mut scratch = zensim::feature_v2::V2Scratch::new();
                         b.iter(move || {
                             let rsv = RgbSlice::new(src_s, n, n);
@@ -1184,7 +1242,7 @@ fn main() {
                     });
                 }
                 // The opponent. Same pixels, same process, same round.
-                group.bench("fast_ssim2", move |b| {
+                bench_arm(group, "fast_ssim2", move |b| {
                     b.iter(move || {
                         let s = imgref::Img::new(src_s, n, n);
                         let d = imgref::Img::new(dst_s, n, n);

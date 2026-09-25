@@ -122,6 +122,19 @@ pub enum ComputeToken {
     Arttype,
     /// Experimental GMSBANK gradient similarity basis, `f1322..1501`.
     Gmsbank,
+    /// Restored cut (COST_CUTS_AUDIT A1): per-scale, per-channel deviation
+    /// (std) of the MSE and HF-energy/magnitude maps, `f1502..1561`.
+    Mapdev,
+    /// Restored cut (COST_CUTS_AUDIT B2): the 228-slot basic+peaks surface
+    /// pooled over ungated 5x5 block maxima instead of pixels, `f1562..1789`.
+    Z1max,
+    /// Restored cut (COST_CUTS_AUDIT Ambiguous 7): C8's X/B gradient
+    /// loss/gain/deviation bank at native scale, `f1790..1819`.
+    Gmsnative,
+    /// Restored cut (COST_CUTS_AUDIT B1): C7's F1 with the two-state gate
+    /// visibility instead of the smooth curve, one slot per level,
+    /// `f1790+30..`.
+    Dvifmgate,
 }
 
 impl ComputeToken {
@@ -142,6 +155,10 @@ impl ComputeToken {
         ComputeToken::Tailhist,
         ComputeToken::Arttype,
         ComputeToken::Gmsbank,
+        ComputeToken::Mapdev,
+        ComputeToken::Z1max,
+        ComputeToken::Gmsnative,
+        ComputeToken::Dvifmgate,
         ComputeToken::Moments,
         ComputeToken::ClassC,
         ComputeToken::Hdr,
@@ -167,6 +184,10 @@ impl ComputeToken {
             ComputeToken::Tailhist => "tailhist",
             ComputeToken::Arttype => "arttype",
             ComputeToken::Gmsbank => "gmsbank",
+            ComputeToken::Mapdev => "mapdev",
+            ComputeToken::Z1max => "z1max",
+            ComputeToken::Gmsnative => "gmsnative",
+            ComputeToken::Dvifmgate => "dvifmgate",
             ComputeToken::Moments => "moments",
             ComputeToken::ClassC => "classc",
             ComputeToken::Hdr => "hdr",

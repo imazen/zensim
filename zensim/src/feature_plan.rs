@@ -174,6 +174,10 @@ impl Plan {
         let tailhist = touches(ComputeToken::Tailhist);
         let arttype = touches(ComputeToken::Arttype);
         let gmsbank = touches(ComputeToken::Gmsbank);
+        let mapdev = touches(ComputeToken::Mapdev);
+        let z1max = touches(ComputeToken::Z1max);
+        let gmsnative = touches(ComputeToken::Gmsnative);
+        let dvifmgate = touches(ComputeToken::Dvifmgate);
         // `csfw_on` is `csfw_block && v2_blocks` in the walk, so a CSFW
         // request implies the v2-era pass regardless of what else is asked.
         // DVIFM is the same shape (`dvifm_block && v2_blocks`), one block up.
@@ -187,7 +191,11 @@ impl Plan {
             || ringbasis
             || tailhist
             || arttype
-            || gmsbank;
+            || gmsbank
+            || mapdev
+            || z1max
+            || gmsnative
+            || dvifmgate;
 
         // Free extras: only meaningful when the owning block is NOT running.
         let free_extras = if touches(ComputeToken::ClassC) && !append {
@@ -257,6 +265,10 @@ impl Plan {
             tailhist,
             arttype,
             gmsbank,
+            mapdev,
+            z1max,
+            gmsnative,
+            dvifmgate,
             free_extras,
         };
         let mut requested = requested;
@@ -454,6 +466,10 @@ impl Plan {
             tailhist: false,
             arttype: false,
             gmsbank: false,
+            mapdev: false,
+            z1max: false,
+            gmsnative: false,
+            dvifmgate: false,
             free_extras: V1FreeExtras::Off,
         };
         Plan::normalized(compute, Layout::identity(layout_width))
@@ -516,6 +532,10 @@ impl Plan {
             rev4_tailhist: layout.tailhist,
             rev4_arttype: layout.arttype,
             gmsbank: layout.gmsbank,
+            mapdev: layout.mapdev,
+            z1max: layout.z1max,
+            gmsnative: layout.gmsnative,
+            dvifmgate: layout.dvifmgate,
             // A sub-toggle that REFINES a block cannot outlive it: the walk
             // asserts `append2_dst_activity => append2_block`. `everything`
             // (the fallback compute set for a wide bake) turns it on
@@ -600,6 +620,10 @@ impl Plan {
             tailhist: a.tailhist || b.tailhist,
             arttype: a.arttype || b.arttype,
             gmsbank: a.gmsbank || b.gmsbank,
+            mapdev: a.mapdev || b.mapdev,
+            z1max: a.z1max || b.z1max,
+            gmsnative: a.gmsnative || b.gmsnative,
+            dvifmgate: a.dvifmgate || b.dvifmgate,
             free_extras: free_union(a.free_extras, b.free_extras),
         };
         let _ = ns;
@@ -626,6 +650,10 @@ struct LayoutBlocks {
     tailhist: bool,
     arttype: bool,
     gmsbank: bool,
+    mapdev: bool,
+    z1max: bool,
+    gmsnative: bool,
+    dvifmgate: bool,
 }
 
 impl LayoutBlocks {
@@ -639,6 +667,10 @@ impl LayoutBlocks {
         let tailhist = ringbasis && width > base_of(ComputeToken::Tailhist, ns);
         let arttype = tailhist && width > base_of(ComputeToken::Arttype, ns);
         let gmsbank = arttype && width > base_of(ComputeToken::Gmsbank, ns);
+        let mapdev = gmsbank && width > base_of(ComputeToken::Mapdev, ns);
+        let z1max = mapdev && width > base_of(ComputeToken::Z1max, ns);
+        let gmsnative = z1max && width > base_of(ComputeToken::Gmsnative, ns);
+        let dvifmgate = gmsnative && width > base_of(ComputeToken::Dvifmgate, ns);
         Self {
             append,
             append2,
@@ -649,6 +681,10 @@ impl LayoutBlocks {
             tailhist,
             arttype,
             gmsbank,
+            mapdev,
+            z1max,
+            gmsnative,
+            dvifmgate,
         }
     }
 }

@@ -104,6 +104,10 @@ fn main() {
     let mut full_986 = false;
     let mut full_rev4 = false;
     let mut full_gmsbank = false;
+    // Restored cuts (COST_CUTS_AUDIT): `--restore-cuts mapdev,z1max,gmsnative`
+    // computes ONLY those families' slots (the plan skips everything else) at
+    // the full registered layout width; every other column is a structural 0.
+    let mut restore_cuts: Option<Vec<zensim::feature_set_id::ComputeToken>> = None;
     let mut dvifm_spec = None;
     let mut dvifm_blocks = None;
     let mut dvifm_cap = 0usize;
@@ -118,6 +122,17 @@ fn main() {
             "--full-986" => full_986 = true,
             "--full-rev4" => full_rev4 = true,
             "--full-gmsbank" => full_gmsbank = true,
+            "--restore-cuts" => {
+                let list = args.next().expect("--restore-cuts value");
+                restore_cuts = Some(
+                    list.split(',')
+                        .map(|t| {
+                            zensim::feature_set_id::ComputeToken::parse(t)
+                                .unwrap_or_else(|| panic!("--restore-cuts: unknown token {t:?}"))
+                        })
+                        .collect(),
+                );
+            }
             "--dvifm-spec" => dvifm_spec = Some(args.next().expect("--dvifm-spec value")),
             "--dvifm-block-stats" => {
                 dvifm_blocks = Some(args.next().expect("--dvifm-block-stats value"))
@@ -174,18 +189,22 @@ fn main() {
         Some(other) => panic!("unknown --force-tier {other:?} (native|v3|scalar)"),
     }
     assert!(
-        [full_944, full_986, full_rev4, full_gmsbank]
-            .iter()
-            .filter(|b| **b)
-            .count()
+        [
+            full_944,
+            full_986,
+            full_rev4,
+            full_gmsbank,
+            restore_cuts.is_some()
+        ]
+        .iter()
+        .filter(|b| **b)
+        .count()
             <= 1,
-        "--full-944/--full-986/--full-rev4/--full-gmsbank are mutually exclusive"
+        "--full-944/--full-986/--full-rev4/--full-gmsbank/--restore-cuts are mutually exclusive"
     );
+    let research_path = full_986 || full_rev4 || full_gmsbank || restore_cuts.is_some();
     assert!(
-        (dvifm_spec.is_none() && dvifm_blocks.is_none() && dvifm_hist.is_none())
-            || full_986
-            || full_rev4
-            || full_gmsbank,
+        (dvifm_spec.is_none() && dvifm_blocks.is_none() && dvifm_hist.is_none()) || research_path,
         "--dvifm-spec/--dvifm-block-stats/--dvifm-hist require the research path (--full-986/--full-rev4/--full-gmsbank)"
     );
     assert!(
@@ -197,7 +216,7 @@ fn main() {
         "--dvifm-hist accompanies --dvifm-block-stats"
     );
     assert!(
-        !(full_986 || full_rev4 || full_gmsbank) || sampling.is_none(),
+        !research_path || sampling.is_none(),
         "the research path (--full-986/--full-rev4/--full-gmsbank) does not take a sampling contract"
     );
     assert!(
@@ -234,8 +253,10 @@ fn main() {
     // plan-driven owner) — `--dvifm-spec`/`--dvifm-block-stats` exist only
     // there. The request is built once and shared by every pair.
     // `--full-rev4` is the same request at the rev4 bank's full width.
-    let research_req = (full_986 || full_rev4 || full_gmsbank).then(|| {
-        let w = if full_gmsbank {
+    let research_req = research_path.then(|| {
+        let w = if let Some(_) = &restore_cuts {
+            zensim::research::full_width()
+        } else if full_gmsbank {
             1502
         } else if full_rev4 {
             1322
@@ -244,10 +265,15 @@ fn main() {
         };
         let spec = dvifm_spec.as_deref().map(|p| dvifm_spec_load(Path::new(p)));
         let spec_sha = dvifm_spec.as_deref().map(|p| sha256_hex_of(Path::new(p)));
-        let mut req = zensim::research::Request::for_slots(
-            zensim::feature_set_id::SlotSet::from_ranges([(0, w)]),
-            w,
-        );
+        let want = match &restore_cuts {
+            Some(tokens) => tokens
+                .iter()
+                .fold(zensim::feature_set_id::SlotSet::default(), |acc, &t| {
+                    acc.union(&zensim::research::family_slots(t))
+                }),
+            None => zensim::feature_set_id::SlotSet::from_ranges([(0, w)]),
+        };
+        let mut req = zensim::research::Request::for_slots(want, w);
         if let Some(spec) = spec {
             req = req.with_dvifm_spec(spec);
         }
@@ -256,7 +282,7 @@ fn main() {
         }
         (req, spec_sha)
     });
-    let producer = if full_986 || full_rev4 || full_gmsbank {
+    let producer = if research_path {
         None
     } else if full_944 {
         Some(diagnostic_producer(
@@ -339,7 +365,9 @@ fn main() {
 
     if let Some(audit) = &audit {
         audit
-            .validate_feature_width(if full_gmsbank {
+            .validate_feature_width(if restore_cuts.is_some() {
+                zensim::research::full_width()
+            } else if full_gmsbank {
                 1502
             } else if full_rev4 {
                 1322
@@ -476,7 +504,9 @@ fn main() {
     }
 
     let n_feat = rows.first().map(|r| r.3.len()).unwrap_or(0);
-    let expected_width = if full_gmsbank {
+    let expected_width = if restore_cuts.is_some() {
+        zensim::research::full_width()
+    } else if full_gmsbank {
         1502
     } else if full_rev4 {
         1322

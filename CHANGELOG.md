@@ -11,6 +11,20 @@
 
 ### Added
 
+- Restored cost cuts (COST_CUTS_AUDIT, 2026-09-24), four default-off opt-in
+  families appended after C8 (widths 1562, 1790, 1820, 1825): `mapdev`
+  f1502–f1561 (per-scale, per-channel population std of the squared-error
+  and four HF maps), `z1max` f1562–f1789 (the 228-slot basic+peaks surface
+  pooled over ungated 5×5 block maxima), `gmsnative` f1790–f1819 (C8's X/B
+  gradient bank at native scale) and `dvifmgate` f1820–f1824 (C7's F1 under
+  the two-state gate visibility). f0–f1501 are unchanged. The exact new
+  public Rust items are the additive `ComputeToken::{Mapdev, Z1max,
+  Gmsnative, Dvifmgate}` arms of the existing `#[non_exhaustive]` enum and
+  the doc-hidden `V2NewFeatureToggles::{mapdev, z1max, gmsnative,
+  dvifmgate}` fields defaulting to false. No other public Rust item is
+  added. The extractor gains `--restore-cuts <tokens>` and its audit accepts
+  the registered widths 1322–1825 (`RESTORE_COMMIT`).
+
 - Experimental C8 GMSBANK adds 180 gradient-similarity slots at f1322–f1501.
   The exact new public Rust items are `ComputeToken::Gmsbank`, an additive arm
   of the existing `#[non_exhaustive]` enum, and
