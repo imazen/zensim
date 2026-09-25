@@ -348,9 +348,25 @@ fn gmsbank_prefix_identity_and_tier_consistency() {
     }
 }
 
+/// Start offsets, relative to `GMSBANK_BASE`, of the ten 15-slot
+/// loss/gain/dev cells in the landed C8 layout (`Replication::GmsbankChroma`
+/// in `feature_defs`). Scale 0 carries only Y (15 slots). Each of scales 1-3
+/// carries X, Y and B cells (3 × 15) followed by 10 chromaticity `cs_*`
+/// slots, which have no loss/gain split.
+fn gmsbank_gradient_cells() -> Vec<usize> {
+    let mut cells = vec![0];
+    for scale in 1..4 {
+        for channel in 0..3 {
+            cells.push(15 + (scale - 1) * 55 + channel * 15);
+        }
+    }
+    cells
+}
+
 /// A monotone grayscale ramp has a positive reference gradient, including
 /// reflected image borders; the uniform destination has zero gradient.
-/// Thus m_d < m_r at every pixel, and every C8 contribution enters loss.
+/// Thus m_d < m_r at every pixel, and every loss/gain contribution enters
+/// loss. The `cs_*` slots are not part of the split and are not checked.
 #[test]
 fn gmsbank_contrast_reduction_has_exact_zero_gain_in_every_tier() {
     let (w, h) = (127, 128);
@@ -371,16 +387,18 @@ fn gmsbank_contrast_reduction_has_exact_zero_gain_in_every_tier() {
         let values = extract(&src, &dst, w, h, toggles, false);
         assert_eq!(values.len(), GMSBANK_BASE + 180);
         let mut total_loss = 0.0;
-        for cell in values[GMSBANK_BASE..].as_chunks::<15>().0 {
+        for (cell, start) in gmsbank_gradient_cells().into_iter().enumerate() {
             for k in 0..5 {
-                let loss = cell[k * 3];
-                let gain = cell[k * 3 + 1];
+                let slot = GMSBANK_BASE + start + 3 * k;
+                let loss = values[slot];
+                let gain = values[slot + 1];
                 total_loss += loss;
                 assert_eq!(
                     gain.to_bits(),
                     0.0f64.to_bits(),
-                    "{}: contrast reduction contributed to gain at k={k}",
-                    perm.label
+                    "{}: contrast reduction contributed to gain at f{} (cell {cell}, k={k})",
+                    perm.label,
+                    slot + 1
                 );
             }
         }
@@ -395,8 +413,15 @@ fn gmsbank_contrast_reduction_has_exact_zero_gain_in_every_tier() {
 
 /// **R4-D** — mount-free 16-pair CI tier. The corpus gate below covers real
 /// TRAIN paths; this catches accidental skips and old-slot regressions in CI.
+///
+/// The on and off walks must run at the same SIMD tier. The permutation
+/// tests in this binary disable tokens process-wide, so without the token
+/// testing lock the two walks can straddle a tier change and differ in the
+/// last bits (measured 2026-09-25: 3 failures in 4 parallel runs, a
+/// different slot each time; 0 failures serially).
 #[test]
 fn rev4_synthetic_16_pair_identity() {
+    let _tier_lock = archmage::testing::lock_token_testing();
     for n in 0..16usize {
         let (w, h) = (64 + n, 65 + (n * 3) % 17);
         let (src, dst) = pair(w, h);
@@ -415,11 +440,13 @@ fn rev4_synthetic_16_pair_identity() {
 /// serial and MT8. The caller supplies corpus access and the expected
 /// unsupported SafeSyn count via `just rev4-corpus-tests`; the admitted
 /// TRAIN sample is pinned to 11 AVIF and 8 JXL omissions. Missing files,
-/// malformed roles and any other unsupported format fail the test.
+/// malformed roles and any other unsupported format fail the test. It holds
+/// the token testing lock for the same reason as the synthetic tier above.
 #[test]
 #[ignore = "explicit corpus gate: use just rev4-corpus-tests"]
 fn rev4_corpus_toggle_identity() {
     use std::path::Path;
+    let _tier_lock = archmage::testing::lock_token_testing();
 
     // Deserialize only role-bearing metadata. Unknown fields, including
     // human targets, are discarded by serde and never materialized here.

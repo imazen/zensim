@@ -120,9 +120,11 @@ fn research_and_production_agree_bit_exactly_at_the_944_layout() {
 
 /// **G2.1, the COMPLETE half** — the full registered width agrees
 /// bit-exactly with the production walk at the widest registered regime
-/// (1322 = folded720 + append + append2 + CSFW + DVIFM + the four REV4
-/// feature-bank families; the DVIFM tail is itself bit-identical to the
-/// whole-plane oracle per the dvifm gates).
+/// (1502 = folded720 + append + append2 + CSFW + DVIFM + the four REV4
+/// feature-bank families + C8 `gmsbank`; the DVIFM tail is itself
+/// bit-identical to the whole-plane oracle per the dvifm gates). The
+/// production toggles must name every registered block: a block left off
+/// here makes the two widths differ.
 #[test]
 fn research_everything_agrees_with_the_production_walk() {
     use zensim::feature_v2::{V1PoolsMode, V2NewFeatureToggles, V2Scratch};
@@ -144,6 +146,7 @@ fn research_everything_agrees_with_the_production_walk() {
                     rev4_ringbasis: true,
                     rev4_tailhist: true,
                     rev4_arttype: true,
+                    gmsbank: true,
                     v1_pools: V1PoolsMode::Full,
                     ..V2NewFeatureToggles::default()
                 },
@@ -153,6 +156,7 @@ fn research_everything_agrees_with_the_production_walk() {
         assert_eq!(prod.features().len(), full, "at {w}x{h}");
         let e = research::extract(&Request::everything(), &rs, &rd)
             .unwrap_or_else(|e| panic!("research everything at {w}x{h}: {e}"));
+        assert_eq!(e.values().len(), full, "research width at {w}x{h}");
         for (i, (p, r)) in prod.features().iter().zip(e.values()).enumerate() {
             assert_eq!(p.to_bits(), r.to_bits(), "f{i} differs at {w}x{h}");
         }

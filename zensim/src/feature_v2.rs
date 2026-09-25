@@ -16644,11 +16644,17 @@ pub(crate) mod tests {
         assert!(
             values[GMSBANK_BASE..GMSBANK_BASE + 15]
                 .iter()
-                .all(|v| v.to_bits() == 0)
+                .all(|v| v.to_bits() == 0),
+            "flat inputs have no scale-0 Y gradient: {:?}",
+            &values[GMSBANK_BASE..GMSBANK_BASE + 15]
         );
         for scale in 1..4 {
             let base = GMSBANK_BASE + 15 + (scale - 1) * 55;
-            assert!(values[base..base + 45].iter().all(|v| v.to_bits() == 0));
+            assert!(
+                values[base..base + 45].iter().all(|v| v.to_bits() == 0),
+                "flat inputs have no scale-{scale} gradient: {:?}",
+                &values[base..base + 45]
+            );
             for k in 0..5 {
                 assert!(
                     values[base + 45 + 2 * k] > 0.0,

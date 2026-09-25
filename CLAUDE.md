@@ -158,6 +158,40 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-09-25 — bulk sRGB→XYB gives different bits for the same colour in the vector chunks and in the scalar
+  remainder. OPEN; the fix needs a formula-revision decision.**
+  - `color::srgb_to_positive_xyb_planar_into` converts each band of `rows × width` pixels in one call. Full
+    vector chunks (16- and 8-wide) use magetypes' `cbrt_midp` (seed `0x2a508c2d`, unfused Halley steps). The last
+    `rows × width mod 8` pixels use `color::cbrtf_fast` (seed `709_958_130`, fused Halley steps). On the scalar tier
+    the chunk matrix is also unfused, because magetypes' scalar `mul_add` is `a * b + c`.
+  - Measured over all 2^24 sRGB8 colours with the real owner
+    (`cargo run --release -p zensim --example xyb_chunk_tail_parity`): the XYB output differs for **84.600 %** of
+    colours on x86_64 AVX-512 (per channel X/Y/B 10,857,190 / 8,584,754 / 9,519,698) and **85.766 %** on i686,
+    which runs the scalar tier (11,023,236 / 8,768,277 / 9,698,716), by up to **196 ULP**. At most 7 pixels per
+    converted band are affected.
+  - Consequence: a flat image is not flat after conversion. `feature_v2::tests::gmsbank_constant_chroma_shift_is_visible_without_gradients`
+    fails on i686, where the XYB conversion always runs the generic scalar variant because its v3/v4 variants are
+    compiled only for x86_64. It passes on x86_64 and aarch64 only because its two test colours shift by the same
+    1 ULP in Y, so the reference and distorted artefacts cancel.
+  - Any fix (pad the remainder into one more vector chunk, or one cube-root and `mul_add` form on every path)
+    changes feature bits for images whose band pixel count is not a multiple of 8. So it is an arithmetic-revision
+    decision, not a silent patch.
+* **2026-09-25 — the C8 landing left `main` with an unparseable `zensim-bench/Cargo.toml` and two failing C8
+  tests; a C1–C4 identity test was also racing. FIXED** (this commit).
+  - The landing rebase kept both the E5A and the C8 `gmsd` entries in `[dependencies]`. TOML rejects a duplicate
+    key, so nothing in the standalone `zensim-bench` workspace built, and root CI could not see it. One entry now
+    remains, with default features off, so the C8 peer scorer keeps the no_std sqrt that produced the stored
+    peer columns; `e5a-render` and `gmsd-arm` enable `gmsd/std` themselves.
+  - `research_everything_agrees_with_the_production_walk` compared a 1322-wide production walk against the
+    1502-wide `research::full_width()`. It now enables `gmsbank` and also checks the research width.
+  - `gmsbank_contrast_reduction_has_exact_zero_gain_in_every_tier` still walked the pre-chroma 12 × 15 layout, so
+    it read a `cs_dev` slot as a gain slot. It now follows the landed `GmsbankChroma` layout: scale-0 Y, then
+    X/Y/B cells plus 10 `cs_*` slots at scales 1–3.
+  - `rev4_synthetic_16_pair_identity` (C1–C4, failing on macOS Intel CI before C8 landed) was a test race, not an
+    extraction defect. The permutation tests in the same binary disable SIMD tokens process-wide, so its on and
+    off walks could run at different tiers. Measured: 3 failures in 4 parallel runs, a different slot each time;
+    0 serially. It and `rev4_corpus_toggle_identity` now hold `archmage::testing::lock_token_testing()`; 0
+    failures in 12 parallel runs.
 * **2026-09-23 — AVIF RGB16→RGB8 in zenmetrics' sRGB-tagged decode route rounds down at near-half levels. OPEN
   (upstream).**
   - The Opus review (`REVIEW_AVIF_DECODE.md`, recorded in `benchmarks/rev4_avif_decode_diff_2026-09-23.md` after its
