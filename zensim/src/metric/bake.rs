@@ -762,16 +762,28 @@ impl<'a> BakeScorer<'a> {
                     reason: "sampling variant requires a matching corruption feature contract",
                 });
             }
-            let needed = match companion {
+            // What the companion reads, and the plan that computes it. The
+            // extraction is the UNION of the base's and the companion's plans
+            // (one walk, as for ensemble members): a narrow base plan — a
+            // local-only basic subset — does not populate a slot the head
+            // reads, and refusing that would make every basic-only bake
+            // unable to carry a head that reads the peaks or a later block.
+            let (needed, companion_plan) = match companion {
                 Companion::Tree(h, _) => {
                     if h.formula_revision() != plan.formula_revision() {
                         return Err(ZensimError::ModelLoadFailed {
                             reason: "corruption head requires another feature revision",
                         });
                     }
-                    crate::feature_set_id::SlotSet::from_slots(
+                    let needed = crate::feature_set_id::SlotSet::from_slots(
                         h.declared_feature_ids().iter().map(|&id| usize::from(id)),
-                    )
+                    );
+                    let own = Plan::derive(&needed, h.caller_input_width().max(372)).map_err(
+                        |_| ZensimError::ModelLoadFailed {
+                            reason: "corruption head reads features not computed by the model's extraction plan",
+                        },
+                    )?;
+                    (needed, own)
                 }
                 Companion::Linear(h, _) => {
                     let p = h.plan()?;
@@ -780,13 +792,22 @@ impl<'a> BakeScorer<'a> {
                             reason: "corruption head requires another feature revision",
                         });
                     }
-                    crate::feature_plan::bake_read_slots(h.model).ok_or(
+                    let needed = crate::feature_plan::bake_read_slots(h.model).ok_or(
                         ZensimError::ModelLoadFailed {
                             reason: "corruption head has no readable feature declaration",
                         },
-                    )?
+                    )?;
+                    (needed, p)
                 }
             };
+            if companion_plan.compute.sampling.is_some() {
+                return Err(ZensimError::ModelLoadFailed {
+                    reason: "sampling variant requires a matching corruption feature contract",
+                });
+            }
+            if !plan.covers(&needed) {
+                plan = plan.union(&companion_plan);
+            }
             if !plan.covers(&needed) {
                 return Err(ZensimError::ModelLoadFailed {
                     reason: "corruption head reads features not computed by the model's extraction plan",

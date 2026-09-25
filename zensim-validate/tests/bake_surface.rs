@@ -841,3 +841,24 @@ fn accelerated_candidate_sensitivities_match_sequential_complete_surface() {
     let mut gated = scorer.with_linear_corruption_head(&head, 20.).unwrap();
     check(&mut gated, &row);
 }
+
+#[test]
+fn a_narrow_base_carries_a_companion_that_reads_later_slots() {
+    // The base reads only f0/f1 (a local-only basic plan); the companion reads
+    // f3 and f156. The extraction must be the union of both plans, not a
+    // refusal because the base plan alone does not populate f156.
+    let base = linear_bias(json!([]), 5.);
+    let head = linear(json!([{"key":"zentrain.feature_ids","type":"utf8","text":"3 156"}]));
+    let mut scorer = BakeScorer::new(&base)
+        .unwrap()
+        .with_linear_corruption_head(&head, 20.)
+        .unwrap();
+    let mut row = vec![0.0; 372];
+    (row[0], row[1]) = (5., 5.);
+    // Head 2*1 + 3*1 - 5 = 0 < 20: active, min(perceptual 30, head 0).
+    (row[3], row[156]) = (1., 1.);
+    assert_eq!(scorer.score_features(&row, 64, 64, None).unwrap(), 0.);
+    // Head 2*10 + 3*10 - 5 = 45 >= 20: inactive, perceptual unchanged.
+    (row[3], row[156]) = (10., 10.);
+    assert_eq!(scorer.score_features(&row, 64, 64, None).unwrap(), 30.);
+}
