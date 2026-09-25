@@ -317,7 +317,7 @@ def load_scores(metrics_csv: str, scores_parquet: str) -> pd.DataFrame:
     keep = ["distorted", "ref_width", "ref_height"] + [
         c for c in s.columns if c.startswith("score_")
     ]
-    out = m.merge(s[keep], on="distorted", how="inner", validate="one_to_one")
+    out = m.merge(s[keep], on="distorted", how="inner", validate="one_to_one")  # joinsafety-ok: per-stimulus filename key, one-to-one validated, row count checked below
     if len(out) != len(m):
         raise SystemExit(
             f"join lost rows: metrics {len(m)} -> joined {len(out)} "
@@ -495,7 +495,7 @@ def main() -> None:
         peer = pd.read_csv(args.peer_cropped, sep="\t")
         key = "stimulus" if "stimulus" in peer.columns else "distorted"
         peer = peer.rename(columns={key: "distorted"})
-        j = cropped.merge(peer, on="distorted", how="inner")
+        j = cropped.merge(peer, on="distorted", how="inner", validate="one_to_one")  # joinsafety-ok: per-stimulus filename key, one-to-one validated
         parity["n_rows"] = int(len(j))
         if "SSIMULACRA2" in j.columns and "ssim2" in j.columns:
             d = (j["ssim2"] - j["SSIMULACRA2"]).to_numpy(dtype=float)
@@ -600,7 +600,7 @@ def main() -> None:
             .str.replace(r"^PTC_", "", regex=True)
             .str.replace(r"\.png$", "", regex=True)
         )
-        j = crop.merge(full, on="stem", suffixes=("_crop", "_full"))
+        j = crop.merge(full, on="stem", suffixes=("_crop", "_full"), validate="one_to_one")  # joinsafety-ok: per-stimulus stem key, one-to-one validated
         j["is_cat3"] = (j["ref_width_full"] != 840) | (j["ref_height_full"] != 944)
         shift["n_joined"] = int(len(j))
         shift["n_cat3_rows"] = int(j["is_cat3"].sum())

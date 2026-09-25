@@ -93,7 +93,7 @@ def load_tables(args) -> pd.DataFrame:
     for extra in ["peer", "dssim"]:
         df = pd.read_csv(getattr(args, extra), sep="\t")
         add = [c for c in df.columns if c not in sc.columns]
-        sc = sc.merge(df[["key"] + add], on="key", how="left", validate="one_to_one")
+        sc = sc.merge(df[["key"] + add], on="key", how="left", validate="one_to_one")  # joinsafety-ok: per-stimulus unique key, one-to-one validated
     if args.tuner:
         tp = pd.read_parquet(args.tuner)
         keep = ["key"] + [c for c in tp.columns if c.startswith("score_")]
@@ -106,7 +106,7 @@ def load_tables(args) -> pd.DataFrame:
                 "score_r915rich": "r915_rich",
             }
         )
-        sc = sc.merge(tp, on="key", how="left", validate="one_to_one")
+        sc = sc.merge(tp, on="key", how="left", validate="one_to_one")  # joinsafety-ok: per-stimulus unique key, one-to-one validated
     missing = [c for c in keycols if c not in sc.columns]
     if missing:
         sys.exit(f"scores table missing key columns: {missing}")
