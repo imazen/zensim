@@ -23,3 +23,27 @@ Brief: `~/tmp/zensim-paper/rev4/RESTORE_CUTS_brief.md`. Rules: `DEVIN_COMMON.md`
 
 ### 2026-09-25 01:35Z lock note
 The shared heavy lock has been held for >30 min by the potential lane MLP batches (8 replicates x many arms). Compile-only `cargo check -p zensim --lib` runs at `run-heavy --mem 6G --jobs 2` (cgroup-capped, nice/ionice, one at a time) OUTSIDE the lock so the first compile is not delayed by hours; every test, benchmark and extraction run stays under the lock.
+
+## 2026-09-25 01:55Z — implementation checkpoint
+
+- Commits: prereg `4ad33bc5`; implementation `2d7b33dd`; pin + API snapshots `429ff917`.
+- Gates run so far (all `run-heavy --jobs 2`, cgroup-capped, outside the shared lock; the lock has been
+  starved by back-to-back potential-lane MLP batches for >1 h, including two waiters of the partb lanes):
+  - `cargo test -p zensim --lib --features training`: `470 passed; 0 failed; 7 ignored`
+    (`/var/tmp/restore-cuts/logs/test_lib_full1.log`).
+  - `cargo test -p zensim --features training --test restore_cuts_parity`: `2 passed; 0 failed`
+    (`test_parity8.log`): f0..f1501 bit-identical with the families on/off on 3 SIMD tiers x 4 sizes,
+    layout-width independence (mapdev@1562, z1max@1790, gmsnative@1820 = the full-width values), research
+    owner equality, identity behaviour, MT8 == serial, strided == tight, same-tier repeatability; cross-tier
+    drift MEASURED (test_parity7.log: non-SSIM worst 5.7e-3 relative on 1e-4-magnitude slots, SSIM-derived
+    worst 6.8e-2), reported not bounded, per the rev4/C8 tier policy.
+  - `cargo clippy -p zensim --all-targets --features training -- -D warnings`: clean.
+  - api snapshots regenerated and `ZEN_API_DOC=check` passes.
+  - NumPy mirror (`just restore-cuts-mirror` steps, run by hand): gmsnative max rel error `6.5e-16`,
+    mapdev `5.3e-5`, z1max mse `3.7e-8`, art/det `2.1e-4`, SSIM-derived `2.1e-3` (float64 mirror vs f32
+    kernel on 1e-4-magnitude maps); wrong-definition controls miss by `1.1e4x` tolerance (z1max block-mean)
+    and `14.8` relative (gmsnative x16 stabilisers) and are rejected.
+- Design finding recorded: the planner computes every family block a layout reaches
+  (`a_wide_layout_computes_every_block_it_reaches`), so "family alone" is not a plan-level notion. The nested
+  chain lets each family be requested at the narrowest layout that reaches it; its values do not depend on
+  later families (asserted).

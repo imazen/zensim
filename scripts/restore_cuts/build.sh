@@ -1,25 +1,17 @@
 #!/usr/bin/env bash
-# Clean-snapshot build of the extractor (CODEX_NOTE crates-on-main rule).
-# Sibling repos are `git archive`s of their fetched mains under $ROOT/src (see
-# $ROOT/snapshot_revs.tsv); zensim itself is a copy of THIS workspace. No sibling
-# working copy is read or written. Usage: build.sh [example ...] (default: the extractor).
+# Clean-snapshot builds of the extractor (CODEX_NOTE crates-on-main rule).
+#   build.sh cand   this workspace (must be committed; a dirty tree builds but writes no build_meta.json)
+#   build.sh base   main@origin as fetched (the bit-identity baseline for the f0..f1501 gate)
+# Sibling repos are `git archive`s of their fetched mains under $ROOT/src (snapshot_revs.tsv); no
+# sibling working copy is read or written. Outputs: $ROOT/bin/extract_{base,cand}.
 set -euo pipefail
+which=${1:?usage: build.sh cand|base}
 ROOT=/var/tmp/restore-cuts
 WS=/home/lilith/work/zen/zensim--restore-cuts
 export CARGO_HOME=$ROOT/cargo-home CARGO_TARGET_DIR=$ROOT/target-rel
-# An extraction binary must come from COMMITTED source: a dirty tree still builds (dev use)
-# but writes no build_meta.json, and bank_sidecar.py refuses a set without it.
-if (cd "$WS" && jj status --ignore-working-copy >/dev/null 2>&1; jj status | grep -q 'The working copy has no changes'); then
-    CLEAN=1
-else
-    CLEAN=0
-    rm -f "$ROOT/build_meta.json"
-    echo "WARNING: uncommitted changes; DEV BUILD, no build_meta.json will be written"
-fi
-mkdir -p "$ROOT/src/zensim"
-rsync -a --delete --exclude '/target' --exclude '.jj' --exclude '.git' --exclude '.workongoing' \
-    "$WS/" "$ROOT/src/zensim/"
-cat >> "$ROOT/src/zensim/zensim-bench/Cargo.toml" <<'OVERLAY'
+mkdir -p "$ROOT/bin"
+overlay() {
+    cat >> "$1/zensim-bench/Cargo.toml" <<'OVERLAY'
 
 # restore-cuts local build overlay: clean archives of fetched main commits.
 [patch."https://github.com/imazen/zenanalyze"]
@@ -39,15 +31,41 @@ zenresize = { path = "../../zenresize" }
 [patch."https://github.com/imazen/codec-corpus"]
 corruption-corpus = { path = "../../codec-corpus/crate/corruption-corpus" }
 OVERLAY
-cd "$ROOT/src/zensim/zensim-bench"
-examples=("$@")
-[ ${#examples[@]} -gt 0 ] || examples=(extract_features_372col)
-args=()
-for e in "${examples[@]}"; do args+=(--example "$e"); done
-cargo build --release -p zensim-bench "${args[@]}" --features training,zen-decode,verify-all
-sha256sum "$CARGO_TARGET_DIR"/release/examples/extract_features_372col
+}
+build_in() {
+    ( cd "$1/zensim-bench"
+      cargo build --release -p zensim-bench --example extract_features_372col --features training,zen-decode,verify-all
+      sha256sum "$CARGO_TARGET_DIR/release/examples/extract_features_372col" )
+}
+if [ "$which" = base ]; then
+    rev=$(git -C /home/lilith/work/zen/zensim rev-parse refs/remotes/origin/main)
+    B=$ROOT/base
+    rm -rf "$B"; mkdir -p "$B/zensim"
+    git -C /home/lilith/work/zen/zensim archive "$rev" | tar -x -C "$B/zensim"
+    for d in "$ROOT"/src/*/; do n=$(basename "$d"); [ "$n" = zensim ] || ln -s "$ROOT/src/$n" "$B/$n"; done
+    overlay "$B/zensim"
+    echo "BASE_COMMIT=$rev"
+    build_in "$B/zensim"
+    cp "$CARGO_TARGET_DIR/release/examples/extract_features_372col" "$ROOT/bin/extract_base"
+    sha256sum "$ROOT/bin/extract_base"
+    exit 0
+fi
+# An extraction binary must come from COMMITTED source.
+if (cd "$WS" && jj status | grep -q 'The working copy has no changes'); then
+    CLEAN=1
+else
+    CLEAN=0
+    rm -f "$ROOT/build_meta.json"
+    echo "WARNING: uncommitted changes; DEV BUILD, no build_meta.json will be written"
+fi
+mkdir -p "$ROOT/src/zensim"
+rsync -a --delete --exclude '/target' --exclude '.jj' --exclude '.git' --exclude '.workongoing' \
+    "$WS/" "$ROOT/src/zensim/"
+overlay "$ROOT/src/zensim"
+build_in "$ROOT/src/zensim"
+cp "$CARGO_TARGET_DIR/release/examples/extract_features_372col" "$ROOT/bin/extract_cand"
+sha256sum "$ROOT/bin/extract_cand"
 [ "$CLEAN" = 1 ] || exit 0
-# Provenance: the workspace commit this tree is.
 cd "$WS"
 zc=$(jj log -r @- --no-graph -T 'commit_id' --ignore-working-copy)
 base=$(jj log -r 'main@origin' --no-graph -T 'commit_id' --ignore-working-copy)

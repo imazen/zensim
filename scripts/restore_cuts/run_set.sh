@@ -7,7 +7,7 @@ set_name=$1
 limit=${2:-}
 ROOT=/var/tmp/restore-cuts
 REPO=/home/lilith/work/zen/zensim--restore-cuts
-bin=$ROOT/target-rel/release/examples/extract_features_372col
+bin=$ROOT/bin/extract_cand
 suffix=
 pairs=$ROOT/pairs/$set_name.tsv
 if [[ -n $limit ]]; then
