@@ -13,6 +13,7 @@
 //! × 9.5M pair updates over a 50,000-pair × 190-epoch V_22-IW run ≈
 //! 9.5M Adam steps.
 
+#[allow(dead_code)] // #[path]-includes the whole kernel file; this bench uses a subset
 #[path = "../src/adam_simd.rs"]
 mod adam_simd;
 

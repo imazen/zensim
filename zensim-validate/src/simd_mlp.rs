@@ -70,12 +70,13 @@ pub fn forward(
 ) -> (f64, Vec<f64>, Vec<f64>) {
     #[cfg(target_arch = "x86_64")]
     {
-        if crate::tier_cap::avx512_allowed() && std::is_x86_feature_detected!("avx512f") {
-            // SAFETY: dispatch gated by `is_x86_feature_detected`.
+        use archmage::SimdToken;
+        if crate::tier_cap::avx512_allowed() && archmage::X64V4Token::summon().is_some() {
+            // SAFETY: dispatch gated by token summon (CPUID-checked).
             return unsafe { forward_avx512(x, w1, b1, w2, b2, n_features, n_hidden, alpha) };
         }
-        if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
-            // SAFETY: dispatch gated by `is_x86_feature_detected`.
+        if archmage::X64V3Token::summon().is_some() {
+            // SAFETY: dispatch gated by token summon (CPUID-checked).
             return unsafe { forward_avx2(x, w1, b1, w2, b2, n_features, n_hidden, alpha) };
         }
     }
@@ -103,8 +104,9 @@ pub fn backprop_step(
 ) {
     #[cfg(target_arch = "x86_64")]
     {
-        if crate::tier_cap::avx512_allowed() && std::is_x86_feature_detected!("avx512f") {
-            // SAFETY: dispatch gated by `is_x86_feature_detected`.
+        use archmage::SimdToken;
+        if crate::tier_cap::avx512_allowed() && archmage::X64V4Token::summon().is_some() {
+            // SAFETY: dispatch gated by token summon (CPUID-checked).
             unsafe {
                 backprop_avx512(
                     x, h_pre, h, dl_dy, gw1, gb1, w2, gw2, gb2, n_features, n_hidden, alpha,
@@ -112,8 +114,8 @@ pub fn backprop_step(
             }
             return;
         }
-        if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
-            // SAFETY: dispatch gated by `is_x86_feature_detected`.
+        if archmage::X64V3Token::summon().is_some() {
+            // SAFETY: dispatch gated by token summon (CPUID-checked).
             unsafe {
                 backprop_avx2(
                     x, h_pre, h, dl_dy, gw1, gb1, w2, gw2, gb2, n_features, n_hidden, alpha,
@@ -128,7 +130,18 @@ pub fn backprop_step(
 }
 
 // =============================================================================
-// SCALAR FALLBACK — bit-identical to original `forward` / `backprop_step`
+// SCALAR FALLBACK — bit-identical to the AVX2 (`forward_avx2` /
+// `backprop_avx2`) kernels, which are the canonical arithmetic. That means
+// the scalar path must reproduce three AVX2 details exactly:
+//
+//  1. Fused-op domain: lanes j < n_hidden - n_hidden%4 use FMA
+//     (`f64::mul_add`, correctly-rounded single rounding on every target),
+//     lanes j >= that boundary use mul+add (two roundings) — the same split
+//     the AVX2 kernel's vector chunks / scalar tail produce.
+//  2. The y-reduction's 4-lane accumulator: lane k sums h[4c+k]*w2[4c+k]
+//     fused over all chunks, then pairwise (a0+a1)+(a2+a3), then the
+//     sequential mul+add tail, then b2 + lane_sum + tail_sum.
+//  3. Identical ascending-feature accumulation order (nonzero x only).
 // =============================================================================
 
 #[inline]
@@ -142,6 +155,7 @@ fn forward_scalar(
     n_hidden: usize,
     alpha: f64,
 ) -> (f64, Vec<f64>, Vec<f64>) {
+    let n4 = n_hidden - (n_hidden % 4);
     let mut h_pre = b1.to_vec();
     for i in 0..n_features {
         let s = x[i];
@@ -149,18 +163,32 @@ fn forward_scalar(
             continue;
         }
         let row = &w1[i * n_hidden..(i + 1) * n_hidden];
-        for (acc, &w) in h_pre.iter_mut().zip(row.iter()) {
-            *acc += s * w;
+        // Fused domain — same fma chain the AVX2 lanes run.
+        for (j, acc) in h_pre.iter_mut().enumerate().take(n4) {
+            *acc = s.mul_add(row[j], *acc);
+        }
+        // Mul+add tail — the AVX2 kernel's scalar tail arithmetic.
+        for (j, acc) in h_pre.iter_mut().enumerate().skip(n4) {
+            *acc += s * row[j];
         }
     }
     let h: Vec<f64> = h_pre
         .iter()
         .map(|&v| if v >= 0.0 { v } else { alpha * v })
         .collect();
-    let mut y = b2[0];
-    for o in 0..n_hidden {
-        y += h[o] * w2[o];
+    // Emulate the AVX2 4-lane fused accumulator and its pairwise tree.
+    let mut acc = [0.0f64; 4];
+    for c in 0..n4 / 4 {
+        for k in 0..4 {
+            acc[k] = h[4 * c + k].mul_add(w2[4 * c + k], acc[k]);
+        }
     }
+    let lane_sum = (acc[0] + acc[1]) + (acc[2] + acc[3]);
+    let mut tail_sum = 0.0f64;
+    for o in n4..n_hidden {
+        tail_sum += h[o] * w2[o];
+    }
+    let y = b2[0] + lane_sum + tail_sum;
     (y, h_pre, h)
 }
 
@@ -179,7 +207,12 @@ fn backprop_scalar(
     n_hidden: usize,
     alpha: f64,
 ) {
-    for o in 0..n_hidden {
+    let n4 = n_hidden - (n_hidden % 4);
+    // gw2: fused on the canonical domain, mul+add on the AVX2 tail.
+    for o in 0..n4 {
+        gw2[o] = dl_dy.mul_add(h[o], gw2[o]);
+    }
+    for o in n4..n_hidden {
         gw2[o] += dl_dy * h[o];
     }
     gb2[0] += dl_dy;
@@ -196,8 +229,11 @@ fn backprop_scalar(
             continue;
         }
         let row = &mut gw1[i * n_hidden..(i + 1) * n_hidden];
-        for (g, &dh) in row.iter_mut().zip(dl_dh_pre.iter()) {
-            *g += s * dh;
+        for (j, g) in row.iter_mut().enumerate().take(n4) {
+            *g = s.mul_add(dl_dh_pre[j], *g);
+        }
+        for (j, g) in row.iter_mut().enumerate().skip(n4) {
+            *g += s * dl_dh_pre[j];
         }
     }
     for (g, &dh) in gb1.iter_mut().zip(dl_dh_pre.iter()) {
@@ -208,6 +244,22 @@ fn backprop_scalar(
 // =============================================================================
 // AVX-512 (f64x8) — primary fast path on Zen 4 / Sapphire Rapids / Ice Lake
 // =============================================================================
+//
+// BIT-PARITY RULE (tier-parity lane): this kernel must reproduce the AVX2
+// (`forward_avx2`) arithmetic bit-for-bit. The AVX2 fused-op domain is
+// lanes j < n4 = n_hidden - n_hidden%4; everything at/after n4 is scalar
+// mul+add. So this kernel runs full 8-lane chunks, then — when
+// n_hidden%8 >= 4 — ONE masked-8 fused group covering [n8*8, n4), then the
+// mul+add tail [n4, n_hidden). The y reduction likewise emulates AVX2's
+// 4-lane accumulator (lanes 0..3 via mask 0x0F) with the identical
+// pairwise tree; an 8-lane accumulator would be a different summation
+// order and is explicitly out of parity.
+
+/// Mask covering the low 4 lanes of an f64x8 — used for the final
+/// AVX2-boundary fused group when `n_hidden % 8 >= 4`, and for emulating
+/// the AVX2 4-lane y accumulator.
+#[cfg(target_arch = "x86_64")]
+const LO4: u8 = 0x0F;
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
@@ -223,7 +275,8 @@ unsafe fn forward_avx512(
 ) -> (f64, Vec<f64>, Vec<f64>) {
     use std::arch::x86_64::{
         _CMP_GE_OQ, _mm512_cmp_pd_mask, _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_mask_blend_pd,
-        _mm512_mul_pd, _mm512_set1_pd, _mm512_storeu_pd,
+        _mm512_mask_fmadd_pd, _mm512_mask_storeu_pd, _mm512_maskz_loadu_pd, _mm512_mul_pd,
+        _mm512_set1_pd, _mm512_setzero_pd, _mm512_storeu_pd,
     };
 
     // h_pre starts as a copy of b1 — matches scalar.
@@ -233,6 +286,10 @@ unsafe fn forward_avx512(
     let h_pre_ptr = h_pre.as_mut_ptr();
     let n_chunks = n_hidden / 8;
     let tail_start = n_chunks * 8;
+    // Canonical fused-op boundary (AVX2 lane structure).
+    let n4 = n_hidden - (n_hidden % 4);
+    // Whether [n8*8, n4) is a nonempty 4-lane fused group.
+    let mid_fused = tail_start + 4 <= n4;
 
     // For each input feature i: scale-and-accumulate w1's row into h_pre.
     // Preserves the sparse-x short-circuit.
@@ -253,17 +310,30 @@ unsafe fn forward_avx512(
                 _mm512_storeu_pd(h_pre_ptr.add(off), new_acc);
             }
         }
-        // Scalar tail for n_hidden % 8 != 0 (test cases).
-        for (k, h) in h_pre[tail_start..n_hidden].iter_mut().enumerate() {
-            *h += s * unsafe { *row_ptr.add(tail_start + k) };
+        if mid_fused {
+            // Fused lanes [tail_start, n4) — the AVX2 kernel covers these
+            // with its last vector chunk; the masked form keeps the same
+            // single-rounding fma per element.
+            unsafe {
+                let acc = _mm512_maskz_loadu_pd(LO4, h_pre_ptr.add(tail_start));
+                let row_v = _mm512_maskz_loadu_pd(LO4, row_ptr.add(tail_start));
+                let new_acc = _mm512_mask_fmadd_pd(row_v, LO4, s_vec, acc);
+                _mm512_mask_storeu_pd(h_pre_ptr.add(tail_start), LO4, new_acc);
+            }
+        }
+        // Mul+add tail [n4, n_hidden) — two roundings, matching AVX2's
+        // scalar tail exactly.
+        for (j, h) in h_pre.iter_mut().enumerate().take(n_hidden).skip(n4) {
+            *h += s * unsafe { *row_ptr.add(j) };
         }
     }
 
     // LeakyReLU: h[o] = h_pre[o] >= 0 ? h_pre[o] : alpha * h_pre[o].
+    // Elementwise — no accumulation structure, any width is bit-identical.
     let mut h = vec![0.0f64; n_hidden];
     let h_ptr = h.as_mut_ptr();
     let alpha_vec = unsafe { _mm512_set1_pd(alpha) };
-    let zero_vec = unsafe { _mm512_set1_pd(0.0) };
+    let zero_vec = unsafe { _mm512_setzero_pd() };
     for c in 0..n_chunks {
         let off = c * 8;
         unsafe {
@@ -281,28 +351,26 @@ unsafe fn forward_avx512(
         h[o] = if v >= 0.0 { v } else { alpha * v };
     }
 
-    // Final reduction: y = b2[0] + sum_o(h[o] * w2[o]).
-    // Use a per-lane SIMD accumulator (8-wide) and reduce at the end.
-    // Order differs from scalar but is within the 1e-9 relative budget.
-    let mut acc_vec = unsafe { _mm512_set1_pd(0.0) };
-    for c in 0..n_chunks {
-        let off = c * 8;
+    // Final reduction: y = b2[0] + sum_o(h[o] * w2[o]) — reproduces the
+    // AVX2 4-lane accumulator exactly: lane k sums h[4c+k]*w2[4c+k] fused
+    // over all chunks c, pairwise (a0+a1)+(a2+a3), then the sequential
+    // mul+add tail.
+    let mut acc_vec = unsafe { _mm512_setzero_pd() };
+    for c in 0..n4 / 4 {
+        let off = c * 4;
         unsafe {
-            let h_v = _mm512_loadu_pd(h_ptr.add(off));
-            let w2_v = _mm512_loadu_pd(w2.as_ptr().add(off));
-            acc_vec = _mm512_fmadd_pd(h_v, w2_v, acc_vec);
+            let h_v = _mm512_maskz_loadu_pd(LO4, h_ptr.add(off));
+            let w2_v = _mm512_maskz_loadu_pd(LO4, w2.as_ptr().add(off));
+            acc_vec = _mm512_mask_fmadd_pd(h_v, LO4, w2_v, acc_vec);
         }
     }
     let mut tail_sum = 0.0f64;
-    for o in tail_start..n_hidden {
+    for o in n4..n_hidden {
         tail_sum += h[o] * w2[o];
     }
     let mut acc_arr = [0.0f64; 8];
     unsafe { _mm512_storeu_pd(acc_arr.as_mut_ptr(), acc_vec) };
-    // Horizontal sum: keep order deterministic (pairwise).
-    let lane_sum = (acc_arr[0] + acc_arr[1])
-        + (acc_arr[2] + acc_arr[3])
-        + ((acc_arr[4] + acc_arr[5]) + (acc_arr[6] + acc_arr[7]));
+    let lane_sum = (acc_arr[0] + acc_arr[1]) + (acc_arr[2] + acc_arr[3]);
     let y = b2[0] + lane_sum + tail_sum;
 
     (y, h_pre, h)
@@ -326,14 +394,17 @@ unsafe fn backprop_avx512(
 ) {
     use std::arch::x86_64::{
         _CMP_GE_OQ, _mm512_cmp_pd_mask, _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_mask_blend_pd,
-        _mm512_mul_pd, _mm512_set1_pd, _mm512_storeu_pd,
+        _mm512_mask_fmadd_pd, _mm512_mask_storeu_pd, _mm512_maskz_loadu_pd, _mm512_mul_pd,
+        _mm512_set1_pd, _mm512_setzero_pd, _mm512_storeu_pd,
     };
 
     let n_chunks = n_hidden / 8;
     let tail_start = n_chunks * 8;
+    let n4 = n_hidden - (n_hidden % 4);
+    let mid_fused = tail_start + 4 <= n4;
     let dl_dy_vec = unsafe { _mm512_set1_pd(dl_dy) };
     let alpha_vec = unsafe { _mm512_set1_pd(alpha) };
-    let zero_vec = unsafe { _mm512_set1_pd(0.0) };
+    let zero_vec = unsafe { _mm512_setzero_pd() };
 
     // 1) gw2[o] += dl_dy * h[o] AND
     //    dl_dh_pre[o] = dl_dy * w2[o] * (h_pre[o] >= 0 ? 1 : alpha)
@@ -361,7 +432,26 @@ unsafe fn backprop_avx512(
             _mm512_storeu_pd(dl_dh_pre_ptr.add(off), dh_gated);
         }
     }
-    for o in tail_start..n_hidden {
+    if mid_fused {
+        // Fused lanes [tail_start, n4) — the AVX2 kernel covers these
+        // with its last vector chunk.
+        let off = tail_start;
+        unsafe {
+            let h_v = _mm512_maskz_loadu_pd(LO4, h.as_ptr().add(off));
+            let gw2_v = _mm512_maskz_loadu_pd(LO4, gw2_ptr.add(off));
+            let gw2_new = _mm512_mask_fmadd_pd(dl_dy_vec, LO4, h_v, gw2_v);
+            _mm512_mask_storeu_pd(gw2_ptr.add(off), LO4, gw2_new);
+
+            let w2_v = _mm512_maskz_loadu_pd(LO4, w2.as_ptr().add(off));
+            let dh = _mm512_mul_pd(dl_dy_vec, w2_v);
+            let dh_scaled = _mm512_mul_pd(dh, alpha_vec);
+            let pre_v = _mm512_maskz_loadu_pd(LO4, h_pre.as_ptr().add(off));
+            let mask = _mm512_cmp_pd_mask::<_CMP_GE_OQ>(pre_v, zero_vec);
+            let dh_gated = _mm512_mask_blend_pd(mask, dh_scaled, dh);
+            _mm512_mask_storeu_pd(dl_dh_pre_ptr.add(off), LO4, dh_gated);
+        }
+    }
+    for o in n4..n_hidden {
         gw2[o] += dl_dy * h[o];
         let dh = dl_dy * w2[o];
         dl_dh_pre[o] = if h_pre[o] >= 0.0 { dh } else { alpha * dh };
@@ -371,6 +461,7 @@ unsafe fn backprop_avx512(
 
     // 2) gw1 row update: for each i, if x[i] != 0,
     //    gw1[i*N + j] += x[i] * dl_dh_pre[j] for all j.
+    //    Fused on j < n4, mul+add on the AVX2 tail.
     let gw1_ptr = gw1.as_mut_ptr();
     for (i, &s) in x[..n_features].iter().enumerate() {
         if s == 0.0 {
@@ -387,12 +478,22 @@ unsafe fn backprop_avx512(
                 _mm512_storeu_pd(gw1_ptr.add(off), g_new);
             }
         }
-        for j in tail_start..n_hidden {
+        if mid_fused {
+            unsafe {
+                let off = row_off + tail_start;
+                let g_v = _mm512_maskz_loadu_pd(LO4, gw1_ptr.add(off));
+                let dh_v = _mm512_maskz_loadu_pd(LO4, dl_dh_pre_ptr.add(tail_start));
+                let g_new = _mm512_mask_fmadd_pd(s_vec, LO4, dh_v, g_v);
+                _mm512_mask_storeu_pd(gw1_ptr.add(off), LO4, g_new);
+            }
+        }
+        for j in n4..n_hidden {
             gw1[row_off + j] += s * dl_dh_pre[j];
         }
     }
 
-    // 3) gb1[o] += dl_dh_pre[o]
+    // 3) gb1[o] += dl_dh_pre[o] — a pure add per element, identical
+    //    under any lane split.
     let gb1_ptr = gb1.as_mut_ptr();
     for c in 0..n_chunks {
         let off = c * 8;
@@ -964,9 +1065,10 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn avx2_kernels_match_scalar_directly() {
-        if !(std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma")) {
-            return;
-        }
+        assert!(
+            std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma"),
+            "this test needs an x86-64-v3 (AVX2+FMA) host: it is the canonical tier every other tier must reproduce"
+        );
         let alpha = 0.01;
         for &(n_features, n_hidden) in &[
             (944usize, 32usize), // fold shape: 8 chunks → one <8> block
@@ -1039,5 +1141,311 @@ mod tests {
             let rel = (gb2_s[0] - gb2_v[0]).abs() / gb2_s[0].abs().max(gb2_v[0].abs()).max(1.0);
             assert!(rel < 1e-12, "gb2 [{n_features},{n_hidden}]");
         }
+    }
+
+    // =====================================================================
+    // Tier parity — the AVX2 (`_v3`) kernels are the canonical arithmetic;
+    // every other tier the dispatcher can pick must reproduce it BIT FOR BIT.
+    // =====================================================================
+
+    /// Ordered-int ULP distance between two f64 values.
+    fn ulp_diff_f64(a: f64, b: f64) -> u64 {
+        fn ord(v: f64) -> i64 {
+            let b = v.to_bits() as i64;
+            if b < 0 { i64::MIN - b } else { b }
+        }
+        ord(a).abs_diff(ord(b))
+    }
+
+    fn max_ulp_slice(a: &[f64], b: &[f64]) -> (u64, usize) {
+        let mut worst = (0u64, usize::MAX);
+        for (i, (&x, &y)) in a.iter().zip(b.iter()).enumerate() {
+            let d = ulp_diff_f64(x, y);
+            if d > worst.0 {
+                worst = (d, i);
+            }
+        }
+        worst
+    }
+
+    /// Tier-parity shapes: the fold (944×32) and production (372×128) plus
+    /// every cascade-arm/tail combination so `n_hidden` exercises
+    /// 8/4/2/1-chunk blocks and 0..7-element scalar tails.
+    #[cfg(target_arch = "x86_64")]
+    const PARITY_SHAPES: &[(usize, usize)] = &[
+        (944, 32),
+        (372, 128),
+        (16, 8),
+        (16, 6),
+        (8, 7),
+        (4, 5),
+        (4, 3),
+        (16, 20),
+        (16, 24),
+        (16, 28),
+        (16, 12),
+        (64, 36),
+        (32, 40),
+        (128, 24),
+        (256, 16),
+        (64, 64),
+    ];
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn forward_all_tiers_bit_identical() {
+        assert!(
+            std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma"),
+            "this test needs an x86-64-v3 (AVX2+FMA) host: it is the canonical tier every other tier must reproduce"
+        );
+        let has512 = crate::tier_cap::avx512_allowed() && std::is_x86_feature_detected!("avx512f");
+        let alpha = 0.01;
+        let mut failures = Vec::new();
+        for &(nf, nh) in PARITY_SHAPES {
+            for &seed in &[0x51ED_1E55u64, 0xABCD_1234, 0x0000_00FF] {
+                let mut rng = Xs64::new(seed ^ (nf * 31 + nh) as u64);
+                let x = random_sparse_x(&mut rng, nf, 0.35);
+                let w1 = random_buf(&mut rng, nf * nh);
+                let b1 = random_buf(&mut rng, nh);
+                let w2 = random_buf(&mut rng, nh);
+                let b2 = vec![rng.next_f64()];
+
+                let (y_v3, hp_v3, h_v3) =
+                    unsafe { forward_avx2(&x, &w1, &b1, &w2, &b2, nf, nh, alpha) };
+
+                // scalar tier vs canonical v3
+                let (y_s, hp_s, h_s) = forward_scalar(&x, &w1, &b1, &w2, &b2, nf, nh, alpha);
+                for (name, a, b) in [
+                    ("y", ulp_diff_f64(y_s, y_v3), 0usize),
+                    (
+                        "h_pre",
+                        max_ulp_slice(&hp_s, &hp_v3).0,
+                        max_ulp_slice(&hp_s, &hp_v3).1,
+                    ),
+                    (
+                        "h",
+                        max_ulp_slice(&h_s, &h_v3).0,
+                        max_ulp_slice(&h_s, &h_v3).1,
+                    ),
+                ] {
+                    if a != 0 {
+                        failures.push(format!(
+                            "forward scalar-vs-v3 [{nf}x{nh} seed={seed:#x}] {name}: \
+                             max_ulp={a} at {b} (scalar={} v3={})",
+                            if name == "y" {
+                                y_s
+                            } else if name == "h_pre" {
+                                hp_s[b]
+                            } else {
+                                h_s[b]
+                            },
+                            if name == "y" {
+                                y_v3
+                            } else if name == "h_pre" {
+                                hp_v3[b]
+                            } else {
+                                h_v3[b]
+                            },
+                        ));
+                    }
+                }
+
+                if has512 {
+                    let (y_v4, hp_v4, h_v4) =
+                        unsafe { forward_avx512(&x, &w1, &b1, &w2, &b2, nf, nh, alpha) };
+                    for (name, a, b) in [
+                        ("y", ulp_diff_f64(y_v4, y_v3), 0usize),
+                        (
+                            "h_pre",
+                            max_ulp_slice(&hp_v4, &hp_v3).0,
+                            max_ulp_slice(&hp_v4, &hp_v3).1,
+                        ),
+                        (
+                            "h",
+                            max_ulp_slice(&h_v4, &h_v3).0,
+                            max_ulp_slice(&h_v4, &h_v3).1,
+                        ),
+                    ] {
+                        if a != 0 {
+                            failures.push(format!(
+                                "forward v4-vs-v3 [{nf}x{nh} seed={seed:#x}] {name}: \
+                                 max_ulp={a} at {b} (v4={} v3={})",
+                                if name == "y" {
+                                    y_v4
+                                } else if name == "h_pre" {
+                                    hp_v4[b]
+                                } else {
+                                    h_v4[b]
+                                },
+                                if name == "y" {
+                                    y_v3
+                                } else if name == "h_pre" {
+                                    hp_v3[b]
+                                } else {
+                                    h_v3[b]
+                                },
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn backprop_all_tiers_bit_identical() {
+        assert!(
+            std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma"),
+            "this test needs an x86-64-v3 (AVX2+FMA) host: it is the canonical tier every other tier must reproduce"
+        );
+        let has512 = crate::tier_cap::avx512_allowed() && std::is_x86_feature_detected!("avx512f");
+        let alpha = 0.01;
+        let mut failures = Vec::new();
+        for &(nf, nh) in PARITY_SHAPES {
+            for &seed in &[0x51ED_1E55u64, 0xABCD_1234, 0x0000_00FF] {
+                let mut rng = Xs64::new(seed ^ (nf * 31 + nh) as u64);
+                let x = random_sparse_x(&mut rng, nf, 0.35);
+                let w2 = random_buf(&mut rng, nh);
+                let h_pre = random_buf(&mut rng, nh);
+                let h: Vec<f64> = h_pre
+                    .iter()
+                    .map(|&v| if v >= 0.0 { v } else { alpha * v })
+                    .collect();
+                let dl_dy = rng.next_f64();
+                let gw1_0 = random_buf(&mut rng, nf * nh);
+                let gb1_0 = random_buf(&mut rng, nh);
+                let gw2_0 = random_buf(&mut rng, nh);
+                let gb2_0 = vec![rng.next_f64()];
+
+                type Grads = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
+                type RunFn<'a> = dyn FnMut(&mut [f64], &mut [f64], &mut [f64], &mut [f64]) + 'a;
+                let run = |f: &mut RunFn<'_>| -> Grads {
+                    let (mut gw1, mut gb1, mut gw2, mut gb2) =
+                        (gw1_0.clone(), gb1_0.clone(), gw2_0.clone(), gb2_0.clone());
+                    f(&mut gw1, &mut gb1, &mut gw2, &mut gb2);
+                    (gw1, gb1, gw2, gb2)
+                };
+
+                let r_v3 = run(&mut |gw1, gb1, gw2, gb2| unsafe {
+                    backprop_avx2(
+                        &x, &h_pre, &h, dl_dy, gw1, gb1, &w2, gw2, gb2, nf, nh, alpha,
+                    )
+                });
+                let r_s = run(&mut |gw1, gb1, gw2, gb2| {
+                    backprop_scalar(
+                        &x, &h_pre, &h, dl_dy, gw1, gb1, &w2, gw2, gb2, nf, nh, alpha,
+                    )
+                });
+                for (name, (ulp, idx)) in [
+                    ("gw1", max_ulp_slice(&r_s.0, &r_v3.0)),
+                    ("gb1", max_ulp_slice(&r_s.1, &r_v3.1)),
+                    ("gw2", max_ulp_slice(&r_s.2, &r_v3.2)),
+                    ("gb2", max_ulp_slice(&r_s.3, &r_v3.3)),
+                ] {
+                    if ulp != 0 {
+                        failures.push(format!(
+                            "backprop scalar-vs-v3 [{nf}x{nh} seed={seed:#x}] {name}: \
+                             max_ulp={ulp} at {idx}"
+                        ));
+                    }
+                }
+
+                if has512 {
+                    let r_v4 = run(&mut |gw1, gb1, gw2, gb2| unsafe {
+                        backprop_avx512(
+                            &x, &h_pre, &h, dl_dy, gw1, gb1, &w2, gw2, gb2, nf, nh, alpha,
+                        )
+                    });
+                    for (name, (ulp, idx)) in [
+                        ("gw1", max_ulp_slice(&r_v4.0, &r_v3.0)),
+                        ("gb1", max_ulp_slice(&r_v4.1, &r_v3.1)),
+                        ("gw2", max_ulp_slice(&r_v4.2, &r_v3.2)),
+                        ("gb2", max_ulp_slice(&r_v4.3, &r_v3.3)),
+                    ] {
+                        if ulp != 0 {
+                            failures.push(format!(
+                                "backprop v4-vs-v3 [{nf}x{nh} seed={seed:#x}] {name}: \
+                                 max_ulp={ulp} at {idx}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// The public dispatchers must select the bit-identical kernels under
+    /// every token permutation the host offers: disabling the AVX-512 tokens
+    /// must route to the AVX2 kernels (same bytes), and disabling those must
+    /// reach the scalar replica (again same bytes).
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn dispatch_bit_identical_under_token_permutations() {
+        use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
+        assert!(
+            std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma"),
+            "this test needs an x86-64-v3 (AVX2+FMA) host: it is the canonical tier every other tier must reproduce"
+        );
+        let alpha = 0.01;
+        let (nf, nh) = (944usize, 32usize);
+        let mut rng = Xs64::new(0x600D_CAFE);
+        let x = random_sparse_x(&mut rng, nf, 0.35);
+        let w1 = random_buf(&mut rng, nf * nh);
+        let b1 = random_buf(&mut rng, nh);
+        let w2 = random_buf(&mut rng, nh);
+        let b2 = vec![rng.next_f64()];
+        let h_pre = random_buf(&mut rng, nh);
+        let h: Vec<f64> = h_pre
+            .iter()
+            .map(|&v| if v >= 0.0 { v } else { alpha * v })
+            .collect();
+        let dl_dy = rng.next_f64();
+        let gw1_0 = random_buf(&mut rng, nf * nh);
+        let gb1_0 = random_buf(&mut rng, nh);
+        let gw2_0 = random_buf(&mut rng, nh);
+        let gb2_0 = vec![rng.next_f64()];
+
+        fn bits_of(v: &[f64]) -> Vec<u64> {
+            v.iter().map(|f| f.to_bits()).collect()
+        }
+
+        type PermOut = (f64, Vec<u64>, Vec<u64>, Vec<u64>);
+        let mut baseline: Option<PermOut> = None;
+        let mut failures = Vec::new();
+        let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
+            let (y, hp, hh) = forward(&x, &w1, &b1, &w2, &b2, nf, nh, alpha);
+            let (mut gw1, mut gb1, mut gw2, mut gb2) =
+                (gw1_0.clone(), gb1_0.clone(), gw2_0.clone(), gb2_0.clone());
+            backprop_step(
+                &x, &h_pre, &h, dl_dy, &mut gw1, &mut gb1, &w2, &mut gw2, &mut gb2, nf, nh, alpha,
+            );
+            let mut bits = Vec::new();
+            for v in gw1.iter().chain(&gb1).chain(&gw2).chain(&gb2) {
+                bits.push(v.to_bits());
+            }
+            let cur = (y, bits_of(&hp), bits_of(&hh), bits);
+            if let Some(b) = &baseline {
+                if cur.0.to_bits() != b.0.to_bits() || cur.1 != b.1 || cur.2 != b.2 || cur.3 != b.3
+                {
+                    failures.push(format!(
+                        "dispatch diverged under permutation: {}",
+                        perm.label
+                    ));
+                }
+            } else {
+                baseline = Some(cur);
+            }
+            eprintln!(
+                "permutation [{}] -> y={:e} (bits {:#x})",
+                perm.label,
+                y,
+                y.to_bits()
+            );
+        });
+        eprintln!("permutations run: {}", report.permutations_run);
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }

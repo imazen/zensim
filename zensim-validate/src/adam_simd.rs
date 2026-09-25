@@ -42,6 +42,7 @@ use archmage::magetypes;
 // re-enable — using the generic type avoids that pitfall entirely
 // while still emitting native AVX-512 codegen under `#[arcane]` when
 // the X64V4Token backend impl is present.
+#[cfg(target_arch = "aarch64")]
 use magetypes::simd::generic::f64x4 as GenericF64x4;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::{f64x4, f64x8};
@@ -189,15 +190,45 @@ fn adam_update_inner_v4(token: archmage::X64V4Token, args: &mut AdamUpdateArgs<'
         zero_v.store(gc_fixed);
     }
 
-    // Tail (0..7 elements) — scalar mop-up. Touches at most 7 lanes per
-    // array, so the overhead is negligible vs the 47,616-element bulk.
-    let head = n - tail_len;
-    if head < n {
+    // Remainder handling — BIT-PARITY RULE (tier-parity lane): the AVX2
+    // (`_v3`) kernel's fused-op domain is [0, n - n%4); only the last n%4
+    // elements are scalar mul+add. The 8-lane loop above leaves
+    // n%8 ∈ [0,7) elements; when n%8 >= 4 the first four of them are
+    // fused-domain in canonical arithmetic, so they take the identical
+    // fused ops (not the mul+add scalar tail), and only the final n%4
+    // take the scalar_ref path.
+    //
+    // Adam is elementwise — there is no cross-lane reduction — so four
+    // per-element `f64::mul_add` updates are bit-identical to one
+    // `_mm256_fmadd_pd` group on the `_v3` kernel.
+    let rem_start = n - tail_len;
+    let n4 = n - n % 4;
+    if rem_start + 4 <= n4 {
+        let one_minus_b1 = 1.0 - args.beta1;
+        let one_minus_b2 = 1.0 - args.beta2;
+        let inv_bc1 = 1.0 / args.bc1;
+        let inv_bc2 = 1.0 / args.bc2;
+        for i in rem_start..rem_start + 4 {
+            let g = args.g[i];
+            let m_new = one_minus_b1.mul_add(g, args.beta1 * args.m[i]);
+            let v_new = one_minus_b2.mul_add(g * g, args.beta2 * args.v[i]);
+            args.m[i] = m_new;
+            args.v[i] = v_new;
+            let m_hat = m_new * inv_bc1;
+            let v_hat = v_new * inv_bc2;
+            args.w[i] -= args.lr * m_hat / (v_hat.sqrt() + args.eps);
+            args.g[i] = 0.0;
+        }
+    }
+
+    // Final n%4 elements — mul+add scalar semantics, identical to the
+    // AVX2 kernel's tail.
+    if n4 < n {
         let mut tail_args = AdamUpdateArgs {
-            w: &mut args.w[head..],
-            g: &mut args.g[head..],
-            m: &mut args.m[head..],
-            v: &mut args.v[head..],
+            w: &mut args.w[n4..],
+            g: &mut args.g[n4..],
+            m: &mut args.m[n4..],
+            v: &mut args.v[n4..],
             beta1: args.beta1,
             beta2: args.beta2,
             eps: args.eps,
@@ -589,12 +620,13 @@ fn adam_update_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamUpdateA
 }
 
 // =============================================================================
-// NEON / WASM / scalar fallback paths — single `#[magetypes]` body shared
-// across all three. The generic `GenericF64x4<Token>` polyfills to the
-// platform's native width.
+// NEON fallback — generic `GenericF64x4<Token>` body. NEON's `mul_add`
+// lowers to `vfmaq` (single-rounding fused), so this is bit-identical to
+// the `_v3` kernel already: same fused domain [0, n - n%4), same
+// scalar_ref tail.
 // =============================================================================
 
-#[magetypes(neon, wasm128, scalar)]
+#[magetypes(neon, -scalar)]
 fn adam_update_inner(token: Token, args: &mut AdamUpdateArgs<'_>) {
     #[allow(non_camel_case_types)]
     type f64x4 = GenericF64x4<Token>;
@@ -658,6 +690,73 @@ fn adam_update_inner(token: Token, args: &mut AdamUpdateArgs<'_>) {
         };
         adam_update_scalar_ref(&mut tail_args);
     }
+}
+
+// =============================================================================
+// wasm128 / scalar fallback — per-lane fused arithmetic.
+//
+// The generic `GenericF64x4<Token>::mul_add` lowers to plain `a*b+c` on
+// these tiers (wasm has no f64 FMA primitive; the scalar polyfill avoids
+// the libm call), which is NOT the canonical `_v3` arithmetic. Bit parity
+// requires the same fused ops the AVX2 lanes run, so these tiers go
+// per-element `f64::mul_add` — single-rounding fused on every target
+// (hardware FMA where it exists, correctly-rounded libm `fma` elsewhere)
+// — over the canonical fused domain [0, n - n%4), followed by the
+// `scalar_ref` mul+add tail.
+// =============================================================================
+
+fn adam_update_scalar_fused(args: &mut AdamUpdateArgs<'_>) {
+    let beta1 = args.beta1;
+    let beta2 = args.beta2;
+    let eps = args.eps;
+    let bc1 = args.bc1;
+    let bc2 = args.bc2;
+    let lr = args.lr;
+    let one_minus_b1 = 1.0 - beta1;
+    let one_minus_b2 = 1.0 - beta2;
+    let inv_bc1 = 1.0 / bc1;
+    let inv_bc2 = 1.0 / bc2;
+    let n = args.w.len();
+    let n4 = n - n % 4;
+    for i in 0..n4 {
+        let g = args.g[i];
+        // Identical fused expression to the AVX2 lane ops:
+        // fma(one_minus_b1, g, round(beta1*m)) etc.
+        let m_new = one_minus_b1.mul_add(g, beta1 * args.m[i]);
+        let v_new = one_minus_b2.mul_add(g * g, beta2 * args.v[i]);
+        args.m[i] = m_new;
+        args.v[i] = v_new;
+        let m_hat = m_new * inv_bc1;
+        let v_hat = v_new * inv_bc2;
+        args.w[i] -= lr * m_hat / (v_hat.sqrt() + eps);
+        args.g[i] = 0.0;
+    }
+    if n4 < n {
+        let mut tail_args = AdamUpdateArgs {
+            w: &mut args.w[n4..],
+            g: &mut args.g[n4..],
+            m: &mut args.m[n4..],
+            v: &mut args.v[n4..],
+            beta1,
+            beta2,
+            eps,
+            bc1,
+            bc2,
+            lr,
+        };
+        adam_update_scalar_ref(&mut tail_args);
+    }
+}
+
+/// `wasm128` tier variant called by `incant!` dispatch.
+#[cfg(target_arch = "wasm32")]
+fn adam_update_inner_wasm128(_token: archmage::Wasm128Token, args: &mut AdamUpdateArgs<'_>) {
+    adam_update_scalar_fused(args);
+}
+
+/// `scalar` tier variant called by `incant!` dispatch.
+fn adam_update_inner_scalar(_token: archmage::ScalarToken, args: &mut AdamUpdateArgs<'_>) {
+    adam_update_scalar_fused(args);
 }
 
 #[cfg(test)]
@@ -810,5 +909,145 @@ mod tests {
         let mut m: Vec<f64> = vec![];
         let mut v: Vec<f64> = vec![];
         adam_update(&mut make_args(&mut w, &mut g, &mut m, &mut v, 1));
+    }
+
+    // =====================================================================
+    // Tier parity — the AVX2 (`_v3`) kernel is the canonical arithmetic;
+    // every other tier the dispatcher can pick must reproduce it BIT FOR
+    // BIT (same fused-op set on [0, n - n%4), same mul+add tail).
+    // =====================================================================
+
+    fn bits_of(v: &[f64]) -> Vec<u64> {
+        v.iter().map(|f| f.to_bits()).collect()
+    }
+
+    /// Max ordered-int ULP distance + first index, for reporting.
+    fn max_ulp(a: &[f64], b: &[f64]) -> (u64, usize) {
+        fn ord(v: f64) -> i64 {
+            let b = v.to_bits() as i64;
+            if b < 0 { i64::MIN - b } else { b }
+        }
+        let mut worst = (0u64, usize::MAX);
+        for (i, (&x, &y)) in a.iter().zip(b.iter()).enumerate() {
+            let d = ord(x).abs_diff(ord(y));
+            if d > worst.0 {
+                worst = (d, i);
+            }
+        }
+        worst
+    }
+
+    /// Compare every host-available tier against `_v3` (canonical) on the
+    /// same buffers. Sizes cover: n<4 (all-tail on every tier), n=5..8
+    /// (v4 all-tail vs v3 partially-chunked — the tier-boundary edge), the
+    /// fold shape 30208/32/1 and a misaligned large n.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn adam_all_tiers_bit_identical() {
+        use archmage::SimdToken;
+        // Hold the token lock for the whole body: `adam_dispatch_bit_identical_under_token_permutations`
+        // disables tokens process-wide, and a `summon()` racing it would silently skip the v4 comparison.
+        let _lock = archmage::testing::lock_token_testing();
+        let v3 = archmage::X64V3Token::summon();
+        let v4 = archmage::X64V4Token::summon();
+        assert!(
+            v3.is_some(),
+            "this test needs an x86-64-v3 (AVX2+FMA) host: it is the canonical tier every other tier must reproduce"
+        );
+        let sizes = [
+            1usize, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 15, 16, 17, 20, 24, 28, 31, 32, 33, 40, 48, 63,
+            64, 65, 30208, 32, 1, 47873,
+        ];
+        let mut failures = Vec::new();
+        for &n in &sizes {
+            for &t in &[5u64, 100, 10_000] {
+                let (w0, g0, m0, v0) = synth_state(n, 0xFEED ^ n as u64 ^ t);
+
+                let run = |f: &mut dyn FnMut(&mut AdamUpdateArgs<'_>)| {
+                    let (mut w, mut g, mut m, mut v) =
+                        (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+                    f(&mut make_args(&mut w, &mut g, &mut m, &mut v, t));
+                    (w, g, m, v)
+                };
+
+                let r_v3 = run(&mut |a| adam_update_inner_v3(v3.unwrap(), a));
+
+                // scalar tier (plain mul_add semantics — must equal v3)
+                let r_s = run(&mut |a| {
+                    adam_update_inner_scalar(archmage::ScalarToken::summon().unwrap(), a)
+                });
+                for (name, (ulp, idx)) in [
+                    ("w", max_ulp(&r_s.0, &r_v3.0)),
+                    ("g", max_ulp(&r_s.1, &r_v3.1)),
+                    ("m", max_ulp(&r_s.2, &r_v3.2)),
+                    ("v", max_ulp(&r_s.3, &r_v3.3)),
+                ] {
+                    if ulp != 0 {
+                        failures.push(format!(
+                            "adam scalar-vs-v3 n={n} t={t} {name}: max_ulp={ulp} at {idx}"
+                        ));
+                    }
+                }
+
+                if let Some(t4) = v4 {
+                    let r_v4 = run(&mut |a| adam_update_inner_v4(t4, a));
+                    for (name, (ulp, idx)) in [
+                        ("w", max_ulp(&r_v4.0, &r_v3.0)),
+                        ("g", max_ulp(&r_v4.1, &r_v3.1)),
+                        ("m", max_ulp(&r_v4.2, &r_v3.2)),
+                        ("v", max_ulp(&r_v4.3, &r_v3.3)),
+                    ] {
+                        if ulp != 0 {
+                            failures.push(format!(
+                                "adam v4-vs-v3 n={n} t={t} {name}: max_ulp={ulp} at {idx}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// The dispatched `adam_update` must produce identical bytes under
+    /// every host token permutation (v4-off → v3 bytes; v3-off → scalar
+    /// bytes; and the scalar tier must match v3 too).
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn adam_dispatch_bit_identical_under_token_permutations() {
+        use archmage::SimdToken;
+        use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
+        assert!(
+            archmage::X64V3Token::summon().is_some(),
+            "this test needs an x86-64-v3 (AVX2+FMA) host: it is the canonical tier every other tier must reproduce"
+        );
+        let n = 30208usize + 65; // fold w1 + biases, misaligned on purpose
+        let (w0, g0, m0, v0) = synth_state(n, 0xCAFE_5EED);
+        let mut baseline: Option<Vec<u64>> = None;
+        let mut failures = Vec::new();
+        let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
+            let (mut w, mut g, mut m, mut v) = (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+            adam_update(&mut make_args(&mut w, &mut g, &mut m, &mut v, 42));
+            let mut bits = bits_of(&w);
+            bits.extend(bits_of(&g));
+            bits.extend(bits_of(&m));
+            bits.extend(bits_of(&v));
+            if let Some(b) = &baseline {
+                if bits != *b {
+                    failures.push(format!("adam dispatch diverged: {}", perm.label));
+                }
+            } else {
+                baseline = Some(bits);
+            }
+            eprintln!(
+                "perm [{}] w[0]={:#x} w[{}]={:#x}",
+                perm.label,
+                w[0].to_bits(),
+                n - 1,
+                w[n - 1].to_bits()
+            );
+        });
+        eprintln!("permutations run: {}", report.permutations_run);
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }

@@ -56,8 +56,16 @@ fn accumulate_rows_f32_v4(
     n_features: usize,
     n_hidden: usize,
 ) {
+    // BIT-PARITY RULE (tier-parity lane): the AVX2 (`_v3`) kernel's fused
+    // domain is lanes j < n8 = n_hidden - n_hidden%8; the tail is scalar
+    // mul+add. The 16-lane loop leaves n_hidden%16 ∈ [0,15) elements; when
+    // it is >= 8 the first eight run ONE f32x8 fused group (same
+    // single-rounding mul_add the AVX2 lanes use), and only the final
+    // n_hidden%8 take mul+add.
     let chunks = n_hidden / 16;
     let tail = chunks * 16;
+    let n8 = n_hidden - (n_hidden % 8);
+    let mid_fused = tail + 8 <= n8;
     for i in 0..n_features {
         let s = x[i];
         if s == 0.0 {
@@ -73,7 +81,15 @@ fn accumulate_rows_f32_v4(
             let w_v = GenericF32x16::load(token, w_block);
             s_v.mul_add(w_v, h_v).store(h_block);
         }
-        for j in tail..n_hidden {
+        if mid_fused {
+            let s8 = GenericF32x8::splat(token, s);
+            let h_block: &mut [f32; 8] = (&mut h_pre[tail..tail + 8]).try_into().unwrap();
+            let w_block: &[f32; 8] = (&row[tail..tail + 8]).try_into().unwrap();
+            let h_v = GenericF32x8::load(token, h_block);
+            let w_v = GenericF32x8::load(token, w_block);
+            s8.mul_add(w_v, h_v).store(h_block);
+        }
+        for j in n8..n_hidden {
             h_pre[j] += s * row[j];
         }
     }
@@ -110,25 +126,46 @@ fn apply_leaky_relu_f32_v4(
 #[cfg(target_arch = "x86_64")]
 #[archmage::arcane]
 fn dot_product_f32_v4(token: archmage::X64V4Token, h: &[f32], w: &[f32]) -> f32 {
-    let chunks = h.len() / 16;
-    let tail = chunks * 16;
-    let mut acc = GenericF32x16::zero(token);
-    for c in 0..chunks {
+    // BIT-PARITY RULE (tier-parity lane): reproduce the AVX2 (`_v3`)
+    // kernel exactly — an 8-lane accumulator where lane k sums
+    // h[8c+k]*w[8c+k] fused, the pairwise tree
+    // ((l0+l1)+(l2+l3))+((l4+l5)+(l6+l7)), and the sequential mul+add
+    // tail over the last len%8 elements. A 16-lane accumulator is a
+    // different summation order and is out of parity. Each 16-element
+    // group therefore feeds TWO f32x8 fused mul_adds into the same
+    // 8-lane accumulator, preserving per-lane chain order.
+    let chunks16 = h.len() / 16;
+    let n8 = h.len() - (h.len() % 8);
+    let mut acc = GenericF32x8::zero(token);
+    for c in 0..chunks16 {
         let off = c * 16;
-        let h_block: &[f32; 16] = (&h[off..off + 16]).try_into().unwrap();
-        let w_block: &[f32; 16] = (&w[off..off + 16]).try_into().unwrap();
-        let h_v = GenericF32x16::load(token, h_block);
-        let w_v = GenericF32x16::load(token, w_block);
+        let lo_h: &[f32; 8] = (&h[off..off + 8]).try_into().unwrap();
+        let hi_h: &[f32; 8] = (&h[off + 8..off + 16]).try_into().unwrap();
+        let lo_w: &[f32; 8] = (&w[off..off + 8]).try_into().unwrap();
+        let hi_w: &[f32; 8] = (&w[off + 8..off + 16]).try_into().unwrap();
+        let h_lo = GenericF32x8::load(token, lo_h);
+        let w_lo = GenericF32x8::load(token, lo_w);
+        acc = h_lo.mul_add(w_lo, acc);
+        let h_hi = GenericF32x8::load(token, hi_h);
+        let w_hi = GenericF32x8::load(token, hi_w);
+        acc = h_hi.mul_add(w_hi, acc);
+    }
+    // Remaining 8-lane chunk when len%16 >= 8 (fused domain [16k, n8)).
+    if chunks16 * 16 + 8 <= n8 {
+        let off = chunks16 * 16;
+        let h_block: &[f32; 8] = (&h[off..off + 8]).try_into().unwrap();
+        let w_block: &[f32; 8] = (&w[off..off + 8]).try_into().unwrap();
+        let h_v = GenericF32x8::load(token, h_block);
+        let w_v = GenericF32x8::load(token, w_block);
         acc = h_v.mul_add(w_v, acc);
     }
-    let mut lanes = [0.0f32; 16];
+    let mut lanes = [0.0f32; 8];
     acc.store(&mut lanes);
-    let mut lane_sum = 0.0f32;
-    for &l in &lanes {
-        lane_sum += l;
-    }
+    let lane_sum = (lanes[0] + lanes[1])
+        + (lanes[2] + lanes[3])
+        + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
     let mut tail_sum = 0.0f32;
-    for j in tail..h.len() {
+    for j in n8..h.len() {
         tail_sum += h[j] * w[j];
     }
     lane_sum + tail_sum
@@ -226,10 +263,12 @@ fn dot_product_f32_v3(token: archmage::X64V3Token, h: &[f32], w: &[f32]) -> f32 
 }
 
 // =============================================================================
-// NEON / WASM / scalar fallback — f32x8 generic
+// NEON fallback — f32x8 generic. NEON `mul_add` lowers to fused `vfmla`,
+// matching the `_v3` kernel bit-for-bit (same fused domain [0, n8),
+// same mul+add tail).
 // =============================================================================
 
-#[magetypes(neon, wasm128, scalar)]
+#[magetypes(neon, -scalar)]
 fn accumulate_rows_f32(
     token: Token,
     x: &[f32],
@@ -288,7 +327,7 @@ fn apply_leaky_relu_f32(token: Token, h_pre: &[f32], leaky_alpha: f32) -> Vec<f3
     h
 }
 
-#[magetypes(neon, wasm128, scalar)]
+#[magetypes(neon, -scalar)]
 fn dot_product_f32(token: Token, h: &[f32], w: &[f32]) -> f32 {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -313,6 +352,93 @@ fn dot_product_f32(token: Token, h: &[f32], w: &[f32]) -> f32 {
         tail_sum += h[j] * w[j];
     }
     lane_sum + tail_sum
+}
+
+// =============================================================================
+// wasm128 / scalar fallback — per-lane fused arithmetic.
+//
+// `GenericF32x8<Token>::mul_add` lowers to plain `a*b+c` on these tiers
+// (no fused FMA in wasm SIMD; the scalar polyfill avoids the libm call),
+// which is NOT the canonical `_v3` arithmetic. These tiers therefore run
+// per-element `f32::mul_add` — single-rounding fused on every target —
+// over the canonical fused domain, with the same mul+add tail, the same
+// 8-lane accumulator, and the same pairwise reduction tree as `_v3`.
+// =============================================================================
+
+fn accumulate_rows_f32_fallback(
+    x: &[f32],
+    w1: &[f32],
+    h_pre: &mut [f32],
+    n_features: usize,
+    n_hidden: usize,
+) {
+    let n8 = n_hidden - (n_hidden % 8);
+    for i in 0..n_features {
+        let s = x[i];
+        if s == 0.0 {
+            continue;
+        }
+        let row = &w1[i * n_hidden..(i + 1) * n_hidden];
+        for j in 0..n8 {
+            h_pre[j] = s.mul_add(row[j], h_pre[j]);
+        }
+        for j in n8..n_hidden {
+            h_pre[j] += s * row[j];
+        }
+    }
+}
+
+fn dot_product_f32_fallback(h: &[f32], w: &[f32]) -> f32 {
+    let n8 = h.len() - (h.len() % 8);
+    // 8-lane accumulator emulation — identical chain order to `_v3`.
+    let mut acc = [0.0f32; 8];
+    for c in 0..n8 / 8 {
+        for k in 0..8 {
+            acc[k] = h[8 * c + k].mul_add(w[8 * c + k], acc[k]);
+        }
+    }
+    let lane_sum = (acc[0] + acc[1]) + (acc[2] + acc[3]) + ((acc[4] + acc[5]) + (acc[6] + acc[7]));
+    let mut tail_sum = 0.0f32;
+    for j in n8..h.len() {
+        tail_sum += h[j] * w[j];
+    }
+    lane_sum + tail_sum
+}
+
+/// `wasm128` tier variant called by `incant!` dispatch.
+#[cfg(target_arch = "wasm32")]
+fn accumulate_rows_f32_wasm128(
+    _token: archmage::Wasm128Token,
+    x: &[f32],
+    w1: &[f32],
+    h_pre: &mut [f32],
+    n_features: usize,
+    n_hidden: usize,
+) {
+    accumulate_rows_f32_fallback(x, w1, h_pre, n_features, n_hidden);
+}
+
+/// `scalar` tier variant called by `incant!` dispatch.
+fn accumulate_rows_f32_scalar(
+    _token: archmage::ScalarToken,
+    x: &[f32],
+    w1: &[f32],
+    h_pre: &mut [f32],
+    n_features: usize,
+    n_hidden: usize,
+) {
+    accumulate_rows_f32_fallback(x, w1, h_pre, n_features, n_hidden);
+}
+
+/// `wasm128` tier variant called by `incant!` dispatch.
+#[cfg(target_arch = "wasm32")]
+fn dot_product_f32_wasm128(_token: archmage::Wasm128Token, h: &[f32], w: &[f32]) -> f32 {
+    dot_product_f32_fallback(h, w)
+}
+
+/// `scalar` tier variant called by `incant!` dispatch.
+fn dot_product_f32_scalar(_token: archmage::ScalarToken, h: &[f32], w: &[f32]) -> f32 {
+    dot_product_f32_fallback(h, w)
 }
 
 /// f32 encoder backprop: accumulate gw1/gb1 from dl_dh_pre.
@@ -643,6 +769,7 @@ pub fn skip_backward(x: &[f64], dl_dy_skip: f64, gw_skip: &mut [f64], gb_skip: &
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     struct Xs32(u64);
@@ -849,5 +976,201 @@ mod tests {
             f32_ns / 1e3,
             f64_ns / f32_ns
         );
+    }
+
+    // =====================================================================
+    // Tier parity — the AVX2 (`_v3`, f32x8) kernels are the canonical
+    // arithmetic; every other tier the dispatcher can pick must reproduce
+    // them BIT FOR BIT.
+    // =====================================================================
+
+    /// Ordered-int ULP distance between two f32 values.
+    fn ulp_diff_f32(a: f32, b: f32) -> u32 {
+        fn ord(v: f32) -> i32 {
+            let b = v.to_bits() as i32;
+            if b < 0 { i32::MIN - b } else { b }
+        }
+        ord(a).abs_diff(ord(b))
+    }
+
+    fn max_ulp_f32(a: &[f32], b: &[f32]) -> (u32, usize) {
+        let mut worst = (0u32, usize::MAX);
+        for (i, (&x, &y)) in a.iter().zip(b.iter()).enumerate() {
+            let d = ulp_diff_f32(x, y);
+            if d > worst.0 {
+                worst = (d, i);
+            }
+        }
+        worst
+    }
+
+    /// Shapes: production 372×128 plus every remainder class so `n_hidden`
+    /// exercises the v4 16-lane boundary vs the v3 8-lane boundary
+    /// (nh%16 ∈ {0..15}, including 8..15 where v4's tail must re-enter
+    /// the fused domain at the v3 boundary).
+    #[cfg(target_arch = "x86_64")]
+    const ENC_SHAPES: &[(usize, usize)] = &[
+        (372, 128),
+        (16, 8),
+        (16, 16),
+        (16, 12),
+        (16, 20),
+        (16, 24),
+        (16, 28),
+        (8, 15),
+        (8, 23),
+        (8, 31),
+        (4, 9),
+        (4, 13),
+        (64, 40),
+        (128, 24),
+    ];
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn encoder_all_tiers_bit_identical() {
+        use archmage::SimdToken;
+        // Hold the token lock for the whole body: `encoder_dispatch_bit_identical_under_token_permutations`
+        // disables tokens process-wide, and a `summon()` racing it would silently skip the v4 comparison.
+        let _lock = archmage::testing::lock_token_testing();
+        let v3 = archmage::X64V3Token::summon();
+        let v4 = archmage::X64V4Token::summon();
+        assert!(
+            v3.is_some(),
+            "this test needs an x86-64-v3 (AVX2+FMA) host: it is the canonical tier every other tier must reproduce"
+        );
+        let alpha = 0.01f32;
+        let mut failures = Vec::new();
+        for &(nf, nh) in ENC_SHAPES {
+            for &seed in &[0x51EDu64, 0xABCD_1234, 0x0000_00FF] {
+                let mut rng = Xs32::new(seed ^ (nf * 31 + nh) as u64);
+                let x = random_sparse_f32(&mut rng, nf, 0.35);
+                let w1 = random_vec_f32(&mut rng, nf * nh);
+                let h_pre0 = random_vec_f32(&mut rng, nh);
+
+                // ---- accumulate_rows_f32 ----
+                let mut ref_rows = h_pre0.clone();
+                accumulate_rows_f32_v3(v3.unwrap(), &x, &w1, &mut ref_rows, nf, nh);
+
+                let mut sca_rows = h_pre0.clone();
+                accumulate_rows_f32_scalar(
+                    archmage::ScalarToken::summon().unwrap(),
+                    &x,
+                    &w1,
+                    &mut sca_rows,
+                    nf,
+                    nh,
+                );
+                let (u, i) = max_ulp_f32(&sca_rows, &ref_rows);
+                if u != 0 {
+                    failures.push(format!(
+                        "accumulate_rows scalar-vs-v3 [{nf}x{nh} seed={seed:#x}] \
+                         max_ulp={u} at {i}"
+                    ));
+                }
+
+                if let Some(t4) = v4 {
+                    let mut v4_rows = h_pre0.clone();
+                    accumulate_rows_f32_v4(t4, &x, &w1, &mut v4_rows, nf, nh);
+                    let (u, i) = max_ulp_f32(&v4_rows, &ref_rows);
+                    if u != 0 {
+                        failures.push(format!(
+                            "accumulate_rows v4-vs-v3 [{nf}x{nh} seed={seed:#x}] \
+                             max_ulp={u} at {i}"
+                        ));
+                    }
+                }
+
+                // ---- apply_leaky_relu_f32 ----
+                let rl_v3 = apply_leaky_relu_f32_v3(v3.unwrap(), &h_pre0, alpha);
+                let rl_s = apply_leaky_relu_f32_scalar(
+                    archmage::ScalarToken::summon().unwrap(),
+                    &h_pre0,
+                    alpha,
+                );
+                let (u, i) = max_ulp_f32(&rl_s, &rl_v3);
+                if u != 0 {
+                    failures.push(format!(
+                        "leaky_relu scalar-vs-v3 [{nf}x{nh} seed={seed:#x}] \
+                         max_ulp={u} at {i}"
+                    ));
+                }
+                if let Some(t4) = v4 {
+                    let rl_v4 = apply_leaky_relu_f32_v4(t4, &h_pre0, alpha);
+                    let (u, i) = max_ulp_f32(&rl_v4, &rl_v3);
+                    if u != 0 {
+                        failures.push(format!(
+                            "leaky_relu v4-vs-v3 [{nf}x{nh} seed={seed:#x}] \
+                             max_ulp={u} at {i}"
+                        ));
+                    }
+                }
+
+                // ---- dot_product_f32 ----
+                let h = rl_v3.clone();
+                let w2 = random_vec_f32(&mut rng, nh);
+                let d_v3 = dot_product_f32_v3(v3.unwrap(), &h, &w2);
+                let d_s = dot_product_f32_scalar(archmage::ScalarToken::summon().unwrap(), &h, &w2);
+                let u = ulp_diff_f32(d_s, d_v3);
+                if u != 0 {
+                    failures.push(format!(
+                        "dot_product scalar-vs-v3 [{nf}x{nh} seed={seed:#x}] \
+                         ulp={u} (scalar={d_s:e} v3={d_v3:e})"
+                    ));
+                }
+                if let Some(t4) = v4 {
+                    let d_v4 = dot_product_f32_v4(t4, &h, &w2);
+                    let u = ulp_diff_f32(d_v4, d_v3);
+                    if u != 0 {
+                        failures.push(format!(
+                            "dot_product v4-vs-v3 [{nf}x{nh} seed={seed:#x}] \
+                             ulp={u} (v4={d_v4:e} v3={d_v3:e})"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// The dispatched wrappers (`encoder_forward_f32`/`dot_bias_f32`) must
+    /// return identical bytes under every host token permutation.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn encoder_dispatch_bit_identical_under_token_permutations() {
+        use archmage::SimdToken;
+        use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
+        assert!(
+            archmage::X64V3Token::summon().is_some(),
+            "this test needs an x86-64-v3 (AVX2+FMA) host: it is the canonical tier every other tier must reproduce"
+        );
+        let (nf, nh) = (372usize, 128usize);
+        let alpha = 0.01f32;
+        let mut rng = Xs32::new(0xE11C_0DE1);
+        let x = random_sparse_f32(&mut rng, nf, 0.35);
+        let w1 = random_vec_f32(&mut rng, nf * nh);
+        let b1 = random_vec_f32(&mut rng, nh);
+        let w2 = random_vec_f32(&mut rng, nh);
+        let bias = rng.next_unit();
+
+        let mut baseline: Option<Vec<u32>> = None;
+        let mut failures = Vec::new();
+        let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
+            let (hp, h) = encoder_forward_f32(&x, &w1, &b1, nf, nh, alpha);
+            let y = dot_bias_f32(&h, &w2, bias);
+            let mut bits: Vec<u32> = hp.iter().map(|f| f.to_bits()).collect();
+            bits.extend(h.iter().map(|f| f.to_bits()));
+            bits.push(y.to_bits());
+            if let Some(b) = &baseline {
+                if bits != *b {
+                    failures.push(format!("encoder dispatch diverged: {}", perm.label));
+                }
+            } else {
+                baseline = Some(bits);
+            }
+            eprintln!("perm [{}] -> y={:e} bits={:#x}", perm.label, y, y.to_bits());
+        });
+        eprintln!("permutations run: {}", report.permutations_run);
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }
