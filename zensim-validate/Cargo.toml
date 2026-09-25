@@ -80,6 +80,7 @@ enough = { workspace = true }
 
 [dev-dependencies]
 zenbench = { workspace = true }
+iai-callgrind = "0.16.1"
 
 [[bench]]
 name = "adam_bench"
@@ -89,4 +90,9 @@ harness = false
 [[bench]]
 name = "bench_mlp_kernels"
 path = "benches/bench_mlp_kernels.rs"
+harness = false
+
+[[bench]]
+name = "optmlp_iai"
+path = "benches/optmlp_iai.rs"
 harness = false

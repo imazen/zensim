@@ -17,6 +17,14 @@
 //! paths are kept in `simd_mlp` so the comparison is exact (no other
 //! code differs).
 
+// Shim for `crate::tier_cap::avx512_allowed()` inside the #[path]-included
+// simd_mlp.rs: allow every tier so the bench dispatches to the host's best.
+mod tier_cap {
+    pub fn avx512_allowed() -> bool {
+        true
+    }
+}
+
 #[path = "../src/simd_mlp.rs"]
 #[allow(dead_code)]
 mod simd_mlp;

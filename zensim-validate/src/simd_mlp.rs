@@ -413,6 +413,84 @@ unsafe fn backprop_avx512(
 // AVX2 + FMA (f64x4) — secondary fast path for Haswell..Zen3
 // =============================================================================
 
+/// Register-blocked hidden-layer accumulate for `forward_avx2`: N YMM
+/// accumulators (4N hidden units) are loaded once, kept in registers for the
+/// entire nonzero-feature sweep, and stored once — the old loop paid a
+/// load+store round-trip per (feature, chunk). `nz` is the ascending nonzero
+/// index set, so the FMA order per accumulator is the same ascending feature
+/// order as the `s == 0.0` skip loop it replaces; `h_pre` was seeded from
+/// `b1`, so the first addend is unchanged.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[inline]
+unsafe fn fwd_acc_block<const N: usize>(
+    h_pre_ptr: *mut f64,
+    w1_ptr: *const f64,
+    x_ptr: *const f64,
+    nz: &[u32],
+    n_hidden: usize,
+    off: usize,
+) {
+    use std::arch::x86_64::{
+        __m256d, _mm256_fmadd_pd, _mm256_loadu_pd, _mm256_set1_pd, _mm256_setzero_pd,
+        _mm256_storeu_pd,
+    };
+    unsafe {
+        let mut acc: [__m256d; N] = [_mm256_setzero_pd(); N];
+        for (k, a) in acc.iter_mut().enumerate() {
+            *a = _mm256_loadu_pd(h_pre_ptr.add(off + 4 * k));
+        }
+        for &i in nz {
+            let i = i as usize;
+            let s_vec = _mm256_set1_pd(*x_ptr.add(i));
+            let row = w1_ptr.add(i * n_hidden + off);
+            for (k, a) in acc.iter_mut().enumerate() {
+                *a = _mm256_fmadd_pd(_mm256_loadu_pd(row.add(4 * k)), s_vec, *a);
+            }
+        }
+        for (k, a) in acc.iter().enumerate() {
+            _mm256_storeu_pd(h_pre_ptr.add(off + 4 * k), *a);
+        }
+    }
+}
+
+/// Register-blocked `gw1` update for `backprop_avx2`: the N `dl_dh_pre`
+/// vectors are loop-invariant across the feature sweep, so they load once and
+/// stay in registers (the old loop reloaded them per feature). Per element
+/// the arithmetic is the identical single `gw1 += x[i] * dh` FMA in ascending
+/// feature order.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[inline]
+unsafe fn bwd_gw1_block<const N: usize>(
+    gw1_ptr: *mut f64,
+    dh_ptr: *const f64,
+    x_ptr: *const f64,
+    nz: &[u32],
+    n_hidden: usize,
+    off: usize,
+) {
+    use std::arch::x86_64::{
+        __m256d, _mm256_fmadd_pd, _mm256_loadu_pd, _mm256_set1_pd, _mm256_setzero_pd,
+        _mm256_storeu_pd,
+    };
+    unsafe {
+        let mut dh: [__m256d; N] = [_mm256_setzero_pd(); N];
+        for (k, d) in dh.iter_mut().enumerate() {
+            *d = _mm256_loadu_pd(dh_ptr.add(off + 4 * k));
+        }
+        for &i in nz {
+            let i = i as usize;
+            let s_vec = _mm256_set1_pd(*x_ptr.add(i));
+            let row = gw1_ptr.add(i * n_hidden + off);
+            for (k, d) in dh.iter().enumerate() {
+                let g = _mm256_fmadd_pd(s_vec, *d, _mm256_loadu_pd(row.add(4 * k)));
+                _mm256_storeu_pd(row.add(4 * k), g);
+            }
+        }
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 unsafe fn forward_avx2(
@@ -433,29 +511,44 @@ unsafe fn forward_avx2(
     let mut h_pre = b1.to_vec();
     debug_assert_eq!(h_pre.len(), n_hidden);
 
+    // Ascending nonzero-feature index set — the same features the old
+    // `s == 0.0` continue skipped, in the same order.
+    let mut nz: Vec<u32> = Vec::with_capacity(n_features);
+    for (i, &s) in x[..n_features].iter().enumerate() {
+        if s != 0.0 {
+            nz.push(i as u32);
+        }
+    }
+
     let h_pre_ptr = h_pre.as_mut_ptr();
+    let x_ptr = x.as_ptr();
+    let w1_ptr = w1.as_ptr();
     let n_chunks = n_hidden / 4;
     let tail_start = n_chunks * 4;
 
-    for (i, &s) in x[..n_features].iter().enumerate() {
-        if s == 0.0 {
-            continue;
+    let mut c0 = 0usize;
+    while c0 + 8 <= n_chunks {
+        unsafe { fwd_acc_block::<8>(h_pre_ptr, w1_ptr, x_ptr, &nz, n_hidden, c0 * 4) };
+        c0 += 8;
+    }
+    if n_chunks - c0 >= 4 {
+        unsafe { fwd_acc_block::<4>(h_pre_ptr, w1_ptr, x_ptr, &nz, n_hidden, c0 * 4) };
+        c0 += 4;
+    }
+    if n_chunks - c0 >= 2 {
+        unsafe { fwd_acc_block::<2>(h_pre_ptr, w1_ptr, x_ptr, &nz, n_hidden, c0 * 4) };
+        c0 += 2;
+    }
+    if n_chunks - c0 >= 1 {
+        unsafe { fwd_acc_block::<1>(h_pre_ptr, w1_ptr, x_ptr, &nz, n_hidden, c0 * 4) };
+    }
+    for (o, h_pre_o) in h_pre.iter_mut().enumerate().skip(tail_start) {
+        let mut acc = *h_pre_o;
+        for &i in &nz {
+            let i = i as usize;
+            acc += unsafe { *x_ptr.add(i) * *w1_ptr.add(i * n_hidden + o) };
         }
-        let s_vec = unsafe { _mm256_set1_pd(s) };
-        let row_ptr = unsafe { w1.as_ptr().add(i * n_hidden) };
-
-        for c in 0..n_chunks {
-            let off = c * 4;
-            unsafe {
-                let acc = _mm256_loadu_pd(h_pre_ptr.add(off));
-                let row_v = _mm256_loadu_pd(row_ptr.add(off));
-                let new_acc = _mm256_fmadd_pd(row_v, s_vec, acc);
-                _mm256_storeu_pd(h_pre_ptr.add(off), new_acc);
-            }
-        }
-        for (k, h) in h_pre[tail_start..n_hidden].iter_mut().enumerate() {
-            *h += s * unsafe { *row_ptr.add(tail_start + k) };
-        }
+        *h_pre_o = acc;
     }
 
     // LeakyReLU
@@ -532,7 +625,10 @@ unsafe fn backprop_avx2(
     let mut dl_dh_pre = vec![0.0f64; n_hidden];
     let dl_dh_pre_ptr = dl_dh_pre.as_mut_ptr();
     let gw2_ptr = gw2.as_mut_ptr();
+    let gb1_ptr = gb1.as_mut_ptr();
 
+    // `gb1[o] += dl_dh_pre[o]` is folded into this pass: the addend is the
+    // just-computed value, so the per-element arithmetic is unchanged.
     for c in 0..n_chunks {
         let off = c * 4;
         unsafe {
@@ -549,49 +645,56 @@ unsafe fn backprop_avx2(
             let mask = _mm256_cmp_pd::<_CMP_LT_OQ>(pre_v, zero_vec);
             let dh_gated = _mm256_blendv_pd(dh, dh_scaled, mask);
             _mm256_storeu_pd(dl_dh_pre_ptr.add(off), dh_gated);
+
+            let gb_v = _mm256_loadu_pd(gb1_ptr.add(off));
+            let gb_new = _mm256_add_pd(gb_v, dh_gated);
+            _mm256_storeu_pd(gb1_ptr.add(off), gb_new);
         }
     }
     for o in tail_start..n_hidden {
         gw2[o] += dl_dy * h[o];
         let dh = dl_dy * w2[o];
-        dl_dh_pre[o] = if h_pre[o] >= 0.0 { dh } else { alpha * dh };
+        let dh_gated = if h_pre[o] >= 0.0 { dh } else { alpha * dh };
+        dl_dh_pre[o] = dh_gated;
+        gb1[o] += dh_gated;
     }
 
     gb2[0] += dl_dy;
 
-    let gw1_ptr = gw1.as_mut_ptr();
+    // Ascending nonzero-feature index set — same skip set as the old
+    // `s == 0.0` continue.
+    let mut nz: Vec<u32> = Vec::with_capacity(n_features);
     for (i, &s) in x[..n_features].iter().enumerate() {
-        if s == 0.0 {
-            continue;
-        }
-        let s_vec = unsafe { _mm256_set1_pd(s) };
-        let row_off = i * n_hidden;
-        for c in 0..n_chunks {
-            let off = row_off + c * 4;
-            unsafe {
-                let g_v = _mm256_loadu_pd(gw1_ptr.add(off));
-                let dh_v = _mm256_loadu_pd(dl_dh_pre_ptr.add(c * 4));
-                let g_new = _mm256_fmadd_pd(s_vec, dh_v, g_v);
-                _mm256_storeu_pd(gw1_ptr.add(off), g_new);
-            }
-        }
-        for j in tail_start..n_hidden {
-            gw1[row_off + j] += s * dl_dh_pre[j];
+        if s != 0.0 {
+            nz.push(i as u32);
         }
     }
 
-    let gb1_ptr = gb1.as_mut_ptr();
-    for c in 0..n_chunks {
-        let off = c * 4;
-        unsafe {
-            let gb_v = _mm256_loadu_pd(gb1_ptr.add(off));
-            let dh_v = _mm256_loadu_pd(dl_dh_pre_ptr.add(off));
-            let gb_new = _mm256_add_pd(gb_v, dh_v);
-            _mm256_storeu_pd(gb1_ptr.add(off), gb_new);
-        }
+    let x_ptr = x.as_ptr();
+    let gw1_ptr = gw1.as_mut_ptr();
+    let mut c0 = 0usize;
+    while c0 + 8 <= n_chunks {
+        unsafe { bwd_gw1_block::<8>(gw1_ptr, dl_dh_pre_ptr, x_ptr, &nz, n_hidden, c0 * 4) };
+        c0 += 8;
     }
-    for o in tail_start..n_hidden {
-        gb1[o] += dl_dh_pre[o];
+    if n_chunks - c0 >= 4 {
+        unsafe { bwd_gw1_block::<4>(gw1_ptr, dl_dh_pre_ptr, x_ptr, &nz, n_hidden, c0 * 4) };
+        c0 += 4;
+    }
+    if n_chunks - c0 >= 2 {
+        unsafe { bwd_gw1_block::<2>(gw1_ptr, dl_dh_pre_ptr, x_ptr, &nz, n_hidden, c0 * 4) };
+        c0 += 2;
+    }
+    if n_chunks - c0 >= 1 {
+        unsafe { bwd_gw1_block::<1>(gw1_ptr, dl_dh_pre_ptr, x_ptr, &nz, n_hidden, c0 * 4) };
+    }
+    for (o, &d) in dl_dh_pre.iter().enumerate().skip(tail_start) {
+        for &i in &nz {
+            let i = i as usize;
+            unsafe {
+                *gw1_ptr.add(i * n_hidden + o) += *x_ptr.add(i) * d;
+            }
+        }
     }
 }
 
@@ -850,6 +953,91 @@ mod tests {
             let denom = gb2_a[0].abs().max(gb2_b[0].abs()).max(1.0);
             let rel = (gb2_a[0] - gb2_b[0]).abs() / denom;
             assert!(rel < 1e-12, "gb2 mismatch [{n_features},{n_hidden}]");
+        }
+    }
+
+    /// The dispatchers prefer AVX-512 on hosts that have it, which would
+    /// leave the AVX2 kernels unexercised by the tests above. Call them
+    /// directly, gated on the same runtime features the dispatch checks,
+    /// across shapes that hit every cascade arm (8/4/2/1 chunk blocks plus
+    /// scalar tails) and the 944×32 fold geometry.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn avx2_kernels_match_scalar_directly() {
+        if !(std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma")) {
+            return;
+        }
+        let alpha = 0.01;
+        for &(n_features, n_hidden) in &[
+            (944usize, 32usize), // fold shape: 8 chunks → one <8> block
+            (372, 128),          // production: 4× <8> blocks
+            (64, 36),            // 9 chunks → 8 + 1
+            (16, 20),            // 5 chunks → 4 + 1
+            (16, 24),            // 6 chunks → 4 + 2
+            (16, 28),            // 7 chunks → 4 + 2 + 1
+            (16, 12),            // 3 chunks → 2 + 1
+            (16, 8),
+            (16, 6),
+            (8, 7),
+            (4, 5),
+            (4, 3), // n_hidden < 4: scalar tail only
+        ] {
+            let mut rng = Xs64::new(0x51ED_1E55 ^ (n_features * 31 + n_hidden) as u64);
+            let x = random_sparse_x(&mut rng, n_features, 0.35);
+            let w1 = random_buf(&mut rng, n_features * n_hidden);
+            let b1 = random_buf(&mut rng, n_hidden);
+            let w2 = random_buf(&mut rng, n_hidden);
+            let b2 = vec![rng.next_f64()];
+
+            let (y_s, hpre_s, h_s) =
+                forward_scalar(&x, &w1, &b1, &w2, &b2, n_features, n_hidden, alpha);
+            let (y_v, hpre_v, h_v) =
+                unsafe { forward_avx2(&x, &w1, &b1, &w2, &b2, n_features, n_hidden, alpha) };
+            for (a, b) in hpre_s.iter().zip(hpre_v.iter()) {
+                let rel = (a - b).abs() / a.abs().max(b.abs()).max(1.0);
+                assert!(rel < 1e-12, "[{n_features},{n_hidden}] h_pre {a} vs {b}");
+            }
+            for (a, b) in h_s.iter().zip(h_v.iter()) {
+                let rel = (a - b).abs() / a.abs().max(b.abs()).max(1.0);
+                assert!(rel < 1e-12, "[{n_features},{n_hidden}] h {a} vs {b}");
+            }
+            let rel = (y_s - y_v).abs() / y_s.abs().max(y_v.abs()).max(1.0);
+            assert!(rel < 1e-11, "[{n_features},{n_hidden}] y {y_s} vs {y_v}");
+
+            let dl_dy = rng.next_f64();
+            let mut gw1_s = random_buf(&mut rng, n_features * n_hidden);
+            let mut gw1_v = gw1_s.clone();
+            let mut gb1_s = random_buf(&mut rng, n_hidden);
+            let mut gb1_v = gb1_s.clone();
+            let mut gw2_s = random_buf(&mut rng, n_hidden);
+            let mut gw2_v = gw2_s.clone();
+            let mut gb2_s = vec![rng.next_f64()];
+            let mut gb2_v = gb2_s.clone();
+
+            backprop_scalar(
+                &x, &hpre_s, &h_s, dl_dy, &mut gw1_s, &mut gb1_s, &w2, &mut gw2_s, &mut gb2_s,
+                n_features, n_hidden, alpha,
+            );
+            unsafe {
+                backprop_avx2(
+                    &x, &hpre_s, &h_s, dl_dy, &mut gw1_v, &mut gb1_v, &w2, &mut gw2_v, &mut gb2_v,
+                    n_features, n_hidden, alpha,
+                );
+            }
+            for (a, b) in gw1_s.iter().zip(gw1_v.iter()) {
+                let rel = (a - b).abs() / a.abs().max(b.abs()).max(1.0);
+                assert!(rel < 1e-12, "gw1 [{n_features},{n_hidden}] {a} vs {b}");
+            }
+            for (a, b) in gb1_s.iter().zip(gb1_v.iter()) {
+                let rel = (a - b).abs() / a.abs().max(b.abs()).max(1.0);
+                assert!(rel < 1e-12, "gb1 [{n_features},{n_hidden}] {a} vs {b}");
+            }
+            for (a, b) in gw2_s.iter().zip(gw2_v.iter()) {
+                let rel = (a - b).abs() / a.abs().max(b.abs()).max(1.0);
+                assert!(rel < 1e-12, "gw2 [{n_features},{n_hidden}] {a} vs {b}");
+            }
+            let rel = (gb2_s[0] - gb2_v[0]).abs() / gb2_s[0].abs().max(gb2_v[0].abs()).max(1.0);
+            assert!(rel < 1e-12, "gb2 [{n_features},{n_hidden}]");
         }
     }
 }
