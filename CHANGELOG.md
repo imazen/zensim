@@ -128,6 +128,13 @@
 
 ### Fixed
 
+- `BakeScorer` no longer refuses a corruption companion whose feature ids a
+  narrow (local-only basic) base plan does not populate; the extraction is the
+  union of both plans (277041e8).
+- Feature-permutation dead-code errors: the Y'CbCr plane helpers (bde56d19) and
+  `AttributionResult::query_rect_frac`/`grid_coord_f` (9e64eed3) are gated on
+  `feature-regime-v2`, the feature every caller sits behind.
+
 - Scalar tier (the tier i686 always runs, and any host with no vector token): the bulk
   sRGB→XYB, sRGB→positive-XYB and linear→positive-XYB conversions gave a pixel different
   bits in the last `n mod 8` pixels of a band than in a full 8-pixel chunk, so a flat
