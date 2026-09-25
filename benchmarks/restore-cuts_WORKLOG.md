@@ -57,3 +57,7 @@ HEARTBEAT 2026-09-25T02:05:02Z restore-cuts extraction
 
 ### 2026-09-25 02:20Z pre-existing failing test on main (not touched)
 `cargo test -p zensim --features training --test rev4_featbank_parity`: 3 passed, 1 failed, 1 ignored (corpus gate) -- identically on the baseline snapshot main@origin 26494c8a and on this branch (baseline run: `/var/tmp/restore-cuts/target-base-test`). The failing test is `gmsbank_contrast_reduction_has_exact_zero_gain_in_every_tier` (`rev4_featbank_parity.rs:379`): it walks the whole 180-slot C8 block in chunks of 15 (`values[GMSBANK_BASE..].as_chunks::<15>()`), a layout that held before the 2026-09-24 chroma revision; after it the block is native Y 15, then per scale X/Y/B 15 each plus a 10-slot joint chromaticity cell, so every chunk after the first CS cell is misaligned and reads a deviation slot as `gain`. It is a test bug from the C8 chroma landing, not a feature defect, and is left alone (relaxing or re-deriving a test needs the owner). `zensim-validate --test feature_set_match`: 10 passed.
+
+HEARTBEAT 2026-09-25T02:20:02Z restore-cuts extraction
+
+HEARTBEAT 2026-09-25T02:35:02Z restore-cuts extraction

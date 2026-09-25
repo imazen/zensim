@@ -29,7 +29,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 BANK = Path("/var/tmp/rev4-featbank/bank")
-ROOT = Path("/var/tmp/restore-cuts")
+ROOT = Path(os.environ.get("RESTORE_ROOT", "/var/tmp/restore-cuts"))
 INPUT_CONTRACT = "legacy-rgb8"
 ROW_GROUP = 65536
 SEED = 20260924

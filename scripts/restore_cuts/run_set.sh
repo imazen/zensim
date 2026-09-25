@@ -5,7 +5,7 @@
 set -euo pipefail
 set_name=$1
 limit=${2:-}
-ROOT=/var/tmp/restore-cuts
+ROOT=${RESTORE_ROOT:-/var/tmp/restore-cuts}
 REPO=/home/lilith/work/zen/zensim--restore-cuts
 bin=$ROOT/bin/extract_cand
 suffix=
