@@ -120,7 +120,7 @@
   image was not flat after conversion and
   `feature_v2::tests::gmsbank_constant_chroma_shift_is_visible_without_gradients` failed on
   i686. The remainder now zero-pads into one more chunk and runs the chunk arithmetic
-  (HASH). **Changes values on the scalar tier only**, for bands whose pixel count is not a
+  (26f29228). **Changes values on the scalar tier only**, for bands whose pixel count is not a
   multiple of 8; user decision 2026-09-25, "You can change i686 values fine."
   The unclamped `GamutMapping::Preserve` converter takes the same chunk arithmetic on the scalar tier.
   x86_64 v4x/v4/v3, aarch64 NEON and wasm128 are unchanged bit for bit. Those tiers'
