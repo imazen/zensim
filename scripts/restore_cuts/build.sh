@@ -51,7 +51,9 @@ if [ "$which" = base ]; then
     exit 0
 fi
 # An extraction binary must come from COMMITTED source.
-if (cd "$WS" && jj status | grep -q 'The working copy has no changes'); then
+# (capture first: `jj status | grep -q` under pipefail dies of SIGPIPE when grep exits early)
+status=$(cd "$WS" && jj status)
+if grep -q 'The working copy has no changes' <<<"$status"; then
     CLEAN=1
 else
     CLEAN=0
