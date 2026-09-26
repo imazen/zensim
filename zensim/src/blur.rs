@@ -2330,8 +2330,8 @@ fn fused_blur_h_mu_inner_v4(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(width - 1);
-            sum_s += s_row[add_idx] - s_row[rem_idx];
-            sum_d += d_row[add_idx] - d_row[rem_idx];
+            sum_s = sum_s + s_row[add_idx] - s_row[rem_idx];
+            sum_d = sum_d + d_row[add_idx] - d_row[rem_idx];
         }
     }
 }
@@ -2623,8 +2623,8 @@ fn fused_blur_h_mu_inner_v4x(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(width - 1);
-            sum_s += s_row[add_idx] - s_row[rem_idx];
-            sum_d += d_row[add_idx] - d_row[rem_idx];
+            sum_s = sum_s + s_row[add_idx] - s_row[rem_idx];
+            sum_d = sum_d + d_row[add_idx] - d_row[rem_idx];
         }
     }
 }
@@ -2795,8 +2795,8 @@ fn fused_blur_h_mu_inner_v3(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(width - 1);
-            sum_s += s_row[add_idx] - s_row[rem_idx];
-            sum_d += d_row[add_idx] - d_row[rem_idx];
+            sum_s = sum_s + s_row[add_idx] - s_row[rem_idx];
+            sum_d = sum_d + d_row[add_idx] - d_row[rem_idx];
         }
     }
 }
@@ -7248,24 +7248,15 @@ mod tests {
     /// `fused_blur_h_mu` and `fused_blur_h_ssim` (+ the `ssim3` MU1=false
     /// specialisation, which shares the ring code path).
     ///
-    /// HEIGHTS ARE MULTIPLES OF 8 HERE, and that is load-bearing rather than
-    /// convenient. `fused_blur_h_mu_inner_{v4,v4x,v3}` still carry a SCALAR
-    /// remainder for the last `height % 8` rows which accumulates
-    /// `sum += add - rem` — i.e. `sum + (add - rem)` — while their vector
-    /// bodies evaluate `(sum + add) - rem`. f32 addition is not associative,
-    /// so those tail rows differ from the vector rows in the last ulp or two
-    /// (MEASURED: 2528.7349 vs 2528.7344 at 7x3 r=1). That is PRE-EXISTING
-    /// and unrelated to the rem-ring — the identical assertion fails
-    /// identically on the pre-ring kernels — and the ring never touches a
-    /// scalar tail, so restricting to full groups isolates what this test is
-    /// for. `fused_blur_h_ssim`'s generic variant already fixed the same
-    /// wart by switching its tail to a masked vector group (see the comment
-    /// above `run_group`); the `mu` family has not been converted, and doing
-    /// so would move v1's shipped bytes, so it needs the golden-gate policy
-    /// and is deliberately NOT done here.
+    /// Includes scalar tail rows: the edge-only and full-feature means must
+    /// retain the same `(sum + add) - remove` operation order there too.
     #[test]
     fn fused_h_ring_matches_regathered_reference() {
         const FUSED_GEOM: &[(usize, usize)] = &[
+            (7, 3),
+            (17, 19),
+            (64, 1),
+            (127, 17),
             (7, 8),
             (11, 16),
             (12, 16),
