@@ -233,3 +233,11 @@ On the served board the four frozen controls read aic4 per-reference +0.9119 / +
 +0.9408 at 0% backwards, and no cell carries the retired corpus-wide note. The fair board is still
 above the 12 MB cap named in `gauntlet.py --fair-only`'s help, as the replaced one was.
 
+Later the same day the served boards were replaced once more, for one link only: the
+`joint-core-v1` discussion entry, which drives the board's "Read latest discussion" link, pointed at a
+404 path. Its record is now published under `/zensim/reports/joint-core-v1-2026-09-20/` (`f507d34c`).
+A sweep of all 26 `report_url` fields finds no other non-200 URL. The rebuilt boards pass all gates,
+and their embedded data differs from the builds above only in that URL (plus one checkout-dependent
+`train_date`). Served now: `summer_gauntlet.html` sha256 `4613edbf…`, `summer_gauntlet_fair.html`
+sha256 `aa641901…`; the previous files are kept as `summer_gauntlet{,_fair}_pre_jointcore_2026-09-26.html`.
+
