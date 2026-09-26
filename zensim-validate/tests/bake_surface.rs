@@ -60,19 +60,21 @@ fn cached_pair_identity_matches_pixels_without_treating_zero_rows_as_proof() {
         pixel.score()
     );
     // The same raw zero features without identity proof must still fire the
-    // companion. An inferred "zero = identity" shortcut would fail this.
-    assert_eq!(scorer.score_features(&[0., 0.], 8, 8, None).unwrap(), 0.);
+    // companion (head score -5 < deadband 10 => min(80, -5)). An inferred
+    // "zero = identity" shortcut would fail this.
+    assert_eq!(scorer.score_features(&[0., 0.], 8, 8, None).unwrap(), -5.);
     assert_eq!(
         scorer
             .score_features_with_identity(&[0., 0.], 8, 8, None, false)
             .unwrap(),
-        0.
+        -5.
     );
+    // Head -155 is below the base's -70: the gate keeps the lower score.
     assert_eq!(
         scorer
             .score_features_with_identity(&[-30., -30.], 8, 8, None, false)
             .unwrap(),
-        -70.
+        -155.
     );
     assert!(
         scorer
@@ -135,11 +137,12 @@ fn candidate_sensitivities_include_ensemble_and_corruption_discontinuities() {
         .unwrap()
         .with_linear_corruption_head(&models[0], 20.)
         .unwrap();
+    // Head score 15 < 20 and below the ensemble's 20: the head's slope.
     assert_gradient(
         &gated
             .score_features_fd_gradient(&[4., 4.], 64, 64, None)
             .unwrap(),
-        &[0., 0.],
+        &[2., 3.],
     );
     assert_gradient(
         &gated
@@ -153,8 +156,10 @@ fn candidate_sensitivities_include_ensemble_and_corruption_discontinuities() {
     let crossing = gated
         .score_features_fd_gradient(&[5., 5.], 64, 64, None)
         .unwrap();
-    assert!((crossing[0] - 2501.).abs() < 0.002);
-    assert!((crossing[1] - 2501.5).abs() < 0.002);
+    // Up-probe: head >= 20, inactive, ensemble 25.01; down-probe: head 19.99
+    // active, min(24.99, 19.99). (25.01 - 19.99) / 0.01 = 502, likewise 503.
+    assert!((crossing[0] - 502.).abs() < 0.002);
+    assert!((crossing[1] - 503.).abs() < 0.002);
 }
 
 #[test]
@@ -197,10 +202,12 @@ fn ensemble_and_corruption_composition_are_returned_by_the_surface() {
         .unwrap()
         .with_linear_corruption_head(&models[0], 20.0001)
         .unwrap();
-    assert_eq!(active.score_features(&[5., 5.], 64, 64, None).unwrap(), 0.);
+    // Head 20 < 20.0001 activates: min(perceptual 25, head 20).
+    assert_eq!(active.score_features(&[5., 5.], 64, 64, None).unwrap(), 20.);
+    // Head -10 is below the ensemble's -5, so the lower head score is kept.
     assert_eq!(
         active.score_features(&[-1., -1.], 64, 64, None).unwrap(),
-        -5.
+        -10.
     );
 }
 
@@ -357,9 +364,12 @@ fn formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse()
         assert!(BakeScorer::new(&model).is_err(), "{bad:?} must be unknown");
     }
     // Revision 3 is a KNOWN revision (issue #61): a bake declaring it loads,
-    // and scoring its own feature rows is legitimate in any process. This
-    // process runs the shipped revision, so its PIXEL scoring is refused
-    // instead of pricing revision-3 coefficients against revision-1 pixels.
+    // and scoring its own feature rows is legitimate in any process. A NARROW
+    // (basic/peak) bake also serves its PIXELS at its declared revision in
+    // any process (CLAUDE.md Known Bugs 2026-09-18; the plan carries the
+    // arithmetic). Only wide-family kernels, which still use the process
+    // default, refuse a mismatch instead of pricing revision-3 coefficients
+    // against revision-1 pixels.
     let three = linear(json!([{"key":"zentrain.formula_revision","type":"utf8","text":"3"}]));
     let mut surface = BakeScorer::new(&three).unwrap();
     assert_eq!(
@@ -371,7 +381,13 @@ fn formula_revision_is_selected_per_bake_and_unknown_or_mixed_revisions_refuse()
         .collect();
     let dst: Vec<[u8; 3]> = src.iter().map(|p| [p[0] / 2, p[1], p[2]]).collect();
     let (r, d) = (RgbSlice::new(&src, 64, 64), RgbSlice::new(&dst, 64, 64));
-    let err = surface.compute(&r, &d, None).unwrap_err();
+    assert!(surface.compute(&r, &d, None).unwrap().score().is_finite());
+    let wide = linear(json!([
+        {"key":"zentrain.formula_revision","type":"utf8","text":"3"},
+        {"key":"zentrain.feature_ids","type":"utf8","text":"1 300"}
+    ]));
+    let mut wide_surface = BakeScorer::new(&wide).unwrap();
+    let err = wide_surface.compute(&r, &d, None).unwrap_err();
     assert!(
         matches!(err, zensim::ZensimError::ModelLoadFailed { reason } if reason.contains("formula revision")),
         "{err}"
@@ -769,12 +785,30 @@ fn candidate_attribution_reports_unsupported_terms_and_complete_gating() {
         .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 8)
         .unwrap();
     assert!(scored.has_corruption_gate());
-    assert_eq!(scored.result().score(), 0.);
+    // The head (scored above through its own surface) is below the deadband
+    // 20 and below the ensemble: the gate returns min(perceptual, head).
+    let ensemble_score = BakeScorer::ensemble(&models, Some(&[0.25, 0.75]))
+        .unwrap()
+        .compute(&rs, &ds, None)
+        .unwrap()
+        .score();
+    let head_score = scorer.compute(&rs, &ds, None).unwrap().score();
+    assert!(head_score < 20.);
+    assert_eq!(scored.result().score(), ensemble_score.min(head_score));
     assert_eq!(
         scored.result().score(),
         gated.compute(&rs, &ds, None).unwrap().score()
     );
-    assert!(scored.attribution().density().iter().all(|x| *x == 0.));
+    // The gated score now follows the head (2*f3 + 3*f156 - 5), so the served
+    // sensitivities are the head's slopes on its ids and the spatial density
+    // is no longer identically zero; f156 has no spatial map.
+    // f32 predictor arithmetic on a real (small) feature value: the central
+    // probe's step is ~1e-3 of it, so allow 0.01 rather than the 0.002 used
+    // for the round-number rows above (measured: 2.0027 and 3.0002).
+    assert!((scored.sensitivities()[3] - 2.).abs() < 0.01);
+    assert!((scored.sensitivities()[156] - 3.).abs() < 0.01);
+    assert_eq!(scored.unsupported_feature_ids(), &[156]);
+    assert!(scored.attribution().density().iter().any(|x| *x != 0.));
     assert!(
         gated
             .compute_with_ref_and_attribution(&rs, &pre, &ds, None, &mut session, 0)
