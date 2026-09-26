@@ -2642,6 +2642,10 @@ struct FitLassoArgs {
     /// L1 penalty on the mean-loss scale (Python `lasso{lam}`).
     #[arg(long)]
     lam: f64,
+    /// Diagnostic 50-point log-lambda path from lambda-max to 1e-4 of it.
+    /// Writes raw f64 fits only and returns before bake/anchor packaging.
+    #[arg(long)]
+    path_out: Option<PathBuf>,
     /// Coordinate-descent sweep cap (Python `n_sweeps`).
     #[arg(long, default_value_t = 200)]
     n_sweeps: usize,
@@ -2721,6 +2725,10 @@ struct FitLassoArgs {
     /// the head artifact `blend-heads` consumes.
     #[arg(long)]
     emit_fit_npz: Option<PathBuf>,
+    /// Return after writing the f64 diagnostic fit, without creating a bake.
+    /// Rev4 POTENTIAL fits stay quarantined and are never packed or served.
+    #[arg(long, requires = "emit_fit_npz")]
+    diagnostic_fit_only: bool,
     /// Embed a `zentrain.repro` metadata entry (argv + gram shas + code
     /// commit) via the canonical `zenpredict_bake::append_metadata_utf8`.
     /// OPT-IN so the byte-repro paths (BHdr `--expect-sha256`) stay
@@ -3107,20 +3115,72 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
     }
     let sg = standardize_gram_multi(n_feat, &groups)?;
 
-    // 2. solver: lasso coordinate descent (MixGram.lasso) or the BVLS-class
-    // box-constrained CD (SOTA-944 §3e — sign-mask bounds).
     let slice_idx: Option<Vec<usize>> = match &a.slice_file {
         Some(p) => {
             let idx = load_slice_file(p, n_feat)?;
             eprintln!(
-                "  slice: {} of {n_feat} coordinates active ({:?})",
-                idx.len(),
-                p
+                "  slice: {} of {n_feat} coordinates active ({p:?})",
+                idx.len()
             );
             Some(idx)
         }
         None => None,
     };
+
+    if let Some(path) = &a.path_out {
+        if a.solver != "lasso" {
+            return Err("--path-out requires --solver lasso".into());
+        }
+        let lambda_max = match slice_idx.as_deref() {
+            Some(ids) => ids
+                .iter()
+                .map(|&i| (sg.c[i] / sg.w_total).abs())
+                .fold(0.0f64, f64::max),
+            None => {
+                sg.c.iter()
+                    .map(|v| (v / sg.w_total).abs())
+                    .fold(0.0f64, f64::max)
+            }
+        };
+        if !lambda_max.is_finite() || lambda_max <= 0.0 {
+            return Err(format!("--path-out: invalid lambda_max {lambda_max}"));
+        }
+        let mut path_fits = Vec::with_capacity(50);
+        for i in 0..50 {
+            let lam = lambda_max * 10.0f64.powf(-4.0 * (i as f64) / 49.0);
+            let w = zensim_validate::gram_lasso::lasso_cd_slice(
+                &sg,
+                lam,
+                a.n_sweeps,
+                a.tol,
+                slice_idx.as_deref(),
+            );
+            path_fits.push(serde_json::json!({"lambda": lam, "w": w}));
+        }
+        let result = serde_json::json!({
+            "schema": "rev4-featpot-lasso-path-v1",
+            "n_feat": n_feat,
+            "w_total": sg.w_total,
+            "lambda_max": lambda_max,
+            "mu": sg.mu,
+            "sd": sg.sd,
+            "bias": sg.ybar,
+            "fits": path_fits,
+        });
+        std::fs::write(
+            path,
+            serde_json::to_vec(&result).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| format!("write path {path:?}: {e}"))?;
+        eprintln!(
+            "POTENTIAL — ceiling, not a model score: path -> {:?}: 50 lambdas, max {:.12e}, {} features",
+            path, lambda_max, n_feat
+        );
+        return Ok(());
+    }
+
+    // 2. solver: lasso coordinate descent (MixGram.lasso) or the BVLS-class
+    // box-constrained CD (SOTA-944 §3e — sign-mask bounds).
     let w = match a.solver.as_str() {
         "lasso" => zensim_validate::gram_lasso::lasso_cd_slice(
             &sg,
@@ -3190,6 +3250,10 @@ fn cmd_fit_lasso(a: &FitLassoArgs) -> Result<(), String> {
             ],
         )?;
         eprintln!("  fit npz -> {npz_path:?}");
+    }
+    if a.diagnostic_fit_only {
+        eprintln!("POTENTIAL — ceiling, not a model score: diagnostic f64 fit only");
+        return Ok(());
     }
 
     // 3. parity gate 1: bit-exact w/bias/mu/sd vs the Python fit npz.
@@ -4209,6 +4273,31 @@ struct GramArgs {
     /// Output `.npz` path.
     #[arg(long)]
     out: PathBuf,
+    /// Also emit one raw-moment Gram per `ref_basename` into this directory.
+    /// The reference order is first appearance in the input table. Fold
+    /// standardization happens later, after selecting these raw moments.
+    #[arg(long)]
+    per_reference_out_dir: Option<PathBuf>,
+}
+
+struct RawReferenceGram {
+    s_mat: Vec<f64>,
+    s_vec: Vec<f64>,
+    q: Vec<Vec<f64>>,
+    y1: Vec<f64>,
+    n_rows: f64,
+}
+
+impl RawReferenceGram {
+    fn new(n_feat: usize, n_targets: usize) -> Self {
+        Self {
+            s_mat: vec![0.0; n_feat * n_feat],
+            s_vec: vec![0.0; n_feat],
+            q: vec![vec![0.0; n_feat]; n_targets],
+            y1: vec![0.0; n_targets],
+            n_rows: 0.0,
+        }
+    }
 }
 
 /// numpy-default (linear-interpolation) quantile on a SORTED slice —
@@ -4256,11 +4345,26 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
     use zensim_validate::npz::{NpzF64Entry, write_npz_f64};
     use zensim_validate::parquet_loader::stream_parquet_rows;
 
+    if a.per_reference_out_dir.is_some() && a.target_minmax01 {
+        return Err("per-reference grams require fold-local target normalization; do not use --target-minmax01 on the whole file".into());
+    }
+
     let sha = zensim_validate::train_manifest::sha256_file(&a.parquet)
         .map_err(|e| format!("sha256 {:?}: {e:?}", a.parquet))?;
     eprintln!("gram: input {:?}\n  sha256 {sha}", a.parquet);
 
     let target_refs: Vec<&str> = a.targets.iter().map(|s| s.as_str()).collect();
+    let ref_ids = if a.per_reference_out_dir.is_some() {
+        let first_target = a.targets.first().ok_or("gram: no targets")?;
+        zensim_validate::parquet_loader::load_scores_and_refs(&a.parquet, first_target, 1.0)?
+            .ref_ids
+            .ok_or("--per-reference-out-dir requires ref_basename or image_path")?
+    } else {
+        Vec::new()
+    };
+    let n_refs = ref_ids.iter().max().map_or(0, |v| *v as usize + 1);
+    let mut ref_grams: Vec<RawReferenceGram> = Vec::new();
+    let mut row_cursor = 0usize;
 
     // Per-feature shaped-space appliers (SOTA-944 §3b): zenpredict's own
     // transform math at f32, widened back to f64 for accumulation.
@@ -4353,6 +4457,11 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
                 s_vec = vec![0.0f64; n_feat];
                 q = vec![vec![0.0f64; n_feat]; a.targets.len()];
                 y1 = vec![0.0f64; a.targets.len()];
+                if a.per_reference_out_dir.is_some() {
+                    ref_grams = (0..n_refs)
+                        .map(|_| RawReferenceGram::new(n_feat, a.targets.len()))
+                        .collect();
+                }
                 if let Some(tsv) = &a.transforms_tsv {
                     appliers = Some(screen_appliers(tsv, n_feat)?);
                     shaped_row = vec![0.0f64; n_feat];
@@ -4372,6 +4481,17 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
                 } else {
                     raw
                 };
+                let ref_idx = if a.per_reference_out_dir.is_some() {
+                    Some(
+                        *ref_ids
+                            .get(row_cursor)
+                            .ok_or("per-reference row count exceeds reference-id count")?
+                            as usize,
+                    )
+                } else {
+                    None
+                };
+                row_cursor += 1;
                 // S upper triangle: row-sequential rank-1 update. The inner
                 // loop is contiguous over j for auto-vectorization.
                 for i in 0..n_feat {
@@ -4385,6 +4505,22 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
                 }
                 for (acc, v) in s_vec.iter_mut().zip(x) {
                     *acc += *v;
+                }
+                if let Some(ri) = ref_idx {
+                    let rg = &mut ref_grams[ri];
+                    rg.n_rows += 1.0;
+                    for i in 0..n_feat {
+                        let xi = x[i];
+                        if xi != 0.0 {
+                            let base = i * n_feat;
+                            for (j, &xj) in x.iter().enumerate().take(n_feat).skip(i) {
+                                rg.s_mat[base + j] += xi * xj;
+                            }
+                        }
+                    }
+                    for (acc, v) in rg.s_vec.iter_mut().zip(x) {
+                        *acc += *v;
+                    }
                 }
                 for (t, tv) in targets.iter().enumerate() {
                     let mut y = tv[r];
@@ -4406,6 +4542,13 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
                         *acc += *v * y;
                     }
                     y1[t] += y;
+                    if let Some(ri) = ref_idx {
+                        let rg = &mut ref_grams[ri];
+                        for (acc, v) in rg.q[t].iter_mut().zip(x) {
+                            *acc += *v * y;
+                        }
+                        rg.y1[t] += y;
+                    }
                     if y < ymin[t] {
                         ymin[t] = y;
                     }
@@ -4418,6 +4561,111 @@ fn cmd_gram(a: &GramArgs) -> Result<(), String> {
             Ok(())
         },
     )?;
+
+    if let Some(dir) = &a.per_reference_out_dir {
+        if row_cursor != ref_ids.len() {
+            return Err(format!(
+                "per-reference rows {row_cursor} != reference IDs {}",
+                ref_ids.len()
+            ));
+        }
+        std::fs::create_dir_all(dir).map_err(|e| format!("mkdir {dir:?}: {e}"))?;
+        let mut max_roundoff = 0.0f64;
+        for i in 0..n_feat {
+            for j in i..n_feat {
+                let idx = i * n_feat + j;
+                let sum: f64 = ref_grams.iter().map(|g| g.s_mat[idx]).sum();
+                let scale: f64 = ref_grams.iter().map(|g| g.s_mat[idx].abs()).sum();
+                let diff = (sum - s_mat[idx]).abs();
+                max_roundoff = max_roundoff.max(diff);
+                if diff > 1e-10 * scale.max(1.0) {
+                    return Err(format!(
+                        "per-reference Gram sum differs at ({i},{j}): {diff:e}"
+                    ));
+                }
+            }
+            let s_sum: f64 = ref_grams.iter().map(|g| g.s_vec[i]).sum();
+            let s_scale: f64 = ref_grams.iter().map(|g| g.s_vec[i].abs()).sum();
+            let diff = (s_sum - s_vec[i]).abs();
+            max_roundoff = max_roundoff.max(diff);
+            if diff > 1e-10 * s_scale.max(1.0) {
+                return Err(format!("per-reference s sum differs at {i}: {diff:e}"));
+            }
+            for (t, q_t) in q.iter().enumerate().take(a.targets.len()) {
+                let q_sum: f64 = ref_grams.iter().map(|g| g.q[t][i]).sum();
+                let q_scale: f64 = ref_grams.iter().map(|g| g.q[t][i].abs()).sum();
+                let diff = (q_sum - q_t[i]).abs();
+                max_roundoff = max_roundoff.max(diff);
+                if diff > 1e-10 * q_scale.max(1.0) {
+                    return Err(format!(
+                        "per-reference q sum differs at target {t}, feature {i}: {diff:e}"
+                    ));
+                }
+            }
+        }
+        for (t, &y1_t) in y1.iter().enumerate().take(a.targets.len()) {
+            let sum: f64 = ref_grams.iter().map(|g| g.y1[t]).sum();
+            let scale: f64 = ref_grams.iter().map(|g| g.y1[t].abs()).sum();
+            let diff = (sum - y1_t).abs();
+            max_roundoff = max_roundoff.max(diff);
+            if diff > 1e-10 * scale.max(1.0) {
+                return Err(format!(
+                    "per-reference Y1 sum differs at target {t}: {diff:e}"
+                ));
+            }
+        }
+        for (ri, rg) in ref_grams.iter_mut().enumerate() {
+            for i in 0..n_feat {
+                for j in (i + 1)..n_feat {
+                    rg.s_mat[j * n_feat + i] = rg.s_mat[i * n_feat + j];
+                }
+            }
+            let shape2 = [n_feat, n_feat];
+            let shape1 = [n_feat];
+            let n = [rg.n_rows];
+            let key_s = format!("{}__S", a.space);
+            let key_sv = format!("{}__s", a.space);
+            let key_n = format!("{}__n", a.space);
+            let mut names = vec![key_s, key_sv, key_n];
+            for target in &a.targets {
+                names.push(format!("{}__q_{target}", a.space));
+                names.push(format!("{}__Y1_{target}", a.space));
+            }
+            let mut entries = vec![
+                NpzF64Entry {
+                    name: &names[0],
+                    shape: &shape2,
+                    data: &rg.s_mat,
+                },
+                NpzF64Entry {
+                    name: &names[1],
+                    shape: &shape1,
+                    data: &rg.s_vec,
+                },
+                NpzF64Entry {
+                    name: &names[2],
+                    shape: &[],
+                    data: &n,
+                },
+            ];
+            for t in 0..a.targets.len() {
+                entries.push(NpzF64Entry {
+                    name: &names[3 + 2 * t],
+                    shape: &shape1,
+                    data: &rg.q[t],
+                });
+                entries.push(NpzF64Entry {
+                    name: &names[4 + 2 * t],
+                    shape: &[],
+                    data: std::slice::from_ref(&rg.y1[t]),
+                });
+            }
+            write_npz_f64(&dir.join(format!("ref_{ri:04}.npz")), &entries)?;
+        }
+        eprintln!(
+            "POTENTIAL — ceiling, not a model score: {n_refs} per-reference grams; max whole-vs-sum S roundoff {max_roundoff:.12e}"
+        );
+    }
 
     // Mirror the upper triangle (bitwise-symmetric by construction, matching
     // the numpy X'X property the lasso comment documents).
