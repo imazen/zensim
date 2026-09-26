@@ -1514,9 +1514,9 @@ impl crate::metric::Zensim {
         let (_, comp_pw, comp_h) = precomputed.scale(0);
         let dst_planes = if width < MIN_PYRAMID_DIM || height < MIN_PYRAMID_DIM {
             let padded = reflect_pad_to_min(distorted);
-            convert_source_to_xyb(&padded, comp_pw, self.parallel())
+            convert_source_to_xyb(&padded, comp_pw, self.parallel(), config.revision())
         } else {
-            convert_source_to_xyb(distorted, comp_pw, self.parallel())
+            convert_source_to_xyb(distorted, comp_pw, self.parallel(), config.revision())
         };
         let num_scales = config.num_scales.min(precomputed.num_scales());
         Ok((
@@ -1744,7 +1744,7 @@ mod tests {
                 let source = RgbSlice::new(&pixels, w, h);
                 let pre = sampling.map_or_else(
                     || test_zensim().precompute_reference(&source).unwrap(),
-                    |s| s.reference(&source, false),
+                    |s| s.reference(&source, false, crate::ssim_form::active_revision()),
                 );
                 for scale in 0..4 {
                     let (_, sw, sh) = pre.scale(scale);
@@ -5919,6 +5919,9 @@ impl crate::metric::Zensim {
         ),
         ZensimError,
     > {
+        // featcanon D2: Rev4 is research-extraction-only (`attr_pass_b_*` and
+        // the edge-only H blur are tier-dispatched).
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         session.basic.result = None;
         validate_pair(source, distorted)?;
         // ZENSIM_ATTR_PERF=1: coarse section timing (perf lever triage).
@@ -6035,6 +6038,7 @@ impl crate::metric::Zensim {
         ),
         ZensimError,
     > {
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         validate_ref_match(precomputed, distorted)?;
         assert!(bin > 0, "bin must be non-zero");
         if bin == 1 {

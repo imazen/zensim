@@ -168,7 +168,12 @@ impl<'a> BakeScorer<'a> {
                 return Err(ZensimError::HdrInputRequiresPuPath);
             }
             crate::feature_v2::validate_hdr_pair(source, source, encoding, Some(120_000_000))?;
-            crate::PrecomputedReference::for_candidate(source, self.parallel, Some(encoding))
+            crate::PrecomputedReference::for_candidate(
+                source,
+                self.parallel,
+                Some(encoding),
+                self.plan()?.compute.formula_revision,
+            )
         } else {
             self.precompute_reference(source)?
         };
@@ -877,6 +882,13 @@ impl<'a> BakeScorer<'a> {
                 reason: "ensemble has no active member",
             })?;
         let revision = crate::feature_layout::formula_revision(model)?;
+        // featcanon D1 + D2, before any exemption: no bake is served in a
+        // Rev4 process (its basic/peak kernels would run the process's
+        // canonical Rev4 arithmetic under the bake's declared revision —
+        // measured: the D bake, declared Rev1, scored 12/12 pairs with Rev4
+        // features), and no Rev4-declared bake is served anywhere (the served
+        // leaves are not canonical yet). No diagnostic bypass.
+        crate::ssim_form::refuse_rev4_served(revision)?;
         // Basic/peak plans carry their arithmetic explicitly through both
         // SIMD passes and the cached spatial owner. Wide-family kernels still
         // use process defaults and must retain the mismatch refusal below.
@@ -1074,7 +1086,11 @@ impl<'a> BakeScorer<'a> {
                 source.height().max(sampling.min_dim()),
                 Some(120_000_000),
             )?;
-            return Ok(sampling.reference(source, self.parallel));
+            return Ok(sampling.reference(
+                source,
+                self.parallel,
+                self.plan()?.compute.formula_revision,
+            ));
         }
         let plan = self.plan()?;
         if plan.toggles().v1_only
@@ -1090,6 +1106,7 @@ impl<'a> BakeScorer<'a> {
                 source,
                 self.parallel,
                 None,
+                plan.compute.formula_revision,
             ));
         }
         Zensim::new(ZensimProfile::B)
@@ -2313,11 +2330,24 @@ mod revision_contract_tests {
             crate::feature_layout::formula_revision(&model).expect("undeclared resolves"),
             crate::ssim_form::SHIPPED_REVISION
         );
+        // `4` is registered since featcanon (Rev4, the `tiercanon` era); the
+        // first unregistered value is `5`.
         let bytes = bake_declaring(Some("4"), 5);
+        let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
+        assert_eq!(
+            crate::feature_layout::formula_revision(&model).expect("4 resolves"),
+            crate::feature_defs::FormulaRevision::Rev4
+        );
+        let bytes = bake_declaring(Some("5"), 5);
         let model = zenpredict::Model::from_bytes(&bytes).expect("parse bake");
         assert!(
             crate::feature_layout::formula_revision(&model).is_err(),
             "an unregistered revision must be refused, not defaulted"
+        );
+        #[cfg(feature = "feature-regime-v2")]
+        assert!(
+            crate::feature_v2::bake_formula_revision(&model).is_err(),
+            "the feature layer must refuse it too, not default to the shipped era"
         );
     }
 }

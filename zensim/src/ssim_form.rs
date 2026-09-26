@@ -1132,13 +1132,71 @@ pub(crate) fn rerun_tests_at_revision(rev: &str, filter: &str, expect: usize) {
 /// Callers that only inspect a config (pool-mode derivation, fold planning)
 /// do not call it: they run no pixel kernel, and the entry that eventually
 /// does has already refused.
+///
+/// It also refuses revision 4 outright ([`refuse_rev4_served`]): every route
+/// that turns a profile into a config is a served route, and Rev4 is
+/// research-extraction-only.
 pub(crate) fn check_route(config: &crate::metric::ZensimConfig) -> Result<(), crate::ZensimError> {
-    if config.formula_revision.unwrap_or_else(active_revision) >= FormulaRevision::Rev3
-        && config.blur_passes != 1
-    {
+    refuse_rev4_served(config.revision())?;
+    if config.revision() >= FormulaRevision::Rev3 && config.blur_passes != 1 {
         return Err(crate::ZensimError::ModelForwardFailed {
             reason: "formula revision 3 serves blur_passes == 1 only (its stable SSIM moments are one reflect-101 box); use revision 1 or 2 for multi-pass blur profiles",
         });
+    }
+    Ok(())
+}
+
+/// The reason every served entry gives when [`refuse_rev4_served`] fires.
+pub(crate) const REV4_RESEARCH_ONLY: &str = "formula revision 4 (tiercanon) is research-extraction-only: the served, HDR and attribution paths still run tier-dispatched kernels, so a Rev4 score or served feature vector would depend on the SIMD tier; use zensim::research::extract, or run the process at ZENSIM_FORMULA_REV <= 3";
+
+/// The reason [`refuse_rev4_mix`] gives.
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // the v2 walk's guard
+pub(crate) const REV4_MIX: &str = "formula revision 4 cannot be mixed with another revision in one process: other formula gates follow ZENSIM_FORMULA_REV, so the request and the process must both be revision 4 or both be earlier";
+
+/// **Refuse Rev4 on every served path** (featcanon D2).
+///
+/// [`FormulaRevision::Rev4`] is canonical only on the research extraction
+/// (`research::extract` and the crate-internal fold walk it drives). The
+/// served and HDR paths still reach tier-dispatched leaves —
+/// `color::linear_to_pu_xyb_planar_into`, the edge-only
+/// `blur::fused_blur_h_mu` route in `streaming`, and `attribution`'s
+/// `attr_pass_b_*` — so a Rev4 score, served feature vector, diffmap or
+/// attribution would silently depend on the SIMD tier. Until those leaves are
+/// canonical, every `Zensim`, `BakeScorer`, HDR, diffmap, attribution and
+/// corruption-head entry calls this and returns the error.
+///
+/// Fires when EITHER the computation's `requested` revision OR the process
+/// revision is Rev4: a revision-1 bake served in a Rev4 process would mix the
+/// bake's semantics with the process's Rev4 gates (featcanon D1, direction 1).
+/// There is no diagnostic bypass — not even `cross-revision-diagnostic` —
+/// because the pixels themselves are not reproducible across tiers.
+pub(crate) fn refuse_rev4_served(requested: FormulaRevision) -> Result<(), crate::ZensimError> {
+    if requested >= FormulaRevision::Rev4 || active_revision() >= FormulaRevision::Rev4 {
+        return Err(crate::ZensimError::ModelForwardFailed {
+            reason: REV4_RESEARCH_ONLY,
+        });
+    }
+    Ok(())
+}
+
+/// **Refuse a computation whose revision disagrees with the process revision
+/// when either one is Rev4** (featcanon D1).
+///
+/// Canonical arithmetic follows the computation's own revision (every
+/// canonical leaf derives it from the revision it receives), but other
+/// formula gates — the dense kernel's `direct` flag, `RootForm`, `PowForm`,
+/// `HfGainForm` — still read the process switch. So a Rev4 request in a Rev3
+/// process would compute Rev3 semantics, and a Rev3 request in a Rev4 process
+/// would mix Rev4 gates into it. Both are refused rather than labelled with a
+/// revision they did not compute. Mixing among Rev1–Rev3 is governed by the
+/// pre-existing per-route checks and is unchanged.
+#[cfg_attr(not(feature = "feature-regime-v2"), allow(dead_code))] // the v2 walk's guard
+pub(crate) fn refuse_rev4_mix(requested: FormulaRevision) -> Result<(), crate::ZensimError> {
+    let process = active_revision();
+    if requested != process
+        && (requested >= FormulaRevision::Rev4 || process >= FormulaRevision::Rev4)
+    {
+        return Err(crate::ZensimError::ModelLoadFailed { reason: REV4_MIX });
     }
     Ok(())
 }
@@ -1540,6 +1598,8 @@ pub(crate) fn ssim_direct8<T: F32x8Backend + Copy>(
 /// `f64::mul_add` keeps the same product-sum groupings; constants widen
 /// exactly). `direct` selects the revision-3 direct-error form. Used by the
 /// `ZENSIM_FEATCANON=exact` extraction arm as the real-arithmetic reference.
+/// Measurement only (`oracle` feature).
+#[cfg(feature = "oracle")]
 pub(crate) fn ssim_dissim_exact(
     form: SsimLumaForm,
     m1: f64,

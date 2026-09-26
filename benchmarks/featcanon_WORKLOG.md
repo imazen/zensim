@@ -215,3 +215,35 @@ Notes for the DONE report:
   ~/tmp/devin/featcanon/vecs/.
 - Open: canon bodies are scalar-shaped (~1.8× v3); LanesF32 is SIMD-
   vectorizable later. pu_xyb/attr_pass_b intentionally not canonical.
+
+## Corrections — featcanon-fix (2026-09-26), from REVIEW_FEATCANON.md (REJECT)
+
+The lane text above is kept as written; where it is wrong, this section governs. Error numbers recomputed from the
+raw dumps (now `/var/tmp/featcanon/lane-scratch/vecs`, symlinked from `~/tmp/devin/featcanon/vecs`) with
+`scripts/featcanon_error_table.py`, which reproduces the review's `errtab`/`accsplit` outputs byte for byte:
+
+    scripts/featcanon_error_table.py --vecs /var/tmp/featcanon/lane-scratch/vecs table basic,csfw,tailhist,append
+    scripts/featcanon_error_table.py --vecs /var/tmp/featcanon/lane-scratch/vecs split
+
+- **"accumulation choice moves nothing measurable" / "IDENTICAL profiles" — holds only for the fused-V-blur pools**
+  (basic, peaks, masked, iw): f32-lane accumulation error A32 = |c32−c64|/|exact| is 10⁻⁹–10⁻⁴ relative (basic:
+  median 8.38e-10, max 1.72e-04) against element error E = |c64−exact|/|exact| (basic: median 8.52e-07).
+  - csfw is the counter-case: c64/neum max_rel 7.630e-05 vs c32 1.378e-03 (18× lower), medians 5.717e-08 vs
+    5.408e-07; A32 > E on 44.7 % of csfw cells.
+  - 13 of 18 families were never varied: c32 ≡ c64 bitwise (A32 = 0) in v2, append, append2, dvifm, gridblk,
+    ringbasis, tailhist, arttype, gmsbank, mapdev, z1max, gmsnative and dvifmgate. The exact arm replaces only XYB,
+    the H/V blurs, the fused-V-blur pools and csfw, so those families' own accumulation error is unmeasured.
+  - All candidates keep f32 H/V sliding-window recurrences; the exact arm runs them in f64. Part of the "element"
+    error is therefore sequential accumulation; the split was not isolated.
+- **"max ABSOLUTE error ≤ ~1.9e-3 everywhere" is false**: tailhist max_abs = 1.232e-02 (production and candidates).
+- **"9 real TRAIN" pairs** — actually 2 TRAIN, 3 SELECT, 6 T0 (five AIC-3 CTC pairs + the AIC-3 mosaic); two pairs
+  (`kadid512x384`, `konfig384x512`) are pixel-identical. See the `docs/DATA_SPLITS.md` ledger entry
+  "2026-09-25/26: featcanon tier-parity audit and its fix". Scalar baseline divergence is 125–1615 slots/pair
+  (non-identity minimum 1523), not "~300–1614" / "~400–1600".
+- **"tier-identity is structural"** — measured, not structural: dvifm still calls the platform libm.
+- **Revision plumbing** (above: "`featcanon::mode()`: env override else Rev4→Canon32"; "hooks gate on
+  `featcanon::active()`") was process-keyed and silently mixed revisions in both directions. featcanon-fix derives
+  the mode from each computation's revision (`featcanon::mode(revision)`), refuses Rev4 on every served/HDR entry
+  and any Rev4 mix, gates `ZENSIM_FEATCANON` and the exact bodies behind the `oracle` feature, registers
+  `tiercanon` (`feature_defs::ARITHMETIC_REVISIONS`), and retires `featcanon_audit` into
+  `tier_audit_features` (`--features featcanon-oracle` for the measurement modes).

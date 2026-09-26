@@ -3018,22 +3018,32 @@ pub(crate) struct ComputeSet {
 /// re-price all of them. A bake declares the revision it was trained against
 /// and is served it; a bake refit later declares the newer one; both coexist.
 ///
-/// An UNRECOGNISED value is not a guess: it falls back to the shipped
-/// revision and the caller reports it (`feature_plan` refuses on a mismatch),
-/// because serving unknown semantics silently is the failure this whole
-/// design exists to stop.
+/// An ABSENT value is the registered pre-stamp era (the shipped revision). A
+/// PRESENT value this build does not know is refused, never guessed: until
+/// featcanon-fix (2026-09-26) it fell back to the shipped revision, so a bake
+/// stamped `4` was silently read as Rev1 by `bake_verdict` while
+/// `Plan::for_bake` refused it. [`crate::feature_layout::formula_revision`] is
+/// the one parser; this is its name at the feature layer.
 pub(crate) fn bake_formula_revision(
     model: &crate::mlp::Model,
-) -> crate::feature_defs::FormulaRevision {
-    crate::feature_layout::formula_revision(model).unwrap_or(crate::ssim_form::SHIPPED_REVISION)
+) -> Result<crate::feature_defs::FormulaRevision, ZensimError> {
+    crate::feature_layout::formula_revision(model)
 }
 
 /// [`bake_formula_revision`], for consumers outside the crate (the verdict
-/// tool's per-bake revision gate).
+/// tool's per-bake revision gate). Errors on a present value this build does
+/// not know.
 ///
 /// `#[doc(hidden)]`: revision plumbing, not product surface.
+///
+/// # Errors
+///
+/// [`ZensimError::ModelLoadFailed`] when `zentrain.formula_revision` is
+/// present but not a known revision.
 #[doc(hidden)]
-pub fn bake_formula_revision_public(model: &zenpredict::Model) -> FormulaRevision {
+pub fn bake_formula_revision_public(
+    model: &zenpredict::Model,
+) -> Result<FormulaRevision, ZensimError> {
     bake_formula_revision(model)
 }
 
@@ -3798,6 +3808,9 @@ fn run_blur_pass_strip_cached_ref(width: usize, height_local: usize, scratch: &m
         width,
         height_local,
         BLUR_RADIUS,
+        // The wide walk's revision IS the process revision: every entry to it
+        // runs `validate_wide_revision` first, same as `run_blur_pass_strip`.
+        crate::ssim_form::active_revision(),
     );
     crate::blur::box_blur_v_from_copy(&mu2_h[..n], &mut mu2[..n], width, height_local, BLUR_RADIUS);
     crate::blur::box_blur_v_from_copy(&ssq_h[..n], &mut ssq[..n], width, height_local, BLUR_RADIUS);
@@ -6390,7 +6403,8 @@ fn csfw_block_kernel_entry(
 }
 
 /// Runtime dispatch wrapper for the CSFW kernel (same `incant!` shape as
-/// [`append_block_kernel`]).
+/// [`append_block_kernel`]). `revision` is the computation's formula
+/// revision: Rev4 runs the canonical body (featcanon D1).
 fn csfw_block_kernel(
     src: &[f32],
     dst: &[f32],
@@ -6398,9 +6412,11 @@ fn csfw_block_kernel(
     eff: [f64; 3],
     width: usize,
     height: usize,
+    revision: crate::feature_defs::FormulaRevision,
 ) -> CsfwAccum {
-    if crate::featcanon::active() {
-        return csfw_block_kernel_canon(src, dst, ref_y, eff, width, height);
+    let mode = crate::featcanon::mode(crate::ssim_form::effective_revision(revision));
+    if mode.active() {
+        return csfw_block_kernel_canon(src, dst, ref_y, eff, width, height, mode);
     }
     incant!(
         csfw_block_kernel_entry(src, dst, ref_y, eff, width, height),
@@ -6414,7 +6430,7 @@ fn csfw_block_kernel(
 /// (the production scalar tail computes `w` in f64 — a different element
 /// value — so canonical pins the chunk form for every pixel), and the five
 /// sums run through `featcanon::Pool` (lane = x mod 8, one fixed reduce per
-/// row). `exact` mode evaluates in f64 + Neumaier.
+/// row). With the `oracle` feature, `exact` mode evaluates in f64 + Neumaier.
 #[allow(clippy::manual_clamp)]
 fn csfw_block_kernel_canon(
     src: &[f32],
@@ -6423,19 +6439,22 @@ fn csfw_block_kernel_canon(
     eff: [f64; 3],
     width: usize,
     height: usize,
+    mode: crate::featcanon::Mode,
 ) -> CsfwAccum {
-    use crate::featcanon::{Mode, Neum64, Pool as _};
+    use crate::featcanon::Mode;
+    #[cfg(feature = "oracle")]
+    use crate::featcanon::{Neum64, Pool as _};
     let b0 = eff[0] as f32;
     let b1 = eff[1] as f32;
     let b2 = eff[2] as f32;
     let w_min = CSFW_W_MIN as f32;
     let w_max = CSFW_W_MAX as f32;
-    let exact = crate::featcanon::mode() == Mode::Exact;
 
     let mut acc = CsfwAccum::default();
     for y in 0..height {
         let row = y * width;
-        if exact {
+        #[cfg(feature = "oracle")]
+        if mode.exact() {
             let mut p_w = Neum64::zero();
             let mut p_ws = Neum64::zero();
             let mut p_wd = Neum64::zero();
@@ -6465,18 +6484,20 @@ fn csfw_block_kernel_canon(
             acc.sum_wd2 += p_wd2.fin();
             continue;
         }
-        match crate::featcanon::canon_acc() {
-            Some(crate::featcanon::CanonAcc::F32Lanes) => {
+        match mode {
+            Mode::Canon32 => {
                 csfw_row_canon::<crate::featcanon::LanesF32>(
                     &mut acc, src, dst, ref_y, row, width, b0, b1, b2, w_min, w_max,
                 );
             }
-            Some(crate::featcanon::CanonAcc::F64Lanes) => {
+            #[cfg(feature = "oracle")]
+            Mode::Canon64 => {
                 csfw_row_canon::<crate::featcanon::LanesF64>(
                     &mut acc, src, dst, ref_y, row, width, b0, b1, b2, w_min, w_max,
                 );
             }
-            Some(crate::featcanon::CanonAcc::Neumaier) => {
+            #[cfg(feature = "oracle")]
+            Mode::CanonNeum => {
                 csfw_row_canon::<Neum64>(
                     &mut acc, src, dst, ref_y, row, width, b0, b1, b2, w_min, w_max,
                 );
@@ -8952,7 +8973,12 @@ fn build_v2_ref_scales(
     let mut height = img.height();
     let mut scales: Vec<([Vec<f32>; 3], usize, usize)> = Vec::with_capacity(crate::NUM_SCALES);
     scales.push((
-        crate::streaming::convert_source_to_xyb(img, width, parallel),
+        crate::streaming::convert_source_to_xyb(
+            img,
+            width,
+            parallel,
+            crate::ssim_form::active_revision(),
+        ),
         width,
         height,
     ));
@@ -9751,6 +9777,7 @@ fn stream_phase_b(
                 cp.eff[scale],
                 width,
                 strip_h,
+                toggles.formula_revision,
             );
             crate::fold_timing::stop(__t_csfw, crate::fold_timing::Phase::CsfwKernel, scale);
             acc.csfw[scale].accumulate(&c);
@@ -10239,8 +10266,13 @@ fn dst_y_edge_mask_generic<T: F32x8Backend + Copy>(
 
 // Wide kernels still consult process arithmetic. Never feed them direct-error
 // moments prepared under a different explicit revision. Basic-only plans carry
-// their revision through both passes and remain safe to serve side by side.
+// their revision through both passes and remain safe to serve side by side —
+// EXCEPT across the Rev4 boundary (featcanon D1): the basic path's other
+// formula gates still read the process switch, so a v1-only Rev4 request in a
+// Rev3 process (or the reverse) would be labelled one revision and computed
+// as another.
 fn validate_wide_revision(toggles: V2NewFeatureToggles) -> Result<(), ZensimError> {
+    crate::ssim_form::refuse_rev4_mix(toggles.formula_revision)?;
     if !toggles.v1_only && toggles.formula_revision != crate::ssim_form::active_revision() {
         return Err(ZensimError::ModelLoadFailed {
             reason: "wide feature extraction requires matching process and requested formula revisions",
@@ -10630,6 +10662,10 @@ pub(crate) fn compute_folded720_hdr_streaming_extras(
     extras: FoldWalkExtras<'_>,
 ) -> Result<ZensimV2Result, ZensimError> {
     validate_wide_revision(toggles)?;
+    // featcanon D2: the PU front end (`color::linear_to_pu_xyb_planar_into`)
+    // is still tier-dispatched, so an HDR walk cannot compute Rev4 — this
+    // includes `research::extract` on a declared-HDR pair.
+    crate::ssim_form::refuse_rev4_served(toggles.formula_revision)?;
     validate_hdr_pair(source, distorted, encoding, max_pixels)?;
     let front_end = crate::feature_v2_stream::FrontEnd::Hdr(encoding);
     if source.width() < crate::metric::MIN_PYRAMID_DIM
@@ -11532,6 +11568,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
         front_end,
         ref_planes,
         compute.sampling,
+        toggles.formula_revision,
     );
 
     let __t_walk = crate::fold_timing::start();
@@ -12626,9 +12663,19 @@ fn compute_v2_features_with_ref_impl_inner(
         || distorted.height() < crate::metric::MIN_PYRAMID_DIM
     {
         let padded_dst = crate::metric::reflect_pad_to_min(distorted);
-        crate::streaming::convert_source_to_xyb(&padded_dst, padded_dst.width(), parallel)
+        crate::streaming::convert_source_to_xyb(
+            &padded_dst,
+            padded_dst.width(),
+            parallel,
+            crate::ssim_form::active_revision(),
+        )
     } else {
-        crate::streaming::convert_source_to_xyb(distorted, distorted.width(), parallel)
+        crate::streaming::convert_source_to_xyb(
+            distorted,
+            distorted.width(),
+            parallel,
+            crate::ssim_form::active_revision(),
+        )
     };
 
     let (mut width, mut height) = (prepared.scales[0].1, prepared.scales[0].2);
@@ -18052,8 +18099,18 @@ pub(crate) mod tests {
             let dst_px = quantize_distort(&src_px, w, h);
             let source = RgbSlice::new(&src_px, w, h);
             let distorted = RgbSlice::new(&dst_px, w, h);
-            let sp = crate::streaming::convert_source_to_xyb(&source, w, false);
-            let dp = crate::streaming::convert_source_to_xyb(&distorted, w, false);
+            let sp = crate::streaming::convert_source_to_xyb(
+                &source,
+                w,
+                false,
+                crate::ssim_form::active_revision(),
+            );
+            let dp = crate::streaming::convert_source_to_xyb(
+                &distorted,
+                w,
+                false,
+                crate::ssim_form::active_revision(),
+            );
             let mut scratch = ScratchV2Strip::new(w * h);
             let n = w * h;
             for ch in 0..3 {
@@ -18954,8 +19011,18 @@ pub(crate) mod tests {
             let dst_px = quantize_distort(&src_px, w, h);
             let source = RgbSlice::new(&src_px, w, h);
             let distorted = RgbSlice::new(&dst_px, w, h);
-            let src_planes = crate::streaming::convert_source_to_xyb(&source, w, false);
-            let dst_planes = crate::streaming::convert_source_to_xyb(&distorted, w, false);
+            let src_planes = crate::streaming::convert_source_to_xyb(
+                &source,
+                w,
+                false,
+                crate::ssim_form::active_revision(),
+            );
+            let dst_planes = crate::streaming::convert_source_to_xyb(
+                &distorted,
+                w,
+                false,
+                crate::ssim_form::active_revision(),
+            );
             let mut scratch = ScratchV2Strip::new(w * h);
             let n = w * h;
 
@@ -19193,8 +19260,18 @@ pub(crate) mod tests {
         // Build real moment planes via the whole-image blur pass.
         let source = RgbSlice::new(&src_px, w, h);
         let distorted = RgbSlice::new(&dst_px, w, h);
-        let src_planes = crate::streaming::convert_source_to_xyb(&source, w, false);
-        let dst_planes = crate::streaming::convert_source_to_xyb(&distorted, w, false);
+        let src_planes = crate::streaming::convert_source_to_xyb(
+            &source,
+            w,
+            false,
+            crate::ssim_form::active_revision(),
+        );
+        let dst_planes = crate::streaming::convert_source_to_xyb(
+            &distorted,
+            w,
+            false,
+            crate::ssim_form::active_revision(),
+        );
         let mut scratch = ScratchV2Strip::new(w * h);
         for ch in 0..3 {
             run_blur_pass(&src_planes[ch], &dst_planes[ch], w, h, &mut scratch);
@@ -23259,8 +23336,20 @@ pub(crate) mod tests {
             let dst = quantize_distort(&src, w, h);
             let sref = RgbSlice::new(&src, w, h);
             let dref = RgbSlice::new(&dst, w, h);
-            let y_s = crate::streaming::convert_source_to_xyb(&sref, w, false)[1].clone();
-            let y_d = crate::streaming::convert_source_to_xyb(&dref, w, false)[1].clone();
+            let y_s = crate::streaming::convert_source_to_xyb(
+                &sref,
+                w,
+                false,
+                crate::ssim_form::active_revision(),
+            )[1]
+            .clone();
+            let y_d = crate::streaming::convert_source_to_xyb(
+                &dref,
+                w,
+                false,
+                crate::ssim_form::active_revision(),
+            )[1]
+            .clone();
             let oracle = crate::dvifm::dvifm_features_stream(
                 &y_s,
                 &y_d,
@@ -23301,8 +23390,20 @@ pub(crate) mod tests {
         let ps = crate::metric::reflect_pad_to_min(&sref);
         let pd = crate::metric::reflect_pad_to_min(&dref);
         let (pw, ph) = (ps.width(), ps.height());
-        let y_s = crate::streaming::convert_source_to_xyb(&ps, pw, false)[1].clone();
-        let y_d = crate::streaming::convert_source_to_xyb(&pd, pw, false)[1].clone();
+        let y_s = crate::streaming::convert_source_to_xyb(
+            &ps,
+            pw,
+            false,
+            crate::ssim_form::active_revision(),
+        )[1]
+        .clone();
+        let y_d = crate::streaming::convert_source_to_xyb(
+            &pd,
+            pw,
+            false,
+            crate::ssim_form::active_revision(),
+        )[1]
+        .clone();
         let oracle = crate::dvifm::dvifm_features_stream(
             &y_s,
             &y_d,
@@ -24657,18 +24758,11 @@ pub(crate) mod oracle {
 #[allow(dead_code)]
 pub(crate) const ERA2_BAND_ROWS: usize = 32;
 
-/// The era-2 horizontal reduction — **part of the semantics**.
-///
-/// Pairwise rather than sequential (tighter error, equally fixed), and written
-/// out rather than delegated: `GenericF32x8::reduce_add` resolves to a
-/// per-backend order (§14.2), so calling it would make the reduction tree an
-/// unspecified, tier-dependent operation — precisely what the era-2 identity
-/// theorem forbids.
-#[inline(always)]
-#[allow(dead_code)]
-pub(crate) fn era2_reduce8(a: [f32; 8]) -> f64 {
-    (((a[0] + a[1]) + (a[2] + a[3])) + ((a[4] + a[5]) + (a[6] + a[7]))) as f64
-}
+/// The era-2 horizontal reduction — defined in [`crate::featcanon`], whose
+/// canonical kernels need it in every build (this module exists only with
+/// `feature-regime-v2`); re-exported here under its era-2 name.
+#[allow(unused_imports)]
+pub(crate) use crate::featcanon::era2_reduce8;
 
 /// One era-2 accumulator: 8 f32 virtual lanes.
 #[derive(Clone, Copy)]
@@ -25319,4 +25413,93 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
         b0 = b1;
     }
     acc
+}
+
+/// featcanon-fix D1 at the crate-internal walk (`validate_wide_revision`): the
+/// public entries refuse a Rev4 request first (D2), so this pins the walk's
+/// OWN refusal — the guard `research::extract` and every internal caller rely
+/// on — in both directions.
+#[cfg(test)]
+mod featcanon_contract_tests {
+    use super::*;
+    use crate::feature_defs::FormulaRevision;
+    use crate::source::RgbSlice;
+
+    fn walk(revision: FormulaRevision, v1_only: bool) -> Result<ZensimV2Result, ZensimError> {
+        let (w, h) = (97, 63);
+        let s = tests::textured_image(w, h, 7);
+        let d = tests::quantize_distort(&s, w, h);
+        let toggles = V2NewFeatureToggles {
+            v1_only,
+            formula_revision: revision,
+            ..Default::default()
+        };
+        let mut scratch = V2Scratch::new();
+        compute_folded720_streaming_impl(
+            &RgbSlice::new(&s, w, h),
+            &RgbSlice::new(&d, w, h),
+            None,
+            false,
+            toggles,
+            &mut scratch,
+            None,
+        )
+    }
+
+    fn assert_mix_refused(r: Result<ZensimV2Result, ZensimError>, what: &str) {
+        match r {
+            Err(ZensimError::ModelLoadFailed { reason }) => {
+                assert_eq!(reason, crate::ssim_form::REV4_MIX, "{what}")
+            }
+            Err(e) => panic!("{what}: refused for another reason: {e:?}"),
+            Ok(_) => panic!("{what}: served a Rev4 mix"),
+        }
+    }
+
+    /// Direction 2: a Rev4 request in a Rev3 process — v1-only included,
+    /// which `validate_wide_revision` used to wave through.
+    #[test]
+    fn the_walk_refuses_a_rev4_request_in_a_rev3_process() {
+        const SENTINEL: &str = "WALK-REV4-IN-REV3-RAN";
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "feature_v2::featcanon_contract_tests::the_walk_refuses_a_rev4_request_in_a_rev3_process",
+            SENTINEL,
+        ) {
+            return;
+        }
+        for v1_only in [true, false] {
+            assert_mix_refused(
+                walk(FormulaRevision::Rev4, v1_only),
+                &format!("Rev4 request, v1_only={v1_only}"),
+            );
+        }
+        walk(FormulaRevision::Rev3, true).expect("the matching v1-only request serves");
+        walk(FormulaRevision::Rev3, false).expect("the matching wide request serves");
+        println!("{SENTINEL}");
+    }
+
+    /// Direction 1: a Rev1/Rev2/Rev3 request in a Rev4 process; the matching
+    /// Rev4 request (the research walk) serves.
+    #[test]
+    fn the_walk_refuses_an_earlier_request_in_a_rev4_process() {
+        const SENTINEL: &str = "WALK-EARLIER-IN-REV4-RAN";
+        if !crate::ssim_form::run_at_revision(
+            "4",
+            "feature_v2::featcanon_contract_tests::the_walk_refuses_an_earlier_request_in_a_rev4_process",
+            SENTINEL,
+        ) {
+            return;
+        }
+        for rev in [
+            FormulaRevision::Rev1,
+            FormulaRevision::Rev2,
+            FormulaRevision::Rev3,
+        ] {
+            assert_mix_refused(walk(rev, true), &format!("{rev:?} v1-only request"));
+        }
+        walk(FormulaRevision::Rev4, true).expect("the matching v1-only request serves");
+        walk(FormulaRevision::Rev4, false).expect("the matching wide request serves");
+        println!("{SENTINEL}");
+    }
 }

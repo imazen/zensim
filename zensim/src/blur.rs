@@ -3199,9 +3199,12 @@ pub(crate) fn fused_blur_h_ssim_at_revision(
     radius: usize,
     revision: crate::feature_defs::FormulaRevision,
 ) {
-    let err = crate::ssim_form::effective_revision(revision)
-        >= crate::feature_defs::FormulaRevision::Rev3;
-    if crate::featcanon::active() {
+    let revision = crate::ssim_form::effective_revision(revision);
+    let err = revision >= crate::feature_defs::FormulaRevision::Rev3;
+    // Canonical arithmetic follows THIS computation's revision (featcanon D1),
+    // never the process switch.
+    let mode = crate::featcanon::mode(revision);
+    if mode.active() {
         fused_blur_h_ssim_canon(
             src,
             dst,
@@ -3213,6 +3216,7 @@ pub(crate) fn fused_blur_h_ssim_at_revision(
             height,
             radius,
             err,
+            mode,
         );
         return;
     }
@@ -3299,12 +3303,16 @@ pub fn fused_blur_h_ssim3(
     width: usize,
     height: usize,
     radius: usize,
+    revision: crate::feature_defs::FormulaRevision,
 ) {
     // Revision 3 accumulates the direct error moment `Σ(a-b)²` in the
     // `sigma12` plane in place of `Σab` — the fusion that replaced the exact
     // f64 second pass. Read ONCE per call; every tier below unswitches on it.
-    let err = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
-    if crate::featcanon::active() {
+    // `revision` is the caller's computation revision (featcanon D1).
+    let revision = crate::ssim_form::effective_revision(revision);
+    let err = revision >= crate::feature_defs::FormulaRevision::Rev3;
+    let mode = crate::featcanon::mode(revision);
+    if mode.active() {
         fused_blur_h_ssim_canon(
             src,
             dst,
@@ -3316,6 +3324,7 @@ pub fn fused_blur_h_ssim3(
             height,
             radius,
             err,
+            mode,
         );
         return;
     }
@@ -4774,9 +4783,9 @@ fn fused_blur_h_ssim_inner(
 /// including scalar/wasm128, where the magetypes backend `mul_add` is unfused
 /// and produced different planes.
 ///
-/// Under `ZENSIM_FEATCANON=exact` the same sliding structure runs in f64
-/// (fused `f64::mul_add`) and rounds once at the f32 plane store — the exact
-/// arm of the accuracy oracle.
+/// With the `oracle` feature and `ZENSIM_FEATCANON=exact`, the same sliding
+/// structure runs in f64 (fused `f64::mul_add`) and rounds once at the f32
+/// plane store — the exact arm of the accuracy oracle.
 #[allow(clippy::too_many_arguments)]
 fn fused_blur_h_ssim_canon(
     src: &[f32],
@@ -4789,16 +4798,22 @@ fn fused_blur_h_ssim_canon(
     height: usize,
     radius: usize,
     err: bool,
+    mode: crate::featcanon::Mode,
 ) {
     let diam = 2 * radius + 1;
     let inv_v = 1.0f32 / diam as f32;
+    #[cfg(feature = "oracle")]
     let inv_v64 = 1.0f64 / diam as f64;
     let r = radius;
-    let exact = crate::featcanon::exact();
+    #[cfg(feature = "oracle")]
+    let exact = mode.exact();
+    #[cfg(not(feature = "oracle"))]
+    let _ = mode;
 
     for y in 0..height {
         let row = y * width;
 
+        #[cfg(feature = "oracle")]
         if exact {
             let mut sum_s = 0.0f64;
             let mut sum_d = 0.0f64;
@@ -6365,8 +6380,9 @@ mod tests {
                 .collect();
             let source = adjoint_probe_linear_image(&a, w, h);
             let distorted = adjoint_probe_linear_image(&d, w, h);
-            let reference = crate::streaming::PrecomputedReference::new(&source, 4, false);
-            let base = crate::streaming::PrecomputedReference::new(&distorted, 4, false);
+            let rev = crate::ssim_form::active_revision();
+            let reference = crate::streaming::PrecomputedReference::new(&source, 4, false, rev);
+            let base = crate::streaming::PrecomputedReference::new(&distorted, 4, false, rev);
             let served = scorer.compute(&source, &distorted, None).unwrap();
             for (s, ((r, sw, sh), (d, _, _))) in
                 reference.scales.iter().zip(&base.scales).enumerate()
@@ -6689,7 +6705,18 @@ mod tests {
                 vec![0.0f32; n],
                 vec![0.0f32; n],
             );
-            fused_blur_h_ssim3(&src, &dst, &mut m1b, &mut m2b, &mut sqb, &mut s12b, w, h, 5);
+            fused_blur_h_ssim3(
+                &src,
+                &dst,
+                &mut m1b,
+                &mut m2b,
+                &mut sqb,
+                &mut s12b,
+                w,
+                h,
+                5,
+                crate::ssim_form::active_revision(),
+            );
             for i in 0..n {
                 assert!(
                     m2a[i].to_bits() == m2b[i].to_bits()
@@ -7637,8 +7664,24 @@ mod tests {
                     super::box_blur_h_into_abs_diff(&src, &mut old, w, h, radius);
                     let (mut m1, mut m2) = (vec![0.0f32; n], vec![0.0f32; n]);
                     let (mut sq, mut pr) = (vec![0.0f32; n], vec![0.0f32; n]);
-                    super::fused_blur_h_ssim(
-                        &src, &dst, &mut m1, &mut m2, &mut sq, &mut pr, w, h, radius,
+                    // A PRODUCTION claim (the served fused-extension route):
+                    // the process revision capped at Rev3. The canonical Rev4
+                    // H body runs one sliding window across tile boundaries,
+                    // so it does not equal the tiled box blur at a tile edge
+                    // (measured: 1025x3 r=1, idx 1024, 11018.707 vs 11018.75);
+                    // Rev4 claims tier invariance, not this equality.
+                    super::fused_blur_h_ssim_at_revision(
+                        &src,
+                        &dst,
+                        &mut m1,
+                        &mut m2,
+                        &mut sq,
+                        &mut pr,
+                        w,
+                        h,
+                        radius,
+                        crate::ssim_form::active_revision()
+                            .min(crate::feature_defs::FormulaRevision::Rev3),
                     );
                     let mut got = vec![0.0f32; n];
                     crate::simd_ops::abs_diff_rows_into(&src, &m1, &mut got, w, w, h);
@@ -7755,7 +7798,16 @@ mod tests {
                     let (mut t_m1, mut t_m2) = (vec![0.0f32; n], vec![0.0f32; n]);
                     let (mut t_sq, mut t_pr) = (vec![0.0f32; n], vec![0.0f32; n]);
                     super::fused_blur_h_ssim3(
-                        &src, &dst, &mut t_m1, &mut t_m2, &mut t_sq, &mut t_pr, w, h, radius,
+                        &src,
+                        &dst,
+                        &mut t_m1,
+                        &mut t_m2,
+                        &mut t_sq,
+                        &mut t_pr,
+                        w,
+                        h,
+                        radius,
+                        crate::ssim_form::active_revision(),
                     );
 
                     for i in 0..n {

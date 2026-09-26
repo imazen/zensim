@@ -19,6 +19,20 @@
 //!
 //! Prints a per-(pair, tier, block) table plus a per-(tier, block) rollup
 //! across pairs to stdout; write `TIER_AUDIT_OUT=<path>` to also emit TSV.
+//!
+//! Also the featcanon measurement driver (absorbed from the retired
+//! `featcanon_audit` bin, featcanon-fix 2026-09-26 — one owner, not two):
+//!
+//! * `ZENSIM_FEATCANON_DUMP=<dir>` writes every tier's raw vector as
+//!   little-endian f64 to `<dir>/<mode>_<tier>_<pair>.f64bin`, plus
+//!   `<dir>/names_<pair>.tsv` (`id\tfamily\tname`), where `<mode>` is
+//!   `ZENSIM_FEATCANON` or `prod`.
+//! * `TIER_AUDIT_ONLY=<tier>` runs one tier and skips the comparison (timing).
+//! * `ZENSIM_FEATCANON=exact|c32|c64|neum|off` selects a measurement
+//!   arithmetic. It exists only in a build with zensim's `oracle` feature:
+//!   `cargo build --release -p zensim-validate --bin tier_audit_features
+//!   --features featcanon-oracle`. A build without it refuses the variable
+//!   rather than dumping production vectors under a candidate's name.
 
 use std::fmt::Write as _;
 use std::process::exit;
@@ -109,6 +123,15 @@ fn apply_tier(tier: &Tier) {
 }
 
 fn main() {
+    if let Ok(mode) = std::env::var("ZENSIM_FEATCANON")
+        && !cfg!(feature = "featcanon-oracle")
+    {
+        eprintln!(
+            "ZENSIM_FEATCANON={mode} needs zensim's measurement arithmetic, which this \
+             build does not contain; rebuild with --features featcanon-oracle"
+        );
+        exit(2);
+    }
     let mut pairs: Vec<(String, String, String)> = Vec::new(); // (label, ref, dist)
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -155,10 +178,12 @@ fn main() {
     {
         use archmage::SimdToken;
         eprintln!(
-            "tokens: v4x={} v4={} v3={}",
+            "tokens: v4x={} v4={} v3={} formula_revision={:?} featcanon={}",
             archmage::X64V4xToken::summon().is_some(),
             archmage::X64V4Token::summon().is_some(),
             archmage::X64V3Token::summon().is_some(),
+            zensim::feature_v2::active_formula_revision(),
+            std::env::var("ZENSIM_FEATCANON").unwrap_or_else(|_| "prod".into()),
         );
     }
 
@@ -177,16 +202,44 @@ fn main() {
         eprintln!("== {label} {rw}x{rh} == {refp}");
 
         // v3 baseline first — canonical arithmetic.
+        let dump_dir = std::env::var("ZENSIM_FEATCANON_DUMP").ok();
+        let mode_tag = std::env::var("ZENSIM_FEATCANON").unwrap_or_else(|_| "prod".into());
         let mut per_tier: Vec<(
             &'static str,
             Vec<f64>,
             Vec<zensim::research::FeatureProvenance>,
         )> = Vec::new();
+        // `TIER_AUDIT_ONLY=<label>` restricts to one tier — for timing runs.
+        let only = std::env::var("TIER_AUDIT_ONLY").ok();
         for tier in TIERS {
+            if only.as_deref().is_some_and(|o| o != tier.label) {
+                continue;
+            }
             apply_tier(tier);
+            let t0 = std::time::Instant::now();
             let e = research::extract(&Request::everything(), &rs, &rd)
                 .unwrap_or_else(|e| panic!("{label} tier {}: {e}", tier.label));
+            let secs = t0.elapsed().as_secs_f64();
+            if let Some(dir) = &dump_dir {
+                // Raw little-endian f64 values, one file per (mode, tier, pair).
+                let path = format!("{dir}/{mode_tag}_{}_{label}.f64bin", tier.label);
+                let bytes: Vec<u8> = e.values().iter().flat_map(|v| v.to_le_bytes()).collect();
+                std::fs::write(&path, &bytes).unwrap_or_else(|e| panic!("write {path}: {e}"));
+            }
+            eprintln!("   {} {secs:.3}s", tier.label);
             per_tier.push((tier.label, e.values().to_vec(), e.provenance().to_vec()));
+        }
+        if let Some(dir) = &dump_dir {
+            // The slot-name table, once per pair (mode-independent).
+            let mut names = String::new();
+            for p in &per_tier[0].2 {
+                writeln!(names, "{}\t{}\t{}", p.id, p.family, p.name).unwrap();
+            }
+            let path = format!("{dir}/names_{label}.tsv");
+            std::fs::write(&path, names).unwrap_or_else(|e| panic!("write {path}: {e}"));
+        }
+        if only.is_some() {
+            continue; // timing run: no comparison
         }
         let base = &per_tier.iter().find(|t| t.0 == "v3").unwrap().1;
         let prov = &per_tier[0].2;

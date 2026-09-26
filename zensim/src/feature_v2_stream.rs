@@ -336,6 +336,9 @@ pub(crate) struct StripPlaneProducer<'a, S: ImageSource, D: ImageSource> {
     /// Scale-0 rows converted per [`Self::produce`] call, and hence this
     /// producer's rolling-window capacity — see [`advance_rows_for`].
     advance_rows: usize,
+    /// The walk's formula revision — what the scale-0 opsin conversion runs
+    /// (canonical at Rev4, featcanon D1).
+    revision: crate::feature_defs::FormulaRevision,
 }
 
 /// Convert `n_new` scale-0 rows of one side into that side's three rolling
@@ -356,6 +359,7 @@ fn convert_side_scale0(
     n_new: usize,
     width: usize,
     parallel: bool,
+    revision: crate::feature_defs::FormulaRevision,
 ) {
     let [c0, c1, c2] = planes;
     let (p0, p1, p2) = (
@@ -373,6 +377,7 @@ fn convert_side_scale0(
         parallel,
         hi0,
         CONVERT_CHUNK_ROWS,
+        revision,
     );
 }
 
@@ -423,6 +428,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         Self::new_with_front_end(source, distorted, parallel, pool, FrontEnd::Sdr)
     }
 
+    /// Test/instrument constructor: the walk runs at the process revision.
     pub(crate) fn new_with_front_end(
         source: &'a S,
         distorted: &'a D,
@@ -430,12 +436,22 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         pool: &mut Vec<Vec<f32>>,
         front_end: FrontEnd,
     ) -> Self {
-        Self::new_with_ref_feed(source, distorted, parallel, pool, front_end, None, None)
+        Self::new_with_ref_feed(
+            source,
+            distorted,
+            parallel,
+            pool,
+            front_end,
+            None,
+            None,
+            crate::ssim_form::active_revision(),
+        )
     }
 
     /// [`Self::new_with_front_end`] with an optional pre-built source-side XYB
     /// pyramid (see the `ref_planes` field). `None` is byte-for-byte the
-    /// non-cached constructor.
+    /// non-cached constructor. `revision` is the walk's formula revision.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_ref_feed(
         source: &'a S,
         distorted: &'a D,
@@ -444,13 +460,14 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         front_end: FrontEnd,
         ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
         sampling: Option<crate::sampling::Sampling>,
+        revision: crate::feature_defs::FormulaRevision,
     ) -> Self {
         if let Some(sampling) = sampling {
             assert!(matches!(front_end, FrontEnd::Sdr));
             let make_pair = || {
                 [
-                    sampling.pyramid(source, parallel),
-                    sampling.pyramid(distorted, parallel),
+                    sampling.pyramid(source, parallel, revision),
+                    sampling.pyramid(distorted, parallel, revision),
                 ]
             };
             #[cfg(feature = "threads")]
@@ -459,8 +476,8 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 && rayon::current_num_threads() > 1
             {
                 let (a, b) = rayon::join(
-                    || sampling.pyramid(source, parallel),
-                    || sampling.pyramid(distorted, parallel),
+                    || sampling.pyramid(source, parallel, revision),
+                    || sampling.pyramid(distorted, parallel, revision),
                 );
                 [a, b]
             } else {
@@ -488,10 +505,11 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                 max_held_rows: vec![0; crate::NUM_SCALES],
                 ref_planes: None,
                 advance_rows: 0,
+                revision,
             };
         }
         Self::new_inner(
-            source, distorted, parallel, pool, front_end, ref_planes, None,
+            source, distorted, parallel, pool, front_end, ref_planes, None, revision,
         )
     }
 
@@ -514,6 +532,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             FrontEnd::Sdr,
             None,
             Some(advance_rows),
+            crate::ssim_form::active_revision(),
         )
     }
 
@@ -526,6 +545,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
         front_end: FrontEnd,
         ref_planes: Option<&'a [crate::streaming::XybPyramidLevel]>,
         advance_override: Option<usize>,
+        revision: crate::feature_defs::FormulaRevision,
     ) -> Self {
         let (w0, h0) = (source.width(), source.height());
         debug_assert_eq!(w0, distorted.width());
@@ -581,6 +601,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             max_held_rows: vec![0; crate::NUM_SCALES],
             ref_planes,
             advance_rows,
+            revision,
         }
     }
 
@@ -694,14 +715,17 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
             let distorted = self.distorted;
             let ref_planes = self.ref_planes;
             let inner_parallel = self.parallel;
+            let revision = self.revision;
             let (h, t) = self.planes.split_at_mut(1);
             let (sp, dp) = (&mut h[0], &mut t[0]);
             rayon::join(
                 || match ref_planes {
                     Some(rp) => copy_cached_scale0(rp, sp, hi0, n_new, width),
-                    None => convert_side_scale0(source, sp, hi0, n_new, width, inner_parallel),
+                    None => {
+                        convert_side_scale0(source, sp, hi0, n_new, width, inner_parallel, revision)
+                    }
                 },
-                || convert_side_scale0(distorted, dp, hi0, n_new, width, inner_parallel),
+                || convert_side_scale0(distorted, dp, hi0, n_new, width, inner_parallel, revision),
             );
         }
         for si in (0..2).take(if sides_parallel { 0 } else { 2 }) {
@@ -741,6 +765,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                             width,
                             self.parallel,
                             hi0,
+                            self.revision,
                         );
                     }
                     _ => {
@@ -753,6 +778,7 @@ impl<'a, S: ImageSource, D: ImageSource> StripPlaneProducer<'a, S, D> {
                             width,
                             self.parallel,
                             hi0,
+                            self.revision,
                         );
                     }
                 },
@@ -1113,7 +1139,12 @@ mod tests {
         let mut height = img.height();
         let mut scales: Vec<([Vec<f32>; 3], usize, usize)> = Vec::new();
         scales.push((
-            crate::streaming::convert_source_to_xyb(img, width, false),
+            crate::streaming::convert_source_to_xyb(
+                img,
+                width,
+                false,
+                crate::ssim_form::active_revision(),
+            ),
             width,
             height,
         ));
@@ -1141,7 +1172,12 @@ mod tests {
         let (w, h) = (127, 93);
         let src = textured_image(w, h, 3);
         let img = RgbSlice::new(&src, w, h);
-        let mut planes = crate::streaming::convert_source_to_xyb(&img, w, false);
+        let mut planes = crate::streaming::convert_source_to_xyb(
+            &img,
+            w,
+            false,
+            crate::ssim_form::active_revision(),
+        );
         let reference = materialize(&img);
         let (mut cw, mut ch_) = (w, h);
         #[allow(clippy::needless_range_loop)] // scale drives geometry AND indexes reference/planes

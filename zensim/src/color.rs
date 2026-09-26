@@ -177,14 +177,29 @@ pub fn srgb_to_positive_xyb_planar_into(
     y_out: &mut [f32],
     b_out: &mut [f32],
 ) {
-    if crate::featcanon::active() {
-        srgb_xyb_canon::<true>(pixels, x_out, y_out, b_out);
-        return;
-    }
     incant!(
         srgb_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
         [v4x, v4, v3, neon, wasm128, scalar]
     );
+}
+
+/// [`srgb_to_positive_xyb_planar_into`] for a computation at `revision`:
+/// the tier-dispatched production kernel through Rev3, the canonical body
+/// ([`srgb_xyb_canon`]) at Rev4. The public form above stays production-only —
+/// it is a bench export with no revision to honour.
+pub(crate) fn srgb_to_positive_xyb_planar_into_at_revision(
+    pixels: &[[u8; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+    revision: crate::feature_defs::FormulaRevision,
+) {
+    let mode = crate::featcanon::mode(revision);
+    if mode.active() {
+        srgb_xyb_canon(pixels, x_out, y_out, b_out, mode);
+        return;
+    }
+    srgb_to_positive_xyb_planar_into(pixels, x_out, y_out, b_out);
 }
 
 /// Convert interleaved sRGB u8 to planar XYB (without positive shift).
@@ -211,10 +226,6 @@ pub fn srgb_to_xyb_planar_into(
     y_plane: &mut [f32],
     b_plane: &mut [f32],
 ) {
-    if crate::featcanon::active() {
-        srgb_xyb_canon::<false>(pixels, x_plane, y_plane, b_plane);
-        return;
-    }
     incant!(
         srgb_to_xyb_planar_inner(pixels, x_plane, y_plane, b_plane),
         [v3, neon, wasm128, scalar]
@@ -275,29 +286,10 @@ fn opsin_px_canon(ab: f32, r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     (x.mul_add(14.0, 0.42), y + 0.01, (t2 - y) + 0.55)
 }
 
-/// One pixel of canonical opsin, no positive shift (the `srgb_to_xyb` form).
-#[inline(always)]
-fn opsin_px_canon_plain(ab: f32, r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-    let m0 = K_M00
-        .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
-        .max(0.0);
-    let m1 = K_M10
-        .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
-        .max(0.0);
-    let m2 = K_M20
-        .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
-        .max(0.0);
-    let t0 = magetypes::nostd_math::cbrt_midp_f32(m0);
-    let t1 = magetypes::nostd_math::cbrt_midp_f32(m1);
-    let t2 = magetypes::nostd_math::cbrt_midp_f32(m2);
-    let c0 = t0 + ab;
-    let c1 = t1 + ab;
-    (0.5 * (c0 - c1), 0.5 * (c0 + c1), t2)
-}
-
 /// Exact-mode sibling: same formula in f64 with the correctly-rounded(ish)
 /// `f64::cbrt` — the real-arithmetic reference the candidates are measured
 /// against.
+#[cfg(feature = "oracle")]
 #[inline(always)]
 #[allow(clippy::manual_clamp)]
 fn opsin_px_exact(ab: f64, r: f64, g: f64, b: f64, positive: bool) -> (f64, f64, f64) {
@@ -333,33 +325,38 @@ fn opsin_px_exact(ab: f64, r: f64, g: f64, b: f64, positive: bool) -> (f64, f64,
     }
 }
 
-/// Canonical sRGB8 → XYB conversion driver. `POSITIVE` selects the
-/// make-positive shift; `EXACT` selects the f64 element evaluation. One body,
-/// no `incant!` — tier identity is structural (every op is inherent `f32`/`f64`,
-/// correctly rounded or fused per IEEE on every target).
+/// Canonical sRGB8 → positive-XYB conversion driver. One body, no `incant!` —
+/// tier identity is structural (every op is inherent `f32`, correctly rounded
+/// or fused per IEEE on every target). `mode` is the caller's
+/// [`crate::featcanon::mode`]; with the `oracle` feature its exact arm
+/// evaluates the same formula in f64 and rounds once at the plane store.
 #[allow(clippy::manual_clamp)]
-pub(crate) fn srgb_xyb_canon<const POSITIVE: bool>(
+pub(crate) fn srgb_xyb_canon(
     pixels: &[[u8; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
     b_out: &mut [f32],
+    mode: crate::featcanon::Mode,
 ) {
     let n = pixels.len();
-    if crate::featcanon::exact() {
+    #[cfg(feature = "oracle")]
+    if mode.exact() {
         let ab = -(K_B0 as f64).cbrt();
         for i in 0..n {
             let r = srgb_u8_to_linear(pixels[i][0]) as f64;
             let g = srgb_u8_to_linear(pixels[i][1]) as f64;
             let b = srgb_u8_to_linear(pixels[i][2]) as f64;
-            let (x, y, bb) = opsin_px_exact(ab, r, g, b, POSITIVE);
+            let (x, y, bb) = opsin_px_exact(ab, r, g, b, true);
             x_out[i] = x as f32;
             y_out[i] = y as f32;
             b_out[i] = bb as f32;
         }
         return;
     }
+    #[cfg(not(feature = "oracle"))]
+    let _ = mode;
     let ab = absorbance_bias_f32();
-    // Fixed-size chunks, remainder zero-padded through the same arithmetic —
+    // Fixed-size chunks, remainder through the same per-pixel arithmetic —
     // identical on every tier by construction.
     let chunks = n / 8;
     for c in 0..chunks {
@@ -372,11 +369,7 @@ pub(crate) fn srgb_xyb_canon<const POSITIVE: bool>(
             let r = srgb_u8_to_linear(p[0]);
             let g = srgb_u8_to_linear(p[1]);
             let b = srgb_u8_to_linear(p[2]);
-            let (x, y, bb) = if POSITIVE {
-                opsin_px_canon(ab, r, g, b)
-            } else {
-                opsin_px_canon_plain(ab, r, g, b)
-            };
+            let (x, y, bb) = opsin_px_canon(ab, r, g, b);
             xs[j] = x;
             ys[j] = y;
             bs[j] = bb;
@@ -391,11 +384,7 @@ pub(crate) fn srgb_xyb_canon<const POSITIVE: bool>(
         let r = srgb_u8_to_linear(p[0]);
         let g = srgb_u8_to_linear(p[1]);
         let b = srgb_u8_to_linear(p[2]);
-        let (x, y, bb) = if POSITIVE {
-            opsin_px_canon(ab, r, g, b)
-        } else {
-            opsin_px_canon_plain(ab, r, g, b)
-        };
+        let (x, y, bb) = opsin_px_canon(ab, r, g, b);
         x_out[i] = x;
         y_out[i] = y;
         b_out[i] = bb;
@@ -403,15 +392,18 @@ pub(crate) fn srgb_xyb_canon<const POSITIVE: bool>(
 }
 
 /// Canonical linear-f32 → XYB driver; `CLAMP` is the display-gamut clamp.
+/// `mode` as for [`srgb_xyb_canon`].
 #[allow(clippy::manual_clamp)]
 pub(crate) fn linear_xyb_canon<const CLAMP: bool>(
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
     b_out: &mut [f32],
+    mode: crate::featcanon::Mode,
 ) {
     let n = pixels.len();
-    if crate::featcanon::exact() {
+    #[cfg(feature = "oracle")]
+    if mode.exact() {
         let ab = -(K_B0 as f64).cbrt();
         for i in 0..n {
             let p = pixels[i];
@@ -431,6 +423,8 @@ pub(crate) fn linear_xyb_canon<const CLAMP: bool>(
         }
         return;
     }
+    #[cfg(not(feature = "oracle"))]
+    let _ = mode;
     let ab = absorbance_bias_f32();
     for i in 0..n {
         let p = pixels[i];
@@ -1392,14 +1386,20 @@ fn srgb_to_xyb_planar_inner(
 /// This is the same opsin matrix + cube root + positive shift as the sRGB u8 path,
 /// but skips the sRGB LUT linearization step. Results are identical for the same
 /// linear RGB values (within floating-point precision).
+///
+/// `revision` is the computation's formula revision: Rev4 runs the canonical
+/// body ([`linear_xyb_canon`]), every earlier revision the tier-dispatched
+/// kernels below.
 pub fn linear_to_positive_xyb_planar_into(
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
     b_out: &mut [f32],
+    revision: crate::feature_defs::FormulaRevision,
 ) {
-    if crate::featcanon::active() {
-        linear_xyb_canon::<true>(pixels, x_out, y_out, b_out);
+    let mode = crate::featcanon::mode(revision);
+    if mode.active() {
+        linear_xyb_canon::<true>(pixels, x_out, y_out, b_out, mode);
         return;
     }
     incant!(
@@ -2050,14 +2050,18 @@ fn linear_to_positive_xyb_planar_inner(
 ///
 /// Both locked by `unclamped_matches_clamped_scalar_for_in_gamut` and
 /// `scalar_tier_unclamped_matches_clamped_at_every_position` below.
+///
+/// `revision` as for [`linear_to_positive_xyb_planar_into`].
 pub(crate) fn linear_to_positive_xyb_planar_into_unclamped(
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
     b_out: &mut [f32],
+    revision: crate::feature_defs::FormulaRevision,
 ) {
-    if crate::featcanon::active() {
-        linear_xyb_canon::<false>(pixels, x_out, y_out, b_out);
+    let mode = crate::featcanon::mode(revision);
+    if mode.active() {
+        linear_xyb_canon::<false>(pixels, x_out, y_out, b_out, mode);
         return;
     }
     incant!(
@@ -2493,15 +2497,108 @@ mod tests {
             [0.5, 0.5, 0.5],
         ];
         let n = pixels.len();
-        let (mut xc, mut yc, mut bc) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
-        let (mut xu, mut yu, mut bu) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
-        linear_to_positive_xyb_planar_into(&pixels, &mut xc, &mut yc, &mut bc);
-        linear_to_positive_xyb_planar_into_unclamped(&pixels, &mut xu, &mut yu, &mut bu);
-        for i in 0..n {
-            assert_eq!(xc[i].to_bits(), xu[i].to_bits(), "X differs at px {i}");
-            assert_eq!(yc[i].to_bits(), yu[i].to_bits(), "Y differs at px {i}");
-            assert_eq!(bc[i].to_bits(), bu[i].to_bits(), "B differs at px {i}");
+        // Production (Rev1–3) and canonical (Rev4) arithmetic alike.
+        for rev in [
+            crate::feature_defs::FormulaRevision::Rev3,
+            crate::feature_defs::FormulaRevision::Rev4,
+        ] {
+            let (mut xc, mut yc, mut bc) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+            let (mut xu, mut yu, mut bu) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+            linear_to_positive_xyb_planar_into(&pixels, &mut xc, &mut yc, &mut bc, rev);
+            linear_to_positive_xyb_planar_into_unclamped(&pixels, &mut xu, &mut yu, &mut bu, rev);
+            for i in 0..n {
+                assert_eq!(
+                    xc[i].to_bits(),
+                    xu[i].to_bits(),
+                    "{rev:?}: X differs at px {i}"
+                );
+                assert_eq!(
+                    yc[i].to_bits(),
+                    yu[i].to_bits(),
+                    "{rev:?}: Y differs at px {i}"
+                );
+                assert_eq!(
+                    bc[i].to_bits(),
+                    bu[i].to_bits(),
+                    "{rev:?}: B differs at px {i}"
+                );
+            }
         }
+    }
+
+    /// featcanon D1: the opsin leaf follows the revision it is GIVEN, in any
+    /// process. Rev4 is the canonical body; Rev1–3 is the production dispatch.
+    /// Run in a Rev3 and a Rev4 process, so the process switch provably does
+    /// not reach the leaf.
+    fn opsin_leaf_follows_the_passed_revision() {
+        use crate::feature_defs::FormulaRevision;
+        // 7 pixels: all remainder, where production (x86: `cbrtf_fast`) and
+        // canonical (`cbrt_midp_f32`) differ for most colours.
+        let px: Vec<[u8; 3]> = (0..7u8)
+            .map(|i| [i.wrapping_mul(37), 255 - i * 29, i * 11 + 3])
+            .collect();
+        let n = px.len();
+        let conv = |rev: Option<FormulaRevision>| {
+            let (mut x, mut y, mut b) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
+            match rev {
+                Some(r) => {
+                    srgb_to_positive_xyb_planar_into_at_revision(&px, &mut x, &mut y, &mut b, r)
+                }
+                None => srgb_to_positive_xyb_planar_into(&px, &mut x, &mut y, &mut b),
+            }
+            [x, y, b].map(|p| p.iter().map(|v| v.to_bits()).collect::<Vec<_>>())
+        };
+        let canon = {
+            let (mut x, mut y, mut b) = (vec![0f32; n], vec![0f32; n], vec![0f32; n]);
+            srgb_xyb_canon(&px, &mut x, &mut y, &mut b, crate::featcanon::Mode::Canon32);
+            [x, y, b].map(|p| p.iter().map(|v| v.to_bits()).collect::<Vec<_>>())
+        };
+        let production = conv(None);
+        for rev in [
+            FormulaRevision::Rev1,
+            FormulaRevision::Rev2,
+            FormulaRevision::Rev3,
+        ] {
+            assert_eq!(
+                conv(Some(rev)),
+                production,
+                "{rev:?} must run the production kernel"
+            );
+        }
+        assert_eq!(
+            conv(Some(FormulaRevision::Rev4)),
+            canon,
+            "Rev4 must run the canonical body"
+        );
+        println!(
+            "OPSIN-LEAF-RAN process={:?} production_differs_from_canonical={}",
+            crate::ssim_form::active_revision(),
+            production != canon
+        );
+    }
+
+    #[test]
+    fn opsin_leaf_follows_the_passed_revision_in_a_rev3_process() {
+        if !crate::ssim_form::run_at_revision(
+            "3",
+            "color::tests::opsin_leaf_follows_the_passed_revision_in_a_rev3_process",
+            "OPSIN-LEAF-RAN",
+        ) {
+            return;
+        }
+        opsin_leaf_follows_the_passed_revision();
+    }
+
+    #[test]
+    fn opsin_leaf_follows_the_passed_revision_in_a_rev4_process() {
+        if !crate::ssim_form::run_at_revision(
+            "4",
+            "color::tests::opsin_leaf_follows_the_passed_revision_in_a_rev4_process",
+            "OPSIN-LEAF-RAN",
+        ) {
+            return;
+        }
+        opsin_leaf_follows_the_passed_revision();
     }
 
     /// Scalar tier: the unclamped converter runs the clamped converter's chunk arithmetic
@@ -2627,10 +2724,18 @@ mod tests {
             [2.0, -1.0, 3.0],
         ];
         let n = pixels.len();
-        let (mut x, mut y, mut b) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
-        linear_to_positive_xyb_planar_into_unclamped(&pixels, &mut x, &mut y, &mut b);
-        for i in 0..n {
-            assert!(x[i].is_finite() && y[i].is_finite() && b[i].is_finite());
+        for rev in [
+            crate::feature_defs::FormulaRevision::Rev3,
+            crate::feature_defs::FormulaRevision::Rev4,
+        ] {
+            let (mut x, mut y, mut b) = (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+            linear_to_positive_xyb_planar_into_unclamped(&pixels, &mut x, &mut y, &mut b, rev);
+            for i in 0..n {
+                assert!(
+                    x[i].is_finite() && y[i].is_finite() && b[i].is_finite(),
+                    "{rev:?}"
+                );
+            }
         }
     }
 

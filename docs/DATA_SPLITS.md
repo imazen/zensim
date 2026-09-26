@@ -1033,3 +1033,31 @@ sample, KonJND-JPEG (SELECT as the confirmatory surface; TERMINAL-100 as a touch
 confirmatory holdouts (`benchmarks/rev4_featpot_v2_amendment_2026-09-30.md` revision R2). Their labels stay sealed and
 unread until the single confirmatory read of frozen candidates; no label of these sets was read in making this
 designation. KADID TERMINAL, LIVE and secret holdouts are not part of it and stay untouched.
+
+## Exposure ledger — 2026-09-25/26: featcanon tier-parity audit and its fix (pixels only)
+
+The featcanon lane (`quarantine/devin/featcanon`, 2026-09-25) and its fix lane (featcanon-fix, 2026-09-26) read
+**pixels only**. No label file was opened, and every quantity is a bit comparison between SIMD tiers or an error
+magnitude against an f64 oracle. Nothing was fitted, calibrated, selected or tuned. Recorded because the audit
+sample included T0 content and SELECT references, which the lane's own record called "TRAIN".
+
+The lane's audit sample (`~/tmp/devin/featcanon/audit_pairs.tsv`, restated exactly, 11 pairs):
+
+| label | reference / distorted | role |
+|---|---|---|
+| kadid512x384 | KADID `I01` / `I01_01_01` | SELECT (last digit 1). **Pixel-identical pair.** |
+| kadid64crop | KADID `I01` / `I01_02_05`, crop x=64 y=224 64×64 (identified 2026-09-26 by exact pixel match; the generator was not committed) | SELECT |
+| tid512x384 | TID2013 `I01` / `I01_01_1` | TRAIN (TID is train-only, §8.1) |
+| konfig384x512 | KonFiG `SRC01_PartA` / `SRC01_colordiffusion_0` | SELECT (`originsplit_val`, digit 1). **Pixel-identical pair.** |
+| konjnd640x480 | KonJND `SRC0505` / `SRC0505_BPG_051` | TRAIN (BPG half, 5 ∉ {8, 9}) |
+| aic3-853x945, aic3-945x840, aic3-1192x832, aic3-2000x2496, aic3-2592x1946 | AIC-3 CTC originals `00002`, `00003`, `00001`, `00004`, `00010` with their `AVIF_*_1` decodes | **T0, eval-only** |
+| mosaic4096 | a 2×2 mosaic of AIC-3 content (the lane's worklog: "disjoint ~2048² real AIC3 crops"; the generator and the crop boxes were not recorded) | **T0-derived** |
+
+So the sample was 2 TRAIN, 3 SELECT and 6 T0 pairs, not "9 real TRAIN pairs". The review
+(`REVIEW_FEATCANON.md` D8) listed TID `I01` as SELECT; under §8.1 TID is train-only. The two pixel-identical pairs
+are the "0" in the lane's "0–297 slots/pair" and the source of its `append_texture_dissim` exact-0.0 outliers.
+
+The fix lane's own pixel reads: KADID `I01` and its 125 distortions (SELECT), read once to identify the
+`kadid64crop` source above; and the review's probe set (`/var/tmp/review-featcanon/probe/pairs.tsv`, KADID `I02`/`I24`
+and 16 even references, TID `I14`/`I01`, KonJND `SRC0510`/`SRC0505`, KonFiG `SRC06`, all TRAIN) for the Rev1–3
+bit-identity and Rev4 tier gates. No AIC-3 file was opened by the fix lane. AIC-3's holdout status is unchanged.

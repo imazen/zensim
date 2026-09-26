@@ -37,7 +37,12 @@ fn gmsbank_calibration_scale1_y_dump() {
             assert_eq!(raw.len(), w * h * 3);
             let rgb: Vec<[u8; 3]> = raw.chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect();
             let image = RgbSlice::new(&rgb, w, h);
-            let mut xyb = crate::streaming::convert_source_to_xyb(&image, w, false);
+            let mut xyb = crate::streaming::convert_source_to_xyb(
+                &image,
+                w,
+                false,
+                crate::ssim_form::active_revision(),
+            );
             let dump = |scale: usize,
                         dw: usize,
                         dh: usize,
@@ -151,7 +156,12 @@ fn gmsbank_chroma_calibration_dump() {
             assert_eq!(raw.len(), width * height * 3);
             let pixels: Vec<[u8; 3]> = raw.as_chunks::<3>().0.to_vec();
             let source = RgbSlice::new(&pixels, width, height);
-            let mut xyb = crate::streaming::convert_source_to_xyb(&source, width, false);
+            let mut xyb = crate::streaming::convert_source_to_xyb(
+                &source,
+                width,
+                false,
+                crate::ssim_form::active_revision(),
+            );
             if pair_number < 8 {
                 let mut planes = xyb.clone();
                 let (mut dw, mut dh) = (width, height);

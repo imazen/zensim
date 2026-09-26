@@ -321,12 +321,14 @@ fn identity_short_circuit_and_computed_residue_follow_the_formula_revision() {
         );
 
         // (iii) Rev3's direct error formulation removed the legacy identity
-        // residue. This helper uses the unrestricted public walk, not a bake
-        // plan, so its expectation must follow the arithmetic revision.
+        // residue, and every later revision keeps it (Rev4 = Rev3 formulas
+        // under canonical arithmetic). This helper uses the unrestricted
+        // public walk, not a bake plan, so its expectation must follow the
+        // arithmetic revision.
         let computed = fold944(&r, &r, w, h, V1PoolsMode::Full, V1FreeExtras::Off, true);
         let nonzero = computed[..372].iter().filter(|&&v| v != 0.0).count();
         if zensim::feature_v2::active_formula_revision()
-            == zensim::feature_v2::FormulaRevision::Rev3
+            >= zensim::feature_v2::FormulaRevision::Rev3
         {
             assert_eq!(nonzero, 0, "Rev3 identity errors must be exactly zero");
         } else {

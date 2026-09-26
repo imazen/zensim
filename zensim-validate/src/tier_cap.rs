@@ -17,9 +17,13 @@
 //! That covers the deployed `fit-p0/p2d2-v7` and v8 images, which were built from `83461101` and
 //! `83a205ad`; keep the launcher guard for them.
 //!
-//! Not covered: zensim metric feature extraction from pixels is still tier-dependent (the generic
-//! `f32x16` reducers sum in AVX-512 order on v4 and in AVX2 order on v3), and no extraction binary
-//! calls [`apply_from_env`].
+//! Not covered: zensim metric feature extraction from pixels at revisions 1-3 is still
+//! tier-dependent (the generic `f32x16` reducers sum in AVX-512 order on v4 and in AVX2 order on
+//! v3; the scalar and wasm128 backends do not fuse `mul_add`), and no extraction binary calls
+//! [`apply_from_env`]. `ZENSIM_FORMULA_REV=4` (the `tiercanon` era) makes `research::extract`'s SDR
+//! vector tier-identical by measurement, but it is research-extraction-only: every served, HDR and
+//! attribution entry refuses revision 4, and nothing extracted at revision 4 is comparable with a
+//! revision 1-3 table.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 

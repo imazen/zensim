@@ -11,7 +11,7 @@ use crate::blur::{
 use crate::color::{
     apply_gamut_matrix, composite_linear_f32_rgba, composite_srgb8_bgra_to_linear,
     composite_srgb8_rgba_to_linear, composite_srgb16_rgba_to_linear,
-    linear_to_positive_xyb_planar_into, srgb_to_positive_xyb_planar_into,
+    linear_to_positive_xyb_planar_into,
 };
 use crate::det_math::DetRoots;
 use crate::diffmap::PixelFeatureWeights;
@@ -906,8 +906,9 @@ pub(crate) fn compute_multiscale_stats_streaming(
     let parallel = config.allow_multithreading;
 
     // Phase 1: Convert sRGB→XYB for entire image.
-    let mut src_planes = convert_source_to_xyb(source, padded_width, parallel);
-    let mut dst_planes = convert_source_to_xyb(distorted, padded_width, parallel);
+    let mut src_planes = convert_source_to_xyb(source, padded_width, parallel, config.revision());
+    let mut dst_planes =
+        convert_source_to_xyb(distorted, padded_width, parallel, config.revision());
 
     // Compute mean_offset while XYB planes are cache-hot
     let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];
@@ -1218,15 +1219,19 @@ pub(crate) fn native_sdr_linear_rgb(
 /// Convert an ImageSource to planar XYB at padded width, parallelized over row chunks.
 ///
 /// Handles both RGB and RGBA sources row-by-row. RGBA is composited over a noise background.
+///
+/// `revision` is the computation's formula revision; it selects the canonical
+/// opsin body at Rev4 (featcanon D1) and nothing else.
 pub(crate) fn convert_source_to_xyb(
     source: &impl ImageSource,
     padded_width: usize,
     parallel: bool,
+    revision: crate::feature_defs::FormulaRevision,
 ) -> [Vec<f32>; 3] {
     let height = source.height();
     let n = padded_width * height;
     let mut planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
-    convert_source_to_xyb_into(source, &mut planes, padded_width, parallel);
+    convert_source_to_xyb_into(source, &mut planes, padded_width, parallel, revision);
     planes
 }
 
@@ -1238,9 +1243,10 @@ pub(crate) fn convert_source_to_xyb_into(
     planes: &mut [Vec<f32>; 3],
     padded_width: usize,
     parallel: bool,
+    revision: crate::feature_defs::FormulaRevision,
 ) {
     let [ref mut p0, ref mut p1, ref mut p2] = *planes;
-    convert_source_to_xyb_into_slices(source, p0, p1, p2, padded_width, parallel, 0);
+    convert_source_to_xyb_into_slices(source, p0, p1, p2, padded_width, parallel, 0, revision);
 }
 
 /// Slice-target core of [`convert_source_to_xyb_into`]: writes the XYB
@@ -1258,6 +1264,7 @@ pub(crate) fn convert_source_to_xyb_into(
 /// sources never consult it. (The v1 streaming-strip path predates this
 /// parameter and passes 0 — its subset conversions keep their historical
 /// subset-local phase.)
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn convert_source_to_xyb_into_slices(
     source: &impl ImageSource,
     p0: &mut [f32],
@@ -1266,6 +1273,7 @@ pub(crate) fn convert_source_to_xyb_into_slices(
     padded_width: usize,
     #[allow(unused_variables)] parallel: bool,
     abs_row_offset: usize,
+    revision: crate::feature_defs::FormulaRevision,
 ) {
     convert_source_to_xyb_into_slices_chunked(
         source,
@@ -1276,6 +1284,7 @@ pub(crate) fn convert_source_to_xyb_into_slices(
         parallel,
         abs_row_offset,
         DEFAULT_CONVERT_CHUNK_ROWS,
+        revision,
     )
 }
 
@@ -1311,6 +1320,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
     #[allow(unused_variables)] parallel: bool,
     abs_row_offset: usize,
     chunk_rows: usize,
+    revision: crate::feature_defs::FormulaRevision,
 ) {
     let width = source.width();
     let height = source.height();
@@ -1374,13 +1384,14 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                 x_out: &mut [f32],
                 y_out: &mut [f32],
                 b_out: &mut [f32],
+                revision: crate::feature_defs::FormulaRevision,
             ) {
                 if preserve_oog {
                     crate::color::linear_to_positive_xyb_planar_into_unclamped(
-                        pixels, x_out, y_out, b_out,
+                        pixels, x_out, y_out, b_out, revision,
                     );
                 } else {
-                    linear_to_positive_xyb_planar_into(pixels, x_out, y_out, b_out);
+                    linear_to_positive_xyb_planar_into(pixels, x_out, y_out, b_out, revision);
                 }
             }
 
@@ -1408,6 +1419,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
                                 &mut c2[row_offset..row_offset + width],
+                                revision,
                             );
                         }
                     } else {
@@ -1419,11 +1431,12 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                             let row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
                             rgb_buf.extend_from_slice(&row[..width]);
                         }
-                        srgb_to_positive_xyb_planar_into(
+                        crate::color::srgb_to_positive_xyb_planar_into_at_revision(
                             &rgb_buf,
                             &mut c0[..raw_elems],
                             &mut c1[..raw_elems],
                             &mut c2[..raw_elems],
+                            revision,
                         );
                     }
                 }
@@ -1439,11 +1452,12 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                                 rgb_buf.push([r, g, b]);
                             }
                         }
-                        srgb_to_positive_xyb_planar_into(
+                        crate::color::srgb_to_positive_xyb_planar_into_at_revision(
                             &rgb_buf,
                             &mut c0[..raw_elems],
                             &mut c1[..raw_elems],
                             &mut c2[..raw_elems],
+                            revision,
                         );
                     } else {
                         let mut linear_row = vec![[0.0f32; 3]; width];
@@ -1481,6 +1495,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
                                 &mut c2[row_offset..row_offset + width],
+                                revision,
                             );
                         }
                     }
@@ -1496,11 +1511,12 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                                 rgb_buf.push([r, g, b]);
                             }
                         }
-                        srgb_to_positive_xyb_planar_into(
+                        crate::color::srgb_to_positive_xyb_planar_into_at_revision(
                             &rgb_buf,
                             &mut c0[..raw_elems],
                             &mut c1[..raw_elems],
                             &mut c2[..raw_elems],
+                            revision,
                         );
                     } else {
                         let mut linear_row = vec![[0.0f32; 3]; width];
@@ -1538,6 +1554,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
                                 &mut c2[row_offset..row_offset + width],
+                                revision,
                             );
                         }
                     }
@@ -1553,6 +1570,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                             &mut c0[row_offset..row_offset + width],
                             &mut c1[row_offset..row_offset + width],
                             &mut c2[row_offset..row_offset + width],
+                            revision,
                         );
                     }
                 }
@@ -1574,6 +1592,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                             &mut c0[..raw_elems],
                             &mut c1[..raw_elems],
                             &mut c2[..raw_elems],
+                            revision,
                         );
                     } else {
                         let mut linear_row = vec![[0.0f32; 3]; width];
@@ -1586,6 +1605,7 @@ pub(crate) fn convert_source_to_xyb_into_slices_chunked(
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
                                 &mut c2[row_offset..row_offset + width],
+                                revision,
                             );
                         }
                     }
@@ -2151,6 +2171,7 @@ fn process_strip_channel(
                 &mut bufs.mask,
                 &mut bufs.mul_buf,
                 config.extended_features || config.compute_iw_features || attr_ret.is_some(),
+                config.revision(),
             );
         }
 
@@ -3285,7 +3306,16 @@ impl PrecomputedReference {
     /// Build a precomputed reference from an ImageSource.
     ///
     /// Converts to XYB and builds the downscale pyramid, storing planes at each level.
-    pub(crate) fn new(source: &impl ImageSource, num_scales: usize, parallel: bool) -> Self {
+    ///
+    /// `revision` is the formula revision of the computations that will read
+    /// this cache: the opsin conversion is canonical at Rev4 (featcanon D1),
+    /// so a cache must be built at the revision its consumers run.
+    pub(crate) fn new(
+        source: &impl ImageSource,
+        num_scales: usize,
+        parallel: bool,
+        revision: crate::feature_defs::FormulaRevision,
+    ) -> Self {
         // Sub-64px sources can't form the 4-scale pyramid; reflect-pad to the
         // minimum (matching the buffered `compute_with_config_inner` path) so the
         // reference holds 4 genuinely-computed scales. The contract dims
@@ -3294,12 +3324,12 @@ impl PrecomputedReference {
         let (orig_w, orig_h) = (source.width(), source.height());
         if crate::metric::needs_pyramid_pad(orig_w, orig_h, num_scales) {
             let padded = crate::metric::reflect_pad_for_scales(source, num_scales);
-            let mut r = Self::new_inner(&padded, num_scales, parallel);
+            let mut r = Self::new_inner(&padded, num_scales, parallel, revision);
             r.ref_width = orig_w;
             r.ref_height = orig_h;
             r
         } else {
-            Self::new_inner(source, num_scales, parallel)
+            Self::new_inner(source, num_scales, parallel, revision)
         }
     }
 
@@ -3315,13 +3345,14 @@ impl PrecomputedReference {
         source: &impl ImageSource,
         parallel: bool,
         encoding: Option<crate::feature_v2::HdrEncoding>,
+        revision: crate::feature_defs::FormulaRevision,
     ) -> Self {
         if source.width() < 64 || source.height() < 64 {
             let padded = crate::metric::reflect_pad_to_min(source);
-            return Self::for_candidate_inner(&padded, parallel, encoding)
+            return Self::for_candidate_inner(&padded, parallel, encoding, revision)
                 .with_ref_dims(source.width(), source.height());
         }
-        Self::for_candidate_inner(source, parallel, encoding)
+        Self::for_candidate_inner(source, parallel, encoding, revision)
     }
 
     #[cfg(all(feature = "custom-profiles", feature = "feature-regime-v2"))]
@@ -3329,23 +3360,29 @@ impl PrecomputedReference {
         source: &impl ImageSource,
         parallel: bool,
         encoding: Option<crate::feature_v2::HdrEncoding>,
+        revision: crate::feature_defs::FormulaRevision,
     ) -> Self {
         Self::build_from_dims(4, source.width(), source.height(), parallel, |planes| {
             if let Some(encoding) = encoding {
                 crate::feature_v2_stream::hdr_source_to_xyb(source, encoding, planes);
             } else {
-                convert_source_to_xyb_into(source, planes, source.width(), parallel);
+                convert_source_to_xyb_into(source, planes, source.width(), parallel, revision);
             }
         })
         .with_ref_dims(source.width(), source.height())
     }
 
-    fn new_inner(source: &impl ImageSource, num_scales: usize, parallel: bool) -> Self {
+    fn new_inner(
+        source: &impl ImageSource,
+        num_scales: usize,
+        parallel: bool,
+        revision: crate::feature_defs::FormulaRevision,
+    ) -> Self {
         let width = source.width();
         let height = source.height();
         let padded_width = pyramid_plane_stride(width);
         Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
-            convert_source_to_xyb_into(source, scale0, padded_width, parallel);
+            convert_source_to_xyb_into(source, scale0, padded_width, parallel, revision);
         })
         .with_ref_dims(width, height)
     }
@@ -3447,6 +3484,7 @@ impl PrecomputedReference {
     /// `planes` are `[R, G, B]`, each with `stride * height` elements (or more).
     /// `stride` is the number of f32 elements per row (may be larger than `width`
     /// for padded buffers). Converts to positive XYB internally.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_linear_planar(
         planes: [&[f32]; 3],
         width: usize,
@@ -3454,6 +3492,7 @@ impl PrecomputedReference {
         stride: usize,
         num_scales: usize,
         parallel: bool,
+        revision: crate::feature_defs::FormulaRevision,
     ) -> Self {
         // Sub-64px planar sources can't form the 4-scale pyramid; reflect-pad
         // the LINEAR planes to the minimum — the planar analogue of
@@ -3489,6 +3528,7 @@ impl PrecomputedReference {
                         bw,
                         padded_width,
                         scale0,
+                        revision,
                     );
                 })
                 .with_ref_dims(width, height);
@@ -3496,7 +3536,15 @@ impl PrecomputedReference {
         }
         let padded_width = pyramid_plane_stride(width);
         Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
-            convert_linear_planar_to_xyb_into(planes, width, height, stride, padded_width, scale0);
+            convert_linear_planar_to_xyb_into(
+                planes,
+                width,
+                height,
+                stride,
+                padded_width,
+                scale0,
+                revision,
+            );
         })
         .with_ref_dims(width, height)
     }
@@ -3600,10 +3648,19 @@ pub(crate) fn convert_linear_planar_to_xyb(
     height: usize,
     stride: usize,
     padded_width: usize,
+    revision: crate::feature_defs::FormulaRevision,
 ) -> [Vec<f32>; 3] {
     let n = padded_width * height;
     let mut out: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
-    convert_linear_planar_to_xyb_into(planes, width, height, stride, padded_width, &mut out);
+    convert_linear_planar_to_xyb_into(
+        planes,
+        width,
+        height,
+        stride,
+        padded_width,
+        &mut out,
+        revision,
+    );
     out
 }
 
@@ -3616,6 +3673,7 @@ pub(crate) fn convert_linear_planar_to_xyb_into(
     stride: usize,
     padded_width: usize,
     out: &mut [Vec<f32>; 3],
+    revision: crate::feature_defs::FormulaRevision,
 ) {
     use crate::color::linear_to_positive_xyb_planar_into;
 
@@ -3646,6 +3704,7 @@ pub(crate) fn convert_linear_planar_to_xyb_into(
             &mut o0[out_off..out_off + width],
             &mut o1[out_off..out_off + width],
             &mut o2[out_off..out_off + width],
+            revision,
         );
     }
 
@@ -3851,7 +3910,13 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed<R: MultiScal
         }
     }
 
-    convert_source_to_xyb_into(distorted, dst_planes, padded_width, parallel);
+    convert_source_to_xyb_into(
+        distorted,
+        dst_planes,
+        padded_width,
+        parallel,
+        config.revision(),
+    );
 
     // Borrow scale-0 planes from the abstract reference (owned or view).
     let (src_planes_s0, _, _) = precomputed.scale(0);
@@ -4176,7 +4241,8 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
     // Edge case: image short enough to process in one strip.
     let one_strip_h = strip_inner + 2 * strip_margin;
     if height <= one_strip_h {
-        let precomputed = PrecomputedReference::new(source, config.num_scales, false);
+        let precomputed =
+            PrecomputedReference::new(source, config.num_scales, false, config.revision());
         return compute_multiscale_stats_streaming_with_ref(
             &precomputed,
             distorted,
@@ -4240,7 +4306,8 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
             let src_strip = crate::source::SubsetView::new(source, strip_y0, strip_y1 - strip_y0);
             let dst_strip =
                 crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
-            let precomp = PrecomputedReference::new(&src_strip, num_scales, false);
+            let precomp =
+                PrecomputedReference::new(&src_strip, num_scales, false, config.revision());
             compute_multiscale_accums_streaming_with_ref_borrowed(
                 &precomp,
                 &dst_strip,
@@ -4350,7 +4417,12 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
     let width = distorted.width();
     let height = distorted.height();
     let padded_width = pyramid_plane_stride(width);
-    let dst_planes = convert_source_to_xyb(distorted, padded_width, config.allow_multithreading);
+    let dst_planes = convert_source_to_xyb(
+        distorted,
+        padded_width,
+        config.allow_multithreading,
+        config.revision(),
+    );
 
     compute_diffmap_from_xyb(
         precomputed,
@@ -4383,7 +4455,14 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
     stop: Option<&dyn enough::Stop>,
 ) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
     let padded_width = pyramid_plane_stride(width);
-    let dst_planes = convert_linear_planar_to_xyb(planes, width, height, stride, padded_width);
+    let dst_planes = convert_linear_planar_to_xyb(
+        planes,
+        width,
+        height,
+        stride,
+        padded_width,
+        config.revision(),
+    );
 
     compute_diffmap_from_xyb(
         precomputed,
@@ -4635,7 +4714,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes_input(
     ),
 ) -> crate::metric::ZensimResult {
     if let Some(sampling) = precomputed.sampling {
-        let levels = sampling.pyramid(distorted, config.allow_multithreading);
+        let levels = sampling.pyramid(distorted, config.allow_multithreading, config.revision());
         let mut cfg = *config;
         cfg.compute_all_features = false;
         cfg.extended_features = false;
@@ -4701,7 +4780,12 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_planes_input(
     let height = distorted.height();
     let padded_width = precomputed.scale(0).1;
     let mut dst_planes = supplied_xyb.unwrap_or_else(|| {
-        convert_source_to_xyb(distorted, padded_width, config.allow_multithreading)
+        convert_source_to_xyb(
+            distorted,
+            padded_width,
+            config.allow_multithreading,
+            config.revision(),
+        )
     });
 
     let num_scales = config.num_scales.min(precomputed.scales.len());
@@ -4790,8 +4874,12 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_attr_fold(
     let width = distorted.width();
     let height = distorted.height();
     let padded_width = pyramid_plane_stride(width);
-    let mut dst_planes =
-        convert_source_to_xyb(distorted, padded_width, config.allow_multithreading);
+    let mut dst_planes = convert_source_to_xyb(
+        distorted,
+        padded_width,
+        config.allow_multithreading,
+        config.revision(),
+    );
 
     let num_scales = config.num_scales.min(precomputed.scales.len());
     let parallel = config.allow_multithreading;
@@ -5416,7 +5504,14 @@ mod tests {
     /// length-invariant since 2026-09-25, and there no height may move a byte.
     #[test]
     fn convert_chunk_rows_is_semantics_not_a_knob() {
+        // This gate is about PRODUCTION arithmetic (Rev1–3; the converter is
+        // identical across them): the process revision, capped at Rev3, so a
+        // Rev4 process still tests production. The canonical (Rev4) converter
+        // gets its own, stronger assertion below.
+        let production =
+            crate::ssim_form::active_revision().min(crate::feature_defs::FormulaRevision::Rev3);
         let mut diverged = 0usize;
+        let mut canon_diverged = 0usize;
         for &(w, h, padded_w) in &[(64usize, 64usize, 64usize), (97, 51, 104), (7, 130, 7)] {
             let img: Vec<[u8; 3]> = (0..w * h)
                 .map(|i| {
@@ -5429,15 +5524,19 @@ mod tests {
                 .collect();
             let src = RgbSlice::new(&img, w, h);
             let n = padded_w * h;
-            let convert = |chunk: usize, parallel: bool| -> [Vec<f32>; 3] {
+            let convert_at = |chunk: usize,
+                              parallel: bool,
+                              revision: crate::feature_defs::FormulaRevision|
+             -> [Vec<f32>; 3] {
                 let mut out = [vec![0.0f32; n], vec![0.0; n], vec![0.0; n]];
                 let (a, rest) = out.split_at_mut(1);
                 let (b, c) = rest.split_at_mut(1);
                 convert_source_to_xyb_into_slices_chunked(
-                    &src, &mut a[0], &mut b[0], &mut c[0], padded_w, parallel, 0, chunk,
+                    &src, &mut a[0], &mut b[0], &mut c[0], padded_w, parallel, 0, chunk, revision,
                 );
                 out
             };
+            let convert = |chunk: usize, parallel: bool| convert_at(chunk, parallel, production);
             let want = convert(DEFAULT_CONVERT_CHUNK_ROWS, false);
             let bits = |v: &[Vec<f32>; 3]| -> Vec<u32> {
                 v.iter()
@@ -5459,7 +5558,23 @@ mod tests {
                     }
                 }
             }
+            // featcanon: the canonical converter pads nothing and splits
+            // nothing by tier — every pixel runs the same per-pixel body — so
+            // no chunk height may move a byte on any tier.
+            let rev4 = crate::feature_defs::FormulaRevision::Rev4;
+            let canon_want = bits(&convert_at(DEFAULT_CONVERT_CHUNK_ROWS, false, rev4));
+            for &parallel in &[false, true] {
+                for &chunk in &[1usize, 3, 8, 16, 17, 32, 128, 4096] {
+                    if bits(&convert_at(chunk, parallel, rev4)) != canon_want {
+                        canon_diverged += 1;
+                    }
+                }
+            }
         }
+        assert_eq!(
+            canon_diverged, 0,
+            "the canonical (Rev4) conversion must give a pixel the same bits at any chunk height"
+        );
         if crate::color::dispatches_scalar() {
             // The scalar tier zero-pads its remainder through a full chunk
             // (2026-09-25), so its conversion IS length-invariant: no chunk height
@@ -5568,7 +5683,8 @@ mod tests {
         let weights: Vec<f64> = WEIGHTS.to_vec();
 
         // Full-image stats.
-        let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
+        let precomp =
+            PrecomputedReference::new(&src_img, config.num_scales, false, config.revision());
         let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
             &precomp, &dst_img, &config, &weights, None,
         );
@@ -5682,7 +5798,8 @@ mod tests {
         };
         let weights: Vec<f64> = WEIGHTS.to_vec();
 
-        let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
+        let precomp =
+            PrecomputedReference::new(&src_img, config.num_scales, false, config.revision());
         let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
             &precomp, &dst_img, &config, &weights, None,
         );
@@ -5952,7 +6069,8 @@ mod tests {
         );
 
         // Buffered ref path
-        let full_precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
+        let full_precomp =
+            PrecomputedReference::new(&src_img, config.num_scales, false, config.revision());
         let (b_stats, b_offset) = compute_multiscale_stats_streaming_strips_with_ref(
             &full_precomp,
             &dst_img,
@@ -6211,7 +6329,8 @@ mod tests {
             let dst_img = RgbSlice::new(&dst, w, h);
 
             // Full path
-            let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
+            let precomp =
+                PrecomputedReference::new(&src_img, config.num_scales, false, config.revision());
             let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
                 &precomp, &dst_img, &config, &weights, None,
             );
@@ -6783,7 +6902,8 @@ mod tests {
         let src_img = RgbSlice::new(&src, w, h);
         let dst_img = RgbSlice::new(&dst, w, h);
         let streaming_result = compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
-        let precomputed = PrecomputedReference::new(&src_img, config.num_scales, true);
+        let precomputed =
+            PrecomputedReference::new(&src_img, config.num_scales, true, config.revision());
         let precomp_result =
             compute_zensim_streaming_with_ref(&precomputed, &dst_img, &config, WEIGHTS, None);
 

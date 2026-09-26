@@ -784,8 +784,12 @@ mod skip_policy_tests {
                 let src = crate::feature_v2::tests::textured_image(w, h, 7);
                 let dst = crate::feature_v2::tests::quantize_distort(&src, w, h);
                 let (sref, dref) = (RgbSlice::new(&src, w, h), RgbSlice::new(&dst, w, h));
-                let pre =
-                    crate::streaming::PrecomputedReference::new(&sref, config.num_scales, parallel);
+                let pre = crate::streaming::PrecomputedReference::new(
+                    &sref,
+                    config.num_scales,
+                    parallel,
+                    config.revision(),
+                );
                 let mut scratch = V2Scratch::new();
                 let full = compute_fold_backed_with_ref(
                     &pre,

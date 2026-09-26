@@ -15,7 +15,7 @@
 #   free functions                             36
 #   inherent methods                          169
 #   struct fields                             114
-#   enum variants                              32
+#   enum variants                              33
 #   trait roster entries (type × trait)       121
 #   auto-trait-complete types                  24
 #
@@ -27,14 +27,14 @@
 #   det_math                         13
 #   f64                               3
 #   feature_set_id                    5
-#   feature_v2                       31
+#   feature_v2                       32
 #   fold_engine                       8
 #   profile                           1
 #   research                        143
 #   score_math                       26
 #   source                            4
 
-## items (391 lines)
+## items (392 lines)
 
 #[non_exhaustive] pub struct research::DvifmFieldMap
 #[non_exhaustive] pub struct research::DvifmLevelField
@@ -155,7 +155,7 @@ pub fn feature_v2::V1PoolsMode::assert_fields_are_eq(&self)
 pub fn feature_v2::V2NewFeatureToggles::feature_set_id(&self, usize, usize, &str) -> core::option::Option<feature_set_id::FeatureSetId>
 pub fn feature_v2::V2NewFeatureToggles::populated_slots(&self, usize, usize) -> feature_set_id::SlotSet
 pub fn feature_v2::active_formula_revision() -> feature_v2::FormulaRevision
-pub fn feature_v2::bake_formula_revision_public(&zenpredict::model::Model) -> feature_v2::FormulaRevision
+pub fn feature_v2::bake_formula_revision_public(&zenpredict::model::Model) -> core::result::Result<feature_v2::FormulaRevision, ZensimError>
 pub fn fold_engine::ScoringEngine::assert_fields_are_eq(&self)
 pub fn fold_engine::ScoringEngine::clone(&self) -> fold_engine::ScoringEngine
 pub fn fold_engine::ScoringEngine::default() -> fold_engine::ScoringEngine
@@ -352,6 +352,7 @@ pub det_math::PowForm::PureRust
 pub feature_v2::FormulaRevision::Rev1
 pub feature_v2::FormulaRevision::Rev2
 pub feature_v2::FormulaRevision::Rev3
+pub feature_v2::FormulaRevision::Rev4
 pub feature_v2::V2NewFeatureToggles::dvifmgate: bool
 pub feature_v2::V2NewFeatureToggles::formula_revision: feature_v2::FormulaRevision
 pub feature_v2::V2NewFeatureToggles::free_extras: feature_v2::V1FreeExtras

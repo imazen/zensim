@@ -18,6 +18,11 @@ gpu-cuda = ["zensim-train-gpu/gpu-cuda"]
 gpu-wgpu = ["zensim-train-gpu/gpu-wgpu"]
 gpu-cpu  = ["zensim-train-gpu/gpu-cpu"]
 
+# featcanon MEASUREMENT arithmetic for `tier_audit_features` only:
+# `ZENSIM_FEATCANON=exact|c32|c64|neum|off` and the f64 exact-oracle bodies
+# exist only in a zensim built with `oracle` (a ruler, not semantics).
+featcanon-oracle = ["zensim/oracle"]
+
 [dependencies]
 # `corruption-head`: the ZCTH evaluator + the ONE owner of the deploy
 # composition, which `bake_verdict` and `corrhead_parity` both consume

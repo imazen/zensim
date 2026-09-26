@@ -63,6 +63,7 @@ pub(crate) fn formula_revision(
         Some("1" | "rev1" | "Rev1") => Ok(FormulaRevision::Rev1),
         Some("2" | "rev2" | "Rev2") => Ok(FormulaRevision::Rev2),
         Some("3" | "rev3" | "Rev3") => Ok(FormulaRevision::Rev3),
+        Some("4" | "rev4" | "Rev4") => Ok(FormulaRevision::Rev4),
         _ => Err(crate::ZensimError::ModelLoadFailed {
             reason: "unknown zentrain.formula_revision",
         }),

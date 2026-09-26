@@ -286,6 +286,17 @@ pub struct ZensimConfig {
     pub(crate) bounded_squash: bool,
 }
 
+impl ZensimConfig {
+    /// The formula revision this computation runs: the request's own
+    /// (`formula_revision`), or — when the request names none — the process
+    /// revision, which is what `None` has always meant. The value every
+    /// revision-dependent leaf on this config's walk receives (featcanon D1).
+    pub(crate) fn revision(&self) -> crate::feature_defs::FormulaRevision {
+        self.formula_revision
+            .unwrap_or_else(crate::ssim_form::active_revision)
+    }
+}
+
 impl Default for ZensimConfig {
     fn default() -> Self {
         Self {
@@ -741,9 +752,14 @@ pub fn precompute_reference_with_scales(
     if source.len() != pixels {
         return Err(ZensimError::InvalidDataLength);
     }
+    // featcanon D2: Rev4 is research-extraction-only.
+    crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
     let src_img = crate::source::RgbSlice::try_new(source, width, height)?;
     Ok(crate::streaming::PrecomputedReference::new(
-        &src_img, num_scales, true,
+        &src_img,
+        num_scales,
+        true,
+        crate::ssim_form::active_revision(),
     ))
 }
 
@@ -1812,6 +1828,8 @@ impl Zensim {
         source: &impl ImageSource,
         distorted: &impl ImageSource,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         crate::feature_v2::compute_v2_features_impl(
             source,
             distorted,
@@ -1849,6 +1867,8 @@ impl Zensim {
         distorted: &impl ImageSource,
         s_v2: &[f64],
     ) -> Result<Vec<f32>, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         crate::feature_v2::compute_v2_diffmap_full(
             source,
             distorted,
@@ -1872,6 +1892,8 @@ impl Zensim {
         distorted: &impl ImageSource,
         toggles: crate::feature_v2::V2NewFeatureToggles,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(toggles.formula_revision)?;
         crate::feature_v2::compute_v2_features_impl_with_toggles(
             source,
             distorted,
@@ -1902,6 +1924,8 @@ impl Zensim {
         &self,
         source: &impl ImageSource,
     ) -> Result<crate::feature_v2::V2PreparedReference, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         crate::feature_v2::prepare_v2_reference_impl(source, self.max_pixels, self.parallel, false)
     }
 
@@ -1926,6 +1950,8 @@ impl Zensim {
         &self,
         source: &impl ImageSource,
     ) -> Result<crate::feature_v2::V2PreparedReference, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         crate::feature_v2::prepare_v2_reference_impl(source, self.max_pixels, self.parallel, true)
     }
 
@@ -1948,6 +1974,8 @@ impl Zensim {
         reference: &crate::feature_v2::V2PreparedReference,
         distorted: &impl ImageSource,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         let mut scratch = crate::feature_v2::V2Scratch::new();
         crate::feature_v2::compute_v2_features_with_ref_impl(
             reference,
@@ -1975,6 +2003,8 @@ impl Zensim {
         toggles: crate::feature_v2::V2NewFeatureToggles,
         scratch: &mut crate::feature_v2::V2Scratch,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(toggles.formula_revision)?;
         crate::feature_v2::compute_v2_features_with_ref_impl(
             reference,
             distorted,
@@ -2016,6 +2046,8 @@ impl Zensim {
         source: &impl ImageSource,
         distorted: &impl ImageSource,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         crate::feature_v2::compute_folded720_impl_with_toggles(
             source,
             distorted,
@@ -2044,6 +2076,8 @@ impl Zensim {
         source: &impl ImageSource,
         distorted: &impl ImageSource,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         crate::feature_v2::compute_folded720_append_impl(
             source,
             distorted,
@@ -2071,6 +2105,8 @@ impl Zensim {
         toggles: crate::feature_v2::V2NewFeatureToggles,
         scratch: &mut crate::feature_v2::V2Scratch,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(toggles.formula_revision)?;
         crate::feature_v2::compute_folded720_streaming_impl(
             source,
             distorted,
@@ -2100,6 +2136,8 @@ impl Zensim {
         toggles: crate::feature_v2::V2NewFeatureToggles,
         scratch: &mut crate::feature_v2::V2Scratch,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(toggles.formula_revision)?;
         crate::feature_v2::compute_folded720_append_streaming_impl(
             source,
             distorted,
@@ -2135,6 +2173,8 @@ impl Zensim {
         toggles: crate::feature_v2::V2NewFeatureToggles,
         scratch: &mut crate::feature_v2::V2Scratch,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(toggles.formula_revision)?;
         crate::feature_v2::compute_folded720_hdr_streaming_impl(
             source,
             distorted,
@@ -2162,6 +2202,8 @@ impl Zensim {
         toggles: crate::feature_v2::V2NewFeatureToggles,
         scratch: &mut crate::feature_v2::V2Scratch,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(toggles.formula_revision)?;
         crate::feature_v2::compute_folded720_append_hdr_streaming_impl(
             source,
             distorted,
@@ -2190,6 +2232,8 @@ impl Zensim {
         source: &impl ImageSource,
         distorted: &impl ImageSource,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         crate::feature_v2::compute_folded720_append2_impl(
             source,
             distorted,
@@ -2214,6 +2258,8 @@ impl Zensim {
         toggles: crate::feature_v2::V2NewFeatureToggles,
         scratch: &mut crate::feature_v2::V2Scratch,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(toggles.formula_revision)?;
         crate::feature_v2::compute_folded720_append2_hdr_streaming_impl(
             source,
             distorted,
@@ -2243,6 +2289,8 @@ impl Zensim {
         source: &impl ImageSource,
         distorted: &impl ImageSource,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         crate::feature_v2::compute_folded720_csfw_impl(
             source,
             distorted,
@@ -2267,6 +2315,8 @@ impl Zensim {
         toggles: crate::feature_v2::V2NewFeatureToggles,
         scratch: &mut crate::feature_v2::V2Scratch,
     ) -> Result<crate::feature_v2::ZensimV2Result, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(toggles.formula_revision)?;
         crate::feature_v2::compute_folded720_csfw_hdr_streaming_impl(
             source,
             distorted,
@@ -2287,6 +2337,8 @@ impl Zensim {
         &self,
         source: &impl ImageSource,
     ) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         let params = self.profile.params();
         if source.width() == 0 || source.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
@@ -2299,6 +2351,7 @@ impl Zensim {
             source,
             params.num_scales,
             self.parallel,
+            crate::ssim_form::active_revision(),
         ))
     }
 
@@ -2736,6 +2789,8 @@ impl Zensim {
         height: usize,
         stride: usize,
     ) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
+        // featcanon D2: Rev4 is research-extraction-only.
+        crate::ssim_form::refuse_rev4_served(crate::ssim_form::active_revision())?;
         let params = self.profile.params();
         if width < 8 || height < 8 {
             return Err(ZensimError::ImageTooSmall);
@@ -2758,6 +2813,7 @@ impl Zensim {
             stride,
             params.num_scales,
             self.parallel,
+            crate::ssim_form::active_revision(),
         ))
     }
 

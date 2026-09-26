@@ -1520,7 +1520,7 @@ pub(crate) mod servability_census {
                 .params()
                 .scoring_bake_bytes()
                 .filter_map(|b| crate::mlp::Model::from_bytes(b).ok())
-                .map(|m| crate::feature_v2::bake_formula_revision(&m))
+                .map(|m| crate::feature_v2::bake_formula_revision(&m).expect("known revision"))
                 .collect();
             assert!(
                 revs.windows(2).all(|w| w[0] == w[1]),

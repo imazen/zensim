@@ -435,6 +435,7 @@ impl CorruptionHead {
             }
             (REVISION_INPUT_VERSION, 2) => FormulaRevision::Rev2,
             (REVISION_INPUT_VERSION, 3) => FormulaRevision::Rev3,
+            (REVISION_INPUT_VERSION, 4) => FormulaRevision::Rev4,
             _ => {
                 return Err(CorruptionHeadError::NotServable {
                     profile: "ZCTH",
@@ -1177,6 +1178,7 @@ mod tests {
             (1, FormulaRevision::Rev1),
             (2, FormulaRevision::Rev2),
             (3, FormulaRevision::Rev3),
+            (4, FormulaRevision::Rev4),
         ] {
             b.revision_field = revision;
             let bytes = b.build_version(REVISION_INPUT_VERSION);
@@ -1188,13 +1190,13 @@ mod tests {
                 assert_eq!(head.decision_function(&row), legacy.decision_function(&row));
             }
             let mut changed = bytes;
-            changed[52..56].copy_from_slice(&(revision % 3 + 1).to_le_bytes());
+            changed[52..56].copy_from_slice(&(revision % 4 + 1).to_le_bytes());
             assert!(matches!(
                 CorruptionHead::from_bytes(&changed),
                 Err(CorruptionHeadError::SchemaHashMismatch { .. })
             ));
         }
-        for invalid in [0, 4, u32::MAX] {
+        for invalid in [0, 5, u32::MAX] {
             b.revision_field = invalid;
             assert!(CorruptionHead::from_bytes(&b.build_version(REVISION_INPUT_VERSION)).is_err());
         }

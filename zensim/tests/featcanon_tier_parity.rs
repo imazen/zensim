@@ -166,47 +166,49 @@ fn rev3_negative_control_can_diverge() {
 
 /// Rev3 output must differ from Rev4 output on textured input — the revision
 /// actually selects different arithmetic (guards a no-op wiring).
+///
+/// Each revision's vector comes from its own child process (the switch is a
+/// `OnceLock`) and is read back from the child's stdout in memory — no file,
+/// so concurrent runs cannot race on a shared path.
 #[test]
 fn rev4_moves_slots_vs_rev3() {
-    const SENTINEL: &str = "REV4_MOVED_OK";
-    // The child writes a slot-diff count; run it for both revisions through
-    // the same re-exec protocol as above (one hop per revision).
-    if std::env::var("ZENSIM_FORMULA_REV").is_err() {
-        for rev in ["3", "4"] {
+    const TAG: &str = "FEATCANON_VEC";
+    if std::env::var("FEATCANON_VEC_CHILD").is_err() {
+        let vector_at = |rev: &str| -> Vec<u64> {
             let exe = std::env::current_exe().expect("test binary path");
             let out = std::process::Command::new(&exe)
                 .args(["rev4_moves_slots_vs_rev3", "--exact", "--nocapture"])
                 .env("ZENSIM_FORMULA_REV", rev)
-                .env("REV4_BASELINE_VEC", "1")
+                .env("FEATCANON_VEC_CHILD", "1")
                 .output()
                 .expect("re-exec");
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            assert!(out.status.success(), "rev{rev} child failed");
             assert!(
-                stdout.contains(&format!("REV{rev}_VEC")),
-                "rev{rev} child did not emit its vector"
+                out.status.success(),
+                "rev{rev} child failed:\n{}",
+                String::from_utf8_lossy(&out.stderr)
             );
-            std::fs::write(
-                std::env::temp_dir().join(format!("featcanon_rev{rev}.vec")),
-                stdout,
-            )
-            .expect("save vector");
-        }
-        let a = std::fs::read_to_string(std::env::temp_dir().join("featcanon_rev3.vec"))
-            .expect("rev3 vec");
-        let b = std::fs::read_to_string(std::env::temp_dir().join("featcanon_rev4.vec"))
-            .expect("rev4 vec");
-        assert_ne!(a, b, "rev3 and rev4 vectors must differ");
-        println!("{SENTINEL}");
+            let line = stdout
+                .lines()
+                .find_map(|l| l.strip_prefix(TAG))
+                .unwrap_or_else(|| panic!("rev{rev} child did not emit its vector:\n{stdout}"));
+            let v: Vec<u64> = line
+                .split_whitespace()
+                .map(|t| u64::from_str_radix(t, 16).expect("hex bits"))
+                .collect();
+            assert_eq!(v.len(), N_SLOTS, "rev{rev} child vector width");
+            v
+        };
+        let (a, b) = (vector_at("3"), vector_at("4"));
+        let moved = a.iter().zip(&b).filter(|(x, y)| x != y).count();
+        eprintln!("rev4 vs rev3 at 131x65: {moved}/{N_SLOTS} slots differ");
+        assert!(moved > 0, "rev3 and rev4 vectors must differ");
         return;
     }
-    // Child body: print the vector bits.
+    // Child body: print the vector bits on one line.
     let (w, h) = (131usize, 65usize);
     let (src, dst) = test_images(w, h);
     let v = extract_bits(&RgbSlice::new(&src, w, h), &RgbSlice::new(&dst, w, h));
-    println!(
-        "REV{}_VEC {:x?}",
-        std::env::var("ZENSIM_FORMULA_REV").unwrap(),
-        v
-    );
+    let hex: Vec<String> = v.iter().map(|b| format!("{b:x}")).collect();
+    println!("{TAG} {}", hex.join(" "));
 }

@@ -1110,6 +1110,12 @@ fn build_computes(r: &feature_defs::Revision) -> bool {
 /// runs, and reporting the landed one would make the provenance lie about the
 /// bytes beside it.
 fn current_era_of(signal: &'static feature_defs::SignalDef) -> &'static str {
+    // An active ARITHMETIC era (Rev4's `tiercanon`) moved every slot, so it
+    // is every slot's era — registered in `feature_defs::ARITHMETIC_REVISIONS`,
+    // not per signal.
+    if let Some(r) = active_arithmetic_revision() {
+        return r.era;
+    }
     signal
         .revisions
         .iter()
@@ -1119,6 +1125,9 @@ fn current_era_of(signal: &'static feature_defs::SignalDef) -> &'static str {
 
 /// The commit of a signal's effective revision, or `"-"`.
 fn current_commit_of(signal: &'static feature_defs::SignalDef) -> &'static str {
+    if let Some(r) = active_arithmetic_revision() {
+        return r.commit;
+    }
     signal
         .revisions
         .iter()
@@ -1140,8 +1149,27 @@ fn current_commit_of(signal: &'static feature_defs::SignalDef) -> &'static str {
 /// `v1ssimcap` when only **36** carry it; under `ZENSIM_FORMULA_REV=2` it
 /// still refused 120 slots the fix does not move. An era is a boundary in
 /// TIME, not a label every slot must wear.
+///
+/// An ARITHMETIC era touches every signal, so rule 2 never applies to it — and
+/// while one is active, it has touched every signal for every other `wanted`
+/// too: no slot's value is any earlier era's value.
 fn signal_matches_era(signal: &'static feature_defs::SignalDef, wanted: &str) -> bool {
-    current_era_of(signal) == wanted || !signal.revisions.iter().any(|r| r.era == wanted)
+    if current_era_of(signal) == wanted {
+        return true;
+    }
+    if feature_defs::is_arithmetic_era(wanted) || active_arithmetic_revision().is_some() {
+        return false;
+    }
+    !signal.revisions.iter().any(|r| r.era == wanted)
+}
+
+/// The arithmetic era this build computes, if any (the latest one named by
+/// the active revision's tokens).
+fn active_arithmetic_revision() -> Option<&'static feature_defs::Revision> {
+    active_era_tokens()
+        .iter()
+        .rev()
+        .find_map(|t| feature_defs::arithmetic_revision(t))
 }
 
 /// The first registered PROPOSED revision for a signal, if any.
@@ -1162,6 +1190,7 @@ fn era_is_registered(era: &str) -> bool {
     // — which is a registry gap, not a reason to weaken the assertion.
     feature_defs::signals().any(|s| s.revisions.iter().any(|r| r.era == era))
         || feature_defs::is_score_path_era(era)
+        || feature_defs::is_arithmetic_era(era)
 }
 
 /// Era tokens this BUILD is actually computing right now.

@@ -894,7 +894,9 @@ pub(crate) fn fused_vblur_features_ssim(
     // and is kept in `ssim_form` as the reference the bounded-error tests
     // measure against.
     let direct = free.revision() >= crate::feature_defs::FormulaRevision::Rev3;
-    match crate::featcanon::mode() {
+    // Canonical arithmetic follows THIS computation's revision (featcanon D1).
+    match crate::featcanon::mode(free.revision()) {
+        #[cfg(feature = "oracle")]
         crate::featcanon::Mode::Exact => {
             return fused_vblur_ssim_exact(
                 h_mu1,
@@ -949,6 +951,7 @@ pub(crate) fn fused_vblur_features_ssim(
                 h_act,
             );
         }
+        #[cfg(feature = "oracle")]
         crate::featcanon::Mode::Canon64 => {
             return fused_vblur_ssim_canon::<crate::featcanon::LanesF64>(
                 h_mu1,
@@ -976,6 +979,7 @@ pub(crate) fn fused_vblur_features_ssim(
                 h_act,
             );
         }
+        #[cfg(feature = "oracle")]
         crate::featcanon::Mode::CanonNeum => {
             return fused_vblur_ssim_canon::<crate::featcanon::Neum64>(
                 h_mu1,
@@ -1040,6 +1044,11 @@ pub(crate) fn fused_vblur_features_ssim(
 /// Reads 4 inputs: 2 H-blurred planes (h_mu1, h_mu2) + raw src + dst.
 /// Maintains 2 V-blur running sums per column group.
 /// Computes edge, variance, texture, and MSE features inline.
+///
+/// `revision` is the computation's formula revision; it selects the canonical
+/// body at Rev4 (featcanon D1) and nothing else — the edge features have no
+/// revision-dependent formula.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn fused_vblur_features_edge(
     h_mu1: &[f32],
     h_mu2: &[f32],
@@ -1053,8 +1062,10 @@ pub(crate) fn fused_vblur_features_edge(
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
     store_mu: bool,
+    revision: crate::feature_defs::FormulaRevision,
 ) -> StripChannelAccum {
-    match crate::featcanon::mode() {
+    match crate::featcanon::mode(crate::ssim_form::effective_revision(revision)) {
+        #[cfg(feature = "oracle")]
         crate::featcanon::Mode::Exact => {
             return fused_vblur_edge_exact(
                 h_mu1,
@@ -1087,6 +1098,7 @@ pub(crate) fn fused_vblur_features_edge(
                 store_mu,
             );
         }
+        #[cfg(feature = "oracle")]
         crate::featcanon::Mode::Canon64 => {
             return fused_vblur_edge_canon::<crate::featcanon::LanesF64>(
                 h_mu1,
@@ -1103,6 +1115,7 @@ pub(crate) fn fused_vblur_features_edge(
                 store_mu,
             );
         }
+        #[cfg(feature = "oracle")]
         crate::featcanon::Mode::CanonNeum => {
             return fused_vblur_edge_canon::<crate::featcanon::Neum64>(
                 h_mu1,
@@ -4609,6 +4622,8 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
 /// f64-exact sibling of [`fused_vblur_ssim_canon`]: every element formula in
 /// f64 (fused `f64::mul_add` mirrors `ssim_direct_raw_scalar`'s order), every
 /// sum Neumaier-compensated, planes rounded once at the f32 store.
+/// Measurement only (`oracle` feature).
+#[cfg(feature = "oracle")]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_ssim_exact(
     h_mu1: &[f32],
@@ -4987,7 +5002,9 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
     acc
 }
 
-/// f64-exact sibling of [`fused_vblur_edge_canon`].
+/// f64-exact sibling of [`fused_vblur_edge_canon`]. Measurement only
+/// (`oracle` feature).
+#[cfg(feature = "oracle")]
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_edge_exact(
     h_mu1: &[f32],

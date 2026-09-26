@@ -137,6 +137,12 @@
 
 ### Fixed
 
+- Bakes and corruption heads stamped `zentrain.formula_revision = 4` now parse
+  as `FormulaRevision::Rev4` (and are then refused by every served entry, see
+  the queued Rev4 item) instead of being refused by `Plan::for_bake` while
+  `bake_verdict` read them as revision 1. `bake_verdict` refuses a bake whose
+  revision stamp it cannot read. (jj change: featcanon-fix `zyxkkvyl`)
+
 - `bake_verdict` takes the per-reference statistic, the SROCC cell's ⛔INVERTED flag and the SVG bars on aic4, sdr25 and KonJND from the declared `EXPECTED_ORIENTATION` registry (b0c0cd11). aic4/sdr25 store `q_jnd`, which rises with distortion, so every correctly ranking bake had read ~100% of references backwards since the 2026-08-04 pin. The board's 330 aic4 and 253 sdr25 stored blocks were repaired in place with the sha-gated `promote_fulleval --repair-rank-orientation` (now with `--repair-tag`, and a value-based equality gate, 021d5226); the false `aic4-corpus-wide-per-ref-inversion` entry is retired and the gauntlet's `corpusWide` exemption is gone (ef8cd804, bea2ca45). JSON `srocc`/`srocc_signed` are unchanged. The 372 roots' unidentified `ext_sdr25.parquet` (63 cells) was left as stored; see Known Bugs. Record: `benchmarks/board_orientation_fix_2026-09-22.md`.
 - `build_fr_corpus_pairs.py aic4` rebuilds the AIC-4 pairs from the committed `site/data/parquet/aic4_sample.parquet` labels, crops and full resolution, so AIC-4 is refreshable (4b202e4e).
 - Align x86 edge-only horizontal-blur tail accumulation with the full-feature path; cover narrow and odd-width tails in the bit-exact regression (7d6d7451).
@@ -466,6 +472,27 @@ BANDVIS activity setting (off). The old wide-bake fallback selected a different
 formula; these candidate profiles intentionally change pixel scores. Their
 original weights, splines and historical artifacts remain. All legacy and dense
 bakes now use one ID-based extraction planner. No public signature is removed.
+
+### QUEUED BREAKING CHANGES — `FormulaRevision::Rev4` (featcanon, 2026-09-26) — AWAITING USER APPROVAL
+
+<!-- Queued by featcanon-fix. Not decided: the user must approve the break or
+     pick a non-breaking alternative (listed in
+     ~/tmp/zensim-paper/rev4/FEATCANON_FIX_DONE.md, D10) before this lands. -->
+
+- `feature_v2::FormulaRevision` (a `#[doc(hidden)]` re-export, but exhaustive
+  and reachable through the supported `V2NewFeatureToggles::formula_revision`
+  field) gains `Rev4`: revision 3 formulas under canonical, SIMD-tier
+  independent arithmetic (the `tiercanon` era). A downstream exhaustive `match`
+  on `FormulaRevision` stops compiling. Selected only by `ZENSIM_FORMULA_REV=4`;
+  **research-extraction-only** — every `Zensim`, `BakeScorer`, HDR, diffmap,
+  attribution and corruption-head entry returns
+  `ZensimError::ModelForwardFailed` at revision 4, and a request whose revision
+  differs from the process revision is refused whenever either is revision 4.
+  (jj changes: featcanon `kmylspyt`, featcanon-fix `zyxkkvyl`)
+- Doc-hidden `feature_v2::bake_formula_revision_public` now returns
+  `Result<FormulaRevision, ZensimError>`: a present `zentrain.formula_revision`
+  value this build does not know is an error instead of silently reading as
+  revision 1. (jj change: featcanon-fix `zyxkkvyl`)
 
 ### QUEUED BREAKING CHANGES — the cruft purge (`zensim` 0.3.0, 2026-09-06)
 

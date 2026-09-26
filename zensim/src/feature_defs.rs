@@ -436,14 +436,27 @@ pub enum FormulaRevision {
     /// basic, peak, masked and IW signals. Requires freshly extracted data.
     Rev3,
     /// Revision 3 formulas under **canonical arithmetic** (the `tiercanon`
-    /// era): every feature-producing leaf runs ONE source-level body with
-    /// fused `f32::mul_add`, fixed 8-virtual-lane pools and a fixed pairwise
-    /// reduce, so all SIMD tiers emit bit-identical output. Requires freshly
-    /// extracted data: the pooling ORDER is tier-width-independent but not
-    /// equal to any shipped tier's, so any slot it touches can move.
-    /// Measured on 11 real pairs: 837 of 1825 slots move vs production AVX2
-    /// (all families), worst-case error vs the f64 exact oracle unchanged
-    /// (error lives in element arithmetic, not accumulation order).
+    /// era), **for research extraction only**.
+    ///
+    /// The canonical leaves — opsin XYB, the fused H/V SSIM blurs and pools,
+    /// the free raw-moment / bounded-error / luma-bin accumulators and the
+    /// CSFW pass — run ONE source-level body with fused `f32::mul_add`, fixed
+    /// 8-virtual-lane pools and a fixed pairwise reduce. Measured, not proven:
+    /// `research::extract`'s full 1825-slot SDR vector is bit-identical across
+    /// x86 v4x/v4/v3/scalar and wasm32 simd128/scalar. Leaves outside the era
+    /// still call the platform libm (dvifm's `powf`/`ln`/`exp`), so
+    /// cross-platform identity rests on libm agreement.
+    ///
+    /// NOT every feature-producing leaf is canonical: the PU front end
+    /// (`color::linear_to_pu_xyb_planar_into`), the edge-only
+    /// `blur::fused_blur_h_mu` route and `attribution::attr_pass_b_*` still
+    /// dispatch per tier. Every served, HDR, diffmap, attribution and
+    /// corruption-head entry therefore refuses Rev4, as does a Rev4 request
+    /// in a non-Rev4 process or any request in a Rev4 process that is not
+    /// Rev4. Requires freshly extracted data: 837 of 1825 slots move vs
+    /// production v3 (union over the lane's 11 audit pairs). Accuracy against
+    /// the f64 exact oracle is established only for the fused-V-blur pools;
+    /// see `benchmarks/featcanon_WORKLOG.md`.
     Rev4,
 }
 
@@ -515,11 +528,15 @@ impl FormulaRevision {
     ///
     /// This is the predicate gate **G3.1** checks against a re-extraction: a
     /// slot that moves and is not returned here is a FAILURE.
+    ///
+    /// A revision that carries an ARITHMETIC era ([`ARITHMETIC_REVISIONS`],
+    /// Rev4's `tiercanon`) moves every live slot, so it returns them all.
     pub(crate) fn moved_slots(self, width: u16, n_scales: usize) -> Vec<u16> {
         let tokens = self.era_tokens();
+        let all = tokens.iter().any(|t| is_arithmetic_era(t));
         (0..width as usize)
             .filter_map(|id| def_at(id, n_scales))
-            .filter(|d| d.signal.revisions.iter().any(|r| tokens.contains(&r.era)))
+            .filter(|d| all || d.signal.revisions.iter().any(|r| tokens.contains(&r.era)))
             .map(|d| d.id)
             .collect()
     }
@@ -535,10 +552,11 @@ impl FormulaRevision {
 /// era-level fact through a revision-level instrument, which was correct only
 /// while the revision had one v1 era in it.
 pub(crate) fn era_moved_slots(era: &str, width: u16, n_scales: usize) -> Vec<u16> {
-    // `tiercanon` is not a per-signal era: canonical pooling order can move
-    // ANY slot a canonical leaf feeds (837/1825 measured on the audit set,
-    // content-dependent), so the honest registration is every live slot.
-    if era == "tiercanon" {
+    // An arithmetic era (`tiercanon`) is not a per-signal era: canonical
+    // pooling order can move ANY slot a canonical leaf feeds (837/1825
+    // measured on the audit set, content-dependent), so the honest
+    // registration is every live slot. See [`ARITHMETIC_REVISIONS`].
+    if is_arithmetic_era(era) {
         return (0..width as usize)
             .filter_map(|id| def_at(id, n_scales))
             .map(|d| d.id)
@@ -1068,6 +1086,72 @@ pub(crate) const SCORE_PATH_REVISIONS: &[(Defect, Revision)] = &[(DEFECT_F19, RE
 /// Whether `era` names a registered SCORE-path era.
 pub(crate) fn is_score_path_era(era: &str) -> bool {
     SCORE_PATH_REVISIONS.iter().any(|(_, r)| r.era == era)
+}
+
+/// The defect behind the `tiercanon` era: the same feature computed on two
+/// SIMD tiers differs in its low bits.
+///
+/// Registered on the registry rather than on a signal because it is a
+/// property of the ARITHMETIC every canonical leaf shares, not of one
+/// formula. Sources: `REVIEW_TIERPARITY.md` and the featcanon lane
+/// (`benchmarks/featcanon_WORKLOG.md`).
+const DEFECT_TIER_DIVERGENCE: Defect = Defect {
+    id: "TIERDIV",
+    note: "Feature bits depend on the SIMD tier: `mul_add` is fused on \
+           v3/v4/neon and `a*b+c` on the magetypes scalar and wasm128 \
+           backends; `reduce_add`'s tree is backend-defined; tail/chunk \
+           geometry differs per width. MEASURED at production Rev3 on 11 \
+           audit pairs: v4x vs v3 differ on 0-297 of 1825 research slots per \
+           pair (the v1 SSIM pools), scalar vs v3 on 125-1615 (1523 minimum on \
+           a non-identity pair) across every family. Not an accuracy defect: \
+           a sameness defect.",
+};
+
+/// The `tiercanon` era: Rev3 formulas under canonical arithmetic.
+const REV_TIERCANON: Revision = Revision {
+    era: "tiercanon",
+    commit: "-",
+    status: RevisionStatus::Proposed,
+    note: "featcanon: every canonical leaf (opsin XYB, the fused H/V SSIM \
+           blurs and pools, the free raw-moment / bounded-error / luma-bin \
+           accumulators, the CSFW pass) runs ONE plain-Rust body with fused \
+           `f32::mul_add`, 8 fixed virtual f32 lanes (lane = x mod 8) and the \
+           fixed `era2_reduce8` tree, so the 1825-slot research vector is \
+           bit-identical across x86 v4x/v4/v3/scalar (measured on the lane's \
+           11 audit pairs and the review's 12 probe pairs) and wasm32 \
+           simd128/scalar (measured, 5 crops) - by \
+           measurement, not by construction, since leaves outside this era \
+           still call the platform libm (e.g. dvifm's powf/ln/exp). Moves \
+           837 of 1825 slots vs production v3 on the audit pairs (union), so \
+           it is registered as moving every live slot. STILL PROPOSED and \
+           RESEARCH-EXTRACTION-ONLY: the served, HDR and attribution paths \
+           keep tier-dispatched leaves (`color::linear_to_pu_xyb_planar_into`, \
+           the edge-only `blur::fused_blur_h_mu` route, \
+           `attribution::attr_pass_b_*`) and refuse Rev4.",
+};
+
+/// The registered eras that change the ARITHMETIC of every canonical leaf
+/// rather than one signal's formula.
+///
+/// Like [`SCORE_PATH_REVISIONS`], a home for eras the per-signal table cannot
+/// express. An arithmetic era moves every live slot ([`era_moved_slots`],
+/// [`FormulaRevision::moved_slots`]), is registered for
+/// `research::era_is_registered`, and — when the build computes it — is every
+/// slot's provenance era (`research::current_era_of`).
+pub(crate) const ARITHMETIC_REVISIONS: &[(Defect, Revision)] =
+    &[(DEFECT_TIER_DIVERGENCE, REV_TIERCANON)];
+
+/// Whether `era` names a registered ARITHMETIC era.
+pub(crate) fn is_arithmetic_era(era: &str) -> bool {
+    ARITHMETIC_REVISIONS.iter().any(|(_, r)| r.era == era)
+}
+
+/// The registered arithmetic-era entry named `era`, if any.
+pub(crate) fn arithmetic_revision(era: &str) -> Option<&'static Revision> {
+    ARITHMETIC_REVISIONS
+        .iter()
+        .find(|(_, r)| r.era == era)
+        .map(|(_, r)| r)
 }
 
 const DEFECT_F17: Defect = Defect {
@@ -3178,6 +3262,52 @@ mod tests {
             super::RevisionStatus::Proposed,
             "SHIPPED_REVISION is Rev1; F19 must stay Proposed"
         );
+    }
+
+    /// featcanon D3: `tiercanon` is REGISTERED (the research provenance and
+    /// `era_is_registered` can name it) as an ARITHMETIC era that moves every
+    /// live slot, it is Rev4's and only Rev4's, and it is still Proposed.
+    #[test]
+    fn tiercanon_is_a_registered_arithmetic_era_moving_every_live_slot() {
+        use super::FormulaRevision;
+        use crate::NUM_SCALES;
+        assert!(super::is_arithmetic_era("tiercanon"));
+        assert!(!super::is_arithmetic_era("v1ssimstable"));
+        assert!(!super::is_score_path_era("tiercanon"));
+        let r = super::arithmetic_revision("tiercanon").expect("registered");
+        assert_eq!(r.status, super::RevisionStatus::Proposed);
+        assert_eq!(super::ARITHMETIC_REVISIONS[0].0.id, "TIERDIV");
+        // No per-signal entry claims it: the registry-level entry is the one
+        // owner, so the two cannot drift apart.
+        assert!(
+            super::signals().all(|s| s.revisions.iter().all(|r| r.era != "tiercanon")),
+            "tiercanon must not also be attached to a SignalDef"
+        );
+        for rev in [
+            FormulaRevision::Rev1,
+            FormulaRevision::Rev2,
+            FormulaRevision::Rev3,
+        ] {
+            assert!(!rev.era_tokens().contains(&"tiercanon"), "{rev:?}");
+        }
+        assert!(FormulaRevision::Rev4.era_tokens().contains(&"tiercanon"));
+        // Rev4 = Rev3's eras + tiercanon, in that order.
+        assert_eq!(
+            &FormulaRevision::Rev4.era_tokens()[..FormulaRevision::Rev3.era_tokens().len()],
+            FormulaRevision::Rev3.era_tokens()
+        );
+        for width in [372u16, 944, 1825] {
+            let live: Vec<u16> = (0..width as usize)
+                .filter_map(|id| super::def_at(id, NUM_SCALES))
+                .map(|d| d.id)
+                .collect();
+            assert_eq!(super::era_moved_slots("tiercanon", width, NUM_SCALES), live);
+            assert_eq!(FormulaRevision::Rev4.moved_slots(width, NUM_SCALES), live);
+            assert!(
+                FormulaRevision::Rev3.moved_slots(width, NUM_SCALES).len() < live.len(),
+                "Rev3's moved set must stay per-signal at width {width}"
+            );
+        }
     }
 
     #[test]

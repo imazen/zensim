@@ -338,10 +338,12 @@ impl Config {
             record["candidate_formula_revisions"] = json!(
                 self.models
                     .iter()
-                    .map(|model| format!(
-                        "{:?}",
-                        zensim::feature_v2::bake_formula_revision_public(model)
-                    ))
+                    .map(
+                        |model| match zensim::feature_v2::bake_formula_revision_public(model) {
+                            Ok(rev) => format!("{rev:?}"),
+                            Err(e) => format!("unknown ({e})"),
+                        }
+                    )
                     .collect::<Vec<_>>()
             );
         }

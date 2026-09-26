@@ -4937,7 +4937,13 @@ fn main() -> ExitCode {
                         b.id,
                         p.display()
                     );
-                    let bake_rev = zensim::feature_v2::bake_formula_revision_public(m);
+                    let bake_rev = match zensim::feature_v2::bake_formula_revision_public(m) {
+                        Ok(rev) => rev,
+                        Err(e) => {
+                            eprintln!("bake_verdict: REFUSING — {}: {e}", p.display());
+                            return ExitCode::from(2);
+                        }
+                    };
                     let table_rev = match feature_set::root_formula_revision(&args.features_root) {
                         Ok(rev) => rev,
                         Err(e) => {

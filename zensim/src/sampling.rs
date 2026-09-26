@@ -155,14 +155,20 @@ impl Sampling {
         (planes, w, h)
     }
 
-    pub(crate) fn pyramid(self, source: &impl ImageSource, parallel: bool) -> Vec<XybPyramidLevel> {
+    /// `revision` is the walk's formula revision (canonical opsin at Rev4).
+    pub(crate) fn pyramid(
+        self,
+        source: &impl ImageSource,
+        parallel: bool,
+        revision: crate::feature_defs::FormulaRevision,
+    ) -> Vec<XybPyramidLevel> {
         let dims = self.dims(source.width(), source.height());
         let padded;
         let planes = if source.width() < self.min_dim() || source.height() < self.min_dim() {
             padded = crate::metric::reflect_pad_to_size(source, self.min_dim());
-            crate::streaming::convert_source_to_xyb(&padded, padded.width(), parallel)
+            crate::streaming::convert_source_to_xyb(&padded, padded.width(), parallel, revision)
         } else {
-            crate::streaming::convert_source_to_xyb(source, source.width(), parallel)
+            crate::streaming::convert_source_to_xyb(source, source.width(), parallel, revision)
         };
         let original = (
             planes,
@@ -193,9 +199,10 @@ impl Sampling {
         self,
         source: &impl ImageSource,
         parallel: bool,
+        revision: crate::feature_defs::FormulaRevision,
     ) -> crate::PrecomputedReference {
         crate::PrecomputedReference {
-            scales: self.pyramid(source, parallel),
+            scales: self.pyramid(source, parallel, revision),
             ref_width: source.width(),
             ref_height: source.height(),
             sampling: Some(self),
@@ -320,7 +327,7 @@ mod tests {
                     .map(|i| [(i % 251) as u8, (i * 7 % 239) as u8, (i * 13 % 233) as u8])
                     .collect();
                 let source = crate::RgbSlice::new(&pixels, w, h);
-                let levels = sampling.pyramid(&source, false);
+                let levels = sampling.pyramid(&source, false, crate::ssim_form::active_revision());
                 let mut max_unquantized_delta = 0f64;
                 for (level, (planes, ow, oh)) in levels.iter().enumerate() {
                     assert_eq!((*ow, *oh), (w / divisors[level], h / divisors[level]));
@@ -417,8 +424,12 @@ mod tests {
                     divisors: Some(divisors),
                 };
                 assert_eq!(
-                    sampling.pyramid(&source, false),
-                    pool.install(|| sampling.pyramid(&source, true)),
+                    sampling.pyramid(&source, false, crate::ssim_form::active_revision()),
+                    pool.install(|| sampling.pyramid(
+                        &source,
+                        true,
+                        crate::ssim_form::active_revision()
+                    )),
                     "{sampling:?}"
                 );
             }
@@ -433,8 +444,11 @@ mod tests {
                         den,
                         divisors: None,
                     };
-                    let serial = sampling.pyramid(&source, false);
-                    let parallel = pool.install(|| sampling.pyramid(&source, true));
+                    let serial =
+                        sampling.pyramid(&source, false, crate::ssim_form::active_revision());
+                    let parallel = pool.install(|| {
+                        sampling.pyramid(&source, true, crate::ssim_form::active_revision())
+                    });
                     assert_eq!(serial, parallel, "{sampling:?}");
                 }
             }
