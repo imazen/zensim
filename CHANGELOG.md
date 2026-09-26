@@ -11,6 +11,15 @@
 
 ### Added
 
+- `bake_dial_refit` gains three opt-in flags for the Rev4 feature-potential
+  run's diagnostic fits (unpublished validation tool; defaults unchanged, so
+  invocations without them produce the same output): `fit-lasso --path-out
+  <file>` (a 50-point log-λ lasso path from λ_max down to 1e-4·λ_max, raw f64
+  fits, lasso solver only), `fit-lasso --diagnostic-fit-only` (requires
+  `--emit-fit-npz`; writes the f64 fit and returns before any bake is built)
+  and `gram --per-reference-out-dir <dir>` (a raw per-reference Gram set with
+  a sum check against the whole Gram). Commit a99a5d3c.
+
 - Restored cost cuts (COST_CUTS_AUDIT, 2026-09-24), four default-off opt-in
   families appended after C8 (widths 1562, 1790, 1820, 1825): `mapdev`
   f1502–f1561 (per-scale, per-channel population std of the squared-error
