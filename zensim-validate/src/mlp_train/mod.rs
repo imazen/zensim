@@ -2568,6 +2568,26 @@ pub fn train_mlp_strategy(
     // so push/clear in the hot loop don't realloc.
     let mut parallel_batch_buffer: Vec<(usize, usize, usize)> = Vec::with_capacity(k);
 
+    // Fused K=1 pair-update path: backprop's gw1 row sweep + L2 + the w1
+    // Adam step run as a single pass (`adam_update_w1_fused`) fed by
+    // per-side `dl_dh_pre` vectors from `backprop_grad_head`. Bit-identical
+    // to the unfused sequence; gated on the shape constraints the v3 fused
+    // kernel requires (any other shape takes the unfused path, which is the
+    // oracle). `dh_a`/`dh_b` are the reused head-output scratch buffers —
+    // allocated once instead of per-pair like the old in-kernel vecs.
+    let fuse_w1 =
+        k == 1 && n_hidden > 0 && n_hidden.is_multiple_of(4) && w1.len().is_multiple_of(n_hidden);
+    let mut dh_a = if fuse_w1 {
+        vec![0.0f64; n_hidden]
+    } else {
+        Vec::new()
+    };
+    let mut dh_b = if fuse_w1 {
+        vec![0.0f64; n_hidden]
+    } else {
+        Vec::new()
+    };
+
     // Norm-in-Norm hybrid loss gate (Li et al. 2020). When opted in via
     // `norm_in_norm_weight > 0.0`, the auxiliary loss is computed on
     // each mini-batch's 2K predictions. Batch statistics are unstable
@@ -2832,58 +2852,117 @@ pub fn train_mlp_strategy(
             let dl_dya = dl_dya_rn + dl_dya_mse;
             let dl_dyb = dl_dyb_rn + dl_dyb_mse;
 
-            backprop_step(
-                xa,
-                &ha_pre,
-                &ha,
-                dl_dya,
-                &w1,
-                &mut adam.gw1,
-                &mut adam.gb1,
-                &w2,
-                &mut adam.gw2,
-                &mut adam.gb2,
-                n_features,
-                n_hidden,
-                hyperparams.leaky_alpha,
-            );
-            backprop_step(
-                xb,
-                &hb_pre,
-                &hb,
-                dl_dyb,
-                &w1,
-                &mut adam.gw1,
-                &mut adam.gb1,
-                &w2,
-                &mut adam.gw2,
-                &mut adam.gb2,
-                n_features,
-                n_hidden,
-                hyperparams.leaky_alpha,
-            );
-
-            if hyperparams.l2_lambda > 0.0 {
-                let fmult = l2_feature_mult();
-                add_l2_grad_layer1(
-                    &mut adam.gw1,
-                    &w1,
-                    hyperparams.l2_lambda,
+            if fuse_w1 {
+                // Fused pair update: the two gw1 row sweeps, the L2 term,
+                // and the w1 Adam step run as one pass. The `dl_dh_pre`
+                // vectors and the gw2/gb1/gb2 accumulations come from
+                // `backprop_grad_head`, which is `backprop_step` minus the
+                // gw1 sweep — identical arithmetic, gw1 never round-trips.
+                crate::simd_mlp::backprop_grad_head(
+                    &ha_pre,
+                    &ha,
+                    dl_dya,
+                    &mut dh_a,
+                    &mut adam.gb1,
+                    &w2,
+                    &mut adam.gw2,
+                    &mut adam.gb2,
                     n_hidden,
-                    fmult.as_ref().map(|v| v.as_slice()),
+                    hyperparams.leaky_alpha,
                 );
-                for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
-                    *g += hyperparams.l2_lambda * w;
+                crate::simd_mlp::backprop_grad_head(
+                    &hb_pre,
+                    &hb,
+                    dl_dyb,
+                    &mut dh_b,
+                    &mut adam.gb1,
+                    &w2,
+                    &mut adam.gw2,
+                    &mut adam.gb2,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                );
+                if hyperparams.l2_lambda > 0.0 {
+                    for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
+                        *g += hyperparams.l2_lambda * w;
+                    }
                 }
-            }
-
-            // T8.1: K=1 → step every pair (bit-identical to legacy).
-            // K>1 sequential → step once per K accumulated pairs.
-            if k == 1 || steps_since_adam >= k as u64 {
-                adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                let fmult = if hyperparams.l2_lambda > 0.0 {
+                    l2_feature_mult()
+                } else {
+                    None
+                };
+                adam.step_w1_fused(
+                    &mut w1,
+                    &mut b1,
+                    &mut w2,
+                    &mut b2,
+                    lr,
+                    xa,
+                    &dh_a,
+                    xb,
+                    &dh_b,
+                    hyperparams.l2_lambda,
+                    fmult.as_ref().map(|v| v.as_slice()),
+                    n_hidden,
+                );
                 apply_post_adam_penalties(&mut w1, n_hidden, lr);
                 nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
                 steps_since_adam = 0;
+            } else {
+                backprop_step(
+                    xa,
+                    &ha_pre,
+                    &ha,
+                    dl_dya,
+                    &w1,
+                    &mut adam.gw1,
+                    &mut adam.gb1,
+                    &w2,
+                    &mut adam.gw2,
+                    &mut adam.gb2,
+                    n_features,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                );
+                backprop_step(
+                    xb,
+                    &hb_pre,
+                    &hb,
+                    dl_dyb,
+                    &w1,
+                    &mut adam.gw1,
+                    &mut adam.gb1,
+                    &w2,
+                    &mut adam.gw2,
+                    &mut adam.gb2,
+                    n_features,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                );
+
+                if hyperparams.l2_lambda > 0.0 {
+                    let fmult = l2_feature_mult();
+                    add_l2_grad_layer1(
+                        &mut adam.gw1,
+                        &w1,
+                        hyperparams.l2_lambda,
+                        n_hidden,
+                        fmult.as_ref().map(|v| v.as_slice()),
+                    );
+                    for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
+                        *g += hyperparams.l2_lambda * w;
+                    }
+                }
+
+                // T8.1: K=1 → step every pair (bit-identical to legacy).
+                // K>1 sequential → step once per K accumulated pairs.
+                if k == 1 || steps_since_adam >= k as u64 {
+                    adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                    apply_post_adam_penalties(&mut w1, n_hidden, lr);
+                    nonneg_project(&mut w2, &mut b1, &mut b2, nonneg);
+                    steps_since_adam = 0;
+                }
             }
 
             // TV regularizer: `lo` is worse quality, `hi` is better quality.
@@ -6548,6 +6627,79 @@ impl AdamState {
             vb2: vec![0.0; nb2],
             t: 0,
         }
+    }
+
+    /// K=1 fused variant: w1's pair-gradient + optional L2 + Adam run as one
+    /// pass (`adam_simd::adam_update_w1_fused`), taking `dl_dh_pre` vectors
+    /// produced by `simd_mlp::backprop_grad_head` instead of a materialized
+    /// gw1 accumulation. `gw1` is still read as the accumulation's initial
+    /// value and still stored as +0.0 on exit — the post-step invariant the
+    /// unfused paths (TV, pool head, k>1) rely on. b1/w2/b2 use the ordinary
+    /// per-array update with the same `t`/bias-correction as `step`.
+    #[allow(clippy::too_many_arguments)]
+    fn step_w1_fused(
+        &mut self,
+        w1: &mut [f64],
+        b1: &mut [f64],
+        w2: &mut [f64],
+        b2: &mut [f64],
+        lr: f64,
+        xa: &[f64],
+        dha: &[f64],
+        xb: &[f64],
+        dhb: &[f64],
+        l2_scale: f64,
+        l2_mult: Option<&[f64]>,
+        n_hidden: usize,
+    ) {
+        self.t += 1;
+        let beta1: f64 = 0.9;
+        let beta2: f64 = 0.999;
+        let eps: f64 = 1e-8;
+        // For sufficiently large `t`, `beta^t` underflows to 0.0 exactly
+        // and `bc = 1.0`. The scalar path divides by `bc` either way; we
+        // pass it through unchanged so the SIMD result is bit-identical.
+        let bc1 = 1.0 - beta1.powi(self.t as i32);
+        let bc2 = 1.0 - beta2.powi(self.t as i32);
+
+        adam_simd::adam_update_w1_fused(&mut adam_simd::AdamW1FusedArgs {
+            w: w1,
+            g: &mut self.gw1,
+            m: &mut self.mw1,
+            v: &mut self.vw1,
+            xa,
+            dha,
+            xb,
+            dhb,
+            l2_scale,
+            l2_mult,
+            n_hidden,
+            beta1,
+            beta2,
+            eps,
+            bc1,
+            bc2,
+            lr,
+        });
+
+        let step_one = |w: &mut [f64], g: &mut [f64], m: &mut [f64], v: &mut [f64]| {
+            let mut args = adam_simd::AdamUpdateArgs {
+                w,
+                g,
+                m,
+                v,
+                beta1,
+                beta2,
+                eps,
+                bc1,
+                bc2,
+                lr,
+            };
+            adam_simd::adam_update(&mut args);
+        };
+        step_one(b1, &mut self.gb1, &mut self.mb1, &mut self.vb1);
+        step_one(w2, &mut self.gw2, &mut self.mw2, &mut self.vw2);
+        step_one(b2, &mut self.gb2, &mut self.mb2, &mut self.vb2);
     }
 
     fn step(&mut self, w1: &mut [f64], b1: &mut [f64], w2: &mut [f64], b2: &mut [f64], lr: f64) {

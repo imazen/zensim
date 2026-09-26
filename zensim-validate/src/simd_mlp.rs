@@ -129,6 +129,48 @@ pub fn backprop_step(
     );
 }
 
+/// Head-only variant of `backprop_step` for the fused K=1 pair update:
+/// updates `gw2`, `gb1`, `gb2` and writes the pair's `dl_dh_pre` vector
+/// into `dh_out` — everything except the `gw1` row sweep, which the fused
+/// Adam kernel performs in-register (`mlp_train` fused path).
+///
+/// Bit-identical to `backprop_step`'s head on every tier (the same tier
+/// bodies minus the gw1 sweep); `dh_out.len()` must be >= `n_hidden`.
+#[inline]
+pub(crate) fn backprop_grad_head(
+    h_pre: &[f64],
+    h: &[f64],
+    dl_dy: f64,
+    dh_out: &mut [f64],
+    gb1: &mut [f64],
+    w2: &[f64],
+    gw2: &mut [f64],
+    gb2: &mut [f64],
+    n_hidden: usize,
+    alpha: f64,
+) {
+    debug_assert!(dh_out.len() >= n_hidden);
+    #[cfg(target_arch = "x86_64")]
+    {
+        use archmage::SimdToken;
+        if crate::tier_cap::avx512_allowed() && archmage::X64V4Token::summon().is_some() {
+            // SAFETY: dispatch gated by token summon (CPUID-checked).
+            unsafe {
+                backprop_avx512_head(h_pre, h, dl_dy, dh_out, gb1, w2, gw2, gb2, n_hidden, alpha);
+            }
+            return;
+        }
+        if archmage::X64V3Token::summon().is_some() {
+            // SAFETY: dispatch gated by token summon (CPUID-checked).
+            unsafe {
+                backprop_avx2_head(h_pre, h, dl_dy, dh_out, gb1, w2, gw2, gb2, n_hidden, alpha);
+            }
+            return;
+        }
+    }
+    backprop_scalar_head(h_pre, h, dl_dy, dh_out, gb1, w2, gw2, gb2, n_hidden, alpha);
+}
+
 // =============================================================================
 // SCALAR FALLBACK — bit-identical to the AVX2 (`forward_avx2` /
 // `backprop_avx2`) kernels, which are the canonical arithmetic. That means
@@ -192,7 +234,40 @@ fn forward_scalar(
     (y, h_pre, h)
 }
 
-#[inline]
+/// Scalar form of the gw1-independent backprop head: `gw2`, `gb2`, the
+/// `dl_dh_pre` vector, and `gb1`. Identical arithmetic and domains to the
+/// pre-split `backprop_scalar` — writes land in the same order per array.
+fn backprop_scalar_head(
+    h_pre: &[f64],
+    h: &[f64],
+    dl_dy: f64,
+    dh_out: &mut [f64],
+    gb1: &mut [f64],
+    w2: &[f64],
+    gw2: &mut [f64],
+    gb2: &mut [f64],
+    n_hidden: usize,
+    alpha: f64,
+) {
+    let n4 = n_hidden - (n_hidden % 4);
+    // gw2: fused on the canonical domain, mul+add on the AVX2 tail.
+    for o in 0..n4 {
+        gw2[o] = dl_dy.mul_add(h[o], gw2[o]);
+    }
+    for o in n4..n_hidden {
+        gw2[o] += dl_dy * h[o];
+    }
+    gb2[0] += dl_dy;
+
+    for o in 0..n_hidden {
+        let dh = dl_dy * w2[o];
+        dh_out[o] = if h_pre[o] >= 0.0 { dh } else { alpha * dh };
+    }
+    for (g, &dh) in gb1.iter_mut().zip(dh_out.iter()) {
+        *g += dh;
+    }
+}
+
 fn backprop_scalar(
     x: &[f64],
     h_pre: &[f64],
@@ -208,20 +283,19 @@ fn backprop_scalar(
     alpha: f64,
 ) {
     let n4 = n_hidden - (n_hidden % 4);
-    // gw2: fused on the canonical domain, mul+add on the AVX2 tail.
-    for o in 0..n4 {
-        gw2[o] = dl_dy.mul_add(h[o], gw2[o]);
-    }
-    for o in n4..n_hidden {
-        gw2[o] += dl_dy * h[o];
-    }
-    gb2[0] += dl_dy;
-
     let mut dl_dh_pre = vec![0.0f64; n_hidden];
-    for o in 0..n_hidden {
-        let dh = dl_dy * w2[o];
-        dl_dh_pre[o] = if h_pre[o] >= 0.0 { dh } else { alpha * dh };
-    }
+    backprop_scalar_head(
+        h_pre,
+        h,
+        dl_dy,
+        &mut dl_dh_pre,
+        gb1,
+        w2,
+        gw2,
+        gb2,
+        n_hidden,
+        alpha,
+    );
 
     for i in 0..n_features {
         let s = x[i];
@@ -235,9 +309,6 @@ fn backprop_scalar(
         for (j, g) in row.iter_mut().enumerate().skip(n4) {
             *g += s * dl_dh_pre[j];
         }
-    }
-    for (g, &dh) in gb1.iter_mut().zip(dl_dh_pre.iter()) {
-        *g += dh;
     }
 }
 
@@ -376,19 +447,20 @@ unsafe fn forward_avx512(
     (y, h_pre, h)
 }
 
+/// AVX-512 form of the gw1-independent backprop head. Writes `dh_out`
+/// (caller-provided `dl_dh_pre`), updates gw2/gb1/gb2 — bit-identical to
+/// the head section of `backprop_avx512`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
-unsafe fn backprop_avx512(
-    x: &[f64],
+unsafe fn backprop_avx512_head(
     h_pre: &[f64],
     h: &[f64],
     dl_dy: f64,
-    gw1: &mut [f64],
+    dh_out: &mut [f64],
     gb1: &mut [f64],
     w2: &[f64],
     gw2: &mut [f64],
     gb2: &mut [f64],
-    n_features: usize,
     n_hidden: usize,
     alpha: f64,
 ) {
@@ -409,9 +481,9 @@ unsafe fn backprop_avx512(
     // 1) gw2[o] += dl_dy * h[o] AND
     //    dl_dh_pre[o] = dl_dy * w2[o] * (h_pre[o] >= 0 ? 1 : alpha)
     // Fuse the two passes so we touch w2/h_pre once.
-    let mut dl_dh_pre = vec![0.0f64; n_hidden];
-    let dl_dh_pre_ptr = dl_dh_pre.as_mut_ptr();
+    let dl_dh_pre_ptr = dh_out.as_mut_ptr();
     let gw2_ptr = gw2.as_mut_ptr();
+    let gb1_ptr = gb1.as_mut_ptr();
 
     for c in 0..n_chunks {
         let off = c * 8;
@@ -454,10 +526,70 @@ unsafe fn backprop_avx512(
     for o in n4..n_hidden {
         gw2[o] += dl_dy * h[o];
         let dh = dl_dy * w2[o];
-        dl_dh_pre[o] = if h_pre[o] >= 0.0 { dh } else { alpha * dh };
+        dh_out[o] = if h_pre[o] >= 0.0 { dh } else { alpha * dh };
     }
 
     gb2[0] += dl_dy;
+
+    // gb1[o] += dh_out[o] — `fma(dh,1,gb)` ≡ `dh + gb` bit-exactly; the
+    // fused lane form is kept from the pre-split kernel for codegen parity.
+    for c in 0..n_chunks {
+        let off = c * 8;
+        unsafe {
+            let gb_v = _mm512_loadu_pd(gb1_ptr.add(off));
+            let dh_v = _mm512_loadu_pd(dl_dh_pre_ptr.add(off));
+            let one = _mm512_set1_pd(1.0);
+            let gb_new = _mm512_fmadd_pd(dh_v, one, gb_v);
+            _mm512_storeu_pd(gb1_ptr.add(off), gb_new);
+        }
+    }
+    for o in tail_start..n_hidden {
+        gb1[o] += dh_out[o];
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn backprop_avx512(
+    x: &[f64],
+    h_pre: &[f64],
+    h: &[f64],
+    dl_dy: f64,
+    gw1: &mut [f64],
+    gb1: &mut [f64],
+    w2: &[f64],
+    gw2: &mut [f64],
+    gb2: &mut [f64],
+    n_features: usize,
+    n_hidden: usize,
+    alpha: f64,
+) {
+    use std::arch::x86_64::{
+        _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_mask_fmadd_pd, _mm512_mask_storeu_pd,
+        _mm512_maskz_loadu_pd, _mm512_set1_pd, _mm512_storeu_pd,
+    };
+
+    let n_chunks = n_hidden / 8;
+    let tail_start = n_chunks * 8;
+    let n4 = n_hidden - (n_hidden % 4);
+    let mid_fused = tail_start + 4 <= n4;
+
+    let mut dl_dh_pre = vec![0.0f64; n_hidden];
+    unsafe {
+        backprop_avx512_head(
+            h_pre,
+            h,
+            dl_dy,
+            &mut dl_dh_pre,
+            gb1,
+            w2,
+            gw2,
+            gb2,
+            n_hidden,
+            alpha,
+        );
+    }
+    let dl_dh_pre_ptr = dl_dh_pre.as_mut_ptr();
 
     // 2) gw1 row update: for each i, if x[i] != 0,
     //    gw1[i*N + j] += x[i] * dl_dh_pre[j] for all j.
@@ -490,23 +622,6 @@ unsafe fn backprop_avx512(
         for j in n4..n_hidden {
             gw1[row_off + j] += s * dl_dh_pre[j];
         }
-    }
-
-    // 3) gb1[o] += dl_dh_pre[o] — a pure add per element, identical
-    //    under any lane split.
-    let gb1_ptr = gb1.as_mut_ptr();
-    for c in 0..n_chunks {
-        let off = c * 8;
-        unsafe {
-            let gb_v = _mm512_loadu_pd(gb1_ptr.add(off));
-            let dh_v = _mm512_loadu_pd(dl_dh_pre_ptr.add(off));
-            let one = _mm512_set1_pd(1.0);
-            let gb_new = _mm512_fmadd_pd(dh_v, one, gb_v);
-            _mm512_storeu_pd(gb1_ptr.add(off), gb_new);
-        }
-    }
-    for o in tail_start..n_hidden {
-        gb1[o] += dl_dh_pre[o];
     }
 }
 
@@ -696,19 +811,20 @@ unsafe fn forward_avx2(
     (y, h_pre, h)
 }
 
+/// AVX2 form of the gw1-independent backprop head. Writes `dh_out`
+/// (caller-provided `dl_dh_pre`), updates gw2/gb1/gb2 — identical
+/// arithmetic to the head section of `backprop_avx2`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
-unsafe fn backprop_avx2(
-    x: &[f64],
+unsafe fn backprop_avx2_head(
     h_pre: &[f64],
     h: &[f64],
     dl_dy: f64,
-    gw1: &mut [f64],
+    dh_out: &mut [f64],
     gb1: &mut [f64],
     w2: &[f64],
     gw2: &mut [f64],
     gb2: &mut [f64],
-    n_features: usize,
     n_hidden: usize,
     alpha: f64,
 ) {
@@ -723,8 +839,7 @@ unsafe fn backprop_avx2(
     let alpha_vec = unsafe { _mm256_set1_pd(alpha) };
     let zero_vec = unsafe { _mm256_setzero_pd() };
 
-    let mut dl_dh_pre = vec![0.0f64; n_hidden];
-    let dl_dh_pre_ptr = dl_dh_pre.as_mut_ptr();
+    let dl_dh_pre_ptr = dh_out.as_mut_ptr();
     let gw2_ptr = gw2.as_mut_ptr();
     let gb1_ptr = gb1.as_mut_ptr();
 
@@ -756,11 +871,48 @@ unsafe fn backprop_avx2(
         gw2[o] += dl_dy * h[o];
         let dh = dl_dy * w2[o];
         let dh_gated = if h_pre[o] >= 0.0 { dh } else { alpha * dh };
-        dl_dh_pre[o] = dh_gated;
+        dh_out[o] = dh_gated;
         gb1[o] += dh_gated;
     }
 
     gb2[0] += dl_dy;
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn backprop_avx2(
+    x: &[f64],
+    h_pre: &[f64],
+    h: &[f64],
+    dl_dy: f64,
+    gw1: &mut [f64],
+    gb1: &mut [f64],
+    w2: &[f64],
+    gw2: &mut [f64],
+    gb2: &mut [f64],
+    n_features: usize,
+    n_hidden: usize,
+    alpha: f64,
+) {
+    let n_chunks = n_hidden / 4;
+    let tail_start = n_chunks * 4;
+
+    let mut dl_dh_pre = vec![0.0f64; n_hidden];
+    unsafe {
+        backprop_avx2_head(
+            h_pre,
+            h,
+            dl_dy,
+            &mut dl_dh_pre,
+            gb1,
+            w2,
+            gw2,
+            gb2,
+            n_hidden,
+            alpha,
+        );
+    }
+    let dl_dh_pre_ptr = dl_dh_pre.as_mut_ptr();
 
     // Ascending nonzero-feature index set — same skip set as the old
     // `s == 0.0` continue.

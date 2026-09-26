@@ -96,3 +96,8 @@ harness = false
 name = "optmlp_iai"
 path = "benches/optmlp_iai.rs"
 harness = false
+
+[[bench]]
+name = "fusedstep_iai"
+path = "benches/fusedstep_iai.rs"
+harness = false

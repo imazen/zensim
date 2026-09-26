@@ -118,3 +118,4 @@ apidoc/target/
 /target-*/
 /target-*
 .jj/
+.workongoing

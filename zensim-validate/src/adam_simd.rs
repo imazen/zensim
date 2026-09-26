@@ -759,6 +759,270 @@ fn adam_update_inner_scalar(_token: archmage::ScalarToken, args: &mut AdamUpdate
     adam_update_scalar_fused(args);
 }
 
+// =============================================================================
+// FUSED K=1 PAIR UPDATE — layer-1 weights only
+// =============================================================================
+//
+// Replaces the per-pair sequence
+//
+//   backprop_step(A) → gw1[i] += xa[i]·dha[j]      (FMA / mul+add per row domain)
+//   backprop_step(B) → gw1[i] += xb[i]·dhb[j]
+//   add_l2_grad_layer1 → gw1[i] += sm[i/nh]·w[i]   (mul+add, never FMA)
+//   adam_update → consume gw1, write w/m/v, store g=0
+//
+// with one pass that holds `g` in a register across the whole chain. Every
+// element still sees the identical op sequence in the identical order, so the
+// result is bit-identical — the only change is that gw1 is not round-tripped
+// through L1 between passes (≈1.6 MB/pair of traffic at 944×32).
+//
+// Domain splits preserved exactly (the "same ops per element" contract):
+//   * backprop contributions: FMA (`s.mul_add(dh, g)`) on lanes j < n4h,
+//     mul+add on the per-row AVX2 tail [n4h, n_hidden) — the kernel is only
+//     dispatched when n_hidden % 4 == 0, so the whole row is fused-domain.
+//   * Adam arithmetic: vector (FMA) domain on [0, n − n%4); scalar_ref on
+//     the flat tail. n = n_features·n_hidden is a multiple of 4 whenever
+//     n_hidden % 4 == 0, so the tail is empty on the gated path.
+//   * `x[i] == 0.0` skips that row's contribution exactly like
+//     `backprop_*`'s nonzero-feature filter.
+//   * L2 applies iff `l2_scale > 0.0` (same gate as the call site); with a
+//     per-feature multiplier `sm = l2_scale * mult[row]` is hoisted per row
+//     exactly as `add_l2_grad_layer1` does.
+//
+// Non-v3 tiers route through `adam_pair_fused_fallback`: a scalar
+// accumulation of the identical elementwise op sequence into `g`, then the
+// regular `adam_update` dispatch — bit-identical by composition (every tier's
+// adam is already AVX2-parity per the tierparity contract).
+
+/// Parameter block for the fused pair update on layer-1 weights.
+/// `w/g/m/v` are the Adam state; `xa`/`xb` are the pair's feature vectors
+/// and `dha`/`dhb` their precomputed `dl_dh_pre` vectors
+/// (`simd_mlp::backprop_grad_head` output).
+#[derive(Debug)]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+pub(crate) struct AdamW1FusedArgs<'a> {
+    pub w: &'a mut [f64],
+    pub g: &'a mut [f64],
+    pub m: &'a mut [f64],
+    pub v: &'a mut [f64],
+    pub xa: &'a [f64],
+    pub dha: &'a [f64],
+    pub xb: &'a [f64],
+    pub dhb: &'a [f64],
+    pub l2_scale: f64,
+    pub l2_mult: Option<&'a [f64]>,
+    pub n_hidden: usize,
+    pub beta1: f64,
+    pub beta2: f64,
+    pub eps: f64,
+    pub bc1: f64,
+    pub bc2: f64,
+    pub lr: f64,
+}
+
+/// Dispatch entry for the fused pair update. Caller contract: `n_hidden > 0`,
+/// `n_hidden % 4 == 0`, `w/g/m/v` equal length with `w.len() % n_hidden == 0`,
+/// `xa/xb.len() >= w.len()/n_hidden`, `dha/dhb.len() >= n_hidden`.
+#[inline]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+pub(crate) fn adam_update_w1_fused(args: &mut AdamW1FusedArgs<'_>) {
+    debug_assert_eq!(args.w.len(), args.g.len());
+    debug_assert_eq!(args.w.len(), args.m.len());
+    debug_assert_eq!(args.w.len(), args.v.len());
+    if args.n_hidden == 0
+        || !args.n_hidden.is_multiple_of(4)
+        || !args.w.len().is_multiple_of(args.n_hidden)
+    {
+        // The v3 kernel walks full 4-lane row chunks; off-grid shapes take
+        // the composition fallback (still bit-identical to the unfused
+        // sequence — the fallback reproduces its per-element ops exactly).
+        adam_pair_fused_fallback(args);
+        return;
+    }
+    incant!(adam_pair_fused_inner(args), [+v4])
+}
+
+/// Scalar-fallback body shared by every non-v3 arm: replays the exact
+/// unfused element sequence (backprop A, backprop B, L2) into `g` — fused
+/// `mul_add` on the per-row canonical domain, mul+add on the AVX2 tail —
+/// then runs the regular tier-dispatched `adam_update`.
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+fn adam_pair_fused_fallback(args: &mut AdamW1FusedArgs<'_>) {
+    let nh = args.n_hidden;
+    let n = args.w.len();
+    let n_rows = n / nh;
+    let n4h = nh - nh % 4;
+    for row in 0..n_rows {
+        let base = row * nh;
+        let sa = args.xa[row];
+        let sb = args.xb[row];
+        for j in 0..nh {
+            let i = base + j;
+            if j < n4h {
+                if sa != 0.0 {
+                    args.g[i] = sa.mul_add(args.dha[j], args.g[i]);
+                }
+                if sb != 0.0 {
+                    args.g[i] = sb.mul_add(args.dhb[j], args.g[i]);
+                }
+            } else {
+                if sa != 0.0 {
+                    args.g[i] += sa * args.dha[j];
+                }
+                if sb != 0.0 {
+                    args.g[i] += sb * args.dhb[j];
+                }
+            }
+        }
+    }
+    // L2 — mul+add, row-hoisted `sm` exactly as add_l2_grad_layer1.
+    if args.l2_scale > 0.0 {
+        match args.l2_mult {
+            None => {
+                for (g, &w) in args.g.iter_mut().zip(args.w.iter()) {
+                    *g += args.l2_scale * w;
+                }
+            }
+            Some(mult) => {
+                for (feat, (grow, wrow)) in args.g.chunks_mut(nh).zip(args.w.chunks(nh)).enumerate()
+                {
+                    let sm = args.l2_scale * mult[feat];
+                    for (g, &w) in grow.iter_mut().zip(wrow.iter()) {
+                        *g += sm * w;
+                    }
+                }
+            }
+        }
+    }
+    adam_update(&mut AdamUpdateArgs {
+        w: args.w,
+        g: args.g,
+        m: args.m,
+        v: args.v,
+        beta1: args.beta1,
+        beta2: args.beta2,
+        eps: args.eps,
+        bc1: args.bc1,
+        bc2: args.bc2,
+        lr: args.lr,
+    });
+}
+
+/// `v4` tier variant. Deliberately NOT a native 8-lane kernel: AVX-512 must
+/// preserve AVX2's fused-domain boundaries (4-lane chunks + canonical tail).
+/// The kernel is purely elementwise and the caller gate guarantees
+/// `n_hidden % 4 == 0`, so the 4-lane v3 body is exact under a v4 token —
+/// run it directly via `token.v3()` instead of the scalar-emulating
+/// fallback (which was bit-identical but ~4× slower on AVX-512 hosts).
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+fn adam_pair_fused_inner_v4(token: archmage::X64V4Token, args: &mut AdamW1FusedArgs<'_>) {
+    adam_pair_fused_inner_v3_body(token.v3(), args);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+fn adam_pair_fused_inner_v3(token: archmage::X64V3Token, args: &mut AdamW1FusedArgs<'_>) {
+    adam_pair_fused_inner_v3_body(token, args);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+fn adam_pair_fused_inner_v3_body(token: archmage::X64V3Token, args: &mut AdamW1FusedArgs<'_>) {
+    let beta1_v = f64x4::splat(token, args.beta1);
+    let beta2_v = f64x4::splat(token, args.beta2);
+    let one_minus_b1_v = f64x4::splat(token, 1.0 - args.beta1);
+    let one_minus_b2_v = f64x4::splat(token, 1.0 - args.beta2);
+    let inv_bc1_v = f64x4::splat(token, 1.0 / args.bc1);
+    let inv_bc2_v = f64x4::splat(token, 1.0 / args.bc2);
+    let lr_v = f64x4::splat(token, args.lr);
+    let eps_v = f64x4::splat(token, args.eps);
+    let zero_v = f64x4::zero(token);
+
+    let nh = args.n_hidden;
+    let n = args.w.len();
+    let n_rows = n / nh;
+    let l2_on = args.l2_scale > 0.0;
+    let (dha_chunks, _) = args.dha[..nh].as_chunks::<4>();
+    let (dhb_chunks, _) = args.dhb[..nh].as_chunks::<4>();
+
+    for row in 0..n_rows {
+        let base = row * nh;
+        let sa = args.xa[row];
+        let sb = args.xb[row];
+        let sa_v = f64x4::splat(token, sa);
+        let sb_v = f64x4::splat(token, sb);
+        let do_a = sa != 0.0;
+        let do_b = sb != 0.0;
+        let sm_v = f64x4::splat(
+            token,
+            match args.l2_mult {
+                Some(mult) => args.l2_scale * mult[row],
+                None => args.l2_scale,
+            },
+        );
+        let (w_chunks, _) = args.w[base..base + nh].as_chunks_mut::<4>();
+        let (g_chunks, _) = args.g[base..base + nh].as_chunks_mut::<4>();
+        let (m_chunks, _) = args.m[base..base + nh].as_chunks_mut::<4>();
+        let (v_chunks, _) = args.v[base..base + nh].as_chunks_mut::<4>();
+        for (c, (((wc, gc), mc), vc)) in w_chunks
+            .iter_mut()
+            .zip(g_chunks.iter_mut())
+            .zip(m_chunks.iter_mut())
+            .zip(v_chunks.iter_mut())
+            .enumerate()
+        {
+            let mut g = f64x4::load(token, gc);
+            if do_a {
+                g = sa_v.mul_add(f64x4::load(token, &dha_chunks[c]), g);
+            }
+            if do_b {
+                g = sb_v.mul_add(f64x4::load(token, &dhb_chunks[c]), g);
+            }
+            let w = f64x4::load(token, wc);
+            if l2_on {
+                // mul+add — two roundings, matching l2_row_avx exactly.
+                g += sm_v * w;
+            }
+            let m = f64x4::load(token, mc);
+            let v = f64x4::load(token, vc);
+            let m_new = one_minus_b1_v.mul_add(g, beta1_v * m);
+            let gg = g * g;
+            let v_new = one_minus_b2_v.mul_add(gg, beta2_v * v);
+            let m_hat = m_new * inv_bc1_v;
+            let v_hat = v_new * inv_bc2_v;
+            let denom = v_hat.sqrt() + eps_v;
+            let w_new = w - (lr_v * m_hat) / denom;
+            m_new.store(mc);
+            v_new.store(vc);
+            w_new.store(wc);
+            zero_v.store(gc);
+        }
+    }
+}
+
+/// `neon` tier variant — routes to the scalar-emulating fallback.
+#[cfg(target_arch = "aarch64")]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+fn adam_pair_fused_inner_neon(_token: archmage::NeonToken, args: &mut AdamW1FusedArgs<'_>) {
+    adam_pair_fused_fallback(args);
+}
+
+/// `wasm128` tier variant — routes to the scalar-emulating fallback.
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+fn adam_pair_fused_inner_wasm128(_token: archmage::Wasm128Token, args: &mut AdamW1FusedArgs<'_>) {
+    adam_pair_fused_fallback(args);
+}
+
+/// `scalar` tier variant — routes to the scalar-emulating fallback.
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
+fn adam_pair_fused_inner_scalar(_token: archmage::ScalarToken, args: &mut AdamW1FusedArgs<'_>) {
+    adam_pair_fused_fallback(args);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1049,5 +1313,373 @@ mod tests {
         });
         eprintln!("permutations run: {}", report.permutations_run);
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    // ---- fused K=1 pair update (fusedstep lane) ----
+
+    /// Unfused oracle: replicate `backprop_*`'s gw1 row sweep (row skip on
+    /// `x == 0.0`; FMA on `j < n4h`, mul+add tail) + `add_l2_grad_layer1`
+    /// (mul+add, per-row `sm`) + the tier-dispatched `adam_update` — the
+    /// exact sequence `mlp_train` runs per pair.
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)] // oracle mirrors the kernel signature 1:1
+    fn unfused_w1_oracle(
+        w: &mut [f64],
+        g: &mut [f64],
+        m: &mut [f64],
+        v: &mut [f64],
+        xa: &[f64],
+        dha: &[f64],
+        xb: &[f64],
+        dhb: &[f64],
+        l2: f64,
+        mult: Option<&[f64]>,
+        nh: usize,
+        t: u64,
+    ) {
+        let n = w.len();
+        let n4h = nh - nh % 4;
+        for r in 0..n / nh {
+            let base = r * nh;
+            let sa = xa[r];
+            if sa != 0.0 {
+                for (j, &dh) in dha.iter().enumerate().take(nh) {
+                    let i = base + j;
+                    if j < n4h {
+                        g[i] = sa.mul_add(dh, g[i]);
+                    } else {
+                        g[i] += sa * dh;
+                    }
+                }
+            }
+            let sb = xb[r];
+            if sb != 0.0 {
+                for (j, &dh) in dhb.iter().enumerate().take(nh) {
+                    let i = base + j;
+                    if j < n4h {
+                        g[i] = sb.mul_add(dh, g[i]);
+                    } else {
+                        g[i] += sb * dh;
+                    }
+                }
+            }
+        }
+        if l2 > 0.0 {
+            match mult {
+                None => {
+                    for (gg, &ww) in g.iter_mut().zip(w.iter()) {
+                        *gg += l2 * ww;
+                    }
+                }
+                Some(mm) => {
+                    for (f, (gr, wr)) in g.chunks_mut(nh).zip(w.chunks(nh)).enumerate() {
+                        let sm = l2 * mm[f];
+                        for (gg, &ww) in gr.iter_mut().zip(wr.iter()) {
+                            *gg += sm * ww;
+                        }
+                    }
+                }
+            }
+        }
+        adam_update(&mut make_args(w, g, m, v, t));
+    }
+
+    /// Deliberate order perturbation for the input-sensitivity check: L2
+    /// before side B's contribution. Hand-written replica — never calls
+    /// the kernel under test.
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)] // oracle mirrors the kernel signature 1:1
+    fn fused_wrong_order(
+        w: &mut [f64],
+        g: &mut [f64],
+        m: &mut [f64],
+        v: &mut [f64],
+        xa: &[f64],
+        dha: &[f64],
+        xb: &[f64],
+        dhb: &[f64],
+        l2: f64,
+        mult: Option<&[f64]>,
+        nh: usize,
+        t: u64,
+    ) {
+        let l2_on = l2 > 0.0;
+        for r in 0..w.len() / nh {
+            let sa = xa[r];
+            let sb = xb[r];
+            let sm = match mult {
+                Some(mm) => l2 * mm[r],
+                None => l2,
+            };
+            for j in 0..nh {
+                let i = r * nh + j;
+                let mut gg = g[i];
+                if sa != 0.0 {
+                    gg = sa.mul_add(dha[j], gg);
+                }
+                if l2_on {
+                    gg += sm * w[i];
+                }
+                if sb != 0.0 {
+                    gg = sb.mul_add(dhb[j], gg);
+                }
+                g[i] = gg;
+            }
+        }
+        adam_update(&mut make_args(w, g, m, v, t));
+    }
+
+    #[allow(dead_code)]
+    fn pair_inputs(nf: usize, nh: usize, seed: u64) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let (xa, _, _, _) = synth_state(nf, seed);
+        let (xb, _, _, _) = synth_state(nf, seed ^ 0x51);
+        let (dha, _, _, _) = synth_state(nh, seed ^ 0x52);
+        let (dhb, _, _, _) = synth_state(nh, seed ^ 0x53);
+        // ~1/7 of rows zeroed on each side — exercises the row-skip path.
+        let xa: Vec<f64> = xa
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| if i % 7 == 3 { 0.0 } else { x })
+            .collect();
+        let xb: Vec<f64> = xb
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| if i % 5 == 1 { 0.0 } else { x })
+            .collect();
+        (xa, xb, dha, dhb)
+    }
+
+    /// The dispatched `adam_update_w1_fused` reproduces the unfused sequence
+    /// bit-for-bit on every gated shape; off-grid shapes (nh%4!=0) route to
+    /// the composition fallback, which must match too.
+    ///
+    /// NOTE on `black_box(t)`: `f64::powi` with a compile-time-known exponent
+    /// can const-fold to a different bit pattern than the same call evaluated
+    /// at runtime (CTFE vs `llvm.powi` lowering disagree by ~1ulp). The oracle
+    /// computes `bc1`/`bc2` inside `make_args` with a runtime `t`; the fused
+    /// args must take the same runtime path or the two sides run Adam with
+    /// different bias corrections and the comparison is meaningless.
+    #[test]
+    fn fused_w1_bit_identical_dispatch() {
+        for &(nf, nh) in &[
+            (4usize, 4usize),
+            (7, 8),
+            (13, 16),
+            (944, 32),
+            (372, 128),
+            (5, 6), // nh%4!=0 → fallback
+            (9, 3), // nh%4!=0 → fallback
+        ] {
+            for has_mult in [false, true] {
+                for l2 in [0.0f64, 1e-5, 0.3] {
+                    let n = nf * nh;
+                    let seed = 0xB17_1D3A ^ ((nf as u64) << 24) ^ nh as u64;
+                    let (w0, g0, m0, v0) = synth_state(n, seed);
+                    let (xa, xb, dha, dhb) = pair_inputs(nf, nh, seed);
+                    let mult: Option<Vec<f64>> = if has_mult {
+                        Some(
+                            synth_state(nf, seed ^ 0x77)
+                                .0
+                                .iter()
+                                .map(|x| x.abs() + 0.5)
+                                .collect(),
+                        )
+                    } else {
+                        None
+                    };
+                    let (mut wo, mut go, mut mo, mut vo) =
+                        (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+                    let t = std::hint::black_box(3u64);
+                    unfused_w1_oracle(
+                        &mut wo,
+                        &mut go,
+                        &mut mo,
+                        &mut vo,
+                        &xa,
+                        &dha,
+                        &xb,
+                        &dhb,
+                        l2,
+                        mult.as_deref(),
+                        nh,
+                        t,
+                    );
+                    let (mut wf, mut gf, mut mf, mut vf) =
+                        (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+                    adam_update_w1_fused(&mut AdamW1FusedArgs {
+                        w: &mut wf,
+                        g: &mut gf,
+                        m: &mut mf,
+                        v: &mut vf,
+                        xa: &xa,
+                        dha: &dha,
+                        xb: &xb,
+                        dhb: &dhb,
+                        l2_scale: l2,
+                        l2_mult: mult.as_deref(),
+                        n_hidden: nh,
+                        beta1: 0.9,
+                        beta2: 0.999,
+                        eps: 1e-8,
+                        bc1: 1.0 - 0.9f64.powi(t as i32),
+                        bc2: 1.0 - 0.999f64.powi(t as i32),
+                        lr: 0.005,
+                    });
+                    for (name, a, b) in [
+                        ("w", &wo, &wf),
+                        ("g", &go, &gf),
+                        ("m", &mo, &mf),
+                        ("v", &vo, &vf),
+                    ] {
+                        assert_eq!(
+                            bits_of(a),
+                            bits_of(b),
+                            "fused diverged: {name} nf={nf} nh={nh} mult={has_mult} l2={l2}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Per-tier check: the v3 fused kernel and the scalar-tier fallback
+    /// must each reproduce the unfused oracle bit-for-bit.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn fused_w1_per_tier_bit_identical() {
+        use archmage::SimdToken;
+        let _lock = archmage::testing::lock_token_testing();
+        let v3 =
+            archmage::X64V3Token::summon().expect("this test needs an x86-64-v3 (AVX2+FMA) host");
+        let sc = archmage::ScalarToken::summon().expect("scalar token");
+        let v4 = archmage::X64V4Token::summon();
+        for &(nf, nh) in &[(6usize, 4usize), (944, 32), (372, 128), (33, 12)] {
+            for has_mult in [false, true] {
+                let n = nf * nh;
+                let seed = 0xF00D ^ ((nf as u64) << 24) ^ nh as u64;
+                let (w0, g0, m0, v0) = synth_state(n, seed);
+                let (xa, xb, dha, dhb) = pair_inputs(nf, nh, seed);
+                let mult: Option<Vec<f64>> = if has_mult {
+                    Some(
+                        synth_state(nf, seed ^ 0x99)
+                            .0
+                            .iter()
+                            .map(|x| x.abs() + 0.5)
+                            .collect(),
+                    )
+                } else {
+                    None
+                };
+                let (mut wo, mut go, mut mo, mut vo) =
+                    (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+                // `black_box(t)`: keeps `powi(t)` on the runtime path in BOTH
+                // the oracle (`make_args`) and the fused args below —
+                // CTFE-folded `powi(5)` differs from runtime `powi(5)` by ~1ulp.
+                let t = std::hint::black_box(5u64);
+                unfused_w1_oracle(
+                    &mut wo,
+                    &mut go,
+                    &mut mo,
+                    &mut vo,
+                    &xa,
+                    &dha,
+                    &xb,
+                    &dhb,
+                    1e-5,
+                    mult.as_deref(),
+                    nh,
+                    t,
+                );
+                let check = |tier: &str, run: &dyn Fn(&mut AdamW1FusedArgs<'_>)| {
+                    let (mut wt, mut gt, mut mt, mut vt) =
+                        (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+                    run(&mut AdamW1FusedArgs {
+                        w: &mut wt,
+                        g: &mut gt,
+                        m: &mut mt,
+                        v: &mut vt,
+                        xa: &xa,
+                        dha: &dha,
+                        xb: &xb,
+                        dhb: &dhb,
+                        l2_scale: 1e-5,
+                        l2_mult: mult.as_deref(),
+                        n_hidden: nh,
+                        beta1: 0.9,
+                        beta2: 0.999,
+                        eps: 1e-8,
+                        bc1: 1.0 - 0.9f64.powi(t as i32),
+                        bc2: 1.0 - 0.999f64.powi(t as i32),
+                        lr: 0.005,
+                    });
+                    for (name, a, b) in [
+                        ("w", &wo, &wt),
+                        ("g", &go, &gt),
+                        ("m", &mo, &mt),
+                        ("v", &vo, &vt),
+                    ] {
+                        let i = a
+                            .iter()
+                            .zip(b.iter())
+                            .position(|(x, y)| x.to_bits() != y.to_bits());
+                        assert_eq!(
+                            i,
+                            None,
+                            "fused {tier} diverged: {name} nf={nf} nh={nh} mult={has_mult} \
+                             first i={:?} (row={} j={})",
+                            i,
+                            i.map(|i| i / nh).unwrap_or(0),
+                            i.map(|i| i % nh).unwrap_or(0),
+                        );
+                    }
+                };
+                check("v3", &|a| adam_pair_fused_inner_v3(v3, a));
+                check("scalar", &|a| adam_pair_fused_inner_scalar(sc, a));
+                // v4 routes to the v3 body via `token.v3()` (the kernel is
+                // elementwise and nh%4==0 keeps every row in the fused
+                // domain); arm it wherever the host provides AVX-512.
+                if let Some(v4) = v4 {
+                    check("v4", &|a| adam_pair_fused_inner_v4(v4, a));
+                }
+            }
+        }
+    }
+
+    /// Input-sensitivity check (NOT a kernel negative control): the same
+    /// fused element sequence with L2 applied *before* side B's
+    /// contribution must produce different bits — otherwise the test data
+    /// is insensitive to ordering and the equivalence asserts above would
+    /// be vacuous. This compares two hand-written replicas; it never runs
+    /// the kernel. Kernel-level mutation evidence (reordered v3 kernels
+    /// are caught) is recorded in the lane report / Opus review mutation
+    /// table.
+    #[test]
+    fn fused_w1_negative_control_order_matters() {
+        let (nf, nh) = (944usize, 32usize);
+        let n = nf * nh;
+        let seed = 0xC0FFEEu64;
+        let (w0, g0, m0, v0) = synth_state(n, seed);
+        let (xa, xb, dha, dhb) = pair_inputs(nf, nh, seed);
+        let (mut wo, mut go, mut mo, mut vo) = (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+        unfused_w1_oracle(
+            &mut wo, &mut go, &mut mo, &mut vo, &xa, &dha, &xb, &dhb, 1e-5, None, nh, 3,
+        );
+        let (mut wp, mut gp, mut mp, mut vp) = (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+        fused_wrong_order(
+            &mut wp, &mut gp, &mut mp, &mut vp, &xa, &dha, &xb, &dhb, 1e-5, None, nh, 3,
+        );
+        let diffs: usize = [(&wo, &wp), (&go, &gp), (&mo, &mp), (&vo, &vp)]
+            .iter()
+            .map(|(a, b)| {
+                a.iter()
+                    .zip(b.iter())
+                    .filter(|(x, y)| x.to_bits() != y.to_bits())
+                    .count()
+            })
+            .sum();
+        assert!(
+            diffs > 0,
+            "negative control: reordered L2 produced identical bits — the oracle is insensitive"
+        );
     }
 }
