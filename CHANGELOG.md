@@ -128,6 +128,9 @@
 
 ### Fixed
 
+- Align x86 edge-only horizontal-blur tail accumulation with the full-feature path; cover narrow and odd-width tails in the bit-exact regression (7d6d7451).
+- Gate fractional attribution helpers with their actual v2 callers, avoiding dead-code warnings in partial-feature builds (ad18b444).
+
 - `BakeScorer` no longer refuses a corruption companion whose feature ids a
   narrow (local-only basic) base plan does not populate; the extraction is the
   union of both plans (2695ef5f).

@@ -158,6 +158,14 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-09-26 — x86 edge-only horizontal-blur tails: FIXED in 7d6d7451.**
+  Scalar remainders now accumulate `(sum + add) - remove`, matching the full-feature
+  path. The existing bit-exact regression includes narrow and odd-width inputs.
+  The Margarine ablation previously differed in 30/168 values on a 17×19 fixture
+  (maximum absolute difference 5.960464477539063e-8). The unchanged consumer
+  test passes with this repair. Fractional attribution helpers are separately
+  gated with their v2 callers in ad18b444; no arithmetic changed there.
+
 * **2026-09-25 — two extraction paths disagree on pixel-identical pairs. OPEN.** `BakeScorer::compute` (the
   `--full-944` extractor route, which built the Rev4 bank's old family) returns the identity short-circuit
   (`metric.rs` `identical_result_at`: score 100 and an all-zero feature vector), while `research::extract`
