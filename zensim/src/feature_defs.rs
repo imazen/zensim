@@ -435,6 +435,16 @@ pub enum FormulaRevision {
     /// Revision 2 plus stable f64 pairwise-error moments for v1 SSIM
     /// basic, peak, masked and IW signals. Requires freshly extracted data.
     Rev3,
+    /// Revision 3 formulas under **canonical arithmetic** (the `tiercanon`
+    /// era): every feature-producing leaf runs ONE source-level body with
+    /// fused `f32::mul_add`, fixed 8-virtual-lane pools and a fixed pairwise
+    /// reduce, so all SIMD tiers emit bit-identical output. Requires freshly
+    /// extracted data: the pooling ORDER is tier-width-independent but not
+    /// equal to any shipped tier's, so any slot it touches can move.
+    /// Measured on 11 real pairs: 837 of 1825 slots move vs production AVX2
+    /// (all families), worst-case error vs the f64 exact oracle unchanged
+    /// (error lives in element arithmetic, not accumulation order).
+    Rev4,
 }
 
 impl FormulaRevision {
@@ -454,6 +464,17 @@ impl FormulaRevision {
                 "v1ssimstable",
                 "v2ssimstable",
                 "v1extfused",
+            ],
+            Self::Rev4 => &[
+                "v1ssimcap",
+                "freecomp",
+                "v1hfgain",
+                "v1detroot",
+                "scorepow",
+                "v1ssimstable",
+                "v2ssimstable",
+                "v1extfused",
+                "tiercanon",
             ],
         }
     }
@@ -484,7 +505,7 @@ impl FormulaRevision {
     /// remaining free-vs-append gap into a MEASUREMENT of the append route's
     /// own error (plan R4) rather than an unattributed disagreement.
     pub(crate) const fn paired_global_contrast(self) -> bool {
-        matches!(self, Self::Rev2 | Self::Rev3)
+        matches!(self, Self::Rev2 | Self::Rev3 | Self::Rev4)
     }
 
     /// Every slot id this revision moves, derived from the signal table's own
@@ -514,6 +535,15 @@ impl FormulaRevision {
 /// era-level fact through a revision-level instrument, which was correct only
 /// while the revision had one v1 era in it.
 pub(crate) fn era_moved_slots(era: &str, width: u16, n_scales: usize) -> Vec<u16> {
+    // `tiercanon` is not a per-signal era: canonical pooling order can move
+    // ANY slot a canonical leaf feeds (837/1825 measured on the audit set,
+    // content-dependent), so the honest registration is every live slot.
+    if era == "tiercanon" {
+        return (0..width as usize)
+            .filter_map(|id| def_at(id, n_scales))
+            .map(|d| d.id)
+            .collect();
+    }
     (0..width as usize)
         .filter_map(|id| def_at(id, n_scales))
         .filter(|d| d.signal.revisions.iter().any(|r| r.era == era))

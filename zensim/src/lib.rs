@@ -218,6 +218,7 @@
 mod attribution;
 mod blur;
 mod color;
+pub(crate) mod featcanon;
 // The companion CORRUPTION HEAD (`docs/PLAN_CORRHEAD_SERVING_2026-09-06.md`):
 // a gradient-boosted tree ensemble in its own `ZCTH` wire format, plus the ONE
 // owner of the deploy composition `gate_score`. Gated and `#[doc(hidden)]`:

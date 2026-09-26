@@ -1928,7 +1928,7 @@ fn process_strip_channel(
         config
             .formula_revision
             .unwrap_or_else(crate::ssim_form::active_revision),
-    ) == crate::feature_defs::FormulaRevision::Rev3;
+    ) >= crate::feature_defs::FormulaRevision::Rev3;
     // Revision 3 fuses the masked/IW extension into the SSIM V sweep
     // (`fused::ExtPoolsWork`): the activity is H-blurred from the H-only
     // `mu1` plane the H pass already wrote, V-blurred inside the same sweep
@@ -8380,6 +8380,7 @@ mod tests {
             crate::feature_defs::FormulaRevision::Rev1 => 1_u64,
             crate::feature_defs::FormulaRevision::Rev2 => 2,
             crate::feature_defs::FormulaRevision::Rev3 => 3,
+            crate::feature_defs::FormulaRevision::Rev4 => 4,
         };
         let expected = spec
             .get("formula_revision")

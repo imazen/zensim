@@ -4291,7 +4291,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
-    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
     let c1 = V8::<T>::splat(token, C1_V2 as f32);
@@ -6399,10 +6399,131 @@ fn csfw_block_kernel(
     width: usize,
     height: usize,
 ) -> CsfwAccum {
+    if crate::featcanon::active() {
+        return csfw_block_kernel_canon(src, dst, ref_y, eff, width, height);
+    }
     incant!(
         csfw_block_kernel_entry(src, dst, ref_y, eff, width, height),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
+}
+
+/// **FEATCANON canonical CSFW kernel.** One plain-Rust body — identical on
+/// every tier by construction: the Horner weight `w = b0 + y·(b1 + y·b2)`
+/// stays fused (`f32::mul_add`), the per-pixel form is the VECTOR body's
+/// (the production scalar tail computes `w` in f64 — a different element
+/// value — so canonical pins the chunk form for every pixel), and the five
+/// sums run through `featcanon::Pool` (lane = x mod 8, one fixed reduce per
+/// row). `exact` mode evaluates in f64 + Neumaier.
+#[allow(clippy::manual_clamp)]
+fn csfw_block_kernel_canon(
+    src: &[f32],
+    dst: &[f32],
+    ref_y: &[f32],
+    eff: [f64; 3],
+    width: usize,
+    height: usize,
+) -> CsfwAccum {
+    use crate::featcanon::{Mode, Neum64, Pool as _};
+    let b0 = eff[0] as f32;
+    let b1 = eff[1] as f32;
+    let b2 = eff[2] as f32;
+    let w_min = CSFW_W_MIN as f32;
+    let w_max = CSFW_W_MAX as f32;
+    let exact = crate::featcanon::mode() == Mode::Exact;
+
+    let mut acc = CsfwAccum::default();
+    for y in 0..height {
+        let row = y * width;
+        if exact {
+            let mut p_w = Neum64::zero();
+            let mut p_ws = Neum64::zero();
+            let mut p_wd = Neum64::zero();
+            let mut p_ws2 = Neum64::zero();
+            let mut p_wd2 = Neum64::zero();
+            for x in 0..width {
+                let i = row + x;
+                let s = src[i] as f64;
+                let dd = dst[i] as f64;
+                let ry = ref_y[i] as f64;
+                let w = ry
+                    .mul_add(ry.mul_add(eff[2], eff[1]), eff[0])
+                    .max(CSFW_W_MIN)
+                    .min(CSFW_W_MAX);
+                let ws = w * s;
+                let wd = w * dd;
+                p_w.add64(x, w);
+                p_ws.add64(x, ws);
+                p_wd.add64(x, wd);
+                p_ws2.add64(x, ws * s);
+                p_wd2.add64(x, wd * dd);
+            }
+            acc.sum_w += p_w.fin();
+            acc.sum_ws += p_ws.fin();
+            acc.sum_wd += p_wd.fin();
+            acc.sum_ws2 += p_ws2.fin();
+            acc.sum_wd2 += p_wd2.fin();
+            continue;
+        }
+        match crate::featcanon::canon_acc() {
+            Some(crate::featcanon::CanonAcc::F32Lanes) => {
+                csfw_row_canon::<crate::featcanon::LanesF32>(
+                    &mut acc, src, dst, ref_y, row, width, b0, b1, b2, w_min, w_max,
+                );
+            }
+            Some(crate::featcanon::CanonAcc::F64Lanes) => {
+                csfw_row_canon::<crate::featcanon::LanesF64>(
+                    &mut acc, src, dst, ref_y, row, width, b0, b1, b2, w_min, w_max,
+                );
+            }
+            Some(crate::featcanon::CanonAcc::Neumaier) => {
+                csfw_row_canon::<Neum64>(
+                    &mut acc, src, dst, ref_y, row, width, b0, b1, b2, w_min, w_max,
+                );
+            }
+            _ => unreachable!("csfw canon called outside a canon mode"),
+        }
+    }
+    acc
+}
+
+/// One row of the canonical CSFW accumulation (Pool-selected lanes).
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::manual_clamp)]
+fn csfw_row_canon<P: crate::featcanon::Pool>(
+    acc: &mut CsfwAccum,
+    src: &[f32],
+    dst: &[f32],
+    ref_y: &[f32],
+    row: usize,
+    width: usize,
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    w_min: f32,
+    w_max: f32,
+) {
+    let (mut p_w, mut p_ws, mut p_wd, mut p_ws2, mut p_wd2) =
+        (P::zero(), P::zero(), P::zero(), P::zero(), P::zero());
+    for x in 0..width {
+        let i = row + x;
+        let s = src[i];
+        let dd = dst[i];
+        let ry = ref_y[i];
+        let w = ry.mul_add(ry.mul_add(b2, b1), b0).max(w_min).min(w_max);
+        let ws = w * s;
+        let wd = w * dd;
+        p_w.add(x, w);
+        p_ws.add(x, ws);
+        p_wd.add(x, wd);
+        p_ws2.add(x, ws * s);
+        p_wd2.add(x, wd * dd);
+    }
+    acc.sum_w += p_w.fin();
+    acc.sum_ws += p_ws.fin();
+    acc.sum_wd += p_wd.fin();
+    acc.sum_ws2 += p_ws2.fin();
+    acc.sum_wd2 += p_wd2.fin();
 }
 
 /// Finalize one scale's CSFW block into its 3 output slots — the weighted
@@ -7340,7 +7461,7 @@ fn fold_v1_one_band(
             }
         });
         let full = work == BandPoolWork::Full;
-        let stable = free.revision() == crate::feature_defs::FormulaRevision::Rev3;
+        let stable = free.revision() >= crate::feature_defs::FormulaRevision::Rev3;
         if stable && full {
             ps.stable_sd.resize(band_cap_n, 0.0);
         }
@@ -8360,7 +8481,7 @@ pub(crate) fn compute_v2_diffmap_channel_scale(
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
-    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
     let n = width * height;
     assert_eq!(src.len(), n, "src plane length must be width*height");
     assert_eq!(dst.len(), n, "dst plane length must be width*height");
@@ -13331,7 +13452,7 @@ fn attr_pass_b_rows(
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
-    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
     let out_off = y0 * width;
     let cross_on = cross.is_some();
     for y in y0..y1 {
@@ -13942,7 +14063,7 @@ fn attr_pass_b_main_kernel_generic<T: F32x8Backend + Copy>(
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
-    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);
     let sp = |v: f32| V8::<T>::splat(token, v);
@@ -24412,7 +24533,7 @@ pub(crate) mod oracle {
                     s12[i] as f64,
                     ssq[i] as f64,
                     crate::ssim_form::active_revision()
-                        == crate::feature_defs::FormulaRevision::Rev3,
+                        >= crate::feature_defs::FormulaRevision::Rev3,
                 );
                 push(&mut s, &mut sum_abs, 0, d);
                 push(&mut s, &mut sum_abs, 1, d * d);
@@ -24917,7 +25038,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
     // Revision 3 (issue #61): the `s12` plane is the direct error moment, so
     // the v2 SSIM signal must read it as such. Hoisted once per call;
     // loop-invariant, so every call site below unswitches on it.
-    let direct = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
     let _ = FUSED; // the split is chosen by tier; see the entries above
     let zero = V8::<T>::zero(token);
     let one = V8::<T>::splat(token, 1.0);

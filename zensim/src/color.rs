@@ -177,6 +177,10 @@ pub fn srgb_to_positive_xyb_planar_into(
     y_out: &mut [f32],
     b_out: &mut [f32],
 ) {
+    if crate::featcanon::active() {
+        srgb_xyb_canon::<true>(pixels, x_out, y_out, b_out);
+        return;
+    }
     incant!(
         srgb_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
         [v4x, v4, v3, neon, wasm128, scalar]
@@ -207,6 +211,10 @@ pub fn srgb_to_xyb_planar_into(
     y_plane: &mut [f32],
     b_plane: &mut [f32],
 ) {
+    if crate::featcanon::active() {
+        srgb_xyb_canon::<false>(pixels, x_plane, y_plane, b_plane);
+        return;
+    }
     incant!(
         srgb_to_xyb_planar_inner(pixels, x_plane, y_plane, b_plane),
         [v3, neon, wasm128, scalar]
@@ -218,6 +226,229 @@ pub fn srgb_to_xyb_planar_into(
 // positive shift in `srgb_to_positive_xyb_planar_into` and
 // `linear_to_positive_xyb_planar_into`, so the separate shift had no
 // remaining callers.
+
+// ============================================================================
+// FEATCANON canonical + exact opsin conversion
+//
+// The chunk arithmetic of [`OpsinChunk`] written in inherent `f32` ops so that
+// EVERY tier — and every pixel, including the remainder — gets the same bits
+// by construction: fused `mul_add` matrix rows (the v3/v4/neon backends fuse;
+// the scalar and wasm128 magetypes backends do not, which is one of the two
+// known XYB tier divergences), `cbrt_midp_f32` lane-wise (bit-identical to the
+// vector `cbrt_midp`: same seed, same unfused Halley steps), and the
+// absorbance bias `-cbrtf_fast(K_B0)` exactly as the chunk path computes it.
+//
+// The remainder is always run through the chunk arithmetic (zero-padded),
+// never the per-pixel `cbrtf_fast` form — so `n mod 8` no longer picks a
+// different algorithm for the last pixels of a band on any tier.
+//
+// The `*_exact` sibling evaluates the same formula in f64 (real `f64::cbrt`)
+// and rounds once at the f32 plane store — the featcanon "exact" oracle's
+// convention: every arithmetic step exact, rounding only at storage.
+
+/// The absorbance bias, `-cbrtf_fast(K_B0)`, as [`OpsinChunk::new`] builds it.
+#[inline(always)]
+fn absorbance_bias_f32() -> f32 {
+    -cbrtf_fast(K_B0)
+}
+
+/// One pixel of canonical opsin absorbance mix + cube root + positive shift.
+#[inline(always)]
+#[allow(clippy::manual_clamp)]
+fn opsin_px_canon(ab: f32, r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let m0 = K_M00
+        .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
+        .max(0.0);
+    let m1 = K_M10
+        .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
+        .max(0.0);
+    let m2 = K_M20
+        .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
+        .max(0.0);
+    let t0 = magetypes::nostd_math::cbrt_midp_f32(m0);
+    let t1 = magetypes::nostd_math::cbrt_midp_f32(m1);
+    let t2 = magetypes::nostd_math::cbrt_midp_f32(m2);
+    let c0 = t0 + ab;
+    let c1 = t1 + ab;
+    let x = 0.5 * (c0 - c1);
+    let y = 0.5 * (c0 + c1);
+    (x.mul_add(14.0, 0.42), y + 0.01, (t2 - y) + 0.55)
+}
+
+/// One pixel of canonical opsin, no positive shift (the `srgb_to_xyb` form).
+#[inline(always)]
+fn opsin_px_canon_plain(ab: f32, r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let m0 = K_M00
+        .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
+        .max(0.0);
+    let m1 = K_M10
+        .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
+        .max(0.0);
+    let m2 = K_M20
+        .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
+        .max(0.0);
+    let t0 = magetypes::nostd_math::cbrt_midp_f32(m0);
+    let t1 = magetypes::nostd_math::cbrt_midp_f32(m1);
+    let t2 = magetypes::nostd_math::cbrt_midp_f32(m2);
+    let c0 = t0 + ab;
+    let c1 = t1 + ab;
+    (0.5 * (c0 - c1), 0.5 * (c0 + c1), t2)
+}
+
+/// Exact-mode sibling: same formula in f64 with the correctly-rounded(ish)
+/// `f64::cbrt` — the real-arithmetic reference the candidates are measured
+/// against.
+#[inline(always)]
+#[allow(clippy::manual_clamp)]
+fn opsin_px_exact(ab: f64, r: f64, g: f64, b: f64, positive: bool) -> (f64, f64, f64) {
+    let m0 = (K_M00 as f64)
+        .mul_add(
+            r,
+            (K_M01 as f64).mul_add(g, (K_M02 as f64).mul_add(b, K_B0 as f64)),
+        )
+        .max(0.0);
+    let m1 = (K_M10 as f64)
+        .mul_add(
+            r,
+            (K_M11 as f64).mul_add(g, (K_M12 as f64).mul_add(b, K_B0 as f64)),
+        )
+        .max(0.0);
+    let m2 = (K_M20 as f64)
+        .mul_add(
+            r,
+            (K_M21 as f64).mul_add(g, (K_M22 as f64).mul_add(b, K_B0 as f64)),
+        )
+        .max(0.0);
+    let t0 = m0.cbrt();
+    let t1 = m1.cbrt();
+    let t2 = m2.cbrt();
+    let c0 = t0 + ab;
+    let c1 = t1 + ab;
+    let x = 0.5 * (c0 - c1);
+    let y = 0.5 * (c0 + c1);
+    if positive {
+        (x.mul_add(14.0, 0.42), y + 0.01, (t2 - y) + 0.55)
+    } else {
+        (x, y, t2)
+    }
+}
+
+/// Canonical sRGB8 → XYB conversion driver. `POSITIVE` selects the
+/// make-positive shift; `EXACT` selects the f64 element evaluation. One body,
+/// no `incant!` — tier identity is structural (every op is inherent `f32`/`f64`,
+/// correctly rounded or fused per IEEE on every target).
+#[allow(clippy::manual_clamp)]
+pub(crate) fn srgb_xyb_canon<const POSITIVE: bool>(
+    pixels: &[[u8; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let n = pixels.len();
+    if crate::featcanon::exact() {
+        let ab = -(K_B0 as f64).cbrt();
+        for i in 0..n {
+            let r = srgb_u8_to_linear(pixels[i][0]) as f64;
+            let g = srgb_u8_to_linear(pixels[i][1]) as f64;
+            let b = srgb_u8_to_linear(pixels[i][2]) as f64;
+            let (x, y, bb) = opsin_px_exact(ab, r, g, b, POSITIVE);
+            x_out[i] = x as f32;
+            y_out[i] = y as f32;
+            b_out[i] = bb as f32;
+        }
+        return;
+    }
+    let ab = absorbance_bias_f32();
+    // Fixed-size chunks, remainder zero-padded through the same arithmetic —
+    // identical on every tier by construction.
+    let chunks = n / 8;
+    for c in 0..chunks {
+        let base = c * 8;
+        let mut xs = [0.0f32; 8];
+        let mut ys = [0.0f32; 8];
+        let mut bs = [0.0f32; 8];
+        for j in 0..8 {
+            let p = pixels[base + j];
+            let r = srgb_u8_to_linear(p[0]);
+            let g = srgb_u8_to_linear(p[1]);
+            let b = srgb_u8_to_linear(p[2]);
+            let (x, y, bb) = if POSITIVE {
+                opsin_px_canon(ab, r, g, b)
+            } else {
+                opsin_px_canon_plain(ab, r, g, b)
+            };
+            xs[j] = x;
+            ys[j] = y;
+            bs[j] = bb;
+        }
+        x_out[base..base + 8].copy_from_slice(&xs);
+        y_out[base..base + 8].copy_from_slice(&ys);
+        b_out[base..base + 8].copy_from_slice(&bs);
+    }
+    let done = chunks * 8;
+    for i in done..n {
+        let p = pixels[i];
+        let r = srgb_u8_to_linear(p[0]);
+        let g = srgb_u8_to_linear(p[1]);
+        let b = srgb_u8_to_linear(p[2]);
+        let (x, y, bb) = if POSITIVE {
+            opsin_px_canon(ab, r, g, b)
+        } else {
+            opsin_px_canon_plain(ab, r, g, b)
+        };
+        x_out[i] = x;
+        y_out[i] = y;
+        b_out[i] = bb;
+    }
+}
+
+/// Canonical linear-f32 → XYB driver; `CLAMP` is the display-gamut clamp.
+#[allow(clippy::manual_clamp)]
+pub(crate) fn linear_xyb_canon<const CLAMP: bool>(
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let n = pixels.len();
+    if crate::featcanon::exact() {
+        let ab = -(K_B0 as f64).cbrt();
+        for i in 0..n {
+            let p = pixels[i];
+            let (r, g, b) = if CLAMP {
+                (
+                    (p[0] as f64).max(0.0).min(1.0),
+                    (p[1] as f64).max(0.0).min(1.0),
+                    (p[2] as f64).max(0.0).min(1.0),
+                )
+            } else {
+                (p[0] as f64, p[1] as f64, p[2] as f64)
+            };
+            let (x, y, bb) = opsin_px_exact(ab, r, g, b, true);
+            x_out[i] = x as f32;
+            y_out[i] = y as f32;
+            b_out[i] = bb as f32;
+        }
+        return;
+    }
+    let ab = absorbance_bias_f32();
+    for i in 0..n {
+        let p = pixels[i];
+        let (r, g, b) = if CLAMP {
+            (
+                p[0].max(0.0).min(1.0),
+                p[1].max(0.0).min(1.0),
+                p[2].max(0.0).min(1.0),
+            )
+        } else {
+            (p[0], p[1], p[2])
+        };
+        let (x, y, bb) = opsin_px_canon(ab, r, g, b);
+        x_out[i] = x;
+        y_out[i] = y;
+        b_out[i] = bb;
+    }
+}
 
 // --- SIMD implementations ---
 
@@ -1167,6 +1398,10 @@ pub fn linear_to_positive_xyb_planar_into(
     y_out: &mut [f32],
     b_out: &mut [f32],
 ) {
+    if crate::featcanon::active() {
+        linear_xyb_canon::<true>(pixels, x_out, y_out, b_out);
+        return;
+    }
     incant!(
         linear_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
         [v4x, v4, v3, neon, wasm128, scalar]
@@ -1821,6 +2056,10 @@ pub(crate) fn linear_to_positive_xyb_planar_into_unclamped(
     y_out: &mut [f32],
     b_out: &mut [f32],
 ) {
+    if crate::featcanon::active() {
+        linear_xyb_canon::<false>(pixels, x_out, y_out, b_out);
+        return;
+    }
     incant!(
         linear_positive_unclamped_inner(pixels, x_out, y_out, b_out),
         [v3, neon, wasm128, scalar]

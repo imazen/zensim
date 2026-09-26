@@ -3200,7 +3200,22 @@ pub(crate) fn fused_blur_h_ssim_at_revision(
     revision: crate::feature_defs::FormulaRevision,
 ) {
     let err = crate::ssim_form::effective_revision(revision)
-        == crate::feature_defs::FormulaRevision::Rev3;
+        >= crate::feature_defs::FormulaRevision::Rev3;
+    if crate::featcanon::active() {
+        fused_blur_h_ssim_canon(
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            width,
+            height,
+            radius,
+            err,
+        );
+        return;
+    }
     let tile = h_blur_tile_width();
     if tile > 0 && width > tile {
         fused_blur_h_ssim_column_tiled(
@@ -3288,7 +3303,22 @@ pub fn fused_blur_h_ssim3(
     // Revision 3 accumulates the direct error moment `Σ(a-b)²` in the
     // `sigma12` plane in place of `Σab` — the fusion that replaced the exact
     // f64 second pass. Read ONCE per call; every tier below unswitches on it.
-    let err = crate::ssim_form::active_revision() == crate::feature_defs::FormulaRevision::Rev3;
+    let err = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    if crate::featcanon::active() {
+        fused_blur_h_ssim_canon(
+            src,
+            dst,
+            mu1_scratch,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            width,
+            height,
+            radius,
+            err,
+        );
+        return;
+    }
     // The tile must be on THIS entry too, not just `fused_blur_h_ssim`: the
     // cached-reference-moments path reaches the H planes through here, and
     // tiling only the 4-output entry made it disagree with the pair path
@@ -4733,6 +4763,156 @@ fn fused_blur_h_ssim_inner(
     let tail = height - row_groups * 8;
     if tail > 0 {
         run_group(row_groups * 8, tail);
+    }
+}
+
+/// **FEATCANON canonical fused H-blur** — the same sliding-moment arithmetic
+/// as [`fused_blur_h_ssim_inner`] written as one plain-Rust body over inherent
+/// `f32` ops. Every product-sum keeps the vector body's fused chain
+/// (`f32::mul_add` is fused on every target), every sum keeps the same order,
+/// so the outputs equal the v3 (AVX2) tier's bit-for-bit on every tier —
+/// including scalar/wasm128, where the magetypes backend `mul_add` is unfused
+/// and produced different planes.
+///
+/// Under `ZENSIM_FEATCANON=exact` the same sliding structure runs in f64
+/// (fused `f64::mul_add`) and rounds once at the f32 plane store — the exact
+/// arm of the accuracy oracle.
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_canon(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    err: bool,
+) {
+    let diam = 2 * radius + 1;
+    let inv_v = 1.0f32 / diam as f32;
+    let inv_v64 = 1.0f64 / diam as f64;
+    let r = radius;
+    let exact = crate::featcanon::exact();
+
+    for y in 0..height {
+        let row = y * width;
+
+        if exact {
+            let mut sum_s = 0.0f64;
+            let mut sum_d = 0.0f64;
+            let mut sum_sq = 0.0f64;
+            let mut sum_prod = 0.0f64;
+            for i in 0..diam {
+                let idx = if i <= r {
+                    (r - i).min(width - 1)
+                } else {
+                    (i - r).min(width - 1)
+                };
+                let s = src[row + idx] as f64;
+                let d = dst[row + idx] as f64;
+                sum_s += s;
+                sum_d += d;
+                sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
+                sum_prod = if err {
+                    let e = s - d;
+                    e.mul_add(e, sum_prod)
+                } else {
+                    s.mul_add(d, sum_prod)
+                };
+            }
+            for x in 0..width {
+                out_mu1[row + x] = (sum_s * inv_v64) as f32;
+                out_mu2[row + x] = (sum_d * inv_v64) as f32;
+                out_sigma_sq[row + x] = (sum_sq * inv_v64) as f32;
+                out_sigma12[row + x] = (sum_prod * inv_v64) as f32;
+
+                let add_raw = x + r + 1;
+                let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
+                let rem_i = x as isize - r as isize;
+                let rem_idx = (if rem_i < 0 {
+                    rem_i.unsigned_abs()
+                } else {
+                    rem_i as usize
+                })
+                .min(width - 1);
+                let sa = src[row + add_idx] as f64;
+                let da = dst[row + add_idx] as f64;
+                let sr = src[row + rem_idx] as f64;
+                let dr = dst[row + rem_idx] as f64;
+                sum_s = sum_s + sa - sr;
+                sum_d = sum_d + da - dr;
+                sum_sq = sa.mul_add(
+                    sa,
+                    da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
+                );
+                sum_prod = if err {
+                    let ea = sa - da;
+                    let er = sr - dr;
+                    ea.mul_add(ea, (-er).mul_add(er, sum_prod))
+                } else {
+                    sa.mul_add(da, (-sr).mul_add(dr, sum_prod))
+                };
+            }
+            continue;
+        }
+
+        let mut ss = 0.0f32;
+        let mut sd = 0.0f32;
+        let mut ssq = 0.0f32;
+        let mut sprod = 0.0f32;
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let s = src[row + idx];
+            let d = dst[row + idx];
+            ss += s;
+            sd += d;
+            ssq = s.mul_add(s, d.mul_add(d, ssq));
+            sprod = if err {
+                let e = s - d;
+                e.mul_add(e, sprod)
+            } else {
+                s.mul_add(d, sprod)
+            };
+        }
+        for x in 0..width {
+            out_mu1[row + x] = ss * inv_v;
+            out_mu2[row + x] = sd * inv_v;
+            out_sigma_sq[row + x] = ssq * inv_v;
+            out_sigma12[row + x] = sprod * inv_v;
+
+            let add_raw = x + r + 1;
+            let add_idx = h_mirror_add_idx(add_raw, width).min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = (if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            })
+            .min(width - 1);
+            let sa = src[row + add_idx];
+            let da = dst[row + add_idx];
+            let sr = src[row + rem_idx];
+            let dr = dst[row + rem_idx];
+            ss = ss + sa - sr;
+            sd = sd + da - dr;
+            ssq = sa.mul_add(
+                sa,
+                da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, ssq))),
+            );
+            sprod = if err {
+                let ea = sa - da;
+                let er = sr - dr;
+                ea.mul_add(ea, (-er).mul_add(er, sprod))
+            } else {
+                sa.mul_add(da, (-sr).mul_add(dr, sprod))
+            };
+        }
     }
 }
 

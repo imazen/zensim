@@ -925,7 +925,9 @@ impl SsimLumaForm {
     pub(crate) const fn for_revision(rev: FormulaRevision) -> Self {
         match rev {
             FormulaRevision::Rev1 => Self::Ssim2Legacy,
-            FormulaRevision::Rev2 | FormulaRevision::Rev3 => Self::REV2_LUMA,
+            FormulaRevision::Rev2 | FormulaRevision::Rev3 | FormulaRevision::Rev4 => {
+                Self::REV2_LUMA
+            }
         }
     }
 
@@ -1016,6 +1018,7 @@ pub(crate) fn active_revision() -> FormulaRevision {
         Ok("1") => FormulaRevision::Rev1,
         Ok("2") => FormulaRevision::Rev2,
         Ok("3") => FormulaRevision::Rev3,
+        Ok("4") => FormulaRevision::Rev4,
         _ => SHIPPED_REVISION,
     })
 }
@@ -1130,7 +1133,7 @@ pub(crate) fn rerun_tests_at_revision(rev: &str, filter: &str, expect: usize) {
 /// do not call it: they run no pixel kernel, and the entry that eventually
 /// does has already refused.
 pub(crate) fn check_route(config: &crate::metric::ZensimConfig) -> Result<(), crate::ZensimError> {
-    if config.formula_revision.unwrap_or_else(active_revision) == FormulaRevision::Rev3
+    if config.formula_revision.unwrap_or_else(active_revision) >= FormulaRevision::Rev3
         && config.blur_passes != 1
     {
         return Err(crate::ZensimError::ModelForwardFailed {
@@ -1530,6 +1533,58 @@ pub(crate) fn ssim_direct8<T: F32x8Backend + Copy>(
     err: GenericF32x8<T>,
 ) -> GenericF32x8<T> {
     SsimSplats8::new(token, form).direct(m1, m2, ssq, err)
+}
+
+/// **FEATCANON exact oracle sibling** of [`ssim_dissim_raw_scalar`] /
+/// [`ssim_direct_raw_scalar`]: the same formula evaluated in f64 (fused
+/// `f64::mul_add` keeps the same product-sum groupings; constants widen
+/// exactly). `direct` selects the revision-3 direct-error form. Used by the
+/// `ZENSIM_FEATCANON=exact` extraction arm as the real-arithmetic reference.
+pub(crate) fn ssim_dissim_exact(
+    form: SsimLumaForm,
+    m1: f64,
+    m2: f64,
+    ssq: f64,
+    s12: f64,
+    direct: bool,
+) -> f64 {
+    if direct {
+        let mu_diff = m1 - m2;
+        let mean_error2 = mu_diff * mu_diff;
+        let variance_sum = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)).max(0.0f64);
+        let error_variance = (s12 - mean_error2).max(0.0f64);
+        let luma_loss = match form {
+            SsimLumaForm::Ssim2Legacy => mean_error2,
+            SsimLumaForm::Clamp => mean_error2.min(1.0f64),
+            SsimLumaForm::Lorentz => mean_error2 / (mean_error2 + 1.0f64),
+            SsimLumaForm::SsimLumaC1 => {
+                mean_error2 / m1.mul_add(m1, m2.mul_add(m2, C_SSIM_LUMA as f64))
+            }
+        };
+        return (1.0f64 - luma_loss)
+            .mul_add(error_variance / (variance_sum + C2 as f64), luma_loss);
+    }
+    let num_s = 2.0f64.mul_add((-m1).mul_add(m2, s12), C2 as f64);
+    let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + C2 as f64;
+    let (num_m, den_m) = match form {
+        SsimLumaForm::Ssim2Legacy => {
+            let mu_diff = m1 - m2;
+            (mu_diff.mul_add(-mu_diff, 1.0f64), 1.0f64)
+        }
+        SsimLumaForm::SsimLumaC1 => (
+            2.0f64.mul_add(m1 * m2, C_SSIM_LUMA as f64),
+            m1.mul_add(m1, m2.mul_add(m2, C_SSIM_LUMA as f64)),
+        ),
+        SsimLumaForm::Lorentz => {
+            let mu_diff = m1 - m2;
+            (1.0f64, mu_diff.mul_add(mu_diff, 1.0f64))
+        }
+        SsimLumaForm::Clamp => {
+            let mu_diff = m1 - m2;
+            (mu_diff.mul_add(-mu_diff, 1.0f64).max(0.0f64), 1.0f64)
+        }
+    };
+    1.0f64 - (num_m * num_s) / (den_m * denom_s)
 }
 
 /// Synthetic derivative prerequisite for the actual Rev3 Clamp expression.
