@@ -1,0 +1,38 @@
+{
+  "status": "baseline_quota_stopped_partial",
+  "label": "POTENTIAL \u2014 ceiling, not a model score",
+  "updated_utc": "2026-09-24T01:44:00Z",
+  "prereg_commit": "d2169f5b9c69",
+  "promoted_bank_addendum_commit": "044f00dc043f",
+  "promoted_bank_addendum_committed_utc": "2026-09-23T22:59:18Z",
+  "human_label_values_read": true,
+  "input": "/var/tmp/rev4-featbank/bank/",
+  "admission_receipt": "/var/tmp/rev4-featpot/admit_bank.jsonl",
+  "result_inventory": "/var/tmp/rev4-featpot/baseline_summary.json",
+  "lodo_detail": "benchmarks/rev4_featpot_lodo_2026-09-23.md",
+  "exposure_ledger": "docs/DATA_SPLITS.md",
+  "missing": [
+    "478/480 H32/H128 MLP fit cells, most outer-fold importance and H32/H128 LODO",
+    "11/32 reference-clustered CIs, 2/16 P0 shams, 15/32 E1/pairwise diagnostics",
+    "Incumbent/peer LODO rows and JPEG residual analysis"
+  ],
+  "deferred": [
+    "C1-C4 and GMSD candidate arms until reviewed Part B sidecars and a later coordinator message",
+    "MCL-JCI until a D3 fitting-role ruling"
+  ],
+  "deterministic_fit_cells": 32,
+  "paired_positive_controls": 16,
+  "lasso_stability_sets": 8,
+  "lodo_diagonal_folds": 14,
+  "lodo_transfer_matrix_cells_per_model": 49,
+  "score_recompute_log_sha256": "dab84065cb7f33d580883314e6e524c6c29e47332aca2f64c3a0595280d06123",
+  "result_inventory_sha256": "20e41de1e613ae38b3d31e3f2da962862a68c8873470a2b2fbd16a5bb91202bd",
+  "reference_ci_cells": 21,
+  "zero_column_shams": 14,
+  "e1_pairwise_cells": 17,
+  "mlp_fit_cells": 2,
+  "mlp_expected_fit_cells": 960,
+  "erratum_2026-09-26": "480 was an arithmetic error; the registered grid is 960",
+  "quota_stop_file": "/home/lilith/tmp/zensim-paper/rev4/CODEX_QUOTA_STOP.md",
+  "active_featpot_runners": 0
+}
