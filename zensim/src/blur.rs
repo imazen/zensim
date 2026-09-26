@@ -82,10 +82,87 @@ pub fn box_blur_v_from_copy(
     height: usize,
     radius: usize,
 ) {
+    // featacc blur axis: measurement-only re-evaluations of the window.
+    // `blur_axis()` is a constant `Rec` in a product build, so this folds to
+    // the incant dispatch unconditionally there.
+    #[cfg(feature = "oracle")]
+    if !matches!(
+        crate::featcanon::blur_axis(),
+        crate::featcanon::BlurMode::Rec
+    ) {
+        box_blur_v_axis(src, dst, width, height, radius);
+        return;
+    }
     incant!(
         box_blur_v_copy_inner(src, dst, width, height, radius),
         [v4x, v4, v3, neon, wasm128, scalar]
     );
+}
+
+/// featacc oracle: the V blur under `BlurMode::Rec64` (sliding f64) or
+/// `Fresh` (per-position f64 window re-summation). Scalar on purpose —
+/// measured against the SIMD row, not meant to replace it.
+#[cfg(feature = "oracle")]
+fn box_blur_v_axis(src: &[f32], dst: &mut [f32], width: usize, height: usize, radius: usize) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let r = radius;
+    let diam = 2 * radius + 1;
+    let inv = 1.0f64 / diam as f64;
+    match crate::featcanon::blur_axis() {
+        crate::featcanon::BlurMode::Fresh => {
+            for x in 0..width {
+                for y in 0..height {
+                    let mut sum = 0.0f64;
+                    for k in -(r as isize)..=(r as isize) {
+                        sum += src[crate::featcanon::tap_mirror(y as isize + k, height) * width + x]
+                            as f64;
+                    }
+                    dst[y * width + x] = (sum * inv) as f32;
+                }
+            }
+        }
+        _ => {
+            // Rec64: the production recurrence, f64 running sums.
+            let mut sum = vec![0.0f64; width];
+            for i in 0..diam {
+                let idx = if i <= r {
+                    (r - i).min(height - 1)
+                } else {
+                    (i - r).min(height - 1)
+                };
+                for x in 0..width {
+                    sum[x] += src[idx * width + x] as f64;
+                }
+            }
+            for y in 0..height {
+                let base = y * width;
+                for x in 0..width {
+                    dst[base + x] = (sum[x] * inv) as f32;
+                }
+                let add_raw = y + r + 1;
+                let add_idx = if add_raw < height {
+                    add_raw
+                } else {
+                    (2 * (height - 1)).saturating_sub(add_raw)
+                }
+                .min(height - 1);
+                let rem_i = y as isize - r as isize;
+                let rem_idx = (if rem_i < 0 {
+                    rem_i.unsigned_abs()
+                } else {
+                    rem_i as usize
+                })
+                .min(height - 1);
+                let ab = add_idx * width;
+                let rb = rem_idx * width;
+                for x in 0..width {
+                    sum[x] = sum[x] + src[ab + x] as f64 - src[rb + x] as f64;
+                }
+            }
+        }
+    }
 }
 
 /// AVX-512 vertical blur: process 16 columns at a time.
@@ -633,6 +710,15 @@ pub(crate) fn box_blur_h(
     height: usize,
     radius: usize,
 ) {
+    // featacc blur axis (measurement only — constant-folds in product).
+    #[cfg(feature = "oracle")]
+    if !matches!(
+        crate::featcanon::blur_axis(),
+        crate::featcanon::BlurMode::Rec
+    ) {
+        box_blur_h_axis(input, output, width, height, radius);
+        return;
+    }
     let tile = h_blur_tile_width();
     if tile > 0 && width > tile {
         h_tile_1in1out(input, output, width, height, radius, tile, |i, o, w, h| {
@@ -641,6 +727,66 @@ pub(crate) fn box_blur_h(
         return;
     }
     box_blur_h_untiled(input, output, width, height, radius)
+}
+
+/// featacc oracle: the H blur under `Rec64` (sliding f64) / `Fresh`
+/// (per-position f64 re-summation). Scalar — a measurement ruler.
+#[cfg(feature = "oracle")]
+fn box_blur_h_axis(input: &[f32], output: &mut [f32], width: usize, height: usize, radius: usize) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let r = radius;
+    let diam = 2 * radius + 1;
+    let inv = 1.0f64 / diam as f64;
+    match crate::featcanon::blur_axis() {
+        crate::featcanon::BlurMode::Fresh => {
+            for y in 0..height {
+                let row = y * width;
+                for x in 0..width {
+                    let mut sum = 0.0f64;
+                    for k in -(r as isize)..=(r as isize) {
+                        sum +=
+                            input[row + crate::featcanon::tap_mirror(x as isize + k, width)] as f64;
+                    }
+                    output[row + x] = (sum * inv) as f32;
+                }
+            }
+        }
+        _ => {
+            // Rec64: the production sliding sum widened to f64.
+            for y in 0..height {
+                let row = y * width;
+                let mut sum = 0.0f64;
+                for i in 0..diam {
+                    let idx = if i <= r {
+                        (r - i).min(width - 1)
+                    } else {
+                        (i - r).min(width - 1)
+                    };
+                    sum += input[row + idx] as f64;
+                }
+                for x in 0..width {
+                    output[row + x] = (sum * inv) as f32;
+                    let add_raw = x + r + 1;
+                    let add_idx = if add_raw < width {
+                        add_raw
+                    } else {
+                        (2 * (width - 1)).saturating_sub(add_raw)
+                    }
+                    .min(width - 1);
+                    let rem_i = x as isize - r as isize;
+                    let rem_idx = (if rem_i < 0 {
+                        rem_i.unsigned_abs()
+                    } else {
+                        rem_i as usize
+                    })
+                    .min(width - 1);
+                    sum = sum + input[row + add_idx] as f64 - input[row + rem_idx] as f64;
+                }
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1346,6 +1492,18 @@ pub(crate) fn box_blur_h_into_abs_diff(
     height: usize,
     radius: usize,
 ) {
+    // featacc blur axis (measurement only — constant-folds in product):
+    // `blur` narrows to f32 at the same boundary as the unfused form
+    // (`box_blur_h` store + `abs_diff`), then the |src − blur| element stays
+    // f32 exactly as production.
+    #[cfg(feature = "oracle")]
+    if !matches!(
+        crate::featcanon::blur_axis(),
+        crate::featcanon::BlurMode::Rec
+    ) {
+        box_blur_h_abs_diff_axis(src, out_activity, width, height, radius);
+        return;
+    }
     let tile = h_blur_tile_width();
     if tile > 0 && width > tile {
         h_tile_1in1out(
@@ -1374,6 +1532,70 @@ pub(crate) fn box_blur_h_into_abs_diff_untiled(
         box_blur_h_into_abs_diff_inner(src, out_activity, width, height, radius),
         [v4x, v4, v3, neon, wasm128, scalar]
     );
+}
+
+/// featacc oracle: `box_blur_h_into_abs_diff` under `Rec64`/`Fresh` — scalar
+/// measurement ruler over the activity plane.
+#[cfg(feature = "oracle")]
+fn box_blur_h_abs_diff_axis(
+    src: &[f32],
+    out_activity: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let r = radius;
+    let diam = 2 * radius + 1;
+    let inv = 1.0f64 / diam as f64;
+    let fresh = matches!(
+        crate::featcanon::blur_axis(),
+        crate::featcanon::BlurMode::Fresh
+    );
+    for y in 0..height {
+        let row = y * width;
+        if fresh {
+            for x in 0..width {
+                let mut sum = 0.0f64;
+                for k in -(r as isize)..=(r as isize) {
+                    sum += src[row + crate::featcanon::tap_mirror(x as isize + k, width)] as f64;
+                }
+                let blur = (sum * inv) as f32;
+                out_activity[row + x] = (src[row + x] - blur).abs();
+            }
+            continue;
+        }
+        let mut sum = 0.0f64;
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            sum += src[row + idx] as f64;
+        }
+        for x in 0..width {
+            let blur = (sum * inv) as f32;
+            out_activity[row + x] = (src[row + x] - blur).abs();
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                (2 * (width - 1)).saturating_sub(add_raw)
+            }
+            .min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = (if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            })
+            .min(width - 1);
+            sum = sum + src[row + add_idx] as f64 - src[row + rem_idx] as f64;
+        }
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -3204,7 +3426,17 @@ pub(crate) fn fused_blur_h_ssim_at_revision(
     // Canonical arithmetic follows THIS computation's revision (featcanon D1),
     // never the process switch.
     let mode = crate::featcanon::mode(revision);
-    if mode.active() {
+    // featacc: a non-`Rec` blur axis needs this body even under `off` —
+    // the f32 SIMD path cannot express `rec64`/`fresh` windows.
+    #[cfg(feature = "oracle")]
+    let canon = mode.active()
+        || !matches!(
+            crate::featcanon::blur_axis(),
+            crate::featcanon::BlurMode::Rec
+        );
+    #[cfg(not(feature = "oracle"))]
+    let canon = mode.active();
+    if canon {
         fused_blur_h_ssim_canon(
             src,
             dst,
@@ -3312,7 +3544,16 @@ pub fn fused_blur_h_ssim3(
     let revision = crate::ssim_form::effective_revision(revision);
     let err = revision >= crate::feature_defs::FormulaRevision::Rev3;
     let mode = crate::featcanon::mode(revision);
-    if mode.active() {
+    // featacc: a non-`Rec` blur axis needs this body even under `off`.
+    #[cfg(feature = "oracle")]
+    let canon = mode.active()
+        || !matches!(
+            crate::featcanon::blur_axis(),
+            crate::featcanon::BlurMode::Rec
+        );
+    #[cfg(not(feature = "oracle"))]
+    let canon = mode.active();
+    if canon {
         fused_blur_h_ssim_canon(
             src,
             dst,
@@ -4805,16 +5046,52 @@ fn fused_blur_h_ssim_canon(
     #[cfg(feature = "oracle")]
     let inv_v64 = 1.0f64 / diam as f64;
     let r = radius;
+    // featacc: the blur axis owns this kernel's arithmetic entirely — the
+    // window sums ARE its elements. `Rec` is the shipped f32 sliding form;
+    // `Rec64` widens the same recurrence to f64; `Fresh` re-sums every
+    // window in f64. `mode` no longer routes inside (an `exact` run with
+    // `BLUR=rec` measures exactly the shipped blur's contribution).
     #[cfg(feature = "oracle")]
-    let exact = mode.exact();
-    #[cfg(not(feature = "oracle"))]
+    let blur = crate::featcanon::blur_axis();
     let _ = mode;
 
     for y in 0..height {
         let row = y * width;
 
+        // featacc blur axis: `Fresh` re-sums every window in f64 — the
+        // strongest ruler; no sliding-recurrence drift at all. Applies under
+        // ANY candidate (it is an axis of the blur, not of `exact`).
         #[cfg(feature = "oracle")]
-        if exact {
+        if matches!(blur, crate::featcanon::BlurMode::Fresh) {
+            for x in 0..width {
+                let mut sum_s = 0.0f64;
+                let mut sum_d = 0.0f64;
+                let mut sum_sq = 0.0f64;
+                let mut sum_prod = 0.0f64;
+                for k in -(r as isize)..=(r as isize) {
+                    let idx = crate::featcanon::tap_mirror(x as isize + k, width);
+                    let s = src[row + idx] as f64;
+                    let d = dst[row + idx] as f64;
+                    sum_s += s;
+                    sum_d += d;
+                    sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
+                    sum_prod = if err {
+                        let e = s - d;
+                        e.mul_add(e, sum_prod)
+                    } else {
+                        s.mul_add(d, sum_prod)
+                    };
+                }
+                out_mu1[row + x] = (sum_s * inv_v64) as f32;
+                out_mu2[row + x] = (sum_d * inv_v64) as f32;
+                out_sigma_sq[row + x] = (sum_sq * inv_v64) as f32;
+                out_sigma12[row + x] = (sum_prod * inv_v64) as f32;
+            }
+            continue;
+        }
+
+        #[cfg(feature = "oracle")]
+        if matches!(blur, crate::featcanon::BlurMode::Rec64) {
             let mut sum_s = 0.0f64;
             let mut sum_d = 0.0f64;
             let mut sum_sq = 0.0f64;

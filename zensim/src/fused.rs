@@ -4342,8 +4342,315 @@ impl<P: crate::featcanon::Pool> BandPools<P> {
     }
 }
 
+// ============================================================
+// featacc blur axis: the V-blur window state behind the fused
+// canon/exact bodies. `Rec` is the shipped per-column f32 sliding
+// sums (bit-identical to production — a product build has only
+// this variant and `blur_axis()` is a constant `Rec` there).
+// `Rec64` runs the same recurrence in f64; `Fresh` keeps no state
+// at all — `at*` re-sums the window per position in f64.
+// ============================================================
+
+/// The blurred planes a V window reads, plus its geometry.
+struct VWinPlanes<'a> {
+    m1: &'a [f32],
+    m2: &'a [f32],
+    sq: &'a [f32],
+    s12: &'a [f32],
+    act: &'a [f32],
+    width: usize,
+    height: usize,
+    r: usize,
+}
+
+impl VWinPlanes<'_> {
+    #[inline(always)]
+    fn diam(&self) -> usize {
+        2 * self.r + 1
+    }
+    #[inline(always)]
+    fn inv32(&self) -> f32 {
+        1.0 / self.diam() as f32
+    }
+    #[cfg(feature = "oracle")]
+    #[inline(always)]
+    fn inv64(&self) -> f64 {
+        1.0 / self.diam() as f64
+    }
+    /// `fresh` re-sum of `plane`'s column `x`, window centred at row `y`.
+    /// Replays the sliding kernels' boundary map exactly (`tap_mirror`).
+    #[cfg(feature = "oracle")]
+    fn fresh(&self, plane: &[f32], x: usize, y: usize) -> f64 {
+        if plane.is_empty() {
+            return 0.0;
+        }
+        let mut s = 0.0f64;
+        for k in -(self.r as isize)..=(self.r as isize) {
+            s += plane[crate::featcanon::tap_mirror(y as isize + k, self.height) * self.width + x]
+                as f64;
+        }
+        s * self.inv64()
+    }
+}
+
+enum VWin {
+    /// Production: per-column f32 sliding sums.
+    Rec {
+        m1: Vec<f32>,
+        m2: Vec<f32>,
+        sq: Vec<f32>,
+        s12: Vec<f32>,
+        act: Vec<f32>,
+    },
+    /// Same sliding recurrence in f64.
+    #[cfg(feature = "oracle")]
+    F64 {
+        m1: Vec<f64>,
+        m2: Vec<f64>,
+        sq: Vec<f64>,
+        s12: Vec<f64>,
+        act: Vec<f64>,
+    },
+    /// No state — per-position f64 re-summation.
+    #[cfg(feature = "oracle")]
+    Fresh,
+}
+
+impl VWin {
+    /// Seed the initial window (row `y = 0`), `mirror_idx`-identical to the
+    /// production init loop.
+    fn new(blur: crate::featcanon::BlurMode, p: &VWinPlanes<'_>) -> Self {
+        let seed32 = |plane: &[f32], out: &mut Vec<f32>| {
+            if plane.is_empty() {
+                return;
+            }
+            for i in 0..p.diam() {
+                let idx = mirror_idx(i, p.r, p.height);
+                let b = idx * p.width;
+                for x in 0..p.width {
+                    out[x] += plane[b + x];
+                }
+            }
+        };
+        match blur {
+            crate::featcanon::BlurMode::Rec => {
+                let mut m1 = vec![0.0; p.width];
+                let mut m2 = vec![0.0; p.width];
+                let mut sq = vec![0.0; p.width];
+                let mut s12 = vec![0.0; p.width];
+                let mut act = if p.act.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![0.0; p.width]
+                };
+                seed32(p.m1, &mut m1);
+                seed32(p.m2, &mut m2);
+                seed32(p.sq, &mut sq);
+                seed32(p.s12, &mut s12);
+                seed32(p.act, &mut act);
+                Self::Rec {
+                    m1,
+                    m2,
+                    sq,
+                    s12,
+                    act,
+                }
+            }
+            #[cfg(feature = "oracle")]
+            crate::featcanon::BlurMode::Rec64 => {
+                let seed64 = |plane: &[f32], out: &mut Vec<f64>| {
+                    if plane.is_empty() {
+                        return;
+                    }
+                    for i in 0..p.diam() {
+                        let idx = mirror_idx(i, p.r, p.height);
+                        let b = idx * p.width;
+                        for x in 0..p.width {
+                            out[x] += plane[b + x] as f64;
+                        }
+                    }
+                };
+                let mut m1 = vec![0.0; p.width];
+                let mut m2 = vec![0.0; p.width];
+                let mut sq = vec![0.0; p.width];
+                let mut s12 = vec![0.0; p.width];
+                let mut act = if p.act.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![0.0; p.width]
+                };
+                seed64(p.m1, &mut m1);
+                seed64(p.m2, &mut m2);
+                seed64(p.sq, &mut sq);
+                seed64(p.s12, &mut s12);
+                seed64(p.act, &mut act);
+                Self::F64 {
+                    m1,
+                    m2,
+                    sq,
+                    s12,
+                    act,
+                }
+            }
+            #[cfg(feature = "oracle")]
+            crate::featcanon::BlurMode::Fresh => Self::Fresh,
+        }
+    }
+
+    /// Advance the window from row `y` to `y + 1` (`vblur_add_idx` /
+    /// `vblur_rem_idx` — the production index sequence).
+    fn slide(&mut self, y: usize, p: &VWinPlanes<'_>) {
+        let slide32 = |plane: &[f32], out: &mut [f32], ab: usize, rb: usize| {
+            if plane.is_empty() {
+                return;
+            }
+            for x in 0..p.width {
+                out[x] = out[x] + plane[ab + x] - plane[rb + x];
+            }
+        };
+        match self {
+            Self::Rec {
+                m1,
+                m2,
+                sq,
+                s12,
+                act,
+            } => {
+                let ab = vblur_add_idx(y, p.r, p.height) * p.width;
+                let rb = vblur_rem_idx(y, p.r, p.height) * p.width;
+                slide32(p.m1, m1, ab, rb);
+                slide32(p.m2, m2, ab, rb);
+                slide32(p.sq, sq, ab, rb);
+                slide32(p.s12, s12, ab, rb);
+                slide32(p.act, act, ab, rb);
+            }
+            #[cfg(feature = "oracle")]
+            Self::F64 {
+                m1,
+                m2,
+                sq,
+                s12,
+                act,
+            } => {
+                let ab = vblur_add_idx(y, p.r, p.height) * p.width;
+                let rb = vblur_rem_idx(y, p.r, p.height) * p.width;
+                for x in 0..p.width {
+                    m1[x] = m1[x] + p.m1[ab + x] as f64 - p.m1[rb + x] as f64;
+                    m2[x] = m2[x] + p.m2[ab + x] as f64 - p.m2[rb + x] as f64;
+                    sq[x] = sq[x] + p.sq[ab + x] as f64 - p.sq[rb + x] as f64;
+                    s12[x] = s12[x] + p.s12[ab + x] as f64 - p.s12[rb + x] as f64;
+                    if !act.is_empty() {
+                        act[x] = act[x] + p.act[ab + x] as f64 - p.act[rb + x] as f64;
+                    }
+                }
+            }
+            #[cfg(feature = "oracle")]
+            Self::Fresh => {}
+        }
+    }
+
+    /// The `(mu1, mu2, ssq, s12, act)` plane values at `(x, y)` — f32, the
+    /// canon bodies' element precision. `Rec` is the production `sum * inv`
+    /// f32 multiply; `F64`/`Fresh` compute in f64 and narrow once at the
+    /// same f32-store boundary production writes through.
+    #[cfg_attr(not(feature = "oracle"), allow(unused_variables))]
+    #[inline(always)]
+    fn at32(&self, x: usize, y: usize, p: &VWinPlanes<'_>) -> (f32, f32, f32, f32, f32) {
+        match self {
+            Self::Rec {
+                m1,
+                m2,
+                sq,
+                s12,
+                act,
+            } => {
+                let inv = p.inv32();
+                let a = if act.is_empty() { 0.0 } else { act[x] * inv };
+                (m1[x] * inv, m2[x] * inv, sq[x] * inv, s12[x] * inv, a)
+            }
+            #[cfg(feature = "oracle")]
+            Self::F64 {
+                m1,
+                m2,
+                sq,
+                s12,
+                act,
+            } => {
+                let inv = p.inv64();
+                let a = if act.is_empty() {
+                    0.0
+                } else {
+                    (act[x] * inv) as f32
+                };
+                (
+                    (m1[x] * inv) as f32,
+                    (m2[x] * inv) as f32,
+                    (sq[x] * inv) as f32,
+                    (s12[x] * inv) as f32,
+                    a,
+                )
+            }
+            #[cfg(feature = "oracle")]
+            Self::Fresh => (
+                p.fresh(p.m1, x, y) as f32,
+                p.fresh(p.m2, x, y) as f32,
+                p.fresh(p.sq, x, y) as f32,
+                p.fresh(p.s12, x, y) as f32,
+                p.fresh(p.act, x, y) as f32,
+            ),
+        }
+    }
+
+    /// f64 sibling of [`VWin::at32`] for the exact bodies. `Rec` widens the
+    /// f32 production product (the plane value IS the f32 store); `F64` and
+    /// `Fresh` keep the unrounded f64.
+    #[cfg(feature = "oracle")]
+    #[inline(always)]
+    fn at64(&self, x: usize, y: usize, p: &VWinPlanes<'_>) -> (f64, f64, f64, f64, f64) {
+        match self {
+            Self::Rec {
+                m1,
+                m2,
+                sq,
+                s12,
+                act,
+            } => {
+                let inv = p.inv32();
+                let a = if act.is_empty() { 0.0 } else { act[x] * inv };
+                (
+                    (m1[x] * inv) as f64,
+                    (m2[x] * inv) as f64,
+                    (sq[x] * inv) as f64,
+                    (s12[x] * inv) as f64,
+                    a as f64,
+                )
+            }
+            #[cfg(feature = "oracle")]
+            Self::F64 {
+                m1,
+                m2,
+                sq,
+                s12,
+                act,
+            } => {
+                let inv = p.inv64();
+                let a = if act.is_empty() { 0.0 } else { act[x] * inv };
+                (m1[x] * inv, m2[x] * inv, sq[x] * inv, s12[x] * inv, a)
+            }
+            Self::Fresh => (
+                p.fresh(p.m1, x, y),
+                p.fresh(p.m2, x, y),
+                p.fresh(p.sq, x, y),
+                p.fresh(p.s12, x, y),
+                p.fresh(p.act, x, y),
+            ),
+        }
+    }
+}
+
 /// Canonical (candidate-arithmetic) fused V-blur + SSIM/edge/HF/MSE feature
-/// accumulation. `P` selects the brief's accumulation candidate.
+/// accumulation. `P` selects the brief's accumulation candidate; the window
+/// state follows the featacc [`crate::featcanon::blur_axis`].
 #[allow(clippy::too_many_arguments)]
 fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
     h_mu1: &[f32],
@@ -4371,34 +4678,21 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
     h_act: &[f32],
 ) -> StripChannelAccum {
     let form = free.luma_form();
-    let diam = 2 * radius + 1;
-    let inv = 1.0f32 / diam as f32;
     let r = radius;
     let inner_end = inner_start + inner_h;
 
-    // Per-column V-blur sliding sums — the production recurrence exactly.
-    let mut sum_m1 = vec![0.0f32; width];
-    let mut sum_m2 = vec![0.0f32; width];
-    let mut sum_sq = vec![0.0f32; width];
-    let mut sum_s12 = vec![0.0f32; width];
-    let mut sum_act = if ext.on {
-        vec![0.0f32; width]
-    } else {
-        Vec::new()
+    // featacc blur axis: `Rec` is the shipped f32 sliding sums.
+    let planes = VWinPlanes {
+        m1: h_mu1,
+        m2: h_mu2,
+        sq: h_sigma_sq,
+        s12: h_sigma12,
+        act: if ext.on { h_act } else { &[] },
+        width,
+        height,
+        r,
     };
-    for i in 0..diam {
-        let idx = mirror_idx(i, r, height);
-        let b = idx * width;
-        for x in 0..width {
-            sum_m1[x] += h_mu1[b + x];
-            sum_m2[x] += h_mu2[b + x];
-            sum_sq[x] += h_sigma_sq[b + x];
-            sum_s12[x] += h_sigma12[b + x];
-            if ext.on {
-                sum_act[x] += h_act[b + x];
-            }
-        }
-    }
+    let mut win = VWin::new(crate::featcanon::blur_axis(), &planes);
 
     let mut acc = StripChannelAccum::zero();
     let mut band = BandPools::<P>::zero();
@@ -4409,10 +4703,7 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
             let mut row = VblurPools::<P>::zero();
             for x in 0..width {
                 let lane = x & 7;
-                let mu1 = sum_m1[x] * inv;
-                let mu2 = sum_m2[x] * inv;
-                let ssq = sum_sq[x] * inv;
-                let s12 = sum_s12[x] * inv;
+                let (mu1, mu2, ssq, s12, act) = win.at32(x, y, &planes);
                 let s = src[base + x];
                 let d = dst[base + x];
 
@@ -4480,7 +4771,6 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
                 let d2 = pd * pd;
                 row.mse.add(lane, d2);
                 if ext.on {
-                    let act = sum_act[x] * inv;
                     row.act_sum.add(lane, act);
                     if ext.mask {
                         let w = 1.0f32 / ext.k_mask.mul_add(act, 1.0f32);
@@ -4601,19 +4891,7 @@ fn fused_vblur_ssim_canon<P: crate::featcanon::Pool>(
         }
 
         // Slide V-blur window — same per-column recurrence as production.
-        let add_idx = vblur_add_idx(y, r, height);
-        let rem_idx = vblur_rem_idx(y, r, height);
-        let ab = add_idx * width;
-        let rb = rem_idx * width;
-        for x in 0..width {
-            sum_m1[x] = sum_m1[x] + h_mu1[ab + x] - h_mu1[rb + x];
-            sum_m2[x] = sum_m2[x] + h_mu2[ab + x] - h_mu2[rb + x];
-            sum_sq[x] = sum_sq[x] + h_sigma_sq[ab + x] - h_sigma_sq[rb + x];
-            sum_s12[x] = sum_s12[x] + h_sigma12[ab + x] - h_sigma12[rb + x];
-            if ext.on {
-                sum_act[x] = sum_act[x] + h_act[ab + x] - h_act[rb + x];
-            }
-        }
+        win.slide(y, &planes);
     }
 
     acc
@@ -4652,33 +4930,23 @@ fn fused_vblur_ssim_exact(
 ) -> StripChannelAccum {
     use crate::featcanon::{Neum64, Pool as _};
     let form = free.luma_form();
-    let diam = 2 * radius + 1;
-    let inv = 1.0f64 / diam as f64;
     let r = radius;
     let inner_end = inner_start + inner_h;
 
-    let mut sum_m1 = vec![0.0f64; width];
-    let mut sum_m2 = vec![0.0f64; width];
-    let mut sum_sq = vec![0.0f64; width];
-    let mut sum_s12 = vec![0.0f64; width];
-    let mut sum_act = if ext.on {
-        vec![0.0f64; width]
-    } else {
-        Vec::new()
+    // featacc blur axis: under `exact` `blur_axis()` defaults to `Fresh`;
+    // `BLUR=rec` replays the shipped f32 sliding sums (each element then
+    // carries the production blur's own drift — the isolation cell).
+    let planes = VWinPlanes {
+        m1: h_mu1,
+        m2: h_mu2,
+        sq: h_sigma_sq,
+        s12: h_sigma12,
+        act: if ext.on { h_act } else { &[] },
+        width,
+        height,
+        r,
     };
-    for i in 0..diam {
-        let idx = mirror_idx(i, r, height);
-        let b = idx * width;
-        for x in 0..width {
-            sum_m1[x] += h_mu1[b + x] as f64;
-            sum_m2[x] += h_mu2[b + x] as f64;
-            sum_sq[x] += h_sigma_sq[b + x] as f64;
-            sum_s12[x] += h_sigma12[b + x] as f64;
-            if ext.on {
-                sum_act[x] += h_act[b + x] as f64;
-            }
-        }
-    }
+    let mut win = VWin::new(crate::featcanon::blur_axis(), &planes);
 
     let mut acc = StripChannelAccum::zero();
     let mut band = BandPools::<Neum64>::zero();
@@ -4688,10 +4956,7 @@ fn fused_vblur_ssim_exact(
             let base = y * width;
             let mut row = VblurPools::<Neum64>::zero();
             for x in 0..width {
-                let mu1 = sum_m1[x] * inv;
-                let mu2 = sum_m2[x] * inv;
-                let ssq = sum_sq[x] * inv;
-                let s12 = sum_s12[x] * inv;
+                let (mu1, mu2, ssq, s12, act) = win.at64(x, y, &planes);
                 let s = src[base + x] as f64;
                 let d = dst[base + x] as f64;
 
@@ -4753,7 +5018,6 @@ fn fused_vblur_ssim_exact(
                 let d2 = pd * pd;
                 row.mse.add64(x, d2);
                 if ext.on {
-                    let act = sum_act[x] * inv;
                     row.act_sum.add64(x, act);
                     if ext.mask {
                         let w = 1.0f64 / (ext.k_mask as f64).mul_add(act, 1.0f64);
@@ -4870,19 +5134,7 @@ fn fused_vblur_ssim_exact(
             }
         }
 
-        let add_idx = vblur_add_idx(y, r, height);
-        let rem_idx = vblur_rem_idx(y, r, height);
-        let ab = add_idx * width;
-        let rb = rem_idx * width;
-        for x in 0..width {
-            sum_m1[x] = sum_m1[x] + h_mu1[ab + x] as f64 - h_mu1[rb + x] as f64;
-            sum_m2[x] = sum_m2[x] + h_mu2[ab + x] as f64 - h_mu2[rb + x] as f64;
-            sum_sq[x] = sum_sq[x] + h_sigma_sq[ab + x] as f64 - h_sigma_sq[rb + x] as f64;
-            sum_s12[x] = sum_s12[x] + h_sigma12[ab + x] as f64 - h_sigma12[rb + x] as f64;
-            if ext.on {
-                sum_act[x] = sum_act[x] + h_act[ab + x] as f64 - h_act[rb + x] as f64;
-            }
-        }
+        win.slide(y, &planes);
     }
 
     acc
@@ -4905,21 +5157,21 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
     mu2_out: &mut [f32],
     store_mu: bool,
 ) -> StripChannelAccum {
-    let diam = 2 * radius + 1;
-    let inv = 1.0f32 / diam as f32;
     let r = radius;
     let inner_end = inner_start + inner_h;
 
-    let mut sum_m1 = vec![0.0f32; width];
-    let mut sum_m2 = vec![0.0f32; width];
-    for i in 0..diam {
-        let idx = mirror_idx(i, r, height);
-        let b = idx * width;
-        for x in 0..width {
-            sum_m1[x] += h_mu1[b + x];
-            sum_m2[x] += h_mu2[b + x];
-        }
-    }
+    // featacc blur axis over the 2-plane window.
+    let planes = VWinPlanes {
+        m1: h_mu1,
+        m2: h_mu2,
+        sq: &[],
+        s12: &[],
+        act: &[],
+        width,
+        height,
+        r,
+    };
+    let mut win = VWin::new(crate::featcanon::blur_axis(), &planes);
 
     let mut acc = StripChannelAccum::zero();
     for y in 0..height {
@@ -4940,8 +5192,7 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
             let mut mse = P::zero();
             for x in 0..width {
                 let lane = x & 7;
-                let mu1 = sum_m1[x] * inv;
-                let mu2 = sum_m2[x] * inv;
+                let (mu1, mu2, _, _, _) = win.at32(x, y, &planes);
                 let s = src[base + x];
                 let d = dst[base + x];
                 if store_mu {
@@ -4990,14 +5241,7 @@ fn fused_vblur_edge_canon<P: crate::featcanon::Pool>(
             acc.hf_abs_dst += hf_abs_dst.fin();
             acc.mse += mse.fin();
         }
-        let add_idx = vblur_add_idx(y, r, height);
-        let rem_idx = vblur_rem_idx(y, r, height);
-        let ab = add_idx * width;
-        let rb = rem_idx * width;
-        for x in 0..width {
-            sum_m1[x] = sum_m1[x] + h_mu1[ab + x] - h_mu1[rb + x];
-            sum_m2[x] = sum_m2[x] + h_mu2[ab + x] - h_mu2[rb + x];
-        }
+        win.slide(y, &planes);
     }
     acc
 }
@@ -5021,21 +5265,21 @@ fn fused_vblur_edge_exact(
     store_mu: bool,
 ) -> StripChannelAccum {
     use crate::featcanon::{Neum64, Pool as _};
-    let diam = 2 * radius + 1;
-    let inv = 1.0f64 / diam as f64;
     let r = radius;
     let inner_end = inner_start + inner_h;
 
-    let mut sum_m1 = vec![0.0f64; width];
-    let mut sum_m2 = vec![0.0f64; width];
-    for i in 0..diam {
-        let idx = mirror_idx(i, r, height);
-        let b = idx * width;
-        for x in 0..width {
-            sum_m1[x] += h_mu1[b + x] as f64;
-            sum_m2[x] += h_mu2[b + x] as f64;
-        }
-    }
+    // featacc blur axis (Fresh is the `exact` default).
+    let planes = VWinPlanes {
+        m1: h_mu1,
+        m2: h_mu2,
+        sq: &[],
+        s12: &[],
+        act: &[],
+        width,
+        height,
+        r,
+    };
+    let mut win = VWin::new(crate::featcanon::blur_axis(), &planes);
 
     let mut acc = StripChannelAccum::zero();
     for y in 0..height {
@@ -5055,8 +5299,7 @@ fn fused_vblur_edge_exact(
             let mut hf_abs_dst = Neum64::zero();
             let mut mse = Neum64::zero();
             for x in 0..width {
-                let mu1 = sum_m1[x] * inv;
-                let mu2 = sum_m2[x] * inv;
+                let (mu1, mu2, _, _, _) = win.at64(x, y, &planes);
                 let s = src[base + x] as f64;
                 let d = dst[base + x] as f64;
                 if store_mu {
@@ -5105,14 +5348,7 @@ fn fused_vblur_edge_exact(
             acc.hf_abs_dst += hf_abs_dst.fin();
             acc.mse += mse.fin();
         }
-        let add_idx = vblur_add_idx(y, r, height);
-        let rem_idx = vblur_rem_idx(y, r, height);
-        let ab = add_idx * width;
-        let rb = rem_idx * width;
-        for x in 0..width {
-            sum_m1[x] = sum_m1[x] + h_mu1[ab + x] as f64 - h_mu1[rb + x] as f64;
-            sum_m2[x] = sum_m2[x] + h_mu2[ab + x] as f64 - h_mu2[rb + x] as f64;
-        }
+        win.slide(y, &planes);
     }
     acc
 }

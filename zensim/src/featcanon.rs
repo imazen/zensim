@@ -72,6 +72,15 @@ impl Mode {
     pub(crate) const fn exact(self) -> bool {
         matches!(self, Mode::Exact)
     }
+
+    /// Product-build sibling of the oracle `exact()`: never true, so
+    /// `if mode.exact()` folds away wherever it is written unconditionally.
+    #[cfg(not(feature = "oracle"))]
+    #[allow(dead_code)]
+    #[inline(always)]
+    pub(crate) const fn exact(self) -> bool {
+        false
+    }
 }
 
 /// The canonical-leaf arithmetic for a computation at `revision`.
@@ -100,19 +109,172 @@ pub(crate) fn mode(revision: FormulaRevision) -> Mode {
     }
 }
 
-/// `ZENSIM_FEATCANON`, read once. `None` when unset or unrecognised.
+/// `ZENSIM_FEATCANON`, read once — into a cell the featacc cost bench can
+/// then overwrite in-process (`bench_set_measurement`), so one zenbench
+/// group can interleave candidates fairly. `None` when unset/unrecognised.
 #[cfg(feature = "oracle")]
 fn measurement_override() -> Option<Mode> {
-    use std::sync::OnceLock;
-    static M: OnceLock<Option<Mode>> = OnceLock::new();
-    *M.get_or_init(|| match std::env::var("ZENSIM_FEATCANON").as_deref() {
-        Ok("exact") => Some(Mode::Exact),
-        Ok("c32") => Some(Mode::Canon32),
-        Ok("c64") => Some(Mode::Canon64),
-        Ok("neum") => Some(Mode::CanonNeum),
-        Ok("off") => Some(Mode::Off),
-        _ => None,
+    *override_cell().read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The shared cell. Initialised from `ZENSIM_FEATCANON` on first read;
+/// `bench_set_measurement` rewrites it.
+#[cfg(feature = "oracle")]
+fn override_cell() -> &'static std::sync::RwLock<Option<Mode>> {
+    use std::sync::{OnceLock, RwLock};
+    static M: OnceLock<RwLock<Option<Mode>>> = OnceLock::new();
+    M.get_or_init(|| {
+        RwLock::new(match std::env::var("ZENSIM_FEATCANON").as_deref() {
+            Ok("exact") => Some(Mode::Exact),
+            Ok("c32") => Some(Mode::Canon32),
+            Ok("c64") => Some(Mode::Canon64),
+            Ok("neum") => Some(Mode::CanonNeum),
+            Ok("off") => Some(Mode::Off),
+            _ => None,
+        })
     })
+}
+
+/// `ZENSIM_FEATCANON_BLUR`, read once into a cell — same bench reasoning as
+/// [`override_cell`]. `None` = unset/unrecognised (the default then applies).
+#[cfg(feature = "oracle")]
+fn blur_cell() -> &'static std::sync::RwLock<Option<BlurMode>> {
+    use std::sync::{OnceLock, RwLock};
+    static B: OnceLock<RwLock<Option<BlurMode>>> = OnceLock::new();
+    B.get_or_init(|| {
+        RwLock::new(match std::env::var("ZENSIM_FEATCANON_BLUR").as_deref() {
+            Ok("rec") => Some(BlurMode::Rec),
+            Ok("rec64") => Some(BlurMode::Rec64),
+            Ok("fresh") => Some(BlurMode::Fresh),
+            _ => None,
+        })
+    })
+}
+
+/// featacc cost bench: set the measurement override (and, when `Some`, the
+/// blur axis) in-process so a zenbench group can interleave candidates
+/// instead of paying a process restart per mode. `None` restores "env
+/// unset". Measurement-only: exists solely under `oracle`.
+#[cfg(feature = "oracle")]
+pub(crate) fn bench_set_measurement(mode: Option<Mode>, blur: Option<BlurMode>) {
+    *override_cell().write().unwrap_or_else(|e| e.into_inner()) = mode;
+    if let Some(b) = blur {
+        *blur_cell().write().unwrap_or_else(|e| e.into_inner()) = Some(b);
+    }
+}
+
+/// featacc D2: the measurement override, `Off` when unset — for kernels
+/// whose production arithmetic is NOT canon-dispatched (dense era-1/era-2,
+/// gradient, append, gridblk, blockiness, dvifm, restore-cuts). Unlike
+/// [`mode`], this never synthesises `Canon32`, so it cannot move a product
+/// Rev4 byte: with no `ZENSIM_FEATCANON` in the environment it returns
+/// `Off` and every kernel that consults it runs its shipped body verbatim.
+/// `Off` itself is a real candidate ("the uncanonized baseline"), so the
+/// dispatch sites gate on `active()` only when routing to a canon body.
+#[cfg(feature = "oracle")]
+#[inline]
+pub(crate) fn measurement_mode() -> Mode {
+    measurement_override().unwrap_or(Mode::Off)
+}
+
+/// The measurement override when it names a canonical/candidate arithmetic.
+/// `None` in a product build (the method does not exist), when the env is
+/// unset, and under `ZENSIM_FEATCANON=off` — those three cases all run the
+/// shipped bodies.
+#[cfg(feature = "oracle")]
+#[inline]
+pub(crate) fn measurement_active() -> Option<Mode> {
+    measurement_override().filter(|m| m.active())
+}
+
+/// Non-oracle sibling: never active — every caller falls through to the
+/// shipped body.
+#[cfg(not(feature = "oracle"))]
+#[inline(always)]
+#[allow(dead_code)]
+pub(crate) const fn measurement_active() -> Option<Mode> {
+    None
+}
+
+// ============================================================================
+// The blur-recurrence axis (featacc) — measurement only
+// ============================================================================
+//
+// The blurred planes feeding every feature kernel carry a THIRD kind of
+// numerical error, separate from element rounding and accumulation order:
+// the production box/SSIM blurs evaluate each window by updating the
+// previous window's sum (`sum += add − rem`), so rounding error accrues
+// with position rather than being re-bounded per output. `BlurMode` is the
+// `ZENSIM_FEATCANON_BLUR` axis that isolates it:
+
+/// How the blur windows evaluate their sums. `Rec` is the shipped form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlurMode {
+    /// Production: per-column (V) / per-row (H) sliding f32 sums
+    /// (`sum = sum + add − rem`).
+    Rec,
+    /// Same sliding recurrence in f64 — measures the f32 storage of the
+    /// running sums, not the recurrence's existence.
+    #[cfg(feature = "oracle")]
+    Rec64,
+    /// Per-position window re-summation in f64 — the strongest reference:
+    /// no drift term at all.
+    #[cfg(feature = "oracle")]
+    Fresh,
+}
+
+/// `ZENSIM_FEATCANON_BLUR` (`rec`/`rec64`/`fresh`), read once — plus the
+/// default: `exact` mode re-sums (`Fresh`); every other candidate keeps the
+/// production recurrence so its column measures accumulation alone. In a
+/// product build this is a constant `Rec`.
+#[cfg(feature = "oracle")]
+#[inline]
+pub(crate) fn blur_axis() -> BlurMode {
+    blur_cell()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(|| {
+            if measurement_mode().exact() {
+                BlurMode::Fresh
+            } else {
+                BlurMode::Rec
+            }
+        })
+}
+
+/// Non-oracle sibling: the blur axis does not exist, only `Rec` ships.
+#[cfg(not(feature = "oracle"))]
+#[inline(always)]
+#[allow(dead_code)]
+pub(crate) const fn blur_axis() -> BlurMode {
+    BlurMode::Rec
+}
+
+/// Non-oracle sibling: no measurement axis exists in a product build.
+#[cfg(not(feature = "oracle"))]
+#[inline(always)]
+pub(crate) const fn measurement_mode() -> Mode {
+    Mode::Off
+}
+
+/// The boundary map the blur recurrences implement, for the `Fresh` arm's
+/// per-position window: reflect once toward the image, clamp if still out
+/// (the kernels' `mirror_idx`/`vblur_add_idx`/`vblur_rem_idx` all reduce to
+/// this: `j < 0 → -j`, `j ≥ n → 2(n−1) − j`, both clamped into `[0, n−1]`).
+/// NOT the crate's periodic [`crate::feature_v2::reflect_101`] — the sliding
+/// kernels' convention is what `fresh` must replay exactly, so a `rec` vs
+/// `fresh` diff measures recurrence drift, not a boundary convention.
+#[cfg(feature = "oracle")]
+#[inline(always)]
+pub(crate) fn tap_mirror(j: isize, n: usize) -> usize {
+    let n1 = n - 1;
+    if j < 0 {
+        j.unsigned_abs().min(n1)
+    } else if j as usize > n1 {
+        (2 * n1).saturating_sub(j as usize).min(n1)
+    } else {
+        j as usize
+    }
 }
 
 // ============================================================================
@@ -143,7 +305,7 @@ pub(crate) const CANON_LANES: usize = 8;
 /// Candidate (d): 8 f32 virtual lanes, term j → lane `j % 8`, tail folds into
 /// the same lanes, closed by the fixed [`era2_reduce8`]
 /// pairwise tree. Width-independent by construction.
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct LanesF32(pub [f32; CANON_LANES]);
 
 impl LanesF32 {
@@ -187,7 +349,7 @@ impl LanesF32 {
 /// adjacent-pairwise tree shape as [`LanesF32`], but every partial is f64, so
 /// per-term error is only the term's own f32 rounding. Measurement only.
 #[cfg(feature = "oracle")]
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct LanesF64(pub [f64; CANON_LANES]);
 
 /// dead_code until chunked-pool kernels land; see LanesF32::add_chunk.
@@ -239,7 +401,7 @@ impl LanesF64 {
 /// compensation semantics have exactly one definition. Measurement only (the
 /// candidate and the exact-oracle bodies).
 #[cfg(feature = "oracle")]
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Neum64 {
     sum: f64,
     comp: f64,
@@ -345,6 +507,315 @@ impl Pool for Neum64 {
     #[inline(always)]
     fn fin(self) -> f64 {
         self.reduce()
+    }
+}
+
+/// Sequential f64 accumulation as a `Pool` — the production shape of the
+/// f64-native kernels (dvifm pools, blockiness, the restore-cuts block
+/// pools). `add(lane, v)` ignores `lane` and adds in arrival order, so a
+/// `Pool`-generic kernel body instantiated at `f64` replays the shipped
+/// sequence exactly.
+impl Pool for f64 {
+    #[inline(always)]
+    fn zero() -> Self {
+        0.0
+    }
+    #[inline(always)]
+    fn add(&mut self, _lane: usize, v: f32) {
+        *self += v as f64;
+    }
+    #[cfg(feature = "oracle")]
+    #[inline(always)]
+    fn add64(&mut self, _lane: usize, v: f64) {
+        *self += v;
+    }
+    #[inline(always)]
+    fn fin(self) -> f64 {
+        self
+    }
+}
+
+// ============================================================================
+// `SumVar` / `WelfordVar` — runtime-mode accumulators for kernels whose
+// production state is scalar f64 (a `Pool`-generic body would put a type
+// parameter on structs like `LevelSums` that live inside long-lived,
+// non-generic accumulator objects).
+// ============================================================================
+
+/// One accumulator slot whose arithmetic is chosen by [`measurement_mode`].
+///
+/// `Seq` is the shipped form (a plain `f64 += ` per term). Which candidate
+/// `c32`/`c64`/`neum` maps to depends on the ELEMENTS the kernel sums —
+/// [`SumVar::f32_elems`] for terms that are f32-representable (f32-computed
+/// or f32-stored: an `as f32` narrowing of `f64::from(v)` is exact), and
+/// [`SumVar::f64_elems`] for f64-native terms — for those, `c32` keeps the
+/// sequential form since f32 lanes would change the ELEMENT precision, not
+/// just the accumulation order (that would conflate the two axes the lane
+/// exists to separate).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SumVar {
+    /// Sequential f64 — production accumulation.
+    Seq(f64),
+    /// 8 f32 lanes + [`era2_reduce8`] — candidate (d).
+    L32(LanesF32),
+    /// 8 f64 lanes + the f64 pairwise tree — candidate (e).
+    #[cfg(feature = "oracle")]
+    L64(LanesF64),
+    /// Sequential Neumaier compensation — candidate (f) and the oracle arm.
+    #[cfg(feature = "oracle")]
+    Neum(Neum64),
+}
+
+impl SumVar {
+    /// Variant for kernels whose summed terms are f32-representable.
+    pub(crate) fn f32_elems(mode: Mode) -> Self {
+        match mode {
+            Mode::Off => Self::Seq(0.0),
+            Mode::Canon32 => Self::L32(LanesF32::zero()),
+            #[cfg(feature = "oracle")]
+            Mode::Canon64 => Self::L64(LanesF64::zero()),
+            #[cfg(feature = "oracle")]
+            Mode::CanonNeum | Mode::Exact => Self::Neum(Neum64::zero()),
+        }
+    }
+
+    /// Variant for kernels whose summed terms are f64-native — `c32` keeps
+    /// `Seq` (production) so the f32-lane column never masks element error
+    /// as accumulation error.
+    pub(crate) fn f64_elems(mode: Mode) -> Self {
+        match mode {
+            Mode::Off | Mode::Canon32 => Self::Seq(0.0),
+            #[cfg(feature = "oracle")]
+            Mode::Canon64 => Self::L64(LanesF64::zero()),
+            #[cfg(feature = "oracle")]
+            Mode::CanonNeum | Mode::Exact => Self::Neum(Neum64::zero()),
+        }
+    }
+
+    /// Constructor used at walk-setup: `measurement_mode()` inside an
+    /// oracle build, `Canon32` under the product Rev4 default — both
+    /// resolve to `Seq` for f64-element slots and preserve production.
+    #[cfg(feature = "oracle")]
+    #[inline]
+    pub(crate) fn f32_elems_meas() -> Self {
+        Self::f32_elems(measurement_mode())
+    }
+    #[cfg(feature = "oracle")]
+    #[inline]
+    pub(crate) fn f64_elems_meas() -> Self {
+        Self::f64_elems(measurement_mode())
+    }
+    #[cfg(not(feature = "oracle"))]
+    #[inline]
+    pub(crate) fn f32_elems_meas() -> Self {
+        Self::f32_elems(Mode::Off)
+    }
+    #[cfg(not(feature = "oracle"))]
+    #[inline]
+    pub(crate) fn f64_elems_meas() -> Self {
+        Self::f64_elems(Mode::Off)
+    }
+
+    /// Accumulate one f64 term — `Seq`/`L64`/`Neum` keep it exact; `L32`
+    /// narrows to f32 first (the caller-chosen variant encodes whether that
+    /// narrowing is value-exact — it is whenever the term is f32-stored).
+    #[inline(always)]
+    pub(crate) fn add64(&mut self, lane: usize, v: f64) {
+        match self {
+            Self::Seq(s) => *s += v,
+            Self::L32(p) => Pool::add(p, lane, v as f32),
+            #[cfg(feature = "oracle")]
+            Self::L64(p) => Pool::add64(p, lane, v),
+            #[cfg(feature = "oracle")]
+            Self::Neum(p) => Pool::add64(p, lane, v),
+        }
+    }
+
+    /// The slot's running value (fold-time readout).
+    #[inline]
+    pub(crate) fn fin(&self) -> f64 {
+        match self {
+            Self::Seq(s) => *s,
+            Self::L32(p) => (*p).fin(),
+            #[cfg(feature = "oracle")]
+            Self::L64(p) => (*p).fin(),
+            #[cfg(feature = "oracle")]
+            Self::Neum(p) => (*p).fin(),
+        }
+    }
+
+    /// Fold a same-mode sibling's accumulated value into `self` —
+    /// lane-aligned for the lane variants (the per-row cell → strip cell
+    /// merge in the var-typed kernels).
+    pub(crate) fn merge_from(&mut self, o: &Self) {
+        match (self, o) {
+            (Self::Seq(a), Self::Seq(b)) => *a += *b,
+            (Self::L32(a), Self::L32(b)) => {
+                for j in 0..CANON_LANES {
+                    a.0[j] += b.0[j];
+                }
+            }
+            #[cfg(feature = "oracle")]
+            (Self::L64(a), Self::L64(b)) => {
+                for j in 0..CANON_LANES {
+                    a.0[j] += b.0[j];
+                }
+            }
+            #[cfg(feature = "oracle")]
+            (Self::Neum(a), Self::Neum(b)) => Neum64::add(a, b.reduce()),
+            _ => panic!("SumVar::merge_from across modes"),
+        }
+    }
+}
+
+/// Welford `(n, mean, m2)` state whose update arithmetic follows the
+/// measurement mode — for `mapdev` (row Welford + Chan merge) and
+/// `gmsbank`'s per-cell deviation state.
+///
+/// There is no meaningful f32-Welford-lane candidate — Welford's value is
+/// precisely that it is already a stable f64 sequential update — so
+/// `c32` maps to [`WelfordVar::Seq`], i.e. the c32 column for the Welford
+/// kernels IS the production accumulation. `c64` gives the 8-lane form
+/// (each lane an independent Welford over the `x ≡ lane (mod 8)` substream,
+/// pairwise Chan-merged), `neum`/`exact` the compensated form.
+#[derive(Clone, Copy)]
+pub(crate) enum WelfordVar {
+    /// Production: sequential Welford in f64.
+    Seq(WelfordCell),
+    /// 8 independent Welford lanes, pairwise-merged at [`Self::stats`].
+    #[cfg(feature = "oracle")]
+    Lanes([WelfordCell; 8]),
+    /// Neumaier-compensated `mean`/`m2` updates.
+    #[cfg(feature = "oracle")]
+    Neum { n: u64, mean: Neum64, m2: Neum64 },
+}
+
+/// Plain f64 Welford triple — the production cell shape.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct WelfordCell {
+    pub(crate) n: u64,
+    pub(crate) mean: f64,
+    pub(crate) m2: f64,
+}
+
+impl WelfordCell {
+    /// One sample. `recip_n1` is `1.0 / (n + 1)` — precomputed by callers
+    /// that fold a whole row (the mapdev idiom); `0` here means "compute".
+    #[inline(always)]
+    pub(crate) fn push(&mut self, x: f64) {
+        self.n += 1;
+        let change = x - self.mean;
+        self.mean += change / self.n as f64;
+        self.m2 += change * (x - self.mean);
+    }
+
+    /// Chan's parallel merge.
+    #[cfg(feature = "oracle")]
+    pub(crate) fn merge(&mut self, o: &Self) {
+        if o.n == 0 {
+            return;
+        }
+        if self.n == 0 {
+            *self = *o;
+            return;
+        }
+        let total = self.n + o.n;
+        let shift = o.mean - self.mean;
+        self.m2 += o.m2 + shift * shift * (self.n as f64 * o.n as f64 / total as f64);
+        self.mean += shift * (o.n as f64 / total as f64);
+        self.n = total;
+    }
+}
+
+impl WelfordVar {
+    pub(crate) fn for_mode(mode: Mode) -> Self {
+        match mode {
+            Mode::Off | Mode::Canon32 => Self::Seq(WelfordCell::default()),
+            #[cfg(feature = "oracle")]
+            Mode::Canon64 => Self::Lanes([WelfordCell::default(); 8]),
+            #[cfg(feature = "oracle")]
+            Mode::CanonNeum | Mode::Exact => Self::Neum {
+                n: 0,
+                mean: Neum64::zero(),
+                m2: Neum64::zero(),
+            },
+        }
+    }
+
+    /// One sample into canonical lane `lane` (`x` position mod 8).
+    #[cfg_attr(not(feature = "oracle"), allow(unused_variables))]
+    #[inline]
+    pub(crate) fn push(&mut self, lane: usize, x: f64) {
+        match self {
+            Self::Seq(c) => c.push(x),
+            #[cfg(feature = "oracle")]
+            Self::Lanes(lanes) => lanes[lane & 7].push(x),
+            #[cfg(feature = "oracle")]
+            Self::Neum { n, mean, m2 } => {
+                *n += 1;
+                let change = x - mean.reduce();
+                mean.add(change / *n as f64);
+                m2.add(change * (x - mean.reduce()));
+            }
+        }
+    }
+
+    /// `(n, mean, m2)` — merging the lanes pairwise first.
+    #[inline]
+    pub(crate) fn stats(&self) -> WelfordCell {
+        match self {
+            Self::Seq(c) => *c,
+            #[cfg(feature = "oracle")]
+            Self::Lanes(lanes) => {
+                // The same adjacent-pairwise tree as `era2_reduce8`.
+                let m = |a: WelfordCell, b: WelfordCell| {
+                    let mut a = a;
+                    a.merge(&b);
+                    a
+                };
+                m(
+                    m(m(lanes[0], lanes[1]), m(lanes[2], lanes[3])),
+                    m(m(lanes[4], lanes[5]), m(lanes[6], lanes[7])),
+                )
+            }
+            #[cfg(feature = "oracle")]
+            Self::Neum { n, mean, m2 } => WelfordCell {
+                n: *n,
+                mean: mean.reduce(),
+                m2: m2.reduce(),
+            },
+        }
+    }
+
+    /// Fold a same-mode sibling's whole state into `self` — lane-aligned
+    /// for `Lanes`, sequential for `Seq`/`Neum` (the per-row → strip cell
+    /// merge in the var-typed kernels).
+    #[cfg(feature = "oracle")]
+    pub(crate) fn merge_var(&mut self, o: &Self) {
+        match (self, o) {
+            (Self::Seq(a), Self::Seq(b)) => a.merge(b),
+            #[cfg(feature = "oracle")]
+            (Self::Lanes(a), Self::Lanes(b)) => {
+                for j in 0..CANON_LANES {
+                    a[j].merge(&b[j]);
+                }
+            }
+            #[cfg(feature = "oracle")]
+            (Self::Neum { n, mean, m2 }, Self::Neum { .. }) => {
+                let mut a = WelfordCell {
+                    n: *n,
+                    mean: mean.reduce(),
+                    m2: m2.reduce(),
+                };
+                a.merge(&o.stats());
+                *n = a.n;
+                *mean = Neum64::zero();
+                Neum64::add(mean, a.mean);
+                *m2 = Neum64::zero();
+                Neum64::add(m2, a.m2);
+            }
+            _ => panic!("WelfordVar::merge_var across modes"),
+        }
     }
 }
 

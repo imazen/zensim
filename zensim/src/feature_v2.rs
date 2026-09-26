@@ -886,27 +886,55 @@ impl TailAccum {
 }
 
 /// C4-noise: flat-reference-region HF-gain mass for one cell.
-#[derive(Clone, Copy, Default)]
+/// featacc: `hfg` is a `SumVar` (f64-native terms) — `Seq` under production.
+#[derive(Clone, Copy)]
 struct FlatAccum {
     /// Σ `hf_gain_i` over pixels with `act ≤ C4_FLAT_ACT` (scan order).
-    hfg: f64,
+    hfg: crate::featcanon::SumVar,
     /// Count of flat pixels.
     n: u64,
 }
 
+impl Default for FlatAccum {
+    fn default() -> Self {
+        Self {
+            hfg: crate::featcanon::SumVar::f64_elems_meas(),
+            n: 0,
+        }
+    }
+}
+
 /// C2: the 6 triangular `u`-domain bins of the per-pixel RINGING term —
 /// `bins[k] = Σ_px ring·m_k(u(ring))` in scan order.
-#[derive(Clone, Copy, Default)]
+/// featacc: `SumVar` bins — `Seq` under production.
+#[derive(Clone, Copy)]
 struct RingAccum {
-    bins: [f64; REV4_HATS],
+    bins: [crate::featcanon::SumVar; REV4_HATS],
+}
+
+impl Default for RingAccum {
+    fn default() -> Self {
+        Self {
+            bins: std::array::from_fn(|_| crate::featcanon::SumVar::f64_elems_meas()),
+        }
+    }
 }
 
 /// C4-bleed: gradient magnitudes summed OUTSIDE the dilated dst-luma-edge
-/// mask (scan order).
-#[derive(Clone, Copy, Default)]
+/// mask (scan order). featacc: `SumVar` — `Seq` under production.
+#[derive(Clone, Copy)]
 struct BleedAccum {
-    out_src: f64,
-    out_dst: f64,
+    out_src: crate::featcanon::SumVar,
+    out_dst: crate::featcanon::SumVar,
+}
+
+impl Default for BleedAccum {
+    fn default() -> Self {
+        Self {
+            out_src: crate::featcanon::SumVar::f64_elems_meas(),
+            out_dst: crate::featcanon::SumVar::f64_elems_meas(),
+        }
+    }
 }
 
 /// C1: the stored `ẽ` boundary planes plus the per-phase profiles that
@@ -933,6 +961,12 @@ struct GridblkAccum {
     signed_v: [f64; GRIDBLK_MAX_PERIOD],
     abs_h: [f64; GRIDBLK_MAX_PERIOD],
     signed_h: [f64; GRIDBLK_MAX_PERIOD],
+    /// featacc `exact`-mode shadow planes: the same `ẽ` grid evaluated in
+    /// f64. Empty in every other mode (and in product builds — two dead
+    /// `Vec`s, 48 bytes of cell state). The rescan in
+    /// [`finish_gridblk_cell`] reads whichever plane family is populated.
+    plane_v64: Vec<f64>,
+    plane_h64: Vec<f64>,
 }
 
 impl Default for GridblkAccum {
@@ -944,6 +978,8 @@ impl Default for GridblkAccum {
             signed_v: [0.0; GRIDBLK_MAX_PERIOD],
             abs_h: [0.0; GRIDBLK_MAX_PERIOD],
             signed_h: [0.0; GRIDBLK_MAX_PERIOD],
+            plane_v64: Vec::new(),
+            plane_h64: Vec::new(),
         }
     }
 }
@@ -987,6 +1023,7 @@ fn rev4_dense_pixel(
     mse: f64,
     hfg: f64,
     act: f64,
+    lane: usize,
 ) {
     if let Some(t) = r4.tail.as_deref_mut() {
         t.scatter(r4.edges, d, 0);
@@ -997,7 +1034,7 @@ fn rev4_dense_pixel(
     if let Some(f) = r4.flat.as_deref_mut()
         && act <= C4_FLAT_ACT
     {
-        f.hfg += hfg;
+        f.hfg.add64(lane, hfg);
         f.n += 1;
     }
 }
@@ -1025,19 +1062,20 @@ fn rev4_grad_pixel(
     g_src: f64,
     g_dst: f64,
     i: usize,
+    lane: usize,
 ) {
     if let Some(bins) = r4.ring.as_deref_mut()
         && ring > 0.0
     {
         let h = rev4_hats(centres, rev4_u(ring));
         for (b, h) in bins.bins.iter_mut().zip(h.iter()) {
-            *b += ring * h;
+            b.add64(lane, ring * h);
         }
     }
     if let Some((m, b)) = r4.bleed.as_mut() {
         let out_w = 1.0 - m[i] as f64;
-        b.out_src += g_src * out_w;
-        b.out_dst += g_dst * out_w;
+        b.out_src.add64(lane, g_src * out_w);
+        b.out_dst.add64(lane, g_dst * out_w);
     }
 }
 
@@ -1188,11 +1226,19 @@ fn finish_gridblk_cell(
     out: &mut [f64; GRIDBLK_PER_CELL],
 ) -> Option<[u32; DIAG_BINS]> {
     *out = [0.0; GRIDBLK_PER_CELL];
-    if period < 2 || grid.plane_v.is_empty() {
+    // featacc `exact` mode fills the f64 shadow planes instead of the f32
+    // ones — the rescan reads whichever family is populated.
+    let exact64 = !grid.plane_v64.is_empty();
+    if period < 2 || (!exact64 && grid.plane_v.is_empty()) {
         return None;
     }
-    debug_assert_eq!(grid.plane_v.len(), width * height);
-    debug_assert_eq!(grid.plane_h.len(), width * height);
+    if exact64 {
+        debug_assert_eq!(grid.plane_v64.len(), width * height);
+        debug_assert_eq!(grid.plane_h64.len(), width * height);
+    } else {
+        debug_assert_eq!(grid.plane_v.len(), width * height);
+        debug_assert_eq!(grid.plane_h.len(), width * height);
+    }
     let mut cnt_v = [0usize; GRIDBLK_MAX_PERIOD];
     let mut cnt_h = [0usize; GRIDBLK_MAX_PERIOD];
     for p in 0..period {
@@ -1231,7 +1277,11 @@ fn finish_gridblk_cell(
         let row = y * width;
         let mut x = xv0;
         while x < width {
-            let v = grid.plane_v[row + x] as f64;
+            let v = if exact64 {
+                grid.plane_v64[row + x]
+            } else {
+                grid.plane_v[row + x] as f64
+            };
             if v != 0.0 {
                 let a = v.abs();
                 let h = rev4_hats(&GRIDBLK_UC, rev4_u(a));
@@ -1249,7 +1299,11 @@ fn finish_gridblk_cell(
     for y in (yh0..height).step_by(period) {
         let row = y * width;
         for x in 0..width {
-            let v = grid.plane_h[row + x] as f64;
+            let v = if exact64 {
+                grid.plane_h64[row + x]
+            } else {
+                grid.plane_h[row + x] as f64
+            };
             if v != 0.0 {
                 let a = v.abs();
                 let h = rev4_hats(&GRIDBLK_UC, rev4_u(a));
@@ -1281,7 +1335,7 @@ fn finish_ringbasis_cell(ring: &RingAccum, n_px: usize, out: &mut [f64; RINGBASI
     }
     let inv = 1.0 / n_px as f64;
     for (o, b) in out.iter_mut().zip(ring.bins.iter()) {
-        *o = b * inv;
+        *o = b.fin() * inv;
     }
 }
 
@@ -1342,20 +1396,22 @@ fn finish_arttype_scale(
     out[idx_arttype::NOISE_X] = if flat[0].n == 0 {
         0.0
     } else {
-        flat[0].hfg / flat[0].n as f64
+        flat[0].hfg.fin() / flat[0].n as f64
     };
     out[idx_arttype::NOISE_Y] = if flat[1].n == 0 {
         0.0
     } else {
-        flat[1].hfg / flat[1].n as f64
+        flat[1].hfg.fin() / flat[1].n as f64
     };
     out[idx_arttype::NOISE_B] = if flat[2].n == 0 {
         0.0
     } else {
-        flat[2].hfg / flat[2].n as f64
+        flat[2].hfg.fin() / flat[2].n as f64
     };
-    out[idx_arttype::BLEED_X] = bounded_excess(bleed[0].out_dst, bleed[0].out_src, C_GMS);
-    out[idx_arttype::BLEED_B] = bounded_excess(bleed[2].out_dst, bleed[2].out_src, C_GMS);
+    out[idx_arttype::BLEED_X] =
+        bounded_excess(bleed[0].out_dst.fin(), bleed[0].out_src.fin(), C_GMS);
+    out[idx_arttype::BLEED_B] =
+        bounded_excess(bleed[2].out_dst.fin(), bleed[2].out_src.fin(), C_GMS);
 }
 
 /// Emit all four rev4 families for one scale into their feature slices.
@@ -4462,6 +4518,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
                             mse_arr[lane] as f64,
                             hfg_arr[lane] as f64,
                             act_arr[lane] as f64,
+                            lane,
                         );
                     }
                 }
@@ -4499,6 +4556,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
                             mse_arr[lane] as f64,
                             hfg_arr[lane] as f64,
                             act_arr[lane] as f64,
+                            lane,
                         );
                     }
                 }
@@ -4611,7 +4669,7 @@ fn dense_block_kernel_generic<T: F32x8Backend + Copy, const POOL_SIMD: bool>(
             // REV4: the tail's f64 values go through the same per-pixel
             // helper — no re-derivation.
             if let Some(r4) = r4.as_mut() {
-                rev4_dense_pixel(r4, d, art_i, det_i, mse_i, hf_gain_i, act);
+                rev4_dense_pixel(r4, d, art_i, det_i, mse_i, hf_gain_i, act, x);
             }
         }
     }
@@ -4806,6 +4864,76 @@ fn dense_block_kernel(
     transducer_bank: bool,
     r4: Option<Rev4Dense<'_>>,
 ) -> DenseAccum {
+    // featacc: measurement candidates route the dense block through the
+    // scalar `Pool`-generic mirror (element eval unchanged — magetypes
+    // `*`/`+`/`/` are unfused, so `LanesF32` replays era-2 bitwise). `off`
+    // (or no override) keeps the shipped SIMD body below.
+    #[cfg(feature = "oracle")]
+    if let Some(m) = crate::featcanon::measurement_active() {
+        match m {
+            crate::featcanon::Mode::Canon32 => {
+                return dense_block_kernel_canon::<crate::featcanon::LanesF32>(
+                    src,
+                    dst,
+                    mu1,
+                    mu2,
+                    ssq,
+                    s12,
+                    activity,
+                    width,
+                    height,
+                    transducer_bank,
+                    r4,
+                );
+            }
+            crate::featcanon::Mode::Canon64 => {
+                return dense_block_kernel_canon::<crate::featcanon::LanesF64>(
+                    src,
+                    dst,
+                    mu1,
+                    mu2,
+                    ssq,
+                    s12,
+                    activity,
+                    width,
+                    height,
+                    transducer_bank,
+                    r4,
+                );
+            }
+            crate::featcanon::Mode::CanonNeum => {
+                return dense_block_kernel_canon::<crate::featcanon::Neum64>(
+                    src,
+                    dst,
+                    mu1,
+                    mu2,
+                    ssq,
+                    s12,
+                    activity,
+                    width,
+                    height,
+                    transducer_bank,
+                    r4,
+                );
+            }
+            crate::featcanon::Mode::Exact => {
+                return dense_block_kernel_exact(
+                    src,
+                    dst,
+                    mu1,
+                    mu2,
+                    ssq,
+                    s12,
+                    activity,
+                    width,
+                    height,
+                    transducer_bank,
+                    r4,
+                );
+            }
+            crate::featcanon::Mode::Off => unreachable!("measurement_active filters Off"),
+        }
+    }
     if era2_dense_enabled() {
         return dense_block_kernel_era2(
             src,
@@ -4979,6 +5107,84 @@ fn gmsbank_pixel(cells: &mut [GmsBankCell; 5], mr: f64, md: f64, constants: &[f6
     let denom_base = mr * mr + md * md;
     for (cell, c) in cells.iter_mut().zip(constants) {
         cell.push(numer / (denom_base + c), md < mr);
+    }
+}
+
+/// featacc: measurement-mode sibling of [`GmsBankCell`] — the `loss`/`gain`
+/// sums ride [`SumVar::f64_elems`] (f64-native deltas: `c32` stays
+/// sequential so the f32 column never conflates element precision with
+/// accumulation order) and the Welford `(n, mean, m2)` triple rides
+/// [`WelfordVar`]. Resolves to the production `GmsBankCell` shape at the
+/// strip boundary so `GradientAccum::accumulate`'s plain-f64 fold is
+/// unchanged for every mode.
+#[cfg(feature = "oracle")]
+struct GmsBankCellVar {
+    loss: crate::featcanon::SumVar,
+    gain: crate::featcanon::SumVar,
+    wf: crate::featcanon::WelfordVar,
+}
+
+#[cfg(feature = "oracle")]
+impl GmsBankCellVar {
+    #[inline]
+    fn for_mode(mode: crate::featcanon::Mode) -> Self {
+        Self {
+            loss: crate::featcanon::SumVar::f64_elems(mode),
+            gain: crate::featcanon::SumVar::f64_elems(mode),
+            wf: crate::featcanon::WelfordVar::for_mode(mode),
+        }
+    }
+
+    /// [`GmsBankCell::push`] with the canonical lane.
+    #[inline]
+    fn push(&mut self, lane: usize, delta: f64, is_loss: bool) {
+        if is_loss {
+            self.loss.add64(lane, delta);
+        } else {
+            self.gain.add64(lane, delta);
+        }
+        self.wf.push(lane, delta);
+    }
+
+    /// [`GmsBankCell::merge`] against a same-mode row cell.
+    #[inline]
+    fn merge_var(&mut self, o: &Self) {
+        self.loss.merge_from(&o.loss);
+        self.gain.merge_from(&o.gain);
+        self.wf.merge_var(&o.wf);
+    }
+
+    /// Resolve to the production cell shape (`n`, `mean`, `m2` from
+    /// [`WelfordVar::stats`]).
+    #[inline]
+    fn resolve(&self) -> GmsBankCell {
+        let s = self.wf.stats();
+        GmsBankCell {
+            loss: self.loss.fin(),
+            gain: self.gain.fin(),
+            n: s.n,
+            mean: s.mean,
+            m2: s.m2,
+        }
+    }
+}
+
+/// [`gmsbank_pixel`] for the var cells — identical element math, canonical
+/// lane forwarded.
+#[cfg(feature = "oracle")]
+#[inline(always)]
+fn gmsbank_pixel_var(
+    cells: &mut [GmsBankCellVar; 5],
+    mr: f64,
+    md: f64,
+    constants: &[f64; 5],
+    lane: usize,
+) {
+    let diff = mr - md;
+    let numer = diff * diff;
+    let denom_base = mr * mr + md * md;
+    for (cell, c) in cells.iter_mut().zip(constants) {
+        cell.push(lane, numer / (denom_base + c), md < mr);
     }
 }
 
@@ -5218,6 +5424,7 @@ fn gradient_block_kernel_generic<
                 grad_src_mag,
                 grad_dst_mag,
                 y * width + x,
+                x & 7,
             );
         }
 
@@ -5365,6 +5572,7 @@ fn gradient_block_kernel_generic<
                             gs_a[lane] as f64,
                             gd_a[lane] as f64,
                             act_row + x + lane,
+                            lane,
                         );
                     }
                 }
@@ -5601,6 +5809,603 @@ fn gradient_block_kernel_entry_bandvis_dstact_gmsbank(
     )
 }
 
+// ============================================================================
+// featacc gradient candidates — measurement-only bodies
+// ============================================================================
+//
+// The production kernel accumulates interior pixels in per-row f32 SIMD
+// lanes closed by `reduce_add()` (a TIER-DEPENDENT reduction tree) and the
+// two border columns + tail in sequential f64; the C8 bank/chroma cells
+// are sequential-f64 `GmsBankCell`s merged per row. The mirrors below put
+// the interior accumulation on the `Pool` axis (canonical lane `x mod 8`,
+// fixed `era2_reduce8`-shaped close) and the bank/chroma cells on
+// [`GmsBankCellVar`]. Borders stay sequential f64 in every mode — they are
+// already the exact element form, so only their bank-cell pushes ride the
+// mode axis.
+
+/// One gradient pixel's full term vector in f64 — the production
+/// `scalar_pixel` element math verbatim (clamped x-neighbors, so it serves
+/// both the border columns and the exact interior).
+#[cfg(feature = "oracle")]
+struct GradTerms64 {
+    gsrc: f64,
+    gdst: f64,
+    g: f64,
+    g2: f64,
+    ring: f64,
+    band: f64,
+    bv_gain: f64,
+    bv_loss: f64,
+}
+
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn gradient_terms64<const BANDVIS: bool, const BV_DSTACT: bool>(
+    src_h: &[f32],
+    dst_h: &[f32],
+    activity: &[f32],
+    act_dst: &[f32],
+    width: usize,
+    x: usize,
+    y: usize,
+    bv_lo: f64,
+    bv_hi: f64,
+) -> GradTerms64 {
+    let xl = x.saturating_sub(1);
+    let xr = (x + 1).min(width - 1);
+    let row = (y + 1) * width;
+    let row_u = y * width;
+    let row_d = (y + 2) * width;
+    let i = row + x;
+    let s = src_h[i] as f64;
+    let dd = dst_h[i] as f64;
+    let act = activity[y * width + x] as f64;
+    let sxl = src_h[row + xl] as f64;
+    let sxr = src_h[row + xr] as f64;
+    let syu = src_h[row_u + x] as f64;
+    let syd = src_h[row_d + x] as f64;
+    let dxl = dst_h[row + xl] as f64;
+    let dxr = dst_h[row + xr] as f64;
+    let dyu = dst_h[row_u + x] as f64;
+    let dyd = dst_h[row_d + x] as f64;
+
+    let gx_src = sxr - sxl;
+    let gy_src = syd - syu;
+    let gsrc = (gx_src * gx_src + gy_src * gy_src).sqrt();
+    let gx_dst = dxr - dxl;
+    let gy_dst = dyd - dyu;
+    let gdst = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
+    let g = 1.0 - bounded_sim(gsrc, gdst, C_GMS);
+
+    let raw_abs_err = (s - dd).abs();
+    let err_b = saturate(raw_abs_err, C_RING_ERR);
+    let act_b = saturate(act, C_ACTIVITY);
+    let edge_r = saturate(gsrc, C_RING_EDGE);
+    let ring = err_b * act_b * (1.0 - edge_r);
+
+    let edge_excess = bounded_excess(gdst, gsrc, C_BAND_DST);
+    let src_smooth_b = 1.0 - saturate(gsrc, C_BAND_SRC);
+    let band = edge_excess * src_smooth_b;
+
+    let (bv_gain, bv_loss) = if BANDVIS {
+        let d2x_src = sxl + sxr - 2.0 * s;
+        let d2y_src = syu + syd - 2.0 * s;
+        let curv_src = (d2x_src * d2x_src + d2y_src * d2y_src).sqrt();
+        let d2x_dst = dxl + dxr - 2.0 * dd;
+        let d2y_dst = dyu + dyd - 2.0 * dd;
+        let curv_dst = (d2x_dst * d2x_dst + d2y_dst * d2y_dst).sqrt();
+        let flat = 1.0 - act_b;
+        let bandf = |g: f64| -> f64 { saturate(g, bv_lo) * (1.0 - saturate(g, bv_hi)) };
+        if BV_DSTACT {
+            let flat_d = 1.0 - saturate(act_dst[y * width + x] as f64, C_ACTIVITY);
+            let b_src = bandf(curv_src) * flat;
+            let b_dst = bandf(curv_dst) * flat;
+            let (_, loss) = bounded_excess_pair(b_dst, b_src, C_BV);
+            let (g0, _) = bounded_excess_pair(bandf(curv_dst), bandf(curv_src), C_BV);
+            (g0 * flat_d, loss)
+        } else {
+            let b_src = bandf(curv_src) * flat;
+            let b_dst = bandf(curv_dst) * flat;
+            bounded_excess_pair(b_dst, b_src, C_BV)
+        }
+    } else {
+        (0.0, 0.0)
+    };
+
+    GradTerms64 {
+        gsrc,
+        gdst,
+        g,
+        g2: g * g,
+        ring,
+        band,
+        bv_gain,
+        bv_loss,
+    }
+}
+
+/// f32 scalar helpers mirroring the `*_v` SIMD ops' exact op order.
+#[cfg(feature = "oracle")]
+#[inline(always)]
+fn sat32(x: f32, c: f32) -> f32 {
+    let x = x.max(0.0);
+    x / (x + c)
+}
+#[cfg(feature = "oracle")]
+#[inline(always)]
+fn bsim32(a: f32, b: f32, c: f32) -> f32 {
+    (2.0f32 * a * b + c) / (a * a + b * b + c)
+}
+#[cfg(feature = "oracle")]
+#[inline(always)]
+fn bex32(a: f32, b: f32, c: f32) -> f32 {
+    (a - b).max(0.0) / (a + b + c)
+}
+#[cfg(feature = "oracle")]
+#[inline(always)]
+fn bex_pair32(a: f32, b: f32, c: f32) -> (f32, f32) {
+    let d = a + b + c;
+    ((a - b).max(0.0) / d, (b - a).max(0.0) / d)
+}
+
+/// Shared border-pixel step for the canon/exact bodies: f64 terms folded
+/// straight into `acc` (production's scalar-border shape), plus the bank /
+/// chroma / rev4 side effects at canonical lane `x mod 8`.
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+fn gradient_border_pixel<const BANDVIS: bool, const BV_DSTACT: bool, const BANK: bool>(
+    src_h: &[f32],
+    dst_h: &[f32],
+    activity: &[f32],
+    act_dst: &[f32],
+    width: usize,
+    x: usize,
+    y: usize,
+    bv_lo: f32,
+    bv_hi: f32,
+    acc: &mut GradientAccum,
+    r4: &mut Option<Rev4Grad<'_>>,
+    bank: GmsBankWork<'_>,
+    bank_row: &mut [GmsBankCellVar; 5],
+    chroma_row: &mut [GmsBankCellVar; 5],
+) {
+    let t = gradient_terms64::<BANDVIS, BV_DSTACT>(
+        src_h,
+        dst_h,
+        activity,
+        act_dst,
+        width,
+        x,
+        y,
+        bv_lo as f64,
+        bv_hi as f64,
+    );
+    let lane = x & 7;
+    if BANK {
+        gmsbank_pixel_var(bank_row, t.gsrc, t.gdst, bank.gradient, lane);
+        if let Some(chroma) = bank.chroma {
+            let i = y * width + x;
+            let h = i + width;
+            let reference = [
+                f64::from(src_h[h]) - f64::from(0.42_f32),
+                f64::from(chroma.reference[i]) - f64::from(0.55_f32),
+            ];
+            let distorted = [
+                f64::from(dst_h[h]) - f64::from(0.42_f32),
+                f64::from(chroma.distorted[i]) - f64::from(0.55_f32),
+            ];
+            for (cell, constants) in chroma_row.iter_mut().zip(GMSBANK_CS_C) {
+                cell.push(
+                    lane,
+                    chromaticity_loss(reference, distorted, constants),
+                    true,
+                );
+            }
+        }
+    }
+    acc.sum_grad_src += t.gsrc;
+    acc.sum_grad_dst += t.gdst;
+    acc.sum_gms += t.g;
+    acc.sum_gms2 += t.g2;
+    acc.sum_ringing += t.ring;
+    if let Some(r4) = r4.as_mut() {
+        rev4_grad_pixel(
+            r4,
+            &RINGBASIS_UC,
+            t.ring,
+            t.gsrc,
+            t.gdst,
+            y * width + x,
+            x & 7,
+        );
+    }
+    acc.sum_banding += t.band;
+    if BANDVIS {
+        acc.sum_bv_gain += t.bv_gain;
+        acc.sum_bv_loss += t.bv_loss;
+    }
+}
+
+/// `Pool`-generic scalar gradient kernel — f32 elements in the SIMD op
+/// order, per-row canonical pools, f64 borders.
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+fn gradient_block_kernel_canon<
+    P: crate::featcanon::Pool,
+    const BANDVIS: bool,
+    const BV_DSTACT: bool,
+    const BANK: bool,
+>(
+    src_h: &[f32],
+    dst_h: &[f32],
+    activity: &[f32],
+    act_dst: &[f32],
+    width: usize,
+    height: usize,
+    bv_lo: f32,
+    bv_hi: f32,
+    mut r4: Option<Rev4Grad<'_>>,
+    mode: crate::featcanon::Mode,
+) -> GradientAccum {
+    let mut acc = GradientAccum::default();
+    let bank = r4
+        .as_ref()
+        .map_or_else(|| GmsBankWork::new(1, None), |r| r.bank);
+    let mut bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+    let mut chroma_acc: [GmsBankCellVar; 5] =
+        std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+    for y in 0..height {
+        let row = (y + 1) * width;
+        let row_u = y * width;
+        let row_d = (y + 2) * width;
+        let act_row = y * width;
+        let mut bank_row: [GmsBankCellVar; 5] =
+            std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+        let mut chroma_row: [GmsBankCellVar; 5] =
+            std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+
+        gradient_border_pixel::<BANDVIS, BV_DSTACT, BANK>(
+            src_h,
+            dst_h,
+            activity,
+            act_dst,
+            width,
+            0,
+            y,
+            bv_lo,
+            bv_hi,
+            &mut acc,
+            &mut r4,
+            bank,
+            &mut bank_row,
+            &mut chroma_row,
+        );
+        if width > 2 {
+            let interior_end = width - 1;
+            let mut r_gms = P::zero();
+            let mut r_gms2 = P::zero();
+            let mut r_ring = P::zero();
+            let mut r_band = P::zero();
+            let mut r_gsrc = P::zero();
+            let mut r_gdst = P::zero();
+            let mut r_bv_gain = P::zero();
+            let mut r_bv_loss = P::zero();
+            for x in 1..interior_end {
+                let lane = x & 7;
+                let sxl = src_h[row + x - 1];
+                let sxr = src_h[row + x + 1];
+                let syu = src_h[row_u + x];
+                let syd = src_h[row_d + x];
+                let dxl = dst_h[row + x - 1];
+                let dxr = dst_h[row + x + 1];
+                let dyu = dst_h[row_u + x];
+                let dyd = dst_h[row_d + x];
+                let s = src_h[row + x];
+                let dd = dst_h[row + x];
+                let act = activity[act_row + x];
+
+                let gx_src = sxr - sxl;
+                let gy_src = syd - syu;
+                let gsrc = (gx_src * gx_src + gy_src * gy_src).sqrt();
+                let gx_dst = dxr - dxl;
+                let gy_dst = dyd - dyu;
+                let gdst = (gx_dst * gx_dst + gy_dst * gy_dst).sqrt();
+
+                if BANK {
+                    gmsbank_pixel_var(
+                        &mut bank_row,
+                        f64::from(gsrc),
+                        f64::from(gdst),
+                        bank.gradient,
+                        lane,
+                    );
+                    if let Some(chroma) = bank.chroma {
+                        let i = act_row + x;
+                        let h = i + width;
+                        let reference = [
+                            f64::from(src_h[h]) - f64::from(0.42_f32),
+                            f64::from(chroma.reference[i]) - f64::from(0.55_f32),
+                        ];
+                        let distorted = [
+                            f64::from(dst_h[h]) - f64::from(0.42_f32),
+                            f64::from(chroma.distorted[i]) - f64::from(0.55_f32),
+                        ];
+                        for (cell, constants) in chroma_row.iter_mut().zip(GMSBANK_CS_C) {
+                            cell.push(
+                                lane,
+                                chromaticity_loss(reference, distorted, constants),
+                                true,
+                            );
+                        }
+                    }
+                }
+
+                r_gsrc.add(lane, gsrc);
+                r_gdst.add(lane, gdst);
+                let g = 1.0f32 - bsim32(gsrc, gdst, C_GMS as f32);
+                r_gms.add(lane, g);
+                r_gms2.add(lane, g * g);
+
+                let raw_abs_err = (s - dd).abs();
+                let err_b = sat32(raw_abs_err, C_RING_ERR as f32);
+                let act_b = sat32(act, C_ACTIVITY as f32);
+                let edge_r = sat32(gsrc, C_RING_EDGE as f32);
+                let ring_i = err_b * act_b * (1.0f32 - edge_r);
+                r_ring.add(lane, ring_i);
+                if let Some(r4) = r4.as_mut() {
+                    rev4_grad_pixel(
+                        r4,
+                        &RINGBASIS_UC,
+                        ring_i as f64,
+                        gsrc as f64,
+                        gdst as f64,
+                        act_row + x,
+                        x & 7,
+                    );
+                }
+
+                let edge_excess = bex32(gdst, gsrc, C_BAND_DST as f32);
+                let src_smooth_b = 1.0f32 - sat32(gsrc, C_BAND_SRC as f32);
+                r_band.add(lane, edge_excess * src_smooth_b);
+
+                if BANDVIS {
+                    let two = 2.0f32;
+                    let d2x_s = sxl + sxr - two * s;
+                    let d2y_s = syu + syd - two * s;
+                    let curv_s = (d2x_s * d2x_s + d2y_s * d2y_s).sqrt();
+                    let d2x_d = dxl + dxr - two * dd;
+                    let d2y_d = dyu + dyd - two * dd;
+                    let curv_d = (d2x_d * d2x_d + d2y_d * d2y_d).sqrt();
+                    let flat = 1.0f32 - act_b;
+                    let band_s = sat32(curv_s, bv_lo) * (1.0f32 - sat32(curv_s, bv_hi));
+                    let band_d = sat32(curv_d, bv_lo) * (1.0f32 - sat32(curv_d, bv_hi));
+                    if BV_DSTACT {
+                        let actd = act_dst[act_row + x];
+                        let flat_d = 1.0f32 - sat32(actd, C_ACTIVITY as f32);
+                        let b_src = band_s * flat;
+                        let b_dst = band_d * flat;
+                        let (_, loss) = bex_pair32(b_dst, b_src, C_BV as f32);
+                        let (g0, _) = bex_pair32(band_d, band_s, C_BV as f32);
+                        r_bv_gain.add(lane, g0 * flat_d);
+                        r_bv_loss.add(lane, loss);
+                    } else {
+                        let b_src = band_s * flat;
+                        let b_dst = band_d * flat;
+                        let (gain, loss) = bex_pair32(b_dst, b_src, C_BV as f32);
+                        r_bv_gain.add(lane, gain);
+                        r_bv_loss.add(lane, loss);
+                    }
+                }
+            }
+            acc.sum_gms += r_gms.fin();
+            acc.sum_gms2 += r_gms2.fin();
+            acc.sum_ringing += r_ring.fin();
+            acc.sum_banding += r_band.fin();
+            acc.sum_grad_src += r_gsrc.fin();
+            acc.sum_grad_dst += r_gdst.fin();
+            if BANDVIS {
+                acc.sum_bv_gain += r_bv_gain.fin();
+                acc.sum_bv_loss += r_bv_loss.fin();
+            }
+        }
+        gradient_border_pixel::<BANDVIS, BV_DSTACT, BANK>(
+            src_h,
+            dst_h,
+            activity,
+            act_dst,
+            width,
+            width - 1,
+            y,
+            bv_lo,
+            bv_hi,
+            &mut acc,
+            &mut r4,
+            bank,
+            &mut bank_row,
+            &mut chroma_row,
+        );
+        if BANK {
+            for (sum, row) in bank_acc.iter_mut().zip(&bank_row) {
+                sum.merge_var(row);
+            }
+            for (sum, row) in chroma_acc.iter_mut().zip(&chroma_row) {
+                sum.merge_var(row);
+            }
+        }
+    }
+    if BANK {
+        for (dst, src) in acc.bank.iter_mut().zip(&bank_acc) {
+            *dst = src.resolve();
+        }
+        for (dst, src) in acc.chroma.iter_mut().zip(&chroma_acc) {
+            *dst = src.resolve();
+        }
+    }
+    acc
+}
+
+/// f64-exact sibling — every pixel through [`gradient_terms64`], interior
+/// folded into Neumaier pools, borders direct (identical element math).
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+fn gradient_block_kernel_exact<const BANDVIS: bool, const BV_DSTACT: bool, const BANK: bool>(
+    src_h: &[f32],
+    dst_h: &[f32],
+    activity: &[f32],
+    act_dst: &[f32],
+    width: usize,
+    height: usize,
+    bv_lo: f32,
+    bv_hi: f32,
+    mut r4: Option<Rev4Grad<'_>>,
+    mode: crate::featcanon::Mode,
+) -> GradientAccum {
+    use crate::featcanon::{Neum64, Pool as _};
+    let mut acc = GradientAccum::default();
+    let bank = r4
+        .as_ref()
+        .map_or_else(|| GmsBankWork::new(1, None), |r| r.bank);
+    let mut bank_acc: [GmsBankCellVar; 5] = std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+    let mut chroma_acc: [GmsBankCellVar; 5] =
+        std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+    for y in 0..height {
+        let act_row = y * width;
+        let mut bank_row: [GmsBankCellVar; 5] =
+            std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+        let mut chroma_row: [GmsBankCellVar; 5] =
+            std::array::from_fn(|_| GmsBankCellVar::for_mode(mode));
+
+        gradient_border_pixel::<BANDVIS, BV_DSTACT, BANK>(
+            src_h,
+            dst_h,
+            activity,
+            act_dst,
+            width,
+            0,
+            y,
+            bv_lo,
+            bv_hi,
+            &mut acc,
+            &mut r4,
+            bank,
+            &mut bank_row,
+            &mut chroma_row,
+        );
+        if width > 2 {
+            let interior_end = width - 1;
+            let mut r_gms = Neum64::zero();
+            let mut r_gms2 = Neum64::zero();
+            let mut r_ring = Neum64::zero();
+            let mut r_band = Neum64::zero();
+            let mut r_gsrc = Neum64::zero();
+            let mut r_gdst = Neum64::zero();
+            let mut r_bv_gain = Neum64::zero();
+            let mut r_bv_loss = Neum64::zero();
+            for x in 1..interior_end {
+                let lane = x & 7;
+                let t = gradient_terms64::<BANDVIS, BV_DSTACT>(
+                    src_h,
+                    dst_h,
+                    activity,
+                    act_dst,
+                    width,
+                    x,
+                    y,
+                    bv_lo as f64,
+                    bv_hi as f64,
+                );
+                if BANK {
+                    gmsbank_pixel_var(&mut bank_row, t.gsrc, t.gdst, bank.gradient, lane);
+                    if let Some(chroma) = bank.chroma {
+                        let i = act_row + x;
+                        let h = i + width;
+                        let reference = [
+                            f64::from(src_h[h]) - f64::from(0.42_f32),
+                            f64::from(chroma.reference[i]) - f64::from(0.55_f32),
+                        ];
+                        let distorted = [
+                            f64::from(dst_h[h]) - f64::from(0.42_f32),
+                            f64::from(chroma.distorted[i]) - f64::from(0.55_f32),
+                        ];
+                        for (cell, constants) in chroma_row.iter_mut().zip(GMSBANK_CS_C) {
+                            cell.push(
+                                lane,
+                                chromaticity_loss(reference, distorted, constants),
+                                true,
+                            );
+                        }
+                    }
+                }
+                r_gsrc.add64(lane, t.gsrc);
+                r_gdst.add64(lane, t.gdst);
+                r_gms.add64(lane, t.g);
+                r_gms2.add64(lane, t.g2);
+                r_ring.add64(lane, t.ring);
+                if let Some(r4) = r4.as_mut() {
+                    rev4_grad_pixel(
+                        r4,
+                        &RINGBASIS_UC,
+                        t.ring,
+                        t.gsrc,
+                        t.gdst,
+                        act_row + x,
+                        x & 7,
+                    );
+                }
+                r_band.add64(lane, t.band);
+                if BANDVIS {
+                    r_bv_gain.add64(lane, t.bv_gain);
+                    r_bv_loss.add64(lane, t.bv_loss);
+                }
+            }
+            acc.sum_gms += r_gms.fin();
+            acc.sum_gms2 += r_gms2.fin();
+            acc.sum_ringing += r_ring.fin();
+            acc.sum_banding += r_band.fin();
+            acc.sum_grad_src += r_gsrc.fin();
+            acc.sum_grad_dst += r_gdst.fin();
+            if BANDVIS {
+                acc.sum_bv_gain += r_bv_gain.fin();
+                acc.sum_bv_loss += r_bv_loss.fin();
+            }
+        }
+        gradient_border_pixel::<BANDVIS, BV_DSTACT, BANK>(
+            src_h,
+            dst_h,
+            activity,
+            act_dst,
+            width,
+            width - 1,
+            y,
+            bv_lo,
+            bv_hi,
+            &mut acc,
+            &mut r4,
+            bank,
+            &mut bank_row,
+            &mut chroma_row,
+        );
+        if BANK {
+            for (sum, row) in bank_acc.iter_mut().zip(&bank_row) {
+                sum.merge_var(row);
+            }
+            for (sum, row) in chroma_acc.iter_mut().zip(&chroma_row) {
+                sum.merge_var(row);
+            }
+        }
+    }
+    if BANK {
+        for (dst, src) in acc.bank.iter_mut().zip(&bank_acc) {
+            *dst = src.resolve();
+        }
+        for (dst, src) in acc.chroma.iter_mut().zip(&chroma_acc) {
+            *dst = src.resolve();
+        }
+    }
+    acc
+}
+
 /// `bandvis`: `Some((δ_lo, δ_hi))` accumulates the append2 BANDVIS pair
 /// (Y channel with `append2_block` on — the CROSS-pattern const split, so
 /// chroma/off paths pay nothing and change no byte). `bv_act_dst`:
@@ -5622,6 +6427,156 @@ fn gradient_block_kernel(
     r4: Option<Rev4Grad<'_>>,
     gmsbank: bool,
 ) -> GradientAccum {
+    // featacc: measurement candidates route through the scalar
+    // `Pool`-generic mirror (same halo contract, same borders). `bv_act_dst`
+    // is ignored without `bandvis`, as in the production match below.
+    #[cfg(feature = "oracle")]
+    if let Some(m) = crate::featcanon::measurement_active() {
+        use crate::featcanon::{LanesF32, LanesF64, Mode, Neum64};
+        macro_rules! go {
+            ($p:ty) => {
+                match (bandvis, bv_act_dst, gmsbank) {
+                    (None, _, false) => gradient_block_kernel_canon::<$p, false, false, false>(
+                        src,
+                        dst,
+                        activity,
+                        &[],
+                        width,
+                        height,
+                        0.0,
+                        0.0,
+                        r4,
+                        m,
+                    ),
+                    (None, _, true) => gradient_block_kernel_canon::<$p, false, false, true>(
+                        src,
+                        dst,
+                        activity,
+                        &[],
+                        width,
+                        height,
+                        0.0,
+                        0.0,
+                        r4,
+                        m,
+                    ),
+                    (Some((lo, hi)), None, false) => {
+                        gradient_block_kernel_canon::<$p, true, false, false>(
+                            src,
+                            dst,
+                            activity,
+                            &[],
+                            width,
+                            height,
+                            lo,
+                            hi,
+                            r4,
+                            m,
+                        )
+                    }
+                    (Some((lo, hi)), None, true) => {
+                        gradient_block_kernel_canon::<$p, true, false, true>(
+                            src,
+                            dst,
+                            activity,
+                            &[],
+                            width,
+                            height,
+                            lo,
+                            hi,
+                            r4,
+                            m,
+                        )
+                    }
+                    (Some((lo, hi)), Some(ad), false) => {
+                        gradient_block_kernel_canon::<$p, true, true, false>(
+                            src, dst, activity, ad, width, height, lo, hi, r4, m,
+                        )
+                    }
+                    (Some((lo, hi)), Some(ad), true) => {
+                        gradient_block_kernel_canon::<$p, true, true, true>(
+                            src, dst, activity, ad, width, height, lo, hi, r4, m,
+                        )
+                    }
+                }
+            };
+        }
+        macro_rules! go_exact {
+            () => {
+                match (bandvis, bv_act_dst, gmsbank) {
+                    (None, _, false) => gradient_block_kernel_exact::<false, false, false>(
+                        src,
+                        dst,
+                        activity,
+                        &[],
+                        width,
+                        height,
+                        0.0,
+                        0.0,
+                        r4,
+                        m,
+                    ),
+                    (None, _, true) => gradient_block_kernel_exact::<false, false, true>(
+                        src,
+                        dst,
+                        activity,
+                        &[],
+                        width,
+                        height,
+                        0.0,
+                        0.0,
+                        r4,
+                        m,
+                    ),
+                    (Some((lo, hi)), None, false) => {
+                        gradient_block_kernel_exact::<true, false, false>(
+                            src,
+                            dst,
+                            activity,
+                            &[],
+                            width,
+                            height,
+                            lo,
+                            hi,
+                            r4,
+                            m,
+                        )
+                    }
+                    (Some((lo, hi)), None, true) => {
+                        gradient_block_kernel_exact::<true, false, true>(
+                            src,
+                            dst,
+                            activity,
+                            &[],
+                            width,
+                            height,
+                            lo,
+                            hi,
+                            r4,
+                            m,
+                        )
+                    }
+                    (Some((lo, hi)), Some(ad), false) => {
+                        gradient_block_kernel_exact::<true, true, false>(
+                            src, dst, activity, ad, width, height, lo, hi, r4, m,
+                        )
+                    }
+                    (Some((lo, hi)), Some(ad), true) => {
+                        gradient_block_kernel_exact::<true, true, true>(
+                            src, dst, activity, ad, width, height, lo, hi, r4, m,
+                        )
+                    }
+                }
+            };
+        }
+        return match m {
+            Mode::Canon32 => go!(LanesF32),
+            Mode::Canon64 => go!(LanesF64),
+            Mode::CanonNeum => go!(Neum64),
+            Mode::Exact => go_exact!(),
+            Mode::Off => unreachable!("measurement_active filters Off"),
+        };
+    }
     match (bandvis, bv_act_dst, gmsbank) {
         (None, _, false) => incant!(
             gradient_block_kernel_entry(src, dst, activity, width, height, r4),
@@ -5686,7 +6641,7 @@ fn gradient_block_kernel(
 /// per step.)
 fn blockiness_sparse(src: &[f32], dst: &[f32], width: usize, height: usize) -> f64 {
     let (sum_v, sum_h) = blockiness_sparse_rows(src, dst, width, 0, height);
-    sum_v + sum_h
+    crate::featcanon::SumVar::fin(&sum_v) + crate::featcanon::SumVar::fin(&sum_h)
 }
 
 /// Row-range core of [`blockiness_sparse`]: accumulate BOTH term families
@@ -5701,9 +6656,11 @@ fn blockiness_sparse_rows(
     width: usize,
     y0: usize,
     y1: usize,
-) -> (f64, f64) {
-    let mut sum_v = 0.0f64;
-    let mut sum_h = 0.0f64;
+) -> (crate::featcanon::SumVar, crate::featcanon::SumVar) {
+    // featacc: `Seq` (the production `f64 +=` chain) unless a measurement
+    // mode is set — the f64-element rule means `c32` is `Seq` too.
+    let mut sum_v = crate::featcanon::SumVar::f64_elems_meas();
+    let mut sum_h = crate::featcanon::SumVar::f64_elems_meas();
     for y in y0..y1 {
         let row = y * width;
         // Vertical steps at lattice columns, this row.
@@ -5712,7 +6669,7 @@ fn blockiness_sparse_rows(
             let i = row + x;
             let step_dst = (dst[i] as f64 - dst[i - 1] as f64).abs();
             let step_src = (src[i] as f64 - src[i - 1] as f64).abs();
-            sum_v += bounded_excess(step_dst, step_src, C_BLOCK);
+            sum_v.add64(x & 7, bounded_excess(step_dst, step_src, C_BLOCK));
             x += BLOCK_LATTICE;
         }
         // Horizontal steps across the whole row, lattice rows only.
@@ -5722,7 +6679,7 @@ fn blockiness_sparse_rows(
                 let i_up = i - width;
                 let step_dst = (dst[i] as f64 - dst[i_up] as f64).abs();
                 let step_src = (src[i] as f64 - src[i_up] as f64).abs();
-                sum_h += bounded_excess(step_dst, step_src, C_BLOCK);
+                sum_h.add64(x & 7, bounded_excess(step_dst, step_src, C_BLOCK));
             }
         }
     }
@@ -6125,6 +7082,327 @@ fn append_block_kernel_generic<T: F32x8Backend + Copy, const CROSS: bool, const 
     acc
 }
 
+// ============================================================================
+// featacc append candidates — measurement-only bodies
+// ============================================================================
+//
+// Same structure as the dense mirrors: `Pool`-generic per-row accumulation
+// (canonical lane `x mod 8`, fixed `era2_reduce8`-shaped close into the f64
+// `AppendAccum`), scalar f32 elements in the SIMD body's exact op order —
+// including the explicit `mul_add` transducer folds, which `f32::mul_add`
+// replays bit-exactly (fused on every hardware tier, correctly rounded on
+// the scalar tier). `exact` runs the f64 scalar-sibling elements (the
+// production tail's forms) into Neumaier pools. Every pixel goes through
+// the pools — the canonical close owns the width tail too.
+
+#[cfg(feature = "oracle")]
+#[inline(always)]
+fn pjnd32(rae: f32, a: f32, k: f32, c: f32) -> f32 {
+    rae / (rae + c * (1.0f32 + k * a))
+}
+
+/// One append pixel's full term vector in f32 — `append_block_kernel_generic`'s
+/// SIMD chunk ops verbatim.
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn append_terms32<const CROSS: bool, const HL: bool>(
+    s: f32,
+    dd: f32,
+    m1: f32,
+    m2: f32,
+    sq_i: f32,
+    b2: f32,
+    act: f32,
+    ry: f32,
+    act_c: f32,
+) -> [f32; 24] {
+    let diff_src = (s - m1).abs();
+    let diff_dst = (dd - m2).abs();
+    let edge_dissim = 1.0f32 - bsim32(diff_src, diff_dst, C_EDGE as f32);
+    let art_i = if diff_dst > diff_src {
+        edge_dissim
+    } else {
+        0.0
+    };
+    let det_i = if diff_dst < diff_src {
+        edge_dissim
+    } else {
+        0.0
+    };
+    let raw_diff = s - dd;
+    let rae = raw_diff.abs();
+    let rsq = raw_diff * raw_diff;
+    let mse_i = rsq.max(0.0) / (rsq.max(0.0) + C_MSE as f32);
+    let t = sat32(ry, C_LUM_T as f32);
+    let k_lum = (K_LUM_ADAPT / K_PJND_MASK) as f32;
+    let k_xch = (K_XCH / K_PJND_MASK) as f32;
+    let (lumt, xm) = if CROSS {
+        (
+            pjnd32(
+                rae,
+                t.mul_add(k_lum, act),
+                K_PJND_MASK as f32,
+                C_PJND_CLAMP as f32,
+            ),
+            pjnd32(
+                rae,
+                act_c.mul_add(k_xch, act),
+                K_PJND_MASK as f32,
+                C_PJND_CLAMP as f32,
+            ),
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    let one_mt = 1.0f32 - t;
+    let wd = one_mt * one_mt;
+    let wb = t * t;
+    let (hl1w, hl1v, hl2w, hl2v) = if HL {
+        let w1 = sat32((ry - HL1_Y_ANCHOR).max(0.0), C_HL as f32);
+        let w2 = sat32((ry - HL2_Y_ANCHOR).max(0.0), C_HL as f32);
+        (w1, w1 * mse_i, w2, w2 * mse_i)
+    } else {
+        (0.0, 0.0, 0.0, 0.0)
+    };
+    let var1 = (b2 - m1 * m1).max(0.0);
+    let var2 = ((sq_i - b2) - m2 * m2).max(0.0);
+    let n1 = (s - m1) / (var1 + C_MSCN_VAR as f32).sqrt();
+    let n2 = (dd - m2) / (var2 + C_MSCN_VAR as f32).sqrt();
+    let dn = n1 - n2;
+    let mscn = sat32(dn.abs(), C_MSCN_ABS as f32);
+    let mscn2 = sat32(dn * dn, C_MSCN_SQ as f32);
+    let (cg, cl) = bex_pair32(var2, var1, C_CONTRAST as f32);
+    let tex = 1.0f32 - bsim32(var1, var2, C_CONTRAST as f32);
+    let df = dd - s;
+    [
+        xm,
+        lumt,
+        wd,
+        wd * mse_i,
+        wb,
+        wb * mse_i,
+        mse_i,
+        mscn,
+        mscn2,
+        cg,
+        cl,
+        tex,
+        art_i * art_i,
+        det_i * det_i,
+        s,
+        dd,
+        s * s,
+        dd * dd,
+        df * (dd + s),
+        df,
+        hl1w,
+        hl1v,
+        hl2w,
+        hl2v,
+    ]
+}
+
+/// `Pool`-generic scalar append kernel — see the module note above.
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+fn append_block_kernel_canon<P: crate::featcanon::Pool, const CROSS: bool, const HL: bool>(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    bs2: &[f32],
+    activity: &[f32],
+    ref_y: &[f32],
+    act_x: &[f32],
+    act_b: &[f32],
+    width: usize,
+    height: usize,
+) -> AppendAccum {
+    let mut acc = AppendAccum::default();
+    for y in 0..height {
+        let row = y * width;
+        let mut r = [P::zero(); 24];
+        for x in 0..width {
+            let i = row + x;
+            let lane = x & 7;
+            let t = append_terms32::<CROSS, HL>(
+                src[i],
+                dst[i],
+                mu1[i],
+                mu2[i],
+                ssq[i],
+                bs2[i],
+                if CROSS { activity[i] } else { 0.0 },
+                ref_y[i],
+                if CROSS { act_x[i] + act_b[i] } else { 0.0 },
+            );
+            for j in 0..24 {
+                r[j].add(lane, t[j]);
+            }
+        }
+        acc.sum_xmask += r[0].fin();
+        acc.sum_lumt += r[1].fin();
+        acc.ws_dark.den += r[2].fin();
+        acc.ws_dark.num += r[3].fin();
+        acc.ws_bright.den += r[4].fin();
+        acc.ws_bright.num += r[5].fin();
+        acc.sum_mse += r[6].fin();
+        acc.sum_mscn += r[7].fin();
+        acc.sum_mscn2 += r[8].fin();
+        acc.sum_cgain += r[9].fin();
+        acc.sum_closs += r[10].fin();
+        acc.sum_tex += r[11].fin();
+        acc.sum_art2 += r[12].fin();
+        acc.sum_det2 += r[13].fin();
+        acc.sum_s += r[14].fin();
+        acc.sum_d += r[15].fin();
+        acc.sum_s2 += r[16].fin();
+        acc.sum_d2 += r[17].fin();
+        acc.sum_dd += r[18].fin();
+        acc.sum_ds += r[19].fin();
+        if HL {
+            acc.ws_hl1.den += r[20].fin();
+            acc.ws_hl1.num += r[21].fin();
+            acc.ws_hl2.den += r[22].fin();
+            acc.ws_hl2.num += r[23].fin();
+        }
+    }
+    acc
+}
+
+/// f64-exact append sibling — the production scalar tail's element forms
+/// (mul+add transducer arguments, two-division `bounded_excess_pair`) into
+/// Neumaier pools.
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+fn append_block_kernel_exact<const CROSS: bool, const HL: bool>(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    bs2: &[f32],
+    activity: &[f32],
+    ref_y: &[f32],
+    act_x: &[f32],
+    act_b: &[f32],
+    width: usize,
+    height: usize,
+) -> AppendAccum {
+    use crate::featcanon::{Neum64, Pool as _};
+    let mut acc = AppendAccum::default();
+    for y in 0..height {
+        let row = y * width;
+        let mut r = [Neum64::zero(); 24];
+        for x in 0..width {
+            let i = row + x;
+            let lane = x & 7;
+            let s = src[i] as f64;
+            let dd = dst[i] as f64;
+            let m1 = mu1[i] as f64;
+            let m2 = mu2[i] as f64;
+            let act = activity[i] as f64;
+            let ry = ref_y[i] as f64;
+            let b2 = bs2[i] as f64;
+            let sq = ssq[i] as f64;
+            let diff_src = (s - m1).abs();
+            let diff_dst = (dd - m2).abs();
+            let ed = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+            let art_i = if diff_dst > diff_src { ed } else { 0.0 };
+            let det_i = if diff_dst < diff_src { ed } else { 0.0 };
+            r[12].add64(lane, art_i * art_i);
+            r[13].add64(lane, det_i * det_i);
+            let raw_diff = s - dd;
+            let rae = raw_diff.abs();
+            let mse_i = saturate(raw_diff * raw_diff, C_MSE);
+            let t = saturate(ry, C_LUM_T);
+            if CROSS {
+                r[1].add64(
+                    lane,
+                    pjnd_transducer(
+                        rae,
+                        act + t * (K_LUM_ADAPT / K_PJND_MASK),
+                        K_PJND_MASK,
+                        C_PJND_CLAMP,
+                    ),
+                );
+                let act_c = act_x[i] as f64 + act_b[i] as f64;
+                r[0].add64(
+                    lane,
+                    pjnd_transducer(
+                        rae,
+                        act + act_c * (K_XCH / K_PJND_MASK),
+                        K_PJND_MASK,
+                        C_PJND_CLAMP,
+                    ),
+                );
+            }
+            let one_mt = 1.0 - t;
+            let wd = one_mt * one_mt;
+            let wb = t * t;
+            r[2].add64(lane, wd);
+            r[3].add64(lane, wd * mse_i);
+            r[4].add64(lane, wb);
+            r[5].add64(lane, wb * mse_i);
+            r[6].add64(lane, mse_i);
+            if HL {
+                let w1 = saturate((ry - HL1_Y_ANCHOR as f64).max(0.0), C_HL);
+                let w2 = saturate((ry - HL2_Y_ANCHOR as f64).max(0.0), C_HL);
+                r[20].add64(lane, w1);
+                r[21].add64(lane, w1 * mse_i);
+                r[22].add64(lane, w2);
+                r[23].add64(lane, w2 * mse_i);
+            }
+            let var1 = (b2 - m1 * m1).max(0.0);
+            let var2 = ((sq - b2) - m2 * m2).max(0.0);
+            let n1 = (s - m1) / (var1 + C_MSCN_VAR).sqrt();
+            let n2 = (dd - m2) / (var2 + C_MSCN_VAR).sqrt();
+            let dn = n1 - n2;
+            r[7].add64(lane, saturate(dn.abs(), C_MSCN_ABS));
+            r[8].add64(lane, saturate(dn * dn, C_MSCN_SQ));
+            let (cg, cl) = bounded_excess_pair(var2, var1, C_CONTRAST);
+            r[9].add64(lane, cg);
+            r[10].add64(lane, cl);
+            r[11].add64(lane, 1.0 - bounded_sim(var1, var2, C_CONTRAST));
+            r[14].add64(lane, s);
+            r[15].add64(lane, dd);
+            r[16].add64(lane, s * s);
+            r[17].add64(lane, dd * dd);
+            r[18].add64(lane, (dd - s) * (dd + s));
+            r[19].add64(lane, dd - s);
+        }
+        acc.sum_xmask += r[0].fin();
+        acc.sum_lumt += r[1].fin();
+        acc.ws_dark.den += r[2].fin();
+        acc.ws_dark.num += r[3].fin();
+        acc.ws_bright.den += r[4].fin();
+        acc.ws_bright.num += r[5].fin();
+        acc.sum_mse += r[6].fin();
+        acc.sum_mscn += r[7].fin();
+        acc.sum_mscn2 += r[8].fin();
+        acc.sum_cgain += r[9].fin();
+        acc.sum_closs += r[10].fin();
+        acc.sum_tex += r[11].fin();
+        acc.sum_art2 += r[12].fin();
+        acc.sum_det2 += r[13].fin();
+        acc.sum_s += r[14].fin();
+        acc.sum_d += r[15].fin();
+        acc.sum_s2 += r[16].fin();
+        acc.sum_d2 += r[17].fin();
+        acc.sum_dd += r[18].fin();
+        acc.sum_ds += r[19].fin();
+        if HL {
+            acc.ws_hl1.den += r[20].fin();
+            acc.ws_hl1.num += r[21].fin();
+            acc.ws_hl2.den += r[22].fin();
+            acc.ws_hl2.num += r[23].fin();
+        }
+    }
+    acc
+}
+
 #[magetypes(v4x, v4, v3, neon, wasm128, scalar)]
 #[allow(clippy::too_many_arguments)]
 fn append_block_kernel_entry_cross(
@@ -6221,6 +7499,70 @@ fn append_block_kernel(
     width: usize,
     height: usize,
 ) -> AppendAccum {
+    // featacc: measurement candidates — the scalar `Pool`-generic mirror.
+    #[cfg(feature = "oracle")]
+    if let Some(m) = crate::featcanon::measurement_active() {
+        use crate::featcanon::{LanesF32, LanesF64, Mode, Neum64};
+        macro_rules! go {
+            ($p:ty) => {
+                match (cross, hl) {
+                    (Some((ax, ab)), true) => append_block_kernel_canon::<$p, true, true>(
+                        src, dst, mu1, mu2, ssq, bs2, activity, ref_y, ax, ab, width, height,
+                    ),
+                    (Some((ax, ab)), false) => append_block_kernel_canon::<$p, true, false>(
+                        src, dst, mu1, mu2, ssq, bs2, activity, ref_y, ax, ab, width, height,
+                    ),
+                    (None, _) => append_block_kernel_canon::<$p, false, false>(
+                        src,
+                        dst,
+                        mu1,
+                        mu2,
+                        ssq,
+                        bs2,
+                        activity,
+                        ref_y,
+                        &[],
+                        &[],
+                        width,
+                        height,
+                    ),
+                }
+            };
+        }
+        macro_rules! go_exact {
+            () => {
+                match (cross, hl) {
+                    (Some((ax, ab)), true) => append_block_kernel_exact::<true, true>(
+                        src, dst, mu1, mu2, ssq, bs2, activity, ref_y, ax, ab, width, height,
+                    ),
+                    (Some((ax, ab)), false) => append_block_kernel_exact::<true, false>(
+                        src, dst, mu1, mu2, ssq, bs2, activity, ref_y, ax, ab, width, height,
+                    ),
+                    (None, _) => append_block_kernel_exact::<false, false>(
+                        src,
+                        dst,
+                        mu1,
+                        mu2,
+                        ssq,
+                        bs2,
+                        activity,
+                        ref_y,
+                        &[],
+                        &[],
+                        width,
+                        height,
+                    ),
+                }
+            };
+        }
+        return match m {
+            Mode::Canon32 => go!(LanesF32),
+            Mode::Canon64 => go!(LanesF64),
+            Mode::CanonNeum => go!(Neum64),
+            Mode::Exact => go_exact!(),
+            Mode::Off => unreachable!("measurement_active filters Off"),
+        };
+    }
     match cross {
         Some((act_x, act_b)) if hl => {
             incant!(
@@ -6895,158 +8237,257 @@ fn square_into(input: &[f32], out: &mut [f32]) {
 /// Finalizers below emit the corresponding slots with global scale
 /// normalization. Peak slots 156..228 are supported and consumed by candidate
 /// models; they are not deprecated or silently discarded.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct V1BasicSums {
-    ssim_d: f64,
-    ssim_d4: f64,
-    ssim_d2: f64,
-    edge_art: f64,
-    edge_art4: f64,
-    edge_art2: f64,
-    edge_det: f64,
-    edge_det4: f64,
-    edge_det2: f64,
-    mse: f64,
-    hf_sq_src: f64,
-    hf_sq_dst: f64,
-    hf_abs_src: f64,
-    hf_abs_dst: f64,
+    // featacc: every f64 sum slot is a `featcanon::SumVar` — production
+    // resolves to `Seq` (the plain `+=` below), a measurement mode to the
+    // matching lane/Neumaier form. Two constructors pick the ELEMENT axis:
+    // `meas_f64` for slots fed f64 strip partials (`accumulate`), `meas_f32`
+    // for slots fed f32-native terms (`accumulate_block` in z1max) — under
+    // `c32` the former stays sequential (f64 terms) and the latter takes
+    // f32 lanes.
+    ssim_d: crate::featcanon::SumVar,
+    ssim_d4: crate::featcanon::SumVar,
+    ssim_d2: crate::featcanon::SumVar,
+    edge_art: crate::featcanon::SumVar,
+    edge_art4: crate::featcanon::SumVar,
+    edge_art2: crate::featcanon::SumVar,
+    edge_det: crate::featcanon::SumVar,
+    edge_det4: crate::featcanon::SumVar,
+    edge_det2: crate::featcanon::SumVar,
+    mse: crate::featcanon::SumVar,
+    hf_sq_src: crate::featcanon::SumVar,
+    hf_sq_dst: crate::featcanon::SumVar,
+    hf_abs_src: crate::featcanon::SumVar,
+    hf_abs_dst: crate::featcanon::SumVar,
     // --- v1 pool blocks (`V2NewFeatureToggles::v1_pools`): the peak
     //     accumulators the fused kernel returns anyway, plus the masked /
     //     IW sums v1's extended strip section derives per band
     //     (`streaming::ScaleAccumulators` field-for-field). ---
-    ssim_d8: f64,
-    edge_art8: f64,
-    edge_det8: f64,
-    ssim_max: f32,
-    edge_art_max: f32,
-    edge_det_max: f32,
-    masked_ssim_d: f64,
-    masked_ssim_d4: f64,
-    masked_ssim_d2: f64,
-    masked_art4: f64,
-    masked_det4: f64,
-    masked_mse: f64,
-    iw_ssim_d: f64,
-    iw_ssim_d4: f64,
-    iw_ssim_d2: f64,
-    iw_art4: f64,
-    iw_det4: f64,
-    iw_mse: f64,
+    ssim_d8: crate::featcanon::SumVar,
+    edge_art8: crate::featcanon::SumVar,
+    edge_det8: crate::featcanon::SumVar,
+    // Maxima are order-free; widened to f64 so the exact map eval can push
+    // f64 block maxima without narrowing (production values were f32, and
+    // f32→f64 is lossless, so production bits are unchanged).
+    ssim_max: f64,
+    edge_art_max: f64,
+    edge_det_max: f64,
+    masked_ssim_d: crate::featcanon::SumVar,
+    masked_ssim_d4: crate::featcanon::SumVar,
+    masked_ssim_d2: crate::featcanon::SumVar,
+    masked_art4: crate::featcanon::SumVar,
+    masked_det4: crate::featcanon::SumVar,
+    masked_mse: crate::featcanon::SumVar,
+    iw_ssim_d: crate::featcanon::SumVar,
+    iw_ssim_d4: crate::featcanon::SumVar,
+    iw_ssim_d2: crate::featcanon::SumVar,
+    iw_art4: crate::featcanon::SumVar,
+    iw_det4: crate::featcanon::SumVar,
+    iw_mse: crate::featcanon::SumVar,
     // --- FREE raw moments ([`V1FreeExtras::RawMoments`]) ---
     // Σsrc, Σdst, Σsrc², Σdst² over this (scale, channel). Zero unless the
     // request asked for them; the fused kernel's own fields of the same
     // name are their only source.
-    sum_s: f64,
-    sum_d: f64,
-    sum_s2: f64,
-    sum_d2: f64,
+    sum_s: crate::featcanon::SumVar,
+    sum_d: crate::featcanon::SumVar,
+    sum_s2: crate::featcanon::SumVar,
+    sum_d2: crate::featcanon::SumVar,
     /// Revision 2's paired second moment `Σ(d−s)(d+s)`, carried alongside the
     /// raw pair so `global_stats_from_raw_moments` can pick per revision.
-    sum_dd: f64,
+    sum_dd: crate::featcanon::SumVar,
     /// Revision 2's paired first difference `Σ(d−s)`.
-    sum_ds: f64,
+    sum_ds: crate::featcanon::SumVar,
     // --- FREE bounded error ([`V1FreeExtras::RawMomentsPlusBoundedErr`]) ---
     // Σ sat((s−d)², C_MSE) over this (scale, channel), and the Y-only
     // dark/bright weighted sums of that same per-pixel value. Zero unless
     // the request asked for them.
-    sum_msat: f64,
-    lum_wd_num: f64,
-    lum_wd_den: f64,
-    lum_wb_num: f64,
-    lum_wb_den: f64,
+    sum_msat: crate::featcanon::SumVar,
+    lum_wd_num: crate::featcanon::SumVar,
+    lum_wd_den: crate::featcanon::SumVar,
+    lum_wb_num: crate::featcanon::SumVar,
+    lum_wb_den: crate::featcanon::SumVar,
+}
+
+impl V1BasicSums {
+    /// Merge-level accumulator fed by `accumulate` (f64 strip partials).
+    fn meas_f64() -> Self {
+        use crate::featcanon::SumVar;
+        Self {
+            ssim_d: SumVar::f64_elems_meas(),
+            ssim_d4: SumVar::f64_elems_meas(),
+            ssim_d2: SumVar::f64_elems_meas(),
+            edge_art: SumVar::f64_elems_meas(),
+            edge_art4: SumVar::f64_elems_meas(),
+            edge_art2: SumVar::f64_elems_meas(),
+            edge_det: SumVar::f64_elems_meas(),
+            edge_det4: SumVar::f64_elems_meas(),
+            edge_det2: SumVar::f64_elems_meas(),
+            mse: SumVar::f64_elems_meas(),
+            hf_sq_src: SumVar::f64_elems_meas(),
+            hf_sq_dst: SumVar::f64_elems_meas(),
+            hf_abs_src: SumVar::f64_elems_meas(),
+            hf_abs_dst: SumVar::f64_elems_meas(),
+            ssim_d8: SumVar::f64_elems_meas(),
+            edge_art8: SumVar::f64_elems_meas(),
+            edge_det8: SumVar::f64_elems_meas(),
+            ssim_max: 0.0,
+            edge_art_max: 0.0,
+            edge_det_max: 0.0,
+            masked_ssim_d: SumVar::f64_elems_meas(),
+            masked_ssim_d4: SumVar::f64_elems_meas(),
+            masked_ssim_d2: SumVar::f64_elems_meas(),
+            masked_art4: SumVar::f64_elems_meas(),
+            masked_det4: SumVar::f64_elems_meas(),
+            masked_mse: SumVar::f64_elems_meas(),
+            iw_ssim_d: SumVar::f64_elems_meas(),
+            iw_ssim_d4: SumVar::f64_elems_meas(),
+            iw_ssim_d2: SumVar::f64_elems_meas(),
+            iw_art4: SumVar::f64_elems_meas(),
+            iw_det4: SumVar::f64_elems_meas(),
+            iw_mse: SumVar::f64_elems_meas(),
+            sum_s: SumVar::f64_elems_meas(),
+            sum_d: SumVar::f64_elems_meas(),
+            sum_s2: SumVar::f64_elems_meas(),
+            sum_d2: SumVar::f64_elems_meas(),
+            sum_dd: SumVar::f64_elems_meas(),
+            sum_ds: SumVar::f64_elems_meas(),
+            sum_msat: SumVar::f64_elems_meas(),
+            lum_wd_num: SumVar::f64_elems_meas(),
+            lum_wd_den: SumVar::f64_elems_meas(),
+            lum_wb_num: SumVar::f64_elems_meas(),
+            lum_wb_den: SumVar::f64_elems_meas(),
+        }
+    }
+
+    /// Term-level accumulator fed f32-native block terms (`accumulate_block`
+    /// in the z1max side pass) — `c32` takes the f32-lane form.
+    fn meas_f32() -> Self {
+        let mut s = Self::meas_f64();
+        if matches!(
+            crate::featcanon::measurement_mode(),
+            crate::featcanon::Mode::Canon32
+        ) {
+            s.ssim_d = crate::featcanon::SumVar::f32_elems_meas();
+            s.ssim_d4 = crate::featcanon::SumVar::f32_elems_meas();
+            s.ssim_d2 = crate::featcanon::SumVar::f32_elems_meas();
+            s.edge_art = crate::featcanon::SumVar::f32_elems_meas();
+            s.edge_art4 = crate::featcanon::SumVar::f32_elems_meas();
+            s.edge_art2 = crate::featcanon::SumVar::f32_elems_meas();
+            s.edge_det = crate::featcanon::SumVar::f32_elems_meas();
+            s.edge_det4 = crate::featcanon::SumVar::f32_elems_meas();
+            s.edge_det2 = crate::featcanon::SumVar::f32_elems_meas();
+            s.mse = crate::featcanon::SumVar::f32_elems_meas();
+            s.hf_sq_src = crate::featcanon::SumVar::f32_elems_meas();
+            s.hf_sq_dst = crate::featcanon::SumVar::f32_elems_meas();
+            s.hf_abs_src = crate::featcanon::SumVar::f32_elems_meas();
+            s.hf_abs_dst = crate::featcanon::SumVar::f32_elems_meas();
+            s.ssim_d8 = crate::featcanon::SumVar::f32_elems_meas();
+            s.edge_art8 = crate::featcanon::SumVar::f32_elems_meas();
+            s.edge_det8 = crate::featcanon::SumVar::f32_elems_meas();
+        }
+        s
+    }
 }
 
 impl V1BasicSums {
     /// Add another band's sums into this one. Used by both paths of
     /// [`fold_v1_basic_bands`]; the parallel path merges IN BAND ORDER so the
     /// f64 addition sequence matches the serial one exactly.
+    ///
+    /// featacc: `merge_from` folds lane-aligned, so under a lane mode each
+    /// lane's own sequence is preserved (the same in-band-order argument, per
+    /// lane).
     fn merge(&mut self, o: &V1BasicSums) {
-        self.ssim_d += o.ssim_d;
-        self.ssim_d4 += o.ssim_d4;
-        self.ssim_d2 += o.ssim_d2;
-        self.edge_art += o.edge_art;
-        self.edge_art4 += o.edge_art4;
-        self.edge_art2 += o.edge_art2;
-        self.edge_det += o.edge_det;
-        self.edge_det4 += o.edge_det4;
-        self.edge_det2 += o.edge_det2;
-        self.mse += o.mse;
-        self.hf_sq_src += o.hf_sq_src;
-        self.hf_sq_dst += o.hf_sq_dst;
-        self.hf_abs_src += o.hf_abs_src;
-        self.hf_abs_dst += o.hf_abs_dst;
-        self.ssim_d8 += o.ssim_d8;
-        self.edge_art8 += o.edge_art8;
-        self.edge_det8 += o.edge_det8;
+        self.ssim_d.merge_from(&o.ssim_d);
+        self.ssim_d4.merge_from(&o.ssim_d4);
+        self.ssim_d2.merge_from(&o.ssim_d2);
+        self.edge_art.merge_from(&o.edge_art);
+        self.edge_art4.merge_from(&o.edge_art4);
+        self.edge_art2.merge_from(&o.edge_art2);
+        self.edge_det.merge_from(&o.edge_det);
+        self.edge_det4.merge_from(&o.edge_det4);
+        self.edge_det2.merge_from(&o.edge_det2);
+        self.mse.merge_from(&o.mse);
+        self.hf_sq_src.merge_from(&o.hf_sq_src);
+        self.hf_sq_dst.merge_from(&o.hf_sq_dst);
+        self.hf_abs_src.merge_from(&o.hf_abs_src);
+        self.hf_abs_dst.merge_from(&o.hf_abs_dst);
+        self.ssim_d8.merge_from(&o.ssim_d8);
+        self.edge_art8.merge_from(&o.edge_art8);
+        self.edge_det8.merge_from(&o.edge_det8);
         self.ssim_max = self.ssim_max.max(o.ssim_max);
         self.edge_art_max = self.edge_art_max.max(o.edge_art_max);
         self.edge_det_max = self.edge_det_max.max(o.edge_det_max);
-        self.masked_ssim_d += o.masked_ssim_d;
-        self.masked_ssim_d4 += o.masked_ssim_d4;
-        self.masked_ssim_d2 += o.masked_ssim_d2;
-        self.masked_art4 += o.masked_art4;
-        self.masked_det4 += o.masked_det4;
-        self.masked_mse += o.masked_mse;
-        self.iw_ssim_d += o.iw_ssim_d;
-        self.iw_ssim_d4 += o.iw_ssim_d4;
-        self.iw_ssim_d2 += o.iw_ssim_d2;
-        self.iw_art4 += o.iw_art4;
-        self.iw_det4 += o.iw_det4;
-        self.iw_mse += o.iw_mse;
-        self.sum_s += o.sum_s;
-        self.sum_d += o.sum_d;
-        self.sum_s2 += o.sum_s2;
-        self.sum_d2 += o.sum_d2;
-        self.sum_dd += o.sum_dd;
-        self.sum_ds += o.sum_ds;
-        self.sum_msat += o.sum_msat;
-        self.lum_wd_num += o.lum_wd_num;
-        self.lum_wd_den += o.lum_wd_den;
-        self.lum_wb_num += o.lum_wb_num;
-        self.lum_wb_den += o.lum_wb_den;
+        self.masked_ssim_d.merge_from(&o.masked_ssim_d);
+        self.masked_ssim_d4.merge_from(&o.masked_ssim_d4);
+        self.masked_ssim_d2.merge_from(&o.masked_ssim_d2);
+        self.masked_art4.merge_from(&o.masked_art4);
+        self.masked_det4.merge_from(&o.masked_det4);
+        self.masked_mse.merge_from(&o.masked_mse);
+        self.iw_ssim_d.merge_from(&o.iw_ssim_d);
+        self.iw_ssim_d4.merge_from(&o.iw_ssim_d4);
+        self.iw_ssim_d2.merge_from(&o.iw_ssim_d2);
+        self.iw_art4.merge_from(&o.iw_art4);
+        self.iw_det4.merge_from(&o.iw_det4);
+        self.iw_mse.merge_from(&o.iw_mse);
+        self.sum_s.merge_from(&o.sum_s);
+        self.sum_d.merge_from(&o.sum_d);
+        self.sum_s2.merge_from(&o.sum_s2);
+        self.sum_d2.merge_from(&o.sum_d2);
+        self.sum_dd.merge_from(&o.sum_dd);
+        self.sum_ds.merge_from(&o.sum_ds);
+        self.sum_msat.merge_from(&o.sum_msat);
+        self.lum_wd_num.merge_from(&o.lum_wd_num);
+        self.lum_wd_den.merge_from(&o.lum_wd_den);
+        self.lum_wb_num.merge_from(&o.lum_wb_num);
+        self.lum_wb_den.merge_from(&o.lum_wb_den);
     }
 
+    /// Merge one strip's channel partials. The term-level accumulation axis
+    /// lives inside the kernel that produced `s`; this merge step folds each
+    /// partial in production order (lane 0 under lane modes — the O(#strips)
+    /// merge sequence is unchanged across candidates).
     fn accumulate(&mut self, s: &crate::fused::StripChannelAccum) {
-        self.ssim_d += s.ssim_d;
-        self.ssim_d4 += s.ssim_d4;
-        self.ssim_d2 += s.ssim_d2;
-        self.edge_art += s.edge_art;
-        self.edge_art4 += s.edge_art4;
-        self.edge_art2 += s.edge_art2;
-        self.edge_det += s.edge_det;
-        self.edge_det4 += s.edge_det4;
-        self.edge_det2 += s.edge_det2;
-        self.mse += s.mse;
-        self.hf_sq_src += s.hf_sq_src;
-        self.hf_sq_dst += s.hf_sq_dst;
-        self.hf_abs_src += s.hf_abs_src;
-        self.hf_abs_dst += s.hf_abs_dst;
+        self.ssim_d.add64(0, s.ssim_d);
+        self.ssim_d4.add64(0, s.ssim_d4);
+        self.ssim_d2.add64(0, s.ssim_d2);
+        self.edge_art.add64(0, s.edge_art);
+        self.edge_art4.add64(0, s.edge_art4);
+        self.edge_art2.add64(0, s.edge_art2);
+        self.edge_det.add64(0, s.edge_det);
+        self.edge_det4.add64(0, s.edge_det4);
+        self.edge_det2.add64(0, s.edge_det2);
+        self.mse.add64(0, s.mse);
+        self.hf_sq_src.add64(0, s.hf_sq_src);
+        self.hf_sq_dst.add64(0, s.hf_sq_dst);
+        self.hf_abs_src.add64(0, s.hf_abs_src);
+        self.hf_abs_dst.add64(0, s.hf_abs_dst);
         // Peaks: v1 merges them the same way (`streaming.rs`
         // `accum.ssim_d8[c] += strip_acc.ssim_d8; accum.ssim_max[c] =
         // accum.ssim_max[c].max(strip_acc.ssim_max)`, …) — free to carry.
-        self.ssim_d8 += s.ssim_d8;
-        self.edge_art8 += s.edge_art8;
-        self.edge_det8 += s.edge_det8;
-        self.ssim_max = self.ssim_max.max(s.ssim_max);
-        self.edge_art_max = self.edge_art_max.max(s.edge_art_max);
-        self.edge_det_max = self.edge_det_max.max(s.edge_det_max);
+        self.ssim_d8.add64(0, s.ssim_d8);
+        self.edge_art8.add64(0, s.edge_art8);
+        self.edge_det8.add64(0, s.edge_det8);
+        self.ssim_max = self.ssim_max.max(s.ssim_max as f64);
+        self.edge_art_max = self.edge_art_max.max(s.edge_art_max as f64);
+        self.edge_det_max = self.edge_det_max.max(s.edge_det_max as f64);
         // FREE raw moments: plain sums, so an unconditional merge is exact
         // whether the kernel filled them (+0.0 otherwise) — same shape as
         // the peaks above.
-        self.sum_s += s.sum_s;
-        self.sum_d += s.sum_d;
-        self.sum_s2 += s.sum_s2;
-        self.sum_d2 += s.sum_d2;
-        self.sum_dd += s.sum_dd;
-        self.sum_ds += s.sum_ds;
+        self.sum_s.add64(0, s.sum_s);
+        self.sum_d.add64(0, s.sum_d);
+        self.sum_s2.add64(0, s.sum_s2);
+        self.sum_d2.add64(0, s.sum_d2);
+        self.sum_dd.add64(0, s.sum_dd);
+        self.sum_ds.add64(0, s.sum_ds);
         // FREE bounded error: plain sums, merged the same unconditional way
         // as the raw moments above (+0.0 when the kernel did not fill them).
-        self.sum_msat += s.sum_msat;
-        self.lum_wd_num += s.lum_wd_num;
-        self.lum_wd_den += s.lum_wd_den;
-        self.lum_wb_num += s.lum_wb_num;
-        self.lum_wb_den += s.lum_wb_den;
+        self.sum_msat.add64(0, s.sum_msat);
+        self.lum_wd_num.add64(0, s.lum_wd_num);
+        self.lum_wd_den.add64(0, s.lum_wd_den);
+        self.lum_wb_num.add64(0, s.lum_wb_num);
+        self.lum_wb_den.add64(0, s.lum_wb_den);
     }
 
     /// Finalize the v1 pool blocks — peaks (6/ch), masked (6/ch), IW
@@ -7069,46 +8510,51 @@ impl V1BasicSums {
         // Hoisted out of the nine root calls below: it reads a `OnceLock`,
         // which LLVM cannot hoist for you. Same discipline as `gain_form`.
         let root_form = crate::det_math::RootForm::at_revision(Some(revision));
-        peaks[0] = f64::from(self.ssim_max);
-        peaks[1] = f64::from(self.edge_art_max);
-        peaks[2] = f64::from(self.edge_det_max);
-        peaks[3] = (self.ssim_d8 * one_over_n).max(0.0).eighth_root(root_form);
-        peaks[4] = (self.edge_art8 * one_over_n)
+        peaks[0] = self.ssim_max;
+        peaks[1] = self.edge_art_max;
+        peaks[2] = self.edge_det_max;
+        peaks[3] = (self.ssim_d8.fin() * one_over_n)
             .max(0.0)
             .eighth_root(root_form);
-        peaks[5] = (self.edge_det8 * one_over_n)
+        peaks[4] = (self.edge_art8.fin() * one_over_n)
             .max(0.0)
             .eighth_root(root_form);
-        masked[0] = (self.masked_ssim_d * one_over_n).abs();
-        masked[1] = (self.masked_ssim_d4 * one_over_n)
+        peaks[5] = (self.edge_det8.fin() * one_over_n)
+            .max(0.0)
+            .eighth_root(root_form);
+        masked[0] = (self.masked_ssim_d.fin() * one_over_n).abs();
+        masked[1] = (self.masked_ssim_d4.fin() * one_over_n)
             .max(0.0)
             .quarter_root(root_form)
             .abs();
-        masked[2] = (self.masked_ssim_d2 * one_over_n).max(0.0).sqrt().abs();
-        masked[3] = (self.masked_art4 * one_over_n)
+        masked[2] = (self.masked_ssim_d2.fin() * one_over_n)
+            .max(0.0)
+            .sqrt()
+            .abs();
+        masked[3] = (self.masked_art4.fin() * one_over_n)
             .max(0.0)
             .quarter_root(root_form)
             .abs();
-        masked[4] = (self.masked_det4 * one_over_n)
+        masked[4] = (self.masked_det4.fin() * one_over_n)
             .max(0.0)
             .quarter_root(root_form)
             .abs();
-        masked[5] = self.masked_mse * one_over_n;
-        iw[0] = (self.iw_ssim_d * one_over_n).abs();
-        iw[1] = (self.iw_ssim_d4 * one_over_n)
+        masked[5] = self.masked_mse.fin() * one_over_n;
+        iw[0] = (self.iw_ssim_d.fin() * one_over_n).abs();
+        iw[1] = (self.iw_ssim_d4.fin() * one_over_n)
             .max(0.0)
             .quarter_root(root_form)
             .abs();
-        iw[2] = (self.iw_ssim_d2 * one_over_n).max(0.0).sqrt().abs();
-        iw[3] = (self.iw_art4 * one_over_n)
+        iw[2] = (self.iw_ssim_d2.fin() * one_over_n).max(0.0).sqrt().abs();
+        iw[3] = (self.iw_art4.fin() * one_over_n)
             .max(0.0)
             .quarter_root(root_form)
             .abs();
-        iw[4] = (self.iw_det4 * one_over_n)
+        iw[4] = (self.iw_det4.fin() * one_over_n)
             .max(0.0)
             .quarter_root(root_form)
             .abs();
-        iw[5] = self.iw_mse * one_over_n;
+        iw[5] = self.iw_mse.fin() * one_over_n;
     }
 
     /// Finalize the FREE v2-era slots ([`V1FreeExtras::RawMoments`]) this
@@ -7124,18 +8570,18 @@ impl V1BasicSums {
     ) -> ([f64; 3], f64) {
         let n_f = n as f64;
         let (dmean, cgain, closs) = global_stats_from_raw_moments(
-            self.sum_s,
-            self.sum_d,
-            self.sum_s2,
-            self.sum_d2,
-            self.sum_dd,
-            self.sum_ds,
+            self.sum_s.fin(),
+            self.sum_d.fin(),
+            self.sum_s2.fin(),
+            self.sum_d2.fin(),
+            self.sum_dd.fin(),
+            self.sum_ds.fin(),
             n_f,
             rev.paired_global_contrast(),
         );
         (
             [dmean, cgain.clamp(0.0, 1.0), closs.clamp(0.0, 1.0)],
-            saturate(self.sum_s / n_f, C_LUM_T).clamp(0.0, 1.0),
+            saturate(self.sum_s.fin() / n_f, C_LUM_T).clamp(0.0, 1.0),
         )
     }
 
@@ -7151,17 +8597,17 @@ impl V1BasicSums {
     fn finalize_free_bounded(&self, n: usize) -> (f64, [f64; 3]) {
         let n_f = n as f64;
         (
-            (self.sum_msat / n_f).clamp(0.0, 1.0),
+            (self.sum_msat.fin() / n_f).clamp(0.0, 1.0),
             lum_bins_from_weighted_sums(
                 WeightedSum {
-                    num: self.lum_wd_num,
-                    den: self.lum_wd_den,
+                    num: self.lum_wd_num.fin(),
+                    den: self.lum_wd_den.fin(),
                 },
                 WeightedSum {
-                    num: self.lum_wb_num,
-                    den: self.lum_wb_den,
+                    num: self.lum_wb_num.fin(),
+                    den: self.lum_wb_den.fin(),
                 },
-                self.sum_msat,
+                self.sum_msat.fin(),
                 n_f,
             ),
         )
@@ -7183,35 +8629,35 @@ impl V1BasicSums {
         debug_assert_eq!(out.len(), 13);
         let one_over_n = 1.0 / n as f64;
         let root_form = crate::det_math::RootForm::at_revision(Some(revision));
-        out[0] = (self.ssim_d * one_over_n).abs();
-        out[1] = (self.ssim_d4 * one_over_n)
+        out[0] = (self.ssim_d.fin() * one_over_n).abs();
+        out[1] = (self.ssim_d4.fin() * one_over_n)
             .max(0.0)
             .quarter_root(root_form)
             .abs();
-        out[2] = (self.ssim_d2 * one_over_n).max(0.0).sqrt().abs();
-        out[3] = (self.edge_art * one_over_n).abs();
-        out[4] = (self.edge_art4 * one_over_n)
+        out[2] = (self.ssim_d2.fin() * one_over_n).max(0.0).sqrt().abs();
+        out[3] = (self.edge_art.fin() * one_over_n).abs();
+        out[4] = (self.edge_art4.fin() * one_over_n)
             .max(0.0)
             .quarter_root(root_form)
             .abs();
-        out[5] = (self.edge_art2 * one_over_n).max(0.0).sqrt().abs();
-        out[6] = (self.edge_det * one_over_n).abs();
-        out[7] = (self.edge_det4 * one_over_n)
+        out[5] = (self.edge_art2.fin() * one_over_n).max(0.0).sqrt().abs();
+        out[6] = (self.edge_det.fin() * one_over_n).abs();
+        out[7] = (self.edge_det4.fin() * one_over_n)
             .max(0.0)
             .quarter_root(root_form)
             .abs();
-        out[8] = (self.edge_det2 * one_over_n).max(0.0).sqrt().abs();
-        out[9] = self.mse * one_over_n;
+        out[8] = (self.edge_det2.fin() * one_over_n).max(0.0).sqrt().abs();
+        out[9] = self.mse.fin() * one_over_n;
         // Same owner as the buffered walk (`crate::hf_gain_form`), which is
         // what keeps the fold's v1 pools bit-identical to v1's under EVERY
         // arm rather than only under the shipped one.
         let gain_form = crate::hf_gain_form::HfGainForm::at_revision(Some(revision));
-        let var_src = self.hf_sq_src * one_over_n;
-        let var_dst = self.hf_sq_dst * one_over_n;
+        let var_src = self.hf_sq_src.fin() * one_over_n;
+        let var_dst = self.hf_sq_dst.fin() * one_over_n;
         out[10] = crate::hf_gain_form::hf_energy_loss(var_src, var_dst);
         out[12] = crate::hf_gain_form::hf_energy_gain(gain_form, var_src, var_dst);
-        let mad_src = self.hf_abs_src * one_over_n;
-        let mad_dst = self.hf_abs_dst * one_over_n;
+        let mad_src = self.hf_abs_src.fin() * one_over_n;
+        let mad_dst = self.hf_abs_dst.fin() * one_over_n;
         out[11] = crate::hf_gain_form::hf_mag_loss(mad_src, mad_dst);
     }
 }
@@ -7618,19 +9064,19 @@ fn fold_v1_one_band(
         sums.accumulate(&acc);
         if fused_ext {
             if full {
-                sums.masked_mse += acc.masked_mse;
-                sums.iw_mse += acc.iw_mse;
-                sums.masked_ssim_d += acc.masked_ssim_d;
-                sums.masked_ssim_d4 += acc.masked_ssim_d4;
-                sums.masked_ssim_d2 += acc.masked_ssim_d2;
-                sums.iw_ssim_d += acc.iw_ssim_d;
-                sums.iw_ssim_d4 += acc.iw_ssim_d4;
-                sums.iw_ssim_d2 += acc.iw_ssim_d2;
+                sums.masked_mse.add64(0, acc.masked_mse);
+                sums.iw_mse.add64(0, acc.iw_mse);
+                sums.masked_ssim_d.add64(0, acc.masked_ssim_d);
+                sums.masked_ssim_d4.add64(0, acc.masked_ssim_d4);
+                sums.masked_ssim_d2.add64(0, acc.masked_ssim_d2);
+                sums.iw_ssim_d.add64(0, acc.iw_ssim_d);
+                sums.iw_ssim_d4.add64(0, acc.iw_ssim_d4);
+                sums.iw_ssim_d2.add64(0, acc.iw_ssim_d2);
             }
-            sums.masked_art4 += acc.masked_art4;
-            sums.masked_det4 += acc.masked_det4;
-            sums.iw_art4 += acc.iw_art4;
-            sums.iw_det4 += acc.iw_det4;
+            sums.masked_art4.add64(0, acc.masked_art4);
+            sums.masked_det4.add64(0, acc.masked_det4);
+            sums.iw_art4.add64(0, acc.iw_art4);
+            sums.iw_det4.add64(0, acc.iw_det4);
             return b1;
         }
         let inner = inner_start * width..(inner_start + inner_h) * width;
@@ -7647,8 +9093,8 @@ fn fold_v1_one_band(
             let (mse_m, mse_i) = crate::simd_ops::build_inline_mse(
                 act_inner, V1_MASK_K, V1_IW_K, inner_src, inner_dst,
             );
-            sums.masked_mse += mse_m;
-            sums.iw_mse += mse_i;
+            sums.masked_mse.add64(0, mse_m);
+            sums.iw_mse.add64(0, mse_i);
             let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) = if stable {
                 // `stable_sd` is sized under `stable && full` above and read
                 // here under `stable` — equivalent only because this arm IS
@@ -7673,20 +9119,20 @@ fn fold_v1_one_band(
                     V1_IW_K,
                 )
             };
-            sums.masked_ssim_d += sd_m;
-            sums.masked_ssim_d4 += sd4_m;
-            sums.masked_ssim_d2 += sd2_m;
-            sums.iw_ssim_d += sd_i;
-            sums.iw_ssim_d4 += sd4_i;
-            sums.iw_ssim_d2 += sd2_i;
+            sums.masked_ssim_d.add64(0, sd_m);
+            sums.masked_ssim_d4.add64(0, sd4_m);
+            sums.masked_ssim_d2.add64(0, sd2_m);
+            sums.iw_ssim_d.add64(0, sd_i);
+            sums.iw_ssim_d4.add64(0, sd4_i);
+            sums.iw_ssim_d2.add64(0, sd2_i);
         }
         let ((art4_m, det4_m), (art4_i, det4_i)) = crate::simd_ops::edge_diff_channel_inline_both(
             inner_src, inner_dst, inner_mu1, inner_mu2, act_inner, V1_MASK_K, V1_IW_K,
         );
-        sums.masked_art4 += art4_m;
-        sums.masked_det4 += det4_m;
-        sums.iw_art4 += art4_i;
-        sums.iw_det4 += det4_i;
+        sums.masked_art4.add64(0, art4_m);
+        sums.masked_det4.add64(0, det4_m);
+        sums.iw_art4.add64(0, art4_i);
+        sums.iw_det4.add64(0, det4_i);
     } else {
         // No pool scratch => no band-local H buffer either, so this arm only
         // serves `FoldHSource::Precomputed`. `fold_v1_basic_bands` refuses the
@@ -7870,7 +9316,7 @@ fn fold_v1_basic_bands(
                         let mut out = Vec::with_capacity(chunk.len());
                         for &b0 in chunk {
                             let __t = crate::fold_timing::start();
-                            let mut local = V1BasicSums::default();
+                            let mut local = V1BasicSums::meas_f64();
                             fold_v1_one_band(
                                 b0,
                                 width,
@@ -7901,7 +9347,7 @@ fn fold_v1_basic_bands(
                 .par_iter()
                 .map(|&b0| {
                     let __t = crate::fold_timing::start();
-                    let mut local = V1BasicSums::default();
+                    let mut local = V1BasicSums::meas_f64();
                     fold_v1_one_band(
                         b0,
                         width,
@@ -7930,7 +9376,7 @@ fn fold_v1_basic_bands(
 
     let mut pools = pools;
     for (i, &b0) in starts.iter().enumerate() {
-        let mut local = V1BasicSums::default();
+        let mut local = V1BasicSums::meas_f64();
         fold_v1_one_band(
             b0,
             width,
@@ -9162,7 +10608,10 @@ struct StreamChannelAccums {
     app: Vec<AppendAccum>,
     v1: Vec<V1BasicSums>,
     /// Row-ordered blockiness partials `(sum_v, sum_h)` (P1 canonical).
-    block: Vec<(f64, f64)>,
+    /// featacc: [`SumVar`] slots — `Seq` unless a measurement mode is set
+    /// (f64-native elements: `c32` resolves to `Seq`, i.e. production
+    /// accumulation, per the f64-element rule).
+    block: Vec<(crate::featcanon::SumVar, crate::featcanon::SumVar)>,
     /// CSFW weighted-pool partials (Y channel + `csfw_block` only —
     /// untouched zeros otherwise).
     csfw: Vec<CsfwAccum>,
@@ -9190,8 +10639,14 @@ impl StreamChannelAccums {
             dense: vec![DenseAccum::default(); n_scales],
             grad: vec![GradientAccum::default(); n_scales],
             app: vec![AppendAccum::default(); n_scales],
-            v1: vec![V1BasicSums::default(); n_scales],
-            block: vec![(0.0, 0.0); n_scales],
+            v1: vec![V1BasicSums::meas_f64(); n_scales],
+            block: vec![
+                (
+                    crate::featcanon::SumVar::f64_elems_meas(),
+                    crate::featcanon::SumVar::f64_elems_meas()
+                );
+                n_scales
+            ],
             csfw: vec![CsfwAccum::default(); n_scales],
             rev4: (0..n_scales).map(|_| Rev4CellAccum::default()).collect(),
             pool_scratch: (0..n_band_slots.clamp(1, V1_BANDS_PER_STRIP))
@@ -9820,8 +11275,8 @@ fn blockiness_sparse_strip_wide(
     width: usize,
     y0: usize,
     strip_h: usize,
-    sum_v: &mut f64,
-    sum_h: &mut f64,
+    sum_v: &mut crate::featcanon::SumVar,
+    sum_h: &mut crate::featcanon::SumVar,
 ) {
     for k in 0..strip_h {
         let y = y0 + k;
@@ -9831,7 +11286,7 @@ fn blockiness_sparse_strip_wide(
             let i = row + x;
             let step_dst = (dst_wide[i] as f64 - dst_wide[i - 1] as f64).abs();
             let step_src = (src_wide[i] as f64 - src_wide[i - 1] as f64).abs();
-            *sum_v += bounded_excess(step_dst, step_src, C_BLOCK);
+            sum_v.add64(x & 7, bounded_excess(step_dst, step_src, C_BLOCK));
             x += BLOCK_LATTICE;
         }
         if y.is_multiple_of(BLOCK_LATTICE) && y > 0 {
@@ -9840,7 +11295,7 @@ fn blockiness_sparse_strip_wide(
                 let i_up = i - width;
                 let step_dst = (dst_wide[i] as f64 - dst_wide[i_up] as f64).abs();
                 let step_src = (src_wide[i] as f64 - src_wide[i_up] as f64).abs();
-                *sum_h += bounded_excess(step_dst, step_src, C_BLOCK);
+                sum_h.add64(x & 7, bounded_excess(step_dst, step_src, C_BLOCK));
             }
         }
     }
@@ -9894,6 +11349,26 @@ fn gridblk_strip_wide(
     period: usize,
     acc: &mut GridblkAccum,
 ) {
+    // featacc: measurement candidates — the scalar canon/exact bodies.
+    #[cfg(feature = "oracle")]
+    if let Some(m) = crate::featcanon::measurement_active() {
+        use crate::featcanon::{LanesF32, LanesF64, Mode, Neum64};
+        return match m {
+            Mode::Canon32 => gridblk_strip_wide_canon::<LanesF32>(
+                src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
+            ),
+            Mode::Canon64 => gridblk_strip_wide_canon::<LanesF64>(
+                src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
+            ),
+            Mode::CanonNeum => gridblk_strip_wide_canon::<Neum64>(
+                src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
+            ),
+            Mode::Exact => gridblk_strip_wide_exact(
+                src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc,
+            ),
+            Mode::Off => unreachable!("measurement_active filters Off"),
+        };
+    }
     incant!(
         gridblk_strip_wide_entry(
             src_wide, dst_wide, act_wide, width, y0, strip_h, plane_h, period, acc
@@ -10048,6 +11523,131 @@ fn gridblk_strip_wide_generic<T: F32x8Backend + Copy>(
             acc.abs_v[p] += a[k] as f64;
             acc.signed_v[p] += s[k] as f64;
         }
+    }
+}
+
+// featacc: measurement-mode `gridblk` bodies. The canon body computes `ẽ`
+// in scalar f32 (the SIMD body's op order — `(a−b).abs() − (c−d).abs()`,
+// `(act_lo + act_hi) * 0.5 + C`, one division), stores the f32 plane, and
+// accumulates the per-phase profiles through per-strip `Pool`s at
+// canonical lane `x mod 8` (V: one pair of pools per phase, folded once
+// per strip like the production lane-parity fold; H: one pool pair per
+// row, folded per row like production). `exact` evaluates `ẽ` in f64 into
+// the `plane_*64` shadow planes and pools through `Neum64`.
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+fn gridblk_strip_wide_canon<P: crate::featcanon::Pool>(
+    src_wide: &[f32],
+    dst_wide: &[f32],
+    act_wide: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    period: usize,
+    acc: &mut GridblkAccum,
+) {
+    let n_plane = width * plane_h;
+    if acc.plane_v.len() != n_plane {
+        acc.plane_v.resize(n_plane, 0.0);
+        acc.plane_h.resize(n_plane, 0.0);
+    }
+    let mut pv_abs = [P::zero(); GRIDBLK_MAX_PERIOD];
+    let mut pv_sgn = [P::zero(); GRIDBLK_MAX_PERIOD];
+    for k in 0..strip_h {
+        let y = y0 + k;
+        let row = (HALO_P + k) * width;
+        let prow = y * width;
+        for x in 1..width {
+            let i = row + x;
+            let e = (dst_wide[i] - dst_wide[i - 1]).abs() - (src_wide[i] - src_wide[i - 1]).abs();
+            let et = e / ((act_wide[i - 1] + act_wide[i]) * 0.5 + C_ACTIVITY as f32);
+            acc.plane_v[prow + x] = et;
+            let p = x % period;
+            pv_abs[p].add(x & 7, et.abs());
+            pv_sgn[p].add(x & 7, et);
+        }
+        if y > 0 {
+            let ph = y % period;
+            let row_u = row - width;
+            let mut h_abs = P::zero();
+            let mut h_sgn = P::zero();
+            for x in 0..width {
+                let i = row + x;
+                let iu = row_u + x;
+                let e = (dst_wide[i] - dst_wide[iu]).abs() - (src_wide[i] - src_wide[iu]).abs();
+                let et = e / ((act_wide[iu] + act_wide[i]) * 0.5 + C_ACTIVITY as f32);
+                acc.plane_h[prow + x] = et;
+                h_abs.add(x & 7, et.abs());
+                h_sgn.add(x & 7, et);
+            }
+            acc.abs_h[ph] += h_abs.fin();
+            acc.signed_h[ph] += h_sgn.fin();
+        }
+    }
+    for p in 0..period {
+        acc.abs_v[p] += pv_abs[p].fin();
+        acc.signed_v[p] += pv_sgn[p].fin();
+    }
+}
+
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+fn gridblk_strip_wide_exact(
+    src_wide: &[f32],
+    dst_wide: &[f32],
+    act_wide: &[f32],
+    width: usize,
+    y0: usize,
+    strip_h: usize,
+    plane_h: usize,
+    period: usize,
+    acc: &mut GridblkAccum,
+) {
+    use crate::featcanon::{Neum64, Pool as _};
+    let n_plane = width * plane_h;
+    if acc.plane_v64.len() != n_plane {
+        acc.plane_v64.resize(n_plane, 0.0);
+        acc.plane_h64.resize(n_plane, 0.0);
+    }
+    let mut pv_abs = [Neum64::zero(); GRIDBLK_MAX_PERIOD];
+    let mut pv_sgn = [Neum64::zero(); GRIDBLK_MAX_PERIOD];
+    for k in 0..strip_h {
+        let y = y0 + k;
+        let row = (HALO_P + k) * width;
+        let prow = y * width;
+        for x in 1..width {
+            let i = row + x;
+            let e = (dst_wide[i] as f64 - dst_wide[i - 1] as f64).abs()
+                - (src_wide[i] as f64 - src_wide[i - 1] as f64).abs();
+            let et = e / ((act_wide[i - 1] as f64 + act_wide[i] as f64) * 0.5 + C_ACTIVITY);
+            acc.plane_v64[prow + x] = et;
+            let p = x % period;
+            pv_abs[p].add64(x & 7, et.abs());
+            pv_sgn[p].add64(x & 7, et);
+        }
+        if y > 0 {
+            let ph = y % period;
+            let row_u = row - width;
+            let mut h_abs = Neum64::zero();
+            let mut h_sgn = Neum64::zero();
+            for x in 0..width {
+                let i = row + x;
+                let iu = row_u + x;
+                let e = (dst_wide[i] as f64 - dst_wide[iu] as f64).abs()
+                    - (src_wide[i] as f64 - src_wide[iu] as f64).abs();
+                let et = e / ((act_wide[iu] as f64 + act_wide[i] as f64) * 0.5 + C_ACTIVITY);
+                acc.plane_h64[prow + x] = et;
+                h_abs.add64(x & 7, et.abs());
+                h_sgn.add64(x & 7, et);
+            }
+            acc.abs_h[ph] += h_abs.fin();
+            acc.signed_h[ph] += h_sgn.fin();
+        }
+    }
+    for p in 0..period {
+        acc.abs_v[p] += pv_abs[p].fin();
+        acc.signed_v[p] += pv_sgn[p].fin();
     }
 }
 
@@ -12208,7 +13808,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                 [v1_total + scale_base + ch * FEATURES_PER_CHANNEL_V2_TOTAL..]
                 [..FEATURES_PER_CHANNEL_V2_TOTAL];
             let sum_blockiness = if toggles.blockiness {
-                acc.block[scale].0 + acc.block[scale].1
+                acc.block[scale].0.fin() + acc.block[scale].1.fin()
             } else {
                 0.0
             };
@@ -12245,7 +13845,7 @@ fn foldapp_streaming_walk_impl<S: ImageSource, D: ImageSource, const ALL_CHANNEL
                     grad: acc.grad[scale],
                     app: acc.app[scale],
                     blockiness: if toggles.blockiness {
-                        acc.block[scale].0 + acc.block[scale].1
+                        acc.block[scale].0.fin() + acc.block[scale].1.fin()
                     } else {
                         0.0
                     },
@@ -17572,10 +19172,11 @@ pub(crate) mod tests {
         let h = rev4_hats(&RINGBASIS_UC, rev4_u(big));
         for _ in 0..N {
             for (b, h) in ring.bins.iter_mut().zip(h.iter()) {
-                *b += big * h;
+                b.add64(0, big * h);
             }
         }
-        for (k, (&b, &h)) in ring.bins.iter().zip(h.iter()).enumerate() {
+        for (k, (b, &h)) in ring.bins.iter().zip(h.iter()).enumerate() {
+            let b = b.fin();
             let expect = N as f64 * big * h;
             let rel = ((b - expect) / expect).abs();
             assert!(
@@ -17586,13 +19187,13 @@ pub(crate) mod tests {
         // FlatAccum: Σ hfg over flat pixels ≈ N · hfg.
         let mut flat = FlatAccum::default();
         for _ in 0..N {
-            flat.hfg += big;
+            flat.hfg.add64(0, big);
             flat.n += 1;
         }
         let expect = N as f64 * big;
         assert!(
-            ((flat.hfg - expect) / expect).abs() < 1e-10,
-            "flat hfg drifted: {} vs {expect}",
+            ((flat.hfg.fin() - expect) / expect).abs() < 1e-10,
+            "flat hfg drifted: {:?} vs {expect}",
             flat.hfg
         );
         // GridblkAccum signed sums over an alternating ±big pattern: the
@@ -19615,7 +21216,7 @@ pub(crate) mod tests {
                     let mut pool: Vec<FoldPoolScratch> = (0..V1_BANDS_PER_STRIP)
                         .map(|_| FoldPoolScratch::default())
                         .collect();
-                    let mut sums = V1BasicSums::default();
+                    let mut sums = V1BasicSums::meas_f64();
                     fold_v1_basic_bands(
                         width,
                         0..strip_h.min(plane_h),
@@ -24959,6 +26560,38 @@ pub fn bench_dense_era2(
     a.sum_d + a.ws_iw_mse.num
 }
 
+/// featacc cost bench (`benches/featacc_extract_ab.rs`): set the measurement
+/// override in-process so one zenbench group can interleave candidates.
+/// `mode`: "prod" (env-unset — shipped Rev4 arithmetic), "off", "c32",
+/// "c64", "neum", "exact". `blur`: "rec", "rec64", "fresh", or `None` to
+/// keep the mode's default. Returns false on an unrecognised name.
+/// Measurement-only — exists solely under `oracle`.
+#[cfg(feature = "oracle")]
+pub fn bench_featcanon(mode: &str, blur: Option<&str>) -> bool {
+    use crate::featcanon::{BlurMode, Mode};
+    let m = match mode {
+        "prod" => None,
+        "off" => Some(Mode::Off),
+        "c32" => Some(Mode::Canon32),
+        "c64" => Some(Mode::Canon64),
+        "neum" => Some(Mode::CanonNeum),
+        "exact" => Some(Mode::Exact),
+        _ => return false,
+    };
+    let b = blur.map(|s| match s {
+        "rec" => BlurMode::Rec,
+        "rec64" => BlurMode::Rec64,
+        "fresh" => BlurMode::Fresh,
+        _ => BlurMode::Rec,
+    });
+    if matches!(blur, Some("rec" | "rec64" | "fresh") | None) {
+        crate::featcanon::bench_set_measurement(m, b);
+        true
+    } else {
+        false
+    }
+}
+
 /// Tier dispatch for the era-2 kernel. The BODY is one source shared by every
 /// tier (see `dense_block_kernel_era2_inner`); `#[magetypes]` exists here only
 /// to put that body inside each tier's `target_feature` region.
@@ -25301,6 +26934,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
                             mse_a[lane] as f64,
                             hfg_a[lane] as f64,
                             act_a[lane] as f64,
+                            lane,
                         );
                     }
                 }
@@ -25356,6 +26990,7 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
                             mse_a[lane] as f64,
                             hfg_a[lane] as f64,
                             act_a[lane] as f64,
+                            lane,
                         );
                     }
                 }
@@ -25380,6 +27015,429 @@ fn dense_block_kernel_era2_generic<T: F32x8Backend + Copy, const FUSED: bool>(
         }
 
         // Band partials merge in BAND INDEX ORDER.
+        let s = &mut acc;
+        s.sum_d += band[0];
+        s.sum_d2 += band[1];
+        s.sum_d3 += band[2];
+        s.sum_d4 += band[3];
+        s.sum_art += band[4];
+        s.sum_det += band[5];
+        s.sum_mse += band[6];
+        s.sum_hf_gain += band[7];
+        s.sum_hf_loss += band[8];
+        s.sum_hf_mag_loss += band[9];
+        s.sum_pjnd += band[10];
+        s.sum_pjnd_lo += band[11];
+        s.sum_pjnd_hi += band[12];
+        for (w, o) in [
+            (&mut s.ws_peak_ssim, 13),
+            (&mut s.ws_peak_art, 15),
+            (&mut s.ws_peak_det, 17),
+            (&mut s.ws_mask_ssim, 19),
+            (&mut s.ws_mask_art, 21),
+            (&mut s.ws_mask_det, 23),
+            (&mut s.ws_mask_mse, 25),
+            (&mut s.ws_iw_ssim, 27),
+            (&mut s.ws_iw_art, 29),
+            (&mut s.ws_iw_det, 31),
+            (&mut s.ws_iw_mse, 33),
+        ] {
+            w.num += band[o];
+            w.den += band[o + 1];
+        }
+        b0 = b1;
+    }
+    acc
+}
+
+// ============================================================================
+// featacc dense candidates — measurement-only bodies
+// ============================================================================
+//
+// `dense_block_kernel_era2_generic` IS the shipped canonical arithmetic for
+// the dense block: f32 SIMD lanes (`x mod 8`) reduced per row through the
+// fixed `era2_reduce8` tree into f64 band partials. The mirrors below put
+// the accumulation on the `Pool` axis and the element eval on its own axis
+// so the candidates can be measured instead of asserted:
+//
+// * [`dense_block_kernel_canon`]<P>: per-pixel SCALAR f32 element eval in
+//   the SIMD body's exact op order — magetypes `*`/`+`/`/` are unfused on
+//   every backend, so the scalar replay is element-bitwise with era-2 on
+//   every tier — then `P::add(x & 7, term)` into per-row pools, `fin()` per
+//   row, `band[j] +=`, strip `+=` — the era-2 accumulation structure with
+//   only the pool arithmetic swapped. `P = LanesF32` replays era-2 bit for
+//   bit; `LanesF64`/`Neum64` are candidates (e)/(f).
+// * [`dense_block_kernel_exact`]: f64 element eval via the existing f64
+//   scalar helpers (`ssim_d_local`, `bounded_sim`, …), Neumaier pools —
+//   the oracle arm.
+
+/// The 13 core + 16 pool terms of one dense pixel, f32 scalar — mirrors
+/// `dense_block_kernel_era2_generic`'s `terms!`/`pools!` op-for-op.
+#[cfg(feature = "oracle")]
+#[inline(always)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn dense_terms32(
+    s: f32,
+    dd: f32,
+    m1: f32,
+    m2: f32,
+    q: f32,
+    p: f32,
+    act: f32,
+    transducer_bank: bool,
+    direct: bool,
+) -> (
+    [f32; 13],
+    f32,
+    f32,
+    f32,
+    f32,
+    f32,
+    [f32; 4],
+    [f32; 4],
+    [f32; 3],
+    [f32; 3],
+) {
+    let c1 = C1_V2 as f32;
+    let c2 = C2_V2 as f32;
+    // `ssim_d_local_v` — identical op order (p = s12, q = ssq).
+    let d = {
+        let a = 2.0f32 * m1 * m2 + c1;
+        let b = m1 * m1 + m2 * m2 + c1;
+        let dl = q - m1 * m1 - m2 * m2 + c2;
+        if direct {
+            let mu_diff = m1 - m2;
+            let err_var = (p - mu_diff * mu_diff).max(0.0);
+            ((dl * (b - a) + a * err_var) / (b * dl)).max(0.0)
+        } else {
+            let cov = p - m1 * m2;
+            let c = 2.0f32 * cov + c2;
+            let local = (a * c) / (b * dl);
+            (1.0f32 - local).max(0.0)
+        }
+    };
+    let d2 = d * d;
+    let diff_src = (s - m1).abs();
+    let diff_dst = (dd - m2).abs();
+    // `bounded_sim_v` — `(2ab+c)/(a²+b²+c)` plain ops.
+    let edge_dissim = 1.0f32
+        - (2.0f32 * diff_src * diff_dst + C_EDGE as f32)
+            / (diff_src * diff_src + diff_dst * diff_dst + C_EDGE as f32);
+    // `simd_gt`/`blend` — scalar select, same values.
+    let (art_i, det_i) = if diff_dst > diff_src {
+        (edge_dissim, 0.0f32)
+    } else if diff_dst < diff_src {
+        (0.0f32, edge_dissim)
+    } else {
+        (0.0f32, 0.0f32)
+    };
+    let raw_diff = s - dd;
+    // `saturate_v(raw_diff², c_mse)` — `.max(0)` then `x/(x+c)`.
+    let raw_sq = raw_diff * raw_diff;
+    let mse_i = raw_sq.max(0.0) / (raw_sq.max(0.0) + C_MSE as f32);
+    let hf_src = s - m1;
+    let hf_dst = dd - m2;
+    // `bounded_excess_pair_v` — ONE denom, TWO divisions (no recip-mul).
+    let (hfg, hfl) = {
+        let a = hf_dst * hf_dst;
+        let b = hf_src * hf_src;
+        let denom = a + b + C_HF as f32;
+        ((a - b).max(0.0) / denom, (b - a).max(0.0) / denom)
+    };
+    let hfm = (hf_src.abs() - hf_dst.abs()).max(0.0) / (hf_src.abs() + hf_dst.abs() + C_HF as f32);
+    let rae = raw_diff.abs();
+    // `pjnd_transducer_v` — `rae / (rae + c*(1 + k*act))`.
+    let pj = rae / (rae + C_PJND_CLAMP as f32 * (1.0f32 + K_PJND_MASK as f32 * act));
+    let (pjl, pjh) = if transducer_bank {
+        (
+            rae / (rae + C_PJND_CLAMP as f32 * (1.0f32 + K_PJND_MASK_LOW as f32 * act)),
+            rae / (rae + C_PJND_CLAMP as f32 * (1.0f32 + K_PJND_MASK_HIGH as f32 * act)),
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    let t = [
+        d,
+        d2,
+        d2 * d,
+        d2 * d2,
+        art_i,
+        det_i,
+        mse_i,
+        hfg,
+        hfl,
+        hfm,
+        pj,
+        pjl,
+        pjh,
+    ];
+    // `pools!` — mask/IW weights + soft-peak saliencies, f32.
+    let sat = act.max(0.0) / (act.max(0.0) + C_ACTIVITY as f32);
+    let m_w = 1.0f32 - sat;
+    let i_w = sat + IW_WEIGHT_FLOOR as f32;
+    let vals = [d, art_i, det_i, mse_i];
+    let mut mv = [0.0f32; 4];
+    let mut iv = [0.0f32; 4];
+    for j in 0..4 {
+        mv[j] = m_w * vals[j];
+        iv[j] = i_w * vals[j];
+    }
+    let mut kn = [0.0f32; 3];
+    let mut kd = [0.0f32; 3];
+    for j in 0..3 {
+        let sal = vals[j].max(0.0) / (vals[j].max(0.0) + C_PEAK as f32);
+        kn[j] = sal * vals[j];
+        kd[j] = sal;
+    }
+    (t, art_i, det_i, mse_i, m_w, i_w, mv, iv, kn, kd)
+}
+
+/// `Pool`-generic scalar dense kernel — see the module note above.
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+fn dense_block_kernel_canon<P: crate::featcanon::Pool>(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+    mut r4: Option<Rev4Dense<'_>>,
+) -> DenseAccum {
+    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let mut acc = DenseAccum::default();
+    let mut b0 = 0usize;
+    while b0 < height {
+        let b1 = (b0 + ERA2_BAND_ROWS).min(height);
+        let mut band = [0.0f64; 35];
+        for y in b0..b1 {
+            let row = y * width;
+            let mut r = [P::zero(); 13];
+            let mut p_mw = P::zero();
+            let mut p_iw = P::zero();
+            let mut p_m = [P::zero(); 4];
+            let mut p_i = [P::zero(); 4];
+            let mut p_kn = [P::zero(); 3];
+            let mut p_kd = [P::zero(); 3];
+            for x in 0..width {
+                let i = row + x;
+                let lane = x & 7;
+                let (t, art_i, det_i, mse_i, m_w, i_w, mv, iv, kn, kd) = dense_terms32(
+                    src[i],
+                    dst[i],
+                    mu1[i],
+                    mu2[i],
+                    ssq[i],
+                    s12[i],
+                    activity[i],
+                    transducer_bank,
+                    direct,
+                );
+                for j in 0..13 {
+                    r[j].add(lane, t[j]);
+                }
+                p_mw.add(lane, m_w);
+                p_iw.add(lane, i_w);
+                for j in 0..4 {
+                    p_m[j].add(lane, mv[j]);
+                    p_i[j].add(lane, iv[j]);
+                }
+                for j in 0..3 {
+                    p_kn[j].add(lane, kn[j]);
+                    p_kd[j].add(lane, kd[j]);
+                }
+                if let Some(r4) = r4.as_mut() {
+                    rev4_dense_pixel(
+                        r4,
+                        t[0] as f64,
+                        art_i as f64,
+                        det_i as f64,
+                        mse_i as f64,
+                        t[7] as f64,
+                        activity[i] as f64,
+                        lane,
+                    );
+                }
+            }
+            for j in 0..13 {
+                band[j] += r[j].fin();
+            }
+            for j in 0..3 {
+                band[13 + j * 2] += p_kn[j].fin();
+                band[14 + j * 2] += p_kd[j].fin();
+            }
+            let mw_row = p_mw.fin();
+            let iw_row = p_iw.fin();
+            for j in 0..4 {
+                band[19 + j * 2] += p_m[j].fin();
+                band[20 + j * 2] += mw_row;
+                band[27 + j * 2] += p_i[j].fin();
+                band[28 + j * 2] += iw_row;
+            }
+        }
+        let s = &mut acc;
+        s.sum_d += band[0];
+        s.sum_d2 += band[1];
+        s.sum_d3 += band[2];
+        s.sum_d4 += band[3];
+        s.sum_art += band[4];
+        s.sum_det += band[5];
+        s.sum_mse += band[6];
+        s.sum_hf_gain += band[7];
+        s.sum_hf_loss += band[8];
+        s.sum_hf_mag_loss += band[9];
+        s.sum_pjnd += band[10];
+        s.sum_pjnd_lo += band[11];
+        s.sum_pjnd_hi += band[12];
+        for (w, o) in [
+            (&mut s.ws_peak_ssim, 13),
+            (&mut s.ws_peak_art, 15),
+            (&mut s.ws_peak_det, 17),
+            (&mut s.ws_mask_ssim, 19),
+            (&mut s.ws_mask_art, 21),
+            (&mut s.ws_mask_det, 23),
+            (&mut s.ws_mask_mse, 25),
+            (&mut s.ws_iw_ssim, 27),
+            (&mut s.ws_iw_art, 29),
+            (&mut s.ws_iw_det, 31),
+            (&mut s.ws_iw_mse, 33),
+        ] {
+            w.num += band[o];
+            w.den += band[o + 1];
+        }
+        b0 = b1;
+    }
+    acc
+}
+
+/// f64-exact sibling of [`dense_block_kernel_canon`] — the oracle arm.
+/// Elements via the existing f64 scalar helpers (`ssim_d_local`,
+/// `bounded_sim`, `bounded_excess`, `saturate`, `pjnd_transducer`); pools
+/// Neumaier-compensated; the band structure is identical.
+#[cfg(feature = "oracle")]
+#[allow(clippy::too_many_arguments)]
+fn dense_block_kernel_exact(
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    ssq: &[f32],
+    s12: &[f32],
+    activity: &[f32],
+    width: usize,
+    height: usize,
+    transducer_bank: bool,
+    mut r4: Option<Rev4Dense<'_>>,
+) -> DenseAccum {
+    use crate::featcanon::{Neum64, Pool as _};
+    let direct = crate::ssim_form::active_revision() >= crate::feature_defs::FormulaRevision::Rev3;
+    let mut acc = DenseAccum::default();
+    let mut b0 = 0usize;
+    while b0 < height {
+        let b1 = (b0 + ERA2_BAND_ROWS).min(height);
+        let mut band = [0.0f64; 35];
+        for y in b0..b1 {
+            let row = y * width;
+            let mut r = [Neum64::zero(); 13];
+            let mut p_mw = Neum64::zero();
+            let mut p_iw = Neum64::zero();
+            let mut p_m = [Neum64::zero(); 4];
+            let mut p_i = [Neum64::zero(); 4];
+            let mut p_kn = [Neum64::zero(); 3];
+            let mut p_kd = [Neum64::zero(); 3];
+            for x in 0..width {
+                let i = row + x;
+                let lane = x & 7;
+                let s = src[i] as f64;
+                let dd = dst[i] as f64;
+                let m1 = mu1[i] as f64;
+                let m2 = mu2[i] as f64;
+                let act = activity[i] as f64;
+                let d = ssim_d_local(m1, m2, s12[i] as f64, ssq[i] as f64, direct);
+                let d2 = d * d;
+                let diff_src = (s - m1).abs();
+                let diff_dst = (dd - m2).abs();
+                let edge_dissim = 1.0 - bounded_sim(diff_src, diff_dst, C_EDGE);
+                let (art_i, det_i) = if diff_dst > diff_src {
+                    (edge_dissim, 0.0)
+                } else if diff_dst < diff_src {
+                    (0.0, edge_dissim)
+                } else {
+                    (0.0, 0.0)
+                };
+                let raw_diff = s - dd;
+                let mse_i = saturate(raw_diff * raw_diff, C_MSE);
+                let hf_src = s - m1;
+                let hf_dst = dd - m2;
+                let (hfg, hfl) = bounded_excess_pair(hf_dst * hf_dst, hf_src * hf_src, C_HF);
+                let hfm = bounded_excess(hf_src.abs(), hf_dst.abs(), C_HF);
+                let rae = raw_diff.abs();
+                let pj = pjnd_transducer(rae, act, K_PJND_MASK, C_PJND_CLAMP);
+                let (pjl, pjh) = if transducer_bank {
+                    (
+                        pjnd_transducer(rae, act, K_PJND_MASK_LOW, C_PJND_CLAMP),
+                        pjnd_transducer(rae, act, K_PJND_MASK_HIGH, C_PJND_CLAMP),
+                    )
+                } else {
+                    (0.0, 0.0)
+                };
+                let t = [
+                    d,
+                    d2,
+                    d2 * d,
+                    d2 * d2,
+                    art_i,
+                    det_i,
+                    mse_i,
+                    hfg,
+                    hfl,
+                    hfm,
+                    pj,
+                    pjl,
+                    pjh,
+                ];
+                for j in 0..13 {
+                    r[j].add64(lane, t[j]);
+                }
+                // f64 pools: `weighted_pool_accumulate_scalar`'s formula.
+                let mask_w = 1.0 - saturate(act, C_ACTIVITY);
+                let iw_w = saturate(act, C_ACTIVITY) + IW_WEIGHT_FLOOR;
+                p_mw.add64(lane, mask_w);
+                p_iw.add64(lane, iw_w);
+                let vals = [d, art_i, det_i, mse_i];
+                for j in 0..4 {
+                    p_m[j].add64(lane, mask_w * vals[j]);
+                    p_i[j].add64(lane, iw_w * vals[j]);
+                }
+                for j in 0..3 {
+                    let sal = saturate(vals[j], C_PEAK);
+                    p_kn[j].add64(lane, sal * vals[j]);
+                    p_kd[j].add64(lane, sal);
+                }
+                if let Some(r4) = r4.as_mut() {
+                    rev4_dense_pixel(r4, d, art_i, det_i, mse_i, hfg, act, x);
+                }
+            }
+            for j in 0..13 {
+                band[j] += r[j].fin();
+            }
+            for j in 0..3 {
+                band[13 + j * 2] += p_kn[j].fin();
+                band[14 + j * 2] += p_kd[j].fin();
+            }
+            let mw_row = p_mw.fin();
+            let iw_row = p_iw.fin();
+            for j in 0..4 {
+                band[19 + j * 2] += p_m[j].fin();
+                band[20 + j * 2] += mw_row;
+                band[27 + j * 2] += p_i[j].fin();
+                band[28 + j * 2] += iw_row;
+            }
+        }
         let s = &mut acc;
         s.sum_d += band[0];
         s.sum_d2 += band[1];

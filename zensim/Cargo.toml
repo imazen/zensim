@@ -369,6 +369,13 @@ name = "era2_dense_ab"
 harness = false
 required-features = ["oracle"]
 
+# featacc: whole-extract cost of each candidate arithmetic, interleaved
+# in-process via bench_featcanon. benchmarks/featacc_WORKLOG.md
+[[bench]]
+name = "featacc_extract_ab"
+harness = false
+required-features = ["oracle"]
+
 [[bench]]
 name = "fold_pools_bench"
 harness = false

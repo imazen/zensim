@@ -58,10 +58,11 @@ struct Welford {
 
 impl Welford {
     /// One row, pixels in ascending `x`. `recip[k] == 1.0 / k as f64`.
-    fn of_row(row: &[f32], recip: &[f64]) -> Self {
+    /// `row` is `f64` — production values are `f64::from` of the f32 maps
+    /// (lossless), so the arithmetic is unchanged.
+    fn of_row(row: &[f64], recip: &[f64]) -> Self {
         let (mut mean, mut m2) = (0.0f64, 0.0f64);
-        for (i, &v) in row.iter().enumerate() {
-            let x = f64::from(v);
+        for (i, &x) in row.iter().enumerate() {
             let delta = x - mean;
             mean += delta * recip[i + 1];
             m2 += delta * (x - mean);
@@ -117,8 +118,14 @@ struct Z1Acc {
     nby: usize,
     /// Running per-block max of the rows seen so far in the current block
     /// row, per map. Zero-initialised, like the record's `mx = [0.0; 8]`.
-    bm: [Vec<f32>; 8],
+    /// featacc: f64 so `exact` mode can carry the f64 map evaluation through
+    /// the max without narrowing; production values were f32, and f32→f64 is
+    /// lossless, so production bits are unchanged.
+    bm: [Vec<f64>; 8],
     sums: V1BasicSums,
+    /// Oracle element precision: `exact` squares in f64, the rest reproduce
+    /// the production f32 square-then-widen.
+    exact: bool,
 }
 
 impl Z1Acc {
@@ -127,12 +134,13 @@ impl Z1Acc {
         Self {
             nbx,
             nby: h / Z1_GRID,
-            bm: std::array::from_fn(|_| vec![0.0f32; nbx]),
-            sums: V1BasicSums::default(),
+            bm: std::array::from_fn(|_| vec![0.0f64; nbx]),
+            sums: V1BasicSums::meas_f32(),
+            exact: crate::featcanon::measurement_mode().exact(),
         }
     }
 
-    fn push_row(&mut self, y: usize, rows: &[Vec<f32>; 8]) {
+    fn push_row(&mut self, y: usize, rows: &[Vec<f64>; 8]) {
         if y >= self.nby * Z1_GRID {
             return;
         }
@@ -147,8 +155,8 @@ impl Z1Acc {
         }
         if y % Z1_GRID == Z1_GRID - 1 {
             for bx in 0..self.nbx {
-                let m: [f32; 8] = std::array::from_fn(|i| self.bm[i][bx]);
-                accumulate_block(&mut self.sums, m);
+                let m: [f64; 8] = std::array::from_fn(|i| self.bm[i][bx]);
+                accumulate_block(&mut self.sums, m, bx & 7, self.exact);
             }
             for bm in &mut self.bm {
                 bm.fill(0.0);
@@ -174,34 +182,54 @@ impl Z1Acc {
 /// One block's eight maxima into the pooled sums — the record's `accumulate`
 /// closure at gate weight `v = 1` (a multiply by exactly 1.0 is the identity,
 /// so it is omitted).
-fn accumulate_block(s: &mut V1BasicSums, m: [f32; 8]) {
+///
+/// featacc: `lane` is the canonical pool lane (block column mod 8).
+/// `exact = false` reproduces the production element form — powers computed
+/// in f32 then widened — while `true` evaluates them in f64 from the f64
+/// block maxima (the oracle's element axis).
+fn accumulate_block(s: &mut V1BasicSums, m: [f64; 8], lane: usize, exact: bool) {
     let [m_sd, m_art, m_det, m_mse, m_hss, m_hsd, m_has, m_had] = m;
-    let sd2 = m_sd * m_sd;
-    let sd4 = sd2 * sd2;
-    s.ssim_d += f64::from(m_sd);
-    s.ssim_d4 += f64::from(sd4);
-    s.ssim_d2 += f64::from(sd2);
-    s.ssim_d8 += f64::from(sd4 * sd4);
+    // Production squares in f32 (`sd2 = m_sd * m_sd` on f32 operands) and
+    // widens; `v as f32` below is a no-op for f32-sourced maxima and is the
+    // production element value for f64-sourced ones — which `exact` then
+    // deliberately does NOT take.
+    let p2 = |v: f64| {
+        if exact {
+            v * v
+        } else {
+            let v32 = v as f32;
+            f64::from(v32 * v32)
+        }
+    };
+    let p1 = |v: f64| {
+        if exact { v } else { f64::from(v as f32) }
+    };
+    let sd2 = p2(m_sd);
+    let sd4 = p2(sd2);
+    s.ssim_d.add64(lane, p1(m_sd));
+    s.ssim_d4.add64(lane, sd4);
+    s.ssim_d2.add64(lane, sd2);
+    s.ssim_d8.add64(lane, p2(sd4));
     s.ssim_max = s.ssim_max.max(m_sd);
-    let a2 = m_art * m_art;
-    let a4 = a2 * a2;
-    s.edge_art += f64::from(m_art);
-    s.edge_art4 += f64::from(a4);
-    s.edge_art2 += f64::from(a2);
-    s.edge_art8 += f64::from(a4 * a4);
+    let a2 = p2(m_art);
+    let a4 = p2(a2);
+    s.edge_art.add64(lane, p1(m_art));
+    s.edge_art4.add64(lane, a4);
+    s.edge_art2.add64(lane, a2);
+    s.edge_art8.add64(lane, p2(a4));
     s.edge_art_max = s.edge_art_max.max(m_art);
-    let d2 = m_det * m_det;
-    let d4 = d2 * d2;
-    s.edge_det += f64::from(m_det);
-    s.edge_det4 += f64::from(d4);
-    s.edge_det2 += f64::from(d2);
-    s.edge_det8 += f64::from(d4 * d4);
+    let d2 = p2(m_det);
+    let d4 = p2(d2);
+    s.edge_det.add64(lane, p1(m_det));
+    s.edge_det4.add64(lane, d4);
+    s.edge_det2.add64(lane, d2);
+    s.edge_det8.add64(lane, p2(d4));
     s.edge_det_max = s.edge_det_max.max(m_det);
-    s.mse += f64::from(m_mse);
-    s.hf_sq_src += f64::from(m_hss);
-    s.hf_sq_dst += f64::from(m_hsd);
-    s.hf_abs_src += f64::from(m_has);
-    s.hf_abs_dst += f64::from(m_had);
+    s.mse.add64(lane, p1(m_mse));
+    s.hf_sq_src.add64(lane, p1(m_hss));
+    s.hf_sq_dst.add64(lane, p1(m_hsd));
+    s.hf_abs_src.add64(lane, p1(m_has));
+    s.hf_abs_dst.add64(lane, p1(m_had));
 }
 
 /// One (scale, channel) cell's outputs.
@@ -233,11 +261,24 @@ fn run_cell(
     let mut mu1_b = vec![0.0f32; band_cap_n];
     let mut mu2_b = vec![0.0f32; band_cap_n];
     let mut sd_b = vec![0.0f32; band_cap_n];
-    let mut rows: [Vec<f32>; 8] = std::array::from_fn(|_| vec![0.0f32; width]);
+    // featacc: the per-pixel maps are f64 so `exact` mode can evaluate the
+    // map formulas in f64; every other mode stores `f64::from` of the
+    // production f32 evaluation (lossless — production bits unchanged).
+    let mut rows: [Vec<f64>; 8] = std::array::from_fn(|_| vec![0.0f64; width]);
     let free = crate::fused::FreeExtrasWork {
         revision: Some(revision),
         ..Default::default()
     };
+    // featacc: under a measurement mode the mapdev pools run as
+    // `WelfordVar` fed PER PIXEL (`Seq` = the canonical sequential Welford,
+    // `Lanes` = 8 substreams on x mod 8 Chan-merged pairwise, `Neum` =
+    // compensated). Production (`off`/unset) keeps the row-Welford + Chan
+    // row merge exactly as shipped. `exact` also re-evaluates the eight
+    // maps' element formulas in f64; every other mode keeps the production
+    // f32 evaluation (widened losslessly into the f64 rows).
+    let meas = crate::featcanon::measurement_active();
+    let exact = crate::featcanon::measurement_mode().exact();
+    let mut dev_var = meas.map(|m| [crate::featcanon::WelfordVar::for_mode(m); MAPDEV_PER_CELL]);
     let mut dev = [Welford::default(); MAPDEV_PER_CELL];
     let mut z1 = work.z1max.then(|| Z1Acc::new(width, height));
 
@@ -297,27 +338,63 @@ fn run_cell(
                 let (bi, pi) = (brow + x, prow + x);
                 let (sv, dv) = (sp[pi], dp[pi]);
                 let (mu1, mu2) = (mu1_b[bi], mu2_b[bi]);
-                let diff1 = (sv - mu1).abs();
-                let diff2 = (dv - mu2).abs();
-                let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                let pd = sv - dv;
-                let vs = sv - mu1;
-                let vd = dv - mu2;
-                rows[MAP_SD][x] = sd_b[bi];
-                rows[MAP_ART][x] = ed.max(0.0);
-                rows[MAP_DET][x] = (-ed).max(0.0);
-                rows[MAP_MSE][x] = pd * pd;
-                rows[MAP_HFSS][x] = vs * vs;
-                rows[MAP_HFSD][x] = vd * vd;
-                rows[MAP_HFAS][x] = diff1;
-                rows[MAP_HFAD][x] = diff2;
+                let sd = sd_b[bi];
+                if exact {
+                    // f64 element evaluation of the same map formulas — the
+                    // oracle's element axis (the f32 blur planes stay the
+                    // terms' inputs; their precision is the blur axis's
+                    // separate measurement).
+                    let (sv, dv) = (f64::from(sv), f64::from(dv));
+                    let (mu1, mu2) = (f64::from(mu1), f64::from(mu2));
+                    let diff1 = (sv - mu1).abs();
+                    let diff2 = (dv - mu2).abs();
+                    let ed = (1.0f64 + diff2) / (1.0f64 + diff1) - 1.0f64;
+                    let pd = sv - dv;
+                    let vs = sv - mu1;
+                    let vd = dv - mu2;
+                    rows[MAP_SD][x] = f64::from(sd);
+                    rows[MAP_ART][x] = ed.max(0.0);
+                    rows[MAP_DET][x] = (-ed).max(0.0);
+                    rows[MAP_MSE][x] = pd * pd;
+                    rows[MAP_HFSS][x] = vs * vs;
+                    rows[MAP_HFSD][x] = vd * vd;
+                    rows[MAP_HFAS][x] = diff1;
+                    rows[MAP_HFAD][x] = diff2;
+                } else {
+                    // Production's f32 element evaluation, widened losslessly.
+                    let diff1 = (sv - mu1).abs();
+                    let diff2 = (dv - mu2).abs();
+                    let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                    let pd = sv - dv;
+                    let vs = sv - mu1;
+                    let vd = dv - mu2;
+                    rows[MAP_SD][x] = f64::from(sd);
+                    rows[MAP_ART][x] = f64::from(ed.max(0.0));
+                    rows[MAP_DET][x] = f64::from((-ed).max(0.0));
+                    rows[MAP_MSE][x] = f64::from(pd * pd);
+                    rows[MAP_HFSS][x] = f64::from(vs * vs);
+                    rows[MAP_HFSD][x] = f64::from(vd * vd);
+                    rows[MAP_HFAS][x] = f64::from(diff1);
+                    rows[MAP_HFAD][x] = f64::from(diff2);
+                }
             }
             if work.mapdev {
-                for (k, map) in [MAP_MSE, MAP_HFSS, MAP_HFSD, MAP_HFAS, MAP_HFAD]
-                    .into_iter()
-                    .enumerate()
-                {
-                    dev[k].merge(&Welford::of_row(&rows[map], recip));
+                if let Some(devv) = dev_var.as_mut() {
+                    for (k, map) in [MAP_MSE, MAP_HFSS, MAP_HFSD, MAP_HFAS, MAP_HFAD]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        for (x, &v) in rows[map].iter().enumerate() {
+                            devv[k].push(x, v);
+                        }
+                    }
+                } else {
+                    for (k, map) in [MAP_MSE, MAP_HFSS, MAP_HFSD, MAP_HFAS, MAP_HFAD]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        dev[k].merge(&Welford::of_row(&rows[map], recip));
+                    }
                 }
             }
             if let Some(z) = z1.as_mut() {
@@ -327,8 +404,19 @@ fn run_cell(
         b0 = b1;
     }
     if work.mapdev {
-        for (o, w) in out.dev.iter_mut().zip(&dev) {
-            *o = w.std();
+        if let Some(devv) = dev_var.as_ref() {
+            for (o, w) in out.dev.iter_mut().zip(devv) {
+                let s = w.stats();
+                *o = if s.n == 0 {
+                    0.0
+                } else {
+                    (s.m2.max(0.0) / s.n as f64).sqrt()
+                };
+            }
+        } else {
+            for (o, w) in out.dev.iter_mut().zip(&dev) {
+                *o = w.std();
+            }
         }
     }
     if let Some(z) = &z1 {
@@ -539,8 +627,9 @@ mod tests {
             let plane: Vec<f32> = (0..w * h)
                 .map(|_| offset + (lcg(&mut seed) * 4.0).floor() * q)
                 .collect();
+            let plane64: Vec<f64> = plane.iter().map(|&v| f64::from(v)).collect();
             let mut acc = Welford::default();
-            for row in plane.chunks_exact(w) {
+            for row in plane64.chunks_exact(w) {
                 acc.merge(&Welford::of_row(row, &r));
             }
             let x: Vec<f64> = plane.iter().map(|&v| f64::from(v)).collect();
@@ -564,7 +653,7 @@ mod tests {
                 );
             }
         }
-        let flat = vec![0.75f32; w * h];
+        let flat = vec![0.75f64; w * h];
         let mut acc = Welford::default();
         for row in flat.chunks_exact(w) {
             acc.merge(&Welford::of_row(row, &r));
@@ -583,27 +672,29 @@ mod tests {
                 .map(|_| (0..w * h).map(|_| lcg(&mut seed)).collect())
                 .collect();
             let mut z = Z1Acc::new(w, h);
-            let mut rows: [Vec<f32>; 8] = std::array::from_fn(|_| vec![0.0; w]);
+            let mut rows: [Vec<f64>; 8] = std::array::from_fn(|_| vec![0.0; w]);
             for y in 0..h {
                 for (k, r) in rows.iter_mut().enumerate() {
-                    r.copy_from_slice(&maps[k][y * w..(y + 1) * w]);
+                    for (d, &v) in r.iter_mut().zip(&maps[k][y * w..(y + 1) * w]) {
+                        *d = f64::from(v);
+                    }
                 }
                 z.push_row(y, &rows);
             }
             let (nbx, nby) = (w / 5, h / 5);
-            let mut want = V1BasicSums::default();
+            let mut want = V1BasicSums::meas_f32();
             for by in 0..nby {
                 for bx in 0..nbx {
-                    let m: [f32; 8] = std::array::from_fn(|k| {
-                        let mut v = 0.0f32;
+                    let m: [f64; 8] = std::array::from_fn(|k| {
+                        let mut v = 0.0f64;
                         for r in by * 5..by * 5 + 5 {
                             for c in bx * 5..bx * 5 + 5 {
-                                v = v.max(maps[k][r * w + c]);
+                                v = v.max(f64::from(maps[k][r * w + c]));
                             }
                         }
                         v
                     });
-                    accumulate_block(&mut want, m);
+                    accumulate_block(&mut want, m, bx & 7, false);
                 }
             }
             let (mut a, mut b) = ([0.0f64; Z1MAX_PER_CELL], [0.0f64; Z1MAX_PER_CELL]);

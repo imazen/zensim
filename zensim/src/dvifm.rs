@@ -1127,17 +1127,35 @@ fn gate_visibility(c: f64, lp: &DvifmLevelParams) -> f64 {
 }
 
 /// Per-level block sums — accumulated in one running order.
-#[derive(Default)]
+///
+/// featacc: the three sums are [`crate::featcanon::SumVar`] slots —
+/// `f64_elems` variants since every pooled term is f64-native — so a
+/// measurement mode (`ZENSIM_FEATCANON`) varies the accumulation order
+/// without touching the block terms. Production (`off`, or no override)
+/// keeps the plain `f64 += ` running order bit-for-bit.
 struct LevelSums {
     n: u64,
-    f1: f64,
+    f1: crate::featcanon::SumVar,
     /// Restored cut `dvifmgate`: the same F1 with the TWO-STATE visibility
     /// `v = 1 iff C <= c0` (merged across sides with `max`, as `f1` merges
     /// the smooth curve). F2 does not depend on `v`, so this one sum is the
     /// whole gate-form variant. Accumulated in the same order as `f1`; it
     /// cannot move any existing value.
-    f1_gate: f64,
-    f2: [f64; DVIFM_BINS],
+    f1_gate: crate::featcanon::SumVar,
+    f2: [crate::featcanon::SumVar; DVIFM_BINS],
+}
+
+impl LevelSums {
+    /// Walk-setup constructor: resolves the measurement mode once (oracle
+    /// builds read `ZENSIM_FEATCANON`; production resolves to `Seq`).
+    fn meas() -> Self {
+        Self {
+            n: 0,
+            f1: crate::featcanon::SumVar::f64_elems_meas(),
+            f1_gate: crate::featcanon::SumVar::f64_elems_meas(),
+            f2: std::array::from_fn(|_| crate::featcanon::SumVar::f64_elems_meas()),
+        }
+    }
 }
 
 /// One block's F1 terms under `lp`: the two side contrasts, the merged
@@ -1155,14 +1173,17 @@ fn block_terms(rec: &BlockRec, lp: &DvifmLevelParams) -> (f64, f64, f64, f64) {
 
 /// Pool one block's record into the running sums — `f1_parametric` +
 /// `f2_binned` per block.
-fn pool_block(sums: &mut LevelSums, lp: &DvifmLevelParams, rec: &BlockRec) {
+fn pool_block(sums: &mut LevelSums, lp: &DvifmLevelParams, rec: &BlockRec, lane: usize) {
     let (cs, cd, vb, e) = block_terms(rec, lp);
-    sums.f1 += vb * e;
-    sums.f1_gate += gate_visibility(cs, lp).max(gate_visibility(cd, lp)) * e;
+    sums.f1.add64(lane, vb * e);
+    sums.f1_gate.add64(
+        lane,
+        gate_visibility(cs, lp).max(gate_visibility(cd, lp)) * e,
+    );
     let ell = (cs.min(cd) + 1e-6).ln();
     let h = hat_memberships(ell, &lp.f2_centers);
     for (hj, f2) in h.iter().zip(sums.f2.iter_mut()) {
-        *f2 += hj * e;
+        f2.add64(lane, hj * e);
     }
     sums.n += 1;
 }
@@ -1172,9 +1193,9 @@ fn level_out(sums: &LevelSums) -> [f64; DVIFM_PER_LEVEL] {
     let mut out = [0.0; DVIFM_PER_LEVEL];
     if sums.n > 0 {
         let inv = 1.0 / sums.n as f64;
-        out[0] = sums.f1 * inv;
+        out[0] = sums.f1.fin() * inv;
         for j in 0..DVIFM_BINS {
-            out[1 + j] = sums.f2[j] * inv;
+            out[1 + j] = sums.f2[j].fin() * inv;
         }
     }
     out
@@ -1324,10 +1345,10 @@ pub(crate) fn dvifm_features_whole(
         }
         let bs = &pyr_s[mi].as_ref().unwrap()[l];
         let bd = &pyr_d[mi].as_ref().unwrap()[l];
-        let (_nby, _nbx, recs) = block_stats_level(bs, bd);
-        let mut sums = LevelSums::default();
-        for rec in &recs {
-            pool_block(&mut sums, lp, rec);
+        let (_nby, nbx, recs) = block_stats_level(bs, bd);
+        let mut sums = LevelSums::meas();
+        for (i, rec) in recs.iter().enumerate() {
+            pool_block(&mut sums, lp, rec, (i % nbx.max(1)) & 7);
         }
         out[l * DVIFM_PER_LEVEL..(l + 1) * DVIFM_PER_LEVEL].copy_from_slice(&level_out(&sums));
     }
@@ -1420,7 +1441,7 @@ impl LevelPump {
             side: [LevelSide::default(), LevelSide::default()],
             band_q: [VecDeque::new(), VecDeque::new()],
             mean_q: [VecDeque::new(), VecDeque::new()],
-            sums: LevelSums::default(),
+            sums: LevelSums::meas(),
             lp,
         }
     }
@@ -1452,7 +1473,7 @@ impl DvifmAccum {
         let mut out = [0.0; DVIFM_LEVELS];
         for (o, pump) in out.iter_mut().zip(&self.levels) {
             if pump.sums.n > 0 {
-                *o = pump.sums.f1_gate * (1.0 / pump.sums.n as f64);
+                *o = pump.sums.f1_gate.fin() * (1.0 / pump.sums.n as f64);
             }
         }
         out
@@ -1547,8 +1568,9 @@ fn pump_consume_block_row<T: F64x8Backend>(
         }
         rec.mean_s = ms / (DVIFM_BLOCK * DVIFM_BLOCK) as f64;
         rec.mean_d = md / (DVIFM_BLOCK * DVIFM_BLOCK) as f64;
+        let lane = bx & 7;
         bx += 1;
-        pool_block(sums, &lp, &rec);
+        pool_block(sums, &lp, &rec, lane);
         if let Some(c) = cache.as_mut() {
             c.push(rec);
         }
@@ -2374,9 +2396,9 @@ mod tests {
             let bs = laplacian_pyramid(t, &refp, DVIFM_LEVELS);
             let bd = laplacian_pyramid(t, &dist, DVIFM_LEVELS);
             let recs = block_stats_n(&bs[lvl], &bd[lvl], n);
-            let mut sums = LevelSums::default();
-            for rec in &recs {
-                pool_block(&mut sums, &lp, rec);
+            let mut sums = LevelSums::meas();
+            for (i, rec) in recs.iter().enumerate() {
+                pool_block(&mut sums, &lp, rec, i & 7);
             }
             level_out(&sums)[0]
         };
@@ -3133,9 +3155,14 @@ mod tests {
                         wl = wl.div_ceil(2);
                         hl = hl.div_ceil(2);
                         assert_eq!(levels[l].len(), nby as usize * nbx as usize);
-                        let mut sums = LevelSums::default();
-                        for rec in &levels[l] {
-                            pool_block(&mut sums, &params.levels[l], rec);
+                        let mut sums = LevelSums::meas();
+                        for (i, rec) in levels[l].iter().enumerate() {
+                            pool_block(
+                                &mut sums,
+                                &params.levels[l],
+                                rec,
+                                (i % nbx.max(1) as usize) & 7,
+                            );
                         }
                         got[l * DVIFM_PER_LEVEL..(l + 1) * DVIFM_PER_LEVEL]
                             .copy_from_slice(&level_out(&sums));
@@ -3151,8 +3178,9 @@ mod tests {
                     // the narrowed replay agrees to f32 rounding, not less.
                     let mut got32 = [0.0f64; DVIFM_FEATURES];
                     for l in 0..DVIFM_LEVELS {
-                        let mut sums = LevelSums::default();
-                        for rec in &levels[l] {
+                        let (_, nbx) = grid[l];
+                        let mut sums = LevelSums::meas();
+                        for (i, rec) in levels[l].iter().enumerate() {
                             let v = rec.to_f32();
                             let rec32 = BlockRec {
                                 m: v[0] as f64,
@@ -3164,7 +3192,12 @@ mod tests {
                                 mean_s: v[18] as f64,
                                 mean_d: v[19] as f64,
                             };
-                            pool_block(&mut sums, &params.levels[l], &rec32);
+                            pool_block(
+                                &mut sums,
+                                &params.levels[l],
+                                &rec32,
+                                (i % nbx.max(1) as usize) & 7,
+                            );
                         }
                         got32[l * DVIFM_PER_LEVEL..(l + 1) * DVIFM_PER_LEVEL]
                             .copy_from_slice(&level_out(&sums));
@@ -3233,13 +3266,13 @@ mod tests {
                     );
                     let (nby, nbx) = (grid[l].0 as usize, grid[l].1 as usize);
                     let f = block_field(&levels[l], &params.levels[l], nby, nbx);
-                    let mut sums = LevelSums::default();
-                    for rec in &levels[l] {
-                        pool_block(&mut sums, &params.levels[l], rec);
+                    let mut sums = LevelSums::meas();
+                    for (i, rec) in levels[l].iter().enumerate() {
+                        pool_block(&mut sums, &params.levels[l], rec, (i % nbx.max(1)) & 7);
                     }
                     assert_eq!(
                         f.f1_sum.to_bits(),
-                        sums.f1.to_bits(),
+                        sums.f1.fin().to_bits(),
                         "{mode:?} {w}x{h} level {l}: field mass != pooled f1"
                     );
                     let n = (nby * nbx) as f64;
