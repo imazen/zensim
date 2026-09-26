@@ -214,3 +214,22 @@ Read-outs:
   `docs/history/CLAUDE-through-2026-09-07.md:556`. The registry is the live
   correction.
 - The CVVDP comparator was not touched.
+
+## 4. Addendum 2026-09-26: the served board is replaced
+
+The gate failure in §1.5 was the three `2026-09-19-dvifm-*` TRAIN comparisons, whose `report_url`
+pointed at `/zensim/benchmarks/*.md` (not served; 404). Each screen's committed record, JSON, pointer
+and prereg are now published byte-identically under
+`/mnt/v/output/zensim/reports/dvifm-{screen,screen2b,screen2c}-2026-09-19/` with a `FILES.json`
+sha256 index, and the three entries point at those served directories (`659580a8`). Rebuilt from
+that commit, both boards pass `gauntlet_gates.sh` (gates 1, 2, 3 and 4a–4e):
+
+| file | before (kept) | now |
+|---|---|---|
+| `summer_gauntlet.html` | `summer_gauntlet_pre_orientation_2026-09-26.html` (29,816,306 B, sha256 `e3cddf74…`) | 29,796,685 B, sha256 `66504af3…`; 566 fulleval files, 549 rendered |
+| `summer_gauntlet_fair.html` | `summer_gauntlet_fair_pre_orientation_2026-09-26.html` (15,734,811 B, sha256 `30c23a87…`) | 15,733,164 B, sha256 `fa587daf…`; 186 rendered |
+
+On the served board the four frozen controls read aic4 per-reference +0.9119 / +0.9517 / +0.9481 /
++0.9408 at 0% backwards, and no cell carries the retired corpus-wide note. The fair board is still
+above the 12 MB cap named in `gauntlet.py --fair-only`'s help, as the replaced one was.
+
