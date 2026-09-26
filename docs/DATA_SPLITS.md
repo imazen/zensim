@@ -905,3 +905,64 @@ them.
   `cvvdp-safesyn-20260923` (3,218 jobs, 196,086 pairs, metric labels only; no
   human label was read). Its record is zenmetrics
   `benchmarks/cvvdp_safesyn_2026-09-23.md`; sidecar sha256 `775bdb8f…`.
+
+## Exposure receipt — 2026-09-23: rev4 featpot baseline (preread reservation)
+
+**POTENTIAL — ceiling, not a model score.** Preregistration: `benchmarks/rev4_featpot_prereg_2026-09-23.md`, committed as `d2169f5b` before any label value was decoded by this lane. Purpose: D1 fitted in-sample potential diagnostics and D2 LODO rotation, baseline Rev3 944 arm only. Fitted models are diagnostic only, under `/var/tmp/rev4-featpot/`; they never qualify a recipe or a held-out score.
+
+| Population | Whole source / planned admitted rows | Status before read | Status after read |
+|---|---|---|---|
+| CID22-A(25) | `ext_cid22val.parquet` 4,292 mixed A/B rows; admit only A rows by pinned ref allowlist | planned | pending; update to potential-exposed / LODO-exposed with exact A row count only after the corresponding read |
+| AIC-3 CTC | `ext_aic3.parquet` 600 rows | planned | pending; update after read |
+| KADID SELECT | `ext_kadid.parquet` 3,125 rows | planned | pending; update after read |
+| KonFiG originsplit_val | `ext_konfig.parquet` 436 rows, origin split to be verified | planned | pending; update after read |
+
+TRAIN-role KADID, TID, KonFiG originsplit_train and KonJND BPG are subject to their original roles; every TRAIN label read also gets a worklog receipt. CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE and secret holdouts stay unread. A missing/incompatible f64 cache does not authorize a substitute population or a different feature era.
+
+## Exposure receipt — 2026-09-23: rev4 featpot promoted-bank baseline (preread)
+
+**POTENTIAL — ceiling, not a model score.** This receipt follows addendum commit `044f00dc043f` (22:59:18 UTC). Source is only `/var/tmp/rev4-featbank/bank/<set>/labels__*.parquet`, joined by `pair_key` to the same set's keys and Rev3 feature sidecar. The coordinator's D1/D2 ruling authorizes the named diagnostic fits and fold reads. All statuses below are **pending until the first actual label-value read**; they are updated with command/output hashes after admission. Fitted in-sample results are diagnostic only.
+
+| Population | Stimuli / unique keys | Planned use | Status before read |
+|---|---:|---|---|
+| KADID TRAIN | 5,000 / 4,880 | TRAIN fit, D2 fold | pending TRAIN read |
+| TID2013 | 3,000 / 3,000 | TRAIN fit, D2 fold | pending TRAIN read |
+| KonFiG originsplit_train | 327 / 327 | TRAIN fit, D2 fold | pending TRAIN read |
+| KonJND BPG TRAIN | 8,060 / 8,060 | oracle-target TRAIN fit, D2 fold | pending TRAIN read |
+| KonJND BPG VAL | 2,020 / 2,020 | oracle-target D2 fold eval only | pending LODO exposure |
+| CID22-A(25) | 2,192 / 2,192 | D1 in-sample diagnostic, D2 fold | pending potential/LODO exposure |
+| AIC-3 CTC | 600 / 600 | D1 in-sample diagnostic, D2 fold | pending potential/LODO exposure |
+| KADID SELECT | 3,125 / 3,050 | D1 in-sample diagnostic, D2 fold | pending potential/LODO exposure |
+| KonFiG originsplit_val | 436 / 436 | D1 in-sample diagnostic, D2 fold eval | pending potential/LODO exposure |
+
+The only admitted held-out human label files are the `labels__human.parquet` files for CID22-A, AIC-3, KADID SELECT and KonFiG VAL. **Never read held-out `human_score` from the bank `pairs/` or `raw/` copies or their `_sealed/` destinations.** CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-JCI pending D3, and every secret holdout stay unread.
+
+### Admission update — 2026-09-23 23:07:33–23:07:35 UTC
+
+The nine populations above were admitted by `scripts/rev4_featpot/admit_bank.py` after preregistration commits `044f00dc043f` and `2195532f`. The adapter read only the listed bank `labels__*.parquet` values, joined on `pair_key`, and wrote `/var/tmp/rev4-featpot/admitted/POT_<set>_rev3_944.parquet`. Its initial nine-line receipt had SHA-256 `5344cbefb4e42188f3c3b66bc4cc5bdb61ee6e60fdba5fd54dd777c0d0d2a23f`; the current receipt and target-free tables are recorded below. Exact admitted rows and keys are the counts in the table above; the receipt also records each output SHA-256 and reference count. KADID TRAIN, TID2013, KonFiG TRAIN and KonJND BPG TRAIN are **TRAIN-read**. CID22-A(25), AIC-3 CTC, KADID SELECT and KonFiG originsplit_val are now **potential-exposed** by the admitted label read; their D2 LODO folds have not yet run. KonJND BPG VAL is **oracle-label-read for D2**, with its fold pending. None is a Rev4 confirmation result.
+
+### Label-source correction — 2026-09-23 23:31 UTC
+
+Before any model fit, the nine admitted tables were rewritten to contain **no target column**. The adapter still validates source-row multiplicity and finite targets from the allowed bank label files, but stores only `pair_key`, `source_row_id`, reference/codec metadata and f0–f943. The new nine-line receipt `/var/tmp/rev4-featpot/admit_bank.jsonl` has SHA-256 `aaf927dc2a8c8dd6066ce740bef53f137a61cee8e26bb3210d440d38465cdbcb`; its lines identify every rewritten output hash. All fit/stat drivers now call `scripts/rev4_featpot/data.py`, which rechecks the pinned manifest/file hashes and reads values directly from the nine named bank `labels__*.parquet` files, joining on both `pair_key` and `source_row_id`. It refuses an admitted table containing a target column. The queued AIC-3 fit was interrupted before acquiring the shared heavy lock; **no model fit ran against the earlier copied-target tables**.
+
+### LODO rotation reservation — 2026-09-24 00:06 UTC, before any LODO fit
+
+The baseline R0 LODO runner will fit seven quarantined diagnostic folds over KADID TRAIN (5,000 rows), TID2013 (3,000), KonFiG originsplit_train (327), KonJND BPG TRAIN (8,060, **SSIMULACRA2 oracle /100**), CID22-A(25) (2,192, **human MCOS/100**), AIC-3 CTC (600), and KADID SELECT (3,125). It will evaluate the KonFiG held-out fold on the reference-disjoint originsplit_val (436) and the BPG held-out fold on its reference-disjoint oracle VAL (2,020), with equal total weight per *training* source. All label values are read only from the nine pinned bank `labels__*.parquet` files through `scripts/rev4_featpot/data.py`; the admitted feature tables carry no target. The listed seven training populations become **LODO-exposed** only after this command actually fits; KonFiG VAL and BPG VAL receive LODO evaluation exposure only after their folds actually score. CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE, MCL-JCI pending D3, and secret holdouts remain unread. No fold output is a model score or a Rev4 confirmation result.
+
+### LODO rotation exposure — 2026-09-24 00:12:21 UTC
+
+The reserved baseline R0 BVLS D2 rotation completed through `scripts/rev4_featpot/lodo_bvls.py --arm r0` under the shared heavy runner (start `00:08:13Z`, end `00:12:21Z`, exit 0). Result `/var/tmp/rev4-featpot/lodo/LODO_r0_bvls/result.json` SHA-256 `7d7d9427737d79e3d1cf522a04a4b86c15a4de21f4d633fdfc9cc7619b070af1`; command log SHA-256 `d147d25911d30ec84d8538db6b087355342c2b691da9dc1ba3dd7b0c334aab59`. KADID TRAIN, TID2013, KonFiG originsplit_train, KonJND BPG TRAIN, CID22-A(25), AIC-3 CTC and KADID SELECT are now **LODO-exposed** diagnostic training populations. KonFiG originsplit_val (436) and KonJND BPG VAL (2,020, SSIMULACRA2 oracle /100) are **LODO-evaluation-exposed**. All source targets were normalized separately on their own training rows before equal-source weighting; CID22-A remains human MCOS/100 and BPG remains an oracle in /100 units. The fold models live only under `/var/tmp/rev4-featpot/lodo/LODO_*`. No secret, confirmation or D3-pending population was read. These results are potential ceilings, never model scores.
+
+The R0 lasso seven-fold rotation subsequently re-read the same nine already exposed bank label files through `scripts/rev4_featpot/data.py`; it added no population. The shared-heavy command `python scripts/rev4_featpot/lodo_lasso.py --arm r0` exited 0 by `2026-09-24T00:32:02Z`. Its result `/var/tmp/rev4-featpot/lodo/LODO_r0_linear/result.json` has SHA-256 `0c01528806375c912ea25e9ed5eb4cd42d32b372d5980e5d93ae2b9c3807f109`, and its command log SHA-256 is `6d2981771c80209c17f5875bf83d8600fc650f16d005a3cb06114d1f888f89fd`. The reference-clustered CI receipt is in `benchmarks/rev4_featpot_lodo_2026-09-23.md`.
+
+## Exposure receipt — 2026-09-25: rev4 featpot restore-cuts arms (preread reservation)
+
+**POTENTIAL — ceiling, not a model score.** Follows amendment commit `72b35b43439b` (2026-09-25T15:57:29Z). Populations, roles and forbidden sets are exactly those of the promoted-bank baseline receipt above (KADID TRAIN, TID2013, KonFiG train/val, KonJND BPG train/val, CID22-A(25), AIC-3 CTC, KADID SELECT); nothing new is admitted, and CID22-B, AIC-4, KonJND JPEG, CSIQ, KADID TERMINAL, LIVE and every secret holdout stay unread. Arms A1, A1m, A1w, B2, B2m (and, once their Part B sidecars exist, B1, B1s, C8n, ALL) with size-matched permuted controls are fitted on these populations as **potential / LODO diagnostics: fitted in-sample, diagnostic only.** Restore-cuts sidecars carry features only; this lane opened no label for these arms before the pin commit. Status before read: pending potential/LODO re-exposure of the same nine populations (already potential-exposed by the baseline). MLP fits of these arms run in the fleet AVX2 era; deterministic BVLS/lasso run locally.
+
+### Post-read update — 2026-09-26 (rev4 featpot baseline preread reservation)
+
+The first featpot receipt above ("rev4 featpot baseline (preread reservation)") lists four `rev3-public-human-eval/features-rev3/ext_*.parquet` f64-cache files, including the mixed A/B `ext_cid22val.parquet`, as "pending; update after read". **Superseded by the promoted-bank receipt** that follows it. Those files were only hashed and footer-counted at preregistration, and `ext_konfig.parquet` was probed for `ref_basename`/`f0` only (`benchmarks/rev4_featpot_2026-09-23/probe_cache.py`, `"labels_read": false`). No label value was decoded from any of them.
+
+### Post-read update — 2026-09-26 (rev4 featpot restore-cuts arms)
+
+The restore-cuts receipt above ends at "Status before read: pending". Reads since: from 2026-09-25T16:05Z the deterministic D1/D2 fits of the 18 arms (c1–c4, all, csfw, c7, p1, p3, b1, b1s, c8n, rall, a1, a1w, a1m, b2, b2m) read labels of exactly the same nine populations; 648 results, the last before 2026-09-26T00:56Z; the arm stability runs followed. So did the two disclosed VOID sets (8 `a1` BVLS D1 cells, 2026-09-25T16:05–16:26Z; 18 registry-mask results, 16:29–16:40Z), whose outputs are excluded from every table; valid results start at 16:43Z. No new population was read and no status changed: the nine populations stay potential/LODO-exposed as recorded.
