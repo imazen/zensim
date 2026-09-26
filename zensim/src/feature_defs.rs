@@ -1090,11 +1090,13 @@ const REV_F17_PROPOSED: &[Revision] = &[
 /// **F15** — `PJND_FRAGILITY` is nonzero on an identity pair.
 const DEFECT_F15: Defect = Defect {
     id: "F15",
-    note: "A fragility measure of an undistorted pair should be 0. It reads \
-           exactly 1.0 on a v1-only 944 walk (from zeroed accumulators) and \
-           0.395 on the full walk — the same slot, two artifacts. It is one of \
-           the two reasons the 944 identity vector is not the zero vector; the \
-           other 15 nonzero slots are correctly reference-only.",
+    note: "The identity-pair value is NOT a defect: the slot is \
+           1 − saturate(mean grad_src_mag), a property of the reference, and on \
+           the Rev4 bank's 88 identical keys it equals every same-reference \
+           sibling bit for bit (2,376 cells; REVIEW_PARTB 2026-09-25). The earlier \
+           premise that it should read 0 there was wrong. The defect is the other \
+           artifact: a v1-only 944 walk reads exactly 1.0 from zeroed \
+           accumulators, a value emitted without its inputs.",
 };
 
 /// **THE one owner of "does this slot use a pooled 4th/8th root?"** — derived
@@ -1660,9 +1662,9 @@ pub(crate) static V2: [SignalDef; 29] = {
             Tranche::None,
             None,
         ),
-        // F15: nonzero on an identity pair (1.0 on a v1-only walk, 0.395 on
-        // the full one). Declared ReferenceOnly because it IS computed from
-        // the reference — the defect is the VALUE, not the form.
+        // F15: ReferenceOnly, and its nonzero identity-pair value is correct
+        // (it equals the same-reference siblings). The defect is the 1.0 a
+        // v1-only walk reads from zeroed accumulators.
         v2sig(
             21,
             "pjnd_fragility",

@@ -140,7 +140,7 @@ exactly three classes, and the classification is now a gate:
 | class | slots | max \|v\| | verdict |
 |---|--:|--:|---|
 | **reference-only** — `GRAD_SRC_MEAN` (append local 16, 11 cells) + `LUMA_MEAN_REF` (append2 local 2, 4 cells) | 15 | 0.890 | **CORRECT.** `∂f/∂dist ≡ 0`, so a non-zero value on `ref == dist` is what these features mean |
-| **`PJND_FRAGILITY`** (v2 local 21) | 12 | 0.395 | **DEFECT (F15).** A fragility measure of an undistorted pair should be 0. Reads exactly **1.0** on a `v1_only` walk and **0.395** on the full walk — the same slot, two artifacts |
+| **`PJND_FRAGILITY`** (v2 local 21) | 12 | 0.395 | **DEFECT (F15).** A fragility measure of an undistorted pair should be 0. Reads exactly **1.0** on a `v1_only` walk and **0.395** on the full walk — the same slot, two artifacts. **Corrected 2026-09-25:** the full-walk identity value is not a defect. The slot is reference-only (`1 − saturate(mean grad_src_mag)`), and on the Rev4 bank's 88 identical keys it equals every same-reference sibling bit for bit (REVIEW_PARTB). Only the v1-only 1.0 is a defect. |
 | **floating-point residue** | 259 | **1.12e-3** | acceptable. v1 blocks ≤ 1.12e-3, v2/append ≤ 2.4e-4 |
 
 The bar the new gate enforces is the third row: any *new* non-zero identity
