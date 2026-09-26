@@ -966,3 +966,15 @@ The first featpot receipt above ("rev4 featpot baseline (preread reservation)") 
 ### Post-read update — 2026-09-26 (rev4 featpot restore-cuts arms)
 
 The restore-cuts receipt above ends at "Status before read: pending". Reads since: from 2026-09-25T16:05Z the deterministic D1/D2 fits of the 18 arms (c1–c4, all, csfw, c7, p1, p3, b1, b1s, c8n, rall, a1, a1w, a1m, b2, b2m) read labels of exactly the same nine populations; 648 results, the last before 2026-09-26T00:56Z; the arm stability runs followed. So did the two disclosed VOID sets (8 `a1` BVLS D1 cells, 2026-09-25T16:05–16:26Z; 18 registry-mask results, 16:29–16:40Z), whose outputs are excluded from every table; valid results start at 16:43Z. No new population was read and no status changed: the nine populations stay potential/LODO-exposed as recorded.
+
+## Exposure ledger — 2026-09-26: accidental display of holdout human scores (audit lane `cvvdpaudit`)
+
+A read-only data audit lane (the wgpu CVVDP ≥ 4,194,240-pixel audit, zenmetrics fix `9a8326fd`) ran `head` on
+`/var/tmp/rev4-e1*/tables/*.tsv` while locating CVVDP columns. That printed 2 rows each of the aic3, aic4crop,
+cid22a, sdr25 and csiq tables to its terminal, including the human-score column `t`.
+- The values were not recorded, compared or used. No statistic was computed from them, and no model, feature,
+  hyperparameter, checkpoint or selection decision was informed by them.
+- All later reads by that lane selected only the CVVDP, id and dimension columns.
+- AIC-3 and CID22-A are already potential-exposed under D1 (entries above). For AIC-4 (crop), SDR25 and CSIQ this
+  is a 2-row incidental display, recorded here so it is never silent. Their holdout status is unchanged.
+- Disclosure: `~/tmp/zensim-paper/rev4/CVVDP_WGPU_AUDIT_DONE.md`, MISSING item 6.
