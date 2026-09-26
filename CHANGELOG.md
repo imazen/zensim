@@ -129,6 +129,12 @@
 ### Fixed
 
 - Align x86 edge-only horizontal-blur tail accumulation with the full-feature path; cover narrow and odd-width tails in the bit-exact regression (7d6d7451).
+  Served-score effect, measured with and without the same six lines on an abe694a0 snapshot, on 27 synthetic pairs (9 sizes from 64x64 to 1920x1081, three distortions each; AVX-512 host):
+  - `PreviewV0_2` scores move on every pair whose height is ragged and at least 131 px (128x131 through 1920x1081),
+    by at most 1.4e-10; raw distance moves by at most 7.7e-12 relative. That profile reads the edge-only route.
+    Heights 53 and 61 are unchanged.
+  - `PreviewV0_1`, `A`, `B`, `C` and `D`, and the 372-column extended features, are bit-unchanged.
+  - Rev3 full-gmsbank extraction (1502 columns) is bit-identical on 2,532 real pairs.
 - Gate fractional attribution helpers with their actual v2 callers, avoiding dead-code warnings in partial-feature builds (ad18b444).
 
 - `BakeScorer` no longer refuses a corruption companion whose feature ids a
