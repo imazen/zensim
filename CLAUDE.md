@@ -158,6 +158,28 @@ because cleanup tests or a historical training reproduction pass.
 
 ## Known Bugs
 
+* **2026-09-22 — the 372 roots' `ext_sdr25.parquet` is an unidentified table; 63 board cells read it. OPEN.**
+  The 2026-05-15, 2026-08-30 (both 372 roots) and 2026-09-05 post-C roots all carry the same `ext_sdr25.parquet`
+  (sha256 `4f567646dcc629a6cb930c03fc9ecf8f79ba0992e6d74741404cfb41785eb96b`): 50 rows = 10 references × 5 rows,
+  `human_score` ∈ {2, 6, 7, 9, 10} on every reference. No builder or provenance is recorded. It is NOT the
+  5-reference × 10-level `q_jnd` table that the `sdr25` DISTORTION declaration in `check_target_orientation.py`
+  describes (the 944/924 roots' table), so its label orientation is unverified.
+  - The 63 board cells that read it keep their stored `rank.sdr25` per-reference values (62 were repaired and then
+    restored exactly). They are annotated `sdr25-372-root-table-orientation-unverified-2026-09-22` in
+    `benchmarks/eval_annotations.json`, which names all 63.
+  - Since the 2026-09-22 orientation fix, `bake_verdict` pins the declared distortion orientation for every `sdr25`
+    read. **A fresh 372-root verdict therefore prints the opposite per-reference sign from those stored cells** until
+    the table is identified. Never compare the two, and read neither as evidence.
+  - Structural observation (2026-09-26, not an identification): `ref_basename` takes the values 1…10 and
+    `human_score` is exactly {2, 6, 7, 9, 10} on every one of them, which are the five AIC-4/SDR25 source numbers
+    (`00002`, `00006`, `00007`, `00009`, `00010` in `site/data/parquet/aic4_sample.parquet`). That is the shape a
+    5-source × 10-level table would have with the level in the reference column and the source id in the label
+    column. If so, the table carries no human label at all. Check this against the features before relying on it.
+  - Fix path: identify the table's source and target semantics. If it is distortion-oriented, repair the 63 cells
+    with `promote_fulleval --repair-rank-orientation --repair-tag declared-orientation-2026-09-22`; if it is
+    quality-oriented, declare it separately from the `q_jnd` sdr25. Do not delete or rewrite the table.
+    Record: `benchmarks/board_orientation_fix_2026-09-22.md` §1.4.
+
 * **2026-09-26 — x86 edge-only horizontal-blur tails: FIXED in 7d6d7451.**
   Scalar remainders now accumulate `(sum + add) - remove`, matching the full-feature
   path. The existing bit-exact regression includes narrow and odd-width inputs.

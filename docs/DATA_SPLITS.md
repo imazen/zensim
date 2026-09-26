@@ -280,6 +280,19 @@ Two corrections to the rows above, both registered in
   (Appendix I); what is new is that the two axes carry **different**
   reconstructions of the same stimuli, differing by up to **1.79 JND**.
 
+A third, registered 2026-09-22:
+
+* **`sdr25-372-root-table-orientation-unverified-2026-09-22`** — the 372-width
+  eval roots (2026-05-15, both 2026-08-30 roots, 2026-09-05 post-C) carry a
+  DIFFERENT `ext_sdr25.parquet` (sha256 `4f567646dcc6…`): 50 rows = **10**
+  references × 5 rows, `human_score` ∈ {2, 6, 7, 9, 10} on every reference, no
+  builder or provenance recorded. It is not the 5-reference × 10-level `q_jnd`
+  table the JPEG-AI-SDR25 row above describes, so the `distortion` declaration
+  does not cover it and its orientation is unverified. The 63 board cells that
+  read it keep their stored per-reference values; a fresh 372-root verdict
+  prints the opposite per-reference sign from them until the table is
+  identified (`benchmarks/board_orientation_fix_2026-09-22.md` §1.4).
+
 **~~NOT-REACHABLE~~ RECOVERED 2026-09-01** (`aic3-iptc-stimuli-recovered-2026-09-01`,
 doc APPENDIX A): the 130 `IPTC_*` stimulus files were never a separate artifact
 — the `IPTC` response table is the source paper's **PTC** experiment and its
