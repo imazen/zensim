@@ -128,6 +128,8 @@
 
 ### Fixed
 
+- `bake_verdict` takes the per-reference statistic, the SROCC cell's ⛔INVERTED flag and the SVG bars on aic4, sdr25 and KonJND from the declared `EXPECTED_ORIENTATION` registry (b0c0cd11). aic4/sdr25 store `q_jnd`, which rises with distortion, so every correctly ranking bake had read ~100% of references backwards since the 2026-08-04 pin. The board's 330 aic4 and 253 sdr25 stored blocks were repaired in place with the sha-gated `promote_fulleval --repair-rank-orientation` (now with `--repair-tag`, and a value-based equality gate, 021d5226); the false `aic4-corpus-wide-per-ref-inversion` entry is retired and the gauntlet's `corpusWide` exemption is gone (ef8cd804, bea2ca45). JSON `srocc`/`srocc_signed` are unchanged. The 372 roots' unidentified `ext_sdr25.parquet` (63 cells) was left as stored; see Known Bugs. Record: `benchmarks/board_orientation_fix_2026-09-22.md`.
+- `build_fr_corpus_pairs.py aic4` rebuilds the AIC-4 pairs from the committed `site/data/parquet/aic4_sample.parquet` labels, crops and full resolution, so AIC-4 is refreshable (4b202e4e).
 - Align x86 edge-only horizontal-blur tail accumulation with the full-feature path; cover narrow and odd-width tails in the bit-exact regression (7d6d7451).
   Served-score effect, measured with and without the same six lines on an abe694a0 snapshot, on 27 synthetic pairs (9 sizes from 64x64 to 1920x1081, three distortions each; AVX-512 host):
   - `PreviewV0_2` scores move on every pair whose height is ragged and at least 131 px (128x131 through 1920x1081),
