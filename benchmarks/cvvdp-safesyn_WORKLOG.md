@@ -383,3 +383,14 @@ stopped (STOP_HEARTBEAT set).
    (descriptive rank agreement vs stored labels/oracle, by family + band).
 4. Fill `/var/tmp/cvvdp-safesyn/DONE.draft.md` (already at r3 artifact ids)
    → `/home/lilith/tmp/zensim-paper/rev4/CVVDP_SAFESYN_DONE.md`.
+
+## Closed at landing (2026-09-26)
+
+The handoff above is historical. The fleet run completed 3,218/3,218 jobs; the harvest,
+its review (PROMOTE WITH CORRECTIONS) and the record were done in zenmetrics
+(`benchmarks/cvvdp_safesyn_2026-09-23.md`, sidecar sha256 `775bdb8f…`). The verify loop is
+stopped (`STOP_VERIFY` present). The r5600g container teardown is closed: the coordinator
+found 0 containers named `zen-score-cvvdp` there on 2026-09-26. Steps 3 and 4 were not run
+as written: there is no zensim `rev4_cvvdp_safesyn_2026-09-23.{md,json}` (see the pointer's
+correction section).
+

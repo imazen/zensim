@@ -901,3 +901,7 @@ them.
 - **SafeSyn (Part 2):** codec-variant pixels only, no human labels exist;
   descriptive rank agreement vs stored features/labels per brief — pending
   the fleet gate (FLEET_READY.md; not yet run).
+- **Status at landing (2026-09-26):** Part 2 ran as fleet run
+  `cvvdp-safesyn-20260923` (3,218 jobs, 196,086 pairs, metric labels only; no
+  human label was read). Its record is zenmetrics
+  `benchmarks/cvvdp_safesyn_2026-09-23.md`; sidecar sha256 `775bdb8f…`.
