@@ -414,7 +414,10 @@ impl AttributionResult {
     /// bilinear-SAT path.
     // Callers: `research::DvifmLevelField` (`training` + `custom-profiles`, in the
     // `feature-regime-v2` research module) and a `dvifm` unit test.
-    #[cfg(any(test, all(feature = "training", feature = "feature-regime-v2")))]
+    #[cfg(all(
+        feature = "feature-regime-v2",
+        any(test, all(feature = "training", feature = "custom-profiles"))
+    ))]
     pub(crate) fn query_rect_frac(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
         let (x0, x1) = (
             x0.clamp(0.0, self.width as f64),
@@ -458,7 +461,10 @@ impl AttributionResult {
     /// extent" rule so edge-clamped queries stay exact.
     // Callers: `research::DvifmLevelField` (`training` + `custom-profiles`, in the
     // `feature-regime-v2` research module) and a `dvifm` unit test.
-    #[cfg(any(test, all(feature = "training", feature = "feature-regime-v2")))]
+    #[cfg(all(
+        feature = "feature-regime-v2",
+        any(test, all(feature = "training", feature = "custom-profiles"))
+    ))]
     fn grid_coord_f(&self, x: f64, limit: usize, grid: usize) -> (usize, f64) {
         if x >= limit as f64 {
             return (grid, 0.0);
