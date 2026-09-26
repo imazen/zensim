@@ -113,9 +113,30 @@ The crate's own full-image numbers on all 49 references (fit-domain) are in §5.
 
 ## §5 — the talk's test sets
 
-<!-- MAIN TABLES -->
+_Copied verbatim from `imazen/dvifmish` `docs/RESULTS.md` at `f1ad80b` (2026-09-23), section "The talk's test sets" (the same frozen-preset run this record describes; SROCC / KROCC over all pairs). Nothing recomputed._
 
-_Tables (not filled: the evaluating lane stopped before the record fill; the final numbers are in the private `imazen/dvifmish` repository docs, and nothing here was reconstructed)._
+| Model | Planes | Fitted on | TID2013 JPEG+J2K | KADID-10k JPEG+J2K | NNCD | AIC-4 crops | CID22 |
+|---|---|---|---|---|---|---|---|
+| talk configuration, CID22 fit (`luma-curve-talk-cid22`) | Y′ | human: all 4,292 CID22 validation pairs | 0.951 / 0.803 | 0.923 / 0.750 | 0.916 / 0.747 | 0.932 / 0.781 | 0.902 / 0.724ᶠ |
+| talk configuration, CID22 fit (`ycbcr3-curve-talk-cid22`) | Y′CbCr | human: all 4,292 CID22 validation pairs | 0.953 / 0.810 | 0.936 / 0.774 | 0.917 / 0.746 | 0.902 / 0.732 | 0.933 / 0.768ᶠ |
+| talk configuration (`talk-faithful-luma`) | Y′ | human: CID22-A + TID2013 & KADID-10k JPEG/J2K | 0.961 / 0.832ᶠ | 0.931 / 0.771ᶠ | 0.916 / 0.747ᵒ | 0.852 / 0.669 | 0.825 / 0.630 |
+| talk configuration (`talk-faithful-ycbcr3`) | Y′CbCr | human: CID22-A + TID2013 & KADID-10k JPEG/J2K | 0.957 / 0.828ᶠ | 0.935 / 0.777ᶠ | 0.933 / 0.781ᵒ | 0.854 / 0.659 | 0.866 / 0.674 |
+| our structure, curve, CID22 fit (`luma-curve-ours-cid22`) | Y′ | human: all 4,292 CID22 validation pairs | 0.952 / 0.807 | 0.940 / 0.784 | 0.893 / 0.713 | 0.947 / 0.807 | 0.886 / 0.702ᶠ |
+| our structure, curve, CID22 fit (`ycbcr3-curve-ours-cid22`) | Y′CbCr | human: all 4,292 CID22 validation pairs | 0.954 / 0.815 | 0.935 / 0.779 | 0.929 / 0.770 | 0.912 / 0.744 | 0.922 / 0.751ᶠ |
+| screen winner's form (XYB three-plane, curve), CID22 fit (`xyb3-curve-ours-cid22`) | XYB | human: all 4,292 CID22 validation pairs | 0.945 / 0.795 | 0.934 / 0.778 | 0.919 / 0.752 | 0.916 / 0.748 | 0.928 / 0.760ᶠ |
+| our structure, gate, CID22 fit (`luma-gate-ours-cid22`) | Y′ | human: all 4,292 CID22 validation pairs | 0.940 / 0.789 | 0.929 / 0.770 | 0.882 / 0.698 | 0.902 / 0.734 | 0.892 / 0.708ᶠ |
+| our structure, gate, CID22 fit (`ycbcr3-gate-ours-cid22`) | Y′CbCr | human: all 4,292 CID22 validation pairs | 0.959 / 0.824 | 0.937 / 0.785 | 0.939 / 0.786 | 0.883 / 0.706 | 0.922 / 0.751ᶠ |
+| screen round 2: XYB three-plane, fitted curve (`xyb3-curve-ours-safesyn`) | XYB | teacher: 4,000 SafeSyn pairs (the arm's seed-1 subset) | 0.942 / 0.787 | 0.942 / 0.793 | 0.926 / 0.765 | 0.934 / 0.784 | 0.875 / 0.690 |
+| screen: smooth curve, constants fitted on SafeSyn (`ycbcr3-curve-ours-safesyn`) | Y′CbCr | teacher: 4,000 SafeSyn pairs (the arm's seed-1 subset) | 0.942 / 0.788 | 0.941 / 0.792 | 0.926 / 0.765 | 0.931 / 0.781 | 0.883 / 0.698 |
+| screen: constants fitted on SafeSyn (`ycbcr3-gate-ours-safesyn`) | Y′CbCr | teacher: 4,000 SafeSyn pairs (the arm's seed-1 subset) | 0.942 / 0.788 | 0.935 / 0.784 | 0.926 / 0.765 | 0.924 / 0.766 | 0.890 / 0.708 |
+| screen round 2: [1 3 3 1] kernel, fitted curve (`ycbcr3-curve-1331-safesyn`) | Y′CbCr | teacher: 4,000 SafeSyn pairs (the arm's seed-1 subset) | 0.956 / 0.816 | 0.937 / 0.785 | 0.935 / 0.779 | 0.923 / 0.766 | 0.904 / 0.723 |
+| our serving gate (`serving-gate-ycbcr3`) | Y′CbCr | mixed: 4,893 pairs of our training corpus (mostly teacher; some TID2013, KADID-10k, KonFiG training rows) | 0.949 / 0.797ᵖ | 0.906 / 0.732ᵖ | 0.913 / 0.741ᵒ | 0.834 / 0.646 | 0.772 / 0.568 |
+| our deviations, teacher fit (`ours-full-luma`) | Y′ | teacher: 3,785 CID22 training-set pairs | 0.961 / 0.831 | 0.922 / 0.755 | 0.906 / 0.733 | 0.923 / 0.767 | 0.841 / 0.646 |
+| SSIMULACRA2 (our `fast-ssim2` port) | – | its authors' tuning: CID22 training refs, TID2013, KADID-10k, KonFiG | 0.954 / 0.815ᶠ | 0.938 / 0.785ᶠ | 0.930 / 0.769ᵒ | 0.913 / 0.746 | 0.925 / 0.758 |
+| zensim B | – | zensim training corpus (incl. TID2013, KADID-10k training refs) | 0.924 / 0.751ᶠ | 0.913 / 0.732ᵖ | 0.932 / 0.771ᵒ | 0.891 / 0.708ˣ | 0.900 / 0.725 |
+| zensim D | – | zensim training corpus (incl. TID2013, KADID-10k training refs) | 0.968 / 0.847ᶠ | 0.935 / 0.778ᵖ | 0.935 / 0.781ᵒ | 0.933 / 0.781ˣ | 0.883 / 0.696 |
+| zensim Rev3 basic228 ensemble | – | zensim training corpus (incl. TID2013, KADID-10k training refs) | 0.960 / 0.824ᶠ | 0.940 / 0.788ᵖ | 0.930 / 0.770ᵒ | 0.916 / 0.747ˣ | 0.912 / 0.738 |
+ᶠ fit-domain (fitted on these pairs) · ᵖ partly fit-domain (some pairs were in the fitting set) · ᵒ scene overlap (the model was fitted on TID2013, whose scenes are crops of NNCD's) · ˣ previously used for model selection · unmarked: held-out
 
 ## §6 — canonical corruption packet
 
@@ -128,9 +149,52 @@ Check: unique pairs, positives and negatives equal the serving record's
 reproduces its base-score counts exactly (below q20 1,945/5,353 and
 2,872/7,725; below q10 1,600/5,353 and 2,402/7,725).
 
-<!-- CORRUPTION TABLES -->
+_Copied verbatim from `imazen/dvifmish` `docs/RESULTS.md` at `f1ad80b` (2026-09-23), section "Broken decodes" (each cell is validation sources / training sources; DVIFM presets on the float path). Nothing recomputed._
 
-_Tables (not filled: the evaluating lane stopped before the record fill; the final numbers are in the private `imazen/dvifmish` repository docs, and nothing here was reconstructed)._
+| Metric | below q20 anchor | below q10 anchor | detection at 1% FP | detection at 5% FP |
+|---|---|---|---|---|
+| `luma-curve-talk-cid22` | 0.246 / 0.268 | 0.199 / 0.218 | 0.076 / 0.096 | 0.119 / 0.125 |
+| `ycbcr3-curve-talk-cid22` | 0.227 / 0.246 | 0.181 / 0.201 | 0.072 / 0.086 | 0.097 / 0.125 |
+| `talk-faithful-luma` | 0.301 / 0.310 | 0.255 / 0.267 | 0.139 / 0.144 | 0.167 / 0.178 |
+| `talk-faithful-ycbcr3` | 0.402 / 0.430 | 0.322 / 0.361 | 0.129 / 0.172 | 0.187 / 0.229 |
+| `luma-curve-ours-cid22` | 0.168 / 0.191 | 0.132 / 0.161 | 0.062 / 0.081 | 0.079 / 0.105 |
+| `ycbcr3-curve-ours-cid22` | 0.169 / 0.198 | 0.128 / 0.159 | 0.049 / 0.074 | 0.074 / 0.103 |
+| `xyb3-curve-ours-cid22` | 0.172 / 0.201 | 0.130 / 0.162 | 0.051 / 0.074 | 0.072 / 0.106 |
+| `luma-gate-ours-cid22` | 0.195 / 0.227 | 0.151 / 0.183 | 0.066 / 0.099 | 0.096 / 0.119 |
+| `ycbcr3-gate-ours-cid22` | 0.190 / 0.217 | 0.147 / 0.171 | 0.067 / 0.080 | 0.098 / 0.107 |
+| `xyb3-curve-ours-safesyn` | 0.341 / 0.357 | 0.271 / 0.293 | 0.129 / 0.144 | 0.171 / 0.186 |
+| `ycbcr3-curve-ours-safesyn` | 0.330 / 0.348 | 0.265 / 0.284 | 0.121 / 0.146 | 0.168 / 0.184 |
+| `ycbcr3-gate-ours-safesyn` | 0.344 / 0.372 | 0.282 / 0.302 | 0.133 / 0.166 | 0.183 / 0.197 |
+| `ycbcr3-curve-1331-safesyn` | 0.304 / 0.324 | 0.236 / 0.262 | 0.095 / 0.125 | 0.133 / 0.153 |
+| `serving-gate-ycbcr3` | 0.228 / 0.241 | 0.184 / 0.196 | 0.080 / 0.087 | 0.101 / 0.120 |
+| `ours-full-luma` | 0.205 / 0.206 | 0.168 / 0.169 | 0.089 / 0.091 | 0.110 / 0.104 |
+| butteraugli (max norm) | 0.660 / 0.679 | 0.612 / 0.620 | 0.383 / 0.400 | 0.442 / 0.451 |
+| SSIMULACRA2 (`fast-ssim2`) | 0.424 / 0.439 | 0.346 / 0.370 | 0.147 / 0.157 | 0.197 / 0.213 |
+| zensim Rev3 basic228 ensemble | 0.385 / 0.396 | 0.303 / 0.330 | 0.122 / 0.136 | 0.169 / 0.178 |
+| zensim B | 0.279 / 0.276 | 0.152 / 0.172 | 0.007 / 0.006 | 0.027 / 0.024 |
+| zensim D | 0.363 / 0.372 | 0.299 / 0.311 | 0.148 / 0.138 | 0.183 / 0.197 |
+
+None of these metrics is a detector of broken decodes, and DVIFM is no
+exception: every preset rates most corruptions better than the same
+source's honest JPEG at quality 20. The fits on CID22 put 17% to 25% of the
+validation corruptions below that anchor, the presets fitted on synthetic
+pairs 30% to 34%, and `talk-faithful-ycbcr3` 40%. At a threshold that flags
+1% of honest pairs, these presets flag 5% to 14% of corruptions. Of all 27
+presets, the one without masking does best (`ycbcr3-off-ours-safesyn`: 53%
+below the anchor, 22% at 1%; [RESULTS_ALL.md](RESULTS_ALL.md) has every
+preset). butteraugli's max norm, which scores an image by its worst spot,
+does best of the metrics here (66% below the anchor, 38% at 1%). The integer
+path gives the same readings to within 0.005 for the presets it accepts.
+
+zensim also has dedicated detectors for this: corruption heads, small
+classifiers on top of its D model that override its score when they fire. We
+did not re-run them. From zensim's records of 2026-09-08, on the validation
+sources only:
+
+| Detector | below q20 anchor | corruptions flagged | honest pairs lowered |
+|---|---|---|---|
+| a head fitted on the training sources (gradient-boosted trees on 228 of D's features) | 91.1% (4,877 of 5,353) | 99.6% (5,330) | 22 of 326 |
+| an earlier head, frozen; its training data is not established to be independent of these sources | 98.6% (5,280) | 93.8% (5,022) | 8 of 326 |
 
 ## Incidents and deviations
 
