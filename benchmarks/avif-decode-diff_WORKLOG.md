@@ -69,3 +69,13 @@ AVIF ladder counts in the report are read from `docs/DATA_SPLITS.md`, not measur
 Codex weekly usage reached 28.0%; the user directed a stop at the next safe point. The investigation, preregistration, 31-pair replay, compact record, report, pointer, and `AVIF_DECODE_DONE.md` are complete. The work is quarantined on `quarantine/codex/avif-decode-diff`; no push or sibling-repository edit was made. No command is in flight. The zenmetrics failing-test proposal remains unapplied at `/var/tmp/avif-decode-diff/zenmetrics-avif-cicp-test.patch` (SHA256 `5f22a9011878b5ae2974897ce3c12217baa1bf1e5528849979c1024f35b8e2eb`). The shared heavy-check gate was unavailable, as noted above.
 
 Next steps for an independent reviewer: read `AVIF_DECODE_DONE.md` and the report, verify the source/bitstream joins and sign of paired deltas, then run `bash replay.sh` from `/var/tmp/avif-decode-diff/` against the pinned inputs and compare its logs and JSON SHA256s with this worklog. Review the proposed zenmetrics test patch before applying it in that repository. Keep this branch quarantined until the required audit promotes it.
+
+**Superseded at landing (2026-09-26).** The handoff above predates the review
+(`REVIEW_AVIF_DECODE.md`, PROMOTE WITH CORRECTIONS) and the corrected landing on main
+(`b0ebae61`, `e77b4b9a`). Two statements in it no longer hold. First, do **not** apply
+`zenmetrics-avif-cicp-test.patch` as written: its expected hash is the tagged-route output, which
+the review measured as inexact (review correction 2). A replacement test should assert the
+transfer tag before reduction and exact rounding of the native samples. Second, the quarantine
+bookmark carried only the prereg; the deliverables landed from the reviewed copies (review
+correction 3). The branch is no longer quarantined.
+
